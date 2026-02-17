@@ -19,6 +19,11 @@ public class SharpClawDbContext(
     public DbSet<ProviderDB> Providers => Set<ProviderDB>();
     public DbSet<ModelDB> Models => Set<ModelDB>();
     public DbSet<AgentDB> Agents => Set<AgentDB>();
+    public DbSet<AgentContextDB> AgentContexts => Set<AgentContextDB>();
+    public DbSet<ContextPermissionGrantDB> ContextPermissionGrants => Set<ContextPermissionGrantDB>();
+    public DbSet<ConversationDB> Conversations => Set<ConversationDB>();
+    public DbSet<ConversationPermissionGrantDB> ConversationPermissionGrants => Set<ConversationPermissionGrantDB>();
+    public DbSet<TaskPermissionGrantDB> TaskPermissionGrants => Set<TaskPermissionGrantDB>();
     public DbSet<ChatMessageDB> ChatMessages => Set<ChatMessageDB>();
     public DbSet<ScheduledTaskDB> ScheduledTasks => Set<ScheduledTaskDB>();
 
@@ -100,7 +105,11 @@ public class SharpClawDbContext(
         modelBuilder.Entity<AgentDB>(e =>
         {
             e.HasIndex(a => a.Name).IsUnique();
-            e.HasMany(a => a.ChatMessages)
+            e.HasMany(a => a.Contexts)
+                .WithOne(c => c.Agent)
+                .HasForeignKey(c => c.AgentId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(a => a.Conversations)
                 .WithOne(c => c.Agent)
                 .HasForeignKey(c => c.AgentId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -108,6 +117,71 @@ public class SharpClawDbContext(
                 .WithMany()
                 .HasForeignKey(a => a.RoleId)
                 .OnDelete(DeleteBehavior.SetNull);
+        });
+
+        // ── Agent Contexts ────────────────────────────────────────
+        modelBuilder.Entity<AgentContextDB>(e =>
+        {
+            e.HasIndex(c => new { c.AgentId, c.Name }).IsUnique();
+            e.HasMany(c => c.Conversations)
+                .WithOne(conv => conv.AgentContext!)
+                .HasForeignKey(conv => conv.AgentContextId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(c => c.Tasks)
+                .WithOne(t => t.AgentContext!)
+                .HasForeignKey(t => t.AgentContextId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(c => c.PermissionGrants)
+                .WithOne(g => g.AgentContext)
+                .HasForeignKey(g => g.AgentContextId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ContextPermissionGrantDB>(e =>
+        {
+            e.HasIndex(g => new { g.AgentContextId, g.ActionType }).IsUnique();
+            e.Property(g => g.ActionType).HasConversion<string>();
+            e.Property(g => g.GrantedClearance).HasConversion<string>();
+        });
+
+        // ── Conversations ─────────────────────────────────────────
+        modelBuilder.Entity<ConversationDB>(e =>
+        {
+            e.HasOne(c => c.Model)
+                .WithMany(m => m.Conversations)
+                .HasForeignKey(c => c.ModelId)
+                .OnDelete(DeleteBehavior.Restrict);
+            e.HasMany(c => c.ChatMessages)
+                .WithOne(m => m.Conversation)
+                .HasForeignKey(m => m.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(c => c.PermissionGrants)
+                .WithOne(g => g.Conversation)
+                .HasForeignKey(g => g.ConversationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<ConversationPermissionGrantDB>(e =>
+        {
+            e.HasIndex(g => new { g.ConversationId, g.ActionType }).IsUnique();
+            e.Property(g => g.ActionType).HasConversion<string>();
+            e.Property(g => g.GrantedClearance).HasConversion<string>();
+        });
+
+        // ── Scheduled Tasks ───────────────────────────────────────
+        modelBuilder.Entity<ScheduledTaskDB>(e =>
+        {
+            e.HasMany(t => t.PermissionGrants)
+                .WithOne(g => g.ScheduledTask)
+                .HasForeignKey(g => g.ScheduledTaskId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TaskPermissionGrantDB>(e =>
+        {
+            e.HasIndex(g => new { g.ScheduledTaskId, g.ActionType }).IsUnique();
+            e.Property(g => g.ActionType).HasConversion<string>();
+            e.Property(g => g.GrantedClearance).HasConversion<string>();
         });
 
         // ── RolePermissions ───────────────────────────────────────

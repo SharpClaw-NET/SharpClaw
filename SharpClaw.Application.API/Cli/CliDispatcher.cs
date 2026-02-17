@@ -9,6 +9,8 @@ using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Contracts.DTOs.Contexts;
+using SharpClaw.Contracts.DTOs.Conversations;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Enums;
@@ -26,6 +28,7 @@ public static class CliDispatcher
 
     private static string? _currentUser;
     private static Guid? _currentUserId;
+    private static Guid? _currentConversationId;
     private static bool IsLoggedIn => _currentUser is not null;
 
     private static readonly HashSet<string> PublicCommands =
@@ -70,6 +73,7 @@ public static class CliDispatcher
             {
                 _currentUser = null;
                 _currentUserId = null;
+                _currentConversationId = null;
                 Console.WriteLine("Logged out.");
                 Console.WriteLine();
                 continue;
@@ -156,6 +160,8 @@ public static class CliDispatcher
             "provider" => await HandleProviderCommand(args, sp),
             "model" => await HandleModelCommand(args, sp),
             "agent" => await HandleAgentCommand(args, sp),
+            "context" or "ctx" => await HandleContextCommand(args, sp),
+            "conversation" or "conv" => await HandleConversationCommand(args, sp),
             "chat" => await HandleChatCommand(args, sp),
             "job" => await HandleJobCommand(args, sp),
             "help" or "--help" or "-h" => PrintHelp(),
@@ -373,18 +379,237 @@ public static class CliDispatcher
         };
     }
 
-    private static async Task<IResult?> HandleChatCommand(string[] args, IServiceProvider sp)
+    private static async Task<IResult?> HandleContextCommand(string[] args, IServiceProvider sp)
     {
-        if (args.Length < 3)
+        if (args.Length < 2)
         {
-            PrintUsage("chat <agentId> <message>");
+            PrintUsage(
+                "context new <agentId> [name]               Create a context",
+                "context list [agentId]                     List contexts",
+                "context get <id>                           Show context details",
+                "context update <id> <name>                 Rename a context",
+                "context grant <id> <actionType> <clearance>",
+                "                                           Set a default permission",
+                "context delete <id>                        Delete a context");
             return Results.Ok();
         }
 
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<ContextService>();
+
+        return sub switch
+        {
+            "new" when args.Length >= 3
+                => await ContextHandlers.Create(
+                    new CreateContextRequest(
+                        CliIdMap.Resolve(args[2]),
+                        args.Length >= 4 ? string.Join(' ', args[3..]) : null),
+                    svc),
+            "new" => UsageResult("context new <agentId> [name]"),
+
+            "list"
+                => await ContextHandlers.List(svc,
+                    args.Length >= 3 ? CliIdMap.Resolve(args[2]) : null),
+
+            "get" when args.Length >= 3
+                => await ContextHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
+            "get" => UsageResult("context get <id>"),
+
+            "update" when args.Length >= 4
+                => await ContextHandlers.Update(
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateContextRequest(string.Join(' ', args[3..])),
+                    svc),
+            "update" => UsageResult("context update <id> <name>"),
+
+            "grant" when args.Length >= 5
+                && Enum.TryParse<AgentActionType>(args[3], true, out var actionType)
+                && Enum.TryParse<PermissionClearance>(args[4], true, out var clearance)
+                => await ContextHandlers.Grant(
+                    CliIdMap.Resolve(args[2]),
+                    new PermissionGrantRequest(actionType, clearance),
+                    svc),
+            "grant" when args.Length < 5
+                => UsageResult("context grant <id> <actionType> <clearance>"),
+            "grant"
+                => UsageResult(
+                    $"Valid action types: {string.Join(", ", Enum.GetNames<AgentActionType>())}",
+                    $"Valid clearances: {string.Join(", ", Enum.GetNames<PermissionClearance>())}"),
+
+            "delete" when args.Length >= 3
+                => await ContextHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
+            "delete" => UsageResult("context delete <id>"),
+
+            _ => UsageResult($"Unknown sub-command: context {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static async Task<IResult?> HandleChatCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage("chat <message>");
+            return Results.Ok();
+        }
+
+        var convSvc = sp.GetRequiredService<ConversationService>();
+
+        // Auto-select latest conversation if none is selected
+        if (_currentConversationId is null)
+        {
+            var latest = await convSvc.GetLatestActiveAsync();
+            if (latest is null)
+            {
+                Console.Error.WriteLine("Error: No conversation selected and no conversations exist.");
+                Console.Error.WriteLine("Create one first: conversation new <agentId> [title]");
+                return Results.Ok();
+            }
+
+            _currentConversationId = latest.Id;
+            Console.WriteLine($"No conversation selected. Opening latest conversation: \"{latest.Title}\" (#{CliIdMap.GetOrAssign(latest.Id)})");
+        }
+
         return await ChatHandlers.Send(
-            CliIdMap.Resolve(args[1]),
-            new ChatRequest(string.Join(' ', args[2..])),
+            _currentConversationId.Value,
+            new ChatRequest(string.Join(' ', args[1..])),
             sp.GetRequiredService<ChatService>());
+    }
+
+    private static async Task<IResult?> HandleConversationCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "conversation new <agentId> [--context <ctxId>] [title]",
+                "                                           Create a conversation",
+                "conversation list [agentId]                List conversations",
+                "conversation select <id>                   Select active conversation",
+                "conversation get <id>                      Show conversation details",
+                "conversation model <id> <modelId>          Change conversation model",
+                "conversation attach <id> <contextId>       Attach to a context",
+                "conversation detach <id>                   Detach from context",
+                "conversation grant <id> <actionType> <clearance>",
+                "                                           Override permission for this conversation",
+                "conversation delete <id>                   Delete a conversation");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<ConversationService>();
+
+        return sub switch
+        {
+            "new" when args.Length >= 3
+                => await HandleConversationNew(args, svc),
+            "new" => UsageResult("conversation new <agentId> [--context <ctxId>] [title]"),
+
+            "list" => await HandleConversationList(args, svc),
+
+            "select" when args.Length >= 3
+                => HandleConversationSelect(args),
+            "select" => UsageResult("conversation select <id>"),
+
+            "get" when args.Length >= 3
+                => await ConversationHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
+            "get" => UsageResult("conversation get <id>"),
+
+            "model" when args.Length >= 4
+                => await ConversationHandlers.Update(
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateConversationRequest(ModelId: CliIdMap.Resolve(args[3])),
+                    svc),
+            "model" => UsageResult("conversation model <conversationId> <modelId>"),
+
+            "attach" when args.Length >= 4
+                => await ConversationHandlers.Update(
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateConversationRequest(ContextId: CliIdMap.Resolve(args[3])),
+                    svc),
+            "attach" => UsageResult("conversation attach <conversationId> <contextId>"),
+
+            "detach" when args.Length >= 3
+                => await ConversationHandlers.Update(
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateConversationRequest(ContextId: Guid.Empty),
+                    svc),
+            "detach" => UsageResult("conversation detach <conversationId>"),
+
+            "grant" when args.Length >= 5
+                && Enum.TryParse<AgentActionType>(args[3], true, out var actionType)
+                && Enum.TryParse<PermissionClearance>(args[4], true, out var clearance)
+                => await ConversationHandlers.Grant(
+                    CliIdMap.Resolve(args[2]),
+                    new ConversationPermissionGrantRequest(actionType, clearance),
+                    svc),
+            "grant" when args.Length < 5
+                => UsageResult("conversation grant <id> <actionType> <clearance>"),
+            "grant"
+                => UsageResult(
+                    $"Valid action types: {string.Join(", ", Enum.GetNames<AgentActionType>())}",
+                    $"Valid clearances: {string.Join(", ", Enum.GetNames<PermissionClearance>())}"),
+
+            "delete" when args.Length >= 3
+                => await HandleConversationDelete(args, svc),
+            "delete" => UsageResult("conversation delete <id>"),
+
+            _ => UsageResult($"Unknown sub-command: conversation {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static async Task<IResult> HandleConversationNew(string[] args, ConversationService svc)
+    {
+        var agentId = CliIdMap.Resolve(args[2]);
+        Guid? contextId = null;
+        var titleParts = new List<string>();
+
+        // Parse remaining args: [--context <ctxId>] [title...]
+        for (var i = 3; i < args.Length; i++)
+        {
+            if (args[i] is "--context" or "-c" && i + 1 < args.Length)
+            {
+                contextId = CliIdMap.Resolve(args[++i]);
+            }
+            else
+            {
+                titleParts.Add(args[i]);
+            }
+        }
+
+        var title = titleParts.Count > 0 ? string.Join(' ', titleParts) : null;
+
+        var result = await ConversationHandlers.Create(
+            new CreateConversationRequest(agentId, title, ContextId: contextId), svc);
+
+        // Auto-select the newly created conversation
+        if (result is IValueHttpResult { Value: ConversationResponse conv })
+            _currentConversationId = conv.Id;
+
+        return result;
+    }
+
+    private static async Task<IResult> HandleConversationList(string[] args, ConversationService svc)
+    {
+        Guid? agentId = args.Length >= 3 ? CliIdMap.Resolve(args[2]) : null;
+        return await ConversationHandlers.List(svc, agentId);
+    }
+
+    private static IResult HandleConversationSelect(string[] args)
+    {
+        _currentConversationId = CliIdMap.Resolve(args[2]);
+        Console.WriteLine($"Conversation #{args[2]} selected.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleConversationDelete(string[] args, ConversationService svc)
+    {
+        var id = CliIdMap.Resolve(args[2]);
+        var result = await ConversationHandlers.Delete(id, svc);
+
+        // Clear selection if the deleted conversation was the active one
+        if (_currentConversationId == id)
+            _currentConversationId = null;
+
+        return result;
     }
 
     private static async Task<IResult?> HandleJobCommand(string[] args, IServiceProvider sp)
@@ -608,7 +833,25 @@ public static class CliDispatcher
                                                           Update an agent
               agent delete <id>                           Delete an agent
 
-              chat <agentId> <message>                    Chat with an agent
+              context new <agentId> [name]                Create a context
+              context list [agentId]                      List contexts
+              context get <id>                            Show context details
+              context update <id> <name>                  Rename a context
+              context grant <id> <type> <clearance>       Set a default permission
+              context delete <id>                         Delete a context
+
+              conversation new <agentId> [--context <id>] [title]
+                                                          Start a conversation
+              conversation list [agentId]                 List conversations
+              conversation select <id>                    Select active conversation
+              conversation get <id>                       Show conversation details
+              conversation model <id> <modelId>           Change conversation model
+              conversation attach <id> <contextId>        Attach to a context
+              conversation detach <id>                    Detach from context
+              conversation grant <id> <type> <clearance>  Override a permission
+              conversation delete <id>                    Delete a conversation
+
+              chat <message>                              Chat in active conversation
 
               job submit <agentId> <type> [resourceId]     Submit an agent action job
                 Global types: ExecuteAsAdmin, CreateSubAgent,

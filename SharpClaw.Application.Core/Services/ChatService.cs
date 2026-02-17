@@ -16,21 +16,24 @@ public sealed class ChatService(
     private const int MaxHistoryMessages = 50;
 
     public async Task<ChatResponse> SendMessageAsync(
-        Guid agentId, ChatRequest request, CancellationToken ct = default)
+        Guid conversationId, ChatRequest request, CancellationToken ct = default)
     {
-        var agent = await db.Agents
-            .Include(a => a.Model).ThenInclude(m => m.Provider)
-            .FirstOrDefaultAsync(a => a.Id == agentId, ct)
-            ?? throw new ArgumentException($"Agent {agentId} not found.");
+        var conversation = await db.Conversations
+            .Include(c => c.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent)
+            .FirstOrDefaultAsync(c => c.Id == conversationId, ct)
+            ?? throw new ArgumentException($"Conversation {conversationId} not found.");
 
-        var provider = agent.Model.Provider;
+        var model = conversation.Model;
+        var provider = model.Provider;
+        var agent = conversation.Agent;
 
         if (string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
         // Build conversation: recent history + new user message
         var history = await db.ChatMessages
-            .Where(m => m.AgentId == agentId)
+            .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.CreatedAt)
             .Take(MaxHistoryMessages)
             .OrderBy(m => m.CreatedAt)
@@ -44,21 +47,21 @@ public sealed class ChatService(
 
         using var httpClient = httpClientFactory.CreateClient();
         var assistantContent = await client.ChatCompletionAsync(
-            httpClient, apiKey, agent.Model.Name, agent.SystemPrompt, history, ct);
+            httpClient, apiKey, model.Name, agent.SystemPrompt, history, ct);
 
         // Persist both messages
         var userMessage = new ChatMessageDB
         {
             Role = "user",
             Content = request.Message,
-            AgentId = agentId
+            ConversationId = conversationId
         };
 
         var assistantMessage = new ChatMessageDB
         {
             Role = "assistant",
             Content = assistantContent,
-            AgentId = agentId
+            ConversationId = conversationId
         };
 
         db.ChatMessages.Add(userMessage);
@@ -71,10 +74,10 @@ public sealed class ChatService(
     }
 
     public async Task<IReadOnlyList<ChatMessageResponse>> GetHistoryAsync(
-        Guid agentId, int limit = 50, CancellationToken ct = default)
+        Guid conversationId, int limit = 50, CancellationToken ct = default)
     {
         return await db.ChatMessages
-            .Where(m => m.AgentId == agentId)
+            .Where(m => m.ConversationId == conversationId)
             .OrderByDescending(m => m.CreatedAt)
             .Take(limit)
             .OrderBy(m => m.CreatedAt)

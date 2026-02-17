@@ -7,6 +7,6 @@ public class ChatMessageDB : BaseEntity
     public required string Role { get; set; }
     public required string Content { get; set; }
 
-    public Guid AgentId { get; set; }
-    public AgentDB Agent { get; set; } = null!;
+    public Guid ConversationId { get; set; }
+    public ConversationDB Conversation { get; set; } = null!;
 }

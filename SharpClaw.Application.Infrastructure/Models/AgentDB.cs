@@ -13,5 +13,6 @@ public class AgentDB : BaseEntity
     public Guid? RoleId { get; set; }
     public RoleDB? Role { get; set; }
 
-    public ICollection<ChatMessageDB> ChatMessages { get; set; } = [];
+    public ICollection<AgentContextDB> Contexts { get; set; } = [];
+    public ICollection<ConversationDB> Conversations { get; set; } = [];
 }

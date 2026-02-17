@@ -3,6 +3,8 @@ using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Contracts.DTOs.Contexts;
+using SharpClaw.Contracts.DTOs.Conversations;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 
@@ -116,7 +118,83 @@ public static class AgentHandlers
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
 }
 
-[RouteGroup("/agents/{id:guid}/chat")]
+[RouteGroup("/contexts")]
+public static class ContextHandlers
+{
+    [MapPost]
+    public static async Task<IResult> Create(CreateContextRequest request, ContextService svc)
+        => Results.Ok(await svc.CreateAsync(request));
+
+    [MapGet]
+    public static async Task<IResult> List(ContextService svc, Guid? agentId = null)
+        => Results.Ok(await svc.ListAsync(agentId));
+
+    [MapGet("/{id:guid}")]
+    public static async Task<IResult> GetById(Guid id, ContextService svc)
+    {
+        var context = await svc.GetByIdAsync(id);
+        return context is not null ? Results.Ok(context) : Results.NotFound();
+    }
+
+    [MapPut("/{id:guid}")]
+    public static async Task<IResult> Update(Guid id, UpdateContextRequest request, ContextService svc)
+    {
+        var context = await svc.UpdateAsync(id, request);
+        return context is not null ? Results.Ok(context) : Results.NotFound();
+    }
+
+    [MapDelete("/{id:guid}")]
+    public static async Task<IResult> Delete(Guid id, ContextService svc)
+        => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    [MapPost("/{id:guid}/grant")]
+    public static async Task<IResult> Grant(
+        Guid id, PermissionGrantRequest request, ContextService svc)
+    {
+        var context = await svc.GrantPermissionAsync(id, request);
+        return context is not null ? Results.Ok(context) : Results.NotFound();
+    }
+}
+
+[RouteGroup("/conversations")]
+public static class ConversationHandlers
+{
+    [MapPost]
+    public static async Task<IResult> Create(CreateConversationRequest request, ConversationService svc)
+        => Results.Ok(await svc.CreateAsync(request));
+
+    [MapGet]
+    public static async Task<IResult> List(ConversationService svc, Guid? agentId = null)
+        => Results.Ok(await svc.ListAsync(agentId));
+
+    [MapGet("/{id:guid}")]
+    public static async Task<IResult> GetById(Guid id, ConversationService svc)
+    {
+        var conversation = await svc.GetByIdAsync(id);
+        return conversation is not null ? Results.Ok(conversation) : Results.NotFound();
+    }
+
+    [MapPut("/{id:guid}")]
+    public static async Task<IResult> Update(Guid id, UpdateConversationRequest request, ConversationService svc)
+    {
+        var conversation = await svc.UpdateAsync(id, request);
+        return conversation is not null ? Results.Ok(conversation) : Results.NotFound();
+    }
+
+    [MapDelete("/{id:guid}")]
+    public static async Task<IResult> Delete(Guid id, ConversationService svc)
+        => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    [MapPost("/{id:guid}/grant")]
+    public static async Task<IResult> Grant(
+        Guid id, ConversationPermissionGrantRequest request, ConversationService svc)
+    {
+        var conversation = await svc.GrantPermissionAsync(id, request);
+        return conversation is not null ? Results.Ok(conversation) : Results.NotFound();
+    }
+}
+
+[RouteGroup("/conversations/{id:guid}/chat")]
 public static class ChatHandlers
 {
     [MapPost]

@@ -10,4 +10,5 @@ public class ModelDB : BaseEntity
     public ProviderDB Provider { get; set; } = null!;
 
     public ICollection<AgentDB> Agents { get; set; } = [];
+    public ICollection<ConversationDB> Conversations { get; set; } = [];
 }
