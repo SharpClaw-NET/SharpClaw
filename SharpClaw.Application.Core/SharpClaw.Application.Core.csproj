@@ -10,6 +10,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="NAudio" />
   </ItemGroup>
 
   <ItemGroup>

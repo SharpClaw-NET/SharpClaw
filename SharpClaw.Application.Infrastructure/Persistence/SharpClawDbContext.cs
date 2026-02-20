@@ -1,5 +1,13 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Application.Infrastructure.Models.Access;
+using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Application.Infrastructure.Models.Conversation;
+using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Application.Infrastructure.Models.Resources;
+using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
@@ -13,19 +21,16 @@ public class SharpClawDbContext(
 {
     public DbSet<UserDB> Users => Set<UserDB>();
     public DbSet<RoleDB> Roles => Set<RoleDB>();
-    public DbSet<RolePermissionsDB> RolePermissions => Set<RolePermissionsDB>();
+    public DbSet<PermissionSetDB> PermissionSets => Set<PermissionSetDB>();
     public DbSet<RefreshTokenDB> RefreshTokens => Set<RefreshTokenDB>();
     public DbSet<MemoryDB> Memories => Set<MemoryDB>();
     public DbSet<ProviderDB> Providers => Set<ProviderDB>();
     public DbSet<ModelDB> Models => Set<ModelDB>();
     public DbSet<AgentDB> Agents => Set<AgentDB>();
     public DbSet<AgentContextDB> AgentContexts => Set<AgentContextDB>();
-    public DbSet<ContextPermissionGrantDB> ContextPermissionGrants => Set<ContextPermissionGrantDB>();
     public DbSet<ConversationDB> Conversations => Set<ConversationDB>();
-    public DbSet<ConversationPermissionGrantDB> ConversationPermissionGrants => Set<ConversationPermissionGrantDB>();
-    public DbSet<TaskPermissionGrantDB> TaskPermissionGrants => Set<TaskPermissionGrantDB>();
     public DbSet<ChatMessageDB> ChatMessages => Set<ChatMessageDB>();
-    public DbSet<ScheduledTaskDB> ScheduledTasks => Set<ScheduledTaskDB>();
+    public DbSet<ScheduledJobDB> ScheduledTasks => Set<ScheduledJobDB>();
 
     // ── Permission resources & grants ─────────────────────────────
     public DbSet<SkillDB> Skills => Set<SkillDB>();
@@ -41,9 +46,12 @@ public class SharpClawDbContext(
     public DbSet<SearchEngineAccessDB> SearchEngineAccesses => Set<SearchEngineAccessDB>();
     public DbSet<ContainerDB> Containers => Set<ContainerDB>();
     public DbSet<ContainerAccessDB> ContainerAccesses => Set<ContainerAccessDB>();
-    public DbSet<AgentPermissionDB> AgentPermissions => Set<AgentPermissionDB>();
-    public DbSet<TaskPermissionDB> TaskPermissions => Set<TaskPermissionDB>();
-    public DbSet<SkillPermissionDB> SkillPermissions => Set<SkillPermissionDB>();
+    public DbSet<AudioDeviceDB> AudioDevices => Set<AudioDeviceDB>();
+    public DbSet<AudioDeviceAccessDB> AudioDeviceAccesses => Set<AudioDeviceAccessDB>();
+    public DbSet<TranscriptionSegmentDB> TranscriptionSegments => Set<TranscriptionSegmentDB>();
+    public DbSet<AgentManagementAccessDB> AgentPermissions => Set<AgentManagementAccessDB>();
+    public DbSet<TaskManageAccessDB> TaskPermissions => Set<TaskManageAccessDB>();
+    public DbSet<SkillManageAccessDB> SkillPermissions => Set<SkillManageAccessDB>();
     public DbSet<ClearanceUserWhitelistEntryDB> ClearanceUserWhitelistEntries => Set<ClearanceUserWhitelistEntryDB>();
     public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
     public DbSet<AgentJobDB> AgentJobs => Set<AgentJobDB>();
@@ -61,9 +69,9 @@ public class SharpClawDbContext(
                 .WithOne(u => u.Role)
                 .HasForeignKey(u => u.RoleId)
                 .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(r => r.Permissions)
-                .WithOne(p => p.Role)
-                .HasForeignKey<RolePermissionsDB>(p => p.RoleId)
+            e.HasOne(r => r.PermissionSet)
+                .WithMany()
+                .HasForeignKey(r => r.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -95,6 +103,7 @@ public class SharpClawDbContext(
         modelBuilder.Entity<ModelDB>(e =>
         {
             e.HasIndex(m => new { m.Name, m.ProviderId }).IsUnique();
+            e.Property(m => m.Capabilities).HasConversion<string>();
             e.HasMany(m => m.Agents)
                 .WithOne(a => a.Model)
                 .HasForeignKey(a => a.ModelId)
@@ -131,17 +140,10 @@ public class SharpClawDbContext(
                 .WithOne(t => t.AgentContext!)
                 .HasForeignKey(t => t.AgentContextId)
                 .OnDelete(DeleteBehavior.SetNull);
-            e.HasMany(c => c.PermissionGrants)
-                .WithOne(g => g.AgentContext)
-                .HasForeignKey(g => g.AgentContextId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<ContextPermissionGrantDB>(e =>
-        {
-            e.HasIndex(g => new { g.AgentContextId, g.ActionType }).IsUnique();
-            e.Property(g => g.ActionType).HasConversion<string>();
-            e.Property(g => g.GrantedClearance).HasConversion<string>();
+            e.HasOne(c => c.PermissionSet)
+                .WithMany()
+                .HasForeignKey(c => c.PermissionSetId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ── Conversations ─────────────────────────────────────────
@@ -155,94 +157,84 @@ public class SharpClawDbContext(
                 .WithOne(m => m.Conversation)
                 .HasForeignKey(m => m.ConversationId)
                 .OnDelete(DeleteBehavior.Cascade);
-            e.HasMany(c => c.PermissionGrants)
-                .WithOne(g => g.Conversation)
-                .HasForeignKey(g => g.ConversationId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<ConversationPermissionGrantDB>(e =>
-        {
-            e.HasIndex(g => new { g.ConversationId, g.ActionType }).IsUnique();
-            e.Property(g => g.ActionType).HasConversion<string>();
-            e.Property(g => g.GrantedClearance).HasConversion<string>();
+            e.HasOne(c => c.PermissionSet)
+                .WithMany()
+                .HasForeignKey(c => c.PermissionSetId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ── Scheduled Tasks ───────────────────────────────────────
-        modelBuilder.Entity<ScheduledTaskDB>(e =>
+        modelBuilder.Entity<ScheduledJobDB>(e =>
         {
-            e.HasMany(t => t.PermissionGrants)
-                .WithOne(g => g.ScheduledTask)
-                .HasForeignKey(g => g.ScheduledTaskId)
-                .OnDelete(DeleteBehavior.Cascade);
+            e.HasOne(t => t.PermissionSet)
+                .WithMany()
+                .HasForeignKey(t => t.PermissionSetId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
-        modelBuilder.Entity<TaskPermissionGrantDB>(e =>
+        // ── PermissionSets ────────────────────────────────────────
+        modelBuilder.Entity<PermissionSetDB>(e =>
         {
-            e.HasIndex(g => new { g.ScheduledTaskId, g.ActionType }).IsUnique();
-            e.Property(g => g.ActionType).HasConversion<string>();
-            e.Property(g => g.GrantedClearance).HasConversion<string>();
-        });
-
-        // ── RolePermissions ───────────────────────────────────────
-        modelBuilder.Entity<RolePermissionsDB>(e =>
-        {
-            e.HasIndex(p => p.RoleId).IsUnique();
             e.Property(p => p.DefaultClearance).HasConversion<string>();
 
             e.HasMany(p => p.SystemUserAccesses)
-                .WithOne(s => s.RolePermissions)
-                .HasForeignKey(s => s.RolePermissionsId)
+                .WithOne(s => s.PermissionSet)
+                .HasForeignKey(s => s.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.LocalInfoStorePermissions)
-                .WithOne(l => l.RolePermissions)
-                .HasForeignKey(l => l.RolePermissionsId)
+                .WithOne(l => l.PermissionSet)
+                .HasForeignKey(l => l.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.ExternalInfoStorePermissions)
-                .WithOne(x => x.RolePermissions)
-                .HasForeignKey(x => x.RolePermissionsId)
+                .WithOne(x => x.PermissionSet)
+                .HasForeignKey(x => x.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.WebsiteAccesses)
-                .WithOne(w => w.RolePermissions)
-                .HasForeignKey(w => w.RolePermissionsId)
+                .WithOne(w => w.PermissionSet)
+                .HasForeignKey(w => w.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.SearchEngineAccesses)
-                .WithOne(s => s.RolePermissions)
-                .HasForeignKey(s => s.RolePermissionsId)
+                .WithOne(s => s.PermissionSet)
+                .HasForeignKey(s => s.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.ContainerAccesses)
-                .WithOne(c => c.RolePermissions)
-                .HasForeignKey(c => c.RolePermissionsId)
+                .WithOne(c => c.PermissionSet)
+                .HasForeignKey(c => c.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.AudioDeviceAccesses)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.AgentPermissions)
-                .WithOne(a => a.RolePermissions)
-                .HasForeignKey(a => a.RolePermissionsId)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.TaskPermissions)
-                .WithOne(t => t.RolePermissions)
-                .HasForeignKey(t => t.RolePermissionsId)
+                .WithOne(t => t.PermissionSet)
+                .HasForeignKey(t => t.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.SkillPermissions)
-                .WithOne(s => s.RolePermissions)
-                .HasForeignKey(s => s.RolePermissionsId)
+                .WithOne(s => s.PermissionSet)
+                .HasForeignKey(s => s.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.ClearanceUserWhitelist)
-                .WithOne(w => w.RolePermissions)
-                .HasForeignKey(w => w.RolePermissionsId)
+                .WithOne(w => w.PermissionSet)
+                .HasForeignKey(w => w.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.ClearanceAgentWhitelist)
-                .WithOne(w => w.RolePermissions)
-                .HasForeignKey(w => w.RolePermissionsId)
+                .WithOne(w => w.PermissionSet)
+                .HasForeignKey(w => w.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
@@ -268,7 +260,7 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<SystemUserAccessDB>(e =>
         {
-            e.HasIndex(a => new { a.RolePermissionsId, a.SystemUserId }).IsUnique();
+            e.HasIndex(a => new { a.PermissionSetId, a.SystemUserId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
@@ -301,14 +293,14 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<LocalInfoStoreAccessDB>(e =>
         {
-            e.HasIndex(p => new { p.RolePermissionsId, p.LocalInformationStoreId }).IsUnique();
+            e.HasIndex(p => new { p.PermissionSetId, p.LocalInformationStoreId }).IsUnique();
             e.Property(p => p.AccessLevel).HasConversion<string>();
             e.Property(p => p.Clearance).HasConversion<string>();
         });
 
         modelBuilder.Entity<ExternalInfoStoreAccessDB>(e =>
         {
-            e.HasIndex(p => new { p.RolePermissionsId, p.ExternalInformationStoreId }).IsUnique();
+            e.HasIndex(p => new { p.PermissionSetId, p.ExternalInformationStoreId }).IsUnique();
             e.Property(p => p.AccessLevel).HasConversion<string>();
             e.Property(p => p.Clearance).HasConversion<string>();
         });
@@ -329,7 +321,7 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<WebsiteAccessDB>(e =>
         {
-            e.HasIndex(a => new { a.RolePermissionsId, a.WebsiteId }).IsUnique();
+            e.HasIndex(a => new { a.PermissionSetId, a.WebsiteId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
@@ -349,7 +341,7 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<SearchEngineAccessDB>(e =>
         {
-            e.HasIndex(a => new { a.RolePermissionsId, a.SearchEngineId }).IsUnique();
+            e.HasIndex(a => new { a.PermissionSetId, a.SearchEngineId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
@@ -369,14 +361,34 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<ContainerAccessDB>(e =>
         {
-            e.HasIndex(a => new { a.RolePermissionsId, a.ContainerId }).IsUnique();
+            e.HasIndex(a => new { a.PermissionSetId, a.ContainerId }).IsUnique();
+            e.Property(a => a.Clearance).HasConversion<string>();
+        });
+
+        // ── Audio devices ────────────────────────────────────────
+        modelBuilder.Entity<AudioDeviceDB>(e =>
+        {
+            e.HasIndex(d => d.Name).IsUnique();
+            e.HasOne(d => d.Skill)
+                .WithMany()
+                .HasForeignKey(d => d.SkillId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(d => d.Accesses)
+                .WithOne(a => a.AudioDevice)
+                .HasForeignKey(a => a.AudioDeviceId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<AudioDeviceAccessDB>(e =>
+        {
+            e.HasIndex(a => new { a.PermissionSetId, a.AudioDeviceId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
         // ── Agent & Task permissions ──────────────────────────────
-        modelBuilder.Entity<AgentPermissionDB>(e =>
+        modelBuilder.Entity<AgentManagementAccessDB>(e =>
         {
-            e.HasIndex(p => new { p.RolePermissionsId, p.AgentId }).IsUnique();
+            e.HasIndex(p => new { p.PermissionSetId, p.AgentId }).IsUnique();
             e.Property(p => p.Clearance).HasConversion<string>();
             e.HasOne(p => p.Agent)
                 .WithMany()
@@ -384,9 +396,9 @@ public class SharpClawDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<TaskPermissionDB>(e =>
+        modelBuilder.Entity<TaskManageAccessDB>(e =>
         {
-            e.HasIndex(p => new { p.RolePermissionsId, p.ScheduledTaskId }).IsUnique();
+            e.HasIndex(p => new { p.PermissionSetId, p.ScheduledTaskId }).IsUnique();
             e.Property(p => p.Clearance).HasConversion<string>();
             e.HasOne(p => p.ScheduledTask)
                 .WithMany()
@@ -395,9 +407,9 @@ public class SharpClawDbContext(
         });
 
         // ── Skill permissions ─────────────────────────────────────
-        modelBuilder.Entity<SkillPermissionDB>(e =>
+        modelBuilder.Entity<SkillManageAccessDB>(e =>
         {
-            e.HasIndex(p => new { p.RolePermissionsId, p.SkillId }).IsUnique();
+            e.HasIndex(p => new { p.PermissionSetId, p.SkillId }).IsUnique();
             e.Property(p => p.Clearance).HasConversion<string>();
             e.HasOne(p => p.Skill)
                 .WithMany()
@@ -408,7 +420,7 @@ public class SharpClawDbContext(
         // ── Clearance whitelists ──────────────────────────────────
         modelBuilder.Entity<ClearanceUserWhitelistEntryDB>(e =>
         {
-            e.HasIndex(w => new { w.RolePermissionsId, w.UserId }).IsUnique();
+            e.HasIndex(w => new { w.PermissionSetId, w.UserId }).IsUnique();
             e.HasOne(w => w.User)
                 .WithMany()
                 .HasForeignKey(w => w.UserId)
@@ -417,7 +429,7 @@ public class SharpClawDbContext(
 
         modelBuilder.Entity<ClearanceAgentWhitelistEntryDB>(e =>
         {
-            e.HasIndex(w => new { w.RolePermissionsId, w.AgentId }).IsUnique();
+            e.HasIndex(w => new { w.PermissionSetId, w.AgentId }).IsUnique();
             e.HasOne(w => w.Agent)
                 .WithMany()
                 .HasForeignKey(w => w.AgentId)
@@ -438,6 +450,19 @@ public class SharpClawDbContext(
                 .WithOne(l => l.AgentJob)
                 .HasForeignKey(l => l.AgentJobId)
                 .OnDelete(DeleteBehavior.Cascade);
+            // Transcription
+            e.HasOne(j => j.TranscriptionModel)
+                .WithMany()
+                .HasForeignKey(j => j.TranscriptionModelId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(j => j.Conversation)
+                .WithMany()
+                .HasForeignKey(j => j.ConversationId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(j => j.TranscriptionSegments)
+                .WithOne(s => s.AgentJob)
+                .HasForeignKey(s => s.AgentJobId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);
@@ -445,6 +470,18 @@ public class SharpClawDbContext(
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
+        // Wildcard resource grants are immutable — reject any attempt
+        // to modify or delete them at runtime.
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.State is EntityState.Modified or EntityState.Deleted
+                && IsProtectedWildcardGrant(entry))
+            {
+                throw new InvalidOperationException(
+                    "Wildcard resource grants (AllResources) are immutable and cannot be modified or deleted.");
+            }
+        }
+
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             var now = DateTimeOffset.UtcNow;
@@ -471,4 +508,24 @@ public class SharpClawDbContext(
 
         return result;
     }
+
+    /// <summary>
+    /// Returns <c>true</c> when the tracked entity is a resource-access
+    /// or permission grant whose resource FK equals
+    /// <see cref="WellKnownIds.AllResources"/> (the wildcard).
+    /// </summary>
+    private static bool IsProtectedWildcardGrant(EntityEntry entry) => entry.Entity switch
+    {
+        SystemUserAccessDB          e => e.SystemUserId              == WellKnownIds.AllResources,
+        LocalInfoStoreAccessDB      e => e.LocalInformationStoreId   == WellKnownIds.AllResources,
+        ExternalInfoStoreAccessDB   e => e.ExternalInformationStoreId == WellKnownIds.AllResources,
+        WebsiteAccessDB             e => e.WebsiteId                 == WellKnownIds.AllResources,
+        SearchEngineAccessDB        e => e.SearchEngineId            == WellKnownIds.AllResources,
+        ContainerAccessDB           e => e.ContainerId               == WellKnownIds.AllResources,
+        AudioDeviceAccessDB         e => e.AudioDeviceId             == WellKnownIds.AllResources,
+        AgentManagementAccessDB           e => e.AgentId                   == WellKnownIds.AllResources,
+        TaskManageAccessDB            e => e.ScheduledTaskId           == WellKnownIds.AllResources,
+        SkillManageAccessDB           e => e.SkillId                   == WellKnownIds.AllResources,
+        _ => false,
+    };
 }

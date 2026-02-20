@@ -116,6 +116,21 @@ public static class AgentHandlers
     [MapDelete("/{id:guid}")]
     public static async Task<IResult> Delete(Guid id, AgentService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    [MapPut("/{id:guid}/role")]
+    public static async Task<IResult> AssignRole(
+        Guid id, AssignAgentRoleRequest request, AgentService svc)
+    {
+        try
+        {
+            var agent = await svc.AssignRoleAsync(id, request.RoleId, request.CallerUserId);
+            return agent is not null ? Results.Ok(agent) : Results.NotFound();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status403Forbidden);
+        }
+    }
 }
 
 [RouteGroup("/contexts")]
@@ -146,14 +161,6 @@ public static class ContextHandlers
     [MapDelete("/{id:guid}")]
     public static async Task<IResult> Delete(Guid id, ContextService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
-
-    [MapPost("/{id:guid}/grant")]
-    public static async Task<IResult> Grant(
-        Guid id, PermissionGrantRequest request, ContextService svc)
-    {
-        var context = await svc.GrantPermissionAsync(id, request);
-        return context is not null ? Results.Ok(context) : Results.NotFound();
-    }
 }
 
 [RouteGroup("/conversations")]
@@ -184,14 +191,6 @@ public static class ConversationHandlers
     [MapDelete("/{id:guid}")]
     public static async Task<IResult> Delete(Guid id, ConversationService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
-
-    [MapPost("/{id:guid}/grant")]
-    public static async Task<IResult> Grant(
-        Guid id, ConversationPermissionGrantRequest request, ConversationService svc)
-    {
-        var conversation = await svc.GrantPermissionAsync(id, request);
-        return conversation is not null ? Results.Ok(conversation) : Results.NotFound();
-    }
 }
 
 [RouteGroup("/conversations/{id:guid}/chat")]

@@ -25,11 +25,14 @@ internal static class CliIdMap
     }
 
     /// <summary>
-    /// Parses a CLI argument as either a short integer ID or a GUID.
+    /// Parses a CLI argument as either a short integer ID (with or without
+    /// the <c>#</c> prefix) or a full GUID string.
     /// </summary>
     public static Guid Resolve(string arg)
     {
-        if (int.TryParse(arg, out var shortId))
+        var normalized = arg.StartsWith('#') ? arg[1..] : arg;
+
+        if (int.TryParse(normalized, out var shortId))
         {
             if (ShortToGuid.TryGetValue(shortId, out var guid))
                 return guid;

@@ -5,6 +5,7 @@ using Microsoft.Extensions.Hosting;
 using Serilog;
 using SharpClaw.Application.API.Api;
 using SharpClaw.Application.API.Cli;
+using SharpClaw.Application.API.Handlers;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Services;
@@ -61,7 +62,9 @@ try
     };
     builder.Services.AddSingleton(encryptionOptions);
 
-    builder.Services.AddHttpClient();
+    builder.Services.AddTransient<HttpLoggingDelegatingHandler>();
+    builder.Services.AddHttpClient()
+        .ConfigureHttpClientDefaults(b => b.AddHttpMessageHandler<HttpLoggingDelegatingHandler>());
     builder.Services.AddSingleton<IProviderApiClient, OpenAiApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, AnthropicApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, OpenRouterApiClient>();
@@ -76,6 +79,14 @@ try
     builder.Services.AddSingleton<IProviderApiClient, GitHubCopilotApiClient>();
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
+    // Transcription clients
+    builder.Services.AddSingleton<ITranscriptionApiClient, OpenAiTranscriptionApiClient>();
+    builder.Services.AddSingleton<ITranscriptionApiClient, GroqTranscriptionApiClient>();
+    builder.Services.AddSingleton<TranscriptionApiClientFactory>();
+
+    // Audio capture
+    builder.Services.AddSingleton<IAudioCaptureProvider, WasapiAudioCaptureProvider>();
+
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ModelService>();
     builder.Services.AddScoped<AgentService>();
@@ -84,6 +95,8 @@ try
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
     builder.Services.AddScoped<ChatService>();
+    builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();
+    builder.Services.AddScoped<TranscriptionService>();
 
     // Background tasks
     builder.Services.AddHostedService<ScheduledTaskService>();
@@ -107,7 +120,9 @@ try
     // API mode
     app.UseSerilogRequestLogging();
     app.UseMiddleware<ApiKeyMiddleware>();
+    app.UseWebSockets();
     app.MapHandlers();
+    app.MapTranscriptionStreaming();
 
     app.Lifetime.ApplicationStopping.Register(apiKeyProvider.Cleanup);
 
@@ -116,7 +131,8 @@ try
 
     await app.StartAsync();
 
-    // Suppress console logging during interactive mode (file logging continues)
+    // Suppress console logging during interactive mode (file logging continues).
+    // CLI command/response logs go to System.Diagnostics.Debug (VS Output > Debug pane).
     consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Fatal;
     await CliDispatcher.RunInteractiveAsync(app.Services, app.Lifetime.ApplicationStopping);
     consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Information;

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Contracts.DTOs.Contexts;
+using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Application.Infrastructure.Models.Conversation;
 using SharpClaw.Contracts.DTOs.Conversations;
-using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -13,7 +13,7 @@ public sealed class ConversationService(SharpClawDbContext db)
     /// Creates a new conversation for the given agent.  If no model is
     /// specified the agent's current model is used.  An optional
     /// <see cref="AgentContextDB"/> can be linked so that the context's
-    /// permission grants act as defaults.
+    /// permission set acts as a default.
     /// </summary>
     public async Task<ConversationResponse> CreateAsync(
         CreateConversationRequest request, CancellationToken ct = default)
@@ -34,7 +34,6 @@ public sealed class ConversationService(SharpClawDbContext db)
         if (request.ContextId is { } ctxId)
         {
             context = await db.AgentContexts
-                .Include(c => c.PermissionGrants)
                 .FirstOrDefaultAsync(c => c.Id == ctxId, ct)
                 ?? throw new ArgumentException($"Context {ctxId} not found.");
         }
@@ -44,20 +43,9 @@ public sealed class ConversationService(SharpClawDbContext db)
             Title = request.Title ?? $"Conversation {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
             ModelId = model.Id,
             AgentId = agent.Id,
-            AgentContextId = context?.Id
+            AgentContextId = context?.Id,
+            PermissionSetId = request.PermissionSetId
         };
-
-        if (request.PermissionGrants is { Count: > 0 })
-        {
-            foreach (var grant in request.PermissionGrants)
-            {
-                conversation.PermissionGrants.Add(new ConversationPermissionGrantDB
-                {
-                    ActionType = grant.ActionType,
-                    GrantedClearance = grant.GrantedClearance
-                });
-            }
-        }
 
         db.Conversations.Add(conversation);
         await db.SaveChangesAsync(ct);
@@ -83,8 +71,7 @@ public sealed class ConversationService(SharpClawDbContext db)
         var query = db.Conversations
             .Include(c => c.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.PermissionGrants)
-            .Include(c => c.PermissionGrants)
+            .Include(c => c.AgentContext)
             .AsQueryable();
 
         if (agentId is not null)
@@ -125,14 +112,12 @@ public sealed class ConversationService(SharpClawDbContext db)
         {
             if (request.ContextId == Guid.Empty)
             {
-                // Detach from context
                 conversation.AgentContextId = null;
                 conversation.AgentContext = null;
             }
             else
             {
                 var ctx = await db.AgentContexts
-                    .Include(c => c.PermissionGrants)
                     .FirstOrDefaultAsync(c => c.Id == request.ContextId, ct)
                     ?? throw new ArgumentException($"Context {request.ContextId} not found.");
                 conversation.AgentContextId = ctx.Id;
@@ -140,37 +125,11 @@ public sealed class ConversationService(SharpClawDbContext db)
             }
         }
 
-        await db.SaveChangesAsync(ct);
-        return ToResponse(conversation, conversation.Agent, conversation.Model, conversation.AgentContext);
-    }
-
-    /// <summary>
-    /// Adds or updates a permission grant for the given action type on a conversation.
-    /// </summary>
-    public async Task<ConversationResponse?> GrantPermissionAsync(
-        Guid conversationId,
-        ConversationPermissionGrantRequest grant,
-        CancellationToken ct = default)
-    {
-        var conversation = await LoadConversationAsync(conversationId, ct);
-        if (conversation is null) return null;
-
-        var existing = conversation.PermissionGrants
-            .FirstOrDefault(g => g.ActionType == grant.ActionType);
-
-        if (existing is not null)
-        {
-            existing.GrantedClearance = grant.GrantedClearance;
-        }
-        else
-        {
-            conversation.PermissionGrants.Add(new ConversationPermissionGrantDB
-            {
-                ActionType = grant.ActionType,
-                GrantedClearance = grant.GrantedClearance,
-                ConversationId = conversationId
-            });
-        }
+        // Allow explicit set/unset of permission set
+        if (request.PermissionSetId is not null)
+            conversation.PermissionSetId = request.PermissionSetId == Guid.Empty
+                ? null
+                : request.PermissionSetId;
 
         await db.SaveChangesAsync(ct);
         return ToResponse(conversation, conversation.Agent, conversation.Model, conversation.AgentContext);
@@ -185,8 +144,7 @@ public sealed class ConversationService(SharpClawDbContext db)
         var conversation = await db.Conversations
             .Include(c => c.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.PermissionGrants)
-            .Include(c => c.PermissionGrants)
+            .Include(c => c.AgentContext)
             .Include(c => c.ChatMessages)
             .OrderByDescending(c => c.ChatMessages.Max(m => (DateTimeOffset?)m.CreatedAt) ?? c.CreatedAt)
             .FirstOrDefaultAsync(ct);
@@ -211,8 +169,7 @@ public sealed class ConversationService(SharpClawDbContext db)
         await db.Conversations
             .Include(c => c.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.PermissionGrants)
-            .Include(c => c.PermissionGrants)
+            .Include(c => c.AgentContext)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
     private static ConversationResponse ToResponse(
@@ -225,41 +182,8 @@ public sealed class ConversationService(SharpClawDbContext db)
             model.Name,
             context?.Id,
             context?.Name,
+            conversation.PermissionSetId,
+            conversation.PermissionSetId ?? context?.PermissionSetId,
             conversation.CreatedAt,
-            conversation.UpdatedAt,
-            conversation.PermissionGrants
-                .Select(g => new ConversationPermissionGrantResponse(
-                    g.Id, g.ActionType, g.GrantedClearance))
-                .ToList(),
-            ResolveEffectivePermissions(conversation, context));
-
-    /// <summary>
-    /// Resolves the effective permissions for a conversation by merging
-    /// context-level defaults with per-conversation overrides.
-    /// Per-conversation grants always win over the context default.
-    /// </summary>
-    internal static IReadOnlyList<EffectivePermissionResponse> ResolveEffectivePermissions(
-        ConversationDB conversation, AgentContextDB? context)
-    {
-        var effective = new Dictionary<AgentActionType, EffectivePermissionResponse>();
-
-        // 1. Start with context-level defaults (if any)
-        if (context?.PermissionGrants is not null)
-        {
-            foreach (var grant in context.PermissionGrants)
-            {
-                effective[grant.ActionType] = new EffectivePermissionResponse(
-                    grant.ActionType, grant.GrantedClearance, "context");
-            }
-        }
-
-        // 2. Per-conversation grants override
-        foreach (var grant in conversation.PermissionGrants)
-        {
-            effective[grant.ActionType] = new EffectivePermissionResponse(
-                grant.ActionType, grant.GrantedClearance, "conversation");
-        }
-
-        return effective.Values.ToList();
-    }
+            conversation.UpdatedAt);
 }

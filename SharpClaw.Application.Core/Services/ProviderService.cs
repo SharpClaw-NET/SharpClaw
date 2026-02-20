@@ -133,6 +133,35 @@ public sealed class ProviderService(
         return client is IDeviceCodeAuthClient;
     }
 
+
+    /// <summary>
+    /// Re-infers <see cref="ModelCapability"/> for all existing models of a provider
+    /// based on their names. Only updates models whose capabilities were never
+    /// manually overridden (i.e. still match what inference would produce or are default <c>Chat</c>).
+    /// </summary>
+    public async Task<int> RefreshCapabilitiesAsync(Guid providerId, CancellationToken ct = default)
+    {
+        var models = await db.Models
+            .Where(m => m.ProviderId == providerId)
+            .ToListAsync(ct);
+
+        var updated = 0;
+        foreach (var model in models)
+        {
+            var inferred = InferCapabilities(model.Name);
+            if (model.Capabilities != inferred)
+            {
+                model.Capabilities = inferred;
+                updated++;
+            }
+        }
+
+        if (updated > 0)
+            await db.SaveChangesAsync(ct);
+
+        return updated;
+    }
+
     /// <summary>
     /// Queries the provider's API for available models and upserts them into the database.
     /// </summary>
@@ -155,7 +184,12 @@ public sealed class ProviderService(
         var existingNames = provider.Models.Select(m => m.Name).ToHashSet();
         var newModels = modelIds
             .Where(id => !existingNames.Contains(id))
-            .Select(id => new ModelDB { Name = id, ProviderId = provider.Id })
+            .Select(id => new ModelDB
+            {
+                Name = id,
+                ProviderId = provider.Id,
+                Capabilities = InferCapabilities(id)
+            })
             .ToList();
 
         if (newModels.Count > 0)
@@ -166,7 +200,52 @@ public sealed class ProviderService(
 
         return await db.Models
             .Where(m => m.ProviderId == providerId)
-            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, provider.Name))
+            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, provider.Name, m.Capabilities))
             .ToListAsync(ct);
+    }
+
+    /// <summary>
+    /// Infers <see cref="ModelCapability"/> from a model's name using
+    /// well-known naming conventions across providers.
+    /// </summary>
+    internal static ModelCapability InferCapabilities(string modelName)
+    {
+        var name = modelName.ToLowerInvariant();
+
+        // ── Pure transcription models ─────────────────────────────
+        if (name.StartsWith("whisper"))
+            return ModelCapability.Transcription;
+
+        // ── Pure embedding models ─────────────────────────────────
+        if (name.Contains("embedding") || name.Contains("embed"))
+            return ModelCapability.Embedding;
+
+        // ── Pure TTS models ───────────────────────────────────────
+        if (name.StartsWith("tts-"))
+            return ModelCapability.TextToSpeech;
+
+        // ── Pure image generation models ──────────────────────────
+        if (name.StartsWith("dall-e") || name.StartsWith("gpt-image")
+            || name.StartsWith("chatgpt-image") || name.StartsWith("sora"))
+            return ModelCapability.ImageGeneration;
+
+        // ── Moderation / non-generative ───────────────────────────
+        if (name.Contains("moderation"))
+            return ModelCapability.None;
+
+        // ── Chat models with transcription suffix ─────────────────
+        if (name.Contains("transcribe"))
+            return ModelCapability.Chat | ModelCapability.Transcription;
+
+        // ── Chat models with TTS suffix ───────────────────────────
+        if (name.Contains("-tts"))
+            return ModelCapability.Chat | ModelCapability.TextToSpeech;
+
+        // ── Chat models with audio/realtime capabilities ──────────
+        if (name.Contains("audio") || name.Contains("realtime"))
+            return ModelCapability.Chat | ModelCapability.Transcription | ModelCapability.TextToSpeech;
+
+        // ── Everything else is a chat model ───────────────────────
+        return ModelCapability.Chat;
     }
 }

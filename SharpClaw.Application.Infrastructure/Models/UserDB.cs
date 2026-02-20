@@ -1,3 +1,4 @@
+using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts.Entities;
 
 namespace SharpClaw.Infrastructure.Models;

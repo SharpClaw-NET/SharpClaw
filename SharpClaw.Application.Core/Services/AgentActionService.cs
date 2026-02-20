@@ -1,7 +1,8 @@
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -137,6 +138,14 @@ public sealed class AgentActionService(SharpClawDbContext db)
             p => p.SkillPermissions, a => a.SkillId, a => a.Clearance,
             "skill access", onApproved, ct);
 
+    public Task<AgentActionResult> AccessAudioDeviceAsync(
+        Guid agentId, Guid audioDeviceId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateResourceAccessAsync(
+            agentId, audioDeviceId, caller,
+            p => p.AudioDeviceAccesses, a => a.AudioDeviceId, a => a.Clearance,
+            "audio device access", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Core evaluation engine
     // ═══════════════════════════════════════════════════════════════
@@ -144,12 +153,12 @@ public sealed class AgentActionService(SharpClawDbContext db)
     /// <summary>
     /// Evaluate a boolean (global-flag) permission.
     /// Global flags have no per-permission clearance — the group
-    /// <see cref="RolePermissionsDB.DefaultClearance"/> is used.
+    /// <see cref="PermissionSetDB.DefaultClearance"/> is used.
     /// </summary>
     private async Task<AgentActionResult> EvaluateGlobalFlagAsync(
         Guid agentId,
         ActionCaller caller,
-        Func<RolePermissionsDB, bool> hasFlag,
+        Func<PermissionSetDB, bool> hasFlag,
         string flagDescription,
         Func<Task>? onApproved,
         CancellationToken ct)
@@ -180,7 +189,7 @@ public sealed class AgentActionService(SharpClawDbContext db)
         Guid agentId,
         Guid resourceId,
         ActionCaller caller,
-        Func<RolePermissionsDB, IEnumerable<TAccess>> getAccessCollection,
+        Func<PermissionSetDB, IEnumerable<TAccess>> getAccessCollection,
         Func<TAccess, Guid> getResourceId,
         Func<TAccess, PermissionClearance> getClearance,
         string resourceDescription,
@@ -192,7 +201,8 @@ public sealed class AgentActionService(SharpClawDbContext db)
             return AgentActionResult.Denied("Agent has no role or permissions assigned.");
 
         var access = getAccessCollection(agentPerms)
-            .FirstOrDefault(a => getResourceId(a) == resourceId);
+            .FirstOrDefault(a => getResourceId(a) == resourceId
+                              || getResourceId(a) == WellKnownIds.AllResources);
 
         if (access is null)
             return AgentActionResult.Denied($"Agent does not have {resourceDescription}.");
@@ -202,7 +212,8 @@ public sealed class AgentActionService(SharpClawDbContext db)
         var result = await EvaluateCallerClearanceAsync(
             agentPerms, effective, caller,
             callerPerms => getAccessCollection(callerPerms)
-                .Any(a => getResourceId(a) == resourceId),
+                .Any(a => getResourceId(a) == resourceId
+                       || getResourceId(a) == WellKnownIds.AllResources),
             ct);
 
         if (result.Verdict == ClearanceVerdict.Approved && onApproved is not null)
@@ -226,10 +237,10 @@ public sealed class AgentActionService(SharpClawDbContext db)
     /// </list>
     /// </summary>
     private async Task<AgentActionResult> EvaluateCallerClearanceAsync(
-        RolePermissionsDB agentPerms,
+        PermissionSetDB agentPerms,
         PermissionClearance effectiveClearance,
         ActionCaller caller,
-        Func<RolePermissionsDB, bool> callerHasSamePermission,
+        Func<PermissionSetDB, bool> callerHasSamePermission,
         CancellationToken ct)
     {
         // ── Level 5: independent ─────────────────────────────────
@@ -238,18 +249,22 @@ public sealed class AgentActionService(SharpClawDbContext db)
                 "Agent can act independently.", effectiveClearance);
 
         // Load the caller's permissions once (may be null if no role)
-        RolePermissionsDB? callerPerms = null;
+        PermissionSetDB? callerPerms = null;
         if (caller.UserId is { } userId)
         {
-            var user = await db.Users.FirstOrDefaultAsync(u => u.Id == userId, ct);
-            if (user?.RoleId is not null)
-                callerPerms = await LoadPermissionsAsync(user.RoleId.Value, ct);
+            var user = await db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == userId, ct);
+            if (user?.Role?.PermissionSetId is { } userPsId)
+                callerPerms = await LoadPermissionSetAsync(userPsId, ct);
         }
         else if (caller.AgentId is { } callerAgentId)
         {
-            var callerAgent = await db.Agents.FirstOrDefaultAsync(a => a.Id == callerAgentId, ct);
-            if (callerAgent?.RoleId is not null)
-                callerPerms = await LoadPermissionsAsync(callerAgent.RoleId.Value, ct);
+            var callerAgent = await db.Agents
+                .Include(a => a.Role)
+                .FirstOrDefaultAsync(a => a.Id == callerAgentId, ct);
+            if (callerAgent?.Role?.PermissionSetId is { } agentPsId)
+                callerPerms = await LoadPermissionSetAsync(agentPsId, ct);
         }
         else
         {
@@ -307,31 +322,38 @@ public sealed class AgentActionService(SharpClawDbContext db)
     // Data loading
     // ═══════════════════════════════════════════════════════════════
 
-    private async Task<RolePermissionsDB?> LoadAgentPermissionsAsync(
+    private async Task<PermissionSetDB?> LoadAgentPermissionsAsync(
         Guid agentId, CancellationToken ct)
     {
-        var agent = await db.Agents.FirstOrDefaultAsync(a => a.Id == agentId, ct);
-        return agent?.RoleId is { } roleId
-            ? await LoadPermissionsAsync(roleId, ct)
+        var agent = await db.Agents
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        return agent?.Role?.PermissionSetId is { } psId
+            ? await LoadPermissionSetAsync(psId, ct)
             : null;
     }
 
-    private async Task<RolePermissionsDB?> LoadPermissionsAsync(
-        Guid roleId, CancellationToken ct)
+    /// <summary>
+    /// Loads a full <see cref="PermissionSetDB"/> by its primary key,
+    /// including all typed access collections and whitelists.
+    /// </summary>
+    public async Task<PermissionSetDB?> LoadPermissionSetAsync(
+        Guid permissionSetId, CancellationToken ct)
     {
-        return await db.RolePermissions
+        return await db.PermissionSets
             .Include(p => p.SystemUserAccesses)
             .Include(p => p.LocalInfoStorePermissions)
             .Include(p => p.ExternalInfoStorePermissions)
             .Include(p => p.WebsiteAccesses)
             .Include(p => p.SearchEngineAccesses)
             .Include(p => p.ContainerAccesses)
+            .Include(p => p.AudioDeviceAccesses)
             .Include(p => p.AgentPermissions)
             .Include(p => p.TaskPermissions)
             .Include(p => p.SkillPermissions)
             .Include(p => p.ClearanceUserWhitelist)
             .Include(p => p.ClearanceAgentWhitelist)
-            .FirstOrDefaultAsync(p => p.RoleId == roleId, ct);
+            .FirstOrDefaultAsync(p => p.Id == permissionSetId, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════

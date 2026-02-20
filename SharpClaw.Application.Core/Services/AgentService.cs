@@ -18,7 +18,7 @@ public sealed class AgentService(SharpClawDbContext db)
         {
             Name = request.Name,
             SystemPrompt = request.SystemPrompt,
-            ModelId = model.Id
+            ModelId = model.Id,
         };
 
         db.Agents.Add(agent);
@@ -31,6 +31,7 @@ public sealed class AgentService(SharpClawDbContext db)
     {
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Name == name, ct);
 
         return agent is null ? null : ToResponse(agent, agent.Model);
@@ -40,6 +41,7 @@ public sealed class AgentService(SharpClawDbContext db)
     {
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
 
         return agent is null ? null : ToResponse(agent, agent.Model);
@@ -49,9 +51,11 @@ public sealed class AgentService(SharpClawDbContext db)
     {
         return await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
             .Select(a => new AgentResponse(
                 a.Id, a.Name, a.SystemPrompt,
-                a.ModelId, a.Model.Name, a.Model.Provider.Name))
+                a.ModelId, a.Model.Name, a.Model.Provider.Name,
+                a.RoleId, a.Role != null ? a.Role.Name : null))
             .ToListAsync(ct);
     }
 
@@ -59,6 +63,7 @@ public sealed class AgentService(SharpClawDbContext db)
     {
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (agent is null) return null;
 
@@ -76,6 +81,48 @@ public sealed class AgentService(SharpClawDbContext db)
         return ToResponse(agent, agent.Model);
     }
 
+    /// <summary>
+    /// Assigns or removes a role on an agent. The calling user must hold the
+    /// target role themselves — you cannot grant permissions you don't have.
+    /// Pass <see cref="Guid.Empty"/> as <paramref name="roleId"/> to remove
+    /// the current role.
+    /// </summary>
+    public async Task<AgentResponse?> AssignRoleAsync(
+        Guid agentId, Guid roleId, Guid? callerUserId, CancellationToken ct = default)
+    {
+        var agent = await db.Agents
+            .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+        if (agent is null) return null;
+
+        if (roleId == Guid.Empty)
+        {
+            agent.RoleId = null;
+            agent.Role = null;
+        }
+        else
+        {
+            var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct)
+                ?? throw new ArgumentException($"Role {roleId} not found.");
+
+            // Caller must hold this role to grant it
+            if (callerUserId is null)
+                throw new UnauthorizedAccessException("A logged-in user is required to assign roles.");
+
+            var caller = await db.Users.FirstOrDefaultAsync(u => u.Id == callerUserId, ct);
+            if (caller?.RoleId != role.Id)
+                throw new UnauthorizedAccessException(
+                    $"You must hold the '{role.Name}' role to assign it to an agent.");
+
+            agent.RoleId = role.Id;
+            agent.Role = role;
+        }
+
+        await db.SaveChangesAsync(ct);
+        return ToResponse(agent, agent.Model);
+    }
+
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
         var agent = await db.Agents.FindAsync([id], ct);
@@ -87,5 +134,6 @@ public sealed class AgentService(SharpClawDbContext db)
     }
 
     private static AgentResponse ToResponse(AgentDB agent, ModelDB model) =>
-        new(agent.Id, agent.Name, agent.SystemPrompt, model.Id, model.Name, model.Provider.Name);
+        new(agent.Id, agent.Name, agent.SystemPrompt, model.Id, model.Name, model.Provider.Name,
+            agent.RoleId, agent.Role?.Name);
 }

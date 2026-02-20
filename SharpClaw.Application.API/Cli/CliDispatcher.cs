@@ -1,8 +1,10 @@
+using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.API.Handlers;
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.DTOs.AgentActions;
@@ -13,6 +15,7 @@ using SharpClaw.Contracts.DTOs.Contexts;
 using SharpClaw.Contracts.DTOs.Conversations;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
+using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -30,6 +33,9 @@ public static class CliDispatcher
     private static Guid? _currentUserId;
     private static Guid? _currentConversationId;
     private static bool IsLoggedIn => _currentUser is not null;
+
+    [Conditional("DEBUG")]
+    private static void DebugLog(string message) => Debug.WriteLine(message, "SharpClaw.CLI");
 
     private static readonly HashSet<string> PublicCommands =
         ["login", "register", "help", "--help", "-h"];
@@ -69,12 +75,15 @@ public static class CliDispatcher
             if (line is "exit" or "quit")
                 break;
 
+            DebugLog($"Command: {line}");
+
             if (line is "logout")
             {
                 _currentUser = null;
                 _currentUserId = null;
                 _currentConversationId = null;
                 Console.WriteLine("Logged out.");
+                DebugLog("Response: Logged out.");
                 Console.WriteLine();
                 continue;
             }
@@ -84,6 +93,7 @@ public static class CliDispatcher
             if (!IsLoggedIn && !PublicCommands.Contains(args[0].ToLowerInvariant()))
             {
                 Console.Error.WriteLine("Please log in first: login <username> <password>");
+                DebugLog("Response: Not logged in, command rejected.");
                 Console.WriteLine();
                 continue;
             }
@@ -91,11 +101,15 @@ public static class CliDispatcher
             try
             {
                 if (!await TryHandleAsync(args, services))
+                {
                     Console.Error.WriteLine($"Unknown command: {args[0]}. Type 'help' for usage.");
+                    DebugLog($"Response: Unknown command '{args[0]}'.");
+                }
             }
             catch (Exception ex)
             {
                 Console.Error.WriteLine($"Error: {ex.Message}");
+                DebugLog($"Error: {ex}");
             }
 
             Console.WriteLine();
@@ -164,6 +178,8 @@ public static class CliDispatcher
             "conversation" or "conv" => await HandleConversationCommand(args, sp),
             "chat" => await HandleChatCommand(args, sp),
             "job" => await HandleJobCommand(args, sp),
+            "role" => await HandleRoleCommand(args, sp),
+            "audiodevice" or "ad" => await HandleAudioDeviceCommand(args, sp),
             "help" or "--help" or "-h" => PrintHelp(),
             _ => null
         };
@@ -281,8 +297,12 @@ public static class CliDispatcher
             "login" => UsageResult("provider login <id>"),
 
             "sync" when args.Length >= 3
-                => await ProviderHandlers.SyncModels(CliIdMap.Resolve(args[2]), svc),
+                => await HandleProviderSync(CliIdMap.Resolve(args[2]), svc),
             "sync" => UsageResult("provider sync <id>"),
+
+            "refresh-caps" when args.Length >= 3
+                => await HandleRefreshCaps(CliIdMap.Resolve(args[2]), svc),
+            "refresh-caps" => UsageResult("provider refresh-caps <id>"),
 
             _ => UsageResult($"Unknown sub-command: provider {sub}. Try 'help' for usage.")
         };
@@ -293,10 +313,12 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "model add <name> <providerId>",
+                "model add <name> <providerId> [--cap <capabilities>]",
+                "  Capabilities (comma-separated): Chat, Transcription,",
+                "    ImageGeneration, Embedding, TextToSpeech",
                 "model get <id>",
                 "model list",
-                "model update <id> <name>",
+                "model update <id> <name> [--cap <capabilities>]",
                 "model delete <id>");
             return Results.Ok();
         }
@@ -308,8 +330,12 @@ public static class CliDispatcher
         {
             "add" when args.Length >= 4
                 => await ModelHandlers.Create(
-                    new CreateModelRequest(args[2], CliIdMap.Resolve(args[3])), svc),
-            "add" => UsageResult("model add <name> <providerId>"),
+                    new CreateModelRequest(
+                        args[2],
+                        CliIdMap.Resolve(args[3]),
+                        ParseCapabilities(args, 4)),
+                    svc),
+            "add" => UsageResult("model add <name> <providerId> [--cap Chat,Transcription]"),
 
             "get" when args.Length >= 3
                 => await ModelHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
@@ -319,8 +345,12 @@ public static class CliDispatcher
 
             "update" when args.Length >= 4
                 => await ModelHandlers.Update(
-                    CliIdMap.Resolve(args[2]), new UpdateModelRequest(args[3]), svc),
-            "update" => UsageResult("model update <id> <name>"),
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateModelRequest(
+                        args[3],
+                        ParseCapabilitiesNullable(args, 4)),
+                    svc),
+            "update" => UsageResult("model update <id> <name> [--cap Chat,Transcription]"),
 
             "delete" when args.Length >= 3
                 => await ModelHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
@@ -328,6 +358,24 @@ public static class CliDispatcher
 
             _ => UsageResult($"Unknown sub-command: model {sub}. Try 'help' for usage.")
         };
+    }
+
+    private static ModelCapability ParseCapabilities(string[] args, int startIndex)
+    {
+        return ParseCapabilitiesNullable(args, startIndex) ?? ModelCapability.Chat;
+    }
+
+    private static ModelCapability? ParseCapabilitiesNullable(string[] args, int startIndex)
+    {
+        for (var i = startIndex; i < args.Length - 1; i++)
+        {
+            if (args[i] is "--cap" or "-c")
+            {
+                if (Enum.TryParse<ModelCapability>(args[i + 1], true, out var cap))
+                    return cap;
+            }
+        }
+        return null;
     }
 
     private static async Task<IResult?> HandleAgentCommand(string[] args, IServiceProvider sp)
@@ -339,6 +387,8 @@ public static class CliDispatcher
                 "agent get <id>",
                 "agent list",
                 "agent update <id> <name> [modelId] [system prompt]",
+                "agent role <id> <roleId>                  Assign a role (use 'role list')",
+                "agent role <id> none                      Remove role",
                 "agent delete <id>");
             return Results.Ok();
         }
@@ -371,12 +421,33 @@ public static class CliDispatcher
                     svc),
             "update" => UsageResult("agent update <id> <name> [modelId] [system prompt]"),
 
+            "role" when args.Length >= 4 && args[3].Equals("none", StringComparison.OrdinalIgnoreCase)
+                => await HandleAgentRoleAssign(CliIdMap.Resolve(args[2]), Guid.Empty, svc),
+            "role" when args.Length >= 4
+                => await HandleAgentRoleAssign(CliIdMap.Resolve(args[2]), CliIdMap.Resolve(args[3]), svc),
+            "role" => UsageResult("agent role <agentId> <roleId>  (use 'role list' to find IDs)"),
+
             "delete" when args.Length >= 3
                 => await AgentHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
             "delete" => UsageResult("agent delete <id>"),
 
             _ => UsageResult($"Unknown sub-command: agent {sub}. Try 'help' for usage.")
         };
+    }
+
+    private static async Task<IResult> HandleAgentRoleAssign(
+        Guid agentId, Guid roleId, AgentService svc)
+    {
+        try
+        {
+            var result = await svc.AssignRoleAsync(agentId, roleId, _currentUserId);
+            return result is not null ? Results.Ok(result) : Results.NotFound();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return Results.Unauthorized();
+        }
     }
 
     private static async Task<IResult?> HandleContextCommand(string[] args, IServiceProvider sp)
@@ -388,8 +459,6 @@ public static class CliDispatcher
                 "context list [agentId]                     List contexts",
                 "context get <id>                           Show context details",
                 "context update <id> <name>                 Rename a context",
-                "context grant <id> <actionType> <clearance>",
-                "                                           Set a default permission",
                 "context delete <id>                        Delete a context");
             return Results.Ok();
         }
@@ -421,20 +490,6 @@ public static class CliDispatcher
                     new UpdateContextRequest(string.Join(' ', args[3..])),
                     svc),
             "update" => UsageResult("context update <id> <name>"),
-
-            "grant" when args.Length >= 5
-                && Enum.TryParse<AgentActionType>(args[3], true, out var actionType)
-                && Enum.TryParse<PermissionClearance>(args[4], true, out var clearance)
-                => await ContextHandlers.Grant(
-                    CliIdMap.Resolve(args[2]),
-                    new PermissionGrantRequest(actionType, clearance),
-                    svc),
-            "grant" when args.Length < 5
-                => UsageResult("context grant <id> <actionType> <clearance>"),
-            "grant"
-                => UsageResult(
-                    $"Valid action types: {string.Join(", ", Enum.GetNames<AgentActionType>())}",
-                    $"Valid clearances: {string.Join(", ", Enum.GetNames<PermissionClearance>())}"),
 
             "delete" when args.Length >= 3
                 => await ContextHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
@@ -488,8 +543,6 @@ public static class CliDispatcher
                 "conversation model <id> <modelId>          Change conversation model",
                 "conversation attach <id> <contextId>       Attach to a context",
                 "conversation detach <id>                   Detach from context",
-                "conversation grant <id> <actionType> <clearance>",
-                "                                           Override permission for this conversation",
                 "conversation delete <id>                   Delete a conversation");
             return Results.Ok();
         }
@@ -533,20 +586,6 @@ public static class CliDispatcher
                     new UpdateConversationRequest(ContextId: Guid.Empty),
                     svc),
             "detach" => UsageResult("conversation detach <conversationId>"),
-
-            "grant" when args.Length >= 5
-                && Enum.TryParse<AgentActionType>(args[3], true, out var actionType)
-                && Enum.TryParse<PermissionClearance>(args[4], true, out var clearance)
-                => await ConversationHandlers.Grant(
-                    CliIdMap.Resolve(args[2]),
-                    new ConversationPermissionGrantRequest(actionType, clearance),
-                    svc),
-            "grant" when args.Length < 5
-                => UsageResult("conversation grant <id> <actionType> <clearance>"),
-            "grant"
-                => UsageResult(
-                    $"Valid action types: {string.Join(", ", Enum.GetNames<AgentActionType>())}",
-                    $"Valid clearances: {string.Join(", ", Enum.GetNames<PermissionClearance>())}"),
 
             "delete" when args.Length >= 3
                 => await HandleConversationDelete(args, svc),
@@ -612,22 +651,53 @@ public static class CliDispatcher
         return result;
     }
 
+    private static async Task<IResult?> HandleRoleCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage("role list                                 List all roles");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+
+        if (sub == "list")
+        {
+            var db = sp.GetRequiredService<SharpClawDbContext>();
+            var roles = await db.Roles.OrderBy(r => r.Name).ToListAsync();
+            var result = roles.Select(r => new { r.Id, r.Name }).ToList();
+            PrintJsonWithShortIds(result);
+            return Results.Ok();
+        }
+
+        return UsageResult($"Unknown sub-command: role {sub}. Try 'role list'.");
+    }
+
     private static async Task<IResult?> HandleJobCommand(string[] args, IServiceProvider sp)
     {
         if (args.Length < 2)
         {
             PrintUsage(
-                "job submit <agentId> <actionType> [resourceId]",
+                "job submit [agentId] <actionType> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]",
+                "  Agent can be omitted when --conv is specified.",
                 "job list <agentId>",
                 "job status <jobId>",
                 "job approve <jobId>",
+                "job stop <jobId>                           Stop a transcription job (complete)",
                 "job cancel <jobId>",
+                "job listen <jobId>                         Stream live transcription segments",
                 "",
                 "Action types (global): ExecuteAsAdmin, CreateSubAgent, CreateContainer,",
                 "  RegisterInfoStore, EditAnyTask",
                 "Action types (resource): ExecuteAsSystemUser, AccessLocalInfoStore,",
                 "  AccessExternalInfoStore, AccessWebsite, QuerySearchEngine,",
-                "  AccessContainer, ManageAgent, EditTask, AccessSkill");
+                "  AccessContainer, ManageAgent, EditTask, AccessSkill",
+                "Transcription types: TranscribeFromAudioDevice,",
+                "  TranscribeFromAudioStream (API only), TranscribeFromAudioFile (API only)",
+                "",
+                "Transcription: submit with TranscribeFromAudioDevice and audio device",
+                "  as resourceId.",
+                "  Optional flags: --model <id>, --conv <id>, --lang <code>");
             return Results.Ok();
         }
 
@@ -636,16 +706,18 @@ public static class CliDispatcher
 
         return sub switch
         {
+            // job submit <agentId> <actionType> [resourceId] [flags...]
             "submit" when args.Length >= 4 && Enum.TryParse<AgentActionType>(args[3], true, out var at)
-                => await AgentJobHandlers.Submit(
-                    CliIdMap.Resolve(args[2]),
-                    new SubmitAgentJobRequest(
-                        at,
-                        args.Length >= 5 ? CliIdMap.Resolve(args[4]) : null,
-                        CallerUserId: _currentUserId),
-                    svc),
-            "submit" when args.Length < 4
-                => UsageResult("job submit <agentId> <actionType> [resourceId]"),
+                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), at, 4, svc),
+
+            // job submit <actionType> [resourceId] [flags...]  (agent inferred from --conv)
+            "submit" when args.Length >= 3 && Enum.TryParse<AgentActionType>(args[2], true, out var at2)
+                => await HandleJobSubmit(args, Guid.Empty, at2, 3, svc),
+
+            "submit" when args.Length < 3
+                => UsageResult(
+                    "job submit [agentId] <actionType> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]",
+                    "  Agent can be omitted when --conv is specified."),
             "submit"
                 => UsageResult($"Unknown action type. Valid types: {string.Join(", ", Enum.GetNames<AgentActionType>())}"),
 
@@ -664,12 +736,128 @@ public static class CliDispatcher
                     svc),
             "approve" => UsageResult("job approve <jobId>"),
 
+            "stop" when args.Length >= 3
+                => await AgentJobHandlers.Stop(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+            "stop" => UsageResult("job stop <jobId>"),
+
             "cancel" when args.Length >= 3
                 => await AgentJobHandlers.Cancel(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
             "cancel" => UsageResult("job cancel <jobId>"),
 
+            "listen" when args.Length >= 3
+                => await HandleJobListen(CliIdMap.Resolve(args[2]), svc),
+            "listen" => UsageResult("job listen <jobId>"),
+
             _ => UsageResult($"Unknown sub-command: job {sub}. Try 'help' for usage.")
         };
+    }
+
+    private static async Task<IResult> HandleJobSubmit(
+        string[] args, Guid agentId, AgentActionType actionType, int nextArg, AgentJobService svc)
+    {
+        // Resource ID is the next positional arg, unless it looks like a flag
+        Guid? resourceId = args.Length > nextArg && !args[nextArg].StartsWith("--")
+            ? CliIdMap.Resolve(args[nextArg])
+            : null;
+        var flagStart = resourceId is not null ? nextArg + 1 : nextArg;
+
+        Guid? modelId = null;
+        Guid? convId = null;
+        string? language = null;
+
+        for (var i = flagStart; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--model" or "-m" when i + 1 < args.Length:
+                    modelId = CliIdMap.Resolve(args[++i]);
+                    break;
+                case "--conv" or "-c" when i + 1 < args.Length:
+                    convId = CliIdMap.Resolve(args[++i]);
+                    break;
+                case "--lang" or "-l" when i + 1 < args.Length:
+                    language = args[++i];
+                    break;
+            }
+        }
+
+        return await AgentJobHandlers.Submit(
+            agentId,
+            new SubmitAgentJobRequest(
+                actionType,
+                resourceId,
+                CallerUserId: _currentUserId,
+                TranscriptionModelId: modelId,
+                ConversationId: convId,
+                Language: language),
+            svc);
+    }
+
+    private static async Task<IResult> HandleJobListen(Guid jobId, AgentJobService svc)
+    {
+        var reader = svc.Subscribe(jobId);
+        if (reader is null)
+        {
+            var job = await svc.GetAsync(jobId);
+            if (job is null)
+            {
+                Console.Error.WriteLine("Job not found.");
+            }
+            else if (job.ActionType is not AgentActionType.TranscribeFromAudioDevice
+                     and not AgentActionType.TranscribeFromAudioStream
+                     and not AgentActionType.TranscribeFromAudioFile)
+            {
+                Console.Error.WriteLine("Only transcription jobs support live listening.");
+            }
+            else if (job.Status is not AgentJobStatus.Executing)
+            {
+                Console.Error.WriteLine($"Job is {job.Status}. Only executing jobs can be listened to.");
+            }
+            else
+            {
+                Console.Error.WriteLine("No active transcription channel for this job.");
+                Console.Error.WriteLine("The job may have been started in a previous session. Cancel and resubmit it.");
+            }
+            return Results.Ok();
+        }
+
+        using var cts = new CancellationTokenSource();
+
+        Console.CancelKeyPress += OnCancelKey;
+
+        Console.WriteLine("Listening for transcription segments... (Ctrl+C to stop)");
+        Console.WriteLine();
+
+        try
+        {
+            await foreach (var segment in reader.ReadAllAsync(cts.Token))
+            {
+                var confidence = segment.Confidence.HasValue
+                    ? $" [{segment.Confidence:P0}]"
+                    : "";
+                Console.WriteLine($"  [{segment.StartTime:F1}s - {segment.EndTime:F1}s]{confidence} {segment.Text}");
+            }
+
+            Console.WriteLine();
+            Console.WriteLine("Transcription ended.");
+        }
+        catch (OperationCanceledException)
+        {
+            Console.WriteLine();
+            Console.WriteLine("Stopped listening.");
+        }
+        finally
+        {
+            Console.CancelKeyPress -= OnCancelKey;
+        }
+
+        return Results.Ok();
+
+        void OnCancelKey(object? sender, ConsoleCancelEventArgs e)
+        {
+            e.Cancel = true;
+            cts.Cancel();
+        }
     }
 
     private static void PrintUsage(params string[] lines)
@@ -701,18 +889,24 @@ public static class CliDispatcher
         switch (result)
         {
             case IValueHttpResult { Value: not null } valueResult:
-                PrintJsonWithShortIds(valueResult.Value);
+                var json = SerializeWithShortIds(valueResult.Value);
+                Console.WriteLine(json);
+                DebugLog($"Response: {json}");
                 break;
             case IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK }:
+                DebugLog("Response: 200 OK (no body).");
                 break;
             case IStatusCodeHttpResult { StatusCode: StatusCodes.Status401Unauthorized }:
                 Console.Error.WriteLine("Unauthorized.");
+                DebugLog("Response: 401 Unauthorized.");
                 break;
             case IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound }:
                 Console.Error.WriteLine("Not found.");
+                DebugLog("Response: 404 Not Found.");
                 break;
             case IStatusCodeHttpResult { StatusCode: StatusCodes.Status204NoContent }:
                 Console.WriteLine("Done.");
+                DebugLog("Response: 204 No Content.");
                 break;
             default:
             {
@@ -721,10 +915,23 @@ public static class CliDispatcher
                 await result.ExecuteAsync(httpContext);
                 stream.Position = 0;
                 using var reader = new StreamReader(stream);
-                Console.WriteLine(await reader.ReadToEndAsync());
+                var body = await reader.ReadToEndAsync();
+                Console.WriteLine(body);
+                DebugLog($"Response ({httpContext.Response.StatusCode}): {body}");
                 break;
             }
         }
+    }
+
+    /// <summary>
+    /// Serializes a value to JSON with short-ID injection, returning the string.
+    /// </summary>
+    private static string SerializeWithShortIds(object value)
+    {
+        var doc = JsonSerializer.SerializeToNode(value, JsonPrint);
+        if (doc is null) return "null";
+        InjectShortIds(doc);
+        return doc.ToJsonString(JsonPrint);
     }
 
     /// <summary>
@@ -795,6 +1002,102 @@ public static class CliDispatcher
         return Results.Ok();
     }
 
+    private static async Task<IResult> HandleProviderSync(Guid providerId, ProviderService svc)
+    {
+        var result = await ProviderHandlers.SyncModels(providerId, svc);
+        var refreshed = await svc.RefreshCapabilitiesAsync(providerId);
+        if (refreshed > 0)
+            Console.WriteLine($"(Updated capabilities for {refreshed} model(s))");
+        return result;
+    }
+
+    private static async Task<IResult> HandleRefreshCaps(Guid providerId, ProviderService svc)
+    {
+        var updated = await svc.RefreshCapabilitiesAsync(providerId);
+        Console.WriteLine(updated > 0
+            ? $"Updated capabilities for {updated} model(s)."
+            : "All model capabilities are already up to date.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult?> HandleAudioDeviceCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "audiodevice add <name> <deviceIdentifier> [description]",
+                "  Use 'audiodevice devices' to find identifiers.",
+                "  Use 'default' as identifier for system default input.",
+                "audiodevice get <id>",
+                "audiodevice list",
+                "audiodevice update <id> [name] [deviceIdentifier]",
+                "audiodevice delete <id>",
+                "audiodevice devices                       List system audio inputs");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<TranscriptionService>();
+
+        return sub switch
+        {
+            "add" when args.Length >= 4
+                => await AudioDeviceHandlers.Create(
+                    new CreateAudioDeviceRequest(
+                        args[2],
+                        args[3],
+                        args.Length >= 5 ? string.Join(' ', args[4..]) : null),
+                    svc),
+            "add" => UsageResult("audiodevice add <name> <deviceIdentifier> [description]",
+                "  Use 'audiodevice devices' to find identifiers.",
+                "  Use 'default' as identifier for system default input."),
+
+            "get" when args.Length >= 3
+                => await AudioDeviceHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
+            "get" => UsageResult("audiodevice get <id>"),
+
+            "list" => await AudioDeviceHandlers.List(svc),
+
+            "update" when args.Length >= 4
+                => await AudioDeviceHandlers.Update(
+                    CliIdMap.Resolve(args[2]),
+                    new UpdateAudioDeviceRequest(
+                        args.Length >= 4 ? args[3] : null,
+                        args.Length >= 5 ? args[4] : null),
+                    svc),
+            "update" => UsageResult("audiodevice update <id> [name] [deviceIdentifier]"),
+
+            "delete" when args.Length >= 3
+                => await AudioDeviceHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
+            "delete" => UsageResult("audiodevice delete <id>"),
+
+            "devices" => ListSystemAudioDevices(sp),
+
+            _ => UsageResult($"Unknown sub-command: audiodevice {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static IResult ListSystemAudioDevices(IServiceProvider sp)
+    {
+        var capture = sp.GetRequiredService<IAudioCaptureProvider>();
+        var devices = capture.ListDevices();
+
+        if (devices.Count == 0)
+        {
+            Console.WriteLine("No audio input devices found.");
+            return Results.Ok();
+        }
+
+        Console.WriteLine("System audio input devices:");
+        foreach (var (id, name) in devices)
+            Console.WriteLine($"  {name}  →  {id}");
+
+        Console.WriteLine();
+        Console.WriteLine("Use the identifier with 'audiodevice add <name> <identifier>'.");
+        Console.WriteLine("Use 'default' to select the system default input device.");
+        return Results.Ok();
+    }
+
     private static IResult PrintHelp()
     {
         Console.WriteLine("""
@@ -819,11 +1122,14 @@ public static class CliDispatcher
               provider set-key <id> <apiKey>              Set API key for a provider
               provider login <id>                         Authenticate via device code flow
               provider sync <id>                          Sync models from provider API
+              provider refresh-caps <id>                  Re-infer model capabilities
 
-              model add <name> <providerId>               Add a model
+              model add <name> <providerId> [--cap <caps>]  Add a model
+                Capabilities (comma-separated): Chat, Transcription,
+                  ImageGeneration, Embedding, TextToSpeech
               model get <id>                              Show a model
               model list                                  List models
-              model update <id> <name>                    Update a model
+              model update <id> <name> [--cap <caps>]     Update a model
               model delete <id>                           Delete a model
 
               agent add <name> <modelId> [system prompt]  Create an agent
@@ -831,13 +1137,14 @@ public static class CliDispatcher
               agent list                                  List agents
               agent update <id> <name> [modelId] [prompt]
                                                           Update an agent
+              agent role <id> <roleId>                    Assign a role to an agent
+              agent role <id> none                        Remove agent role
               agent delete <id>                           Delete an agent
 
               context new <agentId> [name]                Create a context
               context list [agentId]                      List contexts
               context get <id>                            Show context details
               context update <id> <name>                  Rename a context
-              context grant <id> <type> <clearance>       Set a default permission
               context delete <id>                         Delete a context
 
               conversation new <agentId> [--context <id>] [title]
@@ -848,21 +1155,43 @@ public static class CliDispatcher
               conversation model <id> <modelId>           Change conversation model
               conversation attach <id> <contextId>        Attach to a context
               conversation detach <id>                    Detach from context
-              conversation grant <id> <type> <clearance>  Override a permission
               conversation delete <id>                    Delete a conversation
 
               chat <message>                              Chat in active conversation
 
-              job submit <agentId> <type> [resourceId]     Submit an agent action job
+              role list                                    List all roles
+
+              job submit [agentId] <type> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]
+                                                          Submit an agent action job
+                Agent can be omitted when --conv is specified.
                 Global types: ExecuteAsAdmin, CreateSubAgent,
                   CreateContainer, RegisterInfoStore, EditAnyTask
                 Resource types: ExecuteAsSystemUser, AccessLocalInfoStore,
                   AccessExternalInfoStore, AccessWebsite, QuerySearchEngine,
                   AccessContainer, ManageAgent, EditTask, AccessSkill
+                Transcription types: TranscribeFromAudioDevice,
+                  TranscribeFromAudioStream (API only),
+                  TranscribeFromAudioFile (API only)
               job list <agentId>                           List jobs for an agent
               job status <jobId>                           Check job status & logs
               job approve <jobId>                          Approve a pending job
+              job stop <jobId>                             Stop a transcription job
               job cancel <jobId>                           Cancel a job
+              job listen <jobId>                           Stream live transcription
+
+              audiodevice add <name> <deviceId> [desc]    Register an audio device
+              audiodevice get <id>                        Show an audio device
+              audiodevice list                            List audio devices
+              audiodevice update <id> [name] [deviceId]   Update an audio device
+              audiodevice delete <id>                     Delete an audio device
+              audiodevice devices                         List system audio inputs
+              (alias: ad)
+
+              Transcription: use TranscribeFromAudioDevice with audio device
+                as resourceId.
+                job submit TranscribeFromAudioDevice [deviceId] --conv <id> [--model <id>] [--lang <code>]
+                job listen <jobId>
+                job stop <jobId>
 
               exit / quit                                 Shut down
             """);

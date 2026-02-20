@@ -1,3 +1,4 @@
+using SharpClaw.PublicAPI.Controllers;
 using SharpClaw.PublicAPI.Infrastructure;
 using SharpClaw.PublicAPI.Security;
 
@@ -47,8 +48,12 @@ app.UseMiddleware<AntiSpamMiddleware>();
 // 3. Rate limiting
 app.UseRateLimiter();
 
+// 4. WebSocket support for transcription streaming
+app.UseWebSockets();
+
 app.UseAuthorization();
 
 app.MapControllers();
+app.MapTranscriptionStreamingProxy();
 
 app.Run();

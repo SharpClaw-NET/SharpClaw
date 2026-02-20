@@ -96,24 +96,4 @@ public class ConversationsController(InternalApiClient api) : ControllerBase
             return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
         }
     }
-
-    [HttpPost("{id:guid}/grant")]
-    public async Task<IActionResult> Grant(
-        Guid id, ConversationPermissionGrantRequest request, CancellationToken ct)
-    {
-        try
-        {
-            var result = await api.PostAsync<ConversationPermissionGrantRequest, ConversationResponse>(
-                $"/conversations/{id}/grant", request, ct);
-            return result is not null ? Ok(result) : NotFound();
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return NotFound(new { error = "Conversation not found." });
-        }
-        catch (HttpRequestException)
-        {
-            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
-        }
-    }
 }

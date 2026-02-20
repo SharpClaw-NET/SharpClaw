@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Application.Infrastructure.Models.Jobs;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;

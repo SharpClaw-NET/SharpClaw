@@ -96,24 +96,4 @@ public class ContextsController(InternalApiClient api) : ControllerBase
             return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
         }
     }
-
-    [HttpPost("{id:guid}/grant")]
-    public async Task<IActionResult> Grant(
-        Guid id, PermissionGrantRequest request, CancellationToken ct)
-    {
-        try
-        {
-            var result = await api.PostAsync<PermissionGrantRequest, ContextResponse>(
-                $"/contexts/{id}/grant", request, ct);
-            return result is not null ? Ok(result) : NotFound();
-        }
-        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
-        {
-            return NotFound(new { error = "Context not found." });
-        }
-        catch (HttpRequestException)
-        {
-            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
-        }
-    }
 }

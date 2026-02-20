@@ -21,5 +21,10 @@ public enum AgentActionType
     AccessContainer,
     ManageAgent,
     EditTask,
-    AccessSkill
+    AccessSkill,
+
+    // ── Transcription actions (per-resource: audio device) ────────
+    TranscribeFromAudioDevice,
+    TranscribeFromAudioStream,
+    TranscribeFromAudioFile
 }

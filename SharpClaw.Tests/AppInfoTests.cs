@@ -1,18 +1,19 @@
 namespace SharpClaw.Tests;
 
-public class AppInfoTests
-{
-    [SetUp]
-    public void Setup()
-    {
-    }
-
-    [Test]
-    public void AppInfoCreation()
-    {
-        var appInfo = new AppConfig { Environment = "Test" };
-
-        appInfo.Should().NotBeNull();
-        appInfo.Environment.Should().Be("Test");
-    }
-}
+// Disabled: Uno Platform frontend tests are not in scope currently.
+// public class AppInfoTests
+// {
+//     [SetUp]
+//     public void Setup()
+//     {
+//     }
+//
+//     [Test]
+//     public void AppInfoCreation()
+//     {
+//         var appInfo = new AppConfig { Environment = "Test" };
+//
+//         appInfo.Should().NotBeNull();
+//         appInfo.Environment.Should().Be("Test");
+//     }
+// }

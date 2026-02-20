@@ -1,3 +1,4 @@
+using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Contracts.DTOs.AgentActions;
@@ -5,10 +6,14 @@ namespace SharpClaw.Contracts.DTOs.AgentActions;
 // ── Requests ──────────────────────────────────────────────────────
 
 public sealed record SubmitAgentJobRequest(
-    AgentActionType ActionType,
-    Guid? ResourceId = null,
-    Guid? CallerUserId = null,
-    Guid? CallerAgentId = null);
+AgentActionType ActionType,
+Guid? ResourceId = null,
+Guid? CallerUserId = null,
+Guid? CallerAgentId = null,
+// Transcription-specific
+Guid? TranscriptionModelId = null,
+Guid? ConversationId = null,
+string? Language = null);
 
 public sealed record ApproveAgentJobRequest(
     Guid? ApproverUserId = null,
@@ -28,7 +33,12 @@ public sealed record AgentJobResponse(
     IReadOnlyList<AgentJobLogResponse> Logs,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    // Transcription
+    Guid? TranscriptionModelId = null,
+    Guid? ConversationId = null,
+    string? Language = null,
+    IReadOnlyList<TranscriptionSegmentResponse>? Segments = null);
 
 public sealed record AgentJobLogResponse(
     string Message,
