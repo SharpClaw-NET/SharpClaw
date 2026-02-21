@@ -52,6 +52,7 @@ try
     builder.Services.AddSingleton(jwtOptions);
     builder.Services.AddScoped<TokenService>();
     builder.Services.AddScoped<AuthService>();
+    builder.Services.AddScoped<SessionService>();
 
     // Domain services
     var encryptionKeyBase64 = builder.Configuration["Encryption:Key"]
@@ -120,6 +121,7 @@ try
     // API mode
     app.UseSerilogRequestLogging();
     app.UseMiddleware<ApiKeyMiddleware>();
+    app.UseMiddleware<JwtSessionMiddleware>();
     app.UseWebSockets();
     app.MapHandlers();
     app.MapTranscriptionStreaming();

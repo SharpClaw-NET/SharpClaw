@@ -20,9 +20,10 @@ namespace SharpClaw.Application.Services;
 /// (orchestrator, channels, segments).
 /// </summary>
 public sealed class AgentJobService(
-    SharpClawDbContext db,
-    AgentActionService actions,
-    LiveTranscriptionOrchestrator orchestrator)
+SharpClawDbContext db,
+AgentActionService actions,
+LiveTranscriptionOrchestrator orchestrator,
+SessionService session)
 {
     /// <summary>
     /// Per-job broadcast channels for live transcription streaming.
@@ -76,7 +77,7 @@ public sealed class AgentJobService(
         var job = new AgentJobDB
         {
             AgentId = agentId,
-            CallerUserId = request.CallerUserId,
+            CallerUserId = session.UserId,
             CallerAgentId = request.CallerAgentId,
             ActionType = request.ActionType,
             ResourceId = effectiveResourceId,
@@ -92,7 +93,7 @@ public sealed class AgentJobService(
         AddLog(job, $"Job queued: {request.ActionType}.");
         await db.SaveChangesAsync(ct);
 
-        var caller = new ActionCaller(request.CallerUserId, request.CallerAgentId);
+        var caller = new ActionCaller(session.UserId, request.CallerAgentId);
         var result = await DispatchPermissionCheckAsync(
             agentId, job.ActionType, job.ResourceId, caller, ct);
 
@@ -107,13 +108,15 @@ public sealed class AgentJobService(
 
             case ClearanceVerdict.PendingApproval:
                 // Conversation pre-auth counts as ApprovedByWhitelistedUser-
-                // level authority.  If the agent's clearance requirement is
-                // ≤ that level AND the channel/context PS has a matching
-                // grant, the user has already pre-authorised the action.
+                // level authority for levels 2 and 4.  For level 1
+                // (ApprovedBySameLevelUser), the session user must also
+                // personally hold the same permission via their own role.
+                // Level 3 (agent-only) is never pre-authorised.
                 if (request.ConversationId.HasValue
                     && await HasConversationAuthorizationAsync(
                         request.ConversationId.Value, job.ActionType,
-                        job.ResourceId, result.EffectiveClearance, ct))
+                        job.ResourceId, result.EffectiveClearance,
+                        session.UserId, ct))
                 {
                     AddLog(job, "Pre-authorized by conversation/context permission set.");
                     await ExecuteJobAsync(job, ct);
@@ -155,14 +158,14 @@ public sealed class AgentJobService(
             return ToResponse(job);
         }
 
-        var approver = new ActionCaller(request.ApproverUserId, request.ApproverAgentId);
+        var approver = new ActionCaller(session.UserId, request.ApproverAgentId);
         var result = await DispatchPermissionCheckAsync(
             job.AgentId, job.ActionType, job.ResourceId, approver, ct);
 
         switch (result.Verdict)
         {
             case ClearanceVerdict.Approved:
-                job.ApprovedByUserId = request.ApproverUserId;
+                job.ApprovedByUserId = session.UserId;
                 job.ApprovedByAgentId = request.ApproverAgentId;
                 AddLog(job, $"Approved by {FormatCaller(approver)}: {result.Reason}");
                 await ExecuteJobAsync(job, ct);
@@ -609,10 +612,19 @@ public sealed class AgentJobService(
     /// treated as a whitelisted user granting approval in advance.
     /// </para>
     /// <para>
-    /// <see cref="PermissionClearance.ApprovedByWhitelistedUser"/> is
-    /// accepted at clearance levels 2 and 4 (which includes whitelisted
-    /// user in its fallback chain).  It is <b>not</b> accepted at
-    /// level 1 (same-level user only) or level 3 (agent-only).
+    /// <b>Level 1 (<see cref="PermissionClearance.ApprovedBySameLevelUser"/>):</b>
+    /// the conversation PS must contain the grant <b>and</b> the session
+    /// user (<paramref name="callerUserId"/>) must personally hold the
+    /// same permission (with any non-<see cref="PermissionClearance.Unset"/>
+    /// clearance) via their own role.
+    /// </para>
+    /// <para>
+    /// <b>Levels 2 and 4:</b> the conversation/context PS grant alone
+    /// is sufficient — no additional user check is needed.
+    /// </para>
+    /// <para>
+    /// <b>Level 3 (<see cref="PermissionClearance.ApprovedByPermittedAgent"/>):</b>
+    /// agent-only — conversation pre-auth is never accepted.
     /// </para>
     /// </summary>
     private async Task<bool> HasConversationAuthorizationAsync(
@@ -620,18 +632,33 @@ public sealed class AgentJobService(
         AgentActionType actionType,
         Guid? resourceId,
         PermissionClearance agentClearance,
+        Guid? callerUserId,
         CancellationToken ct)
     {
-        // Conversation pre-auth = WhitelistedUser authority.
-        // Only accepted at levels where WhitelistedUser can approve:
-        //   Level 2 (ApprovedByWhitelistedUser) — direct match
-        //   Level 4 (ApprovedByWhitelistedAgent) — fallback chain
-        // NOT accepted at:
-        //   Level 1 (ApprovedBySameLevelUser) — same-level user only
-        //   Level 3 (ApprovedByPermittedAgent) — agent-only
-        if (agentClearance is not (PermissionClearance.ApprovedByWhitelistedUser
+        // Level 3 is agent-only — no user/conversation pre-auth applies.
+        if (agentClearance is not (PermissionClearance.ApprovedBySameLevelUser
+                                or PermissionClearance.ApprovedByWhitelistedUser
                                 or PermissionClearance.ApprovedByWhitelistedAgent))
             return false;
+
+        // Level 1: the session user must personally hold the permission.
+        // Verify via the user's own role PS before checking the conversation PS.
+        if (agentClearance == PermissionClearance.ApprovedBySameLevelUser)
+        {
+            if (callerUserId is null)
+                return false;
+
+            var user = await db.Users
+                .Include(u => u.Role)
+                .FirstOrDefaultAsync(u => u.Id == callerUserId, ct);
+
+            if (user?.Role?.PermissionSetId is not { } userPsId)
+                return false;
+
+            var userPs = await actions.LoadPermissionSetAsync(userPsId, ct);
+            if (userPs is null || !HasMatchingGrant(userPs, actionType, resourceId))
+                return false;
+        }
 
         var conv = await db.Conversations
             .Include(c => c.AgentContext)

@@ -165,6 +165,10 @@ public static class CliDispatcher
         using var scope = services.CreateScope();
         var sp = scope.ServiceProvider;
 
+        // Populate the scoped session with the CLI user identity.
+        var session = sp.GetRequiredService<SessionService>();
+        session.UserId = _currentUserId;
+
         var command = args[0].ToLowerInvariant();
 
         IResult? result = command switch
@@ -733,7 +737,7 @@ public static class CliDispatcher
             "approve" when args.Length >= 3
                 => await AgentJobHandlers.Approve(
                     Guid.Empty, CliIdMap.Resolve(args[2]),
-                    new ApproveAgentJobRequest(ApproverUserId: _currentUserId),
+                    new ApproveAgentJobRequest(),
                     svc),
             "approve" => UsageResult("job approve <jobId>"),
 
@@ -787,7 +791,6 @@ public static class CliDispatcher
             new SubmitAgentJobRequest(
                 actionType,
                 resourceId,
-                CallerUserId: _currentUserId,
                 TranscriptionModelId: modelId,
                 ConversationId: convId,
                 Language: language),
