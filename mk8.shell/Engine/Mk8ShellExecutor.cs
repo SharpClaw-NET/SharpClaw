@@ -334,7 +334,18 @@ public sealed class Mk8ShellExecutor
             Mk8ShellVerb.TextSort         => TextSort(cmd.Arguments),
             Mk8ShellVerb.TextUniq         => TextUniqLines(cmd.Arguments[0]),
             Mk8ShellVerb.TextCount        => TextCount(cmd.Arguments),
+            Mk8ShellVerb.TextIndexOf      => cmd.Arguments[0].IndexOf(cmd.Arguments[1], StringComparison.Ordinal).ToString(),
+            Mk8ShellVerb.TextLastIndexOf  => cmd.Arguments[0].LastIndexOf(cmd.Arguments[1], StringComparison.Ordinal).ToString(),
+            Mk8ShellVerb.TextRemove       => cmd.Arguments[0].Replace(cmd.Arguments[1], "", StringComparison.Ordinal),
+            Mk8ShellVerb.TextWordCount    => cmd.Arguments[0].Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries).Length.ToString(),
+            Mk8ShellVerb.TextReverse      => new string(cmd.Arguments[0].Reverse().ToArray()),
+            Mk8ShellVerb.TextPadLeft      => TextPadLeft(cmd.Arguments),
+            Mk8ShellVerb.TextPadRight     => TextPadRight(cmd.Arguments),
+            Mk8ShellVerb.TextRepeat       => TextRepeat(cmd.Arguments),
             Mk8ShellVerb.JsonMerge        => JsonMergeObjects(cmd.Arguments[0], cmd.Arguments[1]),
+            Mk8ShellVerb.JsonKeys         => JsonKeys(cmd.Arguments[0]),
+            Mk8ShellVerb.JsonCount        => JsonCount(cmd.Arguments[0]),
+            Mk8ShellVerb.JsonType         => JsonTypeOf(cmd.Arguments[0]),
 
             // ── File inspection (read-only) ───────────────────────
             Mk8ShellVerb.FileLineCount    => FileLineCount(cmd.Arguments[0]),
@@ -346,6 +357,11 @@ public sealed class Mk8ShellExecutor
 
             // ── Directory inspection ──────────────────────────────
             Mk8ShellVerb.DirFileCount     => DirFileCount(cmd.Arguments),
+            Mk8ShellVerb.DirEmpty         => DirEmpty(cmd.Arguments[0]),
+
+            // ── File type detection ──────────────────────────────
+            Mk8ShellVerb.FileMimeType     => await FileMimeTypeAsync(cmd.Arguments[0], ct),
+            Mk8ShellVerb.FileEncoding     => await FileEncodingAsync(cmd.Arguments[0], ct),
 
             // ── Environment ───────────────────────────────────────
             Mk8ShellVerb.EnvGet => EnvGet(cmd.Arguments[0]),
@@ -1348,6 +1364,161 @@ public sealed class Mk8ShellExecutor
         return $"Lines: {lines.Length}\nWords: {words.Length}\nChars: {input.Length}";
     }
 
+    private static string TextPadLeft(string[] args)
+    {
+        var input = args[0];
+        var width = int.Parse(args[1]);
+        var padChar = args.Length > 2 ? args[2][0] : ' ';
+        return input.PadLeft(width, padChar);
+    }
+
+    private static string TextPadRight(string[] args)
+    {
+        var input = args[0];
+        var width = int.Parse(args[1]);
+        var padChar = args.Length > 2 ? args[2][0] : ' ';
+        return input.PadRight(width, padChar);
+    }
+
+    private static string TextRepeat(string[] args)
+    {
+        var input = args[0];
+        var count = int.Parse(args[1]);
+        return string.Concat(Enumerable.Repeat(input, count));
+    }
+
+    private static string JsonKeys(string input)
+    {
+        var node = JsonNode.Parse(input) as JsonObject
+            ?? throw new InvalidOperationException("Input is not a JSON object.");
+        return string.Join(Environment.NewLine, node.Select(kv => kv.Key));
+    }
+
+    private static string JsonCount(string input)
+    {
+        var node = JsonNode.Parse(input) as JsonArray
+            ?? throw new InvalidOperationException("Input is not a JSON array.");
+        return node.Count.ToString();
+    }
+
+    private static string JsonTypeOf(string input)
+    {
+        var node = JsonNode.Parse(input);
+        return node switch
+        {
+            JsonObject => "object",
+            JsonArray => "array",
+            JsonValue val => val.GetValueKind() switch
+            {
+                JsonValueKind.String => "string",
+                JsonValueKind.Number => "number",
+                JsonValueKind.True or JsonValueKind.False => "boolean",
+                JsonValueKind.Null => "null",
+                _ => "unknown"
+            },
+            null => "null",
+            _ => "unknown"
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // File type detection helpers (read-only, in-memory)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>Magic-byte signatures for common file types.</summary>
+    private static readonly (byte[] Signature, int Offset, string MimeType)[] MagicBytes =
+    [
+        ([0x89, 0x50, 0x4E, 0x47, 0x0D, 0x0A, 0x1A, 0x0A], 0, "image/png"),
+        ([0xFF, 0xD8, 0xFF], 0, "image/jpeg"),
+        ([0x47, 0x49, 0x46, 0x38], 0, "image/gif"),
+        ([0x50, 0x4B, 0x03, 0x04], 0, "application/zip"),
+        ([0x50, 0x4B, 0x05, 0x06], 0, "application/zip"),
+        ([0x1F, 0x8B], 0, "application/gzip"),
+        ([0x25, 0x50, 0x44, 0x46], 0, "application/pdf"),
+        ([0x52, 0x49, 0x46, 0x46], 0, "image/webp"),  // RIFF header (WebP, WAV, AVI)
+        ([0x4F, 0x67, 0x67, 0x53], 0, "audio/ogg"),
+        ([0x66, 0x4C, 0x61, 0x43], 0, "audio/flac"),
+        ([0x42, 0x4D], 0, "image/bmp"),
+        ([0x49, 0x49, 0x2A, 0x00], 0, "image/tiff"),  // little-endian TIFF
+        ([0x4D, 0x4D, 0x00, 0x2A], 0, "image/tiff"),  // big-endian TIFF
+        ([0x7F, 0x45, 0x4C, 0x46], 0, "application/x-elf"),
+        ([0x4D, 0x5A], 0, "application/x-msdownload"),
+    ];
+
+    private static async Task<string> FileMimeTypeAsync(string path, CancellationToken ct)
+    {
+        var buffer = new byte[16];
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var bytesRead = await stream.ReadAsync(buffer.AsMemory(), ct);
+
+        foreach (var (sig, offset, mime) in MagicBytes)
+        {
+            if (bytesRead >= offset + sig.Length &&
+                buffer.AsSpan(offset, sig.Length).SequenceEqual(sig))
+                return mime;
+        }
+
+        // Check if it looks like text
+        for (var i = 0; i < bytesRead; i++)
+        {
+            var b = buffer[i];
+            if (b < 0x09 || (b > 0x0D && b < 0x20 && b != 0x1B))
+                return "application/octet-stream";
+        }
+
+        return "text/plain";
+    }
+
+    private static async Task<string> FileEncodingAsync(string path, CancellationToken ct)
+    {
+        var bom = new byte[4];
+        await using var stream = new FileStream(path, FileMode.Open, FileAccess.Read, FileShare.Read);
+        var bytesRead = await stream.ReadAsync(bom.AsMemory(), ct);
+
+        if (bytesRead >= 3 && bom[0] == 0xEF && bom[1] == 0xBB && bom[2] == 0xBF)
+            return "utf-8-bom";
+        if (bytesRead >= 2 && bom[0] == 0xFF && bom[1] == 0xFE)
+            return bytesRead >= 4 && bom[2] == 0x00 && bom[3] == 0x00
+                ? "utf-32-le" : "utf-16-le";
+        if (bytesRead >= 2 && bom[0] == 0xFE && bom[1] == 0xFF)
+            return "utf-16-be";
+        if (bytesRead >= 4 && bom[0] == 0x00 && bom[1] == 0x00 && bom[2] == 0xFE && bom[3] == 0xFF)
+            return "utf-32-be";
+
+        // Heuristic: read first 8KB and check for high bytes
+        stream.Position = 0;
+        var sample = new byte[Math.Min(8192, stream.Length)];
+        var sampleRead = await stream.ReadAsync(sample.AsMemory(), ct);
+
+        var hasHighBytes = false;
+        var validUtf8 = true;
+        var i = 0;
+        while (i < sampleRead)
+        {
+            var b = sample[i];
+            if (b < 0x80) { i++; continue; }
+            hasHighBytes = true;
+
+            // UTF-8 continuation byte check
+            int extra;
+            if ((b & 0xE0) == 0xC0) extra = 1;
+            else if ((b & 0xF0) == 0xE0) extra = 2;
+            else if ((b & 0xF8) == 0xF0) extra = 3;
+            else { validUtf8 = false; break; }
+
+            for (var j = 0; j < extra; j++)
+            {
+                if (i + 1 + j >= sampleRead || (sample[i + 1 + j] & 0xC0) != 0x80)
+                { validUtf8 = false; break; }
+            }
+            if (!validUtf8) break;
+            i += 1 + extra;
+        }
+
+        if (!hasHighBytes) return "ascii";
+        return validUtf8 ? "utf-8" : "unknown";
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // File inspection helpers (read-only)
     // ═══════════════════════════════════════════════════════════════
@@ -1450,6 +1621,9 @@ public sealed class Mk8ShellExecutor
         var pattern = args.Length > 1 ? args[1] : "*";
         return Directory.GetFiles(dir, pattern).Length.ToString();
     }
+
+    private static string DirEmpty(string path) =>
+        (!Directory.EnumerateFileSystemEntries(path).Any()).ToString();
 
     private static string FileGlob(string[] args)
     {

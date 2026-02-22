@@ -506,13 +506,19 @@ If no base names are configured, `dotnet new -n` is unavailable (but
 | `dotnet --info` | — | — |
 | `dotnet --list-sdks` | — | — |
 | `dotnet --list-runtimes` | — | — |
-| `dotnet tool list` | — | — |
-| `dotnet build` | `--configuration Release\|Debug`, `--no-restore`, `-o SandboxPath` | — |
+| `dotnet tool list` | `-g`, `--global` | — |
+| `dotnet sln list` | — | — |
+| `dotnet list reference` | — | — |
+| `dotnet list package` | `--outdated`, `--deprecated`, `--vulnerable`, `--include-transitive`, `--format json` | — |
+| `dotnet nuget list source` | `--format json\|Detailed\|Short` | — |
+| `dotnet workload list` | — | — |
+| `dotnet sdk check` | — | — |
+| `dotnet build` | `--configuration Release\|Debug`, `--no-restore`, `-o SandboxPath`, `--verbosity quiet\|minimal\|normal\|detailed\|diagnostic` | — |
 | `dotnet publish` | same as build | — |
-| `dotnet test` | `--configuration`, `--no-restore`, `--no-build` | — |
-| `dotnet clean` | `--configuration` | — |
-| `dotnet restore` | `--no-cache` | — |
-| `dotnet format` | `--verify-no-changes` | — |
+| `dotnet test` | `--configuration`, `--no-restore`, `--no-build`, `--verbosity` | — |
+| `dotnet clean` | `--configuration`, `--verbosity` | — |
+| `dotnet restore` | `--no-cache`, `--verbosity` | — |
+| `dotnet format` | `--verify-no-changes`, `--verbosity` | — |
 | `dotnet new <template> -n <name>` | `-n`/`--name` CompoundName (runtime base + suffix), `-o` SandboxPath | template from DotnetTemplates |
 | `dotnet ef migrations add <name>` | — | name from MigrationNames |
 | `dotnet ef migrations list` | — | — |
@@ -532,9 +538,10 @@ Read-only:
 | Template | Flags | Params |
 |---|---|---|
 | `git --version` | — | — |
-| `git status` | `--short`, `-s`, `--porcelain` | — |
-| `git log --oneline` | `-n 1-100`, `--all`, `--no-decorate` | — |
-| `git diff` | `--staged`, `--cached`, `--stat`, `--name-only`, `--name-status` | — |
+| `git status` | `--short`, `-s`, `--porcelain`, `--branch` | — |
+| `git log --oneline` | `-n 1-100`, `--all`, `--no-decorate`, `--graph`, `--reverse` | — |
+| `git log --oneline -- <path>` | `-n 1-100`, `--all`, `--no-decorate` | SandboxPath |
+| `git diff` | `--staged`, `--cached`, `--stat`, `--name-only`, `--name-status`, `--word-diff` | — |
 | `git diff <path>` | `--staged`, `--cached` | SandboxPath |
 | `git branch` | `--list`, `-a`, `--all`, `-r` | — |
 | `git remote` | `-v` | — |
@@ -542,9 +549,16 @@ Read-only:
 | `git remote remove <name>` | — | name from RemoteNames |
 | `git rev-parse HEAD` | — | — |
 | `git rev-parse --short HEAD` | — | — |
-| `git ls-files` | — | — |
+| `git ls-files` | `--modified`, `--deleted`, `--others`, `--ignored` | — |
 | `git tag --list` / `git tag -l` | — | — |
-| `git describe` | `--tags`, `--always` | — |
+| `git describe` | `--tags`, `--always`, `--long`, `--abbrev 1-40` | — |
+| `git stash show` | `--stat`, `--patch`, `-p` | — |
+| `git blame <path>` | `-L` from BlameLineRanges | SandboxPath |
+| `git clean -n` / `--dry-run` | `-d` | — |
+| `git count-objects` | `-v`, `-H` | — |
+| `git cherry` | `-v` | — |
+| `git shortlog -sn` | `--all`, `--no-merges` | — |
+| `git rev-list --count HEAD` | — | — |
 
 Write (constrained):
 
@@ -554,7 +568,8 @@ Write (constrained):
 | `git add .` | — | — |
 | `git add -A` | — | — |
 | `git commit` | `-m` ComposedWords from CommitWords | — |
-| `git stash` / `pop` / `list` / `drop` | — | — |
+| `git stash` / `pop` / `drop` | — | — |
+| `git stash list` | `--oneline` | — |
 | `git checkout <branch>` | — | AdminWord from BranchNames |
 | `git checkout -b <branch>` | — | AdminWord from BranchNames |
 | `git switch <branch>` | — | AdminWord from BranchNames |
@@ -565,6 +580,7 @@ Word lists:
 - **BranchNames**: `feature/*`, `bugfix/*`, `hotfix/*`, plus single letters/digits
 - **RemoteNames**: `origin`, `upstream`, `fork`, `backup`, `mirror`
 - **GitRemoteUrls**: runtime-configured via `Mk8RuntimeConfig.GitRemoteUrls` (max 16)
+- **BlameLineRanges**: pre-approved `-L` ranges (`1,10`, `1,20`, `1,50`, `1,100`, `1,200`, `1,500`, `1,1000`)
 
 **Protected branches — BANNED:** `main`, `master`, `develop`, `staging`,
 `production`, `live`, `release`, `release/*`, `trunk`.  These are
@@ -573,7 +589,7 @@ branches used for live or master development.  Merging to protected
 branches requires `DangerousShellType.Git` with human approval.
 
 Not whitelisted (require dangerous-shell path): `push`, `pull`, `merge`,
-`rebase`, `reset`, `clean`, `clone`, `config`, `submodule`, `am`, `apply`,
+`rebase`, `reset`, `clean -f`, `clone`, `config`, `submodule`, `am`, `apply`,
 `filter-branch`, `cherry-pick`, `bisect`, `gc`, `fsck`, `reflog`.
 
 #### Runtime configuration (`Mk8RuntimeConfig`)
@@ -597,12 +613,16 @@ If no runtime config is provided, `dotnet new -n` and `git remote add` are
 unavailable (the agent gets a clear error message).
 
 **node / npm** (`Mk8NodeNpmCommands`): `node --version`, `npm --version`,
-`npm ls` (with `--depth 0-10`, `--all`, `--json`), `npm outdated` (with `--json`).
+`npm ls` (with `--depth 0-10`, `--all`, `--json`, `--prod`, `--dev`, `--long`),
+`npm outdated` (with `--json`), `npm audit` (with `--json`, `--production`,
+`--omit dev` — **no `--fix`**), `npm cache verify`, `npm doctor`, `npm fund`,
+`npm prefix`.
 
 **cargo** (`Mk8CargoCommands`): `cargo --version` only.
 
 **Archive tools** (`Mk8ArchiveCommands`): create and list via ProcRun.
-`tar -tf`, `tar -cf`, `tar -czf`, `gzip`, `gunzip`, `zip`, `unzip -l`.
+`tar -tf`, `tar -tvf` (verbose listing with sizes/dates), `tar -cf`,
+`tar -czf`, `gzip`, `gunzip`, `zip`, `unzip -l`.
 Safe extraction is available via the `ArchiveExtract` in-memory verb (see
 Archive Extraction section above).
 
@@ -611,10 +631,14 @@ Archive Extraction section above).
 `base64`/`base64 -d`.  All accept ONLY SandboxPath arguments.
 
 **Version checks** (`Mk8VersionCheckCommands`): `python3 --version`,
-`ruby --version`, `java --version`, `javac --version`, `go version`,
-`rustc --version`.  No arguments, no file access.  `python3` and `ruby`
-use a version-check exception to bypass the permanent binary block — only
-the exact `--version` invocation is allowed.
+`ruby --version`, `perl --version`, `php --version`, `java --version`,
+`javac --version`, `go version`, `rustc --version`, `swift --version`,
+`cmake --version`, `gcc --version`, `g++ --version`, `clang --version`,
+`docker --version`, `kubectl version --client`, `deno --version`,
+`bun --version`, `terraform --version`.  No arguments, no file access.
+`python3`, `ruby`, `perl`, `php`, and `cmake` use a version-check
+exception to bypass the permanent binary block — only the exact
+`--version` invocation is allowed.
 
 **OpenSSL certificate inspection** (`Mk8OpensslCommands`): read-only
 `x509 -in <SandboxPath> -noout` with `-text`, `-enddate`, `-subject`,
@@ -623,12 +647,20 @@ already inside the sandbox — no network connection, no key generation, no
 encryption/decryption. The `-noout` flag prevents binary output. No other
 OpenSSL subcommand (`s_client`, `enc`, `genrsa`, `req`) is whitelisted.
 
+**Tool existence checks** (`Mk8ToolCheckCommands`): `which <binary>` on
+Linux/macOS, `where <binary>` on Windows. The binary argument is a
+`Choice` slot restricted to binaries already in the whitelist (`dotnet`,
+`git`, `node`, `npm`, `cargo`, `tar`, `openssl`, `cat`, `head`, `tail`,
+etc.). Reveals nothing the agent couldn't discover by running the binary
+itself — just avoids the cryptic "command not found" error on failure.
+
 #### Defence-in-depth layers
 
 1. **Permanently blocked binaries** (`Mk8BinaryAllowlist`): bash, sh, cmd,
    powershell, python, perl, ruby, curl, wget, find, sudo, chmod, etc.
    Cannot be overridden even with a template — **except** for exact
-   version-check invocations (`python3 --version`, `ruby --version`) which
+   version-check invocations (`python3 --version`, `ruby --version`,
+   `perl --version`, `php --version`, `cmake --version`) which
    are carved out via `IsVersionCheckException`.
 2. **Command-template whitelist** (`Mk8CommandWhitelist`): only registered
    templates can execute.  Unregistered flags, unknown binaries → rejected.
@@ -703,7 +735,18 @@ resolve to a private/link-local IP. Port must be 80 or 443.
 | TextSort        | `[input, direction?]`  | Sort lines: asc (default), desc, numeric |
 | TextUniq        | `[input]`              | Remove consecutive duplicate lines    |
 | TextCount       | `[input, substring?]`  | Count occurrences, or lines/words/chars if no pattern |
+| TextIndexOf     | `[input, substring]`   | First index of substring (-1 if not found) |
+| TextLastIndexOf | `[input, substring]`   | Last index of substring (-1 if not found) |
+| TextRemove      | `[input, old]`         | Remove all occurrences (sugar for `TextReplace [input, old, ""]`) |
+| TextWordCount   | `[input]`              | Word count (whitespace-split)         |
+| TextReverse     | `[input]`              | Reverse string                        |
+| TextPadLeft     | `[input, width, char?]`| Left-pad to total width (default space, single printable) |
+| TextPadRight    | `[input, width, char?]`| Right-pad to total width (default space, single printable) |
+| TextRepeat      | `[input, count]`       | Repeat string N times (max 256, output capped) |
 | JsonMerge       | `[json1, json2]`         | Shallow-merge JSON objects (second wins) |
+| JsonKeys        | `[input]`                | Top-level keys from JSON object (newline-separated) |
+| JsonCount       | `[input]`                | Element count from JSON array          |
+| JsonType        | `[input]`                | Root JSON token type (object/array/string/number/boolean/null) |
 
 All pure `.NET` string/encoding/crypto APIs — no file I/O, no process, no
 network. These replace ProcRun equivalents (`wc`, `sort`, `base64`) by
@@ -735,6 +778,22 @@ no predicates, just path matching.
 | Verb         | Args              | Description                          |
 |--------------|-------------------|--------------------------------------|
 | DirFileCount | `[path, pattern?]`| Count files, optional glob pattern   |
+| DirEmpty     | `[path]`          | Returns `"True"`/`"False"` — is directory empty? |
+
+### File Type Detection (Read-Only, In-Memory)
+
+| Verb          | Args     | Description                                      |
+|---------------|----------|--------------------------------------------------|
+| FileMimeType  | `[path]` | Detect file type via magic-byte header matching  |
+| FileEncoding  | `[path]` | Detect file encoding via BOM + heuristics        |
+
+`FileMimeType` reads the first bytes of a file and matches against known
+magic-byte signatures. Returns a MIME type string (e.g. `"application/pdf"`,
+`"image/png"`, `"text/plain"`). Read-only, in-memory, path must be in sandbox.
+
+`FileEncoding` detects file encoding via BOM (Byte Order Mark) detection
+and heuristic analysis. Returns encoding name (e.g. `"utf-8"`, `"utf-16-le"`,
+`"ascii"`, `"utf-8-bom"`). Read-only, in-memory, path must be in sandbox.
 
 ### Environment (Read-Only)
 
@@ -1092,13 +1151,25 @@ No else branch, no boolean operators, no nesting beyond depth 3.
 
 **Available predicates:**
 
-| Kind          | Args               | Evaluated at | Description                              |
-|---------------|--------------------|--------------|------------------------------------------|
-| PrevContains  | `[substring]`      | Compile time | True if `$PREV` contains substring       |
-| PrevEmpty     | `[]`               | Compile time | True if `$PREV` is empty/whitespace      |
-| EnvEquals     | `[name, expected]` | Compile time | True if env var equals value (allowlist)  |
-| FileExists    | `[path]`           | Runtime      | Deferred — executor checks at step time  |
-| DirExists     | `[path]`           | Runtime      | Deferred — executor checks at step time  |
+| Kind            | Args                  | Evaluated at | Description                                       |
+|-----------------|-----------------------|--------------|---------------------------------------------------|
+| PrevContains    | `[substring]`         | Compile time | True if `$PREV` contains substring                |
+| PrevEmpty       | `[]`                  | Compile time | True if `$PREV` is empty/whitespace               |
+| PrevStartsWith  | `[value]`             | Compile time | True if `$PREV` starts with value                 |
+| PrevEndsWith    | `[value]`             | Compile time | True if `$PREV` ends with value                   |
+| PrevEquals      | `[value]`             | Compile time | True if `$PREV` equals value exactly              |
+| PrevMatch       | `[pattern]`           | Compile time | True if `$PREV` matches regex (2s timeout)        |
+| PrevLineCount   | `[operator, count]`   | Compile time | True if `$PREV` line count satisfies op+count (eq/gt/lt/gte/lte) |
+| CaptureEmpty    | `[name]`              | Compile time | True if named capture var is empty/whitespace     |
+| CaptureContains | `[name, substring]`   | Compile time | True if named capture contains substring          |
+| EnvEquals       | `[name, expected]`    | Compile time | True if env var equals value (allowlist)           |
+| FileExists      | `[path]`              | Runtime      | Deferred — executor checks at step time           |
+| DirExists       | `[path]`              | Runtime      | Deferred — executor checks at step time           |
+
+All compile-time predicates are case-insensitive. `PrevMatch` uses a 2-second
+regex timeout to prevent ReDoS. `PrevLineCount` operators: `eq`, `gt`, `lt`,
+`gte`, `lte`. `CaptureEmpty`/`CaptureContains` check named capture variables
+from `captureAs` — same injection-safe variable dictionary as `$PREV`.
 
 ## Batch Operations
 

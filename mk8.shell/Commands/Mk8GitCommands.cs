@@ -169,6 +169,17 @@ public static class Mk8GitCommands
         "origin", "upstream", "fork", "backup", "mirror",
     ];
 
+    /// <summary>
+    /// Pre-approved line range specifiers for <c>git blame -L</c>.
+    /// Format: <c>start,end</c> where both are line numbers.
+    /// Only a fixed set of commonly-used ranges to avoid free text.
+    /// </summary>
+    public static readonly string[] BlameLineRanges =
+    [
+        "1,10", "1,20", "1,50", "1,100",
+        "1,200", "1,500", "1,1000",
+    ];
+
     // ── Registration (called once at startup by Mk8CommandWhitelist) ──
 
     internal static KeyValuePair<string, string[]>[] GetWordLists() =>
@@ -176,6 +187,7 @@ public static class Mk8GitCommands
         new("CommitWords", CommitWords),
         new("BranchNames", BranchNames),
         new("RemoteNames", RemoteNames),
+        new("BlameLineRanges", BlameLineRanges),
     ];
 
     internal static Mk8AllowedCommand[] GetCommands()
@@ -193,7 +205,7 @@ public static class Mk8GitCommands
 
             // status
             new("git status", "git", ["status"],
-                Flags: [new("--short"), new("-s"), new("--porcelain")]),
+                Flags: [new("--short"), new("-s"), new("--porcelain"), new("--branch")]),
 
             // log (always --oneline to bound output size)
             new("git log", "git", ["log", "--oneline"],
@@ -201,12 +213,23 @@ public static class Mk8GitCommands
                     new("-n", new Mk8Slot("count", Mk8SlotKind.IntRange, MinValue: 1, MaxValue: 100)),
                     new("--all"),
                     new("--no-decorate"),
+                    new("--graph"),
+                    new("--reverse"),
                 ]),
+
+            // log for a specific file (file history)
+            new("git log file", "git", ["log", "--oneline", "--"],
+                Flags: [
+                    new("-n", new Mk8Slot("count", Mk8SlotKind.IntRange, MinValue: 1, MaxValue: 100)),
+                    new("--all"),
+                    new("--no-decorate"),
+                ],
+                Params: [pathSlot]),
 
             // diff (working tree)
             new("git diff", "git", ["diff"],
                 Flags: [new("--staged"), new("--cached"), new("--stat"),
-                        new("--name-only"), new("--name-status")]),
+                        new("--name-only"), new("--name-status"), new("--word-diff")]),
             new("git diff file", "git", ["diff"],
                 Flags: [new("--staged"), new("--cached")],
                 Params: [pathSlot]),
@@ -235,7 +258,8 @@ public static class Mk8GitCommands
             new("git rev-parse short HEAD", "git", ["rev-parse", "--short", "HEAD"]),
 
             // ls-files
-            new("git ls-files", "git", ["ls-files"]),
+            new("git ls-files", "git", ["ls-files"],
+                Flags: [new("--modified"), new("--deleted"), new("--others"), new("--ignored")]),
 
             // tag listing
             new("git tag list", "git", ["tag", "--list"]),
@@ -243,7 +267,42 @@ public static class Mk8GitCommands
 
             // describe
             new("git describe", "git", ["describe"],
-                Flags: [new("--tags"), new("--always")]),
+                Flags: [new("--tags"), new("--always"), new("--long"),
+                        new("--abbrev", new Mk8Slot("length", Mk8SlotKind.IntRange, MinValue: 1, MaxValue: 40))]),
+
+            // ── New read-only templates ───────────────────────────────
+
+            // stash show (completes existing stash/pop/list/drop set)
+            new("git stash show", "git", ["stash", "show"],
+                Flags: [new("--stat"), new("--patch"), new("-p")]),
+
+            // blame (line-by-line attribution)
+            new("git blame", "git", ["blame"],
+                Flags: [
+                    new("-L", new Mk8Slot("range", Mk8SlotKind.AdminWord, WordListName: "BlameLineRanges")),
+                ],
+                Params: [pathSlot]),
+
+            // clean --dry-run (read-only — NO -f slot, can never delete)
+            new("git clean dry-run", "git", ["clean", "-n"],
+                Flags: [new("-d")]),
+            new("git clean dry-run long", "git", ["clean", "--dry-run"],
+                Flags: [new("-d")]),
+
+            // count-objects (repo size statistics)
+            new("git count-objects", "git", ["count-objects"],
+                Flags: [new("-v"), new("-H")]),
+
+            // cherry (unpushed commits)
+            new("git cherry", "git", ["cherry"],
+                Flags: [new("-v")]),
+
+            // shortlog (contributor summary)
+            new("git shortlog", "git", ["shortlog", "-sn"],
+                Flags: [new("--all"), new("--no-merges")]),
+
+            // rev-list count (total commit count)
+            new("git rev-list count", "git", ["rev-list", "--count", "HEAD"]),
 
             // ═════════════════════════════════════════════════════════
             // WRITE — constrained to word-list values only
@@ -262,7 +321,8 @@ public static class Mk8GitCommands
             // stash
             new("git stash", "git", ["stash"]),
             new("git stash pop", "git", ["stash", "pop"]),
-            new("git stash list", "git", ["stash", "list"]),
+            new("git stash list", "git", ["stash", "list"],
+                Flags: [new("--oneline")]),
             new("git stash drop", "git", ["stash", "drop"]),
 
             // checkout / switch (branch MUST come from word list)

@@ -30,6 +30,7 @@ public static class Mk8ArchiveCommands
         [
             // tar — list and create only
             new("tar list", "tar", ["-tf"], Params: [pathSlot]),
+            new("tar list verbose", "tar", ["-tvf"], Params: [pathSlot]),
             new("tar create", "tar", ["-cf"], Params: [pathSlot, variadicPaths]),
             new("tar create gzip", "tar", ["-czf"], Params: [pathSlot, variadicPaths]),
 

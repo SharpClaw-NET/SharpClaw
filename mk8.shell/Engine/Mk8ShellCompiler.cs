@@ -236,7 +236,18 @@ public sealed class Mk8ShellCompiler
             Mk8ShellVerb.TextSort         => InMemory(op.Verb, RequireArgs(op, 1, 2)),
             Mk8ShellVerb.TextUniq         => InMemory(op.Verb, RequireArgs(op, 1, 1)),
             Mk8ShellVerb.TextCount        => InMemory(op.Verb, RequireArgs(op, 1, 2)),
+            Mk8ShellVerb.TextIndexOf      => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextLastIndexOf  => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextRemove       => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextWordCount    => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextReverse      => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextPadLeft      => CompileTextPad(op),
+            Mk8ShellVerb.TextPadRight     => CompileTextPad(op),
+            Mk8ShellVerb.TextRepeat       => CompileTextRepeat(op),
             Mk8ShellVerb.JsonMerge        => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.JsonKeys         => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.JsonCount        => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.JsonType         => InMemory(op.Verb, RequireArgs(op, 1, 1)),
 
             // ── File inspection (read-only, in-memory) ────────────
             Mk8ShellVerb.FileLineCount => InMemory(op.Verb, RequireArgs(op, 1, 1)),
@@ -248,6 +259,11 @@ public sealed class Mk8ShellCompiler
 
             // ── Directory inspection ──────────────────────────────
             Mk8ShellVerb.DirFileCount  => InMemory(op.Verb, RequireArgs(op, 1, 2)),
+            Mk8ShellVerb.DirEmpty      => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+
+            // ── File type detection (read-only, in-memory) ────────
+            Mk8ShellVerb.FileMimeType  => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.FileEncoding  => InMemory(op.Verb, RequireArgs(op, 1, 1)),
 
             Mk8ShellVerb.EnvGet     => InMemory(op.Verb, RequireArgs(op, 1, 1)),
 
@@ -354,6 +370,9 @@ public sealed class Mk8ShellCompiler
             or Mk8ShellVerb.FileHead or Mk8ShellVerb.FileTail
             or Mk8ShellVerb.DirFileCount
             or Mk8ShellVerb.FileGlob
+            or Mk8ShellVerb.DirEmpty
+            or Mk8ShellVerb.FileMimeType
+            or Mk8ShellVerb.FileEncoding
                 => ValidateReadPaths(args, sandboxRoot),
 
             // FileSearch: args[0] = path (read), args[1] = search literal (not a path).
@@ -585,6 +604,46 @@ public sealed class Mk8ShellCompiler
                 "Supported: sha256, sha512, md5.");
 
         return InMemory(Mk8ShellVerb.TextHash, op.Args);
+    }
+
+    /// <summary>Max repeat count for <see cref="Mk8ShellVerb.TextRepeat"/>.</summary>
+    private const int TextRepeatMaxCount = 256;
+
+    private static Mk8CompiledCommand CompileTextRepeat(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 2, 2);
+
+        if (!int.TryParse(op.Args[1], out var count) || count < 0)
+            throw new Mk8CompileException(Mk8ShellVerb.TextRepeat,
+                $"Count must be a non-negative integer, got '{op.Args[1]}'.");
+
+        if (count > TextRepeatMaxCount)
+            throw new Mk8CompileException(Mk8ShellVerb.TextRepeat,
+                $"Count {count} exceeds maximum of {TextRepeatMaxCount}.");
+
+        return InMemory(Mk8ShellVerb.TextRepeat, op.Args);
+    }
+
+    private static Mk8CompiledCommand CompileTextPad(Mk8ShellOperation op)
+    {
+        // args: [input, totalWidth, padChar?]
+        if (op.Args.Length < 2 || op.Args.Length > 3)
+            throw new Mk8CompileException(op.Verb,
+                $"Expected 2–3 argument(s), got {op.Args.Length}.");
+
+        if (!int.TryParse(op.Args[1], out var width) || width < 0 || width > 10000)
+            throw new Mk8CompileException(op.Verb,
+                $"Total width must be 0–10000, got '{op.Args[1]}'.");
+
+        if (op.Args.Length > 2)
+        {
+            var padChar = op.Args[2];
+            if (padChar.Length != 1 || char.IsControl(padChar[0]))
+                throw new Mk8CompileException(op.Verb,
+                    "Pad character must be a single printable character.");
+        }
+
+        return InMemory(op.Verb, op.Args);
     }
 
     /// <summary>Max lines for FileHead/FileTail.</summary>

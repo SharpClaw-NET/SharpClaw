@@ -32,9 +32,23 @@ public static class Mk8NodeNpmCommands
                     new Mk8Slot("depth", Mk8SlotKind.IntRange, MinValue: 0, MaxValue: 10)),
                 new Mk8FlagDef("--all"),
                 new Mk8FlagDef("--json"),
+                new Mk8FlagDef("--prod"),
+                new Mk8FlagDef("--dev"),
+                new Mk8FlagDef("--long"),
             ]),
 
         new("npm outdated", "npm", ["outdated"],
             Flags: [new Mk8FlagDef("--json")]),
+
+        // ── Read-only audit / diagnostics (no --fix) ──────────────
+        new("npm audit", "npm", ["audit"],
+            Flags: [new Mk8FlagDef("--json"), new Mk8FlagDef("--production"),
+                    new Mk8FlagDef("--omit",
+                        new Mk8Slot("type", Mk8SlotKind.Choice, AllowedValues: ["dev"]))]),
+
+        new("npm cache verify", "npm", ["cache", "verify"]),
+        new("npm doctor", "npm", ["doctor"]),
+        new("npm fund", "npm", ["fund"]),
+        new("npm prefix", "npm", ["prefix"]),
     ];
 }

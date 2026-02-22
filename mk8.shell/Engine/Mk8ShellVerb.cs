@@ -108,11 +108,33 @@ public enum Mk8ShellVerb
     TextUniq,
     /// <summary>Counts occurrences of a literal substring, or lines/words/chars if no pattern.</summary>
     TextCount,
+    /// <summary>Returns first index of substring (-1 if not found).</summary>
+    TextIndexOf,
+    /// <summary>Returns last index of substring (-1 if not found).</summary>
+    TextLastIndexOf,
+    /// <summary>Removes all occurrences of a substring. Sugar for TextReplace(input, old, "").</summary>
+    TextRemove,
+    /// <summary>Word count via whitespace splitting.</summary>
+    TextWordCount,
+    /// <summary>Reverses a string.</summary>
+    TextReverse,
+    /// <summary>Left-pads a string to a total width. Optional pad char (default space, single printable).</summary>
+    TextPadLeft,
+    /// <summary>Right-pads a string to a total width. Optional pad char (default space, single printable).</summary>
+    TextPadRight,
+    /// <summary>Repeats a string N times. Count max 256, output capped at maxOutputBytes.</summary>
+    TextRepeat,
 
     // ── JSON — extended ───────────────────────────────────────────
 
     /// <summary>Shallow-merges two JSON objects. Second wins on key conflict.</summary>
     JsonMerge,
+    /// <summary>Returns top-level keys from a JSON object as newline-separated output.</summary>
+    JsonKeys,
+    /// <summary>Returns element count from a JSON array.</summary>
+    JsonCount,
+    /// <summary>Returns the root JSON token type (object, array, string, number, boolean, null).</summary>
+    JsonType,
 
     // ── File inspection (read-only, in-memory) ────────────────────
 
@@ -136,6 +158,21 @@ public enum Mk8ShellVerb
 
     /// <summary>Returns count of files in a directory, optional glob pattern.</summary>
     DirFileCount,
+    /// <summary>Returns <c>"True"</c>/<c>"False"</c> — whether a directory contains any entries.</summary>
+    DirEmpty,
+
+    // ── File inspection — type detection (read-only, in-memory) ──
+
+    /// <summary>
+    /// Detects file type via magic-byte header matching. Read-only, in-memory.
+    /// Returns a MIME type string (e.g. <c>"application/pdf"</c>).
+    /// </summary>
+    FileMimeType,
+    /// <summary>
+    /// Detects file encoding via BOM detection + heuristics. Read-only, in-memory.
+    /// Returns encoding name (e.g. <c>"utf-8"</c>, <c>"utf-16-le"</c>, <c>"ascii"</c>).
+    /// </summary>
+    FileEncoding,
 
     // ── System info — extended (read-only, no args unless noted) ──
 

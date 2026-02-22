@@ -109,7 +109,18 @@ TextHash       [input, algorithm?]   hash string (sha256/sha512/md5)
 TextSort       [input, direction?]   sort lines: asc (default), desc, numeric
 TextUniq       [input]               remove consecutive duplicate lines
 TextCount      [input, substring?]   count occurrences, or lines/words/chars
+TextIndexOf    [input, substring]    first index of substring (-1 if not found)
+TextLastIndexOf [input, substring]   last index of substring (-1 if not found)
+TextRemove     [input, old]          remove all occurrences of substring
+TextWordCount  [input]               word count (whitespace-split)
+TextReverse    [input]               reverse string
+TextPadLeft    [input, width, char?] left-pad to total width (default space)
+TextPadRight   [input, width, char?] right-pad to total width (default space)
+TextRepeat     [input, count]        repeat N times (max 256, output capped)
 JsonMerge      [json1, json2]        shallow-merge objects (second wins)
+JsonKeys       [input]               top-level keys (newline-separated)
+JsonCount      [input]               element count from JSON array
+JsonType       [input]               root token type (object/array/string/etc.)
 
 --- file inspection (read-only, in-memory) ---
 FileLineCount  [path]                line count
@@ -121,6 +132,11 @@ FileGlob       [path, pattern, depth?] recursive file search by glob (max depth 
 
 --- directory inspection ---
 DirFileCount   [path, pattern?]      count files, optional glob
+DirEmpty       [path]                returns "True"/"False" — is directory empty?
+
+--- file type detection (read-only, in-memory) ---
+FileMimeType   [path]                MIME type via magic-byte header matching
+FileEncoding   [path]                encoding via BOM + heuristics (utf-8, ascii, etc.)
 
 --- environment (read-only) ---
 EnvGet         [name]                allowlist only (see below)
@@ -301,12 +317,20 @@ No nested ForEach.
   }
 }
 
-Predicate kinds:
-  PrevContains  [substring]         true if $PREV contains it
-  PrevEmpty     []                  true if $PREV is blank
-  EnvEquals     [name, expected]    true if env var matches
-  FileExists    [path]              evaluated at runtime
-  DirExists     [path]              evaluated at runtime
+Predicate kinds (all case-insensitive):
+  PrevContains    [substring]         true if $PREV contains it
+  PrevEmpty       []                  true if $PREV is blank
+  PrevStartsWith  [value]             true if $PREV starts with value
+  PrevEndsWith    [value]             true if $PREV ends with value
+  PrevEquals      [value]             true if $PREV equals value exactly
+  PrevMatch       [pattern]           true if $PREV matches regex (2s timeout)
+  PrevLineCount   [operator, count]   true if $PREV line count satisfies condition
+                                      operators: eq, gt, lt, gte, lte
+  CaptureEmpty    [name]              true if named capture is empty/whitespace
+  CaptureContains [name, substring]   true if named capture contains substring
+  EnvEquals       [name, expected]    true if env var matches
+  FileExists      [path]              evaluated at runtime
+  DirExists       [path]              evaluated at runtime
 
 No else branch. No boolean operators.
 
@@ -379,13 +403,23 @@ ComposedWords is NOT concatenation. "Api 1 2 3" (4 words) works.
   dotnet --info
   dotnet --list-sdks
   dotnet --list-runtimes
-  dotnet tool list
+  dotnet tool list   [-g | --global]
+  dotnet sln list
+  dotnet list reference
+  dotnet list package [--outdated] [--deprecated] [--vulnerable]
+                      [--include-transitive] [--format json]
+  dotnet nuget list source [--format json|Detailed|Short]
+  dotnet workload list
+  dotnet sdk check
   dotnet build       [--configuration Release|Debug] [--no-restore] [-o path]
+                     [--verbosity quiet|minimal|normal|detailed|diagnostic]
   dotnet publish     [--configuration Release|Debug] [--no-restore] [-o path]
+                     [--verbosity quiet|minimal|normal|detailed|diagnostic]
   dotnet test        [--configuration Release|Debug] [--no-restore] [--no-build]
-  dotnet clean       [--configuration Release|Debug]
-  dotnet restore     [--no-cache]
-  dotnet format      [--verify-no-changes]
+                     [--verbosity quiet|minimal|normal|detailed|diagnostic]
+  dotnet clean       [--configuration Release|Debug] [--verbosity ...]
+  dotnet restore     [--no-cache] [--verbosity ...]
+  dotnet format      [--verify-no-changes] [--verbosity ...]
   dotnet new <template> [-n <name>] [-o path]
     template: from DotnetTemplates list (console, classlib, webapi, etc.)
     name: CompoundName — runtime base + optional compile-time suffix
@@ -402,9 +436,10 @@ ComposedWords is NOT concatenation. "Api 1 2 3" (4 words) works.
 READ-ONLY (no repository state changed):
 
   git --version
-  git status         [--short | -s | --porcelain]
-  git log --oneline  [-n 1-100] [--all] [--no-decorate]
-  git diff           [--staged] [--cached] [--stat] [--name-only] [--name-status]
+  git status         [--short | -s | --porcelain | --branch]
+  git log --oneline  [-n 1-100] [--all] [--no-decorate] [--graph] [--reverse]
+  git log --oneline -- <path>  [-n 1-100] [--all] [--no-decorate]
+  git diff           [--staged] [--cached] [--stat] [--name-only] [--name-status] [--word-diff]
   git diff <path>    [--staged] [--cached]
   git branch         [--list | -a | --all | -r]
   git remote         [-v]
@@ -412,10 +447,18 @@ READ-ONLY (no repository state changed):
   git remote remove <name>       name from RemoteNames
   git rev-parse HEAD
   git rev-parse --short HEAD
-  git ls-files
+  git ls-files       [--modified] [--deleted] [--others] [--ignored]
   git tag --list
   git tag -l
-  git describe       [--tags] [--always]
+  git describe       [--tags] [--always] [--long] [--abbrev 1-40]
+  git stash show     [--stat] [--patch | -p]
+  git blame <path>   [-L range]            range from BlameLineRanges (1,10 1,20 etc.)
+  git clean -n       [-d]                  dry-run only — NO -f slot, cannot delete
+  git clean --dry-run [-d]                 same as above
+  git count-objects  [-v] [-H]             repo size statistics
+  git cherry         [-v]                  unpushed commits
+  git shortlog -sn   [--all] [--no-merges] contributor summary
+  git rev-list --count HEAD               total commit count
 
 WRITE (constrained to word lists):
 
@@ -425,7 +468,7 @@ WRITE (constrained to word lists):
   git commit -m "<message>"            ComposedWords from CommitWords vocabulary
   git stash
   git stash pop
-  git stash list
+  git stash list     [--oneline]
   git stash drop
   git checkout <branch>                AdminWord from BranchNames
   git checkout -b <branch>             AdminWord from BranchNames
@@ -441,7 +484,7 @@ PROTECTED BRANCHES — BANNED:
   approval.
 
 NOT WHITELISTED (require dangerous-shell path):
-  push, pull, merge, rebase, reset, clean, clone, config, submodule,
+  push, pull, merge, rebase, reset, clean -f, clone, config, submodule,
   am, apply, filter-branch, cherry-pick, bisect, gc, fsck, reflog.
 
 --- git commit message vocabulary (CommitWords) ---
@@ -486,8 +529,13 @@ Digits: 0-9
 
   node --version
   npm --version
-  npm ls             [--depth 0-10] [--all] [--json]
+  npm ls             [--depth 0-10] [--all] [--json] [--prod] [--dev] [--long]
   npm outdated       [--json]
+  npm audit          [--json] [--production] [--omit dev] (NO --fix)
+  npm cache verify
+  npm doctor
+  npm fund
+  npm prefix
 
 --- cargo commands ---
 
@@ -497,14 +545,27 @@ Digits: 0-9
 
   python3 --version       (version-check exception — otherwise blocked)
   ruby --version          (version-check exception — otherwise blocked)
+  perl --version          (version-check exception — otherwise blocked)
+  php --version           (version-check exception — otherwise blocked)
   java --version
   javac --version
   go version
   rustc --version
+  swift --version
+  cmake --version         (version-check exception — otherwise blocked)
+  gcc --version
+  g++ --version
+  clang --version
+  docker --version
+  kubectl version --client
+  deno --version
+  bun --version
+  terraform --version
 
 --- archive commands (create/list via ProcRun) ---
 
   tar -tf <path>
+  tar -tvf <path>              verbose listing with sizes and dates
   tar -cf <out> <inputs...>
   tar -czf <out> <inputs...>
   gzip <path>
@@ -538,6 +599,15 @@ Digits: 0-9
   Only x509 -in <file> -noout is whitelisted. No other openssl subcommand
   (s_client, enc, genrsa, req, etc.) is registered.
 
+--- tool existence checks (which/where) ---
+
+  which <binary>                   Linux/macOS — check if binary is on PATH
+  where <binary>                   Windows — check if binary is on PATH
+
+  The binary argument is restricted to binaries already in the whitelist
+  (dotnet, git, node, npm, cargo, tar, openssl, cat, head, tail, etc.).
+  Reveals nothing the agent couldn't discover by running the binary itself.
+
 --- permanently blocked binaries (cannot be overridden) ---
 
   bash sh zsh fish dash cmd powershell pwsh
@@ -546,7 +616,7 @@ Digits: 0-9
   curl wget find ssh scp rsync nc socat
   chmod chown systemctl crontab dd strace
 
-  Exception: python3 --version and ruby --version are allowed via
+  Exception: python3/ruby/perl/php/cmake --version are allowed via
   version-check carve-out. ALL other arguments remain blocked.
 
 
@@ -979,6 +1049,104 @@ No .. segments. No absolute paths in path components.
     { "verb": "ProcRun", "args": ["openssl", "x509", "-in", "$WORKSPACE/certs/server.pem", "-noout", "-text"], "captureAs": "CERT_TEXT" },
     { "verb": "ProcRun", "args": ["openssl", "x509", "-in", "$WORKSPACE/certs/server.pem", "-noout", "-enddate"], "captureAs": "EXPIRY" },
     { "verb": "FileWrite", "args": ["$WORKSPACE/cert-info.txt", "$CERT_TEXT\n\nExpiry: $EXPIRY"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check which tools are installed ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["which", "dotnet"], "captureAs": "DOTNET_PATH" },
+    { "verb": "ProcRun", "args": ["which", "node"], "captureAs": "NODE_PATH" },
+    { "verb": "ProcRun", "args": ["which", "docker"], "captureAs": "DOCKER_PATH" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/tools.txt",
+      "dotnet: $DOTNET_PATH\nnode: $NODE_PATH\ndocker: $DOCKER_PATH"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- npm security audit ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["npm", "audit", "--json"], "captureAs": "AUDIT" },
+    { "verb": "JsonKeys", "args": ["$AUDIT"], "captureAs": "KEYS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/audit.json", "$AUDIT"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- conditional action based on line count ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "test"], "captureAs": "TEST" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "PrevLineCount", "args": ["gt", "5"] },
+        "then": { "verb": "FileWrite", "args": ["$WORKSPACE/test-verbose.log", "$TEST"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- git blame + file history ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["git", "blame", "$WORKSPACE/src/Program.cs"], "captureAs": "BLAME" },
+    { "verb": "ProcRun", "args": ["git", "log", "--oneline", "--", "$WORKSPACE/src/Program.cs"], "captureAs": "HISTORY" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/code-report.txt", "Blame:\n$BLAME\n\nHistory:\n$HISTORY"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- detect file type and encoding ---
+{
+  "operations": [
+    { "verb": "FileMimeType", "args": ["$WORKSPACE/data/unknown.bin"], "captureAs": "MIME" },
+    { "verb": "FileEncoding", "args": ["$WORKSPACE/src/config.txt"], "captureAs": "ENC" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/file-info.txt", "MIME: $MIME\nEncoding: $ENC"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check if output dir is empty before build ---
+{
+  "operations": [
+    { "verb": "DirEmpty", "args": ["$WORKSPACE/out"], "captureAs": "IS_EMPTY" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "CaptureContains", "args": ["IS_EMPTY", "True"] },
+        "then": { "verb": "ProcRun", "args": ["dotnet", "publish", "-o", "$WORKSPACE/out"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check NuGet packages for vulnerabilities ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "list", "package", "--vulnerable", "--format", "json"], "captureAs": "VULN" },
+    { "verb": "JsonType", "args": ["$VULN"], "captureAs": "TYPE" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/vuln-report.json", "$VULN"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- git repo summary ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["git", "rev-list", "--count", "HEAD"], "captureAs": "COMMITS" },
+    { "verb": "ProcRun", "args": ["git", "count-objects", "-v", "-H"], "captureAs": "SIZE" },
+    { "verb": "ProcRun", "args": ["git", "shortlog", "-sn", "--all", "--no-merges"], "captureAs": "AUTHORS" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/repo-summary.txt",
+      "Total commits: $COMMITS\n\nRepo size:\n$SIZE\n\nAuthors:\n$AUTHORS"
+    ]}
   ],
   "options": { "pipeStepOutput": true }
 }

@@ -89,6 +89,12 @@ public static class Mk8DotnetCommands
             new Mk8Slot("outputPath", Mk8SlotKind.SandboxPath));
         var longOutputFlag = new Mk8FlagDef("--output",
             new Mk8Slot("outputPath", Mk8SlotKind.SandboxPath));
+        var verbosityFlag = new Mk8FlagDef("--verbosity",
+            new Mk8Slot("level", Mk8SlotKind.Choice,
+                AllowedValues: ["quiet", "minimal", "normal", "detailed", "diagnostic"]));
+        var shortVerbosityFlag = new Mk8FlagDef("-v",
+            new Mk8Slot("level", Mk8SlotKind.Choice,
+                AllowedValues: ["quiet", "minimal", "normal", "detailed", "diagnostic"]));
 
         return
         [
@@ -97,26 +103,43 @@ public static class Mk8DotnetCommands
             new("dotnet info", "dotnet", ["--info"]),
             new("dotnet list-sdks", "dotnet", ["--list-sdks"]),
             new("dotnet list-runtimes", "dotnet", ["--list-runtimes"]),
-            new("dotnet tool list", "dotnet", ["tool", "list"]),
+            new("dotnet tool list", "dotnet", ["tool", "list"],
+                Flags: [new("-g"), new("--global")]),
+
+            // ── Read-only inspection ──────────────────────────────
+            new("dotnet sln list", "dotnet", ["sln", "list"]),
+            new("dotnet list reference", "dotnet", ["list", "reference"]),
+            new("dotnet list package", "dotnet", ["list", "package"],
+                Flags: [new("--outdated"), new("--deprecated"), new("--vulnerable"),
+                        new("--include-transitive"), new("--format",
+                            new Mk8Slot("fmt", Mk8SlotKind.Choice, AllowedValues: ["json"]))]),
+            new("dotnet nuget list source", "dotnet", ["nuget", "list", "source"],
+                Flags: [new("--format",
+                    new Mk8Slot("fmt", Mk8SlotKind.Choice, AllowedValues: ["json", "Detailed", "Short"]))]),
+            new("dotnet workload list", "dotnet", ["workload", "list"]),
+            new("dotnet sdk check", "dotnet", ["sdk", "check"]),
 
             // ── Build / publish / test / clean / restore / format ──
             new("dotnet build", "dotnet", ["build"],
-                Flags: [configFlag, shortConfigFlag, noRestore, outputFlag, longOutputFlag]),
+                Flags: [configFlag, shortConfigFlag, noRestore, outputFlag, longOutputFlag,
+                        verbosityFlag, shortVerbosityFlag]),
 
             new("dotnet publish", "dotnet", ["publish"],
-                Flags: [configFlag, shortConfigFlag, noRestore, outputFlag, longOutputFlag]),
+                Flags: [configFlag, shortConfigFlag, noRestore, outputFlag, longOutputFlag,
+                        verbosityFlag, shortVerbosityFlag]),
 
             new("dotnet test", "dotnet", ["test"],
-                Flags: [configFlag, shortConfigFlag, noRestore, noBuild]),
+                Flags: [configFlag, shortConfigFlag, noRestore, noBuild,
+                        verbosityFlag, shortVerbosityFlag]),
 
             new("dotnet clean", "dotnet", ["clean"],
-                Flags: [configFlag, shortConfigFlag]),
+                Flags: [configFlag, shortConfigFlag, verbosityFlag, shortVerbosityFlag]),
 
             new("dotnet restore", "dotnet", ["restore"],
-                Flags: [new Mk8FlagDef("--no-cache")]),
+                Flags: [new Mk8FlagDef("--no-cache"), verbosityFlag, shortVerbosityFlag]),
 
             new("dotnet format", "dotnet", ["format"],
-                Flags: [new Mk8FlagDef("--verify-no-changes")]),
+                Flags: [new Mk8FlagDef("--verify-no-changes"), verbosityFlag, shortVerbosityFlag]),
 
             // ── dotnet new ────────────────────────────────────────
             new("dotnet new project", "dotnet", ["new"],

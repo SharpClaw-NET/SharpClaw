@@ -198,6 +198,41 @@ public static class Mk8ScriptExpander
                 !variables.TryGetValue("PREV", out var prevVal)
                 || string.IsNullOrWhiteSpace(prevVal),
 
+            Mk8PredicateKind.PrevStartsWith =>
+                predicate.Args.Length >= 1
+                && variables.TryGetValue("PREV", out var prevSw)
+                && prevSw.StartsWith(predicate.Args[0], StringComparison.OrdinalIgnoreCase),
+
+            Mk8PredicateKind.PrevEndsWith =>
+                predicate.Args.Length >= 1
+                && variables.TryGetValue("PREV", out var prevEw)
+                && prevEw.EndsWith(predicate.Args[0], StringComparison.OrdinalIgnoreCase),
+
+            Mk8PredicateKind.PrevEquals =>
+                predicate.Args.Length >= 1
+                && variables.TryGetValue("PREV", out var prevEq)
+                && string.Equals(prevEq, predicate.Args[0], StringComparison.OrdinalIgnoreCase),
+
+            Mk8PredicateKind.PrevMatch =>
+                predicate.Args.Length >= 1
+                && variables.TryGetValue("PREV", out var prevRx)
+                && EvaluateRegexPredicate(prevRx, predicate.Args[0]),
+
+            Mk8PredicateKind.PrevLineCount =>
+                predicate.Args.Length >= 2
+                && variables.TryGetValue("PREV", out var prevLc)
+                && EvaluateLineCountPredicate(prevLc, predicate.Args[0], predicate.Args[1]),
+
+            Mk8PredicateKind.CaptureEmpty =>
+                predicate.Args.Length >= 1
+                && (!variables.TryGetValue(predicate.Args[0], out var capVal)
+                    || string.IsNullOrWhiteSpace(capVal)),
+
+            Mk8PredicateKind.CaptureContains =>
+                predicate.Args.Length >= 2
+                && variables.TryGetValue(predicate.Args[0], out var capCont)
+                && capCont.Contains(predicate.Args[1], StringComparison.OrdinalIgnoreCase),
+
             Mk8PredicateKind.EnvEquals =>
                 predicate.Args.Length >= 2
                 && Mk8EnvAllowlist.IsAllowed(predicate.Args[0])
@@ -216,6 +251,44 @@ public static class Mk8ScriptExpander
 
             _ => throw new Mk8CompileException(Mk8ShellVerb.If,
                 $"Unknown predicate kind: {predicate.Kind}.")
+        };
+    }
+
+    /// <summary>Regex match with 2-second timeout to prevent ReDoS.</summary>
+    private static bool EvaluateRegexPredicate(string input, string pattern)
+    {
+        try
+        {
+            return System.Text.RegularExpressions.Regex.IsMatch(
+                input, pattern,
+                System.Text.RegularExpressions.RegexOptions.None,
+                TimeSpan.FromSeconds(2));
+        }
+        catch
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Evaluates PrevLineCount predicate. Operator: eq, gt, lt, gte, lte.
+    /// </summary>
+    private static bool EvaluateLineCountPredicate(
+        string input, string @operator, string countStr)
+    {
+        if (!int.TryParse(countStr, out var expected))
+            return false;
+
+        var lineCount = input.Split('\n').Length;
+
+        return @operator.ToLowerInvariant() switch
+        {
+            "eq" => lineCount == expected,
+            "gt" => lineCount > expected,
+            "lt" => lineCount < expected,
+            "gte" => lineCount >= expected,
+            "lte" => lineCount <= expected,
+            _ => false
         };
     }
 

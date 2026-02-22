@@ -139,6 +139,13 @@ public sealed record Mk8Predicate(
     ///   <item><c>PrevContains</c> — <c>[substring]</c></item>
     ///   <item><c>PrevEmpty</c> — <c>[]</c></item>
     ///   <item><c>EnvEquals</c> — <c>[name, expectedValue]</c></item>
+    ///   <item><c>PrevStartsWith</c> — <c>[value]</c></item>
+    ///   <item><c>PrevEndsWith</c> — <c>[value]</c></item>
+    ///   <item><c>PrevEquals</c> — <c>[value]</c></item>
+    ///   <item><c>PrevMatch</c> — <c>[pattern]</c></item>
+    ///   <item><c>PrevLineCount</c> — <c>[operator, count]</c></item>
+    ///   <item><c>CaptureEmpty</c> — <c>[name]</c></item>
+    ///   <item><c>CaptureContains</c> — <c>[name, substring]</c></item>
     /// </list>
     /// </summary>
     string[] Args);
@@ -150,6 +157,24 @@ public enum Mk8PredicateKind
     PrevContains,
     PrevEmpty,
     EnvEquals,
+
+    /// <summary>True if <c>$PREV</c> starts with the given value (case-insensitive).</summary>
+    PrevStartsWith,
+    /// <summary>True if <c>$PREV</c> ends with the given value (case-insensitive).</summary>
+    PrevEndsWith,
+    /// <summary>True if <c>$PREV</c> equals the given value exactly (case-insensitive).</summary>
+    PrevEquals,
+    /// <summary>True if <c>$PREV</c> matches the given regex pattern (2s timeout).</summary>
+    PrevMatch,
+    /// <summary>
+    /// True if <c>$PREV</c> line count satisfies operator + count.
+    /// Args: <c>[operator, count]</c> where operator ∈ {eq, gt, lt, gte, lte}.
+    /// </summary>
+    PrevLineCount,
+    /// <summary>True if the named capture variable is empty/whitespace. Args: <c>[name]</c>.</summary>
+    CaptureEmpty,
+    /// <summary>True if the named capture contains substring. Args: <c>[name, substring]</c>.</summary>
+    CaptureContains,
 }
 
 // ── Batch file operations ─────────────────────────────────────────

@@ -414,6 +414,7 @@ public sealed class Mk8CommandWhitelist
         Aggregate(wordLists, commands, Mk8ReadOnlyToolCommands.GetWordLists(), Mk8ReadOnlyToolCommands.GetCommands());
         Aggregate(wordLists, commands, Mk8VersionCheckCommands.GetWordLists(), Mk8VersionCheckCommands.GetCommands());
         Aggregate(wordLists, commands, Mk8OpensslCommands.GetWordLists(), Mk8OpensslCommands.GetCommands());
+        Aggregate(wordLists, commands, Mk8ToolCheckCommands.GetWordLists(), Mk8ToolCheckCommands.GetCommands());
 
         // ── Runtime word lists (the ONLY runtime exception) ───────
 

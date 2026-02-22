@@ -83,6 +83,9 @@ public static class Mk8BinaryAllowlist
     {
         ["python3"] = [["--version"]],
         ["ruby"]    = [["--version"]],
+        ["perl"]    = [["--version"]],
+        ["php"]     = [["--version"]],
+        ["cmake"]   = [["--version"]],
     };
 
     /// <summary>
