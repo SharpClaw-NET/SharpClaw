@@ -149,7 +149,12 @@ public sealed class Mk8CommandWhitelist
         var name = Path.GetFileName(binary);
 
         if (Mk8BinaryAllowlist.IsPermanentlyBlocked(name))
-            return $"Binary '{name}' is permanently blocked.";
+        {
+            // Narrow carve-out: version-check-only commands on
+            // otherwise-blocked binaries (e.g. python3 --version).
+            if (!Mk8BinaryAllowlist.IsVersionCheckException(name, args))
+                return $"Binary '{name}' is permanently blocked.";
+        }
 
         var candidates = _commands
             .Where(c => c.Binary.Equals(name, StringComparison.OrdinalIgnoreCase))
@@ -407,6 +412,8 @@ public sealed class Mk8CommandWhitelist
         Aggregate(wordLists, commands, Mk8CargoCommands.GetWordLists(), Mk8CargoCommands.GetCommands());
         Aggregate(wordLists, commands, Mk8ArchiveCommands.GetWordLists(), Mk8ArchiveCommands.GetCommands());
         Aggregate(wordLists, commands, Mk8ReadOnlyToolCommands.GetWordLists(), Mk8ReadOnlyToolCommands.GetCommands());
+        Aggregate(wordLists, commands, Mk8VersionCheckCommands.GetWordLists(), Mk8VersionCheckCommands.GetCommands());
+        Aggregate(wordLists, commands, Mk8OpensslCommands.GetWordLists(), Mk8OpensslCommands.GetCommands());
 
         // ── Runtime word lists (the ONLY runtime exception) ───────
 

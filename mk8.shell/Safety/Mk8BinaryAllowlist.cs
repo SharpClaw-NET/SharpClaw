@@ -68,5 +68,40 @@ public static class Mk8BinaryAllowlist
         return PermanentlyBlocked.Contains(Path.GetFileName(binary));
     }
 
+    /// <summary>
+    /// Exact invocations that bypass the permanent block list.
+    /// These are version-only commands that take zero user input
+    /// and produce a single line of output.  The binary is still
+    /// blocked for ALL other argument patterns.
+    /// <para>
+    /// Key: binary name (case-insensitive).  Value: the EXACT
+    /// complete argument array that is allowed.
+    /// </para>
+    /// </summary>
+    private static readonly Dictionary<string, string[][]> VersionCheckExceptions =
+        new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["python3"] = [["--version"]],
+        ["ruby"]    = [["--version"]],
+    };
+
+    /// <summary>
+    /// Returns <c>true</c> if this exact invocation is a version-check
+    /// exception on an otherwise-blocked binary.  Called by the
+    /// whitelist when <see cref="IsPermanentlyBlocked"/> returns true
+    /// to allow a narrow carve-out.
+    /// </summary>
+    public static bool IsVersionCheckException(string binary, string[] args)
+    {
+        var name = Path.GetFileName(binary);
+        if (!VersionCheckExceptions.TryGetValue(name, out var allowed))
+            return false;
+
+        return allowed.Any(pattern =>
+            pattern.Length == args.Length &&
+            pattern.Zip(args).All(pair =>
+                pair.First.Equals(pair.Second, StringComparison.OrdinalIgnoreCase)));
+    }
+
     public static IReadOnlySet<string> GetPermanentlyBlocked() => PermanentlyBlocked;
 }

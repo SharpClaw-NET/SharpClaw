@@ -26,7 +26,7 @@ dispatch it:
 
 | `Mk8CommandKind` | Verb categories | Runtime mechanism |
 |---|---|---|
-| `InMemory` | File, Dir, HTTP, Text, Env, Sys, FileTemplate, FilePatch, FileHash, DirTree | .NET APIs directly (`File.ReadAllTextAsync`, `HttpClient`, `System.Security.Cryptography`, etc.) — no process spawned |
+| `InMemory` | File*, Dir*, HTTP, Text*, Json*, Env, Sys*, FileTemplate, FilePatch, FileHash, DirTree, Clipboard, Math, OpenUrl, NetPing, NetDns, NetTlsCert, NetHttpStatus, ArchiveExtract | .NET APIs directly (`File.ReadAllTextAsync`, `HttpClient`, `System.Security.Cryptography`, `System.Data.DataTable`, `System.Net.NetworkInformation.Ping`, `System.Net.Security.SslStream`, `System.IO.Compression`, `System.Text.Json.Nodes`, etc.) — no process spawned |
 | `Process` | ProcRun | `System.Diagnostics.Process` with `UseShellExecute = false`, args via `ArgumentList` |
 
 > **Git via command-template whitelist.**  Git operations are available
@@ -340,10 +340,15 @@ via `$NAME` in subsequent steps:
 | FileCopy   | `[source, destination]`   | Copy a file                          | `cp <src> <dst>`      |
 | FileMove   | `[source, destination]`   | Move or rename a file                | `mv <src> <dst>`      |
 | FileHash   | `[path, algorithm?]`      | Compute file hash (sha256/sha512/md5)| `sha256sum <path>`    |
+| FileInfo   | `[path]`                  | File metadata (size, dates, attrs)   | `stat <path>`         |
 
 `FileHash` returns the hex digest. The algorithm argument defaults to
 `sha256`. Executed in-memory via `System.Security.Cryptography` — no
 external process, read-only, path must be in sandbox.
+
+`FileInfo` returns size in bytes, creation date (UTC), last modified date
+(UTC), and file attributes. Executed in-memory via `System.IO.FileInfo` —
+no external process, read-only, path must be in sandbox.
 
 ### Filesystem — Structured Edits
 
@@ -499,6 +504,9 @@ If no base names are configured, `dotnet new -n` is unavailable (but
 |---|---|---|
 | `dotnet --version` | — | — |
 | `dotnet --info` | — | — |
+| `dotnet --list-sdks` | — | — |
+| `dotnet --list-runtimes` | — | — |
+| `dotnet tool list` | — | — |
 | `dotnet build` | `--configuration Release\|Debug`, `--no-restore`, `-o SandboxPath` | — |
 | `dotnet publish` | same as build | — |
 | `dotnet test` | `--configuration`, `--no-restore`, `--no-build` | — |
@@ -593,19 +601,35 @@ unavailable (the agent gets a clear error message).
 
 **cargo** (`Mk8CargoCommands`): `cargo --version` only.
 
-**Archive tools** (`Mk8ArchiveCommands`): create and list ONLY — no
-extraction (symlink/traversal risk).  `tar -tf`, `tar -cf`, `tar -czf`,
-`gzip`, `gunzip`, `zip`, `unzip -l`.
+**Archive tools** (`Mk8ArchiveCommands`): create and list via ProcRun.
+`tar -tf`, `tar -cf`, `tar -czf`, `gzip`, `gunzip`, `zip`, `unzip -l`.
+Safe extraction is available via the `ArchiveExtract` in-memory verb (see
+Archive Extraction section above).
 
 **Read-only tools** (`Mk8ReadOnlyToolCommands`): `cat`, `head -n`, `tail -n`,
 `wc -l/-w/-c`, `sort`, `uniq`, `diff`, `sha256sum`, `md5sum`,
 `base64`/`base64 -d`.  All accept ONLY SandboxPath arguments.
 
+**Version checks** (`Mk8VersionCheckCommands`): `python3 --version`,
+`ruby --version`, `java --version`, `javac --version`, `go version`,
+`rustc --version`.  No arguments, no file access.  `python3` and `ruby`
+use a version-check exception to bypass the permanent binary block — only
+the exact `--version` invocation is allowed.
+
+**OpenSSL certificate inspection** (`Mk8OpensslCommands`): read-only
+`x509 -in <SandboxPath> -noout` with `-text`, `-enddate`, `-subject`,
+`-issuer`, `-serial`, or `-fingerprint -sha256`. Parses certificate files
+already inside the sandbox — no network connection, no key generation, no
+encryption/decryption. The `-noout` flag prevents binary output. No other
+OpenSSL subcommand (`s_client`, `enc`, `genrsa`, `req`) is whitelisted.
+
 #### Defence-in-depth layers
 
 1. **Permanently blocked binaries** (`Mk8BinaryAllowlist`): bash, sh, cmd,
    powershell, python, perl, ruby, curl, wget, find, sudo, chmod, etc.
-   Cannot be overridden even with a template.
+   Cannot be overridden even with a template — **except** for exact
+   version-check invocations (`python3 --version`, `ruby --version`) which
+   are carved out via `IsVersionCheckException`.
 2. **Command-template whitelist** (`Mk8CommandWhitelist`): only registered
    templates can execute.  Unregistered flags, unknown binaries → rejected.
 3. **Typed parameter slots**: every argument position has a slot type.
@@ -654,6 +678,64 @@ resolve to a private/link-local IP. Port must be 80 or 443.
 | JsonParse   | `[input]`                  | Validate and pretty-print     |
 | JsonQuery   | `[input, jsonpath]`        | Extract value by JSONPath     |
 
+### Extended Text Manipulation (Pure String Ops)
+
+| Verb            | Args                     | Description                       |
+|-----------------|--------------------------|-----------------------------------|
+| TextSplit       | `[input, delimiter]`     | Split on delimiter, newline-separated output |
+| TextJoin        | `[delimiter, parts...]`  | Join 1–32 parts with delimiter    |
+| TextTrim        | `[input]`                | Trim leading/trailing whitespace  |
+| TextLength      | `[input]`                | Character count                   |
+| TextSubstring   | `[input, start, length?]`| Extract substring (0-based)       |
+| TextLines       | `[input]`                | Line count + content              |
+| TextToUpper     | `[input]`                | Uppercase (invariant)             |
+| TextToLower     | `[input]`                | Lowercase (invariant)             |
+| TextBase64Encode| `[input]`                | Base64-encode UTF-8 string        |
+| TextBase64Decode| `[input]`                | Decode Base64 to UTF-8            |
+| TextUrlEncode   | `[input]`                | URL-encode (`Uri.EscapeDataString`)  |
+| TextUrlDecode   | `[input]`                | URL-decode (`Uri.UnescapeDataString`)|
+| TextHtmlEncode  | `[input]`                | HTML-encode (`WebUtility.HtmlEncode`)|
+| TextContains    | `[input, substring]`     | Returns `"True"`/`"False"`        |
+| TextStartsWith  | `[input, value]`         | Returns `"True"`/`"False"`        |
+| TextEndsWith    | `[input, value]`         | Returns `"True"`/`"False"`        |
+| TextMatch       | `[input, pattern]`       | Regex match, returns `"True"`/`"False"` (2s timeout) |
+| TextHash        | `[input, algorithm?]`    | Hash UTF-8 string (sha256/sha512/md5) |
+| TextSort        | `[input, direction?]`  | Sort lines: asc (default), desc, numeric |
+| TextUniq        | `[input]`              | Remove consecutive duplicate lines    |
+| TextCount       | `[input, substring?]`  | Count occurrences, or lines/words/chars if no pattern |
+| JsonMerge       | `[json1, json2]`         | Shallow-merge JSON objects (second wins) |
+
+All pure `.NET` string/encoding/crypto APIs — no file I/O, no process, no
+network. These replace ProcRun equivalents (`wc`, `sort`, `base64`) by
+operating on in-memory text from `$PREV`/`captureAs` variables.
+
+### File Inspection (Read-Only, In-Memory)
+
+| Verb          | Args                 | Description                              |
+|---------------|----------------------|------------------------------------------|
+| FileLineCount | `[path]`             | Line count via `File.ReadLines`          |
+| FileHead      | `[path, lines?]`     | First N lines (default 10, max 1000)     |
+| FileTail      | `[path, lines?]`     | Last N lines (default 10, max 1000)      |
+| FileSearch    | `[path, literal]`    | Literal substring match — matching lines with numbers |
+| FileDiff      | `[path1, path2]`     | Line-by-line diff of two files           |
+| FileGlob      | `[path, pattern, depth?]` | Recursive file search by glob (max depth 10, max 1000 results) |
+
+`FileSearch` is **literal** substring matching (not regex — `TextRegex`
+exists for that). Returns matching lines with line numbers, capped at 500.
+`FileDiff` returns added/removed/changed lines, capped at 500 differences.
+All read-only, all paths validated against sandbox.
+
+`FileGlob` recursively searches for files matching a glob pattern within
+the sandbox. Depth defaults to 5, max 10. Results capped at 1000 files.
+Safe replacement for the permanently-blocked `find` command — no `-exec`,
+no predicates, just path matching.
+
+### Directory Inspection (Read-Only)
+
+| Verb         | Args              | Description                          |
+|--------------|-------------------|--------------------------------------|
+| DirFileCount | `[path, pattern?]`| Count files, optional glob pattern   |
+
 ### Environment (Read-Only)
 
 | Verb   | Args     | Description                           |
@@ -672,6 +754,139 @@ Allowed: `HOME`, `USER`, `PATH`, `LANG`, `TZ`, `TERM`, `PWD`, `HOSTNAME`.
 | SysHostname | `[]` | Machine hostname         | `hostname`       |
 | SysUptime   | `[]` | System uptime            | `uptime`         |
 | SysDate     | `[]` | Current UTC datetime     | `date -u`        |
+| SysDiskUsage| `[path?]` | Disk space for drive containing path | `df -h <path>` |
+| SysDirSize  | `[path]`  | Total size of directory (recursive)  | `du -sb <path>` |
+| SysMemory   | `[]` | Process memory + GC heap | `free -m`        |
+| SysProcessList | `[]` | List running processes (name + PID) | `ps aux`  |
+| SysDateFormat  | `[format?]` | Formatted UTC date (restricted charset, max 32) | `date +"..."` |
+| SysTimestamp   | `[]` | Unix epoch seconds (UTC)            | `date +%s`   |
+| SysOsInfo      | `[]` | OS + arch + .NET runtime            | `uname -a`   |
+| SysCpuCount    | `[]` | Processor count                     | `nproc`      |
+| SysTempDir     | `[]` | Temp directory path (read-only)     | `echo $TMPDIR` |
+
+`SysDiskUsage` reports total, available, and used space for the drive
+containing the given path. If no path is provided, uses the sandbox root.
+Executed in-memory via `System.IO.DriveInfo`.
+
+`SysDirSize` recursively sums the size of all files under a directory.
+Path must be in sandbox. Returns bytes and MB.
+
+`SysMemory` reports the current process working set and GC heap size.
+Executed in-memory via `System.Diagnostics.Process` and `System.GC`.
+
+`SysProcessList` returns the first 200 running processes sorted by name,
+each as `PID\tName`. Read-only, in-memory via
+`System.Diagnostics.Process.GetProcesses()`.
+
+`SysDateFormat` returns the current UTC date/time in a custom format.
+The format string is validated at compile time: only date/time specifiers
+(`y`, `M`, `d`, `H`, `m`, `s`, `f`, `z`, etc.), separators, and spaces
+are allowed. Max 32 characters. Defaults to ISO 8601 (`"o"`) if omitted.
+
+`SysTimestamp` returns Unix epoch seconds — useful for unique build IDs,
+log filenames, cache keys.
+
+`SysOsInfo` returns OS description, CPU architecture, and .NET runtime
+version via `System.Runtime.InteropServices.RuntimeInformation`.
+
+`SysCpuCount` returns `Environment.ProcessorCount`.
+
+`SysTempDir` returns `Path.GetTempPath()` — the path string only, does
+NOT create any files or directories.
+
+### Clipboard (Write-Only)
+
+| Verb         | Args        | Description              |
+|--------------|-------------|--------------------------|
+| ClipboardSet | `[content]` | Set OS clipboard text    |
+
+`ClipboardSet` sets the OS clipboard text content. It does **not** read the
+clipboard (prevents exfiltration of user-copied passwords or secrets).
+Platform-dependent: uses `Set-Clipboard` on Windows, `pbcopy` on macOS,
+`xclip`/`xsel` on Linux. May not be available on headless servers.
+
+### Math (Safe Arithmetic)
+
+| Verb     | Args           | Description                         |
+|----------|----------------|-------------------------------------|
+| MathEval | `[expression]` | Evaluate basic arithmetic expression|
+
+`MathEval` evaluates a pure arithmetic expression: `+`, `-`, `*`, `/`, `%`,
+`()`, decimal numbers, and spaces. **No variables, no functions, no string
+eval.** The compiler rejects any character that is not a digit, decimal
+point, operator, parenthesis, or space. Max 256 characters. Executed
+in-memory via `System.Data.DataTable.Compute`.
+
+### URL Validation
+
+| Verb    | Args    | Description                                |
+|---------|---------|---------------------------------------------|
+| OpenUrl | `[url]` | Validate HTTPS URL, return as output string |
+
+`OpenUrl` validates a URL using the same `Mk8UrlSanitizer` as HTTP verbs
+(scheme must be `https` or `http`, no private IPs, no metadata endpoints,
+port 80/443 only, no embedded credentials). mk8.shell does **NOT** launch
+a browser — it returns the validated URL as output. The calling application
+(CLI/API) decides whether to open it. Zero attack surface in mk8.shell.
+
+### Network Diagnostics (In-Memory)
+
+| Verb          | Args              | Description                  |
+|---------------|-------------------|------------------------------|
+| NetPing       | `[host, count?]`  | ICMP echo (1–10 pings)       |
+| NetDns        | `[hostname]`      | DNS lookup (public IPs only) |
+| NetTlsCert    | `[hostname, port?]`| TLS certificate inspection   |
+| NetHttpStatus | `[url]`           | HTTP HEAD — status + headers |
+
+`NetPing` sends ICMP echo requests via `System.Net.NetworkInformation.Ping`.
+No process spawned. Host validated by `Mk8UrlSanitizer.ValidateHostname`:
+IP literals blocked (must use hostname), private/metadata hosts blocked,
+internal TLD suffixes (`.internal`, `.local`, `.corp`, `.lan`, `.intranet`,
+`.private`) blocked. If the resolved address is private, the IP is hidden
+from output. Count defaults to 1, max 10.
+
+`NetDns` resolves a hostname via `System.Net.Dns.GetHostAddressesAsync`.
+Same hostname validation as NetPing. **Private/reserved IPs are filtered
+from output** — even if the DNS server returns `10.0.0.5`, the agent never
+sees it. Prevents infrastructure probing.
+
+`NetTlsCert` connects to a remote host via `System.Net.Security.SslStream`,
+retrieves the TLS certificate, and returns subject, issuer, validity dates,
+thumbprint, serial number, and Subject Alternative Names (SANs). Port
+defaults to 443. Hostname validated by `Mk8UrlSanitizer.ValidateHostname`
+(same SSRF protection as `NetPing`/`NetDns`). Read-only — connect, read
+cert, disconnect. The certificate IS the server's public identity (designed
+to be shared with every client), so no secrets are exposed. Reports days
+until expiry with a warning if < 30 days.
+
+`NetHttpStatus` sends an HTTP HEAD request and returns only the status code
+and response headers — no body is downloaded. Lightweight health check.
+Same SSRF URL validation as `HttpGet` (scheme, host, port restrictions).
+Executed in-memory via `HttpClient`.
+
+### Archive Extraction (In-Memory, Pre-Validated)
+
+| Verb           | Args                     | Description                    |
+|----------------|--------------------------|--------------------------------|
+| ArchiveExtract | `[archivePath, outputDir]` | Extract .zip or .tar.gz safely |
+
+`ArchiveExtract` extracts archives using `System.IO.Compression` — no
+external process. Supported formats: `.zip`, `.tar.gz`, `.tgz`.
+
+**Pre-scan validation** (before ANY file is written to disk):
+
+1. **Path traversal**: every entry's resolved path must be inside the output
+   directory. Entries with `../` or absolute paths are rejected.
+2. **Blocked extensions**: Tier 2 write-blocked extensions (`.dll`, `.exe`,
+   `.js`, `.csproj`, etc.) are enforced per entry via `Mk8PathSanitizer.ResolveForWrite`.
+3. **GIGABLACKLIST**: `mk8.shell.env` / `mk8.shell.signed.env` cannot appear
+   in archives.
+4. **Symlinks**: entries with Unix symlink attributes are rejected (no
+   filesystem symlink is ever created).
+5. **Zip bombs**: cumulative extracted size is capped at 256 MB.
+
+If ANY entry fails validation, the entire extraction is aborted — nothing
+is written to disk.
 
 ## Security Model
 
@@ -1007,9 +1222,16 @@ Mk8PathSanitizer.ResolveForWrite()   ← + blocks executable extensions + projec
 Mk8ShellCompiler.CompileOperation()  ← verb dispatch
        │
        ├─ File/Dir/HTTP/Text/Env/Sys  → InMemory marker (.NET APIs)
-       ├─ FileTemplate/FilePatch       → InMemory (template/patch validation)
-       ├─ FileHash/DirTree             → InMemory (algorithm/depth validation)
-       └─ ProcRun                      → Mk8BinaryAllowlist + ValidateArgs
+       ├─ Text*(extended)/Json*      → InMemory (TextHash: algorithm, SysDateFormat: charset)
+       ├─ File inspection verbs      → InMemory (FileHead/Tail: line count bounds)
+       ├─ FileTemplate/FilePatch     → InMemory (template/patch validation)
+       ├─ FileHash/DirTree           → InMemory (algorithm/depth validation)
+       ├─ ClipboardSet/MathEval      → InMemory (MathEval: character validation)
+       ├─ OpenUrl                    → InMemory (SSRF URL validation)
+       ├─ NetPing/NetDns             → InMemory (hostname + SSRF validation)
+       ├─ NetTlsCert/NetHttpStatus   → InMemory (hostname/URL + SSRF validation)
+       ├─ ArchiveExtract             → InMemory (extension + path validation)
+       └─ ProcRun                    → Mk8BinaryAllowlist + ValidateArgs
        │
        ▼
 Mk8CompiledScript
@@ -1044,3 +1266,13 @@ This enables:
   operations.
 - **Compliance:** full traceability from agent request → compiled command →
   execution result.
+
+## Future Considerations
+
+The following features have been evaluated but carry residual risk that
+cannot be fully mitigated within mk8.shell's security model.
+
+| Feature | Risk | Why it stays out |
+|---|---|---|
+| `traceroute` | Reveals internal network hops, router IPs, topology | The useful output IS the internal hops — any implementation that strips them isn't useful. `NetPing` covers the "is it reachable / how fast" use case. |
+| `ClipboardGet` (read clipboard) | Exfiltration of user-copied passwords/secrets | Would need user consent prompt or clipboard content filtering — not feasible in headless agent context. |

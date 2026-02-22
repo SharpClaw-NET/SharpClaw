@@ -19,6 +19,54 @@ public static class Mk8UrlSanitizer
 
     private static readonly HashSet<int> AllowedPorts = [80, 443, -1];
 
+    /// <summary>
+    /// Blocked hostname patterns for DNS/ping operations.
+    /// Prevents probing internal infrastructure.
+    /// </summary>
+    private static readonly string[] BlockedHostSuffixes =
+    [
+        ".internal", ".local", ".corp", ".lan", ".intranet", ".private",
+    ];
+
+    /// <summary>
+    /// Validates a hostname for use with NetPing/NetDns. Blocks:
+    /// private/metadata hosts, IP literals, internal suffixes.
+    /// </summary>
+    public static void ValidateHostname(string hostname)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(hostname);
+
+        if (hostname.Length > 253)
+            throw new Mk8UrlViolationException(hostname,
+                "Hostname exceeds maximum length of 253 characters.");
+
+        // Block IP address literals — force DNS resolution only.
+        if (System.Net.IPAddress.TryParse(hostname, out _))
+            throw new Mk8UrlViolationException(hostname,
+                "IP address literals are not allowed. Use a hostname.");
+
+        // Block known metadata/internal hosts.
+        if (BlockedHosts.Contains(hostname))
+            throw new Mk8UrlViolationException(hostname,
+                $"Host '{hostname}' is blocked.");
+
+        // Block internal TLD patterns.
+        foreach (var suffix in BlockedHostSuffixes)
+        {
+            if (hostname.EndsWith(suffix, StringComparison.OrdinalIgnoreCase))
+                throw new Mk8UrlViolationException(hostname,
+                    $"Hostname with suffix '{suffix}' is blocked.");
+        }
+
+        // Validate charset: alphanumeric, hyphens, dots only.
+        foreach (var ch in hostname)
+        {
+            if (!char.IsLetterOrDigit(ch) && ch != '-' && ch != '.')
+                throw new Mk8UrlViolationException(hostname,
+                    $"Invalid character '{ch}' in hostname.");
+        }
+    }
+
     public static Uri Validate(string rawUrl)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(rawUrl);

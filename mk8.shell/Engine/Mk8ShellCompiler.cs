@@ -190,6 +190,7 @@ public sealed class Mk8ShellCompiler
             Mk8ShellVerb.FileList   => InMemory(op.Verb, RequireArgs(op, 1, 2)),
             Mk8ShellVerb.FileCopy   => InMemory(op.Verb, RequireArgs(op, 2, 2)),
             Mk8ShellVerb.FileMove   => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.FileInfo   => InMemory(op.Verb, RequireArgs(op, 1, 1)),
 
             Mk8ShellVerb.DirCreate  => InMemory(op.Verb, RequireArgs(op, 1, 1)),
             Mk8ShellVerb.DirDelete  => InMemory(op.Verb, RequireArgs(op, 1, 1)),
@@ -213,6 +214,41 @@ public sealed class Mk8ShellCompiler
             Mk8ShellVerb.JsonParse   => InMemory(op.Verb, RequireArgs(op, 1, 1)),
             Mk8ShellVerb.JsonQuery   => InMemory(op.Verb, RequireArgs(op, 2, 2)),
 
+            // ── Extended text manipulation (pure string ops) ──────
+            Mk8ShellVerb.TextSplit        => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextJoin         => InMemory(op.Verb, RequireArgs(op, 2, 33)),
+            Mk8ShellVerb.TextTrim         => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextLength       => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextSubstring    => InMemory(op.Verb, RequireArgs(op, 2, 3)),
+            Mk8ShellVerb.TextLines        => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextToUpper      => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextToLower      => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextBase64Encode => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextBase64Decode => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextUrlEncode    => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextUrlDecode    => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextHtmlEncode   => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextContains     => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextStartsWith   => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextEndsWith     => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextMatch        => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.TextHash         => CompileTextHash(op),
+            Mk8ShellVerb.TextSort         => InMemory(op.Verb, RequireArgs(op, 1, 2)),
+            Mk8ShellVerb.TextUniq         => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.TextCount        => InMemory(op.Verb, RequireArgs(op, 1, 2)),
+            Mk8ShellVerb.JsonMerge        => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+
+            // ── File inspection (read-only, in-memory) ────────────
+            Mk8ShellVerb.FileLineCount => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.FileHead      => CompileFileHeadTail(op),
+            Mk8ShellVerb.FileTail      => CompileFileHeadTail(op),
+            Mk8ShellVerb.FileSearch    => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.FileDiff      => InMemory(op.Verb, RequireArgs(op, 2, 2)),
+            Mk8ShellVerb.FileGlob      => CompileFileGlob(op),
+
+            // ── Directory inspection ──────────────────────────────
+            Mk8ShellVerb.DirFileCount  => InMemory(op.Verb, RequireArgs(op, 1, 2)),
+
             Mk8ShellVerb.EnvGet     => InMemory(op.Verb, RequireArgs(op, 1, 1)),
 
             Mk8ShellVerb.SysWhoAmI   => InMemory(op.Verb, []),
@@ -220,6 +256,17 @@ public sealed class Mk8ShellCompiler
             Mk8ShellVerb.SysHostname => InMemory(op.Verb, []),
             Mk8ShellVerb.SysUptime   => InMemory(op.Verb, []),
             Mk8ShellVerb.SysDate     => InMemory(op.Verb, []),
+            Mk8ShellVerb.SysDiskUsage => InMemory(op.Verb, RequireArgs(op, 0, 1)),
+            Mk8ShellVerb.SysDirSize   => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+            Mk8ShellVerb.SysMemory    => InMemory(op.Verb, []),
+            Mk8ShellVerb.SysProcessList => InMemory(op.Verb, []),
+
+            // ── Extended system info ──────────────────────────────
+            Mk8ShellVerb.SysDateFormat  => CompileSysDateFormat(op),
+            Mk8ShellVerb.SysTimestamp   => InMemory(op.Verb, []),
+            Mk8ShellVerb.SysOsInfo      => InMemory(op.Verb, []),
+            Mk8ShellVerb.SysCpuCount    => InMemory(op.Verb, []),
+            Mk8ShellVerb.SysTempDir     => InMemory(op.Verb, []),
 
             // ── Advanced filesystem (in-memory) ───────────────────
             Mk8ShellVerb.FileTemplate => CompileFileTemplate(op),
@@ -228,6 +275,24 @@ public sealed class Mk8ShellCompiler
 
             // ── Recursive directory listing (in-memory, read-only) ─
             Mk8ShellVerb.DirTree      => CompileDirTree(op),
+
+            // ── Clipboard (in-memory, write-only) ─────────────────
+            Mk8ShellVerb.ClipboardSet => InMemory(op.Verb, RequireArgs(op, 1, 1)),
+
+            // ── Math (in-memory, safe arithmetic) ─────────────────
+            Mk8ShellVerb.MathEval     => CompileMathEval(op),
+
+            // ── URL validation (in-memory) ────────────────────────
+            Mk8ShellVerb.OpenUrl      => CompileOpenUrl(op),
+
+            // ── Network diagnostics (in-memory) ───────────────────
+            Mk8ShellVerb.NetPing      => CompileNetPing(op),
+            Mk8ShellVerb.NetDns       => CompileNetDns(op),
+            Mk8ShellVerb.NetTlsCert   => CompileNetTlsCert(op),
+            Mk8ShellVerb.NetHttpStatus => CompileNetHttpStatus(op),
+
+            // ── Archive extraction (in-memory, pre-validated) ─────
+            Mk8ShellVerb.ArchiveExtract => CompileArchiveExtract(op),
 
             // ── Batch/Control/Include verbs should never reach the compiler ─
             Mk8ShellVerb.ForEach or Mk8ShellVerb.If
@@ -283,7 +348,28 @@ public sealed class Mk8ShellCompiler
             or Mk8ShellVerb.DirCreate or Mk8ShellVerb.DirDelete
             or Mk8ShellVerb.FileHash
             or Mk8ShellVerb.DirTree
+            or Mk8ShellVerb.FileInfo
+            or Mk8ShellVerb.SysDirSize
+            or Mk8ShellVerb.FileLineCount
+            or Mk8ShellVerb.FileHead or Mk8ShellVerb.FileTail
+            or Mk8ShellVerb.DirFileCount
+            or Mk8ShellVerb.FileGlob
                 => ValidateReadPaths(args, sandboxRoot),
+
+            // FileSearch: args[0] = path (read), args[1] = search literal (not a path).
+            Mk8ShellVerb.FileSearch
+                => ValidateReadPaths(args, sandboxRoot),
+
+            // FileDiff: both args are read paths.
+            Mk8ShellVerb.FileDiff
+                => ValidateDualReadPaths(args, sandboxRoot),
+
+            Mk8ShellVerb.SysDiskUsage when args.Length > 0
+                => ValidateReadPaths(args, sandboxRoot),
+
+            // ArchiveExtract: args[0] = archive (read), args[1] = output dir (write).
+            Mk8ShellVerb.ArchiveExtract
+                => ValidateArchiveExtractPaths(args, sandboxRoot),
 
             Mk8ShellVerb.FileWrite or Mk8ShellVerb.FileAppend
                 => ValidateWritePaths(args, sandboxRoot),
@@ -323,6 +409,15 @@ public sealed class Mk8ShellCompiler
             args[0] = Mk8PathSanitizer.Resolve(args[0], sandboxRoot);
         if (args.Length > 1)
             args[1] = Mk8PathSanitizer.ResolveForWrite(args[1], sandboxRoot);
+        return args;
+    }
+
+    private static string[] ValidateDualReadPaths(string[] args, string sandboxRoot)
+    {
+        if (args.Length > 0)
+            args[0] = Mk8PathSanitizer.Resolve(args[0], sandboxRoot);
+        if (args.Length > 1)
+            args[1] = Mk8PathSanitizer.Resolve(args[1], sandboxRoot);
         return args;
     }
 
@@ -434,6 +529,238 @@ public sealed class Mk8ShellCompiler
         }
 
         return InMemory(Mk8ShellVerb.DirTree, op.Args);
+    }
+
+    /// <summary>Max expression length for <see cref="Mk8ShellVerb.MathEval"/>.</summary>
+    private const int MathEvalMaxLength = 256;
+
+    /// <summary>
+    /// Allowed characters in a MathEval expression. Only digits, decimal
+    /// point, arithmetic operators, parentheses, and whitespace. No
+    /// letters, no functions, no variables — pure arithmetic.
+    /// </summary>
+    private static readonly HashSet<char> MathEvalAllowed =
+    [
+        '0', '1', '2', '3', '4', '5', '6', '7', '8', '9',
+        '.', '+', '-', '*', '/', '%', '(', ')', ' ',
+    ];
+
+    private static Mk8CompiledCommand CompileMathEval(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 1, 1);
+        var expr = op.Args[0];
+
+        if (expr.Length > MathEvalMaxLength)
+            throw new Mk8CompileException(Mk8ShellVerb.MathEval,
+                $"Expression length {expr.Length} exceeds maximum of {MathEvalMaxLength}.");
+
+        if (string.IsNullOrWhiteSpace(expr))
+            throw new Mk8CompileException(Mk8ShellVerb.MathEval,
+                "Expression cannot be empty.");
+
+        foreach (var ch in expr)
+        {
+            if (!MathEvalAllowed.Contains(ch))
+                throw new Mk8CompileException(Mk8ShellVerb.MathEval,
+                    $"Invalid character '{ch}' in expression. " +
+                    "Only digits, decimal point, +, -, *, /, %, (), and spaces are allowed.");
+        }
+
+        return InMemory(Mk8ShellVerb.MathEval, op.Args);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Extended text/file/system verb compilation
+    // ═══════════════════════════════════════════════════════════════
+
+    private static Mk8CompiledCommand CompileTextHash(Mk8ShellOperation op)
+    {
+        if (op.Args.Length < 1 || op.Args.Length > 2)
+            throw new Mk8CompileException(Mk8ShellVerb.TextHash,
+                $"Expected 1–2 argument(s), got {op.Args.Length}.");
+
+        if (op.Args.Length > 1 && !AllowedHashAlgorithms.Contains(op.Args[1]))
+            throw new Mk8CompileException(Mk8ShellVerb.TextHash,
+                $"Unsupported hash algorithm '{op.Args[1]}'. " +
+                "Supported: sha256, sha512, md5.");
+
+        return InMemory(Mk8ShellVerb.TextHash, op.Args);
+    }
+
+    /// <summary>Max lines for FileHead/FileTail.</summary>
+    private const int FileHeadTailMaxLines = 1000;
+
+    private static Mk8CompiledCommand CompileFileHeadTail(Mk8ShellOperation op)
+    {
+        if (op.Args.Length < 1 || op.Args.Length > 2)
+            throw new Mk8CompileException(op.Verb,
+                $"Expected 1–2 argument(s), got {op.Args.Length}.");
+
+        if (op.Args.Length > 1)
+        {
+            if (!int.TryParse(op.Args[1], out var lines) || lines < 1)
+                throw new Mk8CompileException(op.Verb,
+                    $"Line count must be a positive integer, got '{op.Args[1]}'.");
+
+            if (lines > FileHeadTailMaxLines)
+                throw new Mk8CompileException(op.Verb,
+                    $"Line count {lines} exceeds maximum of {FileHeadTailMaxLines}.");
+        }
+
+        return InMemory(op.Verb, op.Args);
+    }
+
+    /// <summary>
+    /// Allowed characters in a <see cref="Mk8ShellVerb.SysDateFormat"/>
+    /// format string. Only date/time specifiers, separators, and spaces.
+    /// </summary>
+    private static readonly HashSet<char> DateFormatAllowed =
+    [
+        'y', 'M', 'd', 'H', 'h', 'm', 's', 'f', 'F', 'z', 'Z', 'K',
+        't', 'T', 'g', ':', '-', '/', '.', ' ', '\'', 'o', 'O', 'r', 'R',
+        'u', 'U', 'D',
+    ];
+
+    private static Mk8CompiledCommand CompileSysDateFormat(Mk8ShellOperation op)
+    {
+        if (op.Args.Length > 1)
+            throw new Mk8CompileException(Mk8ShellVerb.SysDateFormat,
+                $"Expected 0–1 argument(s), got {op.Args.Length}.");
+
+        if (op.Args.Length == 1)
+        {
+            var fmt = op.Args[0];
+            if (fmt.Length > 32)
+                throw new Mk8CompileException(Mk8ShellVerb.SysDateFormat,
+                    $"Format string length {fmt.Length} exceeds maximum of 32.");
+
+            foreach (var ch in fmt)
+            {
+                if (!DateFormatAllowed.Contains(ch) && !char.IsDigit(ch))
+                    throw new Mk8CompileException(Mk8ShellVerb.SysDateFormat,
+                        $"Invalid character '{ch}' in date format string.");
+            }
+        }
+
+        return InMemory(Mk8ShellVerb.SysDateFormat, op.Args);
+    }
+
+    private static Mk8CompiledCommand CompileOpenUrl(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 1, 1);
+        // Reuse existing SSRF validation — same rules as HttpGet.
+        Mk8UrlSanitizer.Validate(op.Args[0]);
+        return InMemory(Mk8ShellVerb.OpenUrl, op.Args);
+    }
+
+    /// <summary>Max ping count.</summary>
+    private const int NetPingMaxCount = 10;
+
+    private static Mk8CompiledCommand CompileNetPing(Mk8ShellOperation op)
+    {
+        // args[0] = hostname, args[1] = count (optional, default 1).
+        if (op.Args.Length < 1 || op.Args.Length > 2)
+            throw new Mk8CompileException(Mk8ShellVerb.NetPing,
+                $"Expected 1–2 argument(s), got {op.Args.Length}.");
+
+        Mk8UrlSanitizer.ValidateHostname(op.Args[0]);
+
+        if (op.Args.Length > 1)
+        {
+            if (!int.TryParse(op.Args[1], out var count) || count < 1 || count > NetPingMaxCount)
+                throw new Mk8CompileException(Mk8ShellVerb.NetPing,
+                    $"Count must be 1–{NetPingMaxCount}. Got '{op.Args[1]}'.");
+        }
+
+        return InMemory(Mk8ShellVerb.NetPing, op.Args);
+    }
+
+    private static Mk8CompiledCommand CompileNetDns(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 1, 1);
+        Mk8UrlSanitizer.ValidateHostname(op.Args[0]);
+        return InMemory(Mk8ShellVerb.NetDns, op.Args);
+    }
+
+    private static Mk8CompiledCommand CompileNetTlsCert(Mk8ShellOperation op)
+    {
+        if (op.Args.Length < 1 || op.Args.Length > 2)
+            throw new Mk8CompileException(Mk8ShellVerb.NetTlsCert,
+                $"Expected 1–2 argument(s), got {op.Args.Length}.");
+
+        Mk8UrlSanitizer.ValidateHostname(op.Args[0]);
+
+        if (op.Args.Length > 1)
+        {
+            if (!int.TryParse(op.Args[1], out var port) || port < 1 || port > 65535)
+                throw new Mk8CompileException(Mk8ShellVerb.NetTlsCert,
+                    $"Port must be 1–65535, got '{op.Args[1]}'.");
+        }
+
+        return InMemory(Mk8ShellVerb.NetTlsCert, op.Args);
+    }
+
+    private static Mk8CompiledCommand CompileNetHttpStatus(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 1, 1);
+        Mk8UrlSanitizer.Validate(op.Args[0]);
+        return InMemory(Mk8ShellVerb.NetHttpStatus, op.Args);
+    }
+
+    /// <summary>Max depth for <see cref="Mk8ShellVerb.FileGlob"/>.</summary>
+    private const int FileGlobMaxDepth = 10;
+    /// <summary>Max results for <see cref="Mk8ShellVerb.FileGlob"/>.</summary>
+    private const int FileGlobMaxResults = 1000;
+
+    private static Mk8CompiledCommand CompileFileGlob(Mk8ShellOperation op)
+    {
+        if (op.Args.Length < 2 || op.Args.Length > 3)
+            throw new Mk8CompileException(Mk8ShellVerb.FileGlob,
+                $"Expected 2–3 argument(s), got {op.Args.Length}.");
+
+        if (op.Args.Length > 2)
+        {
+            if (!int.TryParse(op.Args[2], out var depth) || depth < 1)
+                throw new Mk8CompileException(Mk8ShellVerb.FileGlob,
+                    $"Depth must be a positive integer, got '{op.Args[2]}'.");
+
+            if (depth > FileGlobMaxDepth)
+                throw new Mk8CompileException(Mk8ShellVerb.FileGlob,
+                    $"Depth {depth} exceeds maximum of {FileGlobMaxDepth}.");
+        }
+
+        return InMemory(Mk8ShellVerb.FileGlob, op.Args);
+    }
+
+    /// <summary>Allowed archive extensions for <see cref="Mk8ShellVerb.ArchiveExtract"/>.</summary>
+    private static readonly HashSet<string> AllowedArchiveExtensions =
+        new(StringComparer.OrdinalIgnoreCase) { ".zip", ".gz", ".tgz" };
+
+    private static Mk8CompiledCommand CompileArchiveExtract(Mk8ShellOperation op)
+    {
+        // args[0] = archive path (read), args[1] = output directory (write).
+        RequireArgs(op, 2, 2);
+
+        var ext = Path.GetExtension(op.Args[0]);
+        // Allow .tar.gz via double extension check.
+        if (op.Args[0].EndsWith(".tar.gz", StringComparison.OrdinalIgnoreCase))
+            ext = ".tar.gz";
+
+        if (!AllowedArchiveExtensions.Contains(ext) && ext != ".tar.gz")
+            throw new Mk8CompileException(Mk8ShellVerb.ArchiveExtract,
+                $"Unsupported archive extension '{ext}'. " +
+                "Supported: .zip, .tar.gz, .tgz.");
+
+        return InMemory(Mk8ShellVerb.ArchiveExtract, op.Args);
+    }
+
+    private static string[] ValidateArchiveExtractPaths(string[] args, string sandboxRoot)
+    {
+        if (args.Length > 0)
+            args[0] = Mk8PathSanitizer.Resolve(args[0], sandboxRoot);
+        if (args.Length > 1)
+            args[1] = Mk8PathSanitizer.Resolve(args[1], sandboxRoot);
+        return args;
     }
 
     // ═══════════════════════════════════════════════════════════════

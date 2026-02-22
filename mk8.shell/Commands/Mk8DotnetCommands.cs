@@ -95,6 +95,9 @@ public static class Mk8DotnetCommands
             // ── Informational ─────────────────────────────────────
             new("dotnet version", "dotnet", ["--version"]),
             new("dotnet info", "dotnet", ["--info"]),
+            new("dotnet list-sdks", "dotnet", ["--list-sdks"]),
+            new("dotnet list-runtimes", "dotnet", ["--list-runtimes"]),
+            new("dotnet tool list", "dotnet", ["tool", "list"]),
 
             // ── Build / publish / test / clean / restore / format ──
             new("dotnet build", "dotnet", ["build"],

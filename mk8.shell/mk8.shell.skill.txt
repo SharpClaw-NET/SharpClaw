@@ -48,6 +48,7 @@ FileList       [path, pattern?]      list files, optional glob
 FileCopy       [src, dst]            copy file
 FileMove       [src, dst]            move/rename file
 FileHash       [path, algorithm?]    sha256 (default), sha512, md5
+FileInfo       [path]                size, created, modified, attributes
 
 --- files: structured edits ---
 FileTemplate   [outputPath]          requires "template" field (see below)
@@ -86,15 +87,77 @@ TextReplace    [input, old, new]     literal replacement
 JsonParse      [input]               validate + pretty-print
 JsonQuery      [input, jsonpath]     extract value
 
+--- text: extended (pure string ops, no I/O) ---
+TextSplit      [input, delimiter]    split, newline-separated output
+TextJoin       [delimiter, parts...] join 1-32 parts with delimiter
+TextTrim       [input]               trim whitespace
+TextLength     [input]               character count
+TextSubstring  [input, start, len?]  extract substring (0-based)
+TextLines      [input]               line count + content
+TextToUpper    [input]               uppercase (invariant)
+TextToLower    [input]               lowercase (invariant)
+TextBase64Encode [input]             base64-encode UTF-8 string
+TextBase64Decode [input]             decode base64 to UTF-8
+TextUrlEncode  [input]               URL-encode
+TextUrlDecode  [input]               URL-decode
+TextHtmlEncode [input]               HTML-encode
+TextContains   [input, substring]    returns "True"/"False"
+TextStartsWith [input, value]        returns "True"/"False"
+TextEndsWith   [input, value]        returns "True"/"False"
+TextMatch      [input, pattern]      regex match, "True"/"False", 2s timeout
+TextHash       [input, algorithm?]   hash string (sha256/sha512/md5)
+TextSort       [input, direction?]   sort lines: asc (default), desc, numeric
+TextUniq       [input]               remove consecutive duplicate lines
+TextCount      [input, substring?]   count occurrences, or lines/words/chars
+JsonMerge      [json1, json2]        shallow-merge objects (second wins)
+
+--- file inspection (read-only, in-memory) ---
+FileLineCount  [path]                line count
+FileHead       [path, lines?]        first N lines (default 10, max 1000)
+FileTail       [path, lines?]        last N lines (default 10, max 1000)
+FileSearch     [path, literal]       literal substring match with line numbers
+FileDiff       [path1, path2]        line-by-line diff
+FileGlob       [path, pattern, depth?] recursive file search by glob (max depth 10, max 1000)
+
+--- directory inspection ---
+DirFileCount   [path, pattern?]      count files, optional glob
+
 --- environment (read-only) ---
 EnvGet         [name]                allowlist only (see below)
 
---- system info (no args) ---
+--- system info (no args unless noted) ---
 SysWhoAmI      []                    current user
 SysPwd         []                    working directory
 SysHostname    []                    machine name
 SysUptime      []
 SysDate        []                    UTC
+SysDiskUsage   [path?]               drive space (total/available/used)
+SysDirSize     [path]                recursive directory size in bytes
+SysMemory      []                    process memory + GC heap
+SysProcessList []                    running processes (PID + name, max 200)
+SysDateFormat  [format?]             formatted UTC date (restricted chars, max 32)
+SysTimestamp   []                    Unix epoch seconds
+SysOsInfo      []                    OS + arch + .NET runtime
+SysCpuCount    []                    processor count
+SysTempDir     []                    temp directory path (read-only)
+
+--- clipboard (write-only) ---
+ClipboardSet   [content]             set OS clipboard text (no read)
+
+--- math (safe arithmetic) ---
+MathEval       [expression]          +, -, *, /, %, (), decimals only
+
+--- url validation (in-memory, no browser launch) ---
+OpenUrl        [url]                 validate HTTPS URL, return as string
+
+--- network diagnostics (in-memory, no process) ---
+NetPing        [host, count?]        ICMP echo, 1-10 pings, SSRF-protected
+NetDns         [hostname]            DNS lookup, private IPs hidden
+NetTlsCert     [hostname, port?]     TLS cert inspection (expiry, subject, SANs)
+NetHttpStatus  [url]                 HTTP HEAD — status code + headers only
+
+--- archive extraction (in-memory, pre-validated) ---
+ArchiveExtract [archivePath, outputDir]  extract .zip/.tar.gz safely
 
 --- control flow (expanded at compile time, not runtime) ---
 ForEach        []                    requires "forEach" field
@@ -314,6 +377,9 @@ ComposedWords is NOT concatenation. "Api 1 2 3" (4 words) works.
 
   dotnet --version
   dotnet --info
+  dotnet --list-sdks
+  dotnet --list-runtimes
+  dotnet tool list
   dotnet build       [--configuration Release|Debug] [--no-restore] [-o path]
   dotnet publish     [--configuration Release|Debug] [--no-restore] [-o path]
   dotnet test        [--configuration Release|Debug] [--no-restore] [--no-build]
@@ -427,7 +493,16 @@ Digits: 0-9
 
   cargo --version
 
---- archive commands (create/list ONLY, no extraction) ---
+--- version checks (read-only, no args) ---
+
+  python3 --version       (version-check exception — otherwise blocked)
+  ruby --version          (version-check exception — otherwise blocked)
+  java --version
+  javac --version
+  go version
+  rustc --version
+
+--- archive commands (create/list via ProcRun) ---
 
   tar -tf <path>
   tar -cf <out> <inputs...>
@@ -451,6 +526,18 @@ Digits: 0-9
   base64 <path>
   base64 -d <path>
 
+--- openssl certificate inspection (read-only, SandboxPath only) ---
+
+  openssl x509 -in <cert> -noout -text         full cert dump
+  openssl x509 -in <cert> -noout -enddate      expiry date
+  openssl x509 -in <cert> -noout -subject       subject line
+  openssl x509 -in <cert> -noout -issuer        issuer line
+  openssl x509 -in <cert> -noout -serial        serial number
+  openssl x509 -in <cert> -noout -fingerprint -sha256  SHA-256 fingerprint
+
+  Only x509 -in <file> -noout is whitelisted. No other openssl subcommand
+  (s_client, enc, genrsa, req, etc.) is registered.
+
 --- permanently blocked binaries (cannot be overridden) ---
 
   bash sh zsh fish dash cmd powershell pwsh
@@ -458,6 +545,9 @@ Digits: 0-9
   npx env xargs nohup sudo su doas pkexec
   curl wget find ssh scp rsync nc socat
   chmod chown systemctl crontab dd strace
+
+  Exception: python3 --version and ruby --version are allowed via
+  version-check carve-out. ALL other arguments remain blocked.
 
 
 == runtime configuration (admin-set, the ONLY runtime exception) ======
@@ -553,6 +643,19 @@ No .. segments. No absolute paths in path components.
 - Paths that escape the sandbox via .. or absolute paths
 - $PREV or process-captured variables in ProcRun args
 - $ characters inside template values or patch find/replace
+- MathEval with letters, functions, or expressions longer than 256 chars
+- OpenUrl with non-https scheme, private IPs, or embedded credentials
+- NetPing/NetDns with IP literals, .internal/.local/.corp hostnames
+- ArchiveExtract with path traversal, symlinks, blocked extensions, or >256MB
+- TextSubstring with negative start or length
+- TextHash/TextMatch with unsupported algorithm or invalid regex
+- FileHead/FileTail with line count > 1000 or < 1
+- SysDateFormat with format string > 32 chars or invalid characters
+- JsonMerge with non-object JSON inputs
+- FileGlob with depth > 10
+- NetTlsCert with port outside 1-65535
+- NetHttpStatus with non-https URL or private IP
+- openssl subcommands other than x509 -in <file> -noout
 - More than 1024 total operations after expansion
 - ForEach with more than 256 items
 - Nesting depth greater than 3
@@ -665,4 +768,217 @@ No .. segments. No absolute paths in path components.
     { "verb": "ProcRun", "args": ["git", "switch", "feature/api"] },
     { "verb": "ProcRun", "args": ["git", "stash", "pop"] }
   ]
+}
+
+--- check file metadata ---
+{
+  "operations": [
+    { "verb": "FileInfo", "args": ["$WORKSPACE/bin/app.dll"] }
+  ]
+}
+
+--- check disk space and directory size ---
+{
+  "operations": [
+    { "verb": "SysDiskUsage", "args": [] },
+    { "verb": "SysDirSize", "args": ["$WORKSPACE/bin"] },
+    { "verb": "SysMemory", "args": [] }
+  ]
+}
+
+--- copy result to clipboard ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "build"], "captureAs": "BUILD" },
+    { "verb": "ClipboardSet", "args": ["$BUILD"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- calculate and write result ---
+{
+  "operations": [
+    { "verb": "MathEval", "args": ["(1024 * 1024) / 8"], "captureAs": "RESULT" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/calc.txt", "$RESULT"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- validate a URL ---
+{
+  "operations": [
+    { "verb": "OpenUrl", "args": ["https://api.example.com/health"], "captureAs": "URL" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/url.txt", "$URL"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- ping a host ---
+{
+  "operations": [
+    { "verb": "NetPing", "args": ["api.example.com", "3"] }
+  ]
+}
+
+--- DNS lookup ---
+{
+  "operations": [
+    { "verb": "NetDns", "args": ["api.example.com"], "captureAs": "DNS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/dns.txt", "$DNS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- extract archive ---
+{
+  "operations": [
+    { "verb": "ArchiveExtract", "args": ["$WORKSPACE/data.zip", "$WORKSPACE/extracted"] },
+    { "verb": "DirTree", "args": ["$WORKSPACE/extracted"] }
+  ]
+}
+
+--- check installed runtimes ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "--list-sdks"], "captureAs": "SDKS" },
+    { "verb": "ProcRun", "args": ["python3", "--version"], "captureAs": "PY" },
+    { "verb": "ProcRun", "args": ["java", "--version"], "captureAs": "JAVA" },
+    { "verb": "ProcRun", "args": ["go", "version"], "captureAs": "GO" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/runtime-versions.txt",
+      "dotnet:\n$SDKS\n\npython3:\n$PY\n\njava:\n$JAVA\n\ngo:\n$GO"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- search file for literal text ---
+{
+  "operations": [
+    { "verb": "FileSearch", "args": ["$WORKSPACE/src/config.json", "port"], "captureAs": "MATCHES" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/search-results.txt", "$MATCHES"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- compare two config files ---
+{
+  "operations": [
+    { "verb": "FileDiff", "args": ["$WORKSPACE/config.yaml", "$WORKSPACE/config.backup.yaml"] }
+  ]
+}
+
+--- first 20 lines of a log file ---
+{
+  "operations": [
+    { "verb": "FileHead", "args": ["$WORKSPACE/logs/app.log", "20"] }
+  ]
+}
+
+--- build, hash the output, and base64-encode ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "build"], "captureAs": "BUILD" },
+    { "verb": "TextHash", "args": ["$BUILD", "sha256"], "captureAs": "HASH" },
+    { "verb": "TextBase64Encode", "args": ["$HASH"], "captureAs": "B64" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/build-hash.b64", "$B64"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- merge two JSON configs ---
+{
+  "operations": [
+    { "verb": "FileRead", "args": ["$WORKSPACE/defaults.json"], "captureAs": "DEFAULTS" },
+    { "verb": "FileRead", "args": ["$WORKSPACE/overrides.json"], "captureAs": "OVERRIDES" },
+    { "verb": "JsonMerge", "args": ["$DEFAULTS", "$OVERRIDES"], "captureAs": "MERGED" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/config.json", "$MERGED"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- split build output into lines and count ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "build"], "captureAs": "BUILD" },
+    { "verb": "TextLines", "args": ["$BUILD"], "captureAs": "LINES" },
+    { "verb": "TextContains", "args": ["$BUILD", "Build succeeded"], "captureAs": "OK" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/build-summary.txt", "$LINES\nSuccess: $OK"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- system environment snapshot ---
+{
+  "operations": [
+    { "verb": "SysOsInfo", "args": [], "captureAs": "OS" },
+    { "verb": "SysCpuCount", "args": [], "captureAs": "CPU" },
+    { "verb": "SysMemory", "args": [], "captureAs": "MEM" },
+    { "verb": "SysTimestamp", "args": [], "captureAs": "TS" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/env-snapshot.txt",
+      "Timestamp: $TS\n\n$OS\n\nCPUs: $CPU\n\n$MEM"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- count files in build output ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "publish", "-o", "$WORKSPACE/out"] },
+    { "verb": "DirFileCount", "args": ["$WORKSPACE/out"], "captureAs": "COUNT" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/publish-count.txt", "$COUNT files published"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check TLS certificate expiry ---
+{
+  "operations": [
+    { "verb": "NetTlsCert", "args": ["api.example.com"], "captureAs": "CERT" },
+    { "verb": "TextContains", "args": ["$CERT", "EXPIRING SOON"], "captureAs": "EXPIRING" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/cert-report.txt", "$CERT"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- health check with status only (no body downloaded) ---
+{
+  "operations": [
+    { "verb": "NetHttpStatus", "args": ["https://api.example.com/health"], "captureAs": "STATUS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/health.txt", "$STATUS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- find all .cs files recursively ---
+{
+  "operations": [
+    { "verb": "FileGlob", "args": ["$WORKSPACE/src", "*.cs", "8"], "captureAs": "FILES" },
+    { "verb": "TextCount", "args": ["$FILES"], "captureAs": "STATS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/cs-files.txt", "$FILES\n\n$STATS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- sort and deduplicate build warnings ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "build"], "captureAs": "BUILD" },
+    { "verb": "TextSort", "args": ["$BUILD"], "captureAs": "SORTED" },
+    { "verb": "TextUniq", "args": ["$SORTED"], "captureAs": "UNIQUE" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/warnings.txt", "$UNIQUE"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- inspect a certificate file with openssl ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["openssl", "x509", "-in", "$WORKSPACE/certs/server.pem", "-noout", "-text"], "captureAs": "CERT_TEXT" },
+    { "verb": "ProcRun", "args": ["openssl", "x509", "-in", "$WORKSPACE/certs/server.pem", "-noout", "-enddate"], "captureAs": "EXPIRY" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/cert-info.txt", "$CERT_TEXT\n\nExpiry: $EXPIRY"] }
+  ],
+  "options": { "pipeStepOutput": true }
 }
