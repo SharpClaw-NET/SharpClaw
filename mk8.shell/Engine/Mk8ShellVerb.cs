@@ -555,4 +555,74 @@ public enum Mk8ShellVerb
     /// compile-time predicate is true. No branching at runtime.
     /// </summary>
     If,
+
+    // ── mk8.shell introspection (read-only, resolved at compile time) ──
+
+    /// <summary>
+    /// Returns all effective gigablacklist patterns (compile-time +
+    /// env-sourced) as a newline-separated list. Read-only, no args.
+    /// </summary>
+    Mk8Blacklist,
+
+    /// <summary>
+    /// Returns the words in a named vocabulary/word list as a
+    /// newline-separated sorted list. Args: <c>[listName]</c>.
+    /// </summary>
+    Mk8Vocab,
+
+    /// <summary>
+    /// Returns all vocabulary/word list names as a newline-separated
+    /// sorted list. Read-only, no args.
+    /// </summary>
+    Mk8VocabList,
+
+    /// <summary>
+    /// Returns FreeText status for a command: whether it's enabled,
+    /// the max length, and the fallback word list. Args: <c>[commandKey]</c>
+    /// (e.g., <c>"git commit"</c>, <c>"git tag create"</c>,
+    /// <c>"dotnet ef migrations add"</c>). No args returns the global
+    /// FreeText config.
+    /// </summary>
+    Mk8FreeText,
+
+    /// <summary>
+    /// Returns all merged environment variables (global base.env +
+    /// sandbox signed env) as <c>KEY=VALUE</c> lines. Values containing
+    /// blocked env patterns (<c>KEY=</c>, <c>SECRET=</c>, etc.) are
+    /// redacted. Read-only, no args.
+    /// </summary>
+    Mk8Env,
+
+    /// <summary>
+    /// Returns mk8.shell runtime information: sandbox ID, workspace
+    /// root, OS, .NET runtime, architecture, processor count, and
+    /// the current user. Read-only, no args.
+    /// </summary>
+    Mk8Info,
+
+    /// <summary>
+    /// Returns all registered ProcRun command template descriptions
+    /// as a newline-separated list. Read-only, no args.
+    /// </summary>
+    Mk8Templates,
+
+    /// <summary>
+    /// Returns all available <see cref="Mk8ShellVerb"/> names as a
+    /// newline-separated sorted list. Read-only, no args.
+    /// </summary>
+    Mk8Verbs,
+
+    /// <summary>
+    /// Returns the mk8.shell skill reference (agent-facing quick
+    /// reference with verb tables, slot types, examples, and constraints).
+    /// Read-only, no args. Loaded from embedded resource at compile time.
+    /// </summary>
+    Mk8Skills,
+
+    /// <summary>
+    /// Returns the full mk8.shell documentation (detailed spec with
+    /// security model, design rationale, and all verb reference tables).
+    /// Read-only, no args. Loaded from embedded resource at compile time.
+    /// </summary>
+    Mk8Docs,
 }

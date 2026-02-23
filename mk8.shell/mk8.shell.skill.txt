@@ -266,6 +266,18 @@ SysServiceStatus [name]              detailed status of a specific service
 --- archive extraction (in-memory, pre-validated) ---
 ArchiveExtract [archivePath, outputDir]  extract .zip/.tar.gz safely
 
+--- mk8.shell introspection (compile-time resolved, no I/O) ---
+Mk8Blacklist   []                    all effective gigablacklist patterns
+Mk8Vocab       [listName]            words in a vocabulary (sorted)
+Mk8VocabList   []                    all vocabulary names + word counts
+Mk8FreeText    [commandKey?]         FreeText config (global or per-command)
+Mk8Env         []                    merged env vars (secrets redacted)
+Mk8Info        []                    sandbox ID, OS, .NET, arch, CPU, machine
+Mk8Templates   []                    all ProcRun command template descriptions
+Mk8Verbs       []                    all available verb names
+Mk8Skills      []                    skill reference (this document, from embedded resource)
+Mk8Docs        []                    full documentation (from embedded resource)
+
 --- control flow (expanded at compile time, not runtime) ---
 ForEach        []                    requires "forEach" field
 If             []                    requires "if" field
@@ -903,6 +915,36 @@ No .. segments. No absolute paths in path components.
 - Migration names (FreeText) with spaces, leading digits, or non-identifier chars
 - Tag names (FreeText) with "..", "~^:?*[\", ".lock" suffix, or leading/trailing "."/"/"
 - Tag push (not whitelisted — requires dangerous-shell path)
+
+
+== introspection verbs =================================================
+
+Mk8Blacklist  []              → all effective gigablacklist patterns
+Mk8Vocab      [listName]      → words in a named vocabulary (sorted)
+Mk8VocabList  []              → all vocabulary names with word counts
+Mk8FreeText   [commandKey?]   → FreeText config (global or per-command)
+Mk8Env        []              → merged environment vars (secrets redacted)
+Mk8Info       []              → sandbox ID, OS, .NET, architecture, etc.
+Mk8Templates  []              → all registered ProcRun command templates
+Mk8Verbs      []              → all available verb names
+Mk8Skills     []              → skill reference (this document)
+Mk8Docs       []              → full mk8.shell documentation
+
+All resolved at compile time — output is baked in, no runtime I/O.
+Use these to discover available tools, vocabularies, and constraints.
+When an error occurs, these verbs help you fix it:
+  - Got a vocab/word error?   → Mk8Vocab to see allowed words
+  - Got a blocked binary?     → Mk8Templates to see allowed commands
+  - Got a blacklist error?    → Mk8Blacklist to see blocked patterns
+  - Got a FreeText error?     → Mk8FreeText to check per-command config
+  - Need the sandbox root?    → Mk8Info for workspace + OS info
+  - Need full documentation?  → Mk8Docs or Mk8Skills
+
+Example: check what words are available for commit messages:
+  { "verb": "Mk8Vocab", "args": ["CommitWords"] }
+
+Example: check if FreeText is enabled for git commit:
+  { "verb": "Mk8FreeText", "args": ["git commit"] }
 
 
 == common patterns ====================================================

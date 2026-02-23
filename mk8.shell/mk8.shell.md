@@ -1404,6 +1404,38 @@ external process. Supported formats: `.zip`, `.tar.gz`, `.tgz`.
 If ANY entry fails validation, the entire extraction is aborted — nothing
 is written to disk.
 
+### mk8.shell Introspection (Read-Only, Compile-Time)
+
+Diagnostic verbs that let agents inspect the mk8.shell runtime
+configuration. All are resolved at **compile time** — the output is baked
+into the compiled command, no runtime I/O or state access occurs. These
+verbs exist so agents can discover their available tools, vocabularies, and
+constraints without trial-and-error.
+
+| Verb | Args | Description |
+|---|---|---|
+| `Mk8Blacklist` | `[]` | All effective gigablacklist patterns (compile-time + env-sourced), newline-separated |
+| `Mk8Vocab` | `[listName]` | Words in a named vocabulary, sorted, newline-separated |
+| `Mk8VocabList` | `[]` | All vocabulary names with word counts |
+| `Mk8FreeText` | `[commandKey?]` | FreeText config: global summary (no args) or per-command status |
+| `Mk8Env` | `[]` | All merged environment variables (global + sandbox). Secret-like values redacted |
+| `Mk8Info` | `[]` | Runtime info: sandbox ID, workspace root, OS, .NET, architecture, CPU count, machine name |
+| `Mk8Templates` | `[]` | All registered ProcRun command template descriptions |
+| `Mk8Verbs` | `[]` | All available verb names (excluding control flow / batch verbs) |
+| `Mk8Skills` | `[]` | Full skill reference (verb tables, slot types, examples, constraints) from embedded resource |
+| `Mk8Docs` | `[]` | Full mk8.shell documentation (detailed spec, security model, design rationale) from embedded resource |
+
+`Mk8Vocab` example: `{ "verb": "Mk8Vocab", "args": ["CommitWords"] }` returns
+the full commit vocabulary, one word per line.
+
+`Mk8FreeText` example: `{ "verb": "Mk8FreeText", "args": ["git commit"] }`
+returns whether FreeText is enabled for `git commit -m`, the max length,
+and the fallback word list.
+
+`Mk8Env` redacts any variable whose key contains `KEY`, `SECRET`, `TOKEN`,
+`PASSWORD`, `CREDENTIAL`, `CONN`, `PRIVATE`, `ENCRYPT`, `JWT`, `BEARER`,
+`CERTIFICATE`, or `APIKEY`.
+
 ## Security Model
 
 ### What Cannot Be Expressed

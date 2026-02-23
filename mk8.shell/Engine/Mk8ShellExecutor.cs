@@ -257,8 +257,15 @@ public sealed class Mk8ShellExecutor
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
-                $"Process '{cmd.Executable}' exited with code {process.ExitCode}. " +
-                $"stderr: {stderr}");
+                $"Process '{cmd.Executable}' exited with code {process.ExitCode}.\n" +
+                $"stderr: {stderr}\n" +
+                "This means the external process ran but reported failure. " +
+                "Check the stderr output above for details. Common causes:\n" +
+                "  • Build errors (dotnet build): fix the code and retry\n" +
+                "  • Missing files: verify paths with DirList/FileExists first\n" +
+                "  • Test failures (dotnet test): check test output\n" +
+                "You can retry the step (maxRetries in script options) or " +
+                "use captureAs to inspect output from earlier steps.");
 
         return (stdout, stderr);
     }
@@ -495,7 +502,22 @@ public sealed class Mk8ShellExecutor
             Mk8ShellVerb.ArchiveExtract => await ArchiveExtractAsync(
                 cmd.Arguments[0], cmd.Arguments[1], ct),
 
-            _ => throw new InvalidOperationException($"Unhandled in-memory verb: {verb}")
+            // ── mk8.shell introspection (pre-resolved at compile time) ─
+            Mk8ShellVerb.Mk8Blacklist  => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Vocab     => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8VocabList => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8FreeText  => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Env       => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Info      => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Templates => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Verbs     => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Skills    => cmd.Arguments[0],
+            Mk8ShellVerb.Mk8Docs      => cmd.Arguments[0],
+
+            _ => throw new InvalidOperationException(
+                $"Unhandled in-memory verb: {verb}. This is an internal error — the verb " +
+                "was compiled but the executor has no handler for it. " +
+                "Run { \"verb\": \"Mk8Verbs\", \"args\": [] } to see all available verbs.")
         };
 
         return (output, null);

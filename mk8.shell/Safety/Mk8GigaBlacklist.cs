@@ -174,6 +174,12 @@ public sealed class Mk8GigaBlacklist
     private readonly string[] _allPatterns;
 
     /// <summary>
+    /// Returns all effective patterns (compile-time + env-sourced).
+    /// Read-only view for diagnostic introspection.
+    /// </summary>
+    public IReadOnlyList<string> EffectivePatterns => _allPatterns;
+
+    /// <summary>
     /// Creates a gigablacklist with all compile-time patterns (no env extras).
     /// </summary>
     public Mk8GigaBlacklist() =>
@@ -288,14 +294,23 @@ public sealed class Mk8GigaBlacklist
         var match = Check(binary);
         if (match is not null)
             throw new Mk8GigaBlacklistException(match,
-                $"Binary name contains gigablacklisted term.");
+                $"Binary name '{binary}' contains gigablacklisted term '{match}'.\n" +
+                "The gigablacklist runs on ALL arguments (including the binary name) " +
+                "before any other validation. This is non-bypassable.\n" +
+                $"  ✗ Binary '{binary}' matched pattern: \"{match}\"\n" +
+                "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see allowed commands, " +
+                "or { \"verb\": \"Mk8Blacklist\", \"args\": [] } to see all blocked patterns.");
 
         foreach (var arg in args)
         {
             match = Check(arg);
             if (match is not null)
                 throw new Mk8GigaBlacklistException(match,
-                    $"Argument '{Truncate(arg)}' contains gigablacklisted term.");
+                    $"ProcRun argument '{Truncate(arg)}' contains gigablacklisted term '{match}'.\n" +
+                    "The gigablacklist blocks dangerous patterns in ALL arguments of ALL commands.\n" +
+                    $"  ✗ Argument matched pattern: \"{match}\"\n" +
+                    "Rephrase the argument to avoid this pattern. " +
+                    "Run { \"verb\": \"Mk8Blacklist\", \"args\": [] } to see all blocked patterns.");
         }
     }
 
@@ -310,7 +325,12 @@ public sealed class Mk8GigaBlacklist
             var match = Check(arg);
             if (match is not null)
                 throw new Mk8GigaBlacklistException(match,
-                    $"Argument to '{verb}' contains gigablacklisted term.");
+                    $"Argument to in-memory verb '{verb}' contains gigablacklisted term '{match}'.\n" +
+                    "The gigablacklist runs on ALL arguments of ALL commands (including " +
+                    "in-memory verbs like FileRead, FileWrite, DirList, etc.), not just ProcRun.\n" +
+                    $"  ✗ Argument matched pattern: \"{match}\"\n" +
+                    "Rephrase the argument to avoid this pattern. " +
+                    "Run { \"verb\": \"Mk8Blacklist\", \"args\": [] } to see all blocked patterns.");
         }
     }
 

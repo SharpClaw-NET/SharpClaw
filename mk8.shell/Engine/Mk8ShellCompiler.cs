@@ -51,6 +51,13 @@ public sealed class Mk8ShellCompiler
     /// </summary>
     private string _sandboxRoot = "";
 
+    /// <summary>
+    /// Set during <see cref="Compile(Mk8ShellScript, Mk8WorkspaceContext, Mk8ExecutionOptions)"/>
+    /// so diagnostic verbs (<c>Mk8Info</c>, <c>Mk8Env</c>) can access
+    /// the workspace context at compile time.
+    /// </summary>
+    private Mk8WorkspaceContext? _workspace;
+
     public Mk8ShellCompiler(Mk8CommandWhitelist? whitelist = null)
     {
         _whitelist = whitelist ?? Mk8CommandWhitelist.CreateDefault();
@@ -77,6 +84,7 @@ public sealed class Mk8ShellCompiler
         ArgumentNullException.ThrowIfNull(workspace);
 
         _sandboxRoot = workspace.SandboxRoot;
+        _workspace = workspace;
 
         if (script.Operations.Count == 0)
             throw new Mk8CompileException(Mk8ShellVerb.FileRead,
@@ -403,6 +411,18 @@ public sealed class Mk8ShellCompiler
             // ── Archive extraction (in-memory, pre-validated) ─────
             Mk8ShellVerb.ArchiveExtract => CompileArchiveExtract(op),
 
+            // ── mk8.shell introspection (compile-time resolved) ───
+            Mk8ShellVerb.Mk8Blacklist  => CompileMk8Blacklist(op),
+            Mk8ShellVerb.Mk8Vocab     => CompileMk8Vocab(op),
+            Mk8ShellVerb.Mk8VocabList => CompileMk8VocabList(op),
+            Mk8ShellVerb.Mk8FreeText  => CompileMk8FreeText(op),
+            Mk8ShellVerb.Mk8Env       => CompileMk8Env(op),
+            Mk8ShellVerb.Mk8Info      => CompileMk8Info(op),
+            Mk8ShellVerb.Mk8Templates => CompileMk8Templates(op),
+            Mk8ShellVerb.Mk8Verbs     => CompileMk8Verbs(op),
+            Mk8ShellVerb.Mk8Skills    => CompileMk8EmbeddedDoc(op, Mk8ShellVerb.Mk8Skills, "Mk8.Shell.mk8.shell.skill.txt"),
+            Mk8ShellVerb.Mk8Docs      => CompileMk8EmbeddedDoc(op, Mk8ShellVerb.Mk8Docs, "Mk8.Shell.mk8.shell.md"),
+
             // ── Batch/Control/Include verbs should never reach the compiler ─
             Mk8ShellVerb.ForEach or Mk8ShellVerb.If
             or Mk8ShellVerb.FileWriteMany or Mk8ShellVerb.FileCopyMany
@@ -412,7 +432,10 @@ public sealed class Mk8ShellCompiler
                     "This is an internal error — the expander should have " +
                     "removed all control flow, batch, and include verbs."),
 
-            _ => throw new Mk8CompileException(op.Verb, "Unknown verb.")
+            _ => throw new Mk8CompileException(op.Verb,
+                $"Unknown verb '{op.Verb}'. This verb is not recognized by the mk8.shell compiler.\n" +
+                "Run { \"verb\": \"Mk8Verbs\", \"args\": [] } to see all available verbs, " +
+                "or { \"verb\": \"Mk8Skills\", \"args\": [] } for the full verb reference with args and descriptions.")
         };
     }
 
@@ -430,7 +453,12 @@ public sealed class Mk8ShellCompiler
     {
         if (args.Length < 1 || args.Length > 64)
             throw new Mk8CompileException(Mk8ShellVerb.ProcRun,
-                $"Expected 1–64 argument(s), got {args.Length}.");
+                $"Expected 1–64 argument(s), got {args.Length}.\n" +
+                "ProcRun args must be: [binary, arg0, arg1, ...]. The first arg is " +
+                "always the binary name, followed by its arguments.\n" +
+                "  ✓ Correct: { \"verb\": \"ProcRun\", \"args\": [\"dotnet\", \"build\"] }\n" +
+                "  ✗ Wrong:   { \"verb\": \"ProcRun\", \"args\": [] } (no binary specified)\n" +
+                "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see all allowed commands.");
 
         var binary = args[0];
         var procArgs = args.Length > 1 ? args[1..] : [];
@@ -566,7 +594,10 @@ public sealed class Mk8ShellCompiler
 
         if (op.Template is null)
             throw new Mk8CompileException(Mk8ShellVerb.FileTemplate,
-                "FileTemplate verb requires a 'template' definition.");
+                "FileTemplate verb requires a 'template' definition in the operation.\n" +
+                "  ✓ Correct: { \"verb\": \"FileTemplate\", \"args\": [\"$WORKSPACE/out.json\"], " +
+                "\"template\": { \"source\": \"$WORKSPACE/tmpl.json\", \"values\": { \"KEY\": \"val\" } } }\n" +
+                "  ✗ Wrong:   { \"verb\": \"FileTemplate\", \"args\": [\"$WORKSPACE/out.json\"] } (missing template field)");
 
         if (string.IsNullOrWhiteSpace(op.Template.Source))
             throw new Mk8CompileException(Mk8ShellVerb.FileTemplate,
@@ -582,9 +613,13 @@ public sealed class Mk8ShellCompiler
         {
             if (value.Contains('$'))
                 throw new Mk8CompileException(Mk8ShellVerb.FileTemplate,
-                    $"Template value for key '{key}' contains a '$' character. " +
-                    "Variable expansion inside template values is not allowed " +
-                    "to prevent injection.");
+                    $"Template value for key '{key}' contains a '$' character.\n" +
+                    "Variable expansion inside template values is blocked to prevent " +
+                    "injection (e.g., {{$PREV}} attack).\n" +
+                    "  ✓ Correct: \"values\": { \"PORT\": \"8080\" } (literal string)\n" +
+                    $"  ✗ Wrong:   \"values\": {{ \"{key}\": \"{value}\" }} (contains '$')\n" +
+                    "Use literal values only. If you need to insert captured output, " +
+                    "first write it to a file with FileWrite, then read it separately.");
         }
 
         return InMemory(Mk8ShellVerb.FileTemplate, op.Args);
@@ -597,7 +632,10 @@ public sealed class Mk8ShellCompiler
 
         if (op.Patches is null || op.Patches.Count == 0)
             throw new Mk8CompileException(Mk8ShellVerb.FilePatch,
-                "FilePatch verb requires at least one patch entry.");
+                "FilePatch verb requires at least one patch entry.\n" +
+                "  ✓ Correct: { \"verb\": \"FilePatch\", \"args\": [\"$WORKSPACE/config.yaml\"], " +
+                "\"patches\": [{ \"find\": \"port: 3000\", \"replace\": \"port: 8080\" }] }\n" +
+                "  ✗ Wrong:   { \"verb\": \"FilePatch\", \"args\": [\"$WORKSPACE/config.yaml\"] } (missing patches field)");
 
         if (op.Patches.Count > Mk8PatchEntry.MaxPatches)
             throw new Mk8CompileException(Mk8ShellVerb.FilePatch,
@@ -608,13 +646,19 @@ public sealed class Mk8ShellCompiler
         {
             if (string.IsNullOrEmpty(patch.Find))
                 throw new Mk8CompileException(Mk8ShellVerb.FilePatch,
-                    "Patch 'find' value cannot be empty.");
+                    "Patch 'find' value cannot be empty. Each patch must have a " +
+                    "non-empty literal string to search for.\n" +
+                    "  ✓ Correct: { \"find\": \"debug: true\", \"replace\": \"debug: false\" }\n" +
+                    "  ✗ Wrong:   { \"find\": \"\", \"replace\": \"anything\" }");
 
             // No variable expansion inside patch values.
             if (patch.Find.Contains('$') || patch.Replace.Contains('$'))
                 throw new Mk8CompileException(Mk8ShellVerb.FilePatch,
-                    "Patch find/replace values contain a '$' character. " +
-                    "Variable expansion inside patches is not allowed.");
+                    "Patch find/replace values contain a '$' character.\n" +
+                    "Variable expansion inside patches is blocked to prevent injection.\n" +
+                    "  ✓ Correct: { \"find\": \"port: 3000\", \"replace\": \"port: 8080\" }\n" +
+                    "  ✗ Wrong:   { \"find\": \"$PREV\", \"replace\": \"new value\" }\n" +
+                    "Use literal strings only.");
         }
 
         return InMemory(Mk8ShellVerb.FilePatch, op.Args);
@@ -686,18 +730,26 @@ public sealed class Mk8ShellCompiler
 
         if (expr.Length > MathEvalMaxLength)
             throw new Mk8CompileException(Mk8ShellVerb.MathEval,
-                $"Expression length {expr.Length} exceeds maximum of {MathEvalMaxLength}.");
+                $"Expression length {expr.Length} exceeds maximum of {MathEvalMaxLength}.\n" +
+                "MathEval evaluates pure arithmetic — keep expressions concise.");
 
         if (string.IsNullOrWhiteSpace(expr))
             throw new Mk8CompileException(Mk8ShellVerb.MathEval,
-                "Expression cannot be empty.");
+                "Expression cannot be empty.\n" +
+                "  ✓ Correct: { \"verb\": \"MathEval\", \"args\": [\"(100 + 50) * 2\"] }\n" +
+                "  ✗ Wrong:   { \"verb\": \"MathEval\", \"args\": [\"\"  ] }");
 
         foreach (var ch in expr)
         {
             if (!MathEvalAllowed.Contains(ch))
                 throw new Mk8CompileException(Mk8ShellVerb.MathEval,
-                    $"Invalid character '{ch}' in expression. " +
-                    "Only digits, decimal point, +, -, *, /, %, (), and spaces are allowed.");
+                    $"Invalid character '{ch}' in expression.\n" +
+                    "MathEval accepts ONLY pure arithmetic: digits, decimal point, " +
+                    "+, -, *, /, %, (), and spaces. No variables, no functions, no letters.\n" +
+                    "  ✓ Correct: \"(100 + 50) * 2\" or \"3.14 * 10 * 10\"\n" +
+                    $"  ✗ Wrong:   \"{expr}\" (contains '{ch}')\n" +
+                    "For text manipulation use TextReplace/TextRegex. " +
+                    "For string operations use the Text* verb family.");
         }
 
         return InMemory(Mk8ShellVerb.MathEval, op.Args);
@@ -970,7 +1022,10 @@ public sealed class Mk8ShellCompiler
     {
         if (op.Args.Length < min || op.Args.Length > max)
             throw new Mk8CompileException(op.Verb,
-                $"Expected {min}–{max} argument(s), got {op.Args.Length}.");
+                $"Expected {min}–{max} argument(s) for '{op.Verb}', got {op.Args.Length}.\n" +
+                $"  ✗ You provided {op.Args.Length} arg(s): [{string.Join(", ", op.Args.Select(a => $"\"{a}\""))}]\n" +
+                $"Run {{ \"verb\": \"Mk8Skills\", \"args\": [] }} to see the full verb reference " +
+                $"with argument counts and types for every verb.");
         return op.Args;
     }
 
@@ -1197,5 +1252,160 @@ public sealed class Mk8ShellCompiler
         }
 
         return InMemory(Mk8ShellVerb.SysLogRead, op.Args);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // mk8.shell introspection — resolved at compile time
+    // ═══════════════════════════════════════════════════════════════
+
+    private Mk8CompiledCommand CompileMk8Blacklist(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+        var patterns = _whitelist.GigaBlacklist.EffectivePatterns;
+        var output = string.Join('\n', patterns);
+        return InMemory(Mk8ShellVerb.Mk8Blacklist, [output]);
+    }
+
+    private Mk8CompiledCommand CompileMk8Vocab(Mk8ShellOperation op)
+    {
+        var args = RequireArgs(op, 1, 1);
+        var listName = args[0];
+        var words = _whitelist.GetWordList(listName);
+        if (words.Count == 0)
+        {
+            var available = string.Join(", ", _whitelist.GetWordListNames());
+            return InMemory(Mk8ShellVerb.Mk8Vocab,
+                [$"Word list '{listName}' not found. Available: {available}"]);
+        }
+        var output = string.Join('\n', words.Order());
+        return InMemory(Mk8ShellVerb.Mk8Vocab, [output]);
+    }
+
+    private Mk8CompiledCommand CompileMk8VocabList(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+        var names = _whitelist.GetWordListNames();
+        var sb = new System.Text.StringBuilder();
+        foreach (var name in names)
+        {
+            var count = _whitelist.GetWordList(name).Count;
+            sb.AppendLine($"{name} ({count} words)");
+        }
+        return InMemory(Mk8ShellVerb.Mk8VocabList, [sb.ToString().TrimEnd()]);
+    }
+
+    private Mk8CompiledCommand CompileMk8FreeText(Mk8ShellOperation op)
+    {
+        var args = RequireArgs(op, 0, 1);
+        var config = _whitelist.FreeTextConfig;
+
+        if (args.Length == 0)
+        {
+            // Global config summary
+            var sb = new System.Text.StringBuilder();
+            sb.AppendLine($"Global Enabled: {config.Enabled}");
+            sb.AppendLine($"Global MaxLength: {config.MaxLength}");
+            sb.AppendLine($"Per-verb overrides: {config.PerVerb.Count}");
+            foreach (var (key, policy) in config.PerVerb.OrderBy(kv => kv.Key))
+                sb.AppendLine($"  {key}: Enabled={policy.Enabled}, MaxLength={policy.MaxLength}");
+            return InMemory(Mk8ShellVerb.Mk8FreeText, [sb.ToString().TrimEnd()]);
+        }
+
+        // Per-command query
+        var commandKey = args[0];
+        var enabled = config.Enabled;
+        var maxLen = config.MaxLength;
+
+        if (config.PerVerb.TryGetValue(commandKey, out var verbPolicy))
+        {
+            enabled = verbPolicy.Enabled;
+            if (verbPolicy.MaxLength > 0)
+                maxLen = verbPolicy.MaxLength;
+        }
+
+        var result = $"Command: {commandKey}\n" +
+                     $"FreeText Enabled: {enabled}\n" +
+                     $"MaxLength: {maxLen}";
+        return InMemory(Mk8ShellVerb.Mk8FreeText, [result]);
+    }
+
+    private Mk8CompiledCommand CompileMk8Env(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+
+        // Use the workspace variables (merged global + sandbox).
+        var vars = _workspace?.Variables ?? new Dictionary<string, string>();
+        var sb = new System.Text.StringBuilder();
+
+        // Secret-like patterns to redact
+        string[] secretMarkers = ["KEY", "SECRET", "TOKEN", "PASSWORD",
+            "PASSWD", "CREDENTIAL", "CONN", "PRIVATE", "ENCRYPT",
+            "JWT", "BEARER", "CERTIFICATE", "APIKEY", "API_KEY"];
+
+        foreach (var (key, value) in vars.OrderBy(kv => kv.Key))
+        {
+            var redact = secretMarkers.Any(m =>
+                key.Contains(m, StringComparison.OrdinalIgnoreCase));
+            sb.AppendLine(redact ? $"{key}=[REDACTED]" : $"{key}={value}");
+        }
+
+        return InMemory(Mk8ShellVerb.Mk8Env, [sb.ToString().TrimEnd()]);
+    }
+
+    private Mk8CompiledCommand CompileMk8Info(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"SandboxId: {_workspace?.SandboxId ?? "(unknown)"}");
+        sb.AppendLine($"WorkspaceRoot: {_workspace?.SandboxRoot ?? "(unknown)"}");
+        sb.AppendLine($"WorkingDirectory: {_workspace?.WorkingDirectory ?? "(unknown)"}");
+        sb.AppendLine($"User: {_workspace?.RunAsUser ?? Environment.UserName}");
+        sb.AppendLine($"OS: {System.Runtime.InteropServices.RuntimeInformation.OSDescription}");
+        sb.AppendLine($"Architecture: {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}");
+        sb.AppendLine($"ProcessArchitecture: {System.Runtime.InteropServices.RuntimeInformation.ProcessArchitecture}");
+        sb.AppendLine($".NET: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}");
+        sb.AppendLine($"ProcessorCount: {Environment.ProcessorCount}");
+        sb.AppendLine($"MachineName: {Environment.MachineName}");
+
+        return InMemory(Mk8ShellVerb.Mk8Info, [sb.ToString().TrimEnd()]);
+    }
+
+    private Mk8CompiledCommand CompileMk8Templates(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+        var descriptions = _whitelist.GetTemplateDescriptions();
+        var output = string.Join('\n', descriptions);
+        return InMemory(Mk8ShellVerb.Mk8Templates, [output]);
+    }
+
+    private Mk8CompiledCommand CompileMk8Verbs(Mk8ShellOperation op)
+    {
+        RequireArgs(op, 0, 0);
+        var verbs = Enum.GetNames<Mk8ShellVerb>()
+            .Where(n => n != nameof(Mk8ShellVerb.ForEach)
+                     && n != nameof(Mk8ShellVerb.If)
+                     && n != nameof(Mk8ShellVerb.Include)
+                     && n != nameof(Mk8ShellVerb.FileWriteMany)
+                     && n != nameof(Mk8ShellVerb.FileCopyMany)
+                     && n != nameof(Mk8ShellVerb.FileDeleteMany))
+            .Order();
+        return InMemory(Mk8ShellVerb.Mk8Verbs, [string.Join('\n', verbs)]);
+    }
+
+    private static Mk8CompiledCommand CompileMk8EmbeddedDoc(
+        Mk8ShellOperation op, Mk8ShellVerb verb, string resourceName)
+    {
+        RequireArgs(op, 0, 0);
+
+        var asm = typeof(Mk8ShellCompiler).Assembly;
+        using var stream = asm.GetManifestResourceStream(resourceName);
+        if (stream is null)
+            return InMemory(verb,
+                [$"(embedded resource '{resourceName}' not found in assembly)"]);
+
+        using var reader = new System.IO.StreamReader(stream);
+        var content = reader.ReadToEnd();
+        return InMemory(verb, [content]);
     }
 }

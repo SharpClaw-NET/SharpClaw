@@ -135,10 +135,17 @@ public static class Mk8PathSanitizer
         {
             if (c == '\0')
                 throw new ArgumentException(
-                    "Path contains a null byte.", nameof(path));
+                    "Path contains a null byte (0x00). Paths must contain only " +
+                    "printable characters.\n" +
+                    "  ✓ Correct: \"$WORKSPACE/src/app.cs\"\n" +
+                    "  ✗ Wrong:   a path with embedded null bytes", nameof(path));
             if (char.IsControl(c) && c != '\t')
                 throw new ArgumentException(
-                    $"Path contains control character 0x{(int)c:X2}.", nameof(path));
+                    $"Path contains control character (U+{(int)c:X4}). Only printable " +
+                    "characters and tabs are allowed in paths.\n" +
+                    "  ✓ Correct: \"$WORKSPACE/src/app.cs\"\n" +
+                    "  ✗ Wrong:   paths with newlines, carriage returns, or escape sequences",
+                    nameof(path));
         }
     }
 
@@ -161,8 +168,15 @@ public static class Mk8PathSanitizer
             || resolvedPath.EndsWith($"{sep}.git", PathComparison))
         {
             throw new Mk8CompileException(Mk8ShellVerb.FileWrite,
-                $"Cannot write to git internals (.git/): '{originalPath}'. " +
-                "Git metadata is managed by git commands, not file writes.");
+                $"Cannot write to git internals (.git/): '{originalPath}'.\n" +
+                "The .git/ directory contains hooks, config, objects, and refs " +
+                "that must only be modified through git commands — never through " +
+                "direct file writes (which could inject malicious hooks or tamper " +
+                "with repository state).\n" +
+                "  ✓ Correct: { \"verb\": \"FileWrite\", \"args\": [\"$WORKSPACE/src/readme.md\", \"...\"] }\n" +
+                "  ✗ Wrong:   { \"verb\": \"FileWrite\", \"args\": [\"$WORKSPACE/.git/hooks/pre-commit\", \"...\"] }\n" +
+                "Use git commands (via ProcRun) for git operations. " +
+                "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see available git templates.");
         }
     }
 
@@ -172,7 +186,14 @@ public static class Mk8PathSanitizer
         var ext = Path.GetExtension(resolvedPath);
         if (!string.IsNullOrEmpty(ext) && BlockedWriteExtensions.Contains(ext))
             throw new Mk8CompileException(Mk8ShellVerb.FileWrite,
-                $"Cannot write to executable file type '{ext}': '{originalPath}'.");
+                $"Cannot write to executable file type '{ext}': '{originalPath}'.\n" +
+                "This extension is blocked because the file could be executed by the OS " +
+                "or by an allowed binary (dotnet, node, cargo) without the agent invoking " +
+                "it — other processes sharing the sandbox could load it implicitly.\n" +
+                "  ✓ Correct: .txt, .json, .yaml, .xml, .csv, .md, .sh, .py, .ps1 (scripts OK — interpreters blocked)\n" +
+                $"  ✗ Wrong:   {ext} (blocked: native executable, code runnable by allowed binary, or MSBuild project)\n" +
+                "If you need to create a configuration or data file, use a safe extension. " +
+                "Run { \"verb\": \"Mk8Docs\", \"args\": [] } to see the full write-protection model.");
     }
 
     /// <summary>
@@ -220,9 +241,15 @@ public static class Mk8PathSanitizer
         var fileName = Path.GetFileName(resolvedPath);
         if (BlockedWriteFilenames.Contains(fileName))
             throw new Mk8CompileException(Mk8ShellVerb.FileWrite,
-                $"Cannot write to config file '{fileName}': " +
-                $"it contains executable directives for build tools. " +
-                $"Path: '{originalPath}'.");
+                $"Cannot write to config file '{fileName}': '{originalPath}'.\n" +
+                "This filename triggers implicit code execution by build tools " +
+                "(e.g., Makefile by make, package.json by npm, Cargo.toml by cargo, " +
+                ".csproj by dotnet build). Writing to it could cause arbitrary code " +
+                "execution the next time the build tool runs in this directory.\n" +
+                "  ✓ Correct: { \"verb\": \"FileWrite\", \"args\": [\"$WORKSPACE/config.yaml\", \"...\"] }\n" +
+                $"  ✗ Wrong:   {{ \"verb\": \"FileWrite\", \"args\": [\"$WORKSPACE/{fileName}\", \"...\"] }}\n" +
+                "Use a non-dangerous filename, or use FileTemplate/FilePatch to modify " +
+                "existing safe files instead.");
     }
 
     /// <summary>
@@ -237,10 +264,15 @@ public static class Mk8PathSanitizer
         var fileName = Path.GetFileName(resolvedPath);
         if (GigaBlacklistedFilenames.Contains(fileName))
             throw new Mk8CompileException(Mk8ShellVerb.FileRead,
-                $"Access to '{fileName}' is permanently forbidden. " +
-                $"mk8.shell sandbox environment files can only be " +
-                $"managed by the user or mk8.shell.startup. " +
-                $"Path: '{originalPath}'.");
+                $"Access to '{fileName}' is permanently forbidden.\n" +
+                "mk8.shell sandbox environment files (mk8.shell.env, " +
+                "mk8.shell.signed.env) can only be managed by the user " +
+                "directly or by mk8.shell.startup. No mk8.shell command " +
+                "may read, write, copy, move, delete, hash, or list them.\n" +
+                $"  ✗ Wrong: any operation targeting '{originalPath}'\n" +
+                "These files contain sandbox configuration and cryptographic " +
+                "signatures. Use { \"verb\": \"Mk8Env\", \"args\": [] } to " +
+                "see your merged environment variables instead.");
     }
 
     private static readonly HashSet<string> WindowsDeviceNames =

@@ -15,6 +15,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="mk8.shell.skill.txt" LogicalName="Mk8.Shell.mk8.shell.skill.txt" />
+    <EmbeddedResource Include="mk8.shell.md" LogicalName="Mk8.Shell.mk8.shell.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="System.Diagnostics.EventLog" />
     <PackageReference Include="System.ServiceProcess.ServiceController" />
   </ItemGroup>

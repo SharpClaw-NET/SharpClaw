@@ -181,6 +181,29 @@ public sealed class Mk8CommandWhitelist
     public IReadOnlySet<string> GetWordList(string name) =>
         _wordLists.TryGetValue(name, out var set) ? set : new HashSet<string>();
 
+    /// <summary>
+    /// Returns all word list names (sorted).
+    /// </summary>
+    public IReadOnlyList<string> GetWordListNames() =>
+        _wordLists.Keys.Order().ToList();
+
+    /// <summary>
+    /// Returns the FreeText configuration.
+    /// </summary>
+    public Mk8FreeTextConfig FreeTextConfig => _freeTextConfig;
+
+    /// <summary>
+    /// Returns human-readable descriptions of all registered command
+    /// templates.
+    /// </summary>
+    public IReadOnlyList<string> GetTemplateDescriptions()
+    {
+        var result = new List<string>(_commands.Length);
+        foreach (var cmd in _commands)
+            result.Add(cmd.Description);
+        return result;
+    }
+
     // ── Validation ────────────────────────────────────────────────
 
     /// <summary>
@@ -201,10 +224,16 @@ public sealed class Mk8CommandWhitelist
 
         if (Mk8BinaryAllowlist.IsPermanentlyBlocked(name))
         {
-            // Narrow carve-out: version-check-only commands on
-            // otherwise-blocked binaries (e.g. python3 --version).
             if (!Mk8BinaryAllowlist.IsVersionCheckException(name, args))
-                return $"Binary '{name}' is permanently blocked.";
+                return $"Binary '{name}' is permanently blocked. " +
+                       "mk8.shell only allows a closed set of binaries — interpreters " +
+                       "(bash, cmd, powershell, python, node, etc.) and dangerous system " +
+                       "tools (curl, wget, sudo, chmod, etc.) can never be invoked.\n" +
+                       "  ✓ Correct: { \"verb\": \"ProcRun\", \"args\": [\"dotnet\", \"build\"] }\n" +
+                       $"  ✗ Wrong:   {{ \"verb\": \"ProcRun\", \"args\": [\"{name}\", ...] }}\n" +
+                       "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see all allowed commands. " +
+                       "For file/text operations, use dedicated in-memory verbs " +
+                       "(FileRead, HttpGet, TextRegex, etc.) — run { \"verb\": \"Mk8Verbs\", \"args\": [] } to list them.";
         }
 
         var candidates = _commands
@@ -212,8 +241,14 @@ public sealed class Mk8CommandWhitelist
             .ToList();
 
         if (candidates.Count == 0)
-            return $"Binary '{name}' has no registered command templates. " +
-                   "Only binaries with explicit templates can be used.";
+            return $"Binary '{name}' has no registered command templates.\n" +
+                   "ProcRun uses a strict command-template whitelist — only binaries with " +
+                   "explicit templates can execute. Every invocation must match a registered " +
+                   "pattern exactly (binary + fixed prefix + typed flags + typed parameters).\n" +
+                   $"  ✗ No templates exist for '{name}'.\n" +
+                   "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see all registered templates. " +
+                   "If you need text/file/HTTP operations, use dedicated in-memory verbs instead " +
+                   "— run { \"verb\": \"Mk8Verbs\", \"args\": [] } to list them.";
 
         List<string>? errors = null;
         foreach (var cmd in candidates)
@@ -227,8 +262,13 @@ public sealed class Mk8CommandWhitelist
         }
 
         return $"No matching template for '{name} {string.Join(' ', args)}'.\n" +
-               $"Tried {candidates.Count} template(s):\n" +
-               string.Join('\n', errors!);
+               $"Tried {candidates.Count} template(s) for '{name}' — none matched:\n" +
+               string.Join('\n', errors!) + "\n\n" +
+               "Each ProcRun invocation must match a registered template exactly. " +
+               "Run { \"verb\": \"Mk8Templates\", \"args\": [] } to see all registered templates. " +
+               "If a flag or argument was rejected, run { \"verb\": \"Mk8Vocab\", \"args\": [\"<listName>\"] } " +
+               "to see allowed words for ComposedWords/AdminWord slots, or " +
+               "{ \"verb\": \"Mk8FreeText\", \"args\": [\"<command>\"] } to check FreeText status.";
     }
 
     // ── Template matching ─────────────────────────────────────────
@@ -262,10 +302,17 @@ public sealed class Mk8CommandWhitelist
                     f.Flag.Equals(flagName, StringComparison.OrdinalIgnoreCase));
 
                 if (flagDef is null)
-                    return $"Unrecognized flag '{flagName}'.";
+                {
+                    var allowedFlags = cmd.Flags is { Length: > 0 }
+                        ? string.Join(", ", cmd.Flags.Select(f => f.Flag))
+                        : "(none)";
+                    return $"Unrecognized flag '{flagName}'.\n" +
+                           $"This template ('{cmd.Description}') allows these flags: {allowedFlags}\n" +
+                           $"  \u2717 Got: '{flagName}'";
+                }
 
                 if (!usedFlags.Add(flagName))
-                    return $"Duplicate flag '{flagName}'.";
+                    return $"Duplicate flag '{flagName}'. Each flag can only be specified once.";
 
                 if (flagDef.Value is not null)
                 {
@@ -277,7 +324,9 @@ public sealed class Mk8CommandWhitelist
                     else
                     {
                         if (i + 1 >= remaining.Length)
-                            return $"Flag '{flagName}' requires a value.";
+                            return $"Flag '{flagName}' requires a value but none was provided.\n" +
+                                   $"  ✓ Correct: \"{flagName}\", \"<value>\" (as two separate args) " +
+                                   $"or \"{flagName}=<value>\" (combined)";
                         i++;
                         flagValue = remaining[i];
                     }
@@ -300,7 +349,9 @@ public sealed class Mk8CommandWhitelist
         var fixedCount = hasVariadic ? paramDefs.Length - 1 : paramDefs.Length;
 
         if (!hasVariadic && trailing.Count > paramDefs.Length)
-            return $"Too many arguments: expected at most {paramDefs.Length}, got {trailing.Count}.";
+            return $"Too many positional arguments: template expects at most {paramDefs.Length}, got {trailing.Count}.\n" +
+                   $"Extra args: [{string.Join(", ", trailing.Skip(paramDefs.Length).Select(a => $"\"{a}\""))}]\n" +
+                   "Check that flags start with '-' (otherwise they're treated as positional arguments).";
 
         for (var i = 0; i < fixedCount; i++)
         {
@@ -314,7 +365,8 @@ public sealed class Mk8CommandWhitelist
             }
             else if (paramDefs[i].Required)
             {
-                return $"Missing required parameter '{paramDefs[i].Name}'.";
+                return $"Missing required parameter '{paramDefs[i].Name}' (slot type: {paramDefs[i].Kind}).\n" +
+                       $"This template ('{cmd.Description}') requires this parameter at position {i + 1}.";
             }
         }
 
@@ -351,7 +403,10 @@ public sealed class Mk8CommandWhitelist
             Mk8SlotKind.Choice => slot.AllowedValues is not null &&
                 slot.AllowedValues.Any(v => v.Equals(value, StringComparison.OrdinalIgnoreCase))
                     ? null
-                    : $"Must be one of: {string.Join(", ", slot.AllowedValues ?? [])}. Got '{value}'.",
+                    : $"Must be one of: {string.Join(", ", slot.AllowedValues ?? [])}. Got '{value}'.\n" +
+                      "Choice slots accept only a fixed set of exact values (case-insensitive).\n" +
+                      $"  ✓ Correct: one of [{string.Join(", ", slot.AllowedValues ?? [])}]\n" +
+                      $"  ✗ Got:     \"{value}\"",
 
             Mk8SlotKind.SandboxPath => ValidateSandboxPath(value, sandboxRoot),
 
@@ -360,7 +415,9 @@ public sealed class Mk8CommandWhitelist
             Mk8SlotKind.IntRange => int.TryParse(value, out var n) &&
                 n >= slot.MinValue && n <= slot.MaxValue
                     ? null
-                    : $"Must be an integer {slot.MinValue}–{slot.MaxValue}. Got '{value}'.",
+                    : $"Must be an integer {slot.MinValue}–{slot.MaxValue}. Got '{value}'.\n" +
+                      $"  ✓ Correct: any integer from {slot.MinValue} to {slot.MaxValue}\n" +
+                      $"  ✗ Got:     \"{value}\"",
 
             Mk8SlotKind.ComposedWords => ValidateComposedWords(slot.WordListName!, value),
 
@@ -382,19 +439,29 @@ public sealed class Mk8CommandWhitelist
         }
         catch (Exception ex)
         {
-            return $"Path '{value}' failed sandbox validation: {ex.Message}";
+            return $"Path '{value}' failed sandbox validation: {ex.Message}\n" +
+                   "SandboxPath slots require a path that resolves inside the workspace.\n" +
+                   "  ✓ Correct: \"$WORKSPACE/src/app.cs\" or \"$WORKSPACE/output\"\n" +
+                   $"  ✗ Got:     \"{value}\"\n" +
+                   "Use $WORKSPACE as the base. Run { \"verb\": \"Mk8Info\", \"args\": [] } " +
+                   "to see the sandbox root, or { \"verb\": \"DirList\", \"args\": [\"$WORKSPACE\"] } " +
+                   "to explore.";
         }
     }
 
     private string? ValidateAdminWord(string wordListName, string value)
     {
         if (!_wordLists.TryGetValue(wordListName, out var set))
-            return $"Word list '{wordListName}' is not configured.";
+            return $"Word list '{wordListName}' is not configured. " +
+                   "Run { \"verb\": \"Mk8VocabList\", \"args\": [] } to see available word lists.";
 
         if (!set.Contains(value))
-            return $"'{value}' is not in the '{wordListName}' word list. " +
-                   $"Allowed: {string.Join(", ", set.Order().Take(20))}" +
-                   (set.Count > 20 ? $" ... ({set.Count} total)" : "") + ".";
+            return $"'{value}' is not in the '{wordListName}' word list.\n" +
+                   "AdminWord slots require an exact match from a fixed vocabulary.\n" +
+                   $"  ✓ Allowed: {string.Join(", ", set.Order().Take(20))}" +
+                   (set.Count > 20 ? $" ... ({set.Count} total)" : "") + "\n" +
+                   $"  ✗ Got:     \"{value}\"\n" +
+                   $"Run {{ \"verb\": \"Mk8Vocab\", \"args\": [\"{wordListName}\"] }} to see the full list.";
 
         return null;
     }
@@ -411,19 +478,29 @@ public sealed class Mk8CommandWhitelist
             return "Value cannot be empty.";
 
         if (!_wordLists.TryGetValue(wordListName, out var set))
-            return $"Word list '{wordListName}' is not configured.";
+            return $"Word list '{wordListName}' is not configured. " +
+                   "Run { \"verb\": \"Mk8VocabList\", \"args\": [] } to see available lists.";
 
         var words = value.Split(' ', StringSplitOptions.RemoveEmptyEntries);
 
         if (words.Length > MaxComposedWords)
-            return $"Too many words ({words.Length}). Maximum is {MaxComposedWords}.";
+            return $"Too many words ({words.Length}). Maximum is {MaxComposedWords}.\n" +
+                   "ComposedWords slots split on spaces — each word is validated independently.\n" +
+                   $"  ✓ Correct: up to {MaxComposedWords} space-separated words from the '{wordListName}' vocabulary\n" +
+                   $"  ✗ Got:     {words.Length} words\n" +
+                   "Shorten your message or use fewer words.";
 
         foreach (var word in words)
         {
             if (!set.Contains(word))
-                return $"Word '{word}' is not in the '{wordListName}' vocabulary. " +
-                       $"Allowed: {string.Join(", ", set.Order().Take(20))}" +
-                       (set.Count > 20 ? $" ... ({set.Count} total)" : "") + ".";
+                return $"Word '{word}' is not in the '{wordListName}' vocabulary.\n" +
+                       "ComposedWords validates EACH word independently against the word list. " +
+                       $"The full value was: \"{value}\"\n" +
+                       $"  ✓ Each word must be in the '{wordListName}' vocabulary\n" +
+                       $"  ✗ \"{word}\" was not found\n" +
+                       $"Run {{ \"verb\": \"Mk8Vocab\", \"args\": [\"{wordListName}\"] }} to see all allowed words. " +
+                       "If FreeText is enabled for this command, you can use free-form text instead " +
+                       "— run { \"verb\": \"Mk8FreeText\", \"args\": [\"<command>\"] } to check.";
         }
 
         return null;
@@ -432,15 +509,24 @@ public sealed class Mk8CommandWhitelist
     private string? ValidateCompoundName(string value)
     {
         if (_validProjectNames is null || _validProjectNames.Count == 0)
-            return "No project base names configured. " +
-                   "An administrator must provide ProjectBases in Mk8RuntimeConfig.";
+            return "No project base names configured.\n" +
+                   "An administrator must provide ProjectBases in Mk8RuntimeConfig at startup.\n" +
+                   "  Example: new Mk8RuntimeConfig { ProjectBases = [\"Banana\", \"SharpClaw\"] }\n" +
+                   "Until configured, 'dotnet new -n <name>' is unavailable. " +
+                   "'dotnet new <template>' (without -n) still works — it uses the directory name.\n" +
+                   "Run { \"verb\": \"Mk8Info\", \"args\": [] } to see the current runtime configuration.";
 
         if (_validProjectNames.Contains(value))
             return null;
 
-        return $"'{value}' is not a valid project name. " +
-               "It must be a registered base name optionally followed by a " +
-               "compile-time suffix (direct concatenation or dot-separated).";
+        return $"'{value}' is not a valid project name.\n" +
+               "CompoundName slots accept a runtime-registered base name, optionally " +
+               "composed with a compile-time suffix (direct or dot-separated).\n" +
+               $"  ✓ Examples: {string.Join(", ", _validProjectNames.Order().Take(10))}" +
+               (_validProjectNames.Count > 10 ? $" ... ({_validProjectNames.Count} total)" : "") + "\n" +
+               $"  ✗ Got:      \"{value}\"\n" +
+               "The base names are configured by the administrator at startup. " +
+               "Suffixes include App, Api, Core, Infrastructure, Contracts, Tests, etc.";
     }
 
     // ── FreeText validation ───────────────────────────────────────
@@ -464,11 +550,14 @@ public sealed class Mk8CommandWhitelist
         string commandDescription, string binary)
     {
         // If FreeText is disabled for this command, fall back to ComposedWords
-        // (or AdminWord for single-word fallback lists like MigrationNames/TagNames)
         if (!_freeTextConfig.IsEnabledFor(commandDescription, binary))
         {
             if (slot.WordListName is null)
-                return "FreeText is disabled and no fallback word list is configured.";
+                return "FreeText is disabled and no fallback word list is configured.\n" +
+                       "When FreeText is disabled, the slot falls back to ComposedWords validation " +
+                       "which requires a word list. This slot has no fallback.\n" +
+                       $"Run {{ \"verb\": \"Mk8FreeText\", \"args\": [\"{commandDescription}\"] }} " +
+                       "to check FreeText status for this command.";
 
             return ValidateComposedWords(slot.WordListName, value);
         }
@@ -482,26 +571,35 @@ public sealed class Mk8CommandWhitelist
             : _freeTextConfig.GetMaxLength(commandDescription);
 
         if (value.Length > maxLen)
-            return $"FreeText too long ({value.Length} chars). Maximum is {maxLen}.";
+            return $"FreeText too long ({value.Length} chars). Maximum is {maxLen}.\n" +
+                   $"  ✓ Correct: text up to {maxLen} characters\n" +
+                   $"  ✗ Got:     {value.Length} characters\n" +
+                   $"Run {{ \"verb\": \"Mk8FreeText\", \"args\": [\"{commandDescription}\"] }} " +
+                   "to see the configured max length for this command.";
 
         // Block control characters (null, newlines, tabs, etc.)
         foreach (var ch in value)
         {
             if (char.IsControl(ch) && ch != ' ')
-                return $"FreeText contains control character (U+{(int)ch:X4}). " +
-                       "Only printable characters and spaces are allowed.";
+                return $"FreeText contains control character (U+{(int)ch:X4}).\n" +
+                       "Only printable characters and spaces are allowed in FreeText values.\n" +
+                       "  ✓ Correct: \"Fix authentication error\" (printable text)\n" +
+                       "  ✗ Wrong:   text with newlines, tabs, null bytes, or escape sequences";
         }
 
         // Block secret patterns
         foreach (var pattern in SecretPatterns)
         {
             if (value.Contains(pattern, StringComparison.OrdinalIgnoreCase))
-                return $"FreeText contains secret-like pattern '{pattern}'. " +
-                       "Secrets must never appear in command arguments.";
+                return $"FreeText contains secret-like pattern '{pattern}'.\n" +
+                       "Secrets must never appear in command arguments — they could be " +
+                       "logged, captured in output, or persisted in audit trails.\n" +
+                       "  ✓ Correct: \"Update database config\" (no secrets)\n" +
+                       $"  ✗ Wrong:   text containing \"{pattern}\" patterns\n" +
+                       "Remove secret-like patterns from your text.";
         }
 
-        // Gigablacklist is already enforced at the Validate() level,
-        // but defense-in-depth: check again on the individual value
+        // Gigablacklist defense-in-depth
         var gbMatch = _gigaBlacklist.Check(value);
         if (gbMatch is not null)
             throw new Mk8GigaBlacklistException(gbMatch,
@@ -544,18 +642,29 @@ public sealed class Mk8CommandWhitelist
     private static string? ValidateCSharpIdentifier(string value)
     {
         if (value.Contains(' '))
-            return "Migration name cannot contain spaces. " +
-                   "Use PascalCase like 'AddUserPreferences'.";
+            return "Migration name cannot contain spaces.\n" +
+                   "EF Core generates a C# class from the migration name, so it must " +
+                   "be a valid C# identifier (PascalCase, no spaces, no special chars).\n" +
+                   "  ✓ Correct: \"AddUserPreferences\", \"InitialCreate\", \"V2_AddIndexes\"\n" +
+                   $"  ✗ Got:     \"{value}\" (contains spaces)\n" +
+                   "Use PascalCase like 'AddUserTable' or 'UpdateSchemaV2'.";
 
         if (!char.IsLetter(value[0]) && value[0] != '_')
-            return $"Migration name must start with a letter or underscore. " +
-                   $"Got '{value[0]}'.";
+            return $"Migration name must start with a letter or underscore.\n" +
+                   "EF Core generates a C# class from this name — C# identifiers " +
+                   "cannot start with a digit or special character.\n" +
+                   "  ✓ Correct: \"AddUsers\", \"_TempMigration\"\n" +
+                   $"  ✗ Got:     \"{value}\" (starts with '{value[0]}')";
 
         foreach (var ch in value)
         {
             if (!char.IsLetterOrDigit(ch) && ch != '_')
-                return $"Migration name contains invalid character '{ch}'. " +
-                       "Only letters, digits, and underscores are allowed.";
+                return $"Migration name contains invalid character '{ch}'.\n" +
+                       "Only letters, digits, and underscores are allowed in C# identifiers.\n" +
+                       "  ✓ Correct: \"AddUserRoles\", \"Update_V2\", \"Seed123\"\n" +
+                       $"  ✗ Got:     \"{value}\" (contains '{ch}')\n" +
+                       "If FreeText is disabled, the fallback vocabulary is 'MigrationNames' " +
+                       "— run { \"verb\": \"Mk8Vocab\", \"args\": [\"MigrationNames\"] } to see allowed names.";
         }
 
         return null;
@@ -577,27 +686,46 @@ public sealed class Mk8CommandWhitelist
     private static string? ValidateGitRefName(string value)
     {
         if (value.Contains(".."))
-            return "Tag name cannot contain '..'.";
+            return "Tag name cannot contain '..'.\n" +
+                   "Git ref names forbid '..' (range notation in git).\n" +
+                   "  ✓ Correct: \"v1.0.0\", \"release-beta\"\n" +
+                   $"  ✗ Got:     \"{value}\" (contains '..')\n" +
+                   "If FreeText is disabled, use the 'TagNames' vocabulary " +
+                   "— run { \"verb\": \"Mk8Vocab\", \"args\": [\"TagNames\"] } to see allowed names.";
 
         if (value.Contains("@{"))
-            return "Tag name cannot contain '@{'.";
+            return "Tag name cannot contain '@{'.\n" +
+                   "Git ref names forbid '@{' (reflog notation in git).\n" +
+                   $"  ✗ Got: \"{value}\"";
 
         if (value.StartsWith('.') || value.StartsWith('/'))
-            return "Tag name cannot start with '.' or '/'.";
+            return $"Tag name cannot start with '{value[0]}'.\n" +
+                   "Git ref names must not start with '.' or '/'.\n" +
+                   "  ✓ Correct: \"v1.0.0\", \"release-1\"\n" +
+                   $"  ✗ Got:     \"{value}\"";
 
         if (value.EndsWith('.') || value.EndsWith('/'))
-            return "Tag name cannot end with '.' or '/'.";
+            return $"Tag name cannot end with '{value[^1]}'.\n" +
+                   "Git ref names must not end with '.' or '/'.\n" +
+                   "  ✓ Correct: \"v1.0.0\" (dot in middle OK), \"release\"\n" +
+                   $"  ✗ Got:     \"{value}\"";
 
         if (value.EndsWith(".lock", StringComparison.OrdinalIgnoreCase))
-            return "Tag name cannot end with '.lock'.";
+            return "Tag name cannot end with '.lock'.\n" +
+                   "Git uses '.lock' files internally for locking.\n" +
+                   $"  ✗ Got: \"{value}\"";
 
         if (value.Contains("//"))
-            return "Tag name cannot contain consecutive slashes.";
+            return "Tag name cannot contain consecutive slashes.\n" +
+                   $"  ✗ Got: \"{value}\"";
 
         foreach (var ch in GitRefForbiddenChars)
         {
             if (value.Contains(ch))
-                return $"Tag name contains forbidden character '{ch}'.";
+                return $"Tag name contains forbidden character '{ch}'.\n" +
+                       "Git ref names forbid: space, ~, ^, :, ?, *, [, \\, and control chars.\n" +
+                       "  ✓ Correct: \"v1.0.0-beta\", \"release/2.0\"\n" +
+                       $"  ✗ Got:     \"{value}\" (contains '{ch}')";
         }
 
         return null;
