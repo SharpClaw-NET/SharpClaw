@@ -795,6 +795,163 @@ magic-byte signatures. Returns a MIME type string (e.g. `"application/pdf"`,
 and heuristic analysis. Returns encoding name (e.g. `"utf-8"`, `"utf-16-le"`,
 `"ascii"`, `"utf-8-bom"`). Read-only, in-memory, path must be in sandbox.
 
+### File Comparison (Read-Only)
+
+| Verb         | Args                       | Description                               |
+|--------------|----------------------------|-------------------------------------------|
+| FileEqual    | `[path1, path2]`           | Byte-for-byte comparison → `"True"`/`"False"` |
+| FileChecksum | `[path, expected, algo?]`  | Hash + compare → `"True"`/`"False"`       |
+
+`FileEqual` performs streaming byte-for-byte comparison. Never loads both
+files into memory. Both paths validated by sandbox. Returns `"False"` if
+either file does not exist or sizes differ.
+
+`FileChecksum` computes a hash of the file and compares it to the expected
+hex string. Same algorithm support as `FileHash`: sha256, sha512, md5.
+Case-insensitive comparison of hex strings.
+
+### Path Manipulation (Pure String Ops — No I/O)
+
+| Verb          | Args           | Description                               |
+|---------------|----------------|-------------------------------------------|
+| PathJoin      | `[parts...]`   | Join path segments (2–16 parts)           |
+| PathDir       | `[path]`       | Directory portion                         |
+| PathFile      | `[path]`       | Filename portion                          |
+| PathExt       | `[path]`       | File extension (including dot)            |
+| PathStem      | `[path]`       | Filename without extension                |
+| PathChangeExt | `[path, ext]`  | Change file extension                     |
+
+These use `System.IO.Path` methods that are **pure string operations** —
+they never touch the filesystem. No `Exists()`, no disk access, no sandbox
+escape possible. Results are validated by `Mk8PathSanitizer` if used in
+subsequent file/directory verbs.
+
+### Identity/Value Generation
+
+| Verb         | Args         | Description                         |
+|--------------|--------------|-------------------------------------|
+| GuidNew      | `[]`         | New GUID via `Guid.NewGuid()`       |
+| GuidNewShort | `[]`         | 8-char hex from GUID                |
+| RandomInt    | `[min, max]` | Random integer in range (0–1000000) |
+
+`GuidNew` returns a full GUID string. Useful for unique filenames,
+correlation IDs, build tags. `GuidNewShort` returns an 8-character hex
+string — shorter but still has ~4 billion possible values.
+
+`RandomInt` generates a random integer in [min, max] (inclusive). Range
+must be within 0–1000000. Validated at compile time. Uses
+`Random.Shared.Next()`.
+
+### Time Arithmetic (Pure DateTimeOffset Math)
+
+| Verb       | Args                    | Description                        |
+|------------|-------------------------|------------------------------------|
+| TimeFormat | `[unixSec, format?]`    | Format Unix timestamp as string    |
+| TimeParse  | `[dateString, format?]` | Parse date string to Unix seconds  |
+| TimeAdd    | `[unixSec, seconds]`    | Add seconds to timestamp           |
+| TimeDiff   | `[unixSec1, unixSec2]`  | Absolute difference in seconds     |
+
+All pure arithmetic/string operations on `long` values. No I/O, no network.
+
+`TimeFormat` uses the same format-string validation as `SysDateFormat`
+(restricted charset, max 32 characters). Default format is ISO 8601 (`"o"`).
+
+`TimeParse` accepts a date string and optional format. Returns Unix
+seconds. Uses `DateTimeOffset.Parse` or `DateTimeOffset.ParseExact`.
+
+### Version Comparison
+
+| Verb           | Args         | Description                               |
+|----------------|--------------|-------------------------------------------|
+| VersionCompare | `[v1, v2]`   | Compare semver strings → `-1`/`0`/`1`    |
+| VersionParse   | `[input]`    | Extract first version from string         |
+
+`VersionCompare` extracts version numbers from both inputs and compares
+via `System.Version.CompareTo`. Returns `-1` (v1 < v2), `0` (equal),
+or `1` (v1 > v2). Handles 2, 3, or 4-part versions.
+
+`VersionParse` extracts the first semver-like pattern (`\d+\.\d+(\.\d+)?`)
+from arbitrary text. Useful for extracting versions from command output
+like `"dotnet 9.0.100"` → `"9.0.100"`.
+
+### Encoding/Conversion
+
+| Verb        | Args                 | Description                     |
+|-------------|----------------------|---------------------------------|
+| HexEncode   | `[input]`            | UTF-8 string → hex string      |
+| HexDecode   | `[hexString]`        | Hex string → UTF-8 string      |
+| BaseConvert | `[value, from, to]`  | Convert between bases 2/8/10/16|
+
+Pure encoding/conversion — no I/O. `BaseConvert` supported bases: 2
+(binary), 8 (octal), 10 (decimal), 16 (hex).
+
+### Regex Capture Groups
+
+| Verb            | Args               | Description                        |
+|-----------------|--------------------|------------------------------------|
+| TextRegexGroups | `[input, pattern]` | Named/numbered groups as JSON      |
+
+Returns a JSON object with group names/numbers as keys and matched values.
+Same 2-second timeout as `TextRegex`/`TextMatch`. If no match, returns `{}`.
+
+### Script Control/Debugging
+
+| Verb   | Args                       | Description                           |
+|--------|----------------------------|---------------------------------------|
+| Echo   | `[message]`                | Returns message as-is (identity)      |
+| Sleep  | `[seconds]`                | Pause 0.1–30 seconds                 |
+| Assert | `[actual, expected, msg?]` | Fail step if values don't match       |
+| Fail   | `[message]`                | Always fail with message              |
+
+`Echo` is a pure identity function — returns its input as output. Useful
+for debugging scripts, inserting markers in captured output, or composing
+messages.
+
+`Sleep` pauses execution. Capped at 30 seconds, minimum 0.1 seconds.
+Validated at compile time. Useful between rate-limited HTTP calls.
+
+`Assert` compares actual to expected (ordinal string comparison). If they
+differ, the step fails with the provided message (or a default message).
+Useful for verifying intermediate results before proceeding.
+
+`Fail` always throws, causing the step to fail. Useful in conditional
+branches (e.g. `If` + `Fail` for guard conditions).
+
+### JSON Construction/Mutation (In-Memory)
+
+| Verb          | Args                       | Description                        |
+|---------------|----------------------------|------------------------------------|
+| JsonFromPairs | `[k1, v1, k2, v2, ...]`   | Build JSON object from pairs       |
+| JsonSet       | `[json, key, value]`       | Set/overwrite a key                |
+| JsonRemoveKey | `[json, key]`              | Remove a key                       |
+| JsonGet       | `[json, indexOrKey]`       | Get value by key or index          |
+| JsonCompact   | `[json]`                   | Minify (remove whitespace)         |
+| JsonStringify | `[value]`                  | Wrap as properly-escaped JSON string|
+| JsonArrayFrom | `[items...]`               | Build JSON array from arguments    |
+
+`JsonFromPairs` builds a JSON object from alternating key-value pairs.
+Max 64 pairs (128 arguments). Values are always stored as JSON strings.
+
+`JsonSet` sets or overwrites a key in a JSON object. Returns the modified
+object. Useful for programmatically building configs without templates.
+
+`JsonRemoveKey` removes a key from a JSON object. No error if key doesn't
+exist.
+
+`JsonGet` retrieves a value by key (object) or index (array). Simpler
+than `JsonQuery` for single-level access. Returns the raw value for strings,
+JSON text for objects/arrays.
+
+`JsonCompact` minifies JSON by removing all whitespace/indentation. Useful
+for embedding JSON in single-line contexts.
+
+`JsonStringify` wraps a raw string value as a properly-escaped JSON string
+(handles quotes, backslashes, control characters). Useful for embedding
+captured output in JSON structures.
+
+`JsonArrayFrom` builds a JSON array from arguments. Max 64 items. All
+values stored as JSON strings.
+
 ### Environment (Read-Only)
 
 | Verb   | Args     | Description                           |
@@ -922,6 +1079,174 @@ until expiry with a warning if < 30 days.
 and response headers — no body is downloaded. Lightweight health check.
 Same SSRF URL validation as `HttpGet` (scheme, host, port restrictions).
 Executed in-memory via `HttpClient`.
+
+### TCP Port Check
+
+| Verb          | Args                     | Description                     |
+|---------------|--------------------------|---------------------------------|
+| NetTcpConnect | `[host, port, timeout?]` | TCP connect test → Open/Closed  |
+
+`NetTcpConnect` checks if a remote TCP port is reachable via
+`System.Net.Sockets.TcpClient.ConnectAsync`. No data is sent — it only
+tests whether the connection is established. Same SSRF hostname validation
+as `NetPing` (no IP literals, no private/metadata hosts). Timeout defaults
+to 5 seconds, max 30. Returns `"Open (Xms)"` or `"Closed (Xms)"`.
+
+### HTTP Latency
+
+| Verb        | Args              | Description                          |
+|-------------|-------------------|--------------------------------------|
+| HttpLatency | `[url, count?]`   | Timed HEAD requests → min/avg/max ms |
+
+`HttpLatency` sends multiple timed HTTP HEAD requests and reports
+min/avg/max round-trip times. Count defaults to 3, max 10. Same SSRF
+URL validation as `HttpGet`. 200ms delay between requests. Returns a
+detailed report with individual request times.
+
+### File Age & Staleness (Read-Only)
+
+| Verb          | Args               | Description                              |
+|---------------|--------------------|------------------------------------------|
+| FileAge       | `[path]`           | Seconds since last modification          |
+| FileNewerThan | `[path, seconds]`  | `"True"`/`"False"` — modified within N s |
+
+`FileAge` returns the number of seconds since the file was last written.
+Pure `(UtcNow - LastWriteTimeUtc).TotalSeconds`. Throws if file does not
+exist.
+
+`FileNewerThan` checks if a file was modified within the last N seconds.
+Returns `"False"` if the file does not exist (safe for use in `If`
+predicates). Useful for staleness checks on health files, logs, or cache.
+
+### Process Search (Read-Only)
+
+| Verb        | Args     | Description                           |
+|-------------|----------|---------------------------------------|
+| ProcessFind | `[name]` | Find processes by name substring      |
+
+`ProcessFind` filters `Process.GetProcesses()` by case-insensitive name
+substring. Returns `PID\tName\tWorkingSetKB` per match, sorted by name.
+Max 50 results. Read-only — no `Process.Kill()` or any mutation. If a
+process's working set cannot be read (access denied), it shows
+`"(access denied)"` instead.
+
+### System Discovery (Read-Only)
+
+| Verb         | Args | Description                              |
+|--------------|------|------------------------------------------|
+| SysDriveList | `[]` | All drives: name, type, total/free/used% |
+| SysNetInfo   | `[]` | Network interfaces: name, status, IPs    |
+| EnvList      | `[]` | All allowed env vars with values         |
+
+`SysDriveList` enumerates all drives via `DriveInfo.GetDrives()`. Returns
+name, drive type, filesystem format, total size, free space, and usage
+percentage. Drives that are not ready show `"(not ready)"`.
+
+`SysNetInfo` lists all non-loopback network interfaces via
+`System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces()`.
+Returns interface name, operational status (Up/Down), type, and IPv4/IPv6
+addresses. Link-local (`fe80:`) addresses are filtered. Private IPs are
+**not** hidden here (unlike `NetDns`) because these are the agent's own
+host interfaces — the agent already runs on this machine.
+
+`EnvList` returns all environment variables from the allowlist with their
+current values. Variables that are not set show `"(not set)"`. Same
+allowlist as `EnvGet`.
+
+### Regex File Search (Read-Only)
+
+| Verb            | Args              | Description                        |
+|-----------------|-------------------|------------------------------------|
+| FileSearchRegex | `[path, pattern]` | Regex search — lines with numbers  |
+
+Like `FileSearch` but with regex instead of literal matching. Same
+2-second regex timeout as `TextRegex`/`TextMatch`. Returns
+`lineNumber: matchedLine` format. Max 500 matches. Path must be in
+sandbox.
+
+### Tabular Text (Pure String Ops)
+
+| Verb       | Args                      | Description                         |
+|------------|---------------------------|-------------------------------------|
+| TextColumn | `[input, index, delim?]`  | Extract column N from each line     |
+| TextTable  | `[input, delimiter?]`     | Align columns for display           |
+
+`TextColumn` splits each line by delimiter (default: whitespace), extracts
+the column at the given 0-based index, and returns one value per line.
+Column index validated at compile time (0–100).
+
+`TextTable` aligns columns by padding each to its maximum width in the
+dataset. Default delimiter is tab.
+
+### Directory Comparison & Hashing (Read-Only)
+
+| Verb       | Args                        | Description                        |
+|------------|-----------------------------|------------------------------------|
+| DirCompare | `[path1, path2]`           | Compare directory trees (names)    |
+| DirHash    | `[path, algo?, pattern?]`  | Hash all files → manifest          |
+
+`DirCompare` compares two directory trees **by filename only** (not
+content). Returns three sections: only-in-first, only-in-second, and
+common. Each section capped at 200 entries. Both paths validated by
+sandbox.
+
+`DirHash` walks a directory, hashes each file, and returns a manifest in
+`sha256sum` format (`hash  relativePath`, one per line). Max 500 files.
+Optional algorithm (sha256/sha512/md5) and glob pattern filter. Read-only.
+
+### Human-Readable Formatting
+
+| Verb           | Args        | Description                          |
+|----------------|-------------|--------------------------------------|
+| FormatBytes    | `[bytes]`   | `1048576` → `"1.00 MB"`             |
+| FormatDuration | `[seconds]` | `3661` → `"1h 1m 1s"`               |
+
+`FormatBytes` converts a byte count to the largest unit where the value
+is ≥ 1. Units: B, KB, MB, GB, TB, PB. Two decimal places for KB+.
+
+`FormatDuration` converts seconds to a human-readable duration. Format
+adapts: `"2d 3h 15m 0s"`, `"1h 1m 1s"`, `"5.2s"`, `"150ms"`.
+
+### System Log Viewing (Read-Only, Redacted)
+
+| Verb           | Args                          | Description                            |
+|----------------|-------------------------------|----------------------------------------|
+| SysLogRead     | `[source, lines?, filter?]`   | Read system logs with secret redaction |
+| SysLogSources  | `[]`                          | List available log sources             |
+
+`SysLogRead` reads system/application logs from the host OS. On Windows,
+reads from `System.Diagnostics.EventLog` (Application, System, Security).
+On Linux, reads from `/var/log/syslog`, `/var/log/messages`, or
+`/var/log/auth.log` (whichever exists). Args:
+
+- `source`: `"application"`, `"system"`, `"security"` (Windows) or
+  `"syslog"`, `"auth"`, `"kern"` (Linux). Case-insensitive.
+- `lines`: max lines to return (default 50, max 500). Most recent first.
+- `filter`: optional literal substring filter (same as `FileSearch`).
+
+**All output is secret-redacted.** Lines matching the env blocklist
+patterns (`KEY=`, `SECRET=`, `TOKEN=`, `PASSWORD=`, `CONN=`, `AUTH=`,
+`PRIVATE=`, `ENCRYPT=`, `JWT=`, `CERTIFICATE=`, `APIKEY=`) have the
+value portion replaced with `[REDACTED]`. This is defense-in-depth —
+even though the agent runs on the same machine, redaction prevents
+accidental persistence of secrets in captured output or sandbox files.
+
+`SysLogSources` returns available log sources on the current OS.
+
+### Service Status (Read-Only)
+
+| Verb            | Args        | Description                            |
+|-----------------|-------------|----------------------------------------|
+| SysServiceList  | `[filter?]` | List OS services with status           |
+| SysServiceStatus| `[name]`    | Detailed status of a specific service  |
+
+On Windows, reads from `System.ServiceProcess.ServiceController`. On
+Linux, reads from `/etc/init.d/` or parses `systemctl` output via
+the .NET `Process` API (not ProcRun — internal only).
+
+Returns service name, display name, status (Running/Stopped/etc.), and
+start type (Automatic/Manual/Disabled). Filter is case-insensitive
+name substring. Max 200 results.
 
 ### Archive Extraction (In-Memory, Pre-Validated)
 

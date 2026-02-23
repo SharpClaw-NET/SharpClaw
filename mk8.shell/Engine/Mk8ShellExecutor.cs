@@ -347,6 +347,15 @@ public sealed class Mk8ShellExecutor
             Mk8ShellVerb.JsonCount        => JsonCount(cmd.Arguments[0]),
             Mk8ShellVerb.JsonType         => JsonTypeOf(cmd.Arguments[0]),
 
+            // ── JSON construction/mutation ─────────────────────────
+            Mk8ShellVerb.JsonFromPairs    => JsonFromPairs(cmd.Arguments),
+            Mk8ShellVerb.JsonSet          => JsonSetKey(cmd.Arguments[0], cmd.Arguments[1], cmd.Arguments[2]),
+            Mk8ShellVerb.JsonRemoveKey    => JsonRemoveKey(cmd.Arguments[0], cmd.Arguments[1]),
+            Mk8ShellVerb.JsonGet          => JsonGetValue(cmd.Arguments[0], cmd.Arguments[1]),
+            Mk8ShellVerb.JsonCompact      => JsonCompact(cmd.Arguments[0]),
+            Mk8ShellVerb.JsonStringify    => JsonSerializer.Serialize(cmd.Arguments[0]),
+            Mk8ShellVerb.JsonArrayFrom    => JsonArrayFromArgs(cmd.Arguments),
+
             // ── File inspection (read-only) ───────────────────────
             Mk8ShellVerb.FileLineCount    => FileLineCount(cmd.Arguments[0]),
             Mk8ShellVerb.FileHead         => FileHead(cmd.Arguments),
@@ -362,6 +371,47 @@ public sealed class Mk8ShellExecutor
             // ── File type detection ──────────────────────────────
             Mk8ShellVerb.FileMimeType     => await FileMimeTypeAsync(cmd.Arguments[0], ct),
             Mk8ShellVerb.FileEncoding     => await FileEncodingAsync(cmd.Arguments[0], ct),
+
+            // ── File comparison (read-only) ───────────────────────
+            Mk8ShellVerb.FileEqual        => await FileEqualAsync(cmd.Arguments[0], cmd.Arguments[1], ct),
+            Mk8ShellVerb.FileChecksum     => await FileChecksumAsync(cmd.Arguments, ct),
+
+            // ── Path manipulation (pure string, no I/O) ───────────
+            Mk8ShellVerb.PathJoin         => Path.Combine(cmd.Arguments),
+            Mk8ShellVerb.PathDir          => Path.GetDirectoryName(cmd.Arguments[0]) ?? "",
+            Mk8ShellVerb.PathFile         => Path.GetFileName(cmd.Arguments[0]),
+            Mk8ShellVerb.PathExt          => Path.GetExtension(cmd.Arguments[0]),
+            Mk8ShellVerb.PathStem         => Path.GetFileNameWithoutExtension(cmd.Arguments[0]),
+            Mk8ShellVerb.PathChangeExt    => Path.ChangeExtension(cmd.Arguments[0], cmd.Arguments[1]),
+
+            // ── Identity/value generation ─────────────────────────
+            Mk8ShellVerb.GuidNew          => Guid.NewGuid().ToString(),
+            Mk8ShellVerb.GuidNewShort     => Guid.NewGuid().ToString("N")[..8],
+            Mk8ShellVerb.RandomInt        => Random.Shared.Next(int.Parse(cmd.Arguments[0]), int.Parse(cmd.Arguments[1]) + 1).ToString(),
+
+            // ── Time arithmetic ───────────────────────────────────
+            Mk8ShellVerb.TimeFormat       => TimeFormatFromUnix(cmd.Arguments),
+            Mk8ShellVerb.TimeParse        => TimeParseToUnix(cmd.Arguments),
+            Mk8ShellVerb.TimeAdd          => (long.Parse(cmd.Arguments[0]) + long.Parse(cmd.Arguments[1])).ToString(),
+            Mk8ShellVerb.TimeDiff         => Math.Abs(long.Parse(cmd.Arguments[0]) - long.Parse(cmd.Arguments[1])).ToString(),
+
+            // ── Version comparison ────────────────────────────────
+            Mk8ShellVerb.VersionCompare   => CompareVersions(cmd.Arguments[0], cmd.Arguments[1]),
+            Mk8ShellVerb.VersionParse     => ParseVersion(cmd.Arguments[0]),
+
+            // ── Encoding/conversion ───────────────────────────────
+            Mk8ShellVerb.HexEncode        => Convert.ToHexStringLower(Encoding.UTF8.GetBytes(cmd.Arguments[0])),
+            Mk8ShellVerb.HexDecode        => Encoding.UTF8.GetString(Convert.FromHexString(cmd.Arguments[0])),
+            Mk8ShellVerb.BaseConvert      => ConvertBase(cmd.Arguments[0], cmd.Arguments[1], cmd.Arguments[2]),
+
+            // ── Regex capture groups ──────────────────────────────
+            Mk8ShellVerb.TextRegexGroups  => TextRegexGroups(cmd.Arguments[0], cmd.Arguments[1]),
+
+            // ── Script control/debugging ──────────────────────────
+            Mk8ShellVerb.Echo             => cmd.Arguments[0],
+            Mk8ShellVerb.Sleep            => await SleepAsync(cmd.Arguments[0], ct),
+            Mk8ShellVerb.Assert           => AssertEqual(cmd.Arguments),
+            Mk8ShellVerb.Fail             => throw new InvalidOperationException(cmd.Arguments[0]),
 
             // ── Environment ───────────────────────────────────────
             Mk8ShellVerb.EnvGet => EnvGet(cmd.Arguments[0]),
@@ -403,6 +453,43 @@ public sealed class Mk8ShellExecutor
             Mk8ShellVerb.NetDns       => await NetDnsAsync(cmd.Arguments[0], ct),
             Mk8ShellVerb.NetTlsCert   => await NetTlsCertAsync(cmd.Arguments, ct),
             Mk8ShellVerb.NetHttpStatus => await NetHttpStatusAsync(cmd.Arguments[0], ct),
+            Mk8ShellVerb.NetTcpConnect => await NetTcpConnectAsync(cmd.Arguments, ct),
+            Mk8ShellVerb.HttpLatency   => await HttpLatencyAsync(cmd.Arguments, ct),
+
+            // ── Sysadmin: file age/staleness ──────────────────────
+            Mk8ShellVerb.FileAge       => FileAge(cmd.Arguments[0]),
+            Mk8ShellVerb.FileNewerThan => FileNewerThan(cmd.Arguments[0], cmd.Arguments[1]),
+
+            // ── Sysadmin: process search ──────────────────────────
+            Mk8ShellVerb.ProcessFind   => ProcessFind(cmd.Arguments[0]),
+
+            // ── Sysadmin: system discovery ────────────────────────
+            Mk8ShellVerb.SysDriveList  => SysDriveList(),
+            Mk8ShellVerb.SysNetInfo    => SysNetInfo(),
+            Mk8ShellVerb.EnvList       => EnvListAll(),
+
+            // ── Sysadmin: regex file search ───────────────────────
+            Mk8ShellVerb.FileSearchRegex => FileSearchRegex(cmd.Arguments[0], cmd.Arguments[1]),
+
+            // ── Sysadmin: tabular text ────────────────────────────
+            Mk8ShellVerb.TextColumn    => TextColumn(cmd.Arguments),
+            Mk8ShellVerb.TextTable     => TextTable(cmd.Arguments),
+
+            // ── Sysadmin: directory comparison ────────────────────
+            Mk8ShellVerb.DirCompare    => DirCompare(cmd.Arguments[0], cmd.Arguments[1]),
+            Mk8ShellVerb.DirHash       => await DirHashAsync(cmd.Arguments, ct),
+
+            // ── Sysadmin: human-readable formatting ───────────────
+            Mk8ShellVerb.FormatBytes    => FormatBytesHuman(cmd.Arguments[0]),
+            Mk8ShellVerb.FormatDuration => FormatDurationHuman(cmd.Arguments[0]),
+
+            // ── Sysadmin: system log viewing (read-only, redacted) ─
+            Mk8ShellVerb.SysLogRead    => SysLogRead(cmd.Arguments),
+            Mk8ShellVerb.SysLogSources => SysLogSources(),
+
+            // ── Sysadmin: service status (read-only) ──────────────
+            Mk8ShellVerb.SysServiceList   => SysServiceList(cmd.Arguments),
+            Mk8ShellVerb.SysServiceStatus => SysServiceStatus(cmd.Arguments[0]),
 
             // ── Archive extraction ────────────────────────────────
             Mk8ShellVerb.ArchiveExtract => await ArchiveExtractAsync(
@@ -1625,6 +1712,612 @@ public sealed class Mk8ShellExecutor
     private static string DirEmpty(string path) =>
         (!Directory.EnumerateFileSystemEntries(path).Any()).ToString();
 
+    // ═══════════════════════════════════════════════════════════════
+    // File comparison helpers (read-only)
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<string> FileEqualAsync(string path1, string path2, CancellationToken ct)
+    {
+        var fi1 = new System.IO.FileInfo(path1);
+        var fi2 = new System.IO.FileInfo(path2);
+
+        if (!fi1.Exists || !fi2.Exists) return "False";
+        if (fi1.Length != fi2.Length) return "False";
+
+        const int bufferSize = 8192;
+        var buf1 = new byte[bufferSize];
+        var buf2 = new byte[bufferSize];
+
+        await using var s1 = fi1.OpenRead();
+        await using var s2 = fi2.OpenRead();
+
+        while (true)
+        {
+            ct.ThrowIfCancellationRequested();
+            var read1 = await s1.ReadAsync(buf1.AsMemory(), ct);
+            var read2 = await s2.ReadAsync(buf2.AsMemory(), ct);
+
+            if (read1 != read2) return "False";
+            if (read1 == 0) return "True";
+            if (!buf1.AsSpan(0, read1).SequenceEqual(buf2.AsSpan(0, read2))) return "False";
+        }
+    }
+
+    private static async Task<string> FileChecksumAsync(string[] args, CancellationToken ct)
+    {
+        var filePath = args[0];
+        var expectedHash = args[1].Trim().ToLowerInvariant();
+        var algorithm = args.Length > 2 ? args[2].ToLowerInvariant() : "sha256";
+
+        await using var stream = File.OpenRead(filePath);
+        var hashBytes = algorithm switch
+        {
+            "sha256" => await SHA256.HashDataAsync(stream, ct),
+            "sha512" => await SHA512.HashDataAsync(stream, ct),
+            "md5" => await MD5.HashDataAsync(stream, ct),
+            _ => throw new InvalidOperationException($"Unsupported hash: {algorithm}")
+        };
+
+        var actual = Convert.ToHexStringLower(hashBytes);
+        return actual.Equals(expectedHash, StringComparison.Ordinal).ToString();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // JSON construction/mutation helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string JsonFromPairs(string[] args)
+    {
+        var obj = new JsonObject();
+        for (var i = 0; i < args.Length; i += 2)
+            obj[args[i]] = JsonValue.Create(args[i + 1]);
+        return obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static string JsonSetKey(string json, string key, string value)
+    {
+        var obj = JsonNode.Parse(json) as JsonObject
+            ?? throw new InvalidOperationException("Input is not a JSON object.");
+        obj[key] = JsonValue.Create(value);
+        return obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static string JsonRemoveKey(string json, string key)
+    {
+        var obj = JsonNode.Parse(json) as JsonObject
+            ?? throw new InvalidOperationException("Input is not a JSON object.");
+        obj.Remove(key);
+        return obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    private static string JsonGetValue(string json, string indexOrKey)
+    {
+        var node = JsonNode.Parse(json);
+        JsonNode? result = node switch
+        {
+            JsonObject obj => obj[indexOrKey],
+            JsonArray arr when int.TryParse(indexOrKey, out var idx) => arr[idx],
+            _ => throw new InvalidOperationException("Input must be a JSON object or array.")
+        };
+
+        if (result is null) return "null";
+        return result is JsonValue val && val.GetValueKind() == JsonValueKind.String
+            ? val.GetValue<string>()
+            : result.ToJsonString();
+    }
+
+    private static string JsonCompact(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return JsonSerializer.Serialize(doc.RootElement);
+    }
+
+    private static string JsonArrayFromArgs(string[] args)
+    {
+        var arr = new JsonArray();
+        foreach (var item in args)
+            arr.Add(JsonValue.Create(item));
+        return arr.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Time arithmetic helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string TimeFormatFromUnix(string[] args)
+    {
+        var seconds = long.Parse(args[0]);
+        var dto = DateTimeOffset.FromUnixTimeSeconds(seconds);
+        var format = args.Length > 1 ? args[1] : "o";
+        return dto.ToString(format);
+    }
+
+    private static string TimeParseToUnix(string[] args)
+    {
+        var input = args[0];
+        if (args.Length > 1)
+        {
+            var dto = DateTimeOffset.ParseExact(input, args[1],
+                System.Globalization.CultureInfo.InvariantCulture,
+                System.Globalization.DateTimeStyles.AssumeUniversal);
+            return dto.ToUnixTimeSeconds().ToString();
+        }
+        else
+        {
+            var dto = DateTimeOffset.Parse(input, System.Globalization.CultureInfo.InvariantCulture);
+            return dto.ToUnixTimeSeconds().ToString();
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Version comparison helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static readonly Regex VersionRegex = new(
+        @"(\d+\.\d+(?:\.\d+)?(?:\.\d+)?)",
+        RegexOptions.Compiled, TimeSpan.FromSeconds(2));
+
+    private static string CompareVersions(string v1, string v2)
+    {
+        var ver1 = ParseVersionString(v1);
+        var ver2 = ParseVersionString(v2);
+        return ver1.CompareTo(ver2).ToString();
+    }
+
+    private static string ParseVersion(string input)
+    {
+        var match = VersionRegex.Match(input);
+        return match.Success ? match.Groups[1].Value : "";
+    }
+
+    private static Version ParseVersionString(string input)
+    {
+        var match = VersionRegex.Match(input);
+        var text = match.Success ? match.Groups[1].Value : input;
+        return Version.TryParse(text, out var v) ? v
+            : throw new InvalidOperationException($"Cannot parse version: '{input}'.");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Encoding/conversion helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string ConvertBase(string value, string fromBaseStr, string toBaseStr)
+    {
+        if (!int.TryParse(fromBaseStr, out var fromBase) || !int.TryParse(toBaseStr, out var toBase))
+            throw new InvalidOperationException("Base must be an integer.");
+
+        int[] allowed = [2, 8, 10, 16];
+        if (!allowed.Contains(fromBase) || !allowed.Contains(toBase))
+            throw new InvalidOperationException("Supported bases: 2, 8, 10, 16.");
+
+        var number = Convert.ToInt64(value.Trim(), fromBase);
+        return Convert.ToString(number, toBase);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Regex capture groups helper
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string TextRegexGroups(string input, string pattern)
+    {
+        var regex = new Regex(pattern, RegexOptions.None, TimeSpan.FromSeconds(2));
+        var match = regex.Match(input);
+
+        if (!match.Success)
+            return "{}";
+
+        var obj = new JsonObject();
+        for (var i = 0; i < match.Groups.Count; i++)
+        {
+            var group = match.Groups[i];
+            var name = regex.GroupNameFromNumber(i);
+            var key = string.IsNullOrEmpty(name) || name == i.ToString()
+                ? i.ToString() : name;
+            obj[key] = JsonValue.Create(group.Value);
+        }
+
+        return obj.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Script control helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<string> SleepAsync(string secondsStr, CancellationToken ct)
+    {
+        var seconds = double.Parse(secondsStr);
+        await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+        return $"Slept {seconds}s";
+    }
+
+    private static string AssertEqual(string[] args)
+    {
+        var actual = args[0];
+        var expected = args[1];
+        var message = args.Length > 2 ? args[2] : $"Assertion failed: '{actual}' != '{expected}'";
+
+        if (!string.Equals(actual, expected, StringComparison.Ordinal))
+            throw new InvalidOperationException(message);
+
+        return $"Assert passed: '{actual}'";
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: NetTcpConnect — TCP port check
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<string> NetTcpConnectAsync(string[] args, CancellationToken ct)
+    {
+        var host = args[0];
+        var port = int.Parse(args[1]);
+        var timeout = args.Length > 2 ? int.Parse(args[2]) : 5;
+
+        var sw = Stopwatch.StartNew();
+        try
+        {
+            using var client = new System.Net.Sockets.TcpClient();
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeout));
+            await client.ConnectAsync(host, port, cts.Token);
+            sw.Stop();
+            return $"Open ({sw.ElapsedMilliseconds}ms)";
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            sw.Stop();
+            return $"Closed (timeout {timeout}s)";
+        }
+        catch (System.Net.Sockets.SocketException)
+        {
+            sw.Stop();
+            return $"Closed ({sw.ElapsedMilliseconds}ms)";
+        }
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: HttpLatency — timed HEAD requests
+    // ═══════════════════════════════════════════════════════════════
+
+    private async Task<string> HttpLatencyAsync(string[] args, CancellationToken ct)
+    {
+        var url = args[0];
+        var count = args.Length > 1 ? int.Parse(args[1]) : 3;
+        var times = new List<long>(count);
+
+        for (var i = 0; i < count; i++)
+        {
+            ct.ThrowIfCancellationRequested();
+            var sw = Stopwatch.StartNew();
+            using var request = new HttpRequestMessage(HttpMethod.Head, url);
+            using var response = await _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+            sw.Stop();
+            times.Add(sw.ElapsedMilliseconds);
+
+            if (i < count - 1)
+                await Task.Delay(200, ct); // small delay between requests
+        }
+
+        var min = times.Min();
+        var max = times.Max();
+        var avg = times.Average();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"URL: {url}");
+        sb.AppendLine($"Requests: {count}");
+        for (var i = 0; i < times.Count; i++)
+            sb.AppendLine($"  #{i + 1}: {times[i]}ms");
+        sb.AppendLine($"Min: {min}ms");
+        sb.AppendLine($"Avg: {avg:F0}ms");
+        sb.Append($"Max: {max}ms");
+        return sb.ToString();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: file age and staleness
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string FileAge(string path)
+    {
+        var fi = new System.IO.FileInfo(path);
+        if (!fi.Exists) throw new InvalidOperationException($"File not found: {path}");
+        var age = (DateTimeOffset.UtcNow - fi.LastWriteTimeUtc).TotalSeconds;
+        return ((long)age).ToString();
+    }
+
+    private static string FileNewerThan(string path, string secondsStr)
+    {
+        var fi = new System.IO.FileInfo(path);
+        if (!fi.Exists) return "False";
+        var seconds = long.Parse(secondsStr);
+        var age = (DateTimeOffset.UtcNow - fi.LastWriteTimeUtc).TotalSeconds;
+        return (age <= seconds).ToString();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: process search
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string ProcessFind(string name)
+    {
+        var sb = new StringBuilder();
+        var count = 0;
+        foreach (var proc in Process.GetProcesses()
+            .Where(p => p.ProcessName.Contains(name, StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p.ProcessName))
+        {
+            if (count >= 50) { sb.AppendLine("... (truncated at 50)"); break; }
+            try
+            {
+                sb.AppendLine($"{proc.Id}\t{proc.ProcessName}\t{proc.WorkingSet64 / 1024}KB");
+            }
+            catch
+            {
+                sb.AppendLine($"{proc.Id}\t{proc.ProcessName}\t(access denied)");
+            }
+            count++;
+        }
+
+        return count == 0 ? "No matching processes." : $"{count} process(es):\n{sb.ToString().TrimEnd()}";
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: system discovery
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string SysDriveList()
+    {
+        var sb = new StringBuilder();
+        foreach (var drive in DriveInfo.GetDrives())
+        {
+            sb.Append($"{drive.Name}\t{drive.DriveType}");
+            if (drive.IsReady)
+            {
+                var totalGB = drive.TotalSize / (1024.0 * 1024 * 1024);
+                var freeGB = drive.AvailableFreeSpace / (1024.0 * 1024 * 1024);
+                var usedPct = (1.0 - (double)drive.AvailableFreeSpace / drive.TotalSize) * 100;
+                sb.Append($"\t{drive.DriveFormat}\tTotal: {totalGB:F1}GB\tFree: {freeGB:F1}GB\tUsed: {usedPct:F0}%");
+            }
+            else
+            {
+                sb.Append("\t(not ready)");
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string SysNetInfo()
+    {
+        var sb = new StringBuilder();
+        foreach (var iface in System.Net.NetworkInformation.NetworkInterface.GetAllNetworkInterfaces())
+        {
+            if (iface.NetworkInterfaceType == System.Net.NetworkInformation.NetworkInterfaceType.Loopback)
+                continue;
+
+            sb.Append($"{iface.Name}\t{iface.OperationalStatus}\t{iface.NetworkInterfaceType}");
+
+            var props = iface.GetIPProperties();
+            var addrs = props.UnicastAddresses
+                .Select(a => a.Address.ToString())
+                .Where(a => !a.StartsWith("fe80:", StringComparison.OrdinalIgnoreCase)); // skip link-local
+            var addrList = string.Join(", ", addrs);
+            if (!string.IsNullOrEmpty(addrList))
+                sb.Append($"\t{addrList}");
+
+            sb.AppendLine();
+        }
+        return sb.Length == 0 ? "No non-loopback interfaces found." : sb.ToString().TrimEnd();
+    }
+
+    private static readonly string[] EnvAllowlist =
+    [
+        "HOME", "USERPROFILE", "USER", "USERNAME", "PATH", "LANG",
+        "LC_ALL", "TZ", "TERM", "PWD", "HOSTNAME", "SHELL", "EDITOR",
+        "DOTNET_ROOT", "NODE_ENV"
+    ];
+
+    private static string EnvListAll()
+    {
+        var sb = new StringBuilder();
+        foreach (var name in EnvAllowlist)
+        {
+            var value = Environment.GetEnvironmentVariable(name);
+            sb.AppendLine(value is not null ? $"{name}={value}" : $"{name}=(not set)");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: regex file search
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string FileSearchRegex(string path, string pattern)
+    {
+        var regex = new Regex(pattern, RegexOptions.None, RegexTimeout);
+        var sb = new StringBuilder();
+        var lineNumber = 0;
+        var matchCount = 0;
+        foreach (var line in File.ReadLines(path))
+        {
+            lineNumber++;
+            if (regex.IsMatch(line))
+            {
+                sb.AppendLine($"{lineNumber}: {line}");
+                matchCount++;
+                if (matchCount >= 500)
+                {
+                    sb.AppendLine($"... (truncated at {matchCount} matches)");
+                    break;
+                }
+            }
+        }
+
+        return matchCount == 0
+            ? "No matches found."
+            : $"{matchCount} match(es):\n{sb.ToString().TrimEnd()}";
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: tabular text
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string TextColumn(string[] args)
+    {
+        var input = args[0];
+        var colIndex = int.Parse(args[1]);
+        var delimiter = args.Length > 2 ? args[2] : null;
+
+        var sb = new StringBuilder();
+        foreach (var line in input.Split('\n'))
+        {
+            var parts = delimiter is not null
+                ? line.Split(delimiter)
+                : line.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries);
+
+            sb.AppendLine(colIndex < parts.Length ? parts[colIndex].Trim() : "");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string TextTable(string[] args)
+    {
+        var input = args[0];
+        var delimiter = args.Length > 1 ? args[1] : "\t";
+
+        var rows = input.Split('\n')
+            .Select(line => line.Split(delimiter))
+            .ToList();
+
+        if (rows.Count == 0) return "";
+
+        var maxCols = rows.Max(r => r.Length);
+        var widths = new int[maxCols];
+        foreach (var row in rows)
+            for (var i = 0; i < row.Length; i++)
+                widths[i] = Math.Max(widths[i], row[i].Trim().Length);
+
+        var sb = new StringBuilder();
+        foreach (var row in rows)
+        {
+            for (var i = 0; i < maxCols; i++)
+            {
+                var cell = i < row.Length ? row[i].Trim() : "";
+                if (i > 0) sb.Append("  ");
+                sb.Append(cell.PadRight(widths[i]));
+            }
+            sb.AppendLine();
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: directory comparison and hashing
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string DirCompare(string path1, string path2)
+    {
+        var files1 = Directory.Exists(path1)
+            ? Directory.GetFiles(path1, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(path1, f))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+        var files2 = Directory.Exists(path2)
+            ? Directory.GetFiles(path2, "*", SearchOption.AllDirectories)
+                .Select(f => Path.GetRelativePath(path2, f))
+                .ToHashSet(StringComparer.OrdinalIgnoreCase)
+            : [];
+
+        var onlyIn1 = files1.Except(files2, StringComparer.OrdinalIgnoreCase).Order().ToList();
+        var onlyIn2 = files2.Except(files1, StringComparer.OrdinalIgnoreCase).Order().ToList();
+        var common = files1.Intersect(files2, StringComparer.OrdinalIgnoreCase).Order().ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Only in {Path.GetFileName(path1)} ({onlyIn1.Count}):");
+        foreach (var f in onlyIn1.Take(200)) sb.AppendLine($"  {f}");
+        if (onlyIn1.Count > 200) sb.AppendLine($"  ... ({onlyIn1.Count - 200} more)");
+
+        sb.AppendLine($"Only in {Path.GetFileName(path2)} ({onlyIn2.Count}):");
+        foreach (var f in onlyIn2.Take(200)) sb.AppendLine($"  {f}");
+        if (onlyIn2.Count > 200) sb.AppendLine($"  ... ({onlyIn2.Count - 200} more)");
+
+        sb.AppendLine($"Common ({common.Count}):");
+        foreach (var f in common.Take(200)) sb.AppendLine($"  {f}");
+        if (common.Count > 200) sb.Append($"  ... ({common.Count - 200} more)");
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static async Task<string> DirHashAsync(string[] args, CancellationToken ct)
+    {
+        var dir = args[0];
+        var algorithm = args.Length > 1 ? args[1].ToLowerInvariant() : "sha256";
+        var pattern = args.Length > 2 ? args[2] : "*";
+
+        var files = Directory.GetFiles(dir, pattern, SearchOption.AllDirectories)
+            .OrderBy(f => f, StringComparer.OrdinalIgnoreCase)
+            .Take(500)
+            .ToList();
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"{files.Count} file(s):");
+        foreach (var file in files)
+        {
+            ct.ThrowIfCancellationRequested();
+            await using var stream = File.OpenRead(file);
+            var hashBytes = algorithm switch
+            {
+                "sha256" => await SHA256.HashDataAsync(stream, ct),
+                "sha512" => await SHA512.HashDataAsync(stream, ct),
+                "md5"    => await MD5.HashDataAsync(stream, ct),
+                _ => throw new InvalidOperationException($"Unsupported hash: {algorithm}")
+            };
+            var hash = Convert.ToHexStringLower(hashBytes);
+            var rel = Path.GetRelativePath(dir, file);
+            sb.AppendLine($"{hash}  {rel}");
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: human-readable formatting
+    // ═══════════════════════════════════════════════════════════════
+
+    private static readonly string[] ByteUnits = ["B", "KB", "MB", "GB", "TB", "PB"];
+
+    private static string FormatBytesHuman(string bytesStr)
+    {
+        if (!double.TryParse(bytesStr, out var bytes) || bytes < 0)
+            throw new InvalidOperationException($"Bytes must be a non-negative number, got '{bytesStr}'.");
+
+        var unit = 0;
+        var size = bytes;
+        while (size >= 1024 && unit < ByteUnits.Length - 1)
+        {
+            size /= 1024;
+            unit++;
+        }
+        return unit == 0 ? $"{size:F0} {ByteUnits[unit]}" : $"{size:F2} {ByteUnits[unit]}";
+    }
+
+    private static string FormatDurationHuman(string secondsStr)
+    {
+        if (!double.TryParse(secondsStr, out var totalSeconds) || totalSeconds < 0)
+            throw new InvalidOperationException($"Seconds must be a non-negative number, got '{secondsStr}'.");
+
+        var ts = TimeSpan.FromSeconds(totalSeconds);
+
+        if (ts.TotalDays >= 1)
+            return $"{(int)ts.TotalDays}d {ts.Hours}h {ts.Minutes}m {ts.Seconds}s";
+        if (ts.TotalHours >= 1)
+            return $"{(int)ts.TotalHours}h {ts.Minutes}m {ts.Seconds}s";
+        if (ts.TotalMinutes >= 1)
+            return $"{(int)ts.TotalMinutes}m {ts.Seconds}s";
+        if (ts.TotalSeconds >= 1)
+            return $"{ts.TotalSeconds:F1}s";
+        return $"{ts.TotalMilliseconds:F0}ms";
+    }
+
     private static string FileGlob(string[] args)
     {
         var dir = args[0];
@@ -1668,6 +2361,327 @@ public sealed class Mk8ShellExecutor
         $"OS: {System.Runtime.InteropServices.RuntimeInformation.OSDescription}\n" +
         $"Arch: {System.Runtime.InteropServices.RuntimeInformation.OSArchitecture}\n" +
         $"Runtime: {System.Runtime.InteropServices.RuntimeInformation.FrameworkDescription}";
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: system log viewing (read-only, redacted)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Patterns that trigger value redaction in log output. Any log line
+    /// containing <c>PATTERN=value</c> or <c>PATTERN: value</c> has the
+    /// value portion replaced with <c>[REDACTED]</c>. Defense-in-depth:
+    /// prevents accidental secret persistence in captured output.
+    /// </summary>
+    private static readonly Regex SecretRedactionRegex = new(
+        @"(?i)(KEY|SECRET|TOKEN|PASSWORD|PASSWD|CONN|AUTH|PRIVATE|ENCRYPT|JWT|CERTIFICATE|APIKEY|CREDENTIAL|CONNECTION_STRING)\s*[=:]\s*\S+",
+        RegexOptions.Compiled,
+        TimeSpan.FromSeconds(2));
+
+    private static string RedactSecrets(string line) =>
+        SecretRedactionRegex.Replace(line, m =>
+            $"{m.Groups[1].Value}=[REDACTED]");
+
+    private static string SysLogRead(string[] args)
+    {
+        var source = args[0].ToLowerInvariant();
+        var maxLines = args.Length > 1 ? int.Parse(args[1]) : 50;
+        var filter = args.Length > 2 ? args[2] : null;
+
+        if (OperatingSystem.IsWindows())
+            return SysLogReadWindows(source, maxLines, filter);
+
+        return SysLogReadLinux(source, maxLines, filter);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string SysLogReadWindows(string source, int maxLines, string? filter)
+    {
+        var logName = source switch
+        {
+            "application" => "Application",
+            "system" => "System",
+            "security" => "Security",
+            _ => throw new InvalidOperationException($"Unknown Windows log source: {source}")
+        };
+
+        try
+        {
+            using var eventLog = new System.Diagnostics.EventLog(logName);
+            var entries = eventLog.Entries;
+            var sb = new StringBuilder();
+            var count = 0;
+
+            // Read most recent entries first
+            for (var i = entries.Count - 1; i >= 0 && count < maxLines; i--)
+            {
+                try
+                {
+                    var entry = entries[i];
+                    var line = $"{entry.TimeGenerated:yyyy-MM-dd HH:mm:ss}\t{entry.EntryType}\t{entry.Source}\t{entry.Message?.Replace('\n', ' ').Replace('\r', ' ')}";
+
+                    if (filter is not null && !line.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                        continue;
+
+                    sb.AppendLine(RedactSecrets(line));
+                    count++;
+                }
+                catch
+                {
+                    // Skip inaccessible entries
+                }
+            }
+
+            return count == 0
+                ? $"No entries found in {logName} log."
+                : $"{count} entr(ies) from {logName}:\n{sb.ToString().TrimEnd()}";
+        }
+        catch (System.Security.SecurityException)
+        {
+            return $"Access denied to {logName} event log. Requires elevated privileges.";
+        }
+    }
+
+    private static string SysLogReadLinux(string source, int maxLines, string? filter)
+    {
+        var logPath = source switch
+        {
+            "syslog" => FindLinuxLog("syslog", "messages"),
+            "auth" => FindLinuxLog("auth.log", "secure"),
+            "kern" => FindLinuxLog("kern.log"),
+            "daemon" => FindLinuxLog("daemon.log"),
+            "messages" => FindLinuxLog("messages", "syslog"),
+            _ => throw new InvalidOperationException($"Unknown Linux log source: {source}")
+        };
+
+        if (logPath is null)
+            return $"Log source '{source}' not found. No matching file in /var/log/.";
+
+        try
+        {
+            var allLines = File.ReadLines(logPath);
+            var filtered = filter is not null
+                ? allLines.Where(l => l.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                : allLines;
+
+            var recent = filtered.TakeLast(maxLines).ToList();
+
+            if (recent.Count == 0)
+                return $"No matching entries in {logPath}.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{recent.Count} line(s) from {logPath}:");
+            foreach (var line in recent)
+                sb.AppendLine(RedactSecrets(line));
+
+            return sb.ToString().TrimEnd();
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return $"Access denied to {logPath}. May require elevated privileges.";
+        }
+    }
+
+    private static string? FindLinuxLog(params string[] candidates)
+    {
+        foreach (var name in candidates)
+        {
+            var path = $"/var/log/{name}";
+            if (File.Exists(path)) return path;
+        }
+        return null;
+    }
+
+    private static string SysLogSources()
+    {
+        var sb = new StringBuilder();
+        if (OperatingSystem.IsWindows())
+        {
+            sb.AppendLine("Windows Event Logs:");
+            sb.AppendLine("  application  — Application log");
+            sb.AppendLine("  system       — System log");
+            sb.AppendLine("  security     — Security log (may require elevation)");
+        }
+        else
+        {
+            sb.AppendLine("Linux Log Files (/var/log/):");
+            string[] linuxLogs = ["syslog", "messages", "auth.log", "secure", "kern.log", "daemon.log"];
+            foreach (var name in linuxLogs)
+            {
+                var path = $"/var/log/{name}";
+                var exists = File.Exists(path);
+                sb.AppendLine($"  {name,-15} {(exists ? "✓ available" : "✗ not found")}");
+            }
+        }
+        return sb.ToString().TrimEnd();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Sysadmin: service status (read-only)
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string SysServiceList(string[] args)
+    {
+        var filter = args.Length > 0 ? args[0] : null;
+
+        if (OperatingSystem.IsWindows())
+            return SysServiceListWindows(filter);
+
+        return SysServiceListLinux(filter);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string SysServiceListWindows(string? filter)
+    {
+        var services = System.ServiceProcess.ServiceController.GetServices();
+        var filtered = filter is not null
+            ? services.Where(s =>
+                s.ServiceName.Contains(filter, StringComparison.OrdinalIgnoreCase) ||
+                s.DisplayName.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            : services.AsEnumerable();
+
+        var results = filtered.Take(200).ToList();
+        if (results.Count == 0)
+            return filter is not null ? $"No services matching '{filter}'." : "No services found.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"{results.Count} service(s):");
+        foreach (var svc in results.OrderBy(s => s.ServiceName))
+        {
+            sb.AppendLine($"{svc.ServiceName}\t{svc.DisplayName}\t{svc.Status}\t{svc.StartType}");
+            svc.Dispose();
+        }
+
+        foreach (var svc in services.Except(results))
+            svc.Dispose();
+
+        return sb.ToString().TrimEnd();
+    }
+
+    private static string SysServiceListLinux(string? filter)
+    {
+        // Parse systemd unit files if available
+        const string systemdPath = "/etc/systemd/system";
+        const string initdPath = "/etc/init.d";
+
+        if (Directory.Exists(systemdPath))
+        {
+            var units = Directory.EnumerateFiles(systemdPath, "*.service")
+                .Concat(Directory.EnumerateFiles("/lib/systemd/system", "*.service", new EnumerationOptions { IgnoreInaccessible = true }))
+                .Select(Path.GetFileNameWithoutExtension)
+                .Where(n => n is not null)
+                .Distinct(StringComparer.OrdinalIgnoreCase)
+                .Where(n => filter is null || n!.Contains(filter, StringComparison.OrdinalIgnoreCase))
+                .OrderBy(n => n)
+                .Take(200)
+                .ToList();
+
+            if (units.Count == 0)
+                return filter is not null ? $"No systemd services matching '{filter}'." : "No systemd services found.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{units.Count} systemd service(s):");
+            foreach (var unit in units)
+                sb.AppendLine($"  {unit}");
+            return sb.ToString().TrimEnd();
+        }
+
+        if (Directory.Exists(initdPath))
+        {
+            var scripts = Directory.GetFiles(initdPath)
+                .Select(Path.GetFileName)
+                .Where(n => n is not null && (filter is null || n.Contains(filter, StringComparison.OrdinalIgnoreCase)))
+                .OrderBy(n => n)
+                .Take(200)
+                .ToList();
+
+            if (scripts.Count == 0)
+                return filter is not null ? $"No init.d services matching '{filter}'." : "No init.d services found.";
+
+            var sb = new StringBuilder();
+            sb.AppendLine($"{scripts.Count} init.d service(s):");
+            foreach (var script in scripts)
+                sb.AppendLine($"  {script}");
+            return sb.ToString().TrimEnd();
+        }
+
+        return "No service manager found (no systemd or init.d).";
+    }
+
+    private static string SysServiceStatus(string name)
+    {
+        if (OperatingSystem.IsWindows())
+            return SysServiceStatusWindows(name);
+
+        return SysServiceStatusLinux(name);
+    }
+
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static string SysServiceStatusWindows(string name)
+    {
+        try
+        {
+            using var svc = new System.ServiceProcess.ServiceController(name);
+            var sb = new StringBuilder();
+            sb.AppendLine($"Name: {svc.ServiceName}");
+            sb.AppendLine($"Display: {svc.DisplayName}");
+            sb.AppendLine($"Status: {svc.Status}");
+            sb.AppendLine($"StartType: {svc.StartType}");
+            sb.AppendLine($"ServiceType: {svc.ServiceType}");
+            sb.Append($"CanStop: {svc.CanStop}");
+            return sb.ToString();
+        }
+        catch (InvalidOperationException)
+        {
+            return $"Service '{name}' not found.";
+        }
+    }
+
+    private static string SysServiceStatusLinux(string name)
+    {
+        // Check systemd unit file
+        string[] searchPaths = ["/etc/systemd/system", "/lib/systemd/system"];
+        foreach (var dir in searchPaths)
+        {
+            var unitPath = Path.Combine(dir, $"{name}.service");
+            if (!File.Exists(unitPath)) continue;
+
+            try
+            {
+                var content = File.ReadAllText(unitPath);
+                var sb = new StringBuilder();
+                sb.AppendLine($"Service: {name}");
+                sb.AppendLine($"Unit file: {unitPath}");
+
+                // Extract key fields from the unit file
+                foreach (var line in content.Split('\n'))
+                {
+                    var trimmed = line.Trim();
+                    if (trimmed.StartsWith("Description=", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("ExecStart=", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("Restart=", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("Type=", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("User=", StringComparison.OrdinalIgnoreCase) ||
+                        trimmed.StartsWith("WantedBy=", StringComparison.OrdinalIgnoreCase))
+                    {
+                        sb.AppendLine($"  {RedactSecrets(trimmed)}");
+                    }
+                }
+
+                return sb.ToString().TrimEnd();
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return $"Access denied to unit file for '{name}'.";
+            }
+        }
+
+        // Check init.d
+        var initPath = $"/etc/init.d/{name}";
+        if (File.Exists(initPath))
+            return $"Service: {name}\nType: init.d\nScript: {initPath}";
+
+        return $"Service '{name}' not found.";
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Utilities

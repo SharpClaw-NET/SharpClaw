@@ -29,5 +29,7 @@
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.3" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="NAudio" Version="2.2.1" />
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.0" />
+    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
   </ItemGroup>
 </Project>

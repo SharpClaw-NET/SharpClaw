@@ -37,21 +37,6 @@ public enum Mk8ShellVerb
     // ── Process (allowlisted binaries only) ───────────────────────
     ProcRun,
 
-    // ── Git ───────────────────────────────────────────────────────
-    //
-    // REMOVED.  Git verbs (GitStatus, GitAdd, GitCommit, etc.) were
-    // originally part of mk8.shell but have been pulled out.  Even
-    // with flag validation and UseShellExecute=false, git's own flag
-    // interpreter surface area is too large to guarantee that an
-    // agent cannot destroy or corrupt a repository in an unexpected
-    // way.
-    //
-    // Safe git functionality will be provided by a dedicated future
-    // project (e.g. "mk8.safegit") with a much narrower read-heavy
-    // API surface.  Until then, all git operations require
-    // DangerousShellType.Git via the dangerous-shell execution path.
-    //
-
     // ── HTTP ──────────────────────────────────────────────────────
     HttpGet,
     HttpPost,
@@ -136,6 +121,23 @@ public enum Mk8ShellVerb
     /// <summary>Returns the root JSON token type (object, array, string, number, boolean, null).</summary>
     JsonType,
 
+    // ── JSON — construction/mutation ──────────────────────────────
+
+    /// <summary>Builds a JSON object from key-value pairs: [k1, v1, k2, v2, ...]. Max 64 pairs.</summary>
+    JsonFromPairs,
+    /// <summary>Sets or overwrites a key in a JSON object: [json, key, value].</summary>
+    JsonSet,
+    /// <summary>Removes a key from a JSON object: [json, key].</summary>
+    JsonRemoveKey,
+    /// <summary>Gets a value from JSON by index (array) or key (object): [json, indexOrKey].</summary>
+    JsonGet,
+    /// <summary>Minifies JSON by removing whitespace: [json].</summary>
+    JsonCompact,
+    /// <summary>Wraps a raw string as a properly-escaped JSON string value: [value].</summary>
+    JsonStringify,
+    /// <summary>Builds a JSON array from arguments: [item0, item1, ...]. Max 64 items.</summary>
+    JsonArrayFrom,
+
     // ── File inspection (read-only, in-memory) ────────────────────
 
     /// <summary>Returns line count of a file. In-memory via <c>File.ReadLines</c>.</summary>
@@ -173,6 +175,80 @@ public enum Mk8ShellVerb
     /// Returns encoding name (e.g. <c>"utf-8"</c>, <c>"utf-16-le"</c>, <c>"ascii"</c>).
     /// </summary>
     FileEncoding,
+
+    // ── File comparison (read-only) ──────────────────────────────
+
+    /// <summary>Byte-for-byte file comparison. Returns <c>"True"</c>/<c>"False"</c>.</summary>
+    FileEqual,
+    /// <summary>Computes file hash and compares to expected. Returns <c>"True"</c>/<c>"False"</c>.</summary>
+    FileChecksum,
+
+    // ── Path manipulation (pure string ops, no I/O) ──────────────
+
+    /// <summary>Joins path segments platform-aware via <c>Path.Combine</c>. No disk access.</summary>
+    PathJoin,
+    /// <summary>Returns directory portion via <c>Path.GetDirectoryName</c>.</summary>
+    PathDir,
+    /// <summary>Returns filename portion via <c>Path.GetFileName</c>.</summary>
+    PathFile,
+    /// <summary>Returns file extension via <c>Path.GetExtension</c>.</summary>
+    PathExt,
+    /// <summary>Returns filename without extension via <c>Path.GetFileNameWithoutExtension</c>.</summary>
+    PathStem,
+    /// <summary>Changes file extension via <c>Path.ChangeExtension</c>.</summary>
+    PathChangeExt,
+
+    // ── Identity/value generation ────────────────────────────────
+
+    /// <summary>Generates a new GUID: <c>Guid.NewGuid().ToString()</c>.</summary>
+    GuidNew,
+    /// <summary>Generates a short 8-char hex GUID: <c>Guid.NewGuid().ToString("N")[..8]</c>.</summary>
+    GuidNewShort,
+    /// <summary>Generates a random integer in [min, max]. Max range 0–1000000.</summary>
+    RandomInt,
+
+    // ── Time arithmetic (pure DateTimeOffset math) ───────────────
+
+    /// <summary>Formats a Unix timestamp as a human-readable string: [unixSeconds, format?].</summary>
+    TimeFormat,
+    /// <summary>Parses a date string to Unix seconds: [dateString, format?].</summary>
+    TimeParse,
+    /// <summary>Adds seconds to a Unix timestamp: [unixSeconds, secondsToAdd].</summary>
+    TimeAdd,
+    /// <summary>Returns absolute difference in seconds between two Unix timestamps.</summary>
+    TimeDiff,
+
+    // ── Version comparison ───────────────────────────────────────
+
+    /// <summary>Compares two semver strings. Returns <c>-1</c>, <c>0</c>, or <c>1</c>.</summary>
+    VersionCompare,
+    /// <summary>Extracts the first semver-like version from a string.</summary>
+    VersionParse,
+
+    // ── Encoding/conversion ──────────────────────────────────────
+
+    /// <summary>Encodes a UTF-8 string as a hex string.</summary>
+    HexEncode,
+    /// <summary>Decodes a hex string to a UTF-8 string.</summary>
+    HexDecode,
+    /// <summary>Converts between numeric bases 2/8/10/16: [value, fromBase, toBase].</summary>
+    BaseConvert,
+
+    // ── Regex capture groups ─────────────────────────────────────
+
+    /// <summary>Returns named/numbered capture groups as JSON. Same 2s timeout as TextRegex.</summary>
+    TextRegexGroups,
+
+    // ── Script control/debugging ─────────────────────────────────
+
+    /// <summary>Returns the message as-is. Identity function for debugging/markers.</summary>
+    Echo,
+    /// <summary>Pauses execution for N seconds. Capped at 30s, min 0.1s.</summary>
+    Sleep,
+    /// <summary>Fails the step if actual != expected. Optional message: [actual, expected, msg?].</summary>
+    Assert,
+    /// <summary>Always fails the step with the given message: [message].</summary>
+    Fail,
 
     // ── System info — extended (read-only, no args unless noted) ──
 
@@ -309,6 +385,141 @@ public enum Mk8ShellVerb
     /// as <see cref="HttpGet"/>.
     /// </summary>
     NetHttpStatus,
+
+    /// <summary>
+    /// TCP connect test — checks if a remote port is open. Returns
+    /// <c>"Open (Xms)"</c> or <c>"Closed (Xms)"</c>. Same SSRF
+    /// hostname validation as <see cref="NetPing"/>. In-memory via
+    /// <see cref="System.Net.Sockets.TcpClient"/>. No data sent.
+    /// </summary>
+    NetTcpConnect,
+
+    /// <summary>
+    /// Measures HTTP round-trip latency via timed HEAD requests.
+    /// Returns min/avg/max ms. Same SSRF validation as <see cref="HttpGet"/>.
+    /// </summary>
+    HttpLatency,
+
+    // ── Sysadmin — file age/staleness ──────────────────────────────
+
+    /// <summary>
+    /// Returns seconds since last modification of a file. Read-only,
+    /// in-memory via <see cref="System.IO.FileInfo.LastWriteTimeUtc"/>.
+    /// </summary>
+    FileAge,
+
+    /// <summary>
+    /// Returns <c>"True"</c>/<c>"False"</c> — whether a file was modified
+    /// within the last N seconds. Convenience for staleness checks.
+    /// </summary>
+    FileNewerThan,
+
+    // ── Sysadmin — process search ──────────────────────────────────
+
+    /// <summary>
+    /// Finds processes by name substring. Returns matching PID + name + working set.
+    /// Max 50 results. Read-only via <see cref="System.Diagnostics.Process.GetProcesses"/>.
+    /// </summary>
+    ProcessFind,
+
+    // ── Sysadmin — system discovery ────────────────────────────────
+
+    /// <summary>
+    /// Lists all drives/mount points with name, type, total/free space, and format.
+    /// Read-only via <see cref="System.IO.DriveInfo.GetDrives"/>.
+    /// </summary>
+    SysDriveList,
+
+    /// <summary>
+    /// Lists network interfaces with name, status, type, and IP addresses.
+    /// Loopback filtered. Read-only via <see cref="System.Net.NetworkInformation.NetworkInterface"/>.
+    /// </summary>
+    SysNetInfo,
+
+    /// <summary>
+    /// Lists all allowed environment variable names with their current values.
+    /// Read-only, returns only variables from the <see cref="Mk8EnvAllowlist"/>.
+    /// </summary>
+    EnvList,
+
+    // ── Sysadmin — regex file search ───────────────────────────────
+
+    /// <summary>
+    /// Regex search in file — returns matching lines with line numbers.
+    /// Same 2-second regex timeout as <see cref="TextRegex"/>. Max 500 matches.
+    /// </summary>
+    FileSearchRegex,
+
+    // ── Sysadmin — tabular text ────────────────────────────────────
+
+    /// <summary>
+    /// Extracts a column (0-based) from each line of delimited text.
+    /// Default delimiter is whitespace. Like <c>awk '{print $N}'</c>.
+    /// </summary>
+    TextColumn,
+
+    /// <summary>
+    /// Aligns columns of delimited text for display. Pads each column
+    /// to its maximum width. Default delimiter is tab.
+    /// </summary>
+    TextTable,
+
+    // ── Sysadmin — directory comparison ────────────────────────────
+
+    /// <summary>
+    /// Compares two directory trees by filename (not content). Returns
+    /// only-in-first, only-in-second, and common files. Read-only.
+    /// </summary>
+    DirCompare,
+
+    /// <summary>
+    /// Hashes all files in a directory, returns a manifest in <c>sha256sum</c>
+    /// format (<c>hash  relativePath</c>). Max 500 files. Read-only.
+    /// </summary>
+    DirHash,
+
+    // ── Sysadmin — human-readable formatting ───────────────────────
+
+    /// <summary>
+    /// Formats a byte count as human-readable: <c>1048576</c> → <c>"1.00 MB"</c>.
+    /// Pure arithmetic, no I/O.
+    /// </summary>
+    FormatBytes,
+
+    /// <summary>
+    /// Formats seconds as human-readable duration: <c>3661</c> → <c>"1h 1m 1s"</c>.
+    /// Pure arithmetic, no I/O.
+    /// </summary>
+    FormatDuration,
+
+    // ── Sysadmin — system log viewing (read-only, redacted) ────────
+
+    /// <summary>
+    /// Reads system/application logs with secret redaction. On Windows,
+    /// reads from <see cref="System.Diagnostics.EventLog"/>. On Linux,
+    /// reads from <c>/var/log/</c> files. All output is scrubbed for
+    /// secret-like patterns before returning.
+    /// </summary>
+    SysLogRead,
+
+    /// <summary>
+    /// Lists available log sources on the current OS. Read-only.
+    /// </summary>
+    SysLogSources,
+
+    // ── Sysadmin — service status (read-only) ──────────────────────
+
+    /// <summary>
+    /// Lists OS services with status. On Windows, via
+    /// <see cref="System.ServiceProcess.ServiceController"/>. On Linux,
+    /// parses <c>/etc/init.d/</c> or systemd unit files. Read-only.
+    /// </summary>
+    SysServiceList,
+
+    /// <summary>
+    /// Returns detailed status of a specific OS service by name. Read-only.
+    /// </summary>
+    SysServiceStatus,
 
     // ── Archive extraction (in-memory, pre-scan validated) ─────────
 

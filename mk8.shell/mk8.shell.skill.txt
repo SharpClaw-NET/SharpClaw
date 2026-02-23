@@ -122,6 +122,15 @@ JsonKeys       [input]               top-level keys (newline-separated)
 JsonCount      [input]               element count from JSON array
 JsonType       [input]               root token type (object/array/string/etc.)
 
+--- json: construction/mutation (pure in-memory, no I/O) ---
+JsonFromPairs  [k1, v1, k2, v2...]   build JSON object from key-value pairs (max 64 pairs)
+JsonSet        [json, key, value]    set/overwrite a key in a JSON object
+JsonRemoveKey  [json, key]           remove a key from a JSON object
+JsonGet        [json, indexOrKey]    get value by key (object) or index (array)
+JsonCompact    [json]                minify JSON (remove whitespace)
+JsonStringify  [value]               wrap raw string as properly-escaped JSON string
+JsonArrayFrom  [items...]            build JSON array from arguments (max 64 items)
+
 --- file inspection (read-only, in-memory) ---
 FileLineCount  [path]                line count
 FileHead       [path, lines?]        first N lines (default 10, max 1000)
@@ -137,6 +146,47 @@ DirEmpty       [path]                returns "True"/"False" — is directory emp
 --- file type detection (read-only, in-memory) ---
 FileMimeType   [path]                MIME type via magic-byte header matching
 FileEncoding   [path]                encoding via BOM + heuristics (utf-8, ascii, etc.)
+
+--- file comparison (read-only) ---
+FileEqual      [path1, path2]        byte-for-byte comparison, returns "True"/"False"
+FileChecksum   [path, expected, algo?] hash file + compare to expected, returns "True"/"False"
+
+--- path manipulation (pure string ops, no I/O) ---
+PathJoin       [parts...]            join path segments (platform-aware, 2-16 parts)
+PathDir        [path]                directory portion (Path.GetDirectoryName)
+PathFile       [path]                filename portion (Path.GetFileName)
+PathExt        [path]                extension (Path.GetExtension)
+PathStem       [path]                filename without extension
+PathChangeExt  [path, ext]           change extension (Path.ChangeExtension)
+
+--- identity/value generation ---
+GuidNew        []                    new GUID (Guid.NewGuid)
+GuidNewShort   []                    8-char hex from GUID
+RandomInt      [min, max]            random integer in [min, max], range 0-1000000
+
+--- time arithmetic (pure DateTimeOffset math) ---
+TimeFormat     [unixSec, format?]    format Unix timestamp as human-readable
+TimeParse      [dateString, fmt?]    parse date string to Unix seconds
+TimeAdd        [unixSec, seconds]    add seconds to timestamp
+TimeDiff       [unixSec1, unixSec2]  absolute difference in seconds
+
+--- version comparison ---
+VersionCompare [v1, v2]              compare semver strings: -1, 0, or 1
+VersionParse   [input]               extract first semver from string
+
+--- encoding/conversion ---
+HexEncode      [input]               UTF-8 string → hex string
+HexDecode      [hexString]           hex string → UTF-8 string
+BaseConvert    [value, from, to]     convert between bases 2/8/10/16
+
+--- regex capture groups ---
+TextRegexGroups [input, pattern]     named/numbered groups as JSON, 2s timeout
+
+--- script control/debugging ---
+Echo           [message]             returns message as-is (identity function)
+Sleep          [seconds]             pause 0.1-30 seconds
+Assert         [actual, expected, msg?] fail step if values don't match
+Fail           [message]             always fail with message
 
 --- environment (read-only) ---
 EnvGet         [name]                allowlist only (see below)
@@ -171,6 +221,47 @@ NetPing        [host, count?]        ICMP echo, 1-10 pings, SSRF-protected
 NetDns         [hostname]            DNS lookup, private IPs hidden
 NetTlsCert     [hostname, port?]     TLS cert inspection (expiry, subject, SANs)
 NetHttpStatus  [url]                 HTTP HEAD — status code + headers only
+NetTcpConnect  [host, port, timeout?] TCP port open check (1-30s timeout, default 5)
+HttpLatency    [url, count?]         timed HEAD requests — min/avg/max ms (1-10, default 3)
+
+--- sysadmin: file age/staleness (read-only) ---
+FileAge        [path]                seconds since last modification
+FileNewerThan  [path, seconds]       "True"/"False" — modified within N seconds
+
+--- sysadmin: process search (read-only) ---
+ProcessFind    [name]                find by name substring, PID+name+mem, max 50
+
+--- sysadmin: system discovery (read-only) ---
+SysDriveList   []                    all drives: name, type, total/free/used%
+SysNetInfo     []                    network interfaces: name, status, IPs
+EnvList        []                    all allowed env vars with current values
+
+--- sysadmin: regex file search (read-only) ---
+FileSearchRegex [path, pattern]      regex search in file, 2s timeout, max 500 matches
+
+--- sysadmin: tabular text (pure string ops) ---
+TextColumn     [input, index, delim?] extract column N (0-based), default whitespace
+TextTable      [input, delimiter?]   align columns for display, default tab
+
+--- sysadmin: directory comparison (read-only) ---
+DirCompare     [path1, path2]        compare directory trees (names only)
+DirHash        [path, algo?, pattern?] hash all files → manifest (max 500)
+
+--- sysadmin: human-readable formatting ---
+FormatBytes    [bytes]               1048576 → "1.00 MB"
+FormatDuration [seconds]             3661 → "1h 1m 1s"
+
+--- sysadmin: system log viewing (read-only, secret-redacted) ---
+SysLogRead     [source, lines?, filter?] read system logs, most recent first
+                                     Windows sources: application, system, security
+                                     Linux sources: syslog, auth, kern, daemon, messages
+                                     lines: 1-500 (default 50), filter: literal substring
+                                     Output is SECRET-REDACTED (KEY=, TOKEN=, etc.)
+SysLogSources  []                    list available log sources on current OS
+
+--- sysadmin: service status (read-only) ---
+SysServiceList [filter?]             list OS services with status, optional name filter
+SysServiceStatus [name]              detailed status of a specific service
 
 --- archive extraction (in-memory, pre-validated) ---
 ArchiveExtract [archivePath, outputDir]  extract .zip/.tar.gz safely
@@ -729,6 +820,21 @@ No .. segments. No absolute paths in path components.
 - More than 1024 total operations after expansion
 - ForEach with more than 256 items
 - Nesting depth greater than 3
+- JsonFromPairs with odd argument count or > 128 args
+- JsonArrayFrom with > 64 items
+- RandomInt outside 0-1000000 or min > max
+- Sleep outside 0.1-30 seconds
+- TimeFormat with non-integer timestamp
+- BaseConvert with unsupported base (only 2, 8, 10, 16)
+- VersionCompare with unparseable version strings
+- FileChecksum with unsupported algorithm
+- NetTcpConnect with port outside 1-65535 or timeout outside 1-30
+- HttpLatency with count outside 1-10 or non-HTTPS URL
+- FileNewerThan with negative seconds
+- TextColumn with column index outside 0-100
+- DirHash with unsupported algorithm or > 500 files
+- SysLogRead with unknown source or line count outside 1-500
+- SysLogRead may return "Access denied" for security logs without elevation
 
 
 == common patterns ====================================================
@@ -1146,6 +1252,369 @@ No .. segments. No absolute paths in path components.
     { "verb": "FileWrite", "args": [
       "$WORKSPACE/repo-summary.txt",
       "Total commits: $COMMITS\n\nRepo size:\n$SIZE\n\nAuthors:\n$AUTHORS"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- build JSON config programmatically ---
+{
+  "operations": [
+    { "verb": "JsonFromPairs", "args": ["host", "localhost", "port", "5432", "ssl", "true"], "captureAs": "CONFIG" },
+    { "verb": "JsonSet", "args": ["$CONFIG", "database", "myapp"], "captureAs": "CONFIG" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/config.json", "$CONFIG"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- extract filename from glob results ---
+{
+  "operations": [
+    { "verb": "FileGlob", "args": ["$WORKSPACE/src", "*.cs", "5"], "captureAs": "FILES" },
+    { "verb": "TextSplit", "args": ["$FILES", "\n"], "captureAs": "LINES" },
+    { "verb": "PathFile", "args": ["$WORKSPACE/src/Controllers/HomeController.cs"], "captureAs": "NAME" },
+    { "verb": "PathStem", "args": ["$WORKSPACE/src/app.config.json"], "captureAs": "STEM" }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- verify file copy integrity ---
+{
+  "operations": [
+    { "verb": "FileCopy", "args": ["$WORKSPACE/data/important.db", "$WORKSPACE/backup/important.db"] },
+    { "verb": "FileEqual", "args": ["$WORKSPACE/data/important.db", "$WORKSPACE/backup/important.db"], "captureAs": "MATCH" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "CaptureContains", "args": ["MATCH", "False"] },
+        "then": { "verb": "Fail", "args": ["Backup verification failed — files differ"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check SDK version meets minimum ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "--version"], "captureAs": "VER" },
+    { "verb": "VersionParse", "args": ["$VER"], "captureAs": "PARSED" },
+    { "verb": "VersionCompare", "args": ["$PARSED", "8.0.0"], "captureAs": "CMP" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "CaptureContains", "args": ["CMP", "-1"] },
+        "then": { "verb": "Fail", "args": ["SDK version too old — need >= 8.0.0"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- generate unique build tag ---
+{
+  "operations": [
+    { "verb": "GuidNewShort", "args": [], "captureAs": "TAG" },
+    { "verb": "SysTimestamp", "args": [], "captureAs": "TS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/build-tag.txt", "$TS-$TAG"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- compute build elapsed time ---
+{
+  "operations": [
+    { "verb": "SysTimestamp", "args": [], "captureAs": "START" },
+    { "verb": "ProcRun", "args": ["dotnet", "build"] },
+    { "verb": "SysTimestamp", "args": [], "captureAs": "END" },
+    { "verb": "TimeDiff", "args": ["$START", "$END"], "captureAs": "ELAPSED" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/build-time.txt", "Build took $ELAPSED seconds"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- extract regex capture groups from version string ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "--version"], "captureAs": "VER" },
+    { "verb": "TextRegexGroups", "args": ["$VER", "(?<major>\\d+)\\.(?<minor>\\d+)\\.(?<patch>\\d+)"], "captureAs": "GROUPS" },
+    { "verb": "JsonGet", "args": ["$GROUPS", "major"], "captureAs": "MAJOR" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/version.txt", "Major: $MAJOR\nFull: $GROUPS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- assert build output contains expected string ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "build"], "captureAs": "BUILD" },
+    { "verb": "TextContains", "args": ["$BUILD", "Build succeeded"], "captureAs": "OK" },
+    { "verb": "Assert", "args": ["$OK", "True", "Build did not succeed"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- hex encode a hash for embedding ---
+{
+  "operations": [
+    { "verb": "HexEncode", "args": ["Hello, World!"], "captureAs": "HEX" },
+    { "verb": "HexDecode", "args": ["$HEX"], "captureAs": "DECODED" },
+    { "verb": "Assert", "args": ["$DECODED", "Hello, World!"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- build JSON array of project files ---
+{
+  "operations": [
+    { "verb": "JsonArrayFrom", "args": ["src/app.cs", "src/config.cs", "src/utils.cs"], "captureAs": "FILES" },
+    { "verb": "JsonCompact", "args": ["$FILES"], "captureAs": "COMPACT" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/files.json", "$COMPACT"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- rate-limited health checks ---
+{
+  "operations": [
+    { "verb": "NetHttpStatus", "args": ["https://api.example.com/health"], "captureAs": "S1" },
+    { "verb": "Sleep", "args": ["2"] },
+    { "verb": "NetHttpStatus", "args": ["https://api.example.com/health"], "captureAs": "S2" },
+    { "verb": "Sleep", "args": ["2"] },
+    { "verb": "NetHttpStatus", "args": ["https://api.example.com/health"], "captureAs": "S3" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/health-log.txt", "Check 1:\n$S1\n\nCheck 2:\n$S2\n\nCheck 3:\n$S3"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- convert port number between bases ---
+{
+  "operations": [
+    { "verb": "BaseConvert", "args": ["8080", "10", "16"], "captureAs": "HEX_PORT" },
+    { "verb": "BaseConvert", "args": ["8080", "10", "2"], "captureAs": "BIN_PORT" },
+    { "verb": "Echo", "args": ["Port 8080 = 0x$HEX_PORT = 0b$BIN_PORT"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- verify checksum of downloaded artifact ---
+{
+  "operations": [
+    { "verb": "FileChecksum", "args": ["$WORKSPACE/artifacts/app.zip", "a1b2c3d4e5f6...", "sha256"], "captureAs": "VALID" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "CaptureContains", "args": ["VALID", "False"] },
+        "then": { "verb": "Fail", "args": ["Checksum verification failed — artifact may be corrupted"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- format timestamp for filenames ---
+{
+  "operations": [
+    { "verb": "SysTimestamp", "args": [], "captureAs": "TS" },
+    { "verb": "TimeFormat", "args": ["$TS", "yyyy-MM-dd'T'HH-mm-ss"], "captureAs": "FORMATTED" },
+    { "verb": "GuidNewShort", "args": [], "captureAs": "ID" },
+    { "verb": "PathJoin", "args": ["$WORKSPACE", "backups", "$FORMATTED-$ID.tar.gz"], "captureAs": "BACKUP_PATH" },
+    { "verb": "Echo", "args": ["Backup path: $BACKUP_PATH"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check if a service port is open ---
+{
+  "operations": [
+    { "verb": "NetTcpConnect", "args": ["db.example.com", "5432", "5"], "captureAs": "DB" },
+    { "verb": "NetTcpConnect", "args": ["redis.example.com", "6379"], "captureAs": "REDIS" },
+    { "verb": "NetTcpConnect", "args": ["api.example.com", "443"], "captureAs": "API" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/port-check.txt",
+      "PostgreSQL (5432): $DB\nRedis (6379): $REDIS\nAPI (443): $API"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- measure API latency ---
+{
+  "operations": [
+    { "verb": "HttpLatency", "args": ["https://api.example.com/health", "5"], "captureAs": "LATENCY" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/latency-report.txt", "$LATENCY"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check if log file is stale ---
+{
+  "operations": [
+    { "verb": "FileAge", "args": ["$WORKSPACE/logs/app.log"], "captureAs": "AGE" },
+    { "verb": "FormatDuration", "args": ["$AGE"], "captureAs": "AGE_HUMAN" },
+    { "verb": "FileNewerThan", "args": ["$WORKSPACE/logs/app.log", "300"], "captureAs": "FRESH" },
+    {
+      "verb": "If",
+      "if": {
+        "predicate": { "kind": "CaptureContains", "args": ["FRESH", "False"] },
+        "then": { "verb": "FileWrite", "args": ["$WORKSPACE/alert.txt", "Log stale! Age: $AGE_HUMAN"] }
+      }
+    }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- find a specific process ---
+{
+  "operations": [
+    { "verb": "ProcessFind", "args": ["dotnet"], "captureAs": "PROCS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/dotnet-procs.txt", "$PROCS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- disk and drive inventory ---
+{
+  "operations": [
+    { "verb": "SysDriveList", "args": [], "captureAs": "DRIVES" },
+    { "verb": "SysNetInfo", "args": [], "captureAs": "NETS" },
+    { "verb": "EnvList", "args": [], "captureAs": "ENVS" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/system-inventory.txt",
+      "Drives:\n$DRIVES\n\nNetwork:\n$NETS\n\nEnvironment:\n$ENVS"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- grep for errors in log file ---
+{
+  "operations": [
+    { "verb": "FileSearchRegex", "args": ["$WORKSPACE/logs/app.log", "ERROR|WARN|FATAL"], "captureAs": "ERRORS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/error-report.txt", "$ERRORS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- extract column from tabular output ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["git", "shortlog", "-sn", "--all"], "captureAs": "AUTHORS" },
+    { "verb": "TextColumn", "args": ["$AUTHORS", "1"], "captureAs": "NAMES" },
+    { "verb": "TextColumn", "args": ["$AUTHORS", "0"], "captureAs": "COUNTS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/contributors.txt", "Names:\n$NAMES\n\nCounts:\n$COUNTS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- compare deployment directories ---
+{
+  "operations": [
+    { "verb": "DirCompare", "args": ["$WORKSPACE/deploy-v1", "$WORKSPACE/deploy-v2"], "captureAs": "DIFF" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/deploy-diff.txt", "$DIFF"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- generate integrity manifest ---
+{
+  "operations": [
+    { "verb": "DirHash", "args": ["$WORKSPACE/release", "sha256"], "captureAs": "MANIFEST" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/release/checksums.txt", "$MANIFEST"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- format build output sizes ---
+{
+  "operations": [
+    { "verb": "ProcRun", "args": ["dotnet", "publish", "-o", "$WORKSPACE/out"] },
+    { "verb": "SysDirSize", "args": ["$WORKSPACE/out"], "captureAs": "SIZE_RAW" },
+    { "verb": "TextRegexGroups", "args": ["$SIZE_RAW", "(?<bytes>\\d+) bytes"], "captureAs": "GROUPS" },
+    { "verb": "JsonGet", "args": ["$GROUPS", "bytes"], "captureAs": "BYTES" },
+    { "verb": "FormatBytes", "args": ["$BYTES"], "captureAs": "HUMAN" },
+    { "verb": "Echo", "args": ["Published output: $HUMAN"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- full infrastructure health check ---
+{
+  "operations": [
+    { "verb": "NetTcpConnect", "args": ["db.example.com", "5432"], "captureAs": "DB_PORT" },
+    { "verb": "NetHttpStatus", "args": ["https://api.example.com/health"], "captureAs": "API_STATUS" },
+    { "verb": "HttpLatency", "args": ["https://api.example.com/health", "3"], "captureAs": "API_LATENCY" },
+    { "verb": "NetTlsCert", "args": ["api.example.com"], "captureAs": "CERT" },
+    { "verb": "SysDriveList", "args": [], "captureAs": "DISKS" },
+    { "verb": "SysMemory", "args": [], "captureAs": "MEM" },
+    { "verb": "ProcessFind", "args": ["dotnet"], "captureAs": "PROCS" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/health-report.txt",
+      "=== Port Check ===\nDB (5432): $DB_PORT\n\n=== API Status ===\n$API_STATUS\n\n=== API Latency ===\n$API_LATENCY\n\n=== TLS Certificate ===\n$CERT\n\n=== Disk Space ===\n$DISKS\n\n=== Memory ===\n$MEM\n\n=== Dotnet Processes ===\n$PROCS"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- read recent application logs ---
+{
+  "operations": [
+    { "verb": "SysLogSources", "args": [], "captureAs": "SOURCES" },
+    { "verb": "SysLogRead", "args": ["application", "100"], "captureAs": "APP_LOG" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/app-events.txt", "Available:\n$SOURCES\n\nRecent:\n$APP_LOG"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- search system logs for errors ---
+{
+  "operations": [
+    { "verb": "SysLogRead", "args": ["system", "200", "error"], "captureAs": "SYS_ERRORS" },
+    { "verb": "SysLogRead", "args": ["application", "200", "error"], "captureAs": "APP_ERRORS" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/error-logs.txt",
+      "=== System Errors ===\n$SYS_ERRORS\n\n=== Application Errors ===\n$APP_ERRORS"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- check service status ---
+{
+  "operations": [
+    { "verb": "SysServiceStatus", "args": ["w3svc"], "captureAs": "IIS" },
+    { "verb": "SysServiceStatus", "args": ["postgresql"], "captureAs": "PG" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/service-check.txt",
+      "IIS:\n$IIS\n\nPostgreSQL:\n$PG"
+    ]}
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- list all running services matching a filter ---
+{
+  "operations": [
+    { "verb": "SysServiceList", "args": ["sql"], "captureAs": "SQL_SVCS" },
+    { "verb": "FileWrite", "args": ["$WORKSPACE/sql-services.txt", "$SQL_SVCS"] }
+  ],
+  "options": { "pipeStepOutput": true }
+}
+
+--- full sysadmin diagnostic ---
+{
+  "operations": [
+    { "verb": "SysOsInfo", "args": [], "captureAs": "OS" },
+    { "verb": "SysDriveList", "args": [], "captureAs": "DISKS" },
+    { "verb": "SysNetInfo", "args": [], "captureAs": "NET" },
+    { "verb": "SysMemory", "args": [], "captureAs": "MEM" },
+    { "verb": "ProcessFind", "args": ["dotnet"], "captureAs": "PROCS" },
+    { "verb": "SysLogRead", "args": ["system", "50", "error"], "captureAs": "SYS_ERRS" },
+    { "verb": "SysServiceList", "args": [], "captureAs": "SVCS" },
+    { "verb": "SysUptime", "args": [], "captureAs": "UP" },
+    { "verb": "FileWrite", "args": [
+      "$WORKSPACE/diagnostic.txt",
+      "=== OS ===\n$OS\n\n=== Uptime ===\n$UP\n\n=== Disks ===\n$DISKS\n\n=== Network ===\n$NET\n\n=== Memory ===\n$MEM\n\n=== Dotnet Processes ===\n$PROCS\n\n=== System Errors ===\n$SYS_ERRS\n\n=== Services ===\n$SVCS"
     ]}
   ],
   "options": { "pipeStepOutput": true }
