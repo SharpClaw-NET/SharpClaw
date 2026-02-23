@@ -33,9 +33,9 @@ dispatch it:
 > through the strict command-template whitelist (see ProcRun
 > section) — only the exact templates registered in `Mk8GitCommands`
 > can execute, and no unregistered flag can reach git.  Write
-> operations (commit, checkout, switch) are constrained to
-> compile-time word lists.  Protected branches (main, master,
-> develop, staging, production, live, release/*, trunk) are
+> operations (commit, checkout, switch, push, pull, merge) are
+> constrained to compile-time word lists.  Protected branches (main,
+> master, develop, staging, production, live, release/*, trunk) are
 > intentionally excluded — agents must work in feature/bugfix/hotfix
 > branches only.
 
@@ -262,7 +262,8 @@ Sandbox Registry (local)
 
 Global (mk8.shell.base.env)
 ├── ProjectBases            → Mk8RuntimeConfig for command whitelist
-└── GitRemoteUrls           → Mk8RuntimeConfig for command whitelist
+├── GitRemoteUrls           → Mk8RuntimeConfig for command whitelist
+└── GitCloneUrls            → Mk8RuntimeConfig for command whitelist
 
 OS
 └── Username                → $USER
@@ -517,6 +518,7 @@ per-verb entries merge additively.
       "git tag create": { "enabled": true, "maxLength": 128 },
       "git tag annotated": { "enabled": true, "maxLength": 200 },
       "git tag delete": { "enabled": true, "maxLength": 128 },
+      "git merge": { "enabled": true, "maxLength": 200 },
       "dotnet ef migrations add": { "enabled": true, "maxLength": 128 }
     }
   }
@@ -556,6 +558,7 @@ regardless of configuration. This is a compile-time constant:
 | `git tag -a <name> -m <msg>` | name | TagNames | 128 | git-ref safe |
 | `git tag -a <name> -m <msg>` | message | CommitWords | 200 | — |
 | `git tag -d <name>` | name | TagNames | 128 | git-ref safe |
+| `git merge <branch> -m <msg>` | message | CommitWords | 200 | — |
 | `dotnet ef migrations add` | name | MigrationNames | 128 | C# identifier |
 
 #### Vocabularies — Env-Sourced Word Lists
@@ -666,6 +669,7 @@ Read-only:
 | Template | Flags | Params |
 |---|---|---|
 | `git --version` | — | — |
+| `git init` | — | — |
 | `git status` | `--short`, `-s`, `--porcelain`, `--branch` | — |
 | `git log --oneline` | `-n 1-100`, `--all`, `--no-decorate`, `--graph`, `--reverse` | — |
 | `git log --oneline -- <path>` | `-n 1-100`, `--all`, `--no-decorate` | SandboxPath |
@@ -705,24 +709,35 @@ Write (constrained):
 | `git checkout -b <branch>` | — | AdminWord from BranchNames |
 | `git switch <branch>` | — | AdminWord from BranchNames |
 | `git switch -c <branch>` | — | AdminWord from BranchNames |
+| `git clone <url>` | — | url from GitCloneUrls (runtime) |
+| `git clone <url> <path>` | — | url from GitCloneUrls (runtime), SandboxPath |
+| `git push <remote> <branch>` | — | remote from RemoteNames, branch from BranchNames |
+| `git push -u <remote> <branch>` | `-u`, `--set-upstream` | remote from RemoteNames, branch from BranchNames |
+| `git push --tags <remote>` | — | remote from RemoteNames |
+| `git pull <remote> <branch>` | `--rebase`, `--no-rebase`, `--ff-only` | remote from RemoteNames, branch from BranchNames |
+| `git merge <branch>` | `--no-ff`, `--ff-only`, `--squash`, `-m` FreeText with CommitWords fallback | AdminWord from BranchNames |
+| `git merge --abort` | — | — |
 
 Word lists:
 - **CommitWords**: vocabulary of ~200 verbs, nouns, adjectives, connectors, letters, digits — agent composes messages by combining words with spaces (max 12 words)
 - **BranchNames**: `feature/*`, `bugfix/*`, `hotfix/*`, plus single letters/digits
 - **RemoteNames**: `origin`, `upstream`, `fork`, `backup`, `mirror`
-- **GitRemoteUrls**: runtime-configured via `Mk8RuntimeConfig.GitRemoteUrls` (max 16)
+- **GitRemoteUrls**: runtime-configured via `Mk8RuntimeConfig.GitRemoteUrls`
+- **GitCloneUrls**: runtime-configured via `Mk8RuntimeConfig.GitCloneUrls`
 - **BlameLineRanges**: pre-approved `-L` ranges (`1,10`, `1,20`, `1,50`, `1,100`, `1,200`, `1,500`, `1,1000`)
 - **TagNames**: `v0.1.0`–`v3.1.0`, pre-release variants (`-alpha`, `-beta`, `-rc1`, `-rc2`), milestones (`baseline`, `checkpoint`, `snapshot`, `draft`, `initial`, `stable`, `latest`)
 
 **Protected branches — BANNED:** `main`, `master`, `develop`, `staging`,
 `production`, `live`, `release`, `release/*`, `trunk`.  These are
 intentionally excluded from BranchNames.  Agents must NEVER operate on
-branches used for live or master development.  Merging to protected
-branches requires `DangerousShellType.Git` with human approval.
+branches used for live or master development.  All agent work must happen
+in feature/bugfix/hotfix branches.  Push, pull, and merge are restricted
+to the same branch word list — agents cannot push to or merge into
+protected branches.
 
-Not whitelisted (require dangerous-shell path): `push`, `pull`, `merge`,
-`rebase`, `reset`, `clean -f`, `clone`, `config`, `submodule`, `am`, `apply`,
-`filter-branch`, `cherry-pick`, `bisect`, `gc`, `fsck`, `reflog`.
+Not whitelisted (require dangerous-shell path): `rebase`, `reset`,
+`clean -f`, `config`, `submodule`, `am`, `apply`, `filter-branch`,
+`cherry-pick`, `bisect`, `gc`, `fsck`, `reflog`.
 
 #### Runtime configuration (`Mk8RuntimeConfig`)
 
@@ -734,15 +749,16 @@ var config = new Mk8RuntimeConfig
 {
     ProjectBases = ["Banana", "SharpClaw"],
     GitRemoteUrls = ["https://github.com/org/repo.git"],
+    GitCloneUrls = ["https://github.com/org/repo.git"],
 };
 var whitelist = Mk8CommandWhitelist.CreateDefault(config);
 ```
 
 These are baked into the immutable whitelist at construction — they cannot be
-changed after creation.  Caps: max 32 project bases, max 16 git remote URLs.
+changed after creation.
 
-If no runtime config is provided, `dotnet new -n` and `git remote add` are
-unavailable (the agent gets a clear error message).
+If no runtime config is provided, `dotnet new -n`, `git remote add`,
+and `git clone` are unavailable (the agent gets a clear error message).
 
 **node / npm** (`Mk8NodeNpmCommands`): `node --version`, `npm --version`,
 `npm ls` (with `--depth 0-10`, `--all`, `--json`, `--prod`, `--dev`, `--long`),
@@ -813,13 +829,16 @@ itself — just avoids the cryptic "command not found" error on failure.
 
 Git is available through the strict command-template whitelist:
 
-- **Only registered templates execute.** `git config`, `git -c`, `git push`,
-  `git pull`, and all other unregistered subcommands/flags are rejected.
+- **Only registered templates execute.** `git config`, `git -c`, and all
+  other unregistered subcommands/flags are rejected.
 - **Commit messages are composed** from a vocabulary word list — no free text.
 - **Branch names are pre-approved** — protected branches are excluded.
 - **`.git/` internals are write-protected** — agents cannot create hooks,
   modify config, or inject objects.
-- **No push/pull** — code stays local until a human approves.
+- **Push/pull/merge are branch-restricted** — the same pre-approved branch
+  word list applies, so agents cannot push to or merge into protected branches.
+- **Clone URLs are env-whitelisted** — `git clone` only accepts URLs from
+  `Mk8RuntimeConfig.GitCloneUrls`.
 
 ### HTTP
 

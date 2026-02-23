@@ -22,12 +22,6 @@ namespace Mk8.Shell;
 /// </summary>
 public sealed class Mk8RuntimeConfig
 {
-    /// <summary>Maximum runtime project base names.</summary>
-    public const int MaxProjectBases = 32;
-
-    /// <summary>Maximum runtime git remote URLs.</summary>
-    public const int MaxGitRemoteUrls = 16;
-
     /// <summary>
     /// Base project names the agent may use with <c>dotnet new -n</c>.
     /// Combined with compile-time suffixes from
@@ -48,4 +42,15 @@ public sealed class Mk8RuntimeConfig
     /// </para>
     /// </summary>
     public string[] GitRemoteUrls { get; init; } = [];
+
+    /// <summary>
+    /// Allowed git clone URLs the agent may use with
+    /// <c>git clone &lt;url&gt;</c>.
+    /// <para>
+    /// Only HTTPS URLs should be used — SSH URLs bypass TLS certificate
+    /// validation and could connect to unexpected hosts.  Each URL must
+    /// point to a repository the agent is explicitly permitted to clone.
+    /// </para>
+    /// </summary>
+    public string[] GitCloneUrls { get; init; } = [];
 }

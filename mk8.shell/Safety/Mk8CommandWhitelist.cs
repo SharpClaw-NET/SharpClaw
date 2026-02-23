@@ -9,13 +9,20 @@ namespace Mk8.Shell.Safety;
 // model — the agent can only run commands from a closed, enumerated
 // set of patterns.
 //
-// Templates and word lists are compile-time constants defined in the
-// Commands/ directory (one file per tool category).  They CANNOT be
-// modified at runtime — to change the allowed surface, a developer
-// edits the source file and recompiles.
+// Templates and word lists originate as compile-time constants in
+// the Commands/ directory (one file per tool category).  At
+// construction time, three runtime sources are merged additively:
 //
-// The ONLY runtime exception: project base names and git remote URLs
-// are provided via Mk8RuntimeConfig at construction time, then sealed.
+//   1. Mk8RuntimeConfig — project bases, git remote/clone URLs
+//      (sealed after construction).
+//   2. Env-sourced vocabularies — MK8_VOCAB_* keys from base.env
+//      and sandbox signed env ADD words to compile-time lists.
+//   3. FreeText configuration — per-verb enable/disable + max
+//      length from base.env and sandbox signed env.
+//
+// Once the whitelist is constructed, it is immutable.  Vocabulary
+// extensions and FreeText policies are read at construction time
+// and cannot change for the lifetime of the instance.
 //
 // ═════════════════════════════════════════════════════════════════
 
@@ -762,15 +769,6 @@ public sealed class Mk8CommandWhitelist
         Dictionary<string, string[]>? envVocabularies = null,
         Mk8GigaBlacklist? gigaBlacklist = null)
     {
-        if (runtime?.ProjectBases.Length > Mk8RuntimeConfig.MaxProjectBases)
-            throw new ArgumentException(
-                $"Too many project bases ({runtime.ProjectBases.Length}). " +
-                $"Maximum is {Mk8RuntimeConfig.MaxProjectBases}.");
-        if (runtime?.GitRemoteUrls.Length > Mk8RuntimeConfig.MaxGitRemoteUrls)
-            throw new ArgumentException(
-                $"Too many git remote URLs ({runtime.GitRemoteUrls.Length}). " +
-                $"Maximum is {Mk8RuntimeConfig.MaxGitRemoteUrls}.");
-
         var wordLists = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
         var commands = new List<Mk8AllowedCommand>();
 
@@ -812,6 +810,14 @@ public sealed class Mk8CommandWhitelist
             foreach (var url in urls)
                 urlSet.Add(url);
             wordLists["GitRemoteUrls"] = urlSet;
+        }
+
+        if (runtime?.GitCloneUrls is { Length: > 0 } cloneUrls)
+        {
+            var cloneSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var url in cloneUrls)
+                cloneSet.Add(url);
+            wordLists["GitCloneUrls"] = cloneSet;
         }
 
         // ── Pre-compute valid compound project names ──────────────

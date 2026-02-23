@@ -233,6 +233,9 @@ public static class Mk8GitCommands
 
             new("git version", "git", ["--version"]),
 
+            // init (no params — always runs in the sandbox $CWD)
+            new("git init", "git", ["init"]),
+
             // status
             new("git status", "git", ["status"],
                 Flags: [new("--short"), new("-s"), new("--porcelain"), new("--branch")]),
@@ -389,11 +392,57 @@ public static class Mk8GitCommands
             new("git switch new branch", "git", ["switch", "-c"],
                 Params: [branchSlot]),
 
+            // clone (URL MUST come from runtime config GitCloneUrls)
+            new("git clone", "git", ["clone"],
+                Params: [
+                    new Mk8Slot("url", Mk8SlotKind.AdminWord, WordListName: "GitCloneUrls"),
+                ]),
+            new("git clone into path", "git", ["clone"],
+                Params: [
+                    new Mk8Slot("url", Mk8SlotKind.AdminWord, WordListName: "GitCloneUrls"),
+                    pathSlot,
+                ]),
+
+            // push (branch MUST come from word list — agents can only
+            // push the branches they can checkout/create)
+            new("git push", "git", ["push"],
+                Params: [
+                    new Mk8Slot("remote", Mk8SlotKind.AdminWord, WordListName: "RemoteNames"),
+                    branchSlot,
+                ]),
+            new("git push set-upstream", "git", ["push"],
+                Flags: [new("-u"), new("--set-upstream")],
+                Params: [
+                    new Mk8Slot("remote", Mk8SlotKind.AdminWord, WordListName: "RemoteNames"),
+                    branchSlot,
+                ]),
+            new("git push tags", "git", ["push", "--tags"],
+                Params: [
+                    new Mk8Slot("remote", Mk8SlotKind.AdminWord, WordListName: "RemoteNames"),
+                ]),
+
+            // pull (remote + branch from word lists)
+            new("git pull", "git", ["pull"],
+                Flags: [new("--rebase"), new("--no-rebase"), new("--ff-only")],
+                Params: [
+                    new Mk8Slot("remote", Mk8SlotKind.AdminWord, WordListName: "RemoteNames"),
+                    branchSlot,
+                ]),
+
+            // merge (branch MUST come from word list — agents can only
+            // merge branches they're allowed to work with)
+            new("git merge", "git", ["merge"],
+                Flags: [new("--no-ff"), new("--ff-only"), new("--squash"),
+                        new("-m", new Mk8Slot("message", Mk8SlotKind.FreeText,
+                            WordListName: "CommitWords", MaxFreeTextLength: 200))],
+                Params: [branchSlot]),
+            new("git merge abort", "git", ["merge", "--abort"]),
+
             // ═════════════════════════════════════════════════════════
             // NOT WHITELISTED (require dangerous-shell path):
-            //   push, pull, merge, rebase, reset, clean, clone,
-            //   config, submodule, am, apply, filter-branch,
-            //   cherry-pick, bisect, gc, fsck, reflog
+            //   rebase, reset, clean -f, config, submodule, am,
+            //   apply, filter-branch, cherry-pick, bisect, gc,
+            //   fsck, reflog
             // ═════════════════════════════════════════════════════════
         ];
     }

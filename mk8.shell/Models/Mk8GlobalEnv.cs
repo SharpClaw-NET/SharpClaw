@@ -44,6 +44,12 @@ public sealed class Mk8GlobalEnv
     public string[] GitRemoteUrls { get; set; } = [];
 
     /// <summary>
+    /// Allowed git clone URLs across all sandboxes.
+    /// </summary>
+    [JsonPropertyName("GitCloneUrls")]
+    public string[] GitCloneUrls { get; set; } = [];
+
+    /// <summary>
     /// FreeText configuration. Controls whether free-form text is
     /// allowed in FreeText-typed slots, with per-verb granularity.
     /// </summary>
@@ -187,6 +193,7 @@ public sealed class Mk8GlobalEnv
     {
         ProjectBases = ProjectBases,
         GitRemoteUrls = GitRemoteUrls,
+        GitCloneUrls = GitCloneUrls,
     };
 
     /// <summary>
@@ -209,6 +216,10 @@ public sealed class Mk8GlobalEnv
             [
                 "https://github.com/mkn8rn/BananaApp",
             ],
+            GitCloneUrls =
+            [
+                "https://github.com/mkn8rn/BananaApp",
+            ],
             FreeText = new Mk8FreeTextConfig
             {
                 Enabled = false,
@@ -219,6 +230,7 @@ public sealed class Mk8GlobalEnv
                     ["git tag create"] = new() { Enabled = false, MaxLength = 128 },
                     ["git tag annotated"] = new() { Enabled = false, MaxLength = 200 },
                     ["git tag delete"] = new() { Enabled = false, MaxLength = 128 },
+                    ["git merge"] = new() { Enabled = false, MaxLength = 200 },
                     ["dotnet ef migrations add"] = new() { Enabled = false, MaxLength = 128 },
                 },
             },

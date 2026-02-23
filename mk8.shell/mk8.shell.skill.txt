@@ -114,7 +114,7 @@ Protected branches (BANNED):
   main, master, develop, staging, production, live, release, release/*, trunk
 
 Not whitelisted:
-  push, pull, merge, rebase, reset, clone, config, submodule, etc.
+  rebase, reset, config, submodule, etc.
 
 =====================================================================
 4) CRITICAL RESTRICTIONS
@@ -231,6 +231,37 @@ D) GIT: BRANCH → EDIT → COMMIT
     { "verb":"FileWrite","args":["$WORKSPACE/src/auth.cs","// auth module"] },
     { "verb":"ProcRun","args":["git","add","."] },
     { "verb":"ProcRun","args":["git","commit","-m","Add authentication module"] }
+  ]
+}
+
+---------------------------------------------------------------------
+D2) GIT: INIT → REMOTE → PUSH
+---------------------------------------------------------------------
+
+{
+  "operations": [
+    { "verb":"ProcRun","args":["git","init"] },
+    { "verb":"ProcRun","args":["git","remote","add","origin","https://github.com/org/repo.git"] },
+    { "verb":"FileWrite","args":["$WORKSPACE/README.md","# New project"] },
+    { "verb":"ProcRun","args":["git","add","."] },
+    { "verb":"ProcRun","args":["git","commit","-m","Initial commit"] },
+    { "verb":"ProcRun","args":["git","push","-u","origin","feature/auth"] }
+  ]
+}
+
+---------------------------------------------------------------------
+D3) GIT: CLONE → BRANCH → MERGE
+---------------------------------------------------------------------
+
+{
+  "operations": [
+    { "verb":"ProcRun","args":["git","clone","https://github.com/org/repo.git","$WORKSPACE/repo"] },
+    { "verb":"ProcRun","args":["git","checkout","-b","feature/api"] },
+    { "verb":"FileWrite","args":["$WORKSPACE/repo/api.cs","// api module"] },
+    { "verb":"ProcRun","args":["git","add","."] },
+    { "verb":"ProcRun","args":["git","commit","-m","Add API module"] },
+    { "verb":"ProcRun","args":["git","checkout","feature/auth"] },
+    { "verb":"ProcRun","args":["git","merge","--no-ff","feature/api","-m","Merge API into auth"] }
   ]
 }
 
