@@ -14,6 +14,12 @@
   </ItemGroup>
 
   <ItemGroup>
+    <EmbeddedResource Include="Resources\tool-instructions-text.md" LogicalName="SharpClaw.Application.Core.tool-instructions-text.md" />
+    <EmbeddedResource Include="Resources\tool-instructions-native-suffix.md" LogicalName="SharpClaw.Application.Core.tool-instructions-native-suffix.md" />
+    <EmbeddedResource Include="Resources\tool-description-native.md" LogicalName="SharpClaw.Application.Core.tool-description-native.md" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />

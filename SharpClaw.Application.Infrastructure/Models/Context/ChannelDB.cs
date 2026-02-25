@@ -7,8 +7,8 @@ namespace SharpClaw.Application.Infrastructure.Models.Context;
 
 /// <summary>
 /// A channel that optionally belongs to an agent context.  Each
-/// channel tracks its own model (which can change mid-channel),
-/// title, and chat history.
+/// channel tracks its own title and chat history.  The model used
+/// for completions is always the resolved agent's model.
 /// <para>
 /// When the channel belongs to a context, the context's permission
 /// set acts as a default — it is used unless overridden by the
@@ -18,13 +18,6 @@ namespace SharpClaw.Application.Infrastructure.Models.Context;
 public class ChannelDB : BaseEntity
 {
     public required string Title { get; set; }
-
-    /// <summary>
-    /// The model currently used by this channel. Can be changed
-    /// mid-channel independently of the agent's default model.
-    /// </summary>
-    public Guid ModelId { get; set; }
-    public ModelDB Model { get; set; } = null!;
 
     /// <summary>
     /// The agent that owns this channel. Always required — even for
@@ -47,6 +40,14 @@ public class ChannelDB : BaseEntity
     /// </summary>
     public Guid? PermissionSetId { get; set; }
     public PermissionSetDB? PermissionSet { get; set; }
+
+    /// <summary>
+    /// Additional agents allowed to operate on this channel.  The
+    /// primary <see cref="Agent"/> is always implicitly allowed and
+    /// is NOT included in this collection.  When a job or chat
+    /// specifies a non-default agent, it must be in this set.
+    /// </summary>
+    public ICollection<AgentDB> AllowedAgents { get; set; } = [];
 
     public ICollection<ChatMessageDB> ChatMessages { get; set; } = [];
 }

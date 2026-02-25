@@ -20,8 +20,10 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 - [Agents](#agents)
 - [Channel contexts](#channel-contexts)
 - [Channels](#channels)
-- [Chat](#chat)
+- [Chat (per-channel)](#chat-per-channel)
+- [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
+- [Transcription streaming](#transcription-streaming)
 - [Resources](#resources)
 - [Permission Resolution](#permission-resolution)
 
@@ -66,6 +68,14 @@ ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
 | `Failed` | 4 | Action threw an error |
 | `Denied` | 5 | Agent lacks the required permission |
 | `Cancelled` | 6 | Cancelled by a user or agent |
+
+### ModelCapability (flags)
+
+```
+None, Chat, Transcription, ImageGeneration, Embedding, TextToSpeech
+```
+
+Values can be combined (comma-separated). Default is `Chat`.
 
 ---
 
@@ -288,9 +298,13 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 ```json
 {
   "name": "string",
-  "providerId": "guid"
+  "providerId": "guid",
+  "capabilities": "Chat"
 }
 ```
+
+`capabilities` is a flags enum (comma-separated): `Chat`, `Transcription`,
+`ImageGeneration`, `Embedding`, `TextToSpeech`. Defaults to `Chat`.
 
 **Response `200`:** `ModelResponse`
 
@@ -315,7 +329,8 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 
 ```json
 {
-  "name": "string | null"
+  "name": "string | null",
+  "capabilities": "Chat,Transcription | null"
 }
 ```
 
@@ -338,7 +353,8 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
   "id": "guid",
   "name": "string",
   "providerId": "guid",
-  "providerName": "string"
+  "providerName": "string",
+  "capabilities": "Chat"
 }
 ```
 
@@ -399,6 +415,25 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 
 ---
 
+### PUT /agents/{id}/role
+
+Assign a role to an agent.
+
+**Request:**
+
+```json
+{
+  "roleId": "guid",
+  "callerUserId": "guid"
+}
+```
+
+**Response `200`:** `AgentResponse`
+**Response `403`:** Caller lacks permission.
+**Response `404`:** Not found.
+
+---
+
 ### AgentResponse
 
 ```json
@@ -408,7 +443,9 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
   "systemPrompt": "string | null",
   "modelId": "guid",
   "modelName": "string",
-  "providerName": "string"
+  "providerName": "string",
+  "roleId": "guid | null",
+  "roleName": "string | null"
 }
 ```
 
@@ -431,11 +468,13 @@ Request body (example):
 {
   "agentId": "guid",
   "name": "string | null",
-  "permissionGrants": [
-    { "actionType": "UnsafeExecuteAsDangerousShell", "grantedClearance": "ApprovedBySameLevelUser" }
-  ]
+  "permissionSetId": "guid | null"
 }
 ```
+
+`permissionSetId` links the context to an existing permission set. When
+channels inside this context do not have their own permission set, the
+context's permission set is used as the default.
 
 Response `200`: `ContextResponse`
 
@@ -451,39 +490,26 @@ Response `200`: `ContextResponse` or `404` when not found.
 
 ### PUT /channel-contexts/{id}
 
-Update a context (e.g. rename).
+Update a context (e.g. rename or change permission set).
 
 Request body:
 
 ```json
-{ "name": "string | null" }
+{
+  "name": "string | null",
+  "permissionSetId": "guid | null"
+}
 ```
 
 Response `200`: `ContextResponse` or `404` when not found.
 
 ### DELETE /channel-contexts/{id}
 
-Deletes the context. Conversations and channels inside it are detached
-instead of deleted.
+Deletes the context. Channels inside it are detached instead of deleted.
 
 Response `204` or `404` when not found.
 
-### POST /channel-contexts/{id}/grant
-
-Add or update a permission grant on the context.
-
-Request body:
-
-```json
-{
-  "actionType": "UnsafeExecuteAsDangerousShell",
-  "grantedClearance": "ApprovedBySameLevelUser"
-}
-```
-
-Response `200`: `ContextResponse` (updated) or `404` when not found.
-
-ContextResponse shape (example):
+### ContextResponse
 
 ```json
 {
@@ -491,9 +517,9 @@ ContextResponse shape (example):
   "name": "string",
   "agentId": "guid",
   "agentName": "string",
+  "permissionSetId": "guid | null",
   "createdAt": "datetime",
-  "updatedAt": "datetime",
-  "permissionGrants": [ ... ]
+  "updatedAt": "datetime"
 }
 ```
 
@@ -514,11 +540,15 @@ Request (example):
 {
   "agentId": "guid",
   "title": "string | null",
-  "modelId": "guid | null",
   "contextId": "guid | null",
-  "permissionGrants": [ ... ]
+  "permissionSetId": "guid | null",
+  "allowedAgentIds": ["guid", ...] | null
 }
 ```
+
+`allowedAgentIds` specifies additional agents (beyond the default
+`agentId`) allowed to operate on this channel. The model used for
+completions is always the resolved agent's model.
 
 Response `200`: `ChannelResponse`
 
@@ -539,14 +569,41 @@ Update channel properties.
 Request (example):
 
 ```json
-{ "title": "string | null", "modelId": "guid | null", "contextId": "guid | null" }
+{
+  "title": "string | null",
+  "contextId": "guid | null",
+  "permissionSetId": "guid | null",
+  "allowedAgentIds": ["guid", ...] | null
+}
 ```
+
+When `allowedAgentIds` is provided it replaces the current set.
+`permissionSetId` set to `Guid.Empty` removes the override; `null` leaves
+it unchanged.
 
 Response `200`: `ChannelResponse` or `404` when not found.
 
 ### DELETE /channels/{id}
 
 Response `204` or `404` when not found.
+
+### ChannelResponse
+
+```json
+{
+  "id": "guid",
+  "title": "string",
+  "agentId": "guid",
+  "agentName": "string",
+  "contextId": "guid | null",
+  "contextName": "string | null",
+  "permissionSetId": "guid | null",
+  "effectivePermissionSetId": "guid | null",
+  "allowedAgentIds": ["guid"],
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
 
 ---
 
@@ -560,8 +617,11 @@ All chat operations are scoped to a channel id. Endpoints live under
 Send a message and receive the assistant's reply. Body:
 
 ```json
-{ "message": "string" }
+{ "message": "string", "agentId": "guid | null" }
 ```
+
+`agentId` optionally overrides the channel's default agent. The agent
+must be the channel default or in its `allowedAgentIds`.
 
 Response `200` (example):
 
@@ -607,6 +667,174 @@ POST /channels/{id}/chat/stream/approve/{jobId}
 ```
 
 Response `200` on success, or `404` when no pending approval exists.
+
+---
+
+## Agent Jobs
+
+Jobs represent permission-gated agent actions. When a job is submitted,
+the permission system evaluates it immediately:
+
+- **Approved** → executes inline, returns `Completed` or `Failed`.
+- **Pending** → checks conversation/context for a user-granted
+  permission. If found → executes. Otherwise → `AwaitingApproval`.
+- **Denied** → returns `Denied`.
+
+### POST /channels/{channelId}/jobs
+
+Submit a new job on a channel. The agent is inferred from the channel
+unless overridden via `agentId`.
+
+**Request:**
+
+```json
+{
+  "actionType": "ExecuteAsSafeShell",
+  "resourceId": "guid | null",
+  "agentId": "guid | null",
+  "callerAgentId": "guid | null",
+  "dangerousShellType": "Bash | PowerShell | CommandPrompt | Git | null",
+  "safeShellType": "Mk8Shell | null",
+  "scriptJson": "string | null",
+  "transcriptionModelId": "guid | null",
+  "language": "string | null"
+}
+```
+
+`agentId` optionally overrides the channel's default agent. The agent
+must be the channel default or in its `allowedAgentIds`.
+
+`resourceId` is required for per-resource action types. When omitted,
+defaults are resolved from the channel → context → agent role permission
+sets. Global action types ignore it.
+
+**Response `200`:** `AgentJobResponse`
+
+---
+
+### GET /channels/{channelId}/jobs
+
+List all jobs for a channel.
+
+**Response `200`:** `AgentJobResponse[]`
+
+---
+
+### GET /channels/{channelId}/jobs/{jobId}
+
+**Response `200`:** `AgentJobResponse`
+**Response `404`:** Not found.
+
+---
+
+### POST /channels/{channelId}/jobs/{jobId}/approve
+
+Approve a job that is `AwaitingApproval`.
+
+**Request:**
+
+```json
+{
+  "approverAgentId": "guid | null"
+}
+```
+
+The approver's identity is re-evaluated against the clearance
+requirement.
+
+**Response `200`:** `AgentJobResponse`
+
+---
+
+### POST /channels/{channelId}/jobs/{jobId}/stop
+
+Stop a long-running transcription job (completes it normally).
+
+**Response `200`:** `AgentJobResponse`
+**Response `404`:** Not found.
+
+---
+
+### POST /channels/{channelId}/jobs/{jobId}/cancel
+
+Cancel a job that has not yet completed.
+
+**Response `200`:** `AgentJobResponse`
+**Response `404`:** Not found.
+
+---
+
+### POST /channels/{channelId}/jobs/{jobId}/segments
+
+Push a transcription segment into an executing transcription job.
+
+**Request:**
+
+```json
+{
+  "text": "string",
+  "startTime": 0.0,
+  "endTime": 1.5,
+  "confidence": 0.95
+}
+```
+
+**Response `200`:** `TranscriptionSegmentResponse`
+**Response `404`:** Job not found or not executing.
+
+---
+
+### GET /channels/{channelId}/jobs/{jobId}/segments?since={datetime}
+
+Retrieve transcription segments added after the given timestamp.
+
+**Response `200`:** `TranscriptionSegmentResponse[]`
+
+---
+
+### AgentJobResponse
+
+```json
+{
+  "id": "guid",
+  "channelId": "guid",
+  "agentId": "guid",
+  "actionType": "ExecuteAsSafeShell",
+  "resourceId": "guid | null",
+  "status": "Completed",
+  "effectiveClearance": "ApprovedBySameLevelUser",
+  "resultData": "string | null",
+  "errorLog": "string | null",
+  "logs": [
+    {
+      "message": "string",
+      "level": "Info",
+      "timestamp": "datetime"
+    }
+  ],
+  "createdAt": "datetime",
+  "startedAt": "datetime | null",
+  "completedAt": "datetime | null",
+  "dangerousShellType": "Bash | null",
+  "safeShellType": "Mk8Shell | null",
+  "scriptJson": "string | null",
+  "transcriptionModelId": "guid | null",
+  "language": "string | null",
+  "segments": [
+    {
+      "id": "guid",
+      "text": "string",
+      "startTime": 0.0,
+      "endTime": 1.5,
+      "confidence": 0.95,
+      "timestamp": "datetime"
+    }
+  ]
+}
+```
+
+`segments` is only populated for transcription action types; `null`
+otherwise.
 
 ---
 
@@ -658,113 +886,6 @@ GET  /resources/audiodevices/{id}
 PUT  /resources/audiodevices/{id}
 DELETE /resources/audiodevices/{id}
 POST /resources/audiodevices/sync
-
----
-
-## Agent Jobs
-
-Jobs represent permission-gated agent actions. When a job is submitted,
-the permission system evaluates it immediately:
-
-- **Approved** → executes inline, returns `Completed` or `Failed`.
-- **Pending** → checks conversation/context for a user-granted
-  permission. If found → executes. Otherwise → `AwaitingApproval`.
-- **Denied** → returns `Denied`.
-
-### POST /agents/{agentId}/jobs
-
-Submit a new job.
-
-**Request:**
-
-```json
-{
-  "actionType": "ExecuteAsSafeShell",
-  "resourceId": "guid | null",
-  "callerUserId": "guid | null",
-  "callerAgentId": "guid | null",
-  "dangerousShellType": "Bash | PowerShell | CommandPrompt | Git | null",
-  "safeShellType": "Mk8Shell | null"
-}
-```
-
-`resourceId` is required for per-resource action types. Global action
-types ignore it.
-
-**Response `200`:** `AgentJobResponse`
-
----
-
-### GET /agents/{agentId}/jobs
-
-List all jobs for an agent.
-
-**Response `200`:** `AgentJobResponse[]`
-
----
-
-### GET /agents/{agentId}/jobs/{jobId}
-
-**Response `200`:** `AgentJobResponse`
-**Response `404`:** Not found.
-
----
-
-### POST /agents/{agentId}/jobs/{jobId}/approve
-
-Approve a job that is `AwaitingApproval`.
-
-**Request:**
-
-```json
-{
-  "approverUserId": "guid | null",
-  "approverAgentId": "guid | null"
-}
-```
-
-The approver's identity is re-evaluated against the clearance
-requirement.
-
-**Response `200`:** `AgentJobResponse`
-
----
-
-### POST /agents/{agentId}/jobs/{jobId}/cancel
-
-Cancel a job.
-
-**Response `200`:** `AgentJobResponse`
-**Response `404`:** Not found.
-
----
-
-### AgentJobResponse
-
-```json
-{
-  "id": "guid",
-  "agentId": "guid",
-  "actionType": "ExecuteAsSafeShell",
-  "resourceId": "guid | null",
-  "status": "Completed",
-  "effectiveClearance": "ApprovedBySameLevelUser",
-  "resultData": "string | null",
-  "errorLog": "string | null",
-  "dangerousShellType": "Bash | null",
-  "safeShellType": "Mk8Shell | null",
-  "logs": [
-    {
-      "message": "string",
-      "level": "Information",
-      "timestamp": "datetime"
-    }
-  ],
-  "createdAt": "datetime",
-  "startedAt": "datetime | null",
-  "completedAt": "datetime | null"
-}
-```
 
 ---
 

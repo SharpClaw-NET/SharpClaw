@@ -8,6 +8,7 @@ namespace SharpClaw.Contracts.DTOs.AgentActions;
 public sealed record SubmitAgentJobRequest(
 AgentActionType ActionType,
 Guid? ResourceId = null,
+Guid? AgentId = null,
 Guid? CallerAgentId = null,
 // Shell-specific
 DangerousShellType? DangerousShellType = null,
@@ -15,7 +16,6 @@ SafeShellType? SafeShellType = null,
 string? ScriptJson = null,
 // Transcription-specific
 Guid? TranscriptionModelId = null,
-Guid? ChannelId = null,
 string? Language = null);
 
 public sealed record ApproveAgentJobRequest(
@@ -25,6 +25,7 @@ public sealed record ApproveAgentJobRequest(
 
 public sealed record AgentJobResponse(
 Guid Id,
+Guid ChannelId,
 Guid AgentId,
 AgentActionType ActionType,
 Guid? ResourceId,
@@ -42,7 +43,6 @@ SafeShellType? SafeShellType = null,
 string? ScriptJson = null,
 // Transcription
 Guid? TranscriptionModelId = null,
-Guid? ChannelId = null,
 string? Language = null,
 IReadOnlyList<TranscriptionSegmentResponse>? Segments = null);
 

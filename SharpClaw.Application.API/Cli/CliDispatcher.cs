@@ -507,7 +507,9 @@ public static class CliDispatcher
     {
         if (args.Length < 2)
         {
-            PrintUsage("chat <message>");
+            PrintUsage(
+                "chat [--agent <id>] <message>",
+                "  --agent overrides the channel's default agent.");
             return Results.Ok();
         }
 
@@ -525,11 +527,28 @@ public static class CliDispatcher
             }
 
             _currentChannelId = latest.Id;
-            Console.WriteLine($"No channel selected. Opening latest channel: \"{latest.Title}\" (#{CliIdMap.GetOrAssign(latest.Id)})");
+            Console.WriteLine($"No channel selected. Opening latest channel: \"{latest.Title}\" ({CliIdMap.GetOrAssign(latest.Id)})");
+        }
+
+        // Parse --agent flag and collect message parts
+        Guid? agentId = null;
+        var messageParts = new List<string>();
+        for (var i = 1; i < args.Length; i++)
+        {
+            if (args[i] is "--agent" or "-a" && i + 1 < args.Length)
+                agentId = CliIdMap.Resolve(args[++i]);
+            else
+                messageParts.Add(args[i]);
+        }
+
+        if (messageParts.Count == 0)
+        {
+            PrintUsage("chat [--agent <id>] <message>");
+            return Results.Ok();
         }
 
         var chatService = sp.GetRequiredService<ChatService>();
-        var request = new ChatRequest(string.Join(' ', args[1..]));
+        var request = new ChatRequest(string.Join(' ', messageParts), agentId);
         var wroteText = false;
 
         async Task<bool> CliApprovalCallback(
@@ -592,9 +611,11 @@ public static class CliDispatcher
                 "channel list [agentId]                     List channels",
                 "channel select <id>                        Select active channel",
                 "channel get <id>                           Show channel details",
-                "channel model <id> <modelId>               Change channel model",
                 "channel attach <id> <contextId>            Attach to a context",
                 "channel detach <id>                        Detach from context",
+                "channel agents <id>                        List allowed agents",
+                "channel agents <id> add <agentId>          Allow an agent",
+                "channel agents <id> remove <agentId>       Remove an allowed agent",
                 "channel delete <id>                        Delete a channel");
             return Results.Ok();
         }
@@ -618,13 +639,6 @@ public static class CliDispatcher
                 => await ChannelHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
             "get" => UsageResult("channel get <id>"),
 
-            "model" when args.Length >= 4
-                => await ChannelHandlers.Update(
-                    CliIdMap.Resolve(args[2]),
-                    new UpdateChannelRequest(ModelId: CliIdMap.Resolve(args[3])),
-                    svc),
-            "model" => UsageResult("channel model <channelId> <modelId>"),
-
             "attach" when args.Length >= 4
                 => await ChannelHandlers.Update(
                     CliIdMap.Resolve(args[2]),
@@ -638,6 +652,10 @@ public static class CliDispatcher
                     new UpdateChannelRequest(ContextId: Guid.Empty),
                     svc),
             "detach" => UsageResult("channel detach <channelId>"),
+
+            "agents" when args.Length >= 3
+                => await HandleChannelAgents(args, svc),
+            "agents" => UsageResult("channel agents <channelId> [add|remove <agentId>]"),
 
             "delete" when args.Length >= 3
                 => await HandleChannelDelete(args, svc),
@@ -687,7 +705,7 @@ public static class CliDispatcher
     private static IResult HandleChannelSelect(string[] args)
     {
         _currentChannelId = CliIdMap.Resolve(args[2]);
-        Console.WriteLine($"Channel #{args[2]} selected.");
+        Console.WriteLine($"Channel {args[2]} selected.");
         return Results.Ok();
     }
 
@@ -701,6 +719,59 @@ public static class CliDispatcher
             _currentChannelId = null;
 
         return result;
+    }
+
+    private static async Task<IResult> HandleChannelAgents(string[] args, ChannelService svc)
+    {
+        var channelId = CliIdMap.Resolve(args[2]);
+
+        // channel agents <id>  — list
+        if (args.Length == 3)
+        {
+            var ch = await svc.GetByIdAsync(channelId);
+            if (ch is null) return Results.NotFound();
+            PrintJsonWithShortIds(new
+            {
+                ChannelId = ch.Id,
+                DefaultAgentId = ch.AgentId,
+                AllowedAgentIds = ch.AllowedAgentIds
+            });
+            return Results.Ok();
+        }
+
+        var action = args[3].ToLowerInvariant();
+
+        if (action == "add" && args.Length >= 5)
+        {
+            var agentToAdd = CliIdMap.Resolve(args[4]);
+            var ch = await svc.GetByIdAsync(channelId);
+            if (ch is null) return Results.NotFound();
+
+            var updated = ch.AllowedAgentIds.ToList();
+            if (!updated.Contains(agentToAdd))
+                updated.Add(agentToAdd);
+
+            return await ChannelHandlers.Update(
+                channelId,
+                new UpdateChannelRequest(AllowedAgentIds: updated),
+                svc);
+        }
+
+        if (action == "remove" && args.Length >= 5)
+        {
+            var agentToRemove = CliIdMap.Resolve(args[4]);
+            var ch = await svc.GetByIdAsync(channelId);
+            if (ch is null) return Results.NotFound();
+
+            var updated = ch.AllowedAgentIds.Where(id => id != agentToRemove).ToList();
+
+            return await ChannelHandlers.Update(
+                channelId,
+                new UpdateChannelRequest(AllowedAgentIds: updated),
+                svc);
+        }
+
+        return UsageResult("channel agents <channelId> [add|remove <agentId>]");
     }
 
     private static async Task<IResult?> HandleRoleCommand(string[] args, IServiceProvider sp)
@@ -730,9 +801,10 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "job submit [agentId] <actionType> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]",
-                "  Agent and resource can be omitted when --conv is specified.",
-                "job list <agentId>",
+                "job submit <actionType> [resourceId] [--conv <id>] [--agent <id>] [--model <id>] [--lang <code>]",
+                "  Uses current channel by default, or specify --conv to override.",
+                "  --agent overrides the channel's default agent.",
+                "job list [channelId]                       List jobs (current channel if omitted)",
                 "job status <jobId>",
                 "job approve <jobId>",
                 "job stop <jobId>                           Stop a transcription job (complete)",
@@ -759,24 +831,23 @@ public static class CliDispatcher
 
         return sub switch
         {
-            // job submit <agentId> <actionType> [resourceId] [flags...]
-            "submit" when args.Length >= 4 && Enum.TryParse<AgentActionType>(args[3], true, out var at)
-                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), at, 4, svc),
-
-            // job submit <actionType> [resourceId] [flags...]  (agent inferred from --conv)
-            "submit" when args.Length >= 3 && Enum.TryParse<AgentActionType>(args[2], true, out var at2)
-                => await HandleJobSubmit(args, Guid.Empty, at2, 3, svc),
+            // job submit <actionType> [resourceId] [flags...]
+            "submit" when args.Length >= 3 && Enum.TryParse<AgentActionType>(args[2], true, out var at)
+                => await HandleJobSubmit(args, at, 3, svc),
 
             "submit" when args.Length < 3
                 => UsageResult(
-                    "job submit [agentId] <actionType> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]",
-                    "  Agent can be omitted when --conv is specified."),
+                    "job submit <actionType> [resourceId] [--conv <id>] [--agent <id>] [--model <id>] [--lang <code>]",
+                    "  Uses current channel by default, or specify --conv to override.",
+                    "  --agent overrides the channel's default agent."),
             "submit"
                 => UsageResult($"Unknown action type. Valid types: {string.Join(", ", Enum.GetNames<AgentActionType>())}"),
 
             "list" when args.Length >= 3
                 => await AgentJobHandlers.List(CliIdMap.Resolve(args[2]), svc),
-            "list" => UsageResult("job list <agentId>"),
+            "list" when _currentChannelId.HasValue
+                => await AgentJobHandlers.List(_currentChannelId.Value, svc),
+            "list" => UsageResult("job list [channelId]  (no current channel selected — specify a channel ID or use 'channel select')"),
 
             "status" when args.Length >= 3
                 => await AgentJobHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
@@ -806,7 +877,7 @@ public static class CliDispatcher
     }
 
     private static async Task<IResult> HandleJobSubmit(
-        string[] args, Guid agentId, AgentActionType actionType, int nextArg, AgentJobService svc)
+        string[] args, AgentActionType actionType, int nextArg, AgentJobService svc)
     {
         // Resource ID is the next positional arg, unless it looks like a flag
         Guid? resourceId = args.Length > nextArg && !args[nextArg].StartsWith("--")
@@ -816,6 +887,7 @@ public static class CliDispatcher
 
         Guid? modelId = null;
         Guid? convId = null;
+        Guid? agentId = null;
         string? language = null;
 
         for (var i = flagStart; i < args.Length; i++)
@@ -828,19 +900,26 @@ public static class CliDispatcher
                 case "--conv" or "-c" when i + 1 < args.Length:
                     convId = CliIdMap.Resolve(args[++i]);
                     break;
+                case "--agent" or "-a" when i + 1 < args.Length:
+                    agentId = CliIdMap.Resolve(args[++i]);
+                    break;
                 case "--lang" or "-l" when i + 1 < args.Length:
                     language = args[++i];
                     break;
             }
         }
 
+        var channelId = convId ?? _currentChannelId;
+        if (!channelId.HasValue)
+            return UsageResult("No channel specified. Use --conv <id> or select a channel with 'channel select'.");
+
         return await AgentJobHandlers.Submit(
-            agentId,
+            channelId.Value,
             new SubmitAgentJobRequest(
                 actionType,
                 resourceId,
+                AgentId: agentId,
                 TranscriptionModelId: modelId,
-                ChannelId: convId,
                 Language: language),
             svc);
     }
@@ -1270,18 +1349,21 @@ public static class CliDispatcher
               channel list [agentId]                      List channels
               channel select <id>                         Select active channel
               channel get <id>                            Show channel details
-              channel model <id> <modelId>                Change channel model
               channel attach <id> <contextId>             Attach to a context
               channel detach <id>                         Detach from context
+              channel agents <id>                         List allowed agents
+              channel agents <id> add <agentId>           Allow an agent
+              channel agents <id> remove <agentId>        Remove an allowed agent
               channel delete <id>                         Delete a channel
 
-              chat <message>                              Chat in active channel
+              chat [--agent <id>] <message>               Chat in active channel
 
               role list                                    List all roles
 
-              job submit [agentId] <type> [resourceId] [--model <id>] [--conv <id>] [--lang <code>]
-                                                          Submit an agent action job
-                Agent can be omitted when --conv is specified.
+              job submit <type> [resourceId] [--conv <id>] [--agent <id>] [--model <id>] [--lang <code>]
+                                                          Submit a job on the current channel
+                Uses current channel by default, or --conv to override.
+                --agent overrides the channel's default agent.
                 Global types: ExecuteAsAdmin, CreateSubAgent,
                   CreateContainer, RegisterInfoStore, EditAnyTask
                 Resource types: ExecuteAsSystemUser, AccessLocalInfoStore,
@@ -1290,7 +1372,7 @@ public static class CliDispatcher
                 Transcription types: TranscribeFromAudioDevice,
                   TranscribeFromAudioStream (API only),
                   TranscribeFromAudioFile (API only)
-              job list <agentId>                           List jobs for an agent
+              job list [channelId]                         List jobs (current channel if omitted)
               job status <jobId>                           Check job status & logs
               job approve <jobId>                          Approve a pending job
               job stop <jobId>                             Stop a transcription job

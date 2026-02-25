@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
@@ -19,5 +18,4 @@ public class ModelDB : BaseEntity
     public ProviderDB Provider { get; set; } = null!;
 
     public ICollection<AgentDB> Agents { get; set; } = [];
-    public ICollection<ChannelDB> Channels { get; set; } = [];
 }

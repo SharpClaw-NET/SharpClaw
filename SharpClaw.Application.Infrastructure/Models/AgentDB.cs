@@ -17,4 +17,10 @@ public class AgentDB : BaseEntity
 
     public ICollection<ChannelContextDB> Contexts { get; set; } = [];
     public ICollection<ChannelDB> Channels { get; set; } = [];
+
+    /// <summary>
+    /// Channels where this agent is an additional (non-default) allowed
+    /// agent.  Inverse of <see cref="ChannelDB.AllowedAgents"/>.
+    /// </summary>
+    public ICollection<ChannelDB> AllowedChannels { get; set; } = [];
 }

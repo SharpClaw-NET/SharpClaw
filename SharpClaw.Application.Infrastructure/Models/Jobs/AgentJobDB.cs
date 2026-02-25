@@ -67,8 +67,9 @@ public class AgentJobDB : BaseEntity
     public Guid? TranscriptionModelId { get; set; }
     public ModelDB? TranscriptionModel { get; set; }
 
-    public Guid? ChannelId { get; set; }
-    public ChannelDB? Channel { get; set; }
+    // ── Channel (required — every job belongs to a channel) ───
+    public Guid ChannelId { get; set; }
+    public ChannelDB Channel { get; set; } = null!;
 
     public string? Language { get; set; }
 

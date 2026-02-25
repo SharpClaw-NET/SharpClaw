@@ -20,8 +20,8 @@ public class TranscriptionController(InternalApiClient api) : ControllerBase
     {
         try
         {
-            // Job endpoints use agentId=empty for direct job lookup from CLI
-            var result = await api.GetAsync<AgentJobResponse>($"/agents/00000000-0000-0000-0000-000000000000/jobs/{jobId}", ct);
+            // Channel ID in the route is a namespace only — handlers look up by jobId directly
+            var result = await api.GetAsync<AgentJobResponse>($"/channels/00000000-0000-0000-0000-000000000000/jobs/{jobId}", ct);
             return result is not null ? Ok(result) : NotFound();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -40,7 +40,7 @@ public class TranscriptionController(InternalApiClient api) : ControllerBase
         try
         {
             var result = await api.PostAsync<object, AgentJobResponse>(
-                $"/agents/00000000-0000-0000-0000-000000000000/jobs/{jobId}/stop", new { }, ct);
+                $"/channels/00000000-0000-0000-0000-000000000000/jobs/{jobId}/stop", new { }, ct);
             return result is not null ? Ok(result) : NotFound();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -59,7 +59,7 @@ public class TranscriptionController(InternalApiClient api) : ControllerBase
         try
         {
             var result = await api.PostAsync<object, AgentJobResponse>(
-                $"/agents/00000000-0000-0000-0000-000000000000/jobs/{jobId}/cancel", new { }, ct);
+                $"/channels/00000000-0000-0000-0000-000000000000/jobs/{jobId}/cancel", new { }, ct);
             return result is not null ? Ok(result) : NotFound();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
@@ -79,8 +79,8 @@ public class TranscriptionController(InternalApiClient api) : ControllerBase
         try
         {
             var path = since.HasValue
-                ? $"/agents/00000000-0000-0000-0000-000000000000/jobs/{jobId}/segments?since={since:O}"
-                : $"/agents/00000000-0000-0000-0000-000000000000/jobs/{jobId}/segments";
+                ? $"/channels/00000000-0000-0000-0000-000000000000/jobs/{jobId}/segments?since={since:O}"
+                : $"/channels/00000000-0000-0000-0000-000000000000/jobs/{jobId}/segments";
             var result = await api.GetAsync<IReadOnlyList<TranscriptionSegmentResponse>>(path, ct);
             return Ok(result);
         }

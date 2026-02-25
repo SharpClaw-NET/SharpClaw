@@ -4,6 +4,7 @@ using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
+using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Messages;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -34,14 +35,14 @@ public sealed partial class ChatService(
         Guid channelId, ChatRequest request, CancellationToken ct = default)
     {
         var channel = await db.Channels
-            .Include(c => c.Model).ThenInclude(m => m.Provider)
-            .Include(c => c.Agent)
+            .Include(c => c.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
-        var model = channel.Model;
+        var agent = ResolveAgent(channel, request.AgentId);
+        var model = agent.Model;
         var provider = model.Provider;
-        var agent = channel.Agent;
 
         if (string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
@@ -110,6 +111,28 @@ public sealed partial class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Agent resolution
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Resolves the effective agent for a channel operation.  If no
+    /// override is specified, the channel's default agent is used.
+    /// When an override is specified it must be the default agent or
+    /// one of the channel's allowed agents.
+    /// </summary>
+    private static AgentDB ResolveAgent(ChannelDB channel, Guid? requestedAgentId)
+    {
+        if (requestedAgentId is null || requestedAgentId == channel.AgentId)
+            return channel.Agent;
+
+        var allowed = channel.AllowedAgents.FirstOrDefault(a => a.Id == requestedAgentId);
+        return allowed
+            ?? throw new InvalidOperationException(
+                $"Agent {requestedAgentId} is not allowed on channel {channel.Id}. " +
+                "Add it to the channel's allowed agents first.");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Streaming chat
     // ═══════════════════════════════════════════════════════════════
 
@@ -132,14 +155,14 @@ public sealed partial class ChatService(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var channel = await db.Channels
-            .Include(c => c.Model).ThenInclude(m => m.Provider)
-            .Include(c => c.Agent)
+            .Include(c => c.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
-        var model = channel.Model;
+        var agent = ResolveAgent(channel, request.AgentId);
+        var model = agent.Model;
         var provider = model.Provider;
-        var agent = channel.Agent;
 
         if (string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
@@ -175,7 +198,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, Mk8ShellTools, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, AllTools, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -209,24 +232,15 @@ public sealed partial class ChatService(
                     continue;
                 }
 
-                var resourceId = await ResolveContainerIdAsync(parsed, ct);
-
-                var jobRequest = new SubmitAgentJobRequest(
-                    ActionType: AgentActionType.ExecuteAsSafeShell,
-                    ResourceId: resourceId,
-                    CallerAgentId: agent.Id,
-                    SafeShellType: SafeShellType.Mk8Shell,
-                    ScriptJson: parsed.ScriptJson,
-                    ChannelId: channelId);
-
-                var jobResponse = await jobService.SubmitAsync(agent.Id, jobRequest, ct);
+                var jobRequest = await BuildJobRequestAsync(parsed, agent.Id, ct);
+                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
 
                 // ── Inline approval ───────────────────────────────
                 if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
                 {
                     // Check if the session user CAN approve
                     var canApprove = await CanSessionUserApproveAsync(
-                        agent.Id, jobRequest.ActionType, resourceId, ct);
+                        agent.Id, jobRequest.ActionType, jobRequest.ResourceId, ct);
 
                     if (canApprove)
                     {
@@ -337,6 +351,29 @@ public sealed partial class ChatService(
         return null;
     }
 
+    /// <summary>
+    /// Builds a <see cref="SubmitAgentJobRequest"/> from a parsed tool call.
+    /// For <see cref="AgentActionType.ExecuteAsSafeShell"/> the container
+    /// is resolved by sandbox name when no GUID is provided.
+    /// </summary>
+    private async Task<SubmitAgentJobRequest> BuildJobRequestAsync(
+        ParsedToolCall parsed, Guid agentId, CancellationToken ct)
+    {
+        var resourceId = parsed.ActionType is AgentActionType.ExecuteAsSafeShell
+            ? await ResolveContainerIdAsync(parsed, ct)
+            : parsed.ResourceId;
+
+        return new SubmitAgentJobRequest(
+            ActionType: parsed.ActionType,
+            ResourceId: resourceId,
+            CallerAgentId: agentId,
+            DangerousShellType: parsed.DangerousShellType,
+            SafeShellType: parsed.SafeShellType,
+            ScriptJson: parsed.ScriptJson,
+            TranscriptionModelId: parsed.TranscriptionModelId,
+            Language: parsed.Language);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Tool-call loop implementations
     // ═══════════════════════════════════════════════════════════════
@@ -367,7 +404,7 @@ public sealed partial class ChatService(
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, Mk8ShellTools, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, AllTools, ct);
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
                 return new ToolLoopResult(result.Content ?? "", jobResults);
@@ -387,17 +424,9 @@ public sealed partial class ChatService(
                     continue;
                 }
 
-                var resourceId = await ResolveContainerIdAsync(parsed, ct);
+                var jobRequest = await BuildJobRequestAsync(parsed, agentId, ct);
 
-                var jobRequest = new SubmitAgentJobRequest(
-                    ActionType: AgentActionType.ExecuteAsSafeShell,
-                    ResourceId: resourceId,
-                    CallerAgentId: agentId,
-                    SafeShellType: SafeShellType.Mk8Shell,
-                    ScriptJson: parsed.ScriptJson,
-                    ChannelId: channelId);
-
-                var jobResponse = await jobService.SubmitAsync(agentId, jobRequest, ct);
+                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
                 jobResults.Add(jobResponse);
 
                 var resultContent =
@@ -414,7 +443,7 @@ public sealed partial class ChatService(
             if (anyAwaitingApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, Mk8ShellTools, ct);
+                    httpClient, apiKey, modelName, systemPrompt, messages, AllTools, ct);
                 return new ToolLoopResult(finalResult.Content ?? "", jobResults);
             }
         }
@@ -456,17 +485,9 @@ public sealed partial class ChatService(
 
             foreach (var call in toolCalls)
             {
-                var resourceId = await ResolveContainerIdAsync(call, ct);
+                var jobRequest = await BuildJobRequestAsync(call, agentId, ct);
 
-                var jobRequest = new SubmitAgentJobRequest(
-                    ActionType: AgentActionType.ExecuteAsSafeShell,
-                    ResourceId: resourceId,
-                    CallerAgentId: agentId,
-                    SafeShellType: SafeShellType.Mk8Shell,
-                    ScriptJson: call.ScriptJson,
-                    ChannelId: channelId);
-
-                var jobResponse = await jobService.SubmitAsync(agentId, jobRequest, ct);
+                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
                 jobResults.Add(jobResponse);
 
                 toolResultBuilder.AppendLine(
@@ -499,7 +520,7 @@ public sealed partial class ChatService(
     /// </summary>
     private static ParsedToolCall? ParseNativeToolCall(ChatToolCall toolCall)
     {
-        if (toolCall.Name != "execute_mk8_shell")
+        if (!ToolNameToActionType.TryGetValue(toolCall.Name, out var actionType))
             return null;
 
         try
@@ -508,18 +529,54 @@ public sealed partial class ChatService(
             if (payload is null) return null;
 
             Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
+            // TargetId is the generic "resourceId" alias for non-shell tools
+            resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
+
+            Guid? transcriptionModelId = Guid.TryParse(payload.TranscriptionModelId, out var tmid) ? tmid : null;
+
+            DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
+                payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
 
             return new ParsedToolCall(
                 toolCall.Id,
+                actionType,
                 resourceId,
                 payload.SandboxId,
-                payload.Script is { } script ? script.GetRawText() : null);
+                payload.Script is { } script ? script.GetRawText() : payload.Command,
+                dangerousShell,
+                actionType == AgentActionType.ExecuteAsSafeShell ? SafeShellType.Mk8Shell : null,
+                transcriptionModelId,
+                payload.Language);
         }
         catch (JsonException)
         {
             return null;
         }
     }
+
+    /// <summary>
+    /// Maps native tool function names to their <see cref="AgentActionType"/>.
+    /// </summary>
+    private static readonly Dictionary<string, AgentActionType> ToolNameToActionType = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["execute_mk8_shell"]              = AgentActionType.ExecuteAsSafeShell,
+        ["execute_dangerous_shell"]        = AgentActionType.UnsafeExecuteAsDangerousShell,
+        ["create_sub_agent"]               = AgentActionType.CreateSubAgent,
+        ["create_container"]               = AgentActionType.CreateContainer,
+        ["register_info_store"]            = AgentActionType.RegisterInfoStore,
+        ["edit_any_task"]                   = AgentActionType.EditAnyTask,
+        ["access_local_info_store"]        = AgentActionType.AccessLocalInfoStore,
+        ["access_external_info_store"]     = AgentActionType.AccessExternalInfoStore,
+        ["access_website"]                 = AgentActionType.AccessWebsite,
+        ["query_search_engine"]            = AgentActionType.QuerySearchEngine,
+        ["access_container"]               = AgentActionType.AccessContainer,
+        ["manage_agent"]                   = AgentActionType.ManageAgent,
+        ["edit_task"]                       = AgentActionType.EditTask,
+        ["access_skill"]                   = AgentActionType.AccessSkill,
+        ["transcribe_from_audio_device"]   = AgentActionType.TranscribeFromAudioDevice,
+        ["transcribe_from_audio_stream"]   = AgentActionType.TranscribeFromAudioStream,
+        ["transcribe_from_audio_file"]     = AgentActionType.TranscribeFromAudioFile,
+    };
 
     // ═══════════════════════════════════════════════════════════════
     // Tool-call parsing (text-based fallback)
@@ -593,14 +650,35 @@ public sealed partial class ChatService(
                 if (payload is not null)
                 {
                     Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
+                    resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
+
+                    // Default to mk8.shell for backwards compatibility
+                    var actionType = AgentActionType.ExecuteAsSafeShell;
+
+                    Guid? transcriptionModelId = Guid.TryParse(
+                        payload.TranscriptionModelId, out var tmid) ? tmid : null;
+
+                    DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
+                        payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
+
+                    if (dangerousShell.HasValue)
+                        actionType = AgentActionType.UnsafeExecuteAsDangerousShell;
+                    else if (transcriptionModelId.HasValue)
+                        actionType = AgentActionType.TranscribeFromAudioDevice;
 
                     calls.Add(new ParsedToolCall(
                         callId,
+                        actionType,
                         resourceId,
                         payload.SandboxId,
                         payload.Script is { } script
                             ? script.GetRawText()
-                            : null));
+                            : payload.Command,
+                        dangerousShell,
+                        actionType == AgentActionType.ExecuteAsSafeShell
+                            ? SafeShellType.Mk8Shell : null,
+                        transcriptionModelId,
+                        payload.Language));
                 }
             }
             catch (JsonException)
@@ -634,7 +712,7 @@ public sealed partial class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // System prompt
+    // System prompt & tool definitions (loaded from embedded resources)
     // ═══════════════════════════════════════════════════════════════
 
     private static string BuildSystemPrompt(string? agentPrompt, bool nativeToolCalling)
@@ -647,250 +725,112 @@ public sealed partial class ChatService(
         return agentPrompt + "\n\n" + suffix;
     }
 
-    private const string ToolInstructions = """
-        ## Tool Calls — mk8.shell
+    private static readonly string ToolInstructions =
+        LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-text.md");
 
-        You can execute commands inside a sandbox by emitting one or more
-        tool-call blocks in your response. Each block must be on its own line:
+    private static readonly string NativeToolSystemSuffix =
+        LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-native-suffix.md");
 
-        [TOOL_CALL:<unique_id>] {"resourceId":"<container-guid>","sandboxId":"<name>","script":{...}}
+    private static readonly string Mk8ShellToolDescription =
+        LoadEmbeddedResource("SharpClaw.Application.Core.tool-description-native.md");
 
-        • resourceId — the GUID of the container resource to execute against.
-        • sandboxId  — the mk8.shell sandbox name (resolved from the registry).
-        • script     — an mk8.shell script object (see reference below).
+    private static readonly IReadOnlyList<ChatToolDefinition> AllTools = BuildAllToolDefinitions();
 
-        After you emit tool calls, the system executes them and replies with:
-        [TOOL_RESULT:<id>] status=Completed result=...
-        [TOOL_RESULT:<id>] status=Denied error=...
-        [TOOL_RESULT:<id>] status=AwaitingApproval
+    private static IReadOnlyList<ChatToolDefinition> BuildAllToolDefinitions()
+    {
+        var mk8Schema = BuildMk8ShellToolSchema();
+        var resourceOnly = BuildResourceOnlySchema();
+        var globalSchema = BuildGlobalActionSchema();
+        var dangerousShellSchema = BuildDangerousShellSchema();
+        var transcriptionSchema = BuildTranscriptionSchema();
 
-        When a result is AwaitingApproval, the action requires explicit user
-        approval before it can proceed. You MUST:
-        1. Tell the user which action needs their approval and why.
-        2. Do NOT emit further tool calls until the user approves or denies.
+        return
+        [
+            // ── Implemented ──────────────────────────────────────
+            new("execute_mk8_shell", Mk8ShellToolDescription, mk8Schema),
+            new("execute_dangerous_shell",
+                "Execute a raw shell command via Bash, PowerShell, CommandPrompt, or Git. "
+                + "Requires UnsafeExecuteAsDangerousShell permission. The command string is "
+                + "passed directly to the interpreter with NO sandboxing.",
+                dangerousShellSchema),
 
-        When a result is Denied, explain that the action was not permitted
-        and suggest alternatives if possible.
+            // ── Transcription (implemented) ──────────────────────
+            new("transcribe_from_audio_device",
+                "Start live transcription from a system audio device. Requires a "
+                + "transcription-capable model and an audio device resource.",
+                transcriptionSchema),
+            new("transcribe_from_audio_stream",
+                "Transcribe an incoming audio stream. [NOT YET IMPLEMENTED — job will "
+                + "execute but produce a stub result.]",
+                transcriptionSchema),
+            new("transcribe_from_audio_file",
+                "Transcribe a pre-recorded audio file. [NOT YET IMPLEMENTED — job will "
+                + "execute but produce a stub result.]",
+                transcriptionSchema),
 
-        Use completed results to formulate your final response to the user.
-        Do NOT include [TOOL_CALL:...] blocks in your final answer.
+            // ── Global flags (stubbed) ───────────────────────────
+            new("create_sub_agent",
+                "Create a new sub-agent. [NOT YET IMPLEMENTED — job will execute but "
+                + "produce a stub result.] Requires CreateSubAgent global permission.",
+                globalSchema),
+            new("create_container",
+                "Create a new container resource. [NOT YET IMPLEMENTED — job will execute "
+                + "but produce a stub result.] Requires CreateContainer global permission.",
+                globalSchema),
+            new("register_info_store",
+                "Register a new information store (local or external). [NOT YET "
+                + "IMPLEMENTED — job will execute but produce a stub result.] Requires "
+                + "RegisterInfoStore global permission.",
+                globalSchema),
+            new("edit_any_task",
+                "Edit any scheduled task regardless of ownership. [NOT YET IMPLEMENTED "
+                + "— job will execute but produce a stub result.] Requires EditAnyTask "
+                + "global permission.",
+                globalSchema),
 
-        ---
-
-        ### mk8.shell script reference
-
-        You submit JSON scripts. The server compiles and executes them inside
-        a sandboxed environment. There is no real shell — no eval, no pipes,
-        no chaining, no shell expansion. Arguments are structured arrays.
-
-        Every command executes inside the named sandbox. The server resolves
-        it to a local directory, verifies its cryptographically signed
-        environment, executes the command in an isolated task container, then
-        disposes all state. Nothing transfers between commands.
-
-        You CANNOT register, create, or manage sandboxes. If a sandbox does
-        not exist, tell the user to register it using mk8.shell.startup.
-
-        Script format:
-        {
-          "operations": [
-            { "verb": "...", "args": ["..."] }
-          ],
-          "options": { ... },
-          "cleanup": [ ... ]
-        }
-
-        Every operation needs "verb" and "args". All other fields are optional.
-
-        #### Verbs
-
-        Files:
-          FileRead [path], FileWrite [path, content],
-          FileAppend [path, content], FileDelete [path],
-          FileExists [path], FileList [path, pattern?],
-          FileCopy [src, dst], FileMove [src, dst],
-          FileHash [path, algorithm?] (sha256 default, sha512, md5)
-
-        Structured edits:
-          FileTemplate [outputPath]  — requires "template" field
-          FilePatch    [targetPath]  — requires "patches" field
-
-        Batch (max 64 entries each):
-          FileWriteMany  [p1, c1, p2, c2...] pairs of path+content
-          FileCopyMany   [s1, d1, s2, d2...] pairs of src+dst
-          FileDeleteMany [p1, p2, p3...]
-
-        Directories:
-          DirCreate [path], DirDelete [path], DirList [path],
-          DirExists [path], DirTree [path, depth?] (depth 1–5, default 3)
-
-        Process:
-          ProcRun [binary, arg, arg...] — strict command-template whitelist
-
-        Git (via ProcRun whitelist):
-          Read-only: status, log, diff, branch, remote, ls-files, tag, describe
-          Write: add, commit, stash, checkout, switch
-          Protected branches (main, master, develop, staging, production,
-          live, release/*, trunk) are BANNED.
-
-        HTTP:
-          HttpGet [url], HttpPost [url, body?],
-          HttpPut [url, body?], HttpDelete [url]
-
-        Text:
-          TextRegex [input, pattern] (2 s timeout),
-          TextReplace [input, old, new],
-          JsonParse [input], JsonQuery [input, jsonpath]
-
-        Environment (read-only, allowlist only):
-          EnvGet [name]
-
-        System info (no args):
-          SysWhoAmI, SysPwd, SysHostname, SysUptime, SysDate (UTC)
-
-        Control flow (expanded at compile time):
-          ForEach [] — requires "forEach" field
-          If []      — requires "if" field
-
-        Composition:
-          Include [fragmentId] — inline admin-approved fragment
-
-        #### Variables
-
-        Resolved at compile time, not shell env vars:
-          $WORKSPACE — sandbox root directory
-          $CWD       — working directory (defaults to sandbox root)
-          $USER      — OS username
-          $PREV      — stdout of previous step (only when pipeStepOutput: true)
-
-        Sandbox signed env vars are also available automatically.
-        Use in args: { "args": ["$WORKSPACE/src/app.ts"] }
-        $PREV is always empty when pipeStepOutput is false (default).
-
-        #### Named captures
-
-        Any step can capture its stdout:
-        { "verb": "ProcRun", "args": ["dotnet","build"], "captureAs": "BUILD_OUT" }
-        { "verb": "FileWrite", "args": ["$WORKSPACE/log.txt","$BUILD_OUT"] }
-
-        Max 16 captures per script. Cannot reuse names. Cannot override
-        WORKSPACE, CWD, USER, PREV, ITEM, INDEX.
-        Captures from process-spawning steps are blocked in ProcRun args.
-
-        #### Per-step fields
-
-        maxRetries (int), stepTimeout (TimeSpan e.g. "00:02:00"),
-        label (string, unique, alphanumeric/hyphens/underscores, max 64),
-        onFailure ("goto:<label>" — forward jumps only),
-        captureAs (string), template (object), patches (array)
-
-        #### Options
-
-        maxRetries (0), retryDelay ("00:00:02" — doubles each attempt),
-        stepTimeout ("00:00:30"), scriptTimeout ("00:05:00"),
-        failureMode ("StopOnFirstError" | "ContinueOnError" | "StopAndCleanup"),
-        maxOutputBytes (1048576), maxErrorBytes (262144),
-        pipeStepOutput (false)
-
-        #### Cleanup
-
-        When failureMode is "StopAndCleanup", add a "cleanup" array.
-        These run after failure with best-effort semantics:
-        { "cleanup": [{ "verb": "DirDelete", "args": ["$WORKSPACE/tmp"] }] }
-
-        #### FileTemplate
-
-        { "verb": "FileTemplate", "args": ["$WORKSPACE/config.json"],
-          "template": {
-            "source": "$WORKSPACE/templates/config.template.json",
-            "values": { "DB_HOST": "db.internal", "PORT": "5432" }
-          } }
-
-        Replaces {{KEY}} placeholders. Max 64 keys. No $ in values.
-
-        #### Security constraints
-
-        - No interpreters (bash, cmd, powershell).
-        - ProcRun uses a strict command-template whitelist.
-        - Paths are workspace-relative only (no "..").
-        - URL sanitization (SSRF, private IP, metadata, credentials blocked).
-        - Env allowlist blocks KEY/SECRET/TOKEN/PASSWORD/APIKEY.
-        - Structurally impossible: sudo, pipes, chaining, redirection,
-          backgrounding, interpreter invocation.
-        """;
-
-    private const string NativeToolSystemSuffix = """
-        ## mk8.shell Tool Results
-
-        After calling execute_mk8_shell, results indicate the job status:
-        - status=Completed result=<output> — the command succeeded.
-        - status=Denied error=<reason> — the command was blocked by permissions.
-        - status=AwaitingApproval — the command requires user approval.
-
-        When AwaitingApproval:
-        1. Tell the user which action needs approval and why.
-        2. Do NOT call further tools until the user approves or denies.
-
-        When Denied, explain the permission issue and suggest alternatives.
-
-        You CANNOT register, create, or manage sandboxes. If a sandbox does
-        not exist, tell the user to register it using mk8.shell.startup.
-        """;
-
-    private const string Mk8ShellToolDescription = """
-        Execute commands inside a sandboxed mk8.shell environment.
-
-        You submit JSON scripts. The server compiles and executes them in an
-        isolated workspace. There is no real shell — no eval, pipes, chaining,
-        or shell expansion. Arguments are structured arrays.
-
-        Every command executes inside the named sandbox. The server resolves
-        it to a local directory, verifies its cryptographically signed
-        environment, and executes in an isolated task container.
-
-        Script format: { "operations": [{ "verb": "...", "args": ["..."] }], "options": {...}, "cleanup": [...] }
-
-        Verbs:
-        Files: FileRead [path], FileWrite [path, content], FileAppend [path, content],
-          FileDelete [path], FileExists [path], FileList [path, pattern?],
-          FileCopy [src, dst], FileMove [src, dst], FileHash [path, algorithm?]
-        Structured edits: FileTemplate [outputPath] (requires "template" field),
-          FilePatch [targetPath] (requires "patches" field)
-        Batch (max 64): FileWriteMany [p1,c1,p2,c2...], FileCopyMany [s1,d1,s2,d2...],
-          FileDeleteMany [p1,p2,...]
-        Directories: DirCreate [path], DirDelete [path], DirList [path],
-          DirExists [path], DirTree [path, depth?] (1–5, default 3)
-        Process: ProcRun [binary, arg...] — strict command-template whitelist
-        Git (via ProcRun): status, log, diff, branch, remote, ls-files, tag, describe,
-          add, commit, stash, checkout, switch. Protected branches BANNED.
-        HTTP: HttpGet [url], HttpPost [url, body?], HttpPut [url, body?], HttpDelete [url]
-        Text: TextRegex [input, pattern], TextReplace [input, old, new],
-          JsonParse [input], JsonQuery [input, jsonpath]
-        Env (read-only allowlist): EnvGet [name]
-        System (no args): SysWhoAmI, SysPwd, SysHostname, SysUptime, SysDate
-        Control flow: ForEach [] ("forEach" field), If [] ("if" field)
-        Composition: Include [fragmentId]
-
-        Variables (compile-time): $WORKSPACE, $CWD, $USER, $PREV (when pipeStepOutput: true).
-        Named captures: { "captureAs": "BUILD_OUT" } — max 16, blocked in ProcRun args.
-
-        Per-step fields: maxRetries, stepTimeout, label, onFailure ("goto:<label>"),
-          captureAs, template, patches.
-        Options: maxRetries (0), retryDelay ("00:00:02"), stepTimeout ("00:00:30"),
-          scriptTimeout ("00:05:00"), failureMode, maxOutputBytes, maxErrorBytes,
-          pipeStepOutput (false).
-        Cleanup: runs after failure when failureMode is "StopAndCleanup".
-        FileTemplate: replaces {{KEY}} placeholders. Max 64 keys. No $ in values.
-
-        Security: no interpreters, ProcRun whitelist only, workspace-relative paths,
-        URL sanitization, env allowlist. Structurally impossible: sudo, pipes,
-        chaining, redirection, backgrounding.
-        """;
-
-    private static readonly JsonElement Mk8ShellToolSchema = BuildMk8ShellToolSchema();
-
-    private static readonly IReadOnlyList<ChatToolDefinition> Mk8ShellTools =
-        [new("execute_mk8_shell", Mk8ShellToolDescription, Mk8ShellToolSchema)];
+            // ── Per-resource (stubbed) ───────────────────────────
+            new("access_local_info_store",
+                "Query or retrieve data from a local information store. [NOT YET "
+                + "IMPLEMENTED — job will execute but produce a stub result.] "
+                + "Requires AccessLocalInfoStore permission for the target resource.",
+                resourceOnly),
+            new("access_external_info_store",
+                "Query or retrieve data from an external information store. [NOT YET "
+                + "IMPLEMENTED — job will execute but produce a stub result.] "
+                + "Requires AccessExternalInfoStore permission for the target resource.",
+                resourceOnly),
+            new("access_website",
+                "Access or interact with a registered website resource. [NOT YET "
+                + "IMPLEMENTED — job will execute but produce a stub result.] "
+                + "Requires AccessWebsite permission for the target resource.",
+                resourceOnly),
+            new("query_search_engine",
+                "Query a registered search engine resource. [NOT YET IMPLEMENTED — job "
+                + "will execute but produce a stub result.] Requires QuerySearchEngine "
+                + "permission for the target resource.",
+                resourceOnly),
+            new("access_container",
+                "Access a container resource (read metadata, inspect). [NOT YET "
+                + "IMPLEMENTED — job will execute but produce a stub result.] "
+                + "Requires AccessContainer permission for the target resource.",
+                resourceOnly),
+            new("manage_agent",
+                "Manage another agent (update, configure). [NOT YET IMPLEMENTED — job "
+                + "will execute but produce a stub result.] Requires ManageAgent "
+                + "permission for the target agent.",
+                resourceOnly),
+            new("edit_task",
+                "Edit a specific scheduled task. [NOT YET IMPLEMENTED — job will execute "
+                + "but produce a stub result.] Requires EditTask permission for the "
+                + "target task.",
+                resourceOnly),
+            new("access_skill",
+                "Access or invoke a registered skill. [NOT YET IMPLEMENTED — job will "
+                + "execute but produce a stub result.] Requires AccessSkill permission "
+                + "for the target skill.",
+                resourceOnly),
+        ];
+    }
 
     private static JsonElement BuildMk8ShellToolSchema()
     {
@@ -944,6 +884,99 @@ public sealed partial class ChatService(
         return doc.RootElement.Clone();
     }
 
+    private static JsonElement BuildResourceOnlySchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "The GUID of the target resource."
+                    }
+                },
+                "required": ["targetId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildGlobalActionSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {},
+                "additionalProperties": false
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildDangerousShellSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "resourceId": {
+                        "type": "string",
+                        "description": "The GUID of the SystemUser resource to execute as."
+                    },
+                    "shellType": {
+                        "type": "string",
+                        "enum": ["Bash", "PowerShell", "CommandPrompt", "Git"],
+                        "description": "The shell interpreter to use."
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "The raw command string to pass to the interpreter."
+                    }
+                },
+                "required": ["resourceId", "shellType", "command"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildTranscriptionSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "The GUID of the audio device resource."
+                    },
+                    "transcriptionModelId": {
+                        "type": "string",
+                        "description": "The GUID of the transcription-capable model to use."
+                    },
+                    "language": {
+                        "type": "string",
+                        "description": "Optional BCP-47 language code (e.g. 'en', 'de')."
+                    }
+                },
+                "required": ["targetId", "transcriptionModelId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Embedded resource loader
+    // ═══════════════════════════════════════════════════════════════
+
+    private static string LoadEmbeddedResource(string name)
+    {
+        using var stream = typeof(ChatService).Assembly.GetManifestResourceStream(name)
+            ?? throw new InvalidOperationException(
+                $"Embedded resource '{name}' not found in {typeof(ChatService).Assembly.FullName}.");
+        using var reader = new StreamReader(stream);
+        return reader.ReadToEnd();
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Internal types
     // ═══════════════════════════════════════════════════════════════
@@ -955,15 +988,27 @@ public sealed partial class ChatService(
 
     private sealed record ParsedToolCall(
         string CallId,
+        AgentActionType ActionType,
         Guid? ResourceId,
         string? SandboxId,
-        string? ScriptJson);
+        string? ScriptJson,
+        DangerousShellType? DangerousShellType = null,
+        SafeShellType? SafeShellType = null,
+        Guid? TranscriptionModelId = null,
+        string? Language = null);
 
     private sealed class ToolCallPayload
     {
         public string? ResourceId { get; set; }
         public string? SandboxId { get; set; }
         public JsonElement? Script { get; set; }
+        public string? Command { get; set; }
+        public string? ShellType { get; set; }
+        public string? TranscriptionModelId { get; set; }
+        public string? Language { get; set; }
+        public string? TargetId { get; set; }
+        public string? Query { get; set; }
+        public string? Url { get; set; }
     }
 
     private readonly record struct ToolLoopResult(

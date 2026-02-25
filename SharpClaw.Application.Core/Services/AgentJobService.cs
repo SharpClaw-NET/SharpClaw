@@ -41,7 +41,9 @@ SessionService session)
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Submit a new job.  Permission is evaluated immediately:
+    /// Submit a new job.  The channel is the primary anchor — the agent
+    /// is inferred from the channel unless explicitly overridden in the
+    /// request.  Permission is evaluated immediately:
     /// <list type="bullet">
     ///   <item>Approved → executes inline, returns <see cref="AgentJobStatus.Completed"/>
     ///         or <see cref="AgentJobStatus.Failed"/> (or <see cref="AgentJobStatus.Executing"/>
@@ -51,24 +53,28 @@ SessionService session)
     /// </list>
     /// </summary>
     public async Task<AgentJobResponse> SubmitAsync(
-        Guid agentId,
+        Guid channelId,
         SubmitAgentJobRequest request,
         CancellationToken ct = default)
     {
-        // When no agent is specified, infer from the channel
-        if (agentId == Guid.Empty && request.ChannelId is { } chId)
+        var ch = await db.Channels
+            .Include(c => c.AgentContext)
+            .Include(c => c.AllowedAgents)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct)
+            ?? throw new InvalidOperationException($"Channel {channelId} not found.");
+
+        var agentId = ch.AgentId;
+
+        // Allow overriding the agent if the requested agent is the
+        // channel default or is in the allowed-agents set.
+        if (request.AgentId is { } requestedAgent && requestedAgent != ch.AgentId)
         {
-            var ch = await db.Channels
-                .Include(c => c.AgentContext)
-                .FirstOrDefaultAsync(c => c.Id == chId, ct)
-                ?? throw new InvalidOperationException($"Channel {chId} not found.");
-            agentId = ch.AgentId;
+            if (!ch.AllowedAgents.Any(a => a.Id == requestedAgent))
+                throw new InvalidOperationException(
+                    $"Agent {requestedAgent} is not allowed on channel {channelId}. " +
+                    "Add it to the channel's allowed agents first.");
+            agentId = requestedAgent;
         }
-
-        if (agentId == Guid.Empty)
-            throw new InvalidOperationException(
-                "An agent ID is required. Provide one directly or specify --conv to infer it.");
-
 
         var effectiveResourceId = request.ResourceId;
 
@@ -77,12 +83,13 @@ SessionService session)
         if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionType))
         {
             effectiveResourceId = await ResolveDefaultResourceIdAsync(
-                request.ActionType, request.ChannelId, agentId, ct);
+                request.ActionType, channelId, agentId, ct);
         }
 
         var job = new AgentJobDB
         {
             AgentId = agentId,
+            ChannelId = channelId,
             CallerUserId = session.UserId,
             CallerAgentId = request.CallerAgentId,
             ActionType = request.ActionType,
@@ -92,7 +99,6 @@ SessionService session)
             SafeShellType = request.SafeShellType,
             ScriptJson = request.ScriptJson,
             TranscriptionModelId = request.TranscriptionModelId,
-            ChannelId = request.ChannelId,
             Language = request.Language,
         };
 
@@ -119,9 +125,8 @@ SessionService session)
                 // (ApprovedBySameLevelUser), the session user must also
                 // personally hold the same permission via their own role.
                 // Level 3 (agent-only) is never pre-authorised.
-                if (request.ChannelId.HasValue
-                    && await HasChannelAuthorizationAsync(
-                        request.ChannelId.Value, job.ActionType,
+                if (await HasChannelAuthorizationAsync(
+                        channelId, job.ActionType,
                         job.ResourceId, result.EffectiveClearance,
                         session.UserId, ct))
                 {
@@ -265,14 +270,14 @@ SessionService session)
         return job is null ? null : ToResponse(job);
     }
 
-    /// <summary>List all jobs for an agent, most recent first.</summary>
+    /// <summary>List all jobs for a channel, most recent first.</summary>
     public async Task<IReadOnlyList<AgentJobResponse>> ListAsync(
-        Guid agentId, CancellationToken ct = default)
+        Guid channelId, CancellationToken ct = default)
     {
         var jobs = await db.AgentJobs
             .Include(j => j.LogEntries)
             .Include(j => j.TranscriptionSegments.OrderBy(s => s.StartTime))
-            .Where(j => j.AgentId == agentId)
+            .Where(j => j.ChannelId == channelId)
             .OrderByDescending(j => j.CreatedAt)
             .ToListAsync(ct);
 
@@ -775,24 +780,21 @@ SessionService session)
     /// entry that matches <paramref name="actionType"/>.
     /// </summary>
     private async Task<Guid?> ResolveDefaultResourceIdAsync(
-        AgentActionType actionType, Guid? channelId, Guid agentId,
+        AgentActionType actionType, Guid channelId, Guid agentId,
         CancellationToken ct)
     {
         // Collect permission set IDs in priority order.
         var permissionSetIds = new List<Guid>(3);
 
-        if (channelId.HasValue)
-        {
-            var ch = await db.Channels
-                .Include(c => c.AgentContext)
-                .FirstOrDefaultAsync(c => c.Id == channelId.Value, ct);
+        var ch = await db.Channels
+            .Include(c => c.AgentContext)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
 
-            if (ch?.PermissionSetId is { } chPsId)
-                permissionSetIds.Add(chPsId);
+        if (ch?.PermissionSetId is { } chPsId)
+            permissionSetIds.Add(chPsId);
 
-            if (ch?.AgentContext?.PermissionSetId is { } ctxPsId)
-                permissionSetIds.Add(ctxPsId);
-        }
+        if (ch?.AgentContext?.PermissionSetId is { } ctxPsId)
+            permissionSetIds.Add(ctxPsId);
 
         var agent = await db.Agents
             .Include(a => a.Role)
@@ -1060,6 +1062,7 @@ SessionService session)
     private static AgentJobResponse ToResponse(AgentJobDB job) =>
         new(
             Id: job.Id,
+            ChannelId: job.ChannelId,
             AgentId: job.AgentId,
             ActionType: job.ActionType,
             ResourceId: job.ResourceId,
@@ -1078,7 +1081,6 @@ SessionService session)
             SafeShellType: job.SafeShellType,
             ScriptJson: job.ScriptJson,
             TranscriptionModelId: job.TranscriptionModelId,
-            ChannelId: job.ChannelId,
             Language: job.Language,
             Segments: IsTranscriptionAction(job.ActionType)
                 ? job.TranscriptionSegments
