@@ -2,6 +2,7 @@ using Microsoft.AspNetCore.Http;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Contexts;
+using SharpClaw.Contracts.DTOs.DefaultResources;
 
 namespace SharpClaw.Application.API.Handlers;
 
@@ -33,4 +34,19 @@ public static class ChannelContextHandlers
     [MapDelete("/{id:guid}")]
     public static async Task<IResult> Delete(Guid id, ContextService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    [MapGet("/{id:guid}/defaults")]
+    public static async Task<IResult> GetDefaults(Guid id, DefaultResourceSetService svc)
+    {
+        var result = await svc.GetForContextAsync(id);
+        return result is not null ? Results.Ok(result) : Results.NotFound();
+    }
+
+    [MapPut("/{id:guid}/defaults")]
+    public static async Task<IResult> SetDefaults(
+        Guid id, SetDefaultResourcesRequest request, DefaultResourceSetService svc)
+    {
+        var result = await svc.SetForContextAsync(id, request);
+        return result is not null ? Results.Ok(result) : Results.NotFound();
+    }
 }

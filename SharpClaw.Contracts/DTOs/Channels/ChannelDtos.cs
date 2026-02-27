@@ -1,7 +1,7 @@
 namespace SharpClaw.Contracts.DTOs.Channels;
 
 public sealed record CreateChannelRequest(
-    Guid AgentId,
+    Guid? AgentId = null,
     string? Title = null,
     Guid? ContextId = null,
     Guid? PermissionSetId = null,
@@ -18,8 +18,8 @@ public sealed record UpdateChannelRequest(
 public sealed record ChannelResponse(
     Guid Id,
     string Title,
-    Guid AgentId,
-    string AgentName,
+    Guid? AgentId,
+    string? AgentName,
     Guid? ContextId,
     string? ContextName,
     Guid? PermissionSetId,

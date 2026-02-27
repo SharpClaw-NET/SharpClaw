@@ -97,9 +97,11 @@ try
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
     builder.Services.AddScoped<ChatService>();
+    builder.Services.AddScoped<RoleService>();
     builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();
     builder.Services.AddScoped<TranscriptionService>();
     builder.Services.AddScoped<ContainerService>();
+    builder.Services.AddScoped<DefaultResourceSetService>();
 
     // Background tasks
     builder.Services.AddHostedService<ScheduledTaskService>();

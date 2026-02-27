@@ -15,6 +15,8 @@ using SharpClaw.Contracts.DTOs.Channels;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.Containers;
+using SharpClaw.Contracts.DTOs.DefaultResources;
+using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Persistence;
@@ -483,6 +485,12 @@ public static class CliDispatcher
                 "context list [agentId]                     List contexts",
                 "context get <id>                           Show context details",
                 "context update <id> <name>                 Rename a context",
+                "context agents <id>                        List allowed agents",
+                "context agents <id> add <agentId>          Allow an agent",
+                "context agents <id> remove <agentId>       Remove an allowed agent",
+                "context defaults <id>                      Show default resources",
+                "context defaults <id> set <key> <resId>    Set a default resource",
+                "context defaults <id> clear <key>          Clear a default resource",
                 "context delete <id>                        Delete a context");
             return Results.Ok();
         }
@@ -515,11 +523,179 @@ public static class CliDispatcher
                     svc),
             "update" => UsageResult("context update <id> <name>"),
 
+            "agents" when args.Length >= 3
+                => await HandleContextAgents(args, svc),
+            "agents" => UsageResult("context agents <contextId> [add|remove <agentId>]"),
+
+            "defaults" when args.Length >= 3
+                => await HandleDefaults("context", CliIdMap.Resolve(args[2]), args[3..], sp),
+            "defaults" => UsageResult("context defaults <id> [set <key> <resId> | clear <key>]"),
+
             "delete" when args.Length >= 3
                 => await ChannelContextHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
             "delete" => UsageResult("context delete <id>"),
 
             _ => UsageResult($"Unknown sub-command: context {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static async Task<IResult> HandleContextAgents(string[] args, ContextService svc)
+    {
+        var contextId = CliIdMap.Resolve(args[2]);
+
+        // context agents <id>  — list
+        if (args.Length == 3)
+        {
+            var ctx = await svc.GetByIdAsync(contextId);
+            if (ctx is null) return Results.NotFound();
+            PrintJsonWithShortIds(new
+            {
+                ContextId = ctx.Id,
+                DefaultAgentId = ctx.AgentId,
+                AllowedAgentIds = ctx.AllowedAgentIds
+            });
+            return Results.Ok();
+        }
+
+        var action = args[3].ToLowerInvariant();
+
+        if (action == "add" && args.Length >= 5)
+        {
+            var agentToAdd = CliIdMap.Resolve(args[4]);
+            var ctx = await svc.GetByIdAsync(contextId);
+            if (ctx is null) return Results.NotFound();
+
+            var updated = ctx.AllowedAgentIds.ToList();
+            if (!updated.Contains(agentToAdd))
+                updated.Add(agentToAdd);
+
+            return await ChannelContextHandlers.Update(
+                contextId,
+                new UpdateContextRequest(AllowedAgentIds: updated),
+                svc);
+        }
+
+        if (action == "remove" && args.Length >= 5)
+        {
+            var agentToRemove = CliIdMap.Resolve(args[4]);
+            var ctx = await svc.GetByIdAsync(contextId);
+            if (ctx is null) return Results.NotFound();
+
+            var updated = ctx.AllowedAgentIds.Where(id => id != agentToRemove).ToList();
+
+            return await ChannelContextHandlers.Update(
+                contextId,
+                new UpdateContextRequest(AllowedAgentIds: updated),
+                svc);
+        }
+
+        return UsageResult("context agents <contextId> [add|remove <agentId>]");
+    }
+
+    /// <summary>
+    /// Shared handler for <c>channel defaults</c> and <c>context defaults</c>.
+    /// <list type="bullet">
+    ///   <item><c>defaults &lt;id&gt;</c> — show current defaults (effective for channels).</item>
+    ///   <item><c>defaults &lt;id&gt; set &lt;key&gt; &lt;resourceId&gt;</c> — set one field.</item>
+    ///   <item><c>defaults &lt;id&gt; clear &lt;key&gt;</c> — clear one field.</item>
+    /// </list>
+    /// Keys: safeshell, dangshell, container, website, search, localinfo,
+    /// externalinfo, audiodevice, agent, task, skill, transcriptionmodel.
+    /// </summary>
+    private static async Task<IResult> HandleDefaults(
+        string scope, Guid entityId, string[] extra, IServiceProvider sp)
+    {
+        var svc = sp.GetRequiredService<DefaultResourceSetService>();
+
+        // Show
+        if (extra.Length == 0)
+        {
+            var result = scope == "channel"
+                ? await svc.GetForChannelAsync(entityId)
+                : await svc.GetForContextAsync(entityId);
+
+            if (result is null) return Results.NotFound();
+            PrintJsonWithShortIds(result);
+            return Results.Ok();
+        }
+
+        var action = extra[0].ToLowerInvariant();
+
+        if (action == "set" && extra.Length >= 3)
+        {
+            var key = extra[1].ToLowerInvariant();
+            var value = CliIdMap.Resolve(extra[2]);
+
+            // GET current, merge, PUT — API does a full replace.
+            var current = scope == "channel"
+                ? await svc.GetForChannelAsync(entityId)
+                : await svc.GetForContextAsync(entityId);
+
+            if (current is null) return Results.NotFound();
+
+            var req = MergeDefaultResourceKey(current, key, value);
+            if (req is null)
+                return UsageResult($"Unknown key '{extra[1]}'. Valid keys: safeshell, dangshell, container, website, search, localinfo, externalinfo, audiodevice, agent, task, skill, transcriptionmodel");
+
+            var result = scope == "channel"
+                ? await svc.SetForChannelAsync(entityId, req)
+                : await svc.SetForContextAsync(entityId, req);
+
+            if (result is null) return Results.NotFound();
+            PrintJsonWithShortIds(result);
+            return Results.Ok();
+        }
+
+        if (action == "clear" && extra.Length >= 2)
+        {
+            var key = extra[1].ToLowerInvariant();
+
+            var current = scope == "channel"
+                ? await svc.GetForChannelAsync(entityId)
+                : await svc.GetForContextAsync(entityId);
+
+            if (current is null) return Results.NotFound();
+
+            var req = MergeDefaultResourceKey(current, key, null);
+            if (req is null)
+                return UsageResult($"Unknown key '{extra[1]}'.");
+
+            var result = scope == "channel"
+                ? await svc.SetForChannelAsync(entityId, req)
+                : await svc.SetForContextAsync(entityId, req);
+
+            if (result is null) return Results.NotFound();
+            PrintJsonWithShortIds(result);
+            return Results.Ok();
+        }
+
+        return UsageResult($"{scope} defaults <id> [set <key> <resId> | clear <key>]");
+    }
+
+    /// <summary>
+    /// Merges a single key change into the existing defaults, returning
+    /// a full <see cref="SetDefaultResourcesRequest"/> for the PUT.
+    /// Returns <c>null</c> when the key is unrecognised.
+    /// </summary>
+    private static SetDefaultResourcesRequest? MergeDefaultResourceKey(
+        DefaultResourcesResponse current, string key, Guid? value)
+    {
+        var d = current;
+        return key switch
+        {
+            "safeshell" => new(d.DangerousShellResourceId, value, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "dangshell" or "dangerousshell" => new(value, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "container" => new(d.DangerousShellResourceId, d.SafeShellResourceId, value, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "website" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, value, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "search" or "searchengine" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, value, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "localinfo" or "localinfostore" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, value, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "externalinfo" or "externalinfostore" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, value, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "audiodevice" or "audio" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, value, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "agent" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, value, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId),
+            "task" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, value, d.SkillResourceId, d.TranscriptionModelId),
+            "skill" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, value, d.TranscriptionModelId),
+            "transcriptionmodel" or "model" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.LocalInfoStoreResourceId, d.ExternalInfoStoreResourceId, d.AudioDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, value),
+            _ => null,
         };
     }
 
@@ -660,8 +836,8 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "channel new <agentId> [--context <ctxId>] [title]",
-                "                                           Create a channel",
+                "channel new [agentId] [--context <ctxId>] [title]",
+                "  Either agentId or --context is required.",
                 "channel list [agentId]                     List channels",
                 "channel select <id>                        Select active channel",
                 "channel get <id>                           Show channel details",
@@ -670,6 +846,9 @@ public static class CliDispatcher
                 "channel agents <id>                        List allowed agents",
                 "channel agents <id> add <agentId>          Allow an agent",
                 "channel agents <id> remove <agentId>       Remove an allowed agent",
+                "channel defaults <id>                      Show default resources",
+                "channel defaults <id> set <key> <resId>    Set a default resource",
+                "channel defaults <id> clear <key>          Clear a default resource",
                 "channel delete <id>                        Delete a channel");
             return Results.Ok();
         }
@@ -681,7 +860,7 @@ public static class CliDispatcher
         {
             "new" when args.Length >= 3
                 => await HandleChannelNew(args, svc),
-            "new" => UsageResult("channel new <agentId> [--context <ctxId>] [title]"),
+            "new" => UsageResult("channel new [agentId] [--context <ctxId>] [title]"),
 
             "list" => await HandleChannelList(args, svc),
 
@@ -711,6 +890,10 @@ public static class CliDispatcher
                 => await HandleChannelAgents(args, svc),
             "agents" => UsageResult("channel agents <channelId> [add|remove <agentId>]"),
 
+            "defaults" when args.Length >= 3
+                => await HandleDefaults("channel", CliIdMap.Resolve(args[2]), args[3..], sp),
+            "defaults" => UsageResult("channel defaults <id> [set <key> <resId> | clear <key>]"),
+
             "delete" when args.Length >= 3
                 => await HandleChannelDelete(args, svc),
             "delete" => UsageResult("channel delete <id>"),
@@ -721,12 +904,27 @@ public static class CliDispatcher
 
     private static async Task<IResult> HandleChannelNew(string[] args, ChannelService svc)
     {
-        var agentId = CliIdMap.Resolve(args[2]);
+        Guid? agentId = null;
         Guid? contextId = null;
         var titleParts = new List<string>();
 
-        // Parse remaining args: [--context <ctxId>] [title...]
-        for (var i = 3; i < args.Length; i++)
+        // Parse args: [agentId] [--context <ctxId>] [title...]
+        // The first positional arg is an agent ID unless it looks like a flag.
+        var nextArg = 2;
+        if (args.Length > nextArg && !args[nextArg].StartsWith("--"))
+        {
+            try
+            {
+                agentId = CliIdMap.Resolve(args[nextArg]);
+                nextArg++;
+            }
+            catch
+            {
+                // Not a resolvable ID — treat as title.
+            }
+        }
+
+        for (var i = nextArg; i < args.Length; i++)
         {
             if (args[i] is "--context" or "-c" && i + 1 < args.Length)
             {
@@ -736,6 +934,12 @@ public static class CliDispatcher
             {
                 titleParts.Add(args[i]);
             }
+        }
+
+        if (agentId is null && contextId is null)
+        {
+            Console.Error.WriteLine("Either an agent ID or --context is required.");
+            return Results.Ok();
         }
 
         var title = titleParts.Count > 0 ? string.Join(' ', titleParts) : null;
@@ -832,22 +1036,183 @@ public static class CliDispatcher
     {
         if (args.Length < 2)
         {
-            PrintUsage("role list                                 List all roles");
+            PrintUsage(
+                "role list                                 List all roles",
+                "role permissions <roleId>                 Show role permissions",
+                "role permissions <roleId> set [flags...]  Set role permissions",
+                "",
+                "Permission flags:",
+                "  --clearance <level>                     Default clearance (Unset, Independent, etc.)",
+                "  --create-sub-agents                     Grant CanCreateSubAgents",
+                "  --create-containers                     Grant CanCreateContainers",
+                "  --register-info-stores                  Grant CanRegisterInfoStores",
+                "  --localhost-browser                     Grant CanAccessLocalhostInBrowser",
+                "  --localhost-cli                         Grant CanAccessLocalhostCli",
+                "  --dangerous-shell <id>[:<clearance>]    Add DangerousShell grant",
+                "  --safe-shell <id>[:<clearance>]         Add SafeShell grant",
+                "  --container <id>[:<clearance>]          Add Container grant",
+                "  --website <id>[:<clearance>]            Add Website grant",
+                "  --search-engine <id>[:<clearance>]      Add SearchEngine grant",
+                "  --local-info <id>[:<clearance>]         Add LocalInfoStore grant",
+                "  --external-info <id>[:<clearance>]      Add ExternalInfoStore grant",
+                "  --audio-device <id>[:<clearance>]       Add AudioDevice grant",
+                "  --agent <id>[:<clearance>]              Add Agent grant",
+                "  --task <id>[:<clearance>]               Add Task grant",
+                "  --skill <id>[:<clearance>]              Add Skill grant",
+                "",
+                "  Use 'all' as resource id for wildcard grant.");
             return Results.Ok();
         }
 
         var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<RoleService>();
 
-        if (sub == "list")
+        return sub switch
         {
-            var db = sp.GetRequiredService<SharpClawDbContext>();
-            var roles = await db.Roles.OrderBy(r => r.Name).ToListAsync();
-            var result = roles.Select(r => new { r.Id, r.Name }).ToList();
-            PrintJsonWithShortIds(result);
+            "list" => await HandleRoleList(svc),
+
+            "permissions" or "perms" when args.Length >= 3
+                => await HandleRolePermissions(args, svc),
+            "permissions" or "perms"
+                => UsageResult("role permissions <roleId> [set ...]"),
+
+            _ => UsageResult($"Unknown sub-command: role {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static async Task<IResult> HandleRoleList(RoleService svc)
+    {
+        var roles = await svc.ListAsync();
+        PrintJsonWithShortIds(roles);
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleRolePermissions(
+        string[] args, RoleService svc)
+    {
+        var roleId = CliIdMap.Resolve(args[2]);
+
+        // role permissions <id>  — show
+        if (args.Length == 3 || !args[3].Equals("set", StringComparison.OrdinalIgnoreCase))
+        {
+            var perms = await svc.GetPermissionsAsync(roleId);
+            if (perms is null) return Results.NotFound();
+            PrintJsonWithShortIds(perms);
             return Results.Ok();
         }
 
-        return UsageResult($"Unknown sub-command: role {sub}. Try 'role list'.");
+        // role permissions <id> set [flags...]
+        if (_currentUserId is null)
+            return UsageResult("You must be logged in to set permissions.");
+
+        var clearance = PermissionClearance.Unset;
+        var createSubAgents = false;
+        var createContainers = false;
+        var registerInfoStores = false;
+        var localhostBrowser = false;
+        var localhostCli = false;
+
+        var dangerousShell = new List<ResourceGrant>();
+        var safeShell = new List<ResourceGrant>();
+        var container = new List<ResourceGrant>();
+        var website = new List<ResourceGrant>();
+        var searchEngine = new List<ResourceGrant>();
+        var localInfo = new List<ResourceGrant>();
+        var externalInfo = new List<ResourceGrant>();
+        var audioDevice = new List<ResourceGrant>();
+        var agent = new List<ResourceGrant>();
+        var task = new List<ResourceGrant>();
+        var skill = new List<ResourceGrant>();
+
+        for (var i = 4; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--clearance" when i + 1 < args.Length:
+                    if (Enum.TryParse<PermissionClearance>(args[++i], true, out var cl))
+                        clearance = cl;
+                    break;
+                case "--create-sub-agents": createSubAgents = true; break;
+                case "--create-containers": createContainers = true; break;
+                case "--register-info-stores": registerInfoStores = true; break;
+                case "--localhost-browser": localhostBrowser = true; break;
+                case "--localhost-cli": localhostCli = true; break;
+                case "--dangerous-shell" when i + 1 < args.Length:
+                    dangerousShell.Add(ParseResourceGrant(args[++i])); break;
+                case "--safe-shell" when i + 1 < args.Length:
+                    safeShell.Add(ParseResourceGrant(args[++i])); break;
+                case "--container" when i + 1 < args.Length:
+                    container.Add(ParseResourceGrant(args[++i])); break;
+                case "--website" when i + 1 < args.Length:
+                    website.Add(ParseResourceGrant(args[++i])); break;
+                case "--search-engine" when i + 1 < args.Length:
+                    searchEngine.Add(ParseResourceGrant(args[++i])); break;
+                case "--local-info" when i + 1 < args.Length:
+                    localInfo.Add(ParseResourceGrant(args[++i])); break;
+                case "--external-info" when i + 1 < args.Length:
+                    externalInfo.Add(ParseResourceGrant(args[++i])); break;
+                case "--audio-device" when i + 1 < args.Length:
+                    audioDevice.Add(ParseResourceGrant(args[++i])); break;
+                case "--agent" when i + 1 < args.Length:
+                    agent.Add(ParseResourceGrant(args[++i])); break;
+                case "--task" when i + 1 < args.Length:
+                    task.Add(ParseResourceGrant(args[++i])); break;
+                case "--skill" when i + 1 < args.Length:
+                    skill.Add(ParseResourceGrant(args[++i])); break;
+            }
+        }
+
+        var request = new SetRolePermissionsRequest(
+            DefaultClearance: clearance,
+            CanCreateSubAgents: createSubAgents,
+            CanCreateContainers: createContainers,
+            CanRegisterInfoStores: registerInfoStores,
+            CanAccessLocalhostInBrowser: localhostBrowser,
+            CanAccessLocalhostCli: localhostCli,
+            DangerousShellAccesses: dangerousShell.Count > 0 ? dangerousShell : null,
+            SafeShellAccesses: safeShell.Count > 0 ? safeShell : null,
+            ContainerAccesses: container.Count > 0 ? container : null,
+            WebsiteAccesses: website.Count > 0 ? website : null,
+            SearchEngineAccesses: searchEngine.Count > 0 ? searchEngine : null,
+            LocalInfoStoreAccesses: localInfo.Count > 0 ? localInfo : null,
+            ExternalInfoStoreAccesses: externalInfo.Count > 0 ? externalInfo : null,
+            AudioDeviceAccesses: audioDevice.Count > 0 ? audioDevice : null,
+            AgentAccesses: agent.Count > 0 ? agent : null,
+            TaskAccesses: task.Count > 0 ? task : null,
+            SkillAccesses: skill.Count > 0 ? skill : null);
+
+        try
+        {
+            var result = await svc.SetPermissionsAsync(
+                roleId, request, _currentUserId.Value);
+            if (result is null) return Results.NotFound();
+            PrintJsonWithShortIds(result);
+            return Results.Ok();
+        }
+        catch (UnauthorizedAccessException ex)
+        {
+            Console.Error.WriteLine(ex.Message);
+            return Results.Ok();
+        }
+    }
+
+    /// <summary>
+    /// Parses a resource grant argument: <c>id[:clearance]</c>.
+    /// The special value <c>all</c> maps to <see cref="Contracts.WellKnownIds.AllResources"/>.
+    /// </summary>
+    private static ResourceGrant ParseResourceGrant(string arg)
+    {
+        var parts = arg.Split(':', 2);
+        var resourceId = parts[0].Equals("all", StringComparison.OrdinalIgnoreCase)
+            ? Contracts.WellKnownIds.AllResources
+            : CliIdMap.Resolve(parts[0]);
+
+        var clearance = parts.Length > 1
+            && Enum.TryParse<PermissionClearance>(parts[1], true, out var cl)
+                ? cl
+                : PermissionClearance.Unset;
+
+        return new ResourceGrant(resourceId, clearance);
     }
 
     private static async Task<IResult?> HandleJobCommand(string[] args, IServiceProvider sp)
@@ -866,7 +1231,7 @@ public static class CliDispatcher
                 "job listen <jobId>                         Stream live transcription segments",
                 "",
                 "Action types (global): CreateSubAgent, CreateContainer,",
-                "  RegisterInfoStore",
+                "  RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli",
                 "Action types (resource): UnsafeExecuteAsDangerousShell, ExecuteAsSafeShell,",
                 "  AccessLocalInfoStore,",
                 "  AccessExternalInfoStore, AccessWebsite, QuerySearchEngine,",
@@ -1422,15 +1787,27 @@ public static class CliDispatcher
 
             Agent:     agent <sub> [args]       (add, get, list, update, delete)
               agent add <name> <modelId> [system prompt]
-              agent role <id> <roleId|none>              role list
+              agent role <id> <roleId|none>
+
+            Role:      role <sub> [args]
+              role list                          role permissions <id>
+              role permissions <id> set [--create-sub-agents] [--safe-shell all:Independent] ...
 
             Context:   context|ctx <sub> [args] (new, get, list, update, delete)
               context new <agentId> [name]
+              context agents <id> [add|remove <agentId>]
+              context defaults <id> [set <key> <resId> | clear <key>]
 
             Channel:   channel|chan <sub> [args] (new, get, list, select, delete)
-              channel new <agentId> [--context <id>] [title]
+              channel new [agentId] [--context <id>] [title]
               channel attach|detach <id> [contextId]
               channel agents <id> [add|remove <agentId>]
+              channel defaults <id> [set <key> <resId> | clear <key>]
+              Fields cascade from context when not set: agent, permissions,
+                DisableChatHeader, AllowedAgents, DefaultResourceSet.
+              Default-resource keys: safeshell, dangshell, container, website,
+                search, localinfo, externalinfo, audiodevice, agent, task,
+                skill, transcriptionmodel
 
             Chat:
               chat [--agent <id>] <message>    Send a message in the active channel

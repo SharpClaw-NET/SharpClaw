@@ -57,6 +57,7 @@ public class SharpClawDbContext(
     public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
     public DbSet<AgentJobDB> AgentJobs => Set<AgentJobDB>();
     public DbSet<AgentJobLogEntryDB> AgentJobLogEntries => Set<AgentJobLogEntryDB>();
+    public DbSet<DefaultResourceSetDB> DefaultResourceSets => Set<DefaultResourceSetDB>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -120,9 +121,10 @@ public class SharpClawDbContext(
                 .HasForeignKey(c => c.AgentId)
                 .OnDelete(DeleteBehavior.Cascade);
             e.HasMany(a => a.Channels)
-                .WithOne(c => c.Agent)
+                .WithOne(c => c.Agent!)
                 .HasForeignKey(c => c.AgentId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .IsRequired(false)
+                .OnDelete(DeleteBehavior.SetNull);
             e.HasOne(a => a.Role)
                 .WithMany()
                 .HasForeignKey(a => a.RoleId)
@@ -145,6 +147,13 @@ public class SharpClawDbContext(
                 .WithMany()
                 .HasForeignKey(c => c.PermissionSetId)
                 .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(c => c.DefaultResourceSet)
+                .WithMany()
+                .HasForeignKey(c => c.DefaultResourceSetId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(c => c.AllowedAgents)
+                .WithMany(a => a.AllowedContexts)
+                .UsingEntity("ContextAllowedAgents");
         });
 
         // ── Channels ──────────────────────────────────────────────
@@ -157,6 +166,10 @@ public class SharpClawDbContext(
             e.HasOne(c => c.PermissionSet)
                 .WithMany()
                 .HasForeignKey(c => c.PermissionSetId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(c => c.DefaultResourceSet)
+                .WithMany()
+                .HasForeignKey(c => c.DefaultResourceSetId)
                 .OnDelete(DeleteBehavior.SetNull);
             e.HasMany(c => c.AllowedAgents)
                 .WithMany(a => a.AllowedChannels)

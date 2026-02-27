@@ -38,9 +38,10 @@ public sealed partial class ChatService(
         CancellationToken ct = default)
     {
         var channel = await db.Channels
-            .Include(c => c.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
@@ -130,19 +131,31 @@ public sealed partial class ChatService(
     /// <summary>
     /// Resolves the effective agent for a channel operation.  If no
     /// override is specified, the channel's default agent is used.
-    /// When an override is specified it must be the default agent or
-    /// one of the channel's allowed agents.
+    /// If the channel has no default agent, the context's agent is
+    /// used as fallback.  When an override is specified it must be
+    /// the default agent or one of the channel's allowed agents
+    /// (falling back to the context's allowed agents when the channel
+    /// has none).
     /// </summary>
     private static AgentDB ResolveAgent(ChannelDB channel, Guid? requestedAgentId)
     {
-        if (requestedAgentId is null || requestedAgentId == channel.AgentId)
-            return channel.Agent;
+        var defaultAgent = channel.Agent ?? channel.AgentContext?.Agent;
 
-        var allowed = channel.AllowedAgents.FirstOrDefault(a => a.Id == requestedAgentId);
+        if (requestedAgentId is null || requestedAgentId == defaultAgent?.Id)
+            return defaultAgent
+                ?? throw new InvalidOperationException(
+                    $"Channel {channel.Id} has no agent and no context agent.");
+
+        // Check channel-level allowed agents first, then context-level.
+        var effectiveAllowed = channel.AllowedAgents.Count > 0
+            ? channel.AllowedAgents
+            : (IEnumerable<AgentDB>)(channel.AgentContext?.AllowedAgents ?? []);
+
+        var allowed = effectiveAllowed.FirstOrDefault(a => a.Id == requestedAgentId);
         return allowed
             ?? throw new InvalidOperationException(
                 $"Agent {requestedAgentId} is not allowed on channel {channel.Id}. " +
-                "Add it to the channel's allowed agents first.");
+                "Add it to the channel's or context's allowed agents first.");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -208,6 +221,8 @@ public sealed partial class ChatService(
             if (ps.CanCreateSubAgents) grants.Add("CreateSubAgents");
             if (ps.CanCreateContainers) grants.Add("CreateContainers");
             if (ps.CanRegisterInfoStores) grants.Add("RegisterInfoStores");
+            if (ps.CanAccessLocalhostInBrowser) grants.Add("LocalhostBrowser");
+            if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
             if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
             if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
             if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
@@ -257,9 +272,10 @@ public sealed partial class ChatService(
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var channel = await db.Channels
-            .Include(c => c.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
@@ -730,6 +746,8 @@ public sealed partial class ChatService(
         ["create_sub_agent"]               = AgentActionType.CreateSubAgent,
         ["create_container"]               = AgentActionType.CreateContainer,
         ["register_info_store"]            = AgentActionType.RegisterInfoStore,
+        ["access_localhost_in_browser"]    = AgentActionType.AccessLocalhostInBrowser,
+        ["access_localhost_cli"]           = AgentActionType.AccessLocalhostCli,
         ["access_local_info_store"]        = AgentActionType.AccessLocalInfoStore,
         ["access_external_info_store"]     = AgentActionType.AccessExternalInfoStore,
         ["access_website"]                 = AgentActionType.AccessWebsite,
@@ -913,6 +931,8 @@ public sealed partial class ChatService(
         var createContainerSchema = BuildCreateContainerSchema();
         var manageAgentSchema = BuildManageAgentSchema();
         var editTaskSchema = BuildEditTaskSchema();
+        var localhostBrowserSchema = BuildLocalhostBrowserSchema();
+        var localhostCliSchema = BuildLocalhostCliSchema();
 
         return
         [
@@ -956,6 +976,18 @@ public sealed partial class ChatService(
                 + "IMPLEMENTED — job will execute but produce a stub result.] Requires "
                 + "RegisterInfoStore global permission.",
                 globalSchema),
+            new("access_localhost_in_browser",
+                "Access a localhost URL through a headless browser (Chrome by "
+                + "default). Set mode to 'html' (default) for the DOM content or "
+                + "'screenshot' for a base64 PNG. Only localhost/127.0.0.1 URLs "
+                + "are allowed. Requires AccessLocalhostInBrowser permission.",
+                localhostBrowserSchema),
+            new("access_localhost_cli",
+                "Make a direct HTTP GET to a localhost URL and return the status "
+                + "code, headers, and response body. No browser involved. Only "
+                + "localhost/127.0.0.1 URLs are allowed. Requires "
+                + "AccessLocalhostCli permission.",
+                localhostCliSchema),
 
             // ── Per-resource ─────────────────────────────────────
             new("access_local_info_store",
@@ -1248,6 +1280,45 @@ public sealed partial class ChatService(
                     }
                 },
                 "required": ["targetId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildLocalhostBrowserSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The localhost URL to access (e.g. 'http://localhost:5000/api/health'). Only localhost/127.0.0.1/[::1] allowed."
+                    },
+                    "mode": {
+                        "type": "string",
+                        "enum": ["html", "screenshot"],
+                        "description": "Return mode. 'html' (default) returns the DOM content. 'screenshot' returns a base64-encoded PNG."
+                    }
+                },
+                "required": ["url"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildLocalhostCliSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "url": {
+                        "type": "string",
+                        "description": "The localhost URL to GET (e.g. 'http://localhost:5000/api/health'). Only localhost/127.0.0.1/[::1] allowed."
+                    }
+                },
+                "required": ["url"]
             }
             """);
         return doc.RootElement.Clone();

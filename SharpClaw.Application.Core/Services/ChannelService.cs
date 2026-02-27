@@ -9,29 +9,39 @@ namespace SharpClaw.Application.Services;
 public sealed class ChannelService(SharpClawDbContext db)
 {
     /// <summary>
-    /// Creates a new channel for the given agent.  An optional
-    /// <see cref="ChannelContextDB"/> can be linked so that the context's
-    /// permission set acts as a default.
+    /// Creates a new channel.  Either <see cref="CreateChannelRequest.AgentId"/>
+    /// or <see cref="CreateChannelRequest.ContextId"/> (whose context has an
+    /// agent) must be provided so the channel has a resolvable agent.
     /// </summary>
     public async Task<ChannelResponse> CreateAsync(
         CreateChannelRequest request, CancellationToken ct = default)
     {
-        var agent = await db.Agents
-            .FirstOrDefaultAsync(a => a.Id == request.AgentId, ct)
-            ?? throw new ArgumentException($"Agent {request.AgentId} not found.");
+        AgentDB? agent = null;
+        if (request.AgentId is { } agentId)
+        {
+            agent = await db.Agents
+                .FirstOrDefaultAsync(a => a.Id == agentId, ct)
+                ?? throw new ArgumentException($"Agent {agentId} not found.");
+        }
 
         ChannelContextDB? context = null;
         if (request.ContextId is { } ctxId)
         {
             context = await db.AgentContexts
+                .Include(c => c.Agent)
                 .FirstOrDefaultAsync(c => c.Id == ctxId, ct)
                 ?? throw new ArgumentException($"Context {ctxId} not found.");
         }
 
+        // At least one source of agent is required.
+        if (agent is null && context is null)
+            throw new ArgumentException(
+                "Either an AgentId or a ContextId (with an agent) is required.");
+
         var channel = new ChannelDB
         {
             Title = request.Title ?? $"Channel {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
-            AgentId = agent.Id,
+            AgentId = agent?.Id,
             AgentContextId = context?.Id,
             PermissionSetId = request.PermissionSetId,
             DisableChatHeader = request.DisableChatHeader ?? false
@@ -69,7 +79,8 @@ public sealed class ChannelService(SharpClawDbContext db)
     {
         var query = db.Channels
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
             .Include(c => c.AllowedAgents)
             .AsQueryable();
 
@@ -150,7 +161,8 @@ public sealed class ChannelService(SharpClawDbContext db)
     {
         var channel = await db.Channels
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
             .Include(c => c.AllowedAgents)
             .Include(c => c.ChatMessages)
             .OrderByDescending(c => c.ChatMessages.Max(m => (DateTimeOffset?)m.CreatedAt) ?? c.CreatedAt)
@@ -175,22 +187,33 @@ public sealed class ChannelService(SharpClawDbContext db)
     private async Task<ChannelDB?> LoadChannelAsync(Guid id, CancellationToken ct) =>
         await db.Channels
             .Include(c => c.Agent)
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
             .Include(c => c.AllowedAgents)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
     private static ChannelResponse ToResponse(
-        ChannelDB channel, AgentDB agent, ChannelContextDB? context) =>
-        new(channel.Id,
+        ChannelDB channel, AgentDB? agent, ChannelContextDB? context)
+    {
+        // Effective agent: channel's own agent, or the context's agent.
+        var effectiveAgent = agent ?? context?.Agent;
+
+        // Effective allowed agents: channel's own, falling back to context's.
+        var effectiveAllowed = channel.AllowedAgents.Count > 0
+            ? channel.AllowedAgents.Select(a => a.Id).ToList()
+            : context?.AllowedAgents.Select(a => a.Id).ToList() ?? [];
+
+        return new(channel.Id,
             channel.Title,
-            agent.Id,
-            agent.Name,
+            effectiveAgent?.Id,
+            effectiveAgent?.Name,
             context?.Id,
             context?.Name,
             channel.PermissionSetId,
             channel.PermissionSetId ?? context?.PermissionSetId,
-            channel.AllowedAgents.Select(a => a.Id).ToList(),
+            effectiveAllowed,
             channel.DisableChatHeader,
             channel.CreatedAt,
             channel.UpdatedAt);
+    }
 }

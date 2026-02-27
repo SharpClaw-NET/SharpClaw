@@ -48,6 +48,20 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, caller, p => p.CanRegisterInfoStores,
             "register information stores", onApproved, ct);
 
+    public Task<AgentActionResult> AccessLocalhostInBrowserAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanAccessLocalhostInBrowser,
+            "access localhost in browser", onApproved, ct);
+
+    public Task<AgentActionResult> AccessLocalhostCliAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanAccessLocalhostCli,
+            "access localhost via CLI", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Per-resource actions
     // ═══════════════════════════════════════════════════════════════

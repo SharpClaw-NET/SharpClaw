@@ -26,10 +26,25 @@ public class ChannelContextDB : BaseEntity
     public PermissionSetDB? PermissionSet { get; set; }
 
     /// <summary>
+    /// Default resources for channels in this context.  A channel
+    /// inherits these when its own <see cref="ChannelDB.DefaultResourceSet"/>
+    /// does not specify a value for the action type.
+    /// </summary>
+    public Guid? DefaultResourceSetId { get; set; }
+    public DefaultResourceSetDB? DefaultResourceSet { get; set; }
+
+    /// <summary>
     /// Default value for <see cref="ChannelDB.DisableChatHeader"/> for
     /// channels inside this context. Individual channels can override.
     /// </summary>
     public bool DisableChatHeader { get; set; }
+
+    /// <summary>
+    /// Default set of additional agents allowed on channels in this
+    /// context.  A channel inherits these when its own
+    /// <see cref="ChannelDB.AllowedAgents"/> is empty.
+    /// </summary>
+    public ICollection<AgentDB> AllowedAgents { get; set; } = [];
 
     public ICollection<ChannelDB> Channels { get; set; } = [];
     public ICollection<ScheduledJobDB> Tasks { get; set; } = [];

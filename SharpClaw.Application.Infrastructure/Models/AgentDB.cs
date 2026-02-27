@@ -23,4 +23,10 @@ public class AgentDB : BaseEntity
     /// agent.  Inverse of <see cref="ChannelDB.AllowedAgents"/>.
     /// </summary>
     public ICollection<ChannelDB> AllowedChannels { get; set; } = [];
+
+    /// <summary>
+    /// Contexts where this agent is an additional allowed agent.
+    /// Inverse of <see cref="ChannelContextDB.AllowedAgents"/>.
+    /// </summary>
+    public ICollection<ChannelContextDB> AllowedContexts { get; set; } = [];
 }

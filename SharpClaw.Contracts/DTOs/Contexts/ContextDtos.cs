@@ -8,12 +8,14 @@ public sealed record CreateContextRequest(
     Guid AgentId,
     string? Name = null,
     Guid? PermissionSetId = null,
-    bool? DisableChatHeader = null);
+    bool? DisableChatHeader = null,
+    IReadOnlyList<Guid>? AllowedAgentIds = null);
 
 public sealed record UpdateContextRequest(
     string? Name = null,
     Guid? PermissionSetId = null,
-    bool? DisableChatHeader = null);
+    bool? DisableChatHeader = null,
+    IReadOnlyList<Guid>? AllowedAgentIds = null);
 
 public sealed record ContextResponse(
     Guid Id,
@@ -22,6 +24,7 @@ public sealed record ContextResponse(
     string AgentName,
     Guid? PermissionSetId,
     bool DisableChatHeader,
+    IReadOnlyList<Guid> AllowedAgentIds,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
 

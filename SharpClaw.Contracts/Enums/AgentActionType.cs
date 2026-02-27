@@ -9,6 +9,8 @@ public enum AgentActionType
     CreateSubAgent,
     CreateContainer,
     RegisterInfoStore,
+    AccessLocalhostInBrowser,
+    AccessLocalhostCli,
 
     // ── Per-resource grants ───────────────────────────────────────
     UnsafeExecuteAsDangerousShell,

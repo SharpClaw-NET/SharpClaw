@@ -23,6 +23,15 @@ public sealed class ContextService(SharpClawDbContext db)
             DisableChatHeader = request.DisableChatHeader ?? false
         };
 
+        if (request.AllowedAgentIds is { Count: > 0 } agentIds)
+        {
+            var allowed = await db.Agents
+                .Where(a => agentIds.Contains(a.Id))
+                .ToListAsync(ct);
+            foreach (var a in allowed)
+                context.AllowedAgents.Add(a);
+        }
+
         db.AgentContexts.Add(context);
         await db.SaveChangesAsync(ct);
 
@@ -41,6 +50,7 @@ public sealed class ContextService(SharpClawDbContext db)
     {
         var query = db.AgentContexts
             .Include(c => c.Agent)
+            .Include(c => c.AllowedAgents)
             .AsQueryable();
 
         if (agentId is not null)
@@ -71,6 +81,20 @@ public sealed class ContextService(SharpClawDbContext db)
         if (request.DisableChatHeader is not null)
             context.DisableChatHeader = request.DisableChatHeader.Value;
 
+        // Replace the allowed-agents set when provided.
+        if (request.AllowedAgentIds is not null)
+        {
+            context.AllowedAgents.Clear();
+            if (request.AllowedAgentIds.Count > 0)
+            {
+                var allowed = await db.Agents
+                    .Where(a => request.AllowedAgentIds.Contains(a.Id))
+                    .ToListAsync(ct);
+                foreach (var a in allowed)
+                    context.AllowedAgents.Add(a);
+            }
+        }
+
         await db.SaveChangesAsync(ct);
         return ToResponse(context, context.Agent);
     }
@@ -88,6 +112,7 @@ public sealed class ContextService(SharpClawDbContext db)
     private async Task<ChannelContextDB?> LoadContextAsync(Guid id, CancellationToken ct) =>
         await db.AgentContexts
             .Include(c => c.Agent)
+            .Include(c => c.AllowedAgents)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
     private static ContextResponse ToResponse(ChannelContextDB context, AgentDB agent) =>
@@ -97,6 +122,7 @@ public sealed class ContextService(SharpClawDbContext db)
             agent.Name,
             context.PermissionSetId,
             context.DisableChatHeader,
+            context.AllowedAgents.Select(a => a.Id).ToList(),
             context.CreatedAt,
             context.UpdatedAt);
 }

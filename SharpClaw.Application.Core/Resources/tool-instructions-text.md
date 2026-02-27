@@ -44,8 +44,16 @@ All fields except targetId are optional. Requires EditTask permission.
 [TOOL_CALL:<id>] {"targetId":"<skill-guid>"}
 Returns the skill instruction text. Requires AccessSkill permission.
 
-9. register_info_store [STUB]
+9. Access localhost in browser
+[TOOL_CALL:<id>] {"url":"http://localhost:5000/path","mode":"html|screenshot"}
+Opens a headless browser against a localhost URL. mode defaults to 'html' (DOM content); 'screenshot' returns base64 PNG. Only localhost/127.0.0.1/[::1] allowed. Requires AccessLocalhostInBrowser permission.
+
+10. Access localhost CLI
+[TOOL_CALL:<id>] {"url":"http://localhost:5000/path"}
+Direct HTTP GET to a localhost URL. Returns status, headers, body. No browser. Only localhost/127.0.0.1/[::1] allowed. Requires AccessLocalhostCli permission.
+
+11. register_info_store [STUB]
 [TOOL_CALL:<id>] {}
 
-10. access_local_info_store, access_external_info_store, access_website, query_search_engine, access_container [STUB]
+12. access_local_info_store, access_external_info_store, access_website, query_search_engine, access_container [STUB]
 [TOOL_CALL:<id>] {"targetId":"<resource-guid>"}

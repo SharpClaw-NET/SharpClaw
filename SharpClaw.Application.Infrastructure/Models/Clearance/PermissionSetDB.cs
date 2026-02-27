@@ -30,6 +30,12 @@ public class PermissionSetDB : BaseEntity
     /// <summary>Register new local or external information stores.</summary>
     public bool CanRegisterInfoStores { get; set; }
 
+    /// <summary>Access localhost URLs through a browser (headless Chrome by default).</summary>
+    public bool CanAccessLocalhostInBrowser { get; set; }
+
+    /// <summary>Access localhost URLs via direct HTTP (no browser).</summary>
+    public bool CanAccessLocalhostCli { get; set; }
+
     // ── Per-resource grant collections ────────────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];

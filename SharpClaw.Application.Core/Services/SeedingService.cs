@@ -82,6 +82,8 @@ public sealed class SeedingService(
         CanCreateSubAgents = true,
         CanCreateContainers = true,
         CanRegisterInfoStores = true,
+        CanAccessLocalhostInBrowser = true,
+        CanAccessLocalhostCli = true,
 
         // Wildcard grants — access to ALL resources of each type.
         // WellKnownIds.AllResources is recognised as a universal match

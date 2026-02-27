@@ -20,12 +20,12 @@ public class ChannelDB : BaseEntity
     public required string Title { get; set; }
 
     /// <summary>
-    /// The agent that owns this channel. Always required — even for
-    /// standalone channels the agent identity is needed for the
-    /// system prompt and provider resolution.
+    /// The default agent for this channel.  May be <see langword="null"/>
+    /// when the channel belongs to a context — in that case the context's
+    /// agent is used as the fallback.
     /// </summary>
-    public Guid AgentId { get; set; }
-    public AgentDB Agent { get; set; } = null!;
+    public Guid? AgentId { get; set; }
+    public AgentDB? Agent { get; set; }
 
     /// <summary>
     /// Optional context this channel belongs to.  When set, the
@@ -40,6 +40,14 @@ public class ChannelDB : BaseEntity
     /// </summary>
     public Guid? PermissionSetId { get; set; }
     public PermissionSetDB? PermissionSet { get; set; }
+
+    /// <summary>
+    /// Optional default resources for this channel.  When a job is
+    /// submitted without a resource ID, this set is checked first.
+    /// Falls back to the context's default resource set.
+    /// </summary>
+    public Guid? DefaultResourceSetId { get; set; }
+    public DefaultResourceSetDB? DefaultResourceSet { get; set; }
 
     /// <summary>
     /// When <see langword="true"/>, the per-message user metadata header

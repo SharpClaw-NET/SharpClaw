@@ -1,14 +1,17 @@
 using System.Collections.Concurrent;
+using System.Net.Http;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Mk8.Shell;
 using Mk8.Shell.Engine;
 using Mk8.Shell.Models;
 using Mk8.Shell.Safety;
 using Mk8.Shell.Startup;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Jobs;
 using SharpClaw.Application.Infrastructure.Models.Messages;
 using SharpClaw.Application.Infrastructure.Models.Resources;
@@ -31,7 +34,8 @@ public sealed class AgentJobService(
 SharpClawDbContext db,
 AgentActionService actions,
 LiveTranscriptionOrchestrator orchestrator,
-SessionService session)
+SessionService session,
+IConfiguration configuration)
 {
     /// <summary>
     /// Per-job broadcast channels for live transcription streaming.
@@ -60,32 +64,48 @@ SessionService session)
         CancellationToken ct = default)
     {
         var ch = await db.Channels
-            .Include(c => c.AgentContext)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
             .Include(c => c.AllowedAgents)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new InvalidOperationException($"Channel {channelId} not found.");
 
-        var agentId = ch.AgentId;
+        var agentId = ch.AgentId ?? ch.AgentContext?.AgentId
+            ?? throw new InvalidOperationException(
+                $"Channel {channelId} has no agent and no context agent.");
 
         // Allow overriding the agent if the requested agent is the
-        // channel default or is in the allowed-agents set.
-        if (request.AgentId is { } requestedAgent && requestedAgent != ch.AgentId)
+        // channel default or is in the allowed-agents set (channel-level
+        // first, falling back to context-level).
+        if (request.AgentId is { } requestedAgent && requestedAgent != agentId)
         {
-            if (!ch.AllowedAgents.Any(a => a.Id == requestedAgent))
+            var effectiveAllowed = ch.AllowedAgents.Count > 0
+                ? ch.AllowedAgents
+                : (IEnumerable<AgentDB>)(ch.AgentContext?.AllowedAgents ?? []);
+
+            if (!effectiveAllowed.Any(a => a.Id == requestedAgent))
                 throw new InvalidOperationException(
                     $"Agent {requestedAgent} is not allowed on channel {channelId}. " +
-                    "Add it to the channel's allowed agents first.");
+                    "Add it to the channel's or context's allowed agents first.");
             agentId = requestedAgent;
         }
 
         var effectiveResourceId = request.ResourceId;
 
         // When no resource is specified for a per-resource action, resolve
-        // the default from permission sets: channel → channel context → agent role.
+        // the default from: channel DefaultResourceSet → context DefaultResourceSet
+        // → channel/context/role PermissionSet defaults.
         if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionType))
         {
             effectiveResourceId = await ResolveDefaultResourceIdAsync(
                 request.ActionType, channelId, agentId, ct);
+        }
+
+        // Resolve default transcription model when not specified.
+        var effectiveTranscriptionModelId = request.TranscriptionModelId;
+        if (!effectiveTranscriptionModelId.HasValue && IsTranscriptionAction(request.ActionType))
+        {
+            effectiveTranscriptionModelId = await ResolveDefaultTranscriptionModelAsync(
+                channelId, ct);
         }
 
         var job = new AgentJobDB
@@ -101,7 +121,7 @@ SessionService session)
             SafeShellType = request.SafeShellType,
             ScriptJson = request.ScriptJson,
             WorkingDirectory = request.WorkingDirectory,
-            TranscriptionModelId = request.TranscriptionModelId,
+            TranscriptionModelId = effectiveTranscriptionModelId,
             Language = request.Language,
         };
 
@@ -495,6 +515,12 @@ SessionService session)
             // Knowledge / skills
             AgentActionType.AccessSkill
                 => await ExecuteAccessSkillAsync(job, ct),
+
+            // Localhost access
+            AgentActionType.AccessLocalhostInBrowser
+                => await ExecuteAccessLocalhostInBrowserAsync(job, ct),
+            AgentActionType.AccessLocalhostCli
+                => await ExecuteAccessLocalhostCliAsync(job, ct),
 
             _ => $"Action '{job.ActionType}' executed successfully " +
                  $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
@@ -988,6 +1014,152 @@ SessionService session)
         return $"Skill: {skill.Name}\n\n{skill.SkillText}";
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // ACCESS LOCALHOST IN BROWSER
+    // ═══════════════════════════════════════════════════════════════
+
+    private sealed class AccessLocalhostPayload
+    {
+        public string? Url { get; set; }
+        public string? Mode { get; set; }
+    }
+
+    /// <summary>
+    /// Launches a headless browser (configured via <c>Browser:Executable</c>
+    /// and <c>Browser:Arguments</c> in the SharpClaw .env — defaults to
+    /// Google Chrome <c>--incognito</c>) against a <b>localhost</b> URL
+    /// and returns either a screenshot path or the page HTML.
+    /// </summary>
+    private async Task<string?> ExecuteAccessLocalhostInBrowserAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        var payload = DeserializePayload<AccessLocalhostPayload>(job,
+            "AccessLocalhostInBrowser");
+
+        var url = ValidateLocalhostUrl(payload.Url);
+        var mode = (payload.Mode ?? "html").ToLowerInvariant();
+
+        var executable = configuration["Browser:Executable"] ?? "chrome";
+        var extraArgs = configuration["Browser:Arguments"] ?? "--incognito";
+
+        // Build headless Chrome arguments.
+        // --dump-dom returns the serialised DOM as text.
+        // --screenshot returns a PNG screenshot to a temp file.
+        var tempFile = mode == "screenshot"
+            ? Path.Combine(Path.GetTempPath(), $"sc_{job.Id:N}.png")
+            : null;
+
+        var headlessArgs = mode switch
+        {
+            "screenshot" => $"--headless --disable-gpu --no-sandbox {extraArgs} --screenshot=\"{tempFile}\" \"{url}\"",
+            _ => $"--headless --disable-gpu --no-sandbox {extraArgs} --dump-dom \"{url}\"",
+        };
+
+        AddLog(job, $"Browser ({mode}): {executable} → {url}");
+        await db.SaveChangesAsync(ct);
+
+        var psi = new System.Diagnostics.ProcessStartInfo
+        {
+            FileName = executable,
+            Arguments = headlessArgs,
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+
+        using var process = new System.Diagnostics.Process { StartInfo = psi };
+        process.Start();
+
+        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
+        var stderrTask = process.StandardError.ReadToEndAsync(ct);
+
+        await process.WaitForExitAsync(ct);
+
+        var stdout = await stdoutTask;
+        var stderr = await stderrTask;
+
+        if (process.ExitCode != 0)
+            throw new InvalidOperationException(
+                $"Browser exited with code {process.ExitCode}.\nstderr: {stderr}");
+
+        if (mode == "screenshot" && tempFile is not null && File.Exists(tempFile))
+        {
+            var bytes = await File.ReadAllBytesAsync(tempFile, ct);
+            File.Delete(tempFile);
+            return $"Screenshot captured ({bytes.Length} bytes, base64):\n{Convert.ToBase64String(bytes)}";
+        }
+
+        return string.IsNullOrWhiteSpace(stdout) ? "(empty page)" : stdout;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // ACCESS LOCALHOST CLI
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Makes a direct HTTP request to a <b>localhost</b> URL and returns
+    /// the status code, headers, and response body. No browser involved.
+    /// </summary>
+    private async Task<string?> ExecuteAccessLocalhostCliAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        var payload = DeserializePayload<AccessLocalhostPayload>(job,
+            "AccessLocalhostCli");
+
+        var url = ValidateLocalhostUrl(payload.Url);
+
+        AddLog(job, $"HTTP GET → {url}");
+        await db.SaveChangesAsync(ct);
+
+        using var httpClient = new HttpClient { Timeout = TimeSpan.FromSeconds(30) };
+        var response = await httpClient.GetAsync(url, ct);
+        var body = await response.Content.ReadAsStringAsync(ct);
+
+        var sb = new System.Text.StringBuilder();
+        sb.AppendLine($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
+        foreach (var header in response.Headers)
+            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        foreach (var header in response.Content.Headers)
+            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
+        sb.AppendLine();
+        sb.Append(body);
+
+        return sb.ToString();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Localhost helpers
+    // ═══════════════════════════════════════════════════════════════
+
+    private static T DeserializePayload<T>(AgentJobDB job, string actionName) where T : class
+    {
+        if (string.IsNullOrWhiteSpace(job.ScriptJson))
+            throw new InvalidOperationException(
+                $"{actionName} requires a JSON payload in ScriptJson.");
+
+        return JsonSerializer.Deserialize<T>(job.ScriptJson, _payloadJsonOptions)
+            ?? throw new InvalidOperationException(
+                $"Failed to deserialise {actionName} payload.");
+    }
+
+    private static string ValidateLocalhostUrl(string? url)
+    {
+        if (string.IsNullOrWhiteSpace(url))
+            throw new InvalidOperationException(
+                "Localhost access requires a 'url' field.");
+
+        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
+            throw new InvalidOperationException(
+                $"Invalid URL: '{url}'.");
+
+        if (uri.Host is not ("localhost" or "127.0.0.1" or "[::1]"))
+            throw new InvalidOperationException(
+                $"URL host must be localhost, 127.0.0.1, or [::1]. Got: '{uri.Host}'.");
+
+        return url;
+    }
+
     private static readonly JsonSerializerOptions _payloadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
@@ -1009,6 +1181,10 @@ SessionService session)
                 => actions.CreateContainerAsync(agentId, caller, ct: ct),
             AgentActionType.RegisterInfoStore
                 => actions.RegisterInfoStoreAsync(agentId, caller, ct: ct),
+            AgentActionType.AccessLocalhostInBrowser
+                => actions.AccessLocalhostInBrowserAsync(agentId, caller, ct: ct),
+            AgentActionType.AccessLocalhostCli
+                => actions.AccessLocalhostCliAsync(agentId, caller, ct: ct),
             AgentActionType.UnsafeExecuteAsDangerousShell when resourceId.HasValue
                 => actions.UnsafeExecuteAsDangerousShellAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.ExecuteAsSafeShell when resourceId.HasValue
@@ -1061,20 +1237,37 @@ SessionService session)
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Walks the permission-set hierarchy (channel → channel context → agent
-    /// role) and returns the resource ID from the first default access
-    /// entry that matches <paramref name="actionType"/>.
+    /// Resolves the default resource ID for a per-resource action.
+    /// Priority: channel DefaultResourceSet → context DefaultResourceSet
+    /// → channel PermissionSet → context PermissionSet → agent role
+    /// PermissionSet.
     /// </summary>
     private async Task<Guid?> ResolveDefaultResourceIdAsync(
         AgentActionType actionType, Guid channelId, Guid agentId,
         CancellationToken ct)
     {
-        // Collect permission set IDs in priority order.
-        var permissionSetIds = new List<Guid>(3);
-
         var ch = await db.Channels
+            .Include(c => c.DefaultResourceSet)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.DefaultResourceSet)
             .Include(c => c.AgentContext)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+
+        // 1. Channel's DefaultResourceSet
+        if (ch?.DefaultResourceSet is { } chDrs)
+        {
+            var id = ExtractFromDefaultResourceSet(chDrs, actionType);
+            if (id.HasValue) return id;
+        }
+
+        // 2. Context's DefaultResourceSet
+        if (ch?.AgentContext?.DefaultResourceSet is { } ctxDrs)
+        {
+            var id = ExtractFromDefaultResourceSet(ctxDrs, actionType);
+            if (id.HasValue) return id;
+        }
+
+        // 3. Fall back to permission set defaults (channel → context → role).
+        var permissionSetIds = new List<Guid>(3);
 
         if (ch?.PermissionSetId is { } chPsId)
             permissionSetIds.Add(chPsId);
@@ -1092,7 +1285,6 @@ SessionService session)
         if (permissionSetIds.Count == 0)
             return null;
 
-        // Load all candidate permission sets with their default access navigations.
         var permissionSets = await db.PermissionSets
             .Where(p => permissionSetIds.Contains(p.Id))
             .Include(p => p.DefaultDangerousShellAccess)
@@ -1108,7 +1300,6 @@ SessionService session)
             .Include(p => p.DefaultSkillPermission)
             .ToListAsync(ct);
 
-        // Check each permission set in priority order.
         foreach (var psId in permissionSetIds)
         {
             var ps = permissionSets.FirstOrDefault(p => p.Id == psId);
@@ -1121,6 +1312,46 @@ SessionService session)
 
         return null;
     }
+
+    /// <summary>
+    /// Resolves the default transcription model from the channel/context
+    /// <see cref="DefaultResourceSetDB"/>.
+    /// </summary>
+    private async Task<Guid?> ResolveDefaultTranscriptionModelAsync(
+        Guid channelId, CancellationToken ct)
+    {
+        var ch = await db.Channels
+            .Include(c => c.DefaultResourceSet)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.DefaultResourceSet)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+
+        if (ch?.DefaultResourceSet?.TranscriptionModelId is { } chModel)
+            return chModel;
+
+        if (ch?.AgentContext?.DefaultResourceSet?.TranscriptionModelId is { } ctxModel)
+            return ctxModel;
+
+        return null;
+    }
+
+    private static Guid? ExtractFromDefaultResourceSet(
+        DefaultResourceSetDB drs, AgentActionType actionType) => actionType switch
+    {
+        AgentActionType.UnsafeExecuteAsDangerousShell => drs.DangerousShellResourceId,
+        AgentActionType.ExecuteAsSafeShell => drs.SafeShellResourceId,
+        AgentActionType.AccessLocalInfoStore => drs.LocalInfoStoreResourceId,
+        AgentActionType.AccessExternalInfoStore => drs.ExternalInfoStoreResourceId,
+        AgentActionType.AccessWebsite => drs.WebsiteResourceId,
+        AgentActionType.QuerySearchEngine => drs.SearchEngineResourceId,
+        AgentActionType.AccessContainer => drs.ContainerResourceId,
+        AgentActionType.ManageAgent => drs.AgentResourceId,
+        AgentActionType.EditTask => drs.TaskResourceId,
+        AgentActionType.AccessSkill => drs.SkillResourceId,
+        AgentActionType.TranscribeFromAudioDevice or
+        AgentActionType.TranscribeFromAudioStream or
+        AgentActionType.TranscribeFromAudioFile => drs.AudioDeviceResourceId,
+        _ => null,
+    };
 
     /// <summary>
     /// Returns the resource ID from the matching default access entry on
@@ -1257,6 +1488,8 @@ SessionService session)
         AgentActionType.CreateSubAgent    => ps.CanCreateSubAgents,
         AgentActionType.CreateContainer   => ps.CanCreateContainers,
         AgentActionType.RegisterInfoStore => ps.CanRegisterInfoStores,
+        AgentActionType.AccessLocalhostInBrowser => ps.CanAccessLocalhostInBrowser,
+        AgentActionType.AccessLocalhostCli       => ps.CanAccessLocalhostCli,
 
         // ── Per-resource grants ───────────────────────────────────
         AgentActionType.UnsafeExecuteAsDangerousShell when resourceId.HasValue
