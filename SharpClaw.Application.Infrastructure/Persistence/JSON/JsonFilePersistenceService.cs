@@ -37,9 +37,11 @@ public sealed class JsonFilePersistenceService(
         // after deserialization, preventing EF from traversing the object graph
         // and hitting duplicate-key conflicts on related entities.
         var navigations = context.Model.GetEntityTypes()
+            .GroupBy(e => e.ClrType)
             .ToDictionary(
-                e => e.ClrType,
-                e => e.GetNavigations()
+                g => g.Key,
+                g => g.First()
+                    .GetNavigations()
                     .Select(n => n.PropertyInfo)
                     .Where(p => p is not null)
                     .ToList());

@@ -44,6 +44,17 @@ try
     // Infrastructure
     builder.Services.AddInfrastructure(StorageMode.JsonFile);
 
+    // CORS
+    builder.Services.AddCors(options =>
+    {
+        options.AddDefaultPolicy(policy =>
+        {
+            policy.AllowAnyOrigin()
+                  .AllowAnyMethod()
+                  .AllowAnyHeader();
+        });
+    });
+
     // Auth
     var jwtOptions = new JwtOptions
     {
@@ -127,6 +138,7 @@ try
 
     // API mode
     app.UseSerilogRequestLogging();
+    app.UseCors();
     app.UseMiddleware<ApiKeyMiddleware>();
     app.UseMiddleware<JwtSessionMiddleware>();
     app.UseWebSockets();
