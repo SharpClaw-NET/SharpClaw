@@ -28,7 +28,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         ConfigureRequest(request);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<ModelsListResponse>(ct);
         return body?.Data?
@@ -65,7 +65,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         request.Content = JsonContent.Create(payload);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<CompletionResponse>(ct);
         return result?.Choices?.FirstOrDefault()?.Message?.Content
@@ -112,7 +112,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         request.Content = JsonContent.Create(payload, options: OaiToolJsonOptions);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<OaiToolCompletionResponse>(ct);
         var choice = result?.Choices?.FirstOrDefault()
@@ -196,7 +196,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 
         using var response = await httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);

@@ -26,7 +26,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         AddAuthHeaders(request, apiKey);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<ModelsListResponse>(ct);
         return body?.Data?
@@ -60,7 +60,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         request.Content = JsonContent.Create(payload, options: WriteOptions);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<MessagesResponse>(ct);
         return result?.Content?.FirstOrDefault(c => c.Type == "text")?.Text
@@ -132,7 +132,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         request.Content = JsonContent.Create(payload, options: WriteOptions);
 
         var response = await httpClient.SendAsync(request, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<AntToolCompletionResponse>(ct);
 
@@ -333,7 +333,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
 
         using var response = await httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
-        response.EnsureSuccessStatusCode();
+        await response.EnsureSuccessOrThrowAsync(ct);
 
         using var stream = await response.Content.ReadAsStreamAsync(ct);
         using var reader = new StreamReader(stream);
