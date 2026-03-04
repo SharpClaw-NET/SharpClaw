@@ -4,10 +4,6 @@
     <Project Path="SharpClaw.Application.Core/SharpClaw.Application.Core.csproj" />
     <Project Path="SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj" />
   </Folder>
-  <Folder Name="/Extensions/">
-    <Project Path="SharpClaw.VisualStudio2026/SharpClaw.VisualStudio2026.csproj" Id="1922239b-8ca8-410c-9fb9-88b462a54f59" />
-    <Project Path="SharpClaw.VisualStudioCode/SharpClaw.VisualStudioCode.csproj" Id="d152e2eb-8379-4ba1-8cb3-f38ab6ba1220" />
-  </Folder>
   <Folder Name="/NativeClient/">
     <Project Path="SharpClaw.Uno/SharpClaw.Uno.csproj">
       <Deploy />
