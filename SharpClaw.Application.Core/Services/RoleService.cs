@@ -106,6 +106,8 @@ public sealed class RoleService(SharpClawDbContext db)
         ps.CanRegisterInfoStores = request.CanRegisterInfoStores;
         ps.CanAccessLocalhostInBrowser = request.CanAccessLocalhostInBrowser;
         ps.CanAccessLocalhostCli = request.CanAccessLocalhostCli;
+        ps.CanClickDesktop = request.CanClickDesktop;
+        ps.CanTypeOnDesktop = request.CanTypeOnDesktop;
 
         // Apply per-resource grants.
         AddGrants(ps.DangerousShellAccesses, request.DangerousShellAccesses,
@@ -172,7 +174,9 @@ public sealed class RoleService(SharpClawDbContext db)
                     CanCreateContainers: false,
                     CanRegisterInfoStores: false,
                     CanAccessLocalhostInBrowser: false,
-                    CanAccessLocalhostCli: false
+                    CanAccessLocalhostCli: false,
+                    CanClickDesktop: false,
+                    CanTypeOnDesktop: false
                 })
                 return;
 
@@ -199,6 +203,14 @@ public sealed class RoleService(SharpClawDbContext db)
         if (request.CanAccessLocalhostCli && !callerPs.CanAccessLocalhostCli)
             throw new UnauthorizedAccessException(
                 "Cannot grant CanAccessLocalhostCli — you do not hold this permission.");
+
+        if (request.CanClickDesktop && !callerPs.CanClickDesktop)
+            throw new UnauthorizedAccessException(
+                "Cannot grant CanClickDesktop — you do not hold this permission.");
+
+        if (request.CanTypeOnDesktop && !callerPs.CanTypeOnDesktop)
+            throw new UnauthorizedAccessException(
+                "Cannot grant CanTypeOnDesktop — you do not hold this permission.");
     }
 
     private static void ValidateResourceGrants(
@@ -318,6 +330,8 @@ public sealed class RoleService(SharpClawDbContext db)
             CanRegisterInfoStores: ps?.CanRegisterInfoStores ?? false,
             CanAccessLocalhostInBrowser: ps?.CanAccessLocalhostInBrowser ?? false,
             CanAccessLocalhostCli: ps?.CanAccessLocalhostCli ?? false,
+            CanClickDesktop: ps?.CanClickDesktop ?? false,
+            CanTypeOnDesktop: ps?.CanTypeOnDesktop ?? false,
             DangerousShellAccesses: MapGrants(ps?.DangerousShellAccesses, a => a.SystemUserId, a => a.Clearance),
             SafeShellAccesses: MapGrants(ps?.SafeShellAccesses, a => a.ContainerId, a => a.Clearance),
             ContainerAccesses: MapGrants(ps?.ContainerAccesses, a => a.ContainerId, a => a.Clearance),

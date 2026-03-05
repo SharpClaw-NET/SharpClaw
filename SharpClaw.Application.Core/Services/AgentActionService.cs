@@ -62,6 +62,20 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, caller, p => p.CanAccessLocalhostCli,
             "access localhost via CLI", onApproved, ct);
 
+    public Task<AgentActionResult> ClickDesktopAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanClickDesktop,
+            "click desktop", onApproved, ct);
+
+    public Task<AgentActionResult> TypeOnDesktopAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanTypeOnDesktop,
+            "type on desktop", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Per-resource actions
     // ═══════════════════════════════════════════════════════════════

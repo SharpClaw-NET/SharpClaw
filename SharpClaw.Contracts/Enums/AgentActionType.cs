@@ -11,6 +11,8 @@ public enum AgentActionType
     RegisterInfoStore,
     AccessLocalhostInBrowser,
     AccessLocalhostCli,
+    ClickDesktop,
+    TypeOnDesktop,
 
     // ── Per-resource grants ───────────────────────────────────────
     UnsafeExecuteAsDangerousShell,
@@ -31,10 +33,6 @@ public enum AgentActionType
 
     // ── Display capture (per-resource: display device) ────────────
     CaptureDisplay,
-
-    // ── Desktop interaction (per-resource: display device) ────────
-    ClickDesktop,
-    TypeOnDesktop,
 
     // ── Editor actions (per-resource: editor session) ─────────────
     EditorReadFile,

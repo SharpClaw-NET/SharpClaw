@@ -9,12 +9,12 @@ using SharpClaw.Contracts.DTOs.Chat;
 namespace SharpClaw.Application.API.Handlers;
 
 /// <summary>
-/// SSE streaming endpoint for chat. Streams <see cref="ChatStreamEvent"/>
-/// items as server-sent events. Approval requests pause the stream;
-/// the client must POST to the companion approve endpoint to continue.
+/// SSE streaming endpoint for threaded chat. Mirrors
+/// <see cref="ChatStreamHandlers"/> but scopes messages to a thread
+/// so conversation history is included.
 /// </summary>
-[RouteGroup("/channels/{id:guid}/chat")]
-public static class ChatStreamHandlers
+[RouteGroup("/channels/{id:guid}/chat/threads/{threadId:guid}")]
+public static class ThreadChatStreamHandlers
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -23,25 +23,13 @@ public static class ChatStreamHandlers
         Converters = { new JsonStringEnumConverter() }
     };
 
-    /// <summary>
-    /// Shared pending-approval store keyed by job ID. The SSE stream
-    /// registers a TCS here; the companion POST resolves it.
-    /// </summary>
     private static readonly ConcurrentDictionary<Guid, TaskCompletionSource<bool>> PendingApprovals = new();
 
-    /// <summary>
-    /// <c>POST /channels/{id}/chat/stream</c> — streams the response as SSE.
-    /// <para>
-    /// When a job needs approval, emits an <c>approval_required</c> event
-    /// and waits for the client to POST to
-    /// <c>/channels/{id}/chat/stream/approve/{jobId}</c> with a JSON body
-    /// <c>{ "approved": true|false }</c>.
-    /// </para>
-    /// </summary>
     [MapPost("stream")]
     public static async Task StreamChat(
         HttpContext context,
         Guid id,
+        Guid threadId,
         ChatRequest request,
         ChatService chatService)
     {
@@ -69,7 +57,7 @@ public static class ChatStreamHandlers
         try
         {
             await foreach (var evt in chatService.SendMessageStreamAsync(
-                id, request, ApprovalCallback, threadId: null, context.RequestAborted))
+                id, request, ApprovalCallback, threadId, context.RequestAborted))
             {
                 var json = JsonSerializer.Serialize(evt, JsonOptions);
                 var eventName = evt.Type.ToString();
@@ -80,18 +68,15 @@ public static class ChatStreamHandlers
         }
         catch (OperationCanceledException)
         {
-            // Client disconnected — clean up any pending approvals
+            // Client disconnected
         }
     }
 
-    /// <summary>
-    /// <c>POST /channels/{id}/chat/stream/approve/{jobId}</c> — resolves
-    /// a pending inline approval during a streaming chat session.
-    /// </summary>
     [MapPost("stream/approve/{jobId:guid}")]
     public static IResult ResolveApproval(
         HttpContext context,
         Guid id,
+        Guid threadId,
         Guid jobId,
         ChatStreamApprovalRequest approval)
     {
@@ -104,5 +89,3 @@ public static class ChatStreamHandlers
         return Results.NotFound("No pending approval for this job.");
     }
 }
-
-public sealed record ChatStreamApprovalRequest(bool Approved);

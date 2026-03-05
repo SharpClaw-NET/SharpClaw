@@ -29,6 +29,7 @@ public class SharpClawDbContext(
     public DbSet<AgentDB> Agents => Set<AgentDB>();
     public DbSet<ChannelContextDB> AgentContexts => Set<ChannelContextDB>();
     public DbSet<ChannelDB> Channels => Set<ChannelDB>();
+    public DbSet<ChatThreadDB> ChatThreads => Set<ChatThreadDB>();
     public DbSet<ChatMessageDB> ChatMessages => Set<ChatMessageDB>();
     public DbSet<ScheduledJobDB> ScheduledTasks => Set<ScheduledJobDB>();
 
@@ -178,6 +179,19 @@ public class SharpClawDbContext(
             e.HasMany(c => c.AllowedAgents)
                 .WithMany(a => a.AllowedChannels)
                 .UsingEntity("ChannelAllowedAgents");
+            e.HasMany(c => c.Threads)
+                .WithOne(t => t.Channel)
+                .HasForeignKey(t => t.ChannelId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Chat Threads ──────────────────────────────────────────
+        modelBuilder.Entity<ChatThreadDB>(e =>
+        {
+            e.HasMany(t => t.ChatMessages)
+                .WithOne(m => m.Thread!)
+                .HasForeignKey(m => m.ThreadId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         // ── Scheduled Tasks ───────────────────────────────────────

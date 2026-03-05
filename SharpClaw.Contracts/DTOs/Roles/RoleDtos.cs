@@ -18,6 +18,8 @@ public sealed record SetRolePermissionsRequest(
     bool CanRegisterInfoStores = false,
     bool CanAccessLocalhostInBrowser = false,
     bool CanAccessLocalhostCli = false,
+    bool CanClickDesktop = false,
+    bool CanTypeOnDesktop = false,
 
     // Per-resource grants
     IReadOnlyList<ResourceGrant>? DangerousShellAccesses = null,
@@ -58,6 +60,8 @@ public sealed record RolePermissionsResponse(
     bool CanRegisterInfoStores,
     bool CanAccessLocalhostInBrowser,
     bool CanAccessLocalhostCli,
+    bool CanClickDesktop,
+    bool CanTypeOnDesktop,
 
     IReadOnlyList<ResourceGrant> DangerousShellAccesses,
     IReadOnlyList<ResourceGrant> SafeShellAccesses,

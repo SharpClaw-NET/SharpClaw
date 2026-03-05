@@ -1685,6 +1685,10 @@ IConfiguration configuration)
                 => actions.AccessLocalhostInBrowserAsync(agentId, caller, ct: ct),
             AgentActionType.AccessLocalhostCli
                 => actions.AccessLocalhostCliAsync(agentId, caller, ct: ct),
+            AgentActionType.ClickDesktop
+                => actions.ClickDesktopAsync(agentId, caller, ct: ct),
+            AgentActionType.TypeOnDesktop
+                => actions.TypeOnDesktopAsync(agentId, caller, ct: ct),
             AgentActionType.UnsafeExecuteAsDangerousShell when resourceId.HasValue
                 => actions.UnsafeExecuteAsDangerousShellAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.ExecuteAsSafeShell when resourceId.HasValue
@@ -1712,10 +1716,6 @@ IConfiguration configuration)
             AgentActionType.TranscribeFromAudioFile when resourceId.HasValue
                 => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.CaptureDisplay when resourceId.HasValue
-                => actions.AccessDisplayDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.ClickDesktop when resourceId.HasValue
-                => actions.AccessDisplayDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.TypeOnDesktop when resourceId.HasValue
                 => actions.AccessDisplayDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.EditorReadFile or
             AgentActionType.EditorGetOpenFiles or
@@ -1749,8 +1749,6 @@ IConfiguration configuration)
             or AgentActionType.TranscribeFromAudioStream
             or AgentActionType.TranscribeFromAudioFile
             or AgentActionType.CaptureDisplay
-            or AgentActionType.ClickDesktop
-            or AgentActionType.TypeOnDesktop
             or AgentActionType.EditorReadFile
             or AgentActionType.EditorGetOpenFiles
             or AgentActionType.EditorGetSelection

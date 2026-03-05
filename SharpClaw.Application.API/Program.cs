@@ -39,9 +39,6 @@ try
 
     builder.Host.UseSerilog();
 
-    // Localhost only
-    builder.WebHost.UseUrls("http://127.0.0.1:48923");
-
     // Infrastructure
     builder.Services.AddInfrastructure(StorageMode.JsonFile);
 
@@ -105,6 +102,7 @@ try
     builder.Services.AddScoped<ModelService>();
     builder.Services.AddScoped<AgentService>();
     builder.Services.AddScoped<ChannelService>();
+    builder.Services.AddScoped<ThreadService>();
     builder.Services.AddScoped<ContextService>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
@@ -159,7 +157,8 @@ try
 
     app.Lifetime.ApplicationStopping.Register(apiKeyProvider.Cleanup);
 
-    Log.Information("SharpClaw API listening on http://127.0.0.1:48923");
+    var urls = string.Join(", ", app.Urls);
+    Log.Information("SharpClaw API listening on {Urls}", urls);
     Log.Information("API key written to: {KeyFilePath}", apiKeyProvider.KeyFilePath);
 
     await app.StartAsync();

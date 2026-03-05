@@ -13,6 +13,7 @@ using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Contexts;
 using SharpClaw.Contracts.DTOs.Channels;
+using SharpClaw.Contracts.DTOs.Threads;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.Containers;
@@ -36,6 +37,7 @@ public static class CliDispatcher
     private static string? _currentUser;
     private static Guid? _currentUserId;
     private static Guid? _currentChannelId;
+    private static Guid? _currentThreadId;
     private static bool _chatMode;
     private static bool IsLoggedIn => _currentUser is not null;
 
@@ -91,6 +93,7 @@ public static class CliDispatcher
                 _currentUser = null;
                 _currentUserId = null;
                 _currentChannelId = null;
+                _currentThreadId = null;
                 _chatMode = false;
                 Console.WriteLine("Logged out.");
                 DebugLog("Response: Logged out.");
@@ -203,6 +206,7 @@ public static class CliDispatcher
             "agent" => await HandleAgentCommand(args, sp),
             "context" or "ctx" => await HandleContextCommand(args, sp),
             "channel" or "chan" => await HandleChannelCommand(args, sp),
+            "thread" => await HandleThreadCommand(args, sp),
             "chat" => await HandleChatCommand(args, sp),
             "job" => await HandleJobCommand(args, sp),
             "role" => await HandleRoleCommand(args, sp),
@@ -747,9 +751,11 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "chat [--agent <id>] <message>",
+                "chat [--agent <id>] [--thread <id>] <message>",
                 "  chat toggle                             Toggle chat mode on/off",
-                "  --agent overrides the channel's default agent.");
+                "  --agent overrides the channel's default agent.",
+                "  --thread sends the message in a thread (with history).",
+                "  Without --thread, no history is sent to the model.");
             return Results.Ok();
         }
 
@@ -770,20 +776,23 @@ public static class CliDispatcher
             Console.WriteLine($"No channel selected. Opening latest channel: \"{latest.Title}\" ({CliIdMap.GetOrAssign(latest.Id)})");
         }
 
-        // Parse --agent flag and collect message parts
+        // Parse --agent, --thread flags and collect message parts
         Guid? agentId = null;
+        Guid? threadId = _currentThreadId;
         var messageParts = new List<string>();
         for (var i = 1; i < args.Length; i++)
         {
             if (args[i] is "--agent" or "-a" && i + 1 < args.Length)
                 agentId = CliIdMap.Resolve(args[++i]);
+            else if (args[i] is "--thread" or "-t" && i + 1 < args.Length)
+                threadId = CliIdMap.Resolve(args[++i]);
             else
                 messageParts.Add(args[i]);
         }
 
         if (messageParts.Count == 0)
         {
-            PrintUsage("chat [--agent <id>] <message>");
+            PrintUsage("chat [--agent <id>] [--thread <id>] <message>");
             return Results.Ok();
         }
 
@@ -802,7 +811,7 @@ public static class CliDispatcher
         try
         {
             await foreach (var evt in chatService.SendMessageStreamAsync(
-                _currentChannelId.Value, request, CliApprovalCallback))
+                _currentChannelId.Value, request, CliApprovalCallback, threadId))
             {
                 switch (evt.Type)
                 {
@@ -969,6 +978,7 @@ public static class CliDispatcher
     private static IResult HandleChannelSelect(string[] args)
     {
         _currentChannelId = CliIdMap.Resolve(args[2]);
+        _currentThreadId = null;
         Console.WriteLine($"Channel {args[2]} selected.");
         return Results.Ok();
     }
@@ -980,7 +990,10 @@ public static class CliDispatcher
 
         // Clear selection if the deleted channel was the active one
         if (_currentChannelId == id)
+        {
             _currentChannelId = null;
+            _currentThreadId = null;
+        }
 
         return result;
     }
@@ -1038,6 +1051,199 @@ public static class CliDispatcher
         return UsageResult("channel agents <channelId> [add|remove <agentId>]");
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Thread
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<IResult?> HandleThreadCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "thread add [channelId] [name] [--max-messages <n>] [--max-chars <n>]",
+                "  Create a thread (current channel if omitted)",
+                "thread list [channelId]                    List threads in a channel",
+                "thread get <id>                            Show thread details",
+                "thread update <id> [--name <name>] [--max-messages <n>] [--max-chars <n>]",
+                "  Rename a thread or change history limits (0 to reset to default)",
+                "thread select <id>                         Select active thread for chat",
+                "thread deselect                            Deselect active thread",
+                "thread delete <id>                         Delete a thread");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<ThreadService>();
+
+        return sub switch
+        {
+            "add" => await HandleThreadAdd(args, svc),
+
+            "list" => await HandleThreadList(args, svc),
+
+            "get" when args.Length >= 3
+                => await HandleThreadGet(CliIdMap.Resolve(args[2]), svc),
+            "get" => UsageResult("thread get <id>"),
+
+            "update" when args.Length >= 3
+                => await HandleThreadUpdate(args, svc),
+            "update" => UsageResult("thread update <id> [--name <name>] [--max-messages <n>] [--max-chars <n>]"),
+
+            "select" when args.Length >= 3
+                => HandleThreadSelect(args),
+            "select" => UsageResult("thread select <id>"),
+
+            "deselect" => HandleThreadDeselect(),
+
+            "delete" when args.Length >= 3
+                => await HandleThreadDelete(CliIdMap.Resolve(args[2]), svc),
+            "delete" => UsageResult("thread delete <id>"),
+
+            _ => UsageResult($"Unknown sub-command: thread {sub}. Try 'help' for usage.")
+        };
+    }
+
+    private static async Task<IResult> HandleThreadAdd(string[] args, ThreadService svc)
+    {
+        // thread add [channelId] [name] [--max-messages <n>] [--max-chars <n>]
+        Guid channelId;
+        int? maxMessages = null;
+        int? maxChars = null;
+        var nameParts = new List<string>();
+
+        // First pass: separate flags from positional args
+        var positional = new List<string>();
+        for (var i = 2; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--max-messages" when i + 1 < args.Length && int.TryParse(args[i + 1], out var mm):
+                    maxMessages = mm; i++; break;
+                case "--max-chars" when i + 1 < args.Length && int.TryParse(args[i + 1], out var mc):
+                    maxChars = mc; i++; break;
+                default:
+                    positional.Add(args[i]); break;
+            }
+        }
+
+        if (positional.Count >= 1)
+        {
+            var possibleId = TryResolveId(positional[0]);
+            if (possibleId is not null)
+            {
+                channelId = possibleId.Value;
+                nameParts.AddRange(positional.Skip(1));
+            }
+            else if (_currentChannelId is not null)
+            {
+                channelId = _currentChannelId.Value;
+                nameParts.AddRange(positional);
+            }
+            else
+            {
+                Console.Error.WriteLine("No channel selected. Specify a channel ID or use 'channel select'.");
+                return Results.Ok();
+            }
+        }
+        else if (_currentChannelId is not null)
+        {
+            channelId = _currentChannelId.Value;
+        }
+        else
+        {
+            Console.Error.WriteLine("No channel selected. Specify a channel ID or use 'channel select'.");
+            return Results.Ok();
+        }
+
+        var name = nameParts.Count > 0 ? string.Join(' ', nameParts) : null;
+
+        var result = await ThreadHandlers.Create(
+            channelId,
+            new CreateThreadRequest(name, maxMessages, maxChars),
+            svc);
+
+        // Auto-select the newly created thread
+        if (result is IValueHttpResult { Value: ThreadResponse tr })
+            _currentThreadId = tr.Id;
+
+        return result;
+    }
+
+    private static async Task<IResult> HandleThreadList(string[] args, ThreadService svc)
+    {
+        Guid channelId;
+        if (args.Length >= 3)
+            channelId = CliIdMap.Resolve(args[2]);
+        else if (_currentChannelId is not null)
+            channelId = _currentChannelId.Value;
+        else
+        {
+            Console.Error.WriteLine("No channel selected. Specify a channel ID or use 'channel select'.");
+            return Results.Ok();
+        }
+
+        return await ThreadHandlers.List(channelId, svc);
+    }
+
+    private static async Task<IResult> HandleThreadGet(Guid threadId, ThreadService svc)
+        => await ThreadHandlers.GetById(Guid.Empty, threadId, svc);
+
+    private static async Task<IResult> HandleThreadUpdate(string[] args, ThreadService svc)
+    {
+        // thread update <id> [--name <name>] [--max-messages <n>] [--max-chars <n>]
+        // Also supports legacy positional: thread update <id> <name>
+        var threadId = CliIdMap.Resolve(args[2]);
+        string? name = null;
+        int? maxMessages = null;
+        int? maxChars = null;
+        var hasFlags = false;
+
+        for (var i = 3; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--name" when i + 1 < args.Length:
+                    name = args[++i]; hasFlags = true; break;
+                case "--max-messages" when i + 1 < args.Length && int.TryParse(args[i + 1], out var mm):
+                    maxMessages = mm; i++; hasFlags = true; break;
+                case "--max-chars" when i + 1 < args.Length && int.TryParse(args[i + 1], out var mc):
+                    maxChars = mc; i++; hasFlags = true; break;
+            }
+        }
+
+        // Legacy positional: thread update <id> <name> (no flags used)
+        if (!hasFlags && args.Length >= 4)
+            name = string.Join(' ', args[3..]);
+
+        var request = new UpdateThreadRequest(name, maxMessages, maxChars);
+        var result = await ThreadHandlers.Update(Guid.Empty, threadId, request, svc);
+        return result;
+    }
+
+    private static IResult HandleThreadSelect(string[] args)
+    {
+        _currentThreadId = CliIdMap.Resolve(args[2]);
+        Console.WriteLine($"Thread {args[2]} selected. Chat messages will now include thread history.");
+        return Results.Ok();
+    }
+
+    private static IResult HandleThreadDeselect()
+    {
+        _currentThreadId = null;
+        Console.WriteLine("Thread deselected. Chat messages will be sent without history.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleThreadDelete(Guid threadId, ThreadService svc)
+    {
+        var result = await ThreadHandlers.Delete(Guid.Empty, threadId, svc);
+
+        if (_currentThreadId == threadId)
+            _currentThreadId = null;
+
+        return result;
+    }
+
     private static async Task<IResult?> HandleRoleCommand(string[] args, IServiceProvider sp)
     {
         if (args.Length < 2)
@@ -1054,6 +1260,8 @@ public static class CliDispatcher
                 "  --register-info-stores                  Grant CanRegisterInfoStores",
                 "  --localhost-browser                     Grant CanAccessLocalhostInBrowser",
                 "  --localhost-cli                         Grant CanAccessLocalhostCli",
+                "  --click-desktop                         Grant CanClickDesktop",
+                "  --type-on-desktop                       Grant CanTypeOnDesktop",
                 "  --dangerous-shell <id>[:<clearance>]    Add DangerousShell grant",
                 "  --safe-shell <id>[:<clearance>]         Add SafeShell grant",
                 "  --container <id>[:<clearance>]          Add Container grant",
@@ -1117,6 +1325,8 @@ public static class CliDispatcher
         var registerInfoStores = false;
         var localhostBrowser = false;
         var localhostCli = false;
+        var clickDesktop = false;
+        var typeOnDesktop = false;
 
         var dangerousShell = new List<ResourceGrant>();
         var safeShell = new List<ResourceGrant>();
@@ -1143,6 +1353,8 @@ public static class CliDispatcher
                 case "--register-info-stores": registerInfoStores = true; break;
                 case "--localhost-browser": localhostBrowser = true; break;
                 case "--localhost-cli": localhostCli = true; break;
+                case "--click-desktop": clickDesktop = true; break;
+                case "--type-on-desktop": typeOnDesktop = true; break;
                 case "--dangerous-shell" when i + 1 < args.Length:
                     dangerousShell.Add(ParseResourceGrant(args[++i])); break;
                 case "--safe-shell" when i + 1 < args.Length:
@@ -1175,6 +1387,8 @@ public static class CliDispatcher
             CanRegisterInfoStores: registerInfoStores,
             CanAccessLocalhostInBrowser: localhostBrowser,
             CanAccessLocalhostCli: localhostCli,
+            CanClickDesktop: clickDesktop,
+            CanTypeOnDesktop: typeOnDesktop,
             DangerousShellAccesses: dangerousShell.Count > 0 ? dangerousShell : null,
             SafeShellAccesses: safeShell.Count > 0 ? safeShell : null,
             ContainerAccesses: container.Count > 0 ? container : null,
@@ -1932,9 +2146,22 @@ public static class CliDispatcher
                 skill, transcriptionmodel
 
             Chat:
-              chat [--agent <id>] <message>    Send a message in the active channel
+              chat [--agent <id>] [--thread <id>] <message>
+                Send a message in the active channel.
+                Without --thread, no history is sent (one-shot).
+                With --thread, conversation history is included.
               chat toggle                      Toggle chat mode (all input → chat)
                 In chat mode: !exit or !chat toggle to return to normal mode.
+
+            Thread:    thread <sub> [args]
+              thread add [channelId] [name] [--max-messages <n>] [--max-chars <n>]
+              thread list [channelId]                      List threads
+              thread get <id>                              Show thread details
+              thread update <id> [--name <n>] [--max-messages <n>] [--max-chars <n>]
+              thread select <id>                           Select active thread for chat
+              thread deselect                              Deselect active thread
+              thread delete <id>                           Delete a thread
+              Defaults: 50 messages, 100k chars. Set 0 to reset to default.
 
             Bio:       bio get | set <text> | clear
 

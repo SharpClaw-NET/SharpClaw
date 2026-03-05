@@ -7,6 +7,7 @@ using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Messages;
+using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Editor;
@@ -25,6 +26,7 @@ public sealed partial class ChatService(
     AgentJobService jobService)
 {
     private const int MaxHistoryMessages = 50;
+    private const int MaxHistoryCharacters = 100_000;
 
     /// <summary>
     /// Maximum number of tool-call round-trips before forcing a final
@@ -35,6 +37,7 @@ public sealed partial class ChatService(
 
     public async Task<ChatResponse> SendMessageAsync(
         Guid channelId, ChatRequest request,
+        Guid? threadId = null,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback = null,
         CancellationToken ct = default)
     {
@@ -53,14 +56,16 @@ public sealed partial class ChatService(
         if (string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
-        // Build channel history: recent messages + new user message
-        var history = await db.ChatMessages
-            .Where(m => m.ChannelId == channelId)
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(MaxHistoryMessages)
-            .OrderBy(m => m.CreatedAt)
-            .Select(m => new ChatCompletionMessage(m.Role, m.Content))
-            .ToListAsync(ct);
+        // Build history: only when a thread is specified; otherwise a single one-shot.
+        List<ChatCompletionMessage> history;
+        if (threadId is not null)
+        {
+            history = await LoadThreadHistoryAsync(threadId.Value, ct);
+        }
+        else
+        {
+            history = [];
+        }
 
         history.Add(new ChatCompletionMessage("user", request.Message));
 
@@ -70,7 +75,7 @@ public sealed partial class ChatService(
         var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, useNativeTools);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, request.ClientType, request.EditorContext, ct);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -95,14 +100,16 @@ public sealed partial class ChatService(
         {
             Role = "user",
             Content = request.Message,
-            ChannelId = channelId
+            ChannelId = channelId,
+            ThreadId = threadId
         };
 
         var assistantMessage = new ChatMessageDB
         {
             Role = "assistant",
             Content = loopResult.AssistantContent,
-            ChannelId = channelId
+            ChannelId = channelId,
+            ThreadId = threadId
         };
 
         db.ChatMessages.Add(userMessage);
@@ -116,10 +123,13 @@ public sealed partial class ChatService(
     }
 
     public async Task<IReadOnlyList<ChatMessageResponse>> GetHistoryAsync(
-        Guid channelId, int limit = 50, CancellationToken ct = default)
+        Guid channelId, Guid? threadId = null, int limit = 50, CancellationToken ct = default)
     {
-        return await db.ChatMessages
-            .Where(m => m.ChannelId == channelId)
+        var query = threadId is not null
+            ? db.ChatMessages.Where(m => m.ThreadId == threadId)
+            : db.ChatMessages.Where(m => m.ChannelId == channelId);
+
+        return await query
             .OrderByDescending(m => m.CreatedAt)
             .Take(limit)
             .OrderBy(m => m.CreatedAt)
@@ -162,6 +172,49 @@ public sealed partial class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Thread history loading
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Loads messages for a thread, respecting the thread's per-thread
+    /// <see cref="ChatThreadDB.MaxMessages"/> and
+    /// <see cref="ChatThreadDB.MaxCharacters"/> limits.
+    /// Falls back to system defaults (<see cref="MaxHistoryMessages"/>
+    /// and <see cref="MaxHistoryCharacters"/>).
+    /// When both limits are set, only messages fitting within both are
+    /// returned.
+    /// </summary>
+    private async Task<List<ChatCompletionMessage>> LoadThreadHistoryAsync(
+        Guid threadId, CancellationToken ct)
+    {
+        var thread = await db.ChatThreads.FindAsync([threadId], ct);
+        var maxMessages = thread?.MaxMessages ?? MaxHistoryMessages;
+        var maxChars = thread?.MaxCharacters ?? MaxHistoryCharacters;
+
+        // Fetch up to maxMessages most-recent messages, chronologically.
+        var messages = await db.ChatMessages
+            .Where(m => m.ThreadId == threadId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(maxMessages)
+            .OrderBy(m => m.CreatedAt)
+            .Select(m => new ChatCompletionMessage(m.Role, m.Content))
+            .ToListAsync(ct);
+
+        // Trim oldest messages until the total character count fits.
+        var totalChars = 0;
+        for (var i = messages.Count - 1; i >= 0; i--)
+            totalChars += messages[i].Content.Length;
+
+        while (messages.Count > 0 && totalChars > maxChars)
+        {
+            totalChars -= messages[0].Content.Length;
+            messages.RemoveAt(0);
+        }
+
+        return messages;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Chat header
     // ═══════════════════════════════════════════════════════════════
 
@@ -172,7 +225,7 @@ public sealed partial class ChatService(
     /// (either at channel level or inherited from the context).
     /// </summary>
     private async Task<string?> BuildChatHeaderAsync(
-        ChannelDB channel, ChatClientType clientType,
+        ChannelDB channel, AgentDB agent, ChatClientType clientType,
         EditorContext? editorContext, CancellationToken ct)
     {
         // Channel-level flag takes precedence; fall back to context.
@@ -218,30 +271,13 @@ public sealed partial class ChatService(
         }
 
         var sb = new StringBuilder();
-        sb.Append("[user: ").Append(user.Username);
+        sb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
+        sb.Append(" | user: ").Append(user.Username);
         sb.Append(" | via: ").Append(clientType);
 
         if (user.Role is not null && ps is not null)
         {
-            var grants = new List<string>();
-            if (ps.CanCreateSubAgents) grants.Add("CreateSubAgents");
-            if (ps.CanCreateContainers) grants.Add("CreateContainers");
-            if (ps.CanRegisterInfoStores) grants.Add("RegisterInfoStores");
-            if (ps.CanAccessLocalhostInBrowser) grants.Add("LocalhostBrowser");
-            if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
-            if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
-            if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
-            if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
-            if (ps.WebsiteAccesses.Count > 0) grants.Add("WebsiteAccess");
-            if (ps.SearchEngineAccesses.Count > 0) grants.Add("SearchEngineAccess");
-            if (ps.LocalInfoStorePermissions.Count > 0) grants.Add("LocalInfoStore");
-            if (ps.ExternalInfoStorePermissions.Count > 0) grants.Add("ExternalInfoStore");
-            if (ps.AudioDeviceAccesses.Count > 0) grants.Add("AudioDevice");
-            if (ps.DisplayDeviceAccesses.Count > 0) grants.Add("DisplayDevice");
-            if (ps.EditorSessionAccesses.Count > 0) grants.Add("EditorSession");
-            if (ps.AgentPermissions.Count > 0) grants.Add("ManageAgent");
-            if (ps.TaskPermissions.Count > 0) grants.Add("EditTask");
-            if (ps.SkillPermissions.Count > 0) grants.Add("AccessSkill");
+            var grants = CollectGrants(ps);
 
             if (grants.Count > 0)
                 sb.Append(" | role: ").Append(user.Role.Name)
@@ -252,6 +288,44 @@ public sealed partial class ChatService(
 
         if (!string.IsNullOrWhiteSpace(user.Bio))
             sb.Append(" | bio: ").Append(user.Bio);
+
+        // ── Agent self-awareness: own role, clearance, permissions ─
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+            .ThenInclude(r => r!.PermissionSet)
+            .FirstOrDefaultAsync(a => a.Id == agent.Id, ct);
+
+        if (agentWithRole?.Role is { } agentRole)
+        {
+            PermissionSetDB? agentPs = null;
+            if (agentRole.PermissionSetId is { } agentPsId)
+            {
+                agentPs = await db.PermissionSets
+                    .Include(p => p.SafeShellAccesses)
+                    .Include(p => p.ContainerAccesses)
+                    .Include(p => p.WebsiteAccesses)
+                    .Include(p => p.SearchEngineAccesses)
+                    .Include(p => p.LocalInfoStorePermissions)
+                    .Include(p => p.ExternalInfoStorePermissions)
+                    .Include(p => p.AudioDeviceAccesses)
+                    .Include(p => p.DisplayDeviceAccesses)
+                    .Include(p => p.EditorSessionAccesses)
+                    .Include(p => p.AgentPermissions)
+                    .Include(p => p.TaskPermissions)
+                    .Include(p => p.SkillPermissions)
+                    .AsSplitQuery()
+                    .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
+            }
+
+            sb.Append(" | agent-role: ").Append(agentRole.Name);
+            if (agentPs is not null)
+            {
+                sb.Append(" clearance=").Append(agentPs.DefaultClearance);
+                var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
+                if (agentGrants.Count > 0)
+                    sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
+            }
+        }
 
         if (editorContext is not null)
         {
@@ -268,6 +342,147 @@ public sealed partial class ChatService(
 
         sb.AppendLine("]");
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Collects human-readable grant names from a permission set for
+    /// inclusion in the chat header.
+    /// </summary>
+    private static List<string> CollectGrants(PermissionSetDB ps)
+    {
+        var grants = new List<string>();
+        if (ps.CanCreateSubAgents) grants.Add("CreateSubAgents");
+        if (ps.CanCreateContainers) grants.Add("CreateContainers");
+        if (ps.CanRegisterInfoStores) grants.Add("RegisterInfoStores");
+        if (ps.CanAccessLocalhostInBrowser) grants.Add("LocalhostBrowser");
+        if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
+        if (ps.CanClickDesktop) grants.Add("ClickDesktop");
+        if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
+        if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
+        if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
+        if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
+        if (ps.WebsiteAccesses.Count > 0) grants.Add("WebsiteAccess");
+        if (ps.SearchEngineAccesses.Count > 0) grants.Add("SearchEngineAccess");
+        if (ps.LocalInfoStorePermissions.Count > 0) grants.Add("LocalInfoStore");
+        if (ps.ExternalInfoStorePermissions.Count > 0) grants.Add("ExternalInfoStore");
+        if (ps.AudioDeviceAccesses.Count > 0) grants.Add("AudioDevice");
+        if (ps.DisplayDeviceAccesses.Count > 0) grants.Add("DisplayDevice");
+        if (ps.EditorSessionAccesses.Count > 0) grants.Add("EditorSession");
+        if (ps.AgentPermissions.Count > 0) grants.Add("ManageAgent");
+        if (ps.TaskPermissions.Count > 0) grants.Add("EditTask");
+        if (ps.SkillPermissions.Count > 0) grants.Add("AccessSkill");
+        return grants;
+    }
+
+    /// <summary>
+    /// Collects grant names with enumerated resource IDs for the agent
+    /// self-awareness header. When a wildcard grant
+    /// (<see cref="WellKnownIds.AllResources"/>) is present, all resource
+    /// IDs of that type are resolved from the database so the agent knows
+    /// exactly which resources it can act on.
+    /// </summary>
+    private async Task<List<string>> CollectGrantsWithResourcesAsync(
+        PermissionSetDB ps, CancellationToken ct)
+    {
+        var grants = new List<string>();
+        if (ps.CanCreateSubAgents) grants.Add("CreateSubAgents");
+        if (ps.CanCreateContainers) grants.Add("CreateContainers");
+        if (ps.CanRegisterInfoStores) grants.Add("RegisterInfoStores");
+        if (ps.CanAccessLocalhostInBrowser) grants.Add("LocalhostBrowser");
+        if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
+        if (ps.CanClickDesktop) grants.Add("ClickDesktop");
+        if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
+
+        await AppendResourceGrantAsync(grants, "DangerousShell",
+            ps.DangerousShellAccesses.Select(a => a.SystemUserId),
+            () => db.SystemUsers.Select(s => s.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "SafeShell",
+            ps.SafeShellAccesses.Select(a => a.ContainerId),
+            () => db.Containers.Select(c => c.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "ContainerAccess",
+            ps.ContainerAccesses.Select(a => a.ContainerId),
+            () => db.Containers.Select(c => c.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "WebsiteAccess",
+            ps.WebsiteAccesses.Select(a => a.WebsiteId),
+            () => db.Websites.Select(w => w.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "SearchEngineAccess",
+            ps.SearchEngineAccesses.Select(a => a.SearchEngineId),
+            () => db.SearchEngines.Select(s => s.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "LocalInfoStore",
+            ps.LocalInfoStorePermissions.Select(a => a.LocalInformationStoreId),
+            () => db.LocalInformationStores.Select(l => l.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "ExternalInfoStore",
+            ps.ExternalInfoStorePermissions.Select(a => a.ExternalInformationStoreId),
+            () => db.ExternalInformationStores.Select(e => e.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "AudioDevice",
+            ps.AudioDeviceAccesses.Select(a => a.AudioDeviceId),
+            () => db.AudioDevices.Select(a => a.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "DisplayDevice",
+            ps.DisplayDeviceAccesses.Select(a => a.DisplayDeviceId),
+            () => db.DisplayDevices.Select(d => d.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "EditorSession",
+            ps.EditorSessionAccesses.Select(a => a.EditorSessionId),
+            () => db.EditorSessions.Select(e => e.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "ManageAgent",
+            ps.AgentPermissions.Select(a => a.AgentId),
+            () => db.Agents.Select(a => a.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "EditTask",
+            ps.TaskPermissions.Select(a => a.ScheduledTaskId),
+            () => db.ScheduledTasks.Select(t => t.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "AccessSkill",
+            ps.SkillPermissions.Select(a => a.SkillId),
+            () => db.Skills.Select(s => s.Id).ToListAsync(ct), ct);
+
+        return grants;
+    }
+
+    /// <summary>
+    /// Appends a grant entry with resource IDs. If any grant entry
+    /// matches <see cref="WellKnownIds.AllResources"/>, all IDs of that
+    /// type are loaded from the database so the agent sees the resolved
+    /// list instead of the wildcard.
+    /// </summary>
+    private static async Task AppendResourceGrantAsync(
+        List<string> grants,
+        string grantName,
+        IEnumerable<Guid> grantedIds,
+        Func<Task<List<Guid>>> loadAllIdsAsync,
+        CancellationToken ct)
+    {
+        var ids = grantedIds.ToList();
+        if (ids.Count == 0)
+            return;
+
+        List<Guid> resolved;
+        if (ids.Any(id => id == WellKnownIds.AllResources))
+        {
+            resolved = await loadAllIdsAsync();
+        }
+        else
+        {
+            resolved = ids;
+        }
+
+        if (resolved.Count == 0)
+        {
+            grants.Add(grantName);
+            return;
+        }
+
+        var idList = string.Join(",", resolved.Select(id => id.ToString("D")));
+        grants.Add($"{grantName}[{idList}]");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -290,6 +505,7 @@ public sealed partial class ChatService(
         Guid channelId,
         ChatRequest request,
         Func<AgentJobResponse, CancellationToken, Task<bool>> approvalCallback,
+        Guid? threadId = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var channel = await db.Channels
@@ -307,13 +523,16 @@ public sealed partial class ChatService(
         if (string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
-        var history = await db.ChatMessages
-            .Where(m => m.ChannelId == channelId)
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(MaxHistoryMessages)
-            .OrderBy(m => m.CreatedAt)
-            .Select(m => new ChatCompletionMessage(m.Role, m.Content))
-            .ToListAsync(ct);
+        // Build history: only when a thread is specified; otherwise a single one-shot.
+        List<ChatCompletionMessage> history;
+        if (threadId is not null)
+        {
+            history = await LoadThreadHistoryAsync(threadId.Value, ct);
+        }
+        else
+        {
+            history = [];
+        }
 
         history.Add(new ChatCompletionMessage("user", request.Message));
 
@@ -322,7 +541,7 @@ public sealed partial class ChatService(
         var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, nativeToolCalling: true);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, request.ClientType, request.EditorContext, ct);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 
@@ -433,14 +652,16 @@ public sealed partial class ChatService(
         {
             Role = "user",
             Content = request.Message,
-            ChannelId = channelId
+            ChannelId = channelId,
+            ThreadId = threadId
         };
 
         var assistantMessage = new ChatMessageDB
         {
             Role = "assistant",
             Content = assistantContent,
-            ChannelId = channelId
+            ChannelId = channelId,
+            ThreadId = threadId
         };
 
         db.ChatMessages.Add(userMessage);
@@ -1144,13 +1365,14 @@ public sealed partial class ChatService(
                 "Simulate a mouse click at specific coordinates on a display. "
                 + "Coordinates are relative to the display's top-left corner. "
                 + "Returns a follow-up screenshot so you can verify the result. "
-                + "Requires DisplayDevice permission for the target display.",
+                + "Requires CanClickDesktop global permission. Provide the "
+                + "target display device GUID.",
                 clickDesktopSchema),
             new("type_on_desktop",
                 "Type text using keyboard input. Optionally click at coordinates "
                 + "first to focus an input field. Returns a follow-up screenshot "
-                + "so you can verify the result. Requires DisplayDevice permission "
-                + "for the target display.",
+                + "so you can verify the result. Requires CanTypeOnDesktop "
+                + "global permission. Provide the target display device GUID.",
                 typeOnDesktopSchema),
 
             // ── Editor actions ────────────────────────────────────

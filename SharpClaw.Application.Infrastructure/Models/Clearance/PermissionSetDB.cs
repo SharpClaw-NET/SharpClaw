@@ -36,6 +36,12 @@ public class PermissionSetDB : BaseEntity
     /// <summary>Access localhost URLs via direct HTTP (no browser).</summary>
     public bool CanAccessLocalhostCli { get; set; }
 
+    /// <summary>Simulate mouse clicks on desktop displays.</summary>
+    public bool CanClickDesktop { get; set; }
+
+    /// <summary>Simulate keyboard input on desktop displays.</summary>
+    public bool CanTypeOnDesktop { get; set; }
+
     // ── Per-resource grant collections ────────────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];

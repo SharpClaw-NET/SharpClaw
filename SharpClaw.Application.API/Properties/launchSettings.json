@@ -2,6 +2,7 @@
   "profiles": {
     "SharpClaw.Application.API": {
       "commandName": "Project",
+      "applicationUrl": "http://127.0.0.1:48923",
       "environmentVariables": {
         "ASPNETCORE_ENVIRONMENT": "Development"
       }

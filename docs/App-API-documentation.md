@@ -20,6 +20,7 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 - [Agents](#agents)
 - [Channel contexts](#channel-contexts)
 - [Channels](#channels)
+- [Threads](#threads)
 - [Chat (per-channel)](#chat-per-channel)
 - [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
@@ -42,9 +43,10 @@ ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
 
 | Category | Values |
 |----------|--------|
-| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `EditAnyTask` |
-| Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill` |
+| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop` |
+| Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill`, `CaptureDisplay` |
 | Transcription | `TranscribeFromAudioDevice`, `TranscribeFromAudioStream`, `TranscribeFromAudioFile` |
+| Editor | `EditorReadFile`, `EditorGetOpenFiles`, `EditorGetSelection`, `EditorGetDiagnostics`, `EditorApplyEdit`, `EditorCreateFile`, `EditorDeleteFile`, `EditorShowDiff`, `EditorRunBuild`, `EditorRunTerminal` |
 
 ### PermissionClearance
 
@@ -630,6 +632,142 @@ Response `204` or `404` when not found.
 
 ---
 
+## Threads
+
+Threads are lightweight conversation threads within a channel. Messages
+sent with a thread ID include the thread's history; messages without a
+thread are one-shot (no history sent to the model).
+
+Each thread has optional per-thread history limits:
+
+- **`maxMessages`** — caps the number of recent messages sent as context.
+  Default: `50`. `null` means use system default.
+- **`maxCharacters`** — caps the total character count of the history
+  payload. Default: `100000`. `null` means use system default.
+
+When both are set, messages must fit within **both** limits — the oldest
+messages are trimmed first. Setting either to `0` in an update resets it
+to `null` (system default).
+
+Endpoints live under `/channels/{channelId}/threads`.
+
+### POST /channels/{channelId}/threads
+
+Create a new thread.
+
+**Request:**
+
+```json
+{
+  "name": "string | null",
+  "maxMessages": "int | null",
+  "maxCharacters": "int | null"
+}
+```
+
+All fields are optional. Omitted limits use system defaults (50 messages,
+100 000 characters).
+
+**Response `200`:** `ThreadResponse`
+
+---
+
+### GET /channels/{channelId}/threads
+
+List all threads in a channel.
+
+**Response `200`:** `ThreadResponse[]`
+
+---
+
+### GET /channels/{channelId}/threads/{threadId}
+
+**Response `200`:** `ThreadResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /channels/{channelId}/threads/{threadId}
+
+**Request:**
+
+```json
+{
+  "name": "string | null",
+  "maxMessages": "int | null",
+  "maxCharacters": "int | null"
+}
+```
+
+All fields are optional; only provided fields are updated. Set
+`maxMessages` or `maxCharacters` to `0` to reset to `null` (system
+default).
+
+**Response `200`:** `ThreadResponse`
+**Response `404`:** Not found.
+
+---
+
+### DELETE /channels/{channelId}/threads/{threadId}
+
+Deletes the thread and all its messages.
+
+**Response `204`:** Deleted.
+**Response `404`:** Not found.
+
+---
+
+### ThreadResponse
+
+```json
+{
+  "id": "guid",
+  "name": "string | null",
+  "channelId": "guid",
+  "maxMessages": "int | null",
+  "maxCharacters": "int | null",
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+`maxMessages` and `maxCharacters` are `null` when using the system
+defaults (50 and 100 000 respectively).
+
+---
+
+### Thread chat
+
+Chat endpoints that operate within a thread context:
+
+#### POST /channels/{id}/chat/threads/{threadId}
+
+Send a message in a thread. History is included automatically,
+respecting the thread's `maxMessages` and `maxCharacters` limits
+(defaults: 50 messages / 100 000 characters). Body is the same as
+`POST /channels/{id}/chat`.
+
+**Response `200`:** `ChatResponse`
+
+---
+
+#### GET /channels/{id}/chat/threads/{threadId}/history
+
+Retrieve message history for a specific thread.
+
+**Response `200`:** Array of message objects.
+
+---
+
+#### GET /channels/{id}/chat/threads/{threadId}/stream
+
+SSE-based streaming chat within a thread. Same event format as
+`POST /channels/{id}/chat/stream` but includes thread history context.
+
+**Response:** `text/event-stream`
+
+---
+
 ## Chat (per-channel)
 
 All chat operations are scoped to a channel id. Endpoints live under
@@ -637,7 +775,8 @@ All chat operations are scoped to a channel id. Endpoints live under
 
 ### POST /channels/{id}/chat
 
-Send a message and receive the assistant's reply. Body:
+Send a message and receive the assistant's reply. Without a thread,
+no history is sent to the model (one-shot). Body:
 
 ```json
 { "message": "string", "agentId": "guid | null" }

@@ -65,4 +65,6 @@ public class ChannelDB : BaseEntity
     public ICollection<AgentDB> AllowedAgents { get; set; } = [];
 
     public ICollection<ChatMessageDB> ChatMessages { get; set; } = [];
+
+    public ICollection<ChatThreadDB> Threads { get; set; } = [];
 }
