@@ -1,4 +1,4 @@
-<Project Sdk="Uno.Sdk">
+﻿<Project Sdk="Uno.Sdk">
   <PropertyGroup>
     <TargetFrameworks>net10.0-android;net10.0-ios;net10.0-browserwasm;net10.0-desktop;net10.0</TargetFrameworks>
 
@@ -49,6 +49,30 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+  </ItemGroup>
+
+  <!--
+    Bundle the API backend into the output under a "backend" subfolder.
+
+    During DEVELOPMENT: both projects run separately (start API project first,
+    then the Uno app connects to it). The Uno app detects the running API
+    via the /echo endpoint and skips process launch.
+
+    For DISTRIBUTION: publish with /p:BundleBackend=true to auto-publish
+    the backend into the output alongside the Uno app:
+      dotnet publish SharpClaw.Uno.csproj -c Release /p:BundleBackend=true
+
+    Or manually:
+      dotnet publish ..\SharpClaw.Application.API -c Release -o publish\backend
+      dotnet publish SharpClaw.Uno.csproj -c Release
+  -->
+  <Target Name="PublishWithBackend" BeforeTargets="Publish" Condition="'$(BundleBackend)' == 'true' AND Exists('..\SharpClaw.Application.API\SharpClaw.Application.API.csproj')">
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Application.API\SharpClaw.Application.API.csproj&quot; -c $(Configuration) -o &quot;$(PublishDir)backend&quot; --no-self-contained" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+  </Target>
+  <ItemGroup>
+    <Page Update="Presentation\BootPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 
 </Project>

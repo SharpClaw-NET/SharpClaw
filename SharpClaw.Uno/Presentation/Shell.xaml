@@ -8,7 +8,7 @@
       mc:Ignorable="d"
       d:DesignHeight="300"
       d:DesignWidth="400">
-  <Border Background="{ThemeResource ApplicationPageBackgroundThemeBrush}">
+  <Border Background="Black">
     <utu:ExtendedSplashScreen x:Name="Splash"
                 HorizontalAlignment="Stretch"
                 VerticalAlignment="Stretch"
@@ -16,18 +16,23 @@
                 VerticalContentAlignment="Stretch">
       <utu:ExtendedSplashScreen.LoadingContentTemplate>
         <DataTemplate>
-          <Grid>
-            <Grid.RowDefinitions>
-              <RowDefinition Height="2*" />
-              <RowDefinition />
-            </Grid.RowDefinitions>
-
-            <ProgressRing IsActive="True"
-                  Grid.Row="1"
-                  VerticalAlignment="Center"
-                  HorizontalAlignment="Center"
-                  Height="100"
-                  Width="100" />
+          <Grid Background="Black">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        Spacing="12">
+              <TextBlock Text="SharpClaw"
+                         FontFamily="Consolas, Courier New, monospace"
+                         FontSize="28"
+                         FontWeight="Bold"
+                         Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+              <TextBlock x:Name="LoadingDots"
+                         Text="."
+                         FontFamily="Consolas, Courier New, monospace"
+                         FontSize="20"
+                         Foreground="#808080"
+                         HorizontalAlignment="Center" />
+            </StackPanel>
           </Grid>
         </DataTemplate>
       </utu:ExtendedSplashScreen.LoadingContentTemplate>

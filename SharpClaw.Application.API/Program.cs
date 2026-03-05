@@ -36,6 +36,12 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    // Ensure the API always binds to the expected port, regardless of
+    // whether a launch profile is active.  ASPNETCORE_URLS env var
+    // (set by BackendProcessManager) takes precedence if present.
+    if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
+        builder.WebHost.UseUrls("http://127.0.0.1:48923");
+
     // Configuration: environment files
     builder.Configuration.AddLocalEnvironment(builder.Environment.IsDevelopment());
 
