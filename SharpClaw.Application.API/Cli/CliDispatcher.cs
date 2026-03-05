@@ -1162,10 +1162,6 @@ public static class CliDispatcher
             new CreateThreadRequest(name, maxMessages, maxChars),
             svc);
 
-        // Auto-select the newly created thread
-        if (result is IValueHttpResult { Value: ThreadResponse tr })
-            _currentThreadId = tr.Id;
-
         return result;
     }
 

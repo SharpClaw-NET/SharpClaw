@@ -57,6 +57,9 @@ public static class EndpointMapper
             3 => typeof(Func<,,>).MakeGenericType(allTypes),
             4 => typeof(Func<,,,>).MakeGenericType(allTypes),
             5 => typeof(Func<,,,,>).MakeGenericType(allTypes),
+            6 => typeof(Func<,,,,,>).MakeGenericType(allTypes),
+            7 => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
+            8 => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
             _ => throw new NotSupportedException($"Handler '{method.Name}' has too many parameters.")
         };
     }
