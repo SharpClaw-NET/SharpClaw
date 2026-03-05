@@ -36,6 +36,7 @@ public sealed class JsonFilePersistenceService(
         // Collect navigation property names per CLR type so we can null them
         // after deserialization, preventing EF from traversing the object graph
         // and hitting duplicate-key conflicts on related entities.
+        // This includes both regular navigations AND skip navigations (m2m).
         var navigations = context.Model.GetEntityTypes()
             .GroupBy(e => e.ClrType)
             .ToDictionary(
@@ -43,6 +44,7 @@ public sealed class JsonFilePersistenceService(
                 g => g.First()
                     .GetNavigations()
                     .Select(n => n.PropertyInfo)
+                    .Concat(g.First().GetSkipNavigations().Select(n => n.PropertyInfo))
                     .Where(p => p is not null)
                     .ToList());
 
@@ -156,10 +158,7 @@ public sealed class JsonFilePersistenceService(
 
     private void DetachAll()
     {
-        foreach (var entry in context.ChangeTracker.Entries().ToList())
-        {
-            entry.State = EntityState.Detached;
-        }
+        context.ChangeTracker.Clear();
     }
 
     /// <summary>
