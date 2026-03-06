@@ -14,7 +14,8 @@
     <StackPanel HorizontalAlignment="Center"
                 VerticalAlignment="Center"
                 Spacing="8"
-                MinWidth="380">
+                MinWidth="380"
+                MaxWidth="480">
 
       <!-- Title -->
       <TextBlock Text="SharpClaw"
@@ -32,6 +33,22 @@
                  FontSize="14"
                  Foreground="#808080"
                  Margin="0,0,0,12" />
+
+      <!-- First-setup disclaimer (shown only when setup not yet completed) -->
+      <Border x:Name="SetupDisclaimer"
+              Background="#1A1A0A"
+              BorderBrush="#333300"
+              BorderThickness="1"
+              CornerRadius="4"
+              Padding="10,8"
+              Margin="0,0,0,12"
+              Visibility="Collapsed">
+        <TextBlock Style="{StaticResource TerminalText}"
+                   FontSize="11"
+                   Foreground="#CCCC66"
+                   TextWrapping="Wrap"
+                   Text="Default admin credentials: username admin, password 123456 unless otherwise configured in SharpClaw.Application/Environments/.env. You are encouraged to change them after finishing first-time setup." />
+      </Border>
 
       <!-- Username -->
       <TextBlock Text="username:"

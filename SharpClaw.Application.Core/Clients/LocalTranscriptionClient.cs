@@ -39,8 +39,11 @@ public sealed class LocalTranscriptionClient(
 
         using var processor = builder.Build();
 
-        // The audio capture provider delivers 16-bit 16 kHz mono PCM in
-        // WAV format. Whisper.net ProcessAsync(Stream) handles WAV input.
+        // Ensure audio is mono 16 kHz 16-bit PCM — optimal for Whisper.
+        // Live-capture audio is already in this format (fast path);
+        // future file/stream inputs get resampled here automatically.
+        audioData = AudioNormalizer.Normalize(audioData);
+
         using var ms = new MemoryStream(audioData);
 
         var segments = new List<TranscriptionChunkSegment>();

@@ -1033,6 +1033,9 @@ public sealed partial class MainPage : Page
         _ = navigator.NavigateRouteAsync(this, "Login", qualifier: Qualifiers.ClearBackStack);
     }
 
+    private async void OnOfficialWebsiteClick(object sender, RoutedEventArgs e)
+        => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://sharpclaw.mkn8rn.com"));
+
     private async void OnMatrixCommunityClick(object sender, RoutedEventArgs e)
         => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://matrix.to/#/#p1:matrix.mkn8rn.com"));
 

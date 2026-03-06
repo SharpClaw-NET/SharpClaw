@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SharpClaw.Application.API.Routing;
+using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.DTOs.Auth;
 
@@ -8,6 +9,16 @@ namespace SharpClaw.Application.API.Handlers;
 [RouteGroup("/auth")]
 public static class AuthHandlers
 {
+    [MapGet("/me")]
+    public static async Task<IResult> Me(SessionService session, AuthService auth)
+    {
+        if (session.UserId is not { } userId)
+            return Results.Unauthorized();
+
+        var me = await auth.GetMeAsync(userId);
+        return me is not null ? Results.Ok(me) : Results.Unauthorized();
+    }
+
     [MapPost("/login")]
     public static async Task<IResult> Login(LoginRequest request, AuthService auth)
     {

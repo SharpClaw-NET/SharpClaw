@@ -144,7 +144,10 @@ public sealed class AgentService(SharpClawDbContext db)
 
         foreach (var model in models)
         {
-            var agentName = $"default-{model.Name}";
+            var providerSuffix = model.Provider.Name
+                .Replace(" ", "-")
+                .ToLowerInvariant();
+            var agentName = $"default-{model.Name}-{providerSuffix}";
             if (nameSet.Contains(agentName)) continue;
 
             var agent = new AgentDB

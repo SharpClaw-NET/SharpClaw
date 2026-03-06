@@ -1,0 +1,196 @@
+﻿<Page x:Class="SharpClaw.Presentation.FirstSetupPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:local="using:SharpClaw.Presentation"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      mc:Ignorable="d"
+      NavigationCacheMode="Required"
+      Background="Black">
+
+  <Grid VerticalAlignment="Stretch">
+    <ScrollViewer HorizontalAlignment="Center"
+                  VerticalAlignment="Center"
+                  MaxWidth="620"
+                  Padding="20">
+      <StackPanel x:Name="StepsPanel"
+                  Spacing="6"
+                  MinWidth="500">
+
+        <!-- Title -->
+        <TextBlock Text="SharpClaw — First-time Setup"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="20"
+                   FontWeight="Bold"
+                   Foreground="#00FF00"
+                   Margin="0,0,0,12" />
+
+        <!-- Steps are appended dynamically from code-behind -->
+
+        <!-- Provider input panel (hidden until needed) -->
+        <StackPanel x:Name="ProviderInputPanel"
+                    Visibility="Collapsed"
+                    Spacing="6"
+                    Margin="16,8,0,8">
+          <TextBlock Text="provider name:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC" />
+          <TextBox x:Name="ProviderNameBox"
+                   Style="{StaticResource TerminalInput}"
+                   FontSize="12"
+                   PlaceholderText="e.g. My OpenAI" />
+          <TextBlock Text="provider type:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC" />
+          <ComboBox x:Name="ProviderTypeSelector"
+                    FontFamily="Consolas, Courier New, monospace"
+                    FontSize="12"
+                    Background="#1A1A1A"
+                    Foreground="#CCCCCC"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    MinWidth="260"
+                    SelectionChanged="OnApiKeyProviderSelectionChanged" />
+          <StackPanel x:Name="EndpointPanel" Visibility="Collapsed" Spacing="6">
+            <TextBlock Text="API endpoint:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC" />
+            <TextBox x:Name="EndpointBox"
+                     Style="{StaticResource TerminalInput}"
+                     FontSize="12"
+                     PlaceholderText="https://..." />
+          </StackPanel>
+          <Button x:Name="ProviderSubmitBtn"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnProviderSubmitClick"
+                  Margin="0,4,0,0">
+            <TextBlock Text="[ Create Provider ]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#00FF00"
+                       HorizontalAlignment="Center" />
+          </Button>
+        </StackPanel>
+
+        <!-- API key input panel (hidden until needed) -->
+        <StackPanel x:Name="ApiKeyInputPanel"
+                    Visibility="Collapsed"
+                    Spacing="6"
+                    Margin="16,8,0,8">
+          <TextBlock x:Name="ApiKeyProviderLabel"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
+          <ComboBox x:Name="ApiKeyProviderSelector"
+                    FontFamily="Consolas, Courier New, monospace"
+                    FontSize="12"
+                    Background="#1A1A1A"
+                    Foreground="#CCCCCC"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    MinWidth="260"
+                    SelectionChanged="OnApiKeyProviderSelectionChanged" />
+
+          <!-- API key input (for key-based providers) -->
+          <StackPanel x:Name="ApiKeyFieldsPanel" Spacing="6">
+            <TextBlock Text="API key:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC" />
+            <PasswordBox x:Name="ApiKeyBox"
+                         Style="{StaticResource TerminalPasswordInput}"
+                         FontSize="12"
+                         PlaceholderText="sk-..." />
+            <Button x:Name="ApiKeySubmitBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnApiKeySubmitClick">
+              <TextBlock Text="[ Set Key &amp; Continue ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+          </StackPanel>
+
+          <!-- Device code flow (for OAuth-based providers like GitHub Copilot) -->
+          <StackPanel x:Name="DeviceCodePanel" Visibility="Collapsed" Spacing="6">
+            <Button x:Name="DeviceCodeStartBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnDeviceCodeStartClick">
+              <TextBlock Text="[ Start Login ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+            <StackPanel x:Name="DeviceCodeInfoPanel" Visibility="Collapsed" Spacing="4">
+              <TextBlock Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#CCCCCC"
+                         Text="Enter this code in your browser:" />
+              <TextBlock x:Name="DeviceCodeValueBlock"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="18" FontWeight="Bold"
+                         Foreground="#00FF00"
+                         IsTextSelectionEnabled="True"
+                         Margin="0,4,0,4" />
+              <TextBlock x:Name="DeviceCodeStatusBlock"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="11" Foreground="#808080" />
+            </StackPanel>
+          </StackPanel>
+
+          <Button x:Name="LocalOnlyBtn"
+                  Style="{StaticResource TerminalLink}"
+                  Click="OnLocalOnlyClick">
+            <TextBlock Text="> Continue with local models only"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#808080" />
+          </Button>
+        </StackPanel>
+
+        <!-- Agent selector panel (hidden until needed) -->
+        <StackPanel x:Name="AgentSelectorPanel"
+                    Visibility="Collapsed"
+                    Spacing="6"
+                    Margin="16,8,0,8">
+          <TextBlock Text="Select a default agent:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC" />
+          <ComboBox x:Name="DefaultAgentSelector"
+                    FontFamily="Consolas, Courier New, monospace"
+                    FontSize="12"
+                    Background="#1A1A1A"
+                    Foreground="#CCCCCC"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    MinWidth="300" />
+          <Button x:Name="AgentSubmitBtn"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnAgentSubmitClick"
+                  Margin="0,4,0,0">
+            <TextBlock Text="[ Continue ]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#00FF00"
+                       HorizontalAlignment="Center" />
+          </Button>
+        </StackPanel>
+
+        <!-- Skip setup -->
+        <StackPanel Orientation="Horizontal"
+                    Spacing="8"
+                    Margin="0,16,0,0">
+          <Button x:Name="SkipSetupBtn"
+                  Style="{StaticResource TerminalLink}"
+                  Click="OnSkipSetupClick">
+            <TextBlock Text="> Skip setup entirely"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="11" Foreground="#FF8800" />
+          </Button>
+          <TextBlock Style="{StaticResource TerminalText}"
+                     FontSize="11" Foreground="#665500"
+                     VerticalAlignment="Center"
+                     Text="(you will need to configure providers, models, and channels manually)" />
+        </StackPanel>
+
+        <!-- Terminal cursor -->
+        <local:TerminalCursor x:Name="Cursor" Margin="0,8,0,0" />
+
+      </StackPanel>
+    </ScrollViewer>
+  </Grid>
+</Page>

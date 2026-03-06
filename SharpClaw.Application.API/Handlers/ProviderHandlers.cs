@@ -49,6 +49,26 @@ public static class ProviderHandlers
     public static async Task<IResult> StartDeviceCodeFlow(Guid id, ProviderService svc)
     {
         var session = await svc.StartDeviceCodeFlowAsync(id);
-        return Results.Ok(new DeviceCodeResponse(session.UserCode, session.VerificationUri, session.ExpiresInSeconds));
+        return Results.Ok(new DeviceCodeResponse(
+            session.DeviceCode, session.UserCode, session.VerificationUri,
+            session.ExpiresInSeconds, session.IntervalSeconds));
+    }
+
+    [MapPost("/{id:guid}/auth/device-code/poll")]
+    public static async Task<IResult> PollDeviceCodeFlow(
+        Guid id, DeviceCodePollRequest request, ProviderService svc)
+    {
+        try
+        {
+            var session = new DeviceCodeSession(
+                request.DeviceCode, request.UserCode,
+                request.VerificationUri, request.ExpiresInSeconds, request.IntervalSeconds);
+            await svc.CompleteDeviceCodeFlowAsync(id, session);
+            return Results.Ok(new { status = "completed" });
+        }
+        catch (TimeoutException)
+        {
+            return Results.Json(new { status = "expired" }, statusCode: StatusCodes.Status408RequestTimeout);
+        }
     }
 }

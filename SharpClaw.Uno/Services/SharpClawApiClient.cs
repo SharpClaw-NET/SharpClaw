@@ -12,7 +12,11 @@ public sealed class SharpClawApiClient : IDisposable
 
     public SharpClawApiClient(string baseUrl)
     {
-        _http = new HttpClient { BaseAddress = new Uri(baseUrl) };
+        _http = new HttpClient
+        {
+            BaseAddress = new Uri(baseUrl),
+            Timeout = TimeSpan.FromMinutes(10)
+        };
     }
 
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>

@@ -129,4 +129,23 @@ public sealed class AuthService(
         await db.SaveChangesAsync(ct);
         return user;
     }
+
+    /// <summary>
+    /// Returns the profile of the user with the given ID, or <c>null</c> if not found.
+    /// </summary>
+    public async Task<MeResponse?> GetMeAsync(Guid userId, CancellationToken ct = default)
+    {
+        var user = await db.Users
+            .Include(u => u.Role)
+            .FirstOrDefaultAsync(u => u.Id == userId, ct);
+
+        if (user is null) return null;
+
+        return new MeResponse(
+            user.Id,
+            user.Username,
+            user.Bio,
+            user.RoleId,
+            user.Role?.Name);
+    }
 }

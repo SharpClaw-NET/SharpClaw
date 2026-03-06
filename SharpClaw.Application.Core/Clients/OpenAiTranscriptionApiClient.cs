@@ -19,6 +19,15 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
     private const int MaxRetries = 3;
     private static readonly TimeSpan InitialBackoff = TimeSpan.FromSeconds(2);
 
+    /// <summary>
+    /// The <c>gpt-4o-*-transcribe</c> family only supports <c>json</c> or <c>text</c>,
+    /// not <c>verbose_json</c>. Fall back to <c>json</c> for those models.
+    /// </summary>
+    private static string ResolveResponseFormat(string model) =>
+        model.Contains("transcribe", StringComparison.OrdinalIgnoreCase)
+            ? "json"
+            : "verbose_json";
+
     public async Task<TranscriptionChunkResult> TranscribeAsync(
         HttpClient httpClient,
         string apiKey,
@@ -27,6 +36,12 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
         string? language = null,
         CancellationToken ct = default)
     {
+        // Ensure audio is mono 16 kHz 16-bit PCM — optimal for Whisper / ASR.
+        // The WASAPI capture path already outputs this format so the fast
+        // path returns the bytes unchanged; future file/stream inputs get
+        // resampled here automatically.
+        audioData = AudioNormalizer.Normalize(audioData);
+
         HttpResponseMessage? response = null;
 
         for (var attempt = 0; ; attempt++)
@@ -37,7 +52,7 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
             audioContent.Headers.ContentType = new MediaTypeHeaderValue("audio/wav");
             content.Add(audioContent, "file", "chunk.wav");
             content.Add(new StringContent(model), "model");
-            content.Add(new StringContent("verbose_json"), "response_format");
+            content.Add(new StringContent(ResolveResponseFormat(model)), "response_format");
 
             if (language is not null)
                 content.Add(new StringContent(language), "language");

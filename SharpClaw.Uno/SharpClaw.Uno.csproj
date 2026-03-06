@@ -100,11 +100,22 @@
     </Page>
   </ItemGroup>
   <ItemGroup>
+    <Page Update="Presentation\FirstSetupPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+  <ItemGroup>
     <Content Include="Environment\**" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
     <UnoIcon Include="Environment\icon.png" ForegroundScale="1.0" Color="Transparent" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\FirstSetupPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 
 </Project>

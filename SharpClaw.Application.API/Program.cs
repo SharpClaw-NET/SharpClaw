@@ -169,6 +169,11 @@ try
 
     var app = builder.Build();
 
+    // Configure JSON serialisation for minimal API responses to match
+    // the conventions used throughout the solution: camelCase + string enums.
+    app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
+        .Value.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+
     // Initialize infrastructure (loads persisted data into InMemory DB)
     await app.Services.InitializeInfrastructureAsync();
 

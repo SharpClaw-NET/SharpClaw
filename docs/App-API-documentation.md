@@ -870,6 +870,23 @@ must be the channel default or in its `allowedAgentIds`.
 defaults are resolved from the channel → context → agent role permission
 sets. Global action types ignore it.
 
+#### Transcription fields
+
+For transcription jobs (`TranscribeFromAudioDevice`,
+`TranscribeFromAudioStream`, `TranscribeFromAudioFile`):
+
+- **`transcriptionModelId`** — overrides the agent's model with a
+  specific transcription model. When omitted the default transcription
+  model is resolved from the channel → context default resource set.
+- **`language`** — BCP-47 language hint (e.g. `"en"`, `"de"`, `"ja"`)
+  forwarded to the STT provider. When omitted, the model auto-detects
+  the spoken language. **Supplying the correct language code improves
+  accuracy and reduces latency** — especially for short audio chunks
+  where auto-detection is unreliable.
+
+> **CLI equivalent:**
+> `job submit <channelId> TranscribeFromAudioDevice <audioDeviceId> --model <id> --lang en`
+
 **Response `200`:** `AgentJobResponse`
 
 ---

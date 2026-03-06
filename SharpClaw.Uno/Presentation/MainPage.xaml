@@ -79,6 +79,14 @@
         </Button>
         <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
           <Button Background="Transparent" BorderThickness="0" Padding="4"
+                  Click="OnOfficialWebsiteClick"
+                  ToolTipService.ToolTip="Official Website">
+            <TextBlock Text="&#xE774;"
+                       FontFamily="{ThemeResource SymbolThemeFontFamily}"
+                       FontSize="14"
+                       Foreground="#00FF00" />
+          </Button>
+          <Button Background="Transparent" BorderThickness="0" Padding="4"
                   Click="OnMatrixCommunityClick"
                   ToolTipService.ToolTip="Matrix Community">
             <TextBlock Text="M"

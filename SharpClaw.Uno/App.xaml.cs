@@ -155,6 +155,7 @@ public partial class App : Application
             new ViewMap(ViewModel: typeof(ShellModel)),
             new ViewMap<BootPage>(),
             new ViewMap<LoginPage>(),
+            new ViewMap<FirstSetupPage>(),
             new ViewMap<MainPage>(),
             new ViewMap<DashboardPage>(),
             new DataViewMap<SecondPage, SecondModel, Entity>()
@@ -166,6 +167,7 @@ public partial class App : Application
                 [
                     new ("Boot", View: views.FindByView<BootPage>()),
                     new ("Login", View: views.FindByView<LoginPage>()),
+                    new ("FirstSetup", View: views.FindByView<FirstSetupPage>()),
                     new ("Main", View: views.FindByView<MainPage>(), IsDefault:true),
                     new ("Dashboard", View: views.FindByView<DashboardPage>()),
                     new ("Second", View: views.FindByViewModel<SecondModel>()),
