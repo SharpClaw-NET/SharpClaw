@@ -79,8 +79,8 @@ public sealed class SharpClawApiClient : IDisposable
     }
 
     /// <summary>
-    /// Waits for the API process to become reachable by polling the
-    /// <c>/echo</c> endpoint (no auth required).
+    /// Waits for the API process to become reachable and the API key to be
+    /// valid by polling the <c>/ping</c> endpoint (requires X-Api-Key).
     /// </summary>
     public async Task WaitForReadyAsync(
         TimeSpan timeout, CancellationToken ct = default)
@@ -92,11 +92,12 @@ public sealed class SharpClawApiClient : IDisposable
         {
             try
             {
-                var response = await _http.GetAsync("/echo", cts.Token);
+                var response = await GetAsync("/ping", cts.Token);
                 if (response.IsSuccessStatusCode)
                     return;
             }
             catch (HttpRequestException) { }
+            catch (InvalidOperationException) { }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(250, cts.Token);

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
@@ -127,6 +128,8 @@ public sealed class AgentService(SharpClawDbContext db)
     /// <summary>
     /// Creates a <c>default-{modelName}</c> agent for every chat-capable model
     /// that does not already have one.  Returns the list of newly created agents.
+    /// For local models the suffix is derived from the download source
+    /// (e.g. "huggingface") instead of the provider name.
     /// </summary>
     public async Task<IReadOnlyList<AgentResponse>> SyncWithModelsAsync(CancellationToken ct = default)
     {
@@ -134,6 +137,18 @@ public sealed class AgentService(SharpClawDbContext db)
             .Include(m => m.Provider)
             .Where(m => (m.Capabilities & ModelCapability.Chat) != 0)
             .ToListAsync(ct);
+
+        // Pre-load source URLs for local models so we can derive the suffix.
+        var localModelIds = models
+            .Where(m => m.Provider.ProviderType == ProviderType.Local)
+            .Select(m => m.Id)
+            .ToHashSet();
+
+        var localSourceUrls = localModelIds.Count > 0
+            ? await db.LocalModelFiles
+                .Where(f => localModelIds.Contains(f.ModelId))
+                .ToDictionaryAsync(f => f.ModelId, f => f.SourceUrl, ct)
+            : [];
 
         var existingNames = await db.Agents
             .Select(a => a.Name)
@@ -144,9 +159,19 @@ public sealed class AgentService(SharpClawDbContext db)
 
         foreach (var model in models)
         {
-            var providerSuffix = model.Provider.Name
-                .Replace(" ", "-")
-                .ToLowerInvariant();
+            string providerSuffix;
+            if (model.Provider.ProviderType == ProviderType.Local
+                && localSourceUrls.TryGetValue(model.Id, out var sourceUrl))
+            {
+                providerSuffix = ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant();
+            }
+            else
+            {
+                providerSuffix = model.Provider.Name
+                    .Replace(" ", "-")
+                    .ToLowerInvariant();
+            }
+
             var agentName = $"default-{model.Name}-{providerSuffix}";
             if (nameSet.Contains(agentName)) continue;
 

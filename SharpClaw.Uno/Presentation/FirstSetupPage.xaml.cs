@@ -23,6 +23,7 @@ public sealed partial class FirstSetupPage : Page
     private TaskCompletionSource<bool>? _providerTcs;
     private TaskCompletionSource<bool>? _apiKeyTcs;
     private TaskCompletionSource<Guid?>? _agentTcs;
+    private TaskCompletionSource<bool>? _localModelTcs;
     private bool _localOnly;
     private List<ProviderDto>? _providers;
 
@@ -168,36 +169,51 @@ public sealed partial class FirstSetupPage : Page
         {
             if (_localOnly)
             {
-                ReplaceLastStep("No models available (local only). Setup cannot continue.", error: true);
-                return;
-            }
+                // Guide the user through downloading a local model from HuggingFace.
+                ReplaceLastStep("No models found. Download a local model to continue.");
+                LocalModelDownloadPanel.Visibility = Visibility.Visible;
+                _localModelTcs = new TaskCompletionSource<bool>();
+                var downloaded = await _localModelTcs.Task;
+                LocalModelDownloadPanel.Visibility = Visibility.Collapsed;
 
-            ReplaceLastStep("No models found. Syncing from providers...");
-            var synced = false;
-            foreach (var p in _providers!.Where(p => p.HasApiKey))
-            {
-                try
+                if (!downloaded)
                 {
-                    var resp = await Api.PostAsync($"/providers/{p.Id}/sync-models", null);
-                    if (resp.IsSuccessStatusCode) synced = true;
+                    ReplaceLastStep("No local model downloaded. Setup cannot continue.", error: true);
+                    return;
                 }
-                catch { /* try next */ }
-            }
 
-            if (!synced)
+                models = await FetchListAsync<ModelDto>("/models");
+                ReplaceLastStep($"Downloaded and registered {models?.Count ?? 0} model(s).", done: true);
+            }
+            else
             {
-                ReplaceLastStep("Model sync failed. Check your API key and try setup again.", error: true);
-                // Wipe API keys on failed sync
+                ReplaceLastStep("No models found. Syncing from providers...");
+                var synced = false;
                 foreach (var p in _providers!.Where(p => p.HasApiKey))
                 {
-                    try { await Api.PostAsync($"/providers/{p.Id}/set-key", new StringContent(JsonSerializer.Serialize(new { apiKey = "" }, Json), Encoding.UTF8, "application/json")); }
-                    catch { /* best effort */ }
+                    try
+                    {
+                        var resp = await Api.PostAsync($"/providers/{p.Id}/sync-models", null);
+                        if (resp.IsSuccessStatusCode) synced = true;
+                    }
+                    catch { /* try next */ }
                 }
-                return;
-            }
 
-            models = await FetchListAsync<ModelDto>("/models");
-            ReplaceLastStep($"Synced {models?.Count ?? 0} model(s).", done: true);
+                if (!synced)
+                {
+                    ReplaceLastStep("Model sync failed. Check your API key and try setup again.", error: true);
+                    // Wipe API keys on failed sync
+                    foreach (var p in _providers!.Where(p => p.HasApiKey))
+                    {
+                        try { await Api.PostAsync($"/providers/{p.Id}/set-key", new StringContent(JsonSerializer.Serialize(new { apiKey = "" }, Json), Encoding.UTF8, "application/json")); }
+                        catch { /* best effort */ }
+                    }
+                    return;
+                }
+
+                models = await FetchListAsync<ModelDto>("/models");
+                ReplaceLastStep($"Synced {models?.Count ?? 0} model(s).", done: true);
+            }
         }
 
         // ── Step 4: Agents ──
@@ -263,29 +279,18 @@ public sealed partial class FirstSetupPage : Page
         {
             ReplaceLastStep("Creating default workspace...");
 
-            // Try to find GPT 5.4 agent (non-pro)
             agents ??= await FetchListAsync<AgentDto>("/agents") ?? [];
-            var gpt54 = agents.FirstOrDefault(a =>
-                a.ModelName.Contains("gpt-5.4", StringComparison.OrdinalIgnoreCase)
-                && !a.ModelName.Contains("pro", StringComparison.OrdinalIgnoreCase));
-
-            Guid? selectedAgentId = gpt54?.Id;
+            ReplaceLastStep("Please select a default agent for the initial workspace.");
+            PopulateAgentSelector(agents);
+            AgentSelectorPanel.Visibility = Visibility.Visible;
+            _agentTcs = new TaskCompletionSource<Guid?>();
+            var selectedAgentId = await _agentTcs.Task;
+            AgentSelectorPanel.Visibility = Visibility.Collapsed;
 
             if (selectedAgentId is null)
             {
-                // User must select
-                ReplaceLastStep("GPT 5.4 not available. Please select a default agent.");
-                PopulateAgentSelector(agents);
-                AgentSelectorPanel.Visibility = Visibility.Visible;
-                _agentTcs = new TaskCompletionSource<Guid?>();
-                selectedAgentId = await _agentTcs.Task;
-                AgentSelectorPanel.Visibility = Visibility.Collapsed;
-
-                if (selectedAgentId is null)
-                {
-                    ReplaceLastStep("No agent selected. Setup cannot continue.", error: true);
-                    return;
-                }
+                ReplaceLastStep("No agent selected. Setup cannot continue.", error: true);
+                return;
             }
 
             try
@@ -436,6 +441,96 @@ public sealed partial class FirstSetupPage : Page
         _apiKeyTcs?.TrySetResult(false);
     }
 
+    private async void OnListFilesClick(object sender, RoutedEventArgs e)
+    {
+        var url = HfUrlBox.Text?.Trim();
+        if (string.IsNullOrEmpty(url))
+        {
+            AppendStep("URL is required.", error: true);
+            return;
+        }
+
+        HfListFilesBtn.IsEnabled = false;
+        HfStatusBlock.Text = "Fetching available files...";
+        HfStatusBlock.Visibility = Visibility.Visible;
+
+        try
+        {
+            var encodedUrl = Uri.EscapeDataString(url);
+            var files = await FetchListAsync<GgufFileDto>($"/models/local/download/list?url={encodedUrl}");
+            if (files is not { Count: > 0 })
+            {
+                HfStatusBlock.Text = "No GGUF files found at this URL.";
+                HfListFilesBtn.IsEnabled = true;
+                return;
+            }
+
+            HfFileSelector.Items.Clear();
+            foreach (var f in files)
+            {
+                var label = f.Quantization is not null
+                    ? $"{f.Filename}  ({f.Quantization})"
+                    : f.Filename;
+                HfFileSelector.Items.Add(new ComboBoxItem
+                {
+                    Content = label,
+                    Tag = f.DownloadUrl,
+                });
+            }
+            HfFileSelector.SelectedIndex = 0;
+            HfFileSelectionPanel.Visibility = Visibility.Visible;
+            HfStatusBlock.Text = $"{files.Count} file(s) available.";
+        }
+        catch (Exception ex)
+        {
+            HfStatusBlock.Text = $"Failed: {ex.Message}";
+        }
+        finally
+        {
+            HfListFilesBtn.IsEnabled = true;
+        }
+    }
+
+    private async void OnDownloadModelClick(object sender, RoutedEventArgs e)
+    {
+        if (HfFileSelector.SelectedItem is not ComboBoxItem { Tag: string downloadUrl })
+        {
+            AppendStep("Please select a file.", error: true);
+            return;
+        }
+
+        HfDownloadBtn.IsEnabled = false;
+        HfListFilesBtn.IsEnabled = false;
+        HfStatusBlock.Text = "Downloading model — this may take a while...";
+        HfStatusBlock.Visibility = Visibility.Visible;
+
+        try
+        {
+            var body = JsonSerializer.Serialize(new { url = downloadUrl }, Json);
+            var resp = await Api.PostAsync("/models/local/download",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+
+            if (resp.IsSuccessStatusCode)
+            {
+                HfStatusBlock.Text = "Download complete!";
+                _localModelTcs?.TrySetResult(true);
+            }
+            else
+            {
+                var msg = await resp.Content.ReadAsStringAsync();
+                HfStatusBlock.Text = $"Download failed: {(int)resp.StatusCode} — {msg}";
+                HfDownloadBtn.IsEnabled = true;
+                HfListFilesBtn.IsEnabled = true;
+            }
+        }
+        catch (Exception ex)
+        {
+            HfStatusBlock.Text = $"Download failed: {ex.Message}";
+            HfDownloadBtn.IsEnabled = true;
+            HfListFilesBtn.IsEnabled = true;
+        }
+    }
+
     private async void OnDeviceCodeStartClick(object sender, RoutedEventArgs e)
     {
         if (ApiKeyProviderSelector.SelectedItem is not ComboBoxItem { Tag: Guid providerId }) return;
@@ -516,6 +611,7 @@ public sealed partial class FirstSetupPage : Page
         _providerTcs?.TrySetResult(false);
         _apiKeyTcs?.TrySetResult(false);
         _agentTcs?.TrySetResult(null);
+        _localModelTcs?.TrySetResult(false);
 
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
@@ -623,4 +719,6 @@ public sealed partial class FirstSetupPage : Page
     private sealed partial record ChannelDto(Guid Id, string Title, Guid? ContextId);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ThreadDto(Guid Id, string Name, Guid ChannelId);
+    [ImplicitKeys(IsEnabled = false)]
+    private sealed partial record GgufFileDto(string DownloadUrl, string Filename, string? Quantization);
 }

@@ -148,6 +148,58 @@
                     Visibility="Collapsed"
                     Spacing="6"
                     Margin="16,8,0,8">
+
+        <!-- Local model download panel (hidden until needed) -->
+        <StackPanel x:Name="LocalModelDownloadPanel"
+                    Visibility="Collapsed"
+                    Spacing="6"
+                    Margin="16,8,0,8">
+          <TextBlock Text="Enter a HuggingFace model URL:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC" />
+          <TextBox x:Name="HfUrlBox"
+                   Style="{StaticResource TerminalInput}"
+                   FontSize="12"
+                   PlaceholderText="https://huggingface.co/org/repo" />
+          <Button x:Name="HfListFilesBtn"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnListFilesClick">
+            <TextBlock Text="[ List Files ]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#00FF00"
+                       HorizontalAlignment="Center" />
+          </Button>
+
+          <StackPanel x:Name="HfFileSelectionPanel" Visibility="Collapsed" Spacing="6">
+            <TextBlock Text="Select a GGUF file:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC" />
+            <ComboBox x:Name="HfFileSelector"
+                      FontFamily="Consolas, Courier New, monospace"
+                      FontSize="12"
+                      Background="#1A1A1A"
+                      Foreground="#CCCCCC"
+                      BorderBrush="#333333"
+                      BorderThickness="1"
+                      MinWidth="300" />
+            <Button x:Name="HfDownloadBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnDownloadModelClick">
+              <TextBlock Text="[ Download ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+          </StackPanel>
+
+          <TextBlock x:Name="HfStatusBlock"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="11" Foreground="#808080"
+                     Visibility="Collapsed"
+                     TextWrapping="Wrap" />
+        </StackPanel>
+
+        <!-- Agent selector panel (original, below local model panel) -->
           <TextBlock Text="Select a default agent:"
                      Style="{StaticResource TerminalText}"
                      FontSize="12" Foreground="#CCCCCC" />

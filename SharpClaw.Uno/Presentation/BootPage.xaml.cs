@@ -59,7 +59,7 @@ public sealed partial class BootPage : Page
             UrlPanel.Visibility = Visibility.Collapsed;
             StopDots();
 
-            _typewriterDone = Cursor.TypeCommandAsync("sharpclaw echo");
+            _typewriterDone = Cursor.TypeCommandAsync("sharpclaw ping");
             _typewriterDone.ContinueWith(_ =>
                 DispatcherQueue.TryEnqueue(StartDots),
                 TaskScheduler.Default);
@@ -135,7 +135,7 @@ public sealed partial class BootPage : Page
         if (state.IsRetryVisible && _model is not null)
         {
             UrlBox.Text = _model.ApiUrl.TrimEnd('/');
-            Focus(FocusState.Programmatic);
+            UrlBox.Focus(FocusState.Programmatic);
         }
     }
 
