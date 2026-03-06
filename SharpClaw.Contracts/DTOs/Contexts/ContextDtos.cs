@@ -1,3 +1,4 @@
+using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Contracts.DTOs.Contexts;
@@ -20,13 +21,21 @@ public sealed record UpdateContextRequest(
 public sealed record ContextResponse(
     Guid Id,
     string Name,
-    Guid AgentId,
-    string AgentName,
+    AgentSummary Agent,
     Guid? PermissionSetId,
     bool DisableChatHeader,
-    IReadOnlyList<Guid> AllowedAgentIds,
+    IReadOnlyList<AgentSummary> AllowedAgents,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+// ── Granular operation DTOs ──────────────────────────────────────
+
+public sealed record AddContextAllowedAgentRequest(Guid AgentId);
+
+public sealed record ContextAllowedAgentsResponse(
+    Guid ContextId,
+    AgentSummary DefaultAgent,
+    IReadOnlyList<AgentSummary> AllowedAgents);
 
 // ── Effective permission (resolved view) ─────────────────────────
 

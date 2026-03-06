@@ -37,3 +37,8 @@ public sealed record DefaultResourcesResponse(
     Guid? SkillResourceId,
     Guid? TranscriptionModelId,
     Guid? EditorSessionResourceId);
+
+/// <summary>
+/// Sets a single default resource by key.
+/// </summary>
+public sealed record SetDefaultResourceByKeyRequest(Guid ResourceId);

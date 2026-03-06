@@ -108,6 +108,130 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db)
         return ToResponse(ctx.DefaultResourceSet!);
     }
 
+    // ── Per-key operations ──────────────────────────────────────────
+
+    private static readonly HashSet<string> ValidKeys = new(StringComparer.OrdinalIgnoreCase)
+    {
+        "dangshell", "safeshell", "container", "website", "search",
+        "localinfo", "externalinfo", "audiodevice", "displaydevice",
+        "agent", "task", "skill", "transcriptionmodel", "editor"
+    };
+
+    /// <summary>
+    /// Validates a default-resource key name. Returns <see langword="false"/>
+    /// if the key is not recognised.
+    /// </summary>
+    public static bool IsValidKey(string key) =>
+        ValidKeys.Contains(key);
+
+    /// <summary>
+    /// Sets a single default resource by key for a channel.
+    /// </summary>
+    public async Task<DefaultResourcesResponse?> SetKeyForChannelAsync(
+        Guid channelId, string key, Guid resourceId,
+        CancellationToken ct = default)
+    {
+        var ch = await db.Channels
+            .Include(c => c.DefaultResourceSet)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        if (ch is null) return null;
+
+        if (ch.DefaultResourceSet is null)
+        {
+            var drs = new DefaultResourceSetDB();
+            db.DefaultResourceSets.Add(drs);
+            await db.SaveChangesAsync(ct);
+            ch.DefaultResourceSetId = drs.Id;
+            ch.DefaultResourceSet = drs;
+        }
+
+        ApplyKey(ch.DefaultResourceSet, key, resourceId);
+        await db.SaveChangesAsync(ct);
+        return ToResponse(ch.DefaultResourceSet);
+    }
+
+    /// <summary>
+    /// Clears a single default resource by key for a channel.
+    /// </summary>
+    public async Task<DefaultResourcesResponse?> ClearKeyForChannelAsync(
+        Guid channelId, string key, CancellationToken ct = default)
+    {
+        var ch = await db.Channels
+            .Include(c => c.DefaultResourceSet)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+        if (ch is null) return null;
+        if (ch.DefaultResourceSet is null) return EmptyResponse(Guid.Empty);
+
+        ApplyKey(ch.DefaultResourceSet, key, null);
+        await db.SaveChangesAsync(ct);
+        return ToResponse(ch.DefaultResourceSet);
+    }
+
+    /// <summary>
+    /// Sets a single default resource by key for a context.
+    /// </summary>
+    public async Task<DefaultResourcesResponse?> SetKeyForContextAsync(
+        Guid contextId, string key, Guid resourceId,
+        CancellationToken ct = default)
+    {
+        var ctx = await db.AgentContexts
+            .Include(c => c.DefaultResourceSet)
+            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
+        if (ctx is null) return null;
+
+        if (ctx.DefaultResourceSet is null)
+        {
+            var drs = new DefaultResourceSetDB();
+            db.DefaultResourceSets.Add(drs);
+            await db.SaveChangesAsync(ct);
+            ctx.DefaultResourceSetId = drs.Id;
+            ctx.DefaultResourceSet = drs;
+        }
+
+        ApplyKey(ctx.DefaultResourceSet, key, resourceId);
+        await db.SaveChangesAsync(ct);
+        return ToResponse(ctx.DefaultResourceSet);
+    }
+
+    /// <summary>
+    /// Clears a single default resource by key for a context.
+    /// </summary>
+    public async Task<DefaultResourcesResponse?> ClearKeyForContextAsync(
+        Guid contextId, string key, CancellationToken ct = default)
+    {
+        var ctx = await db.AgentContexts
+            .Include(c => c.DefaultResourceSet)
+            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
+        if (ctx is null) return null;
+        if (ctx.DefaultResourceSet is null) return EmptyResponse(Guid.Empty);
+
+        ApplyKey(ctx.DefaultResourceSet, key, null);
+        await db.SaveChangesAsync(ct);
+        return ToResponse(ctx.DefaultResourceSet);
+    }
+
+    private static void ApplyKey(DefaultResourceSetDB drs, string key, Guid? value)
+    {
+        switch (key.ToLowerInvariant())
+        {
+            case "dangshell": drs.DangerousShellResourceId = value; break;
+            case "safeshell": drs.SafeShellResourceId = value; break;
+            case "container": drs.ContainerResourceId = value; break;
+            case "website": drs.WebsiteResourceId = value; break;
+            case "search": drs.SearchEngineResourceId = value; break;
+            case "localinfo": drs.LocalInfoStoreResourceId = value; break;
+            case "externalinfo": drs.ExternalInfoStoreResourceId = value; break;
+            case "audiodevice": drs.AudioDeviceResourceId = value; break;
+            case "displaydevice": drs.DisplayDeviceResourceId = value; break;
+            case "agent": drs.AgentResourceId = value; break;
+            case "task": drs.TaskResourceId = value; break;
+            case "skill": drs.SkillResourceId = value; break;
+            case "transcriptionmodel": drs.TranscriptionModelId = value; break;
+            case "editor": drs.EditorSessionResourceId = value; break;
+            default: throw new ArgumentException($"Unknown default resource key: {key}");
+        }
+    }
+
     // ── Helpers ───────────────────────────────────────────────────
 
     private static void Apply(DefaultResourceSetDB drs, SetDefaultResourcesRequest r)

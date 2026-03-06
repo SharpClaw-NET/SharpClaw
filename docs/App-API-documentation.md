@@ -13,20 +13,51 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 
 ## Table of Contents
 
+- [Health checks](#health-checks)
 - [Enums](#enums)
 - [Auth](#auth)
 - [Providers](#providers)
 - [Models](#models)
+- [Local models](#local-models)
 - [Agents](#agents)
+- [Roles](#roles)
 - [Channel contexts](#channel-contexts)
 - [Channels](#channels)
+- [Default resources](#default-resources)
 - [Threads](#threads)
 - [Chat (per-channel)](#chat-per-channel)
 - [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
 - [Transcription streaming](#transcription-streaming)
 - [Resources](#resources)
+- [Editor bridge](#editor-bridge)
 - [Permission Resolution](#permission-resolution)
+
+---
+
+## Health checks
+
+### GET /echo
+
+Liveness check — **no auth required** (no `X-Api-Key` header needed).
+
+**Response `200`:**
+
+```json
+{ "status": "ok" }
+```
+
+---
+
+### GET /ping
+
+Authentication check — requires a valid `X-Api-Key` header.
+
+**Response `200`:**
+
+```json
+{ "status": "authenticated" }
+```
 
 ---
 
@@ -36,8 +67,11 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 
 ```
 OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
-ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
+ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot,
+Custom, Local
 ```
+
+`Local` is used for in-process LLamaSharp / Whisper.net models.
 
 ### AgentActionType
 
@@ -74,10 +108,62 @@ ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
 ### ModelCapability (flags)
 
 ```
-None, Chat, Transcription, ImageGeneration, Embedding, TextToSpeech
+None = 0, Chat = 1, Transcription = 2, ImageGeneration = 4,
+Embedding = 8, TextToSpeech = 16, Vision = 32
 ```
 
 Values can be combined (comma-separated). Default is `Chat`.
+`Vision` enables image/screenshot input for models that support it
+(e.g. gpt-4o, claude-3+, gemini-1.5+).
+
+### DangerousShellType
+
+```
+Bash, PowerShell, CommandPrompt, Git
+```
+
+These spawn a real shell interpreter with unrestricted execution.
+
+### SafeShellType
+
+```
+Mk8Shell
+```
+
+Sandboxed DSL — never invokes a real shell interpreter.
+
+### ChatClientType
+
+```
+CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode, Other
+```
+
+Identifies the client interface that originated a chat message. Included
+in the chat header so the agent knows the communication channel.
+
+### EditorType
+
+```
+VisualStudio2026, VisualStudioCode, Other
+```
+
+### LocalModelStatus
+
+```
+Pending, Downloading, Ready, Failed
+```
+
+### ChatStreamEventType
+
+| Value | Description |
+|-------|-------------|
+| `TextDelta` | Partial text token from the model |
+| `ToolCallStart` | A tool call was detected and a job submitted |
+| `ToolCallResult` | A tool call job completed (or failed/was denied) |
+| `ApprovalRequired` | A job requires user approval before execution |
+| `ApprovalResult` | Approval decision has been applied |
+| `Error` | An error occurred during the stream |
+| `Done` | Stream complete; contains the final persisted response |
 
 ---
 
@@ -474,6 +560,23 @@ Assign a role to an agent.
 }
 ```
 
+### AgentSummary
+
+Lightweight agent object embedded in channel and context responses.
+Omits `systemPrompt` to keep payloads compact.
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "modelId": "guid",
+  "modelName": "string",
+  "providerName": "string",
+  "roleId": "guid | null",
+  "roleName": "string | null"
+}
+```
+
 ---
 
 ## Channel contexts
@@ -534,17 +637,85 @@ Deletes the context. Channels inside it are detached instead of deleted.
 
 Response `204` or `404` when not found.
 
+### Allowed agents (context)
+
+#### GET /channel-contexts/{id}/agents
+
+List the context's allowed agents.
+
+**Response `200`:** `ContextAllowedAgentsResponse`
+
+#### POST /channel-contexts/{id}/agents
+
+Add an agent to the context's allowed set.
+
+**Request:**
+
+```json
+{ "agentId": "guid" }
+```
+
+**Response `200`:** `ContextAllowedAgentsResponse`
+
+#### DELETE /channel-contexts/{id}/agents/{agentId}
+
+Remove an agent from the context's allowed set.
+
+**Response `200`:** `ContextAllowedAgentsResponse`
+**Response `404`:** Context not found.
+
+### Default resources (context, per-key)
+
+#### PUT /channel-contexts/{id}/defaults/{key}
+
+Set a single default resource by key.
+
+**Request:**
+
+```json
+{ "resourceId": "guid" }
+```
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `400`:** Invalid key.
+
+#### DELETE /channel-contexts/{id}/defaults/{key}
+
+Clear a single default resource by key.
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `400`:** Invalid key.
+
+Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
+`localinfo`, `externalinfo`, `audiodevice`, `displaydevice`, `agent`,
+`task`, `skill`, `transcriptionmodel`, `editor`.
+
 ### ContextResponse
 
 ```json
 {
   "id": "guid",
   "name": "string",
-  "agentId": "guid",
-  "agentName": "string",
+  "agent": { /* AgentSummary */ },
   "permissionSetId": "guid | null",
+  "disableChatHeader": false,
+  "allowedAgents": [ { /* AgentSummary */ } ],
   "createdAt": "datetime",
   "updatedAt": "datetime"
+}
+```
+
+`agent` and each entry in `allowedAgents` are full
+[`AgentSummary`](#agentsummary) objects (id, name, modelId, modelName,
+providerName, roleId, roleName).
+
+### ContextAllowedAgentsResponse
+
+```json
+{
+  "contextId": "guid",
+  "defaultAgent": { /* AgentSummary */ },
+  "allowedAgents": [ { /* AgentSummary */ } ]
 }
 ```
 
@@ -612,21 +783,104 @@ Response `200`: `ChannelResponse` or `404` when not found.
 
 Response `204` or `404` when not found.
 
+### Default agent
+
+#### PUT /channels/{id}/agent
+
+Set the default agent for a channel.
+
+**Request:**
+
+```json
+{ "agentId": "guid" }
+```
+
+**Response `200`:** `ChannelResponse`
+**Response `404`:** Channel not found.
+
+### Allowed agents (channel)
+
+#### GET /channels/{id}/agents
+
+List the channel's allowed agents (effective: channel's own, falling
+back to context's).
+
+**Response `200`:** `ChannelAllowedAgentsResponse`
+
+#### POST /channels/{id}/agents
+
+Add an agent to the channel's allowed set.
+
+**Request:**
+
+```json
+{ "agentId": "guid" }
+```
+
+**Response `200`:** `ChannelAllowedAgentsResponse`
+
+#### DELETE /channels/{id}/agents/{agentId}
+
+Remove an agent from the channel's allowed set.
+
+**Response `200`:** `ChannelAllowedAgentsResponse`
+**Response `404`:** Channel not found.
+
+### Default resources (channel, per-key)
+
+#### PUT /channels/{id}/defaults/{key}
+
+Set a single default resource by key.
+
+**Request:**
+
+```json
+{ "resourceId": "guid" }
+```
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `400`:** Invalid key.
+
+#### DELETE /channels/{id}/defaults/{key}
+
+Clear a single default resource by key.
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `400`:** Invalid key.
+
+Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
+`localinfo`, `externalinfo`, `audiodevice`, `displaydevice`, `agent`,
+`task`, `skill`, `transcriptionmodel`, `editor`.
+
 ### ChannelResponse
 
 ```json
 {
   "id": "guid",
   "title": "string",
-  "agentId": "guid",
-  "agentName": "string",
+  "agent": { /* AgentSummary | null */ },
   "contextId": "guid | null",
   "contextName": "string | null",
   "permissionSetId": "guid | null",
   "effectivePermissionSetId": "guid | null",
-  "allowedAgentIds": ["guid"],
+  "allowedAgents": [ { /* AgentSummary */ } ],
+  "disableChatHeader": false,
   "createdAt": "datetime",
   "updatedAt": "datetime"
+}
+```
+
+`agent` and each entry in `allowedAgents` are full
+[`AgentSummary`](#agentsummary) objects (id, name, modelId, modelName,
+providerName, roleId, roleName).
+
+### ChannelAllowedAgentsResponse
+
+```json
+{
+  "channelId": "guid",
+  "defaultAgent": { /* AgentSummary | null */ },
+  "allowedAgents": [ { /* AgentSummary */ } ]
 }
 ```
 
@@ -779,19 +1033,39 @@ Send a message and receive the assistant's reply. Without a thread,
 no history is sent to the model (one-shot). Body:
 
 ```json
-{ "message": "string", "agentId": "guid | null" }
+{
+  "message": "string",
+  "agentId": "guid | null",
+  "clientType": "CLI | API | Telegram | Discord | WhatsApp | VisualStudio | VisualStudioCode | Other",
+  "editorContext": {
+    "editorType": "VisualStudio2026 | VisualStudioCode | Other",
+    "editorVersion": "string | null",
+    "workspacePath": "string | null",
+    "activeFilePath": "string | null",
+    "activeFileLanguage": "string | null",
+    "selectionStartLine": "int | null",
+    "selectionEndLine": "int | null",
+    "selectedText": "string | null"
+  }
+}
 ```
 
-`agentId` optionally overrides the channel's default agent. The agent
-must be the channel default or in its `allowedAgentIds`.
+- `agentId` optionally overrides the channel's default agent. The agent
+  must be the channel default or in its `allowedAgentIds`.
+- `clientType` identifies the calling interface. Defaults to `API`.
+  Included in the chat header so the agent knows the communication
+  channel.
+- `editorContext` is optional. When provided by an IDE extension, it is
+  included in the chat header so the agent is aware of the user's
+  current editor state (open file, selection, workspace).
 
-Response `200` (example):
+Response `200`:
 
 ```json
 {
   "userMessage": { "role": "user", "content": "string", "timestamp": "datetime" },
   "assistantMessage": { "role": "assistant", "content": "string", "timestamp": "datetime" },
-  "jobResults": [ /* Agent job results, if any */ ]
+  "jobResults": [ /* AgentJobResponse[], if any */ ]
 }
 ```
 
@@ -808,27 +1082,72 @@ Response `200`: an array of message objects.
 
 ## Chat streaming (SSE)
 
-The API exposes an SSE-based streaming chat endpoint which pauses for
-inline approvals. Use the following endpoints under the channel route
-group:
+The API exposes SSE-based streaming chat endpoints which pause for
+inline approvals.
 
-POST /channels/{id}/chat/stream
+### POST /channels/{id}/chat/stream
 
-- Streams `ChatStreamEvent` items as server-sent events (`text/event-stream`).
-- When a job requires approval the stream emits an `approval_required`
-  event and waits for the client to POST to the companion approve
-  endpoint.
+Streams `ChatStreamEvent` items as server-sent events (`text/event-stream`).
+Request body is the same as `POST /channels/{id}/chat`.
 
-POST /channels/{id}/chat/stream/approve/{jobId}
+Each event has an `event:` line matching the `ChatStreamEventType` and a
+`data:` line with the JSON payload:
 
-- Companion endpoint used by the client to resolve a pending approval
-  emitted by a running SSE stream. Body:
+```
+event: TextDelta
+data: {"type":"TextDelta","delta":"Hello"}
+
+event: ToolCallStart
+data: {"type":"ToolCallStart","job":{...AgentJobResponse...}}
+
+event: ToolCallResult
+data: {"type":"ToolCallResult","result":{...AgentJobResponse...}}
+
+event: ApprovalRequired
+data: {"type":"ApprovalRequired","pendingJob":{...AgentJobResponse...}}
+
+event: ApprovalResult
+data: {"type":"ApprovalResult","approvalOutcome":{...AgentJobResponse...}}
+
+event: Error
+data: {"type":"Error","error":"message"}
+
+event: Done
+data: {"type":"Done","finalResponse":{...ChatResponse...}}
+```
+
+When a job requires approval the stream emits an `ApprovalRequired`
+event and waits for the client to POST to the companion approve
+endpoint.
+
+### POST /channels/{id}/chat/stream/approve/{jobId}
+
+Companion endpoint used by the client to resolve a pending approval
+emitted by a running SSE stream. Body:
 
 ```json
 { "approved": true }
 ```
 
 Response `200` on success, or `404` when no pending approval exists.
+
+---
+
+### Thread streaming
+
+Thread-scoped streaming mirrors the channel-level endpoints but
+includes conversation history:
+
+#### POST /channels/{id}/chat/threads/{threadId}/stream
+
+Same SSE event format as `POST /channels/{id}/chat/stream` but scoped
+to a thread. Request body is the same as `POST /channels/{id}/chat`.
+History is included automatically, respecting the thread's
+`maxMessages` and `maxCharacters` limits.
+
+#### POST /channels/{id}/chat/threads/{threadId}/stream/approve/{jobId}
+
+Same approval companion endpoint, scoped to a thread stream.
 
 ---
 
@@ -858,6 +1177,7 @@ unless overridden via `agentId`.
   "dangerousShellType": "Bash | PowerShell | CommandPrompt | Git | null",
   "safeShellType": "Mk8Shell | null",
   "scriptJson": "string | null",
+  "workingDirectory": "string | null",
   "transcriptionModelId": "guid | null",
   "language": "string | null"
 }
@@ -869,6 +1189,19 @@ must be the channel default or in its `allowedAgentIds`.
 `resourceId` is required for per-resource action types. When omitted,
 defaults are resolved from the channel → context → agent role permission
 sets. Global action types ignore it.
+
+#### Shell fields
+
+For shell jobs:
+
+- **`dangerousShellType`** — required for `UnsafeExecuteAsDangerousShell`.
+  Values: `Bash`, `PowerShell`, `CommandPrompt`, `Git`.
+- **`safeShellType`** — required for `ExecuteAsSafeShell`. Value: `Mk8Shell`.
+- **`scriptJson`** — serialised `Mk8ShellScript` JSON for safe shell;
+  raw command text for dangerous shell.
+- **`workingDirectory`** — absolute path where the dangerous shell
+  process should be spawned. Overrides the system user's default
+  working directory. Not sandboxed — dangerous by design.
 
 #### Transcription fields
 
@@ -886,6 +1219,9 @@ For transcription jobs (`TranscribeFromAudioDevice`,
 
 > **CLI equivalent:**
 > `job submit <channelId> TranscribeFromAudioDevice <audioDeviceId> --model <id> --lang en`
+
+Audio is automatically normalised to mono 16 kHz 16-bit PCM before
+being sent to the transcription model (Whisper-optimal format).
 
 **Response `200`:** `AgentJobResponse`
 
@@ -997,6 +1333,7 @@ Retrieve transcription segments added after the given timestamp.
   "dangerousShellType": "Bash | null",
   "safeShellType": "Mk8Shell | null",
   "scriptJson": "string | null",
+  "workingDirectory": "string | null",
   "transcriptionModelId": "guid | null",
   "language": "string | null",
   "segments": [
@@ -1042,29 +1379,462 @@ subscription.
 ## Resources
 
 The API exposes multiple resource types under the `/resources` group.
-Examples implemented in the handlers include containers and audio
-devices.
+All resource types follow the same CRUD pattern.
 
 ### Containers
 
-POST /resources/containers
-GET  /resources/containers
-GET  /resources/containers/{id}
-PUT  /resources/containers/{id}
+```
+POST   /resources/containers
+GET    /resources/containers
+GET    /resources/containers/{id}
+PUT    /resources/containers/{id}
 DELETE /resources/containers/{id}
-POST /resources/containers/sync
+POST   /resources/containers/sync
+```
+
+`sync` scans the local filesystem for registered mk8.shell workspaces.
 
 Typical request/response bodies are `CreateContainerRequest`, `ContainerResponse`,
 etc.
 
 ### Audio devices
 
-POST /resources/audiodevices
-GET  /resources/audiodevices
-GET  /resources/audiodevices/{id}
-PUT  /resources/audiodevices/{id}
+```
+POST   /resources/audiodevices
+GET    /resources/audiodevices
+GET    /resources/audiodevices/{id}
+PUT    /resources/audiodevices/{id}
 DELETE /resources/audiodevices/{id}
-POST /resources/audiodevices/sync
+POST   /resources/audiodevices/sync
+```
+
+`sync` discovers WASAPI capture devices on the local machine
+(Windows-only).
+
+### Display devices
+
+```
+POST   /resources/displaydevices
+GET    /resources/displaydevices
+GET    /resources/displaydevices/{id}
+PUT    /resources/displaydevices/{id}
+DELETE /resources/displaydevices/{id}
+POST   /resources/displaydevices/sync
+```
+
+`sync` enumerates connected displays.
+
+**CreateDisplayDeviceRequest:**
+
+```json
+{
+  "name": "string",
+  "deviceIdentifier": "string | null",
+  "displayIndex": 0,
+  "description": "string | null"
+}
+```
+
+**DisplayDeviceResponse:**
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "deviceIdentifier": "string | null",
+  "displayIndex": 0,
+  "description": "string | null",
+  "skillId": "guid | null",
+  "createdAt": "datetime"
+}
+```
+
+### Editor sessions
+
+Editor sessions are resource entities that represent registered IDE
+connections. They are used for permission grants on editor actions.
+
+```
+POST   /resources/editorsessions
+GET    /resources/editorsessions
+GET    /resources/editorsessions/{id}
+PUT    /resources/editorsessions/{id}
+DELETE /resources/editorsessions/{id}
+```
+
+**CreateEditorSessionRequest:**
+
+```json
+{
+  "name": "string",
+  "editorType": "VisualStudio2026 | VisualStudioCode | Other",
+  "editorVersion": "string | null",
+  "workspacePath": "string | null",
+  "description": "string | null"
+}
+```
+
+**UpdateEditorSessionRequest:**
+
+```json
+{
+  "name": "string | null",
+  "description": "string | null"
+}
+```
+
+**EditorSessionResponse:**
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "editorType": "VisualStudio2026",
+  "editorVersion": "string | null",
+  "workspacePath": "string | null",
+  "description": "string | null",
+  "isConnected": true,
+  "createdAt": "datetime"
+}
+```
+
+---
+
+## Roles
+
+Roles define permission sets that can be assigned to agents.
+
+### GET /roles
+
+List all roles.
+
+**Response `200`:** `RoleResponse[]`
+
+---
+
+### GET /roles/{id}
+
+**Response `200`:** `RoleResponse`
+**Response `404`:** Not found.
+
+---
+
+### GET /roles/{id}/permissions
+
+**Response `200`:** `RolePermissionsResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /roles/{id}/permissions
+
+Replace the entire permission set of a role. The calling user must
+hold every permission they are granting — you cannot give what you
+don't have.
+
+**Request:**
+
+```json
+{
+  "defaultClearance": "Independent",
+  "canCreateSubAgents": false,
+  "canCreateContainers": false,
+  "canRegisterInfoStores": false,
+  "canAccessLocalhostInBrowser": false,
+  "canAccessLocalhostCli": false,
+  "canClickDesktop": false,
+  "canTypeOnDesktop": false,
+  "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
+  "safeShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
+  "containerAccesses": null,
+  "websiteAccesses": null,
+  "searchEngineAccesses": null,
+  "localInfoStoreAccesses": null,
+  "externalInfoStoreAccesses": null,
+  "audioDeviceAccesses": null,
+  "agentAccesses": null,
+  "taskAccesses": null,
+  "skillAccesses": null
+}
+```
+
+Each `*Accesses` array contains `ResourceGrant` objects:
+
+```json
+{ "resourceId": "guid", "clearance": "Independent" }
+```
+
+Use `ffffffff-ffff-ffff-ffff-ffffffffffff` as the `resourceId` for a
+wildcard grant that covers all resources of that type.
+
+**Response `200`:** `RolePermissionsResponse`
+**Response `403`:** Caller lacks the permissions they are trying to grant.
+**Response `404`:** Not found.
+
+### RoleResponse
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "permissionSetId": "guid | null"
+}
+```
+
+### RolePermissionsResponse
+
+```json
+{
+  "roleId": "guid",
+  "roleName": "string",
+  "defaultClearance": "Independent",
+  "canCreateSubAgents": false,
+  "canCreateContainers": false,
+  "canRegisterInfoStores": false,
+  "canAccessLocalhostInBrowser": false,
+  "canAccessLocalhostCli": false,
+  "canClickDesktop": false,
+  "canTypeOnDesktop": false,
+  "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
+  "safeShellAccesses": [],
+  "containerAccesses": [],
+  "websiteAccesses": [],
+  "searchEngineAccesses": [],
+  "localInfoStoreAccesses": [],
+  "externalInfoStoreAccesses": [],
+  "audioDeviceAccesses": [],
+  "agentAccesses": [],
+  "taskAccesses": [],
+  "skillAccesses": []
+}
+```
+
+---
+
+## Default resources
+
+Default resources determine which resource is used when a job is
+submitted without an explicit `resourceId`. Defaults can be set at both
+channel and context level. Resolution order: channel → context.
+
+### GET /channels/{id}/defaults
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `404`:** Channel not found or no defaults set.
+
+### PUT /channels/{id}/defaults
+
+**Request:** `SetDefaultResourcesRequest`
+**Response `200`:** `DefaultResourcesResponse`
+
+### GET /channel-contexts/{id}/defaults
+
+**Response `200`:** `DefaultResourcesResponse`
+**Response `404`:** Context not found or no defaults set.
+
+### PUT /channel-contexts/{id}/defaults
+
+**Request:** `SetDefaultResourcesRequest`
+**Response `200`:** `DefaultResourcesResponse`
+
+### SetDefaultResourcesRequest
+
+```json
+{
+  "dangerousShellResourceId": "guid | null",
+  "safeShellResourceId": "guid | null",
+  "containerResourceId": "guid | null",
+  "websiteResourceId": "guid | null",
+  "searchEngineResourceId": "guid | null",
+  "localInfoStoreResourceId": "guid | null",
+  "externalInfoStoreResourceId": "guid | null",
+  "audioDeviceResourceId": "guid | null",
+  "displayDeviceResourceId": "guid | null",
+  "agentResourceId": "guid | null",
+  "taskResourceId": "guid | null",
+  "skillResourceId": "guid | null",
+  "transcriptionModelId": "guid | null",
+  "editorSessionResourceId": "guid | null"
+}
+```
+
+### DefaultResourcesResponse
+
+Same fields as the request, plus an `id` field for the
+`DefaultResourceSetDB` entity.
+
+---
+
+## Local models
+
+In-process inference via LLamaSharp (LLM) and Whisper.net (STT).
+Endpoints live under `/models/local`.
+
+### POST /models/local/download
+
+Download a GGUF model file from a URL (e.g. Hugging Face) and register
+it as a local model.
+
+**Request:**
+
+```json
+{
+  "url": "string",
+  "name": "string | null",
+  "quantization": "string | null",
+  "gpuLayers": "int | null"
+}
+```
+
+**Response `200`:** `LocalModelFileResponse`
+
+---
+
+### GET /models/local/download/list?url={url}
+
+List available GGUF files at a Hugging Face model URL.
+
+**Response `200`:** `ResolvedModelFileResponse[]`
+
+```json
+[
+  {
+    "downloadUrl": "string",
+    "filename": "string",
+    "quantization": "string | null"
+  }
+]
+```
+
+---
+
+### GET /models/local
+
+List all downloaded local models.
+
+**Response `200`:** `LocalModelFileResponse[]`
+
+---
+
+### POST /models/local/{modelId}/load
+
+Pin a model in memory. Optionally override GPU layers and context size.
+
+**Request:**
+
+```json
+{
+  "gpuLayers": "int | null",
+  "contextSize": "uint | null"
+}
+```
+
+**Response `200`:** `{ "modelId": "guid", "pinned": true }`
+
+---
+
+### POST /models/local/{modelId}/unload
+
+Unpin a model (it will be evicted when idle).
+
+**Response `200`**
+
+---
+
+### DELETE /models/local/{modelId}
+
+Delete the local model file and its DB record.
+
+**Response `204`:** Deleted.
+**Response `404`:** Not found.
+
+---
+
+### LocalModelFileResponse
+
+```json
+{
+  "id": "guid",
+  "modelId": "guid",
+  "modelName": "string",
+  "sourceUrl": "string",
+  "filePath": "string",
+  "fileSizeBytes": 0,
+  "quantization": "string | null",
+  "status": "Ready",
+  "downloadProgress": 1.0,
+  "isLoaded": true
+}
+```
+
+`status` is a `LocalModelStatus`: `Pending`, `Downloading`, `Ready`, `Failed`.
+
+---
+
+## Editor bridge
+
+The editor bridge provides a WebSocket connection for IDE extensions
+(VS 2026, VS Code) and a REST endpoint for querying active sessions.
+
+### WS /editor/ws
+
+WebSocket upgrade endpoint. IDE extensions connect here and send a
+registration message, then enter a request/response loop managed by
+`EditorBridgeService`.
+
+**Registration message (extension → server):**
+
+```json
+{
+  "editorType": "VisualStudio2026 | VisualStudioCode | Other",
+  "editorVersion": "string | null",
+  "workspacePath": "string | null"
+}
+```
+
+**Request (server → extension):**
+
+```json
+{
+  "requestId": "guid",
+  "action": "string",
+  "params": { ... }
+}
+```
+
+**Response (extension → server):**
+
+```json
+{
+  "requestId": "guid",
+  "success": true,
+  "data": "string | null",
+  "error": "string | null"
+}
+```
+
+30-second timeout per request.
+
+---
+
+### GET /editor/sessions
+
+List all currently connected editor sessions.
+
+**Response `200`:**
+
+```json
+[
+  {
+    "sessionId": "guid",
+    "editorType": "VisualStudio2026",
+    "editorVersion": "string | null",
+    "workspacePath": "string | null",
+    "isConnected": true,
+    "connectedAt": "datetime"
+  }
+]
+```
 
 ---
 

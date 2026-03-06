@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Channels;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
@@ -20,6 +21,8 @@ public sealed class ChannelService(SharpClawDbContext db)
         if (request.AgentId is { } agentId)
         {
             agent = await db.Agents
+                .Include(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(a => a.Role)
                 .FirstOrDefaultAsync(a => a.Id == agentId, ct)
                 ?? throw new ArgumentException($"Agent {agentId} not found.");
         }
@@ -28,7 +31,10 @@ public sealed class ChannelService(SharpClawDbContext db)
         if (request.ContextId is { } ctxId)
         {
             context = await db.AgentContexts
-                .Include(c => c.Agent)
+                .Include(c => c.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.Agent).ThenInclude(a => a.Role)
+                .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.AllowedAgents).ThenInclude(a => a.Role)
                 .FirstOrDefaultAsync(c => c.Id == ctxId, ct)
                 ?? throw new ArgumentException($"Context {ctxId} not found.");
         }
@@ -50,6 +56,8 @@ public sealed class ChannelService(SharpClawDbContext db)
         if (request.AllowedAgentIds is { Count: > 0 } agentIds)
         {
             var allowed = await db.Agents
+                .Include(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(a => a.Role)
                 .Where(a => agentIds.Contains(a.Id))
                 .ToListAsync(ct);
             foreach (var a in allowed)
@@ -78,10 +86,14 @@ public sealed class ChannelService(SharpClawDbContext db)
         Guid? agentId = null, Guid? contextId = null, CancellationToken ct = default)
     {
         var query = db.Channels
-            .Include(c => c.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
-            .Include(c => c.AllowedAgents)
+            .Include(c => c.Agent).ThenInclude(a => a!.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent).ThenInclude(a => a!.Role)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Role)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Role)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Role)
             .AsQueryable();
 
         if (agentId is not null)
@@ -176,10 +188,14 @@ public sealed class ChannelService(SharpClawDbContext db)
         {
             // No messages in any channel — fall back to most recently created.
             channel = await db.Channels
-                .Include(c => c.Agent)
-                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
-                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
-                .Include(c => c.AllowedAgents)
+                .Include(c => c.Agent).ThenInclude(a => a!.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.Agent).ThenInclude(a => a!.Role)
+                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Role)
+                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Role)
+                .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+                .Include(c => c.AllowedAgents).ThenInclude(a => a.Role)
                 .OrderByDescending(c => c.CreatedAt)
                 .FirstOrDefaultAsync(ct);
         }
@@ -198,14 +214,105 @@ public sealed class ChannelService(SharpClawDbContext db)
         return true;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Granular operations
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Sets the default agent for a channel.
+    /// </summary>
+    public async Task<ChannelResponse?> SetAgentAsync(
+        Guid channelId, Guid agentId, CancellationToken ct = default)
+    {
+        var channel = await LoadChannelAsync(channelId, ct);
+        if (channel is null) return null;
+
+        var agent = await db.Agents
+            .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct)
+            ?? throw new ArgumentException($"Agent {agentId} not found.");
+
+        channel.AgentId = agent.Id;
+        channel.Agent = agent;
+        await db.SaveChangesAsync(ct);
+        return ToResponse(channel, channel.Agent, channel.AgentContext);
+    }
+
+    /// <summary>
+    /// Lists the allowed agents for a channel (effective: channel's own,
+    /// falling back to context's).
+    /// </summary>
+    public async Task<ChannelAllowedAgentsResponse?> ListAllowedAgentsAsync(
+        Guid channelId, CancellationToken ct = default)
+    {
+        var channel = await LoadChannelAsync(channelId, ct);
+        if (channel is null) return null;
+
+        var effectiveAgent = channel.Agent ?? channel.AgentContext?.Agent;
+        var effectiveAllowed = channel.AllowedAgents.Count > 0
+            ? channel.AllowedAgents
+            : channel.AgentContext?.AllowedAgents ?? (ICollection<AgentDB>)[];
+
+        return new(channelId,
+            effectiveAgent is not null ? ToSummary(effectiveAgent) : null,
+            effectiveAllowed.Select(ToSummary).ToList());
+    }
+
+    /// <summary>
+    /// Adds an agent to the channel's allowed agents.
+    /// </summary>
+    public async Task<ChannelAllowedAgentsResponse?> AddAllowedAgentAsync(
+        Guid channelId, Guid agentId, CancellationToken ct = default)
+    {
+        var channel = await LoadChannelAsync(channelId, ct);
+        if (channel is null) return null;
+
+        if (channel.AllowedAgents.Any(a => a.Id == agentId))
+            return await ListAllowedAgentsAsync(channelId, ct);
+
+        var agent = await db.Agents
+            .Include(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(a => a.Role)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct)
+            ?? throw new ArgumentException($"Agent {agentId} not found.");
+
+        channel.AllowedAgents.Add(agent);
+        await db.SaveChangesAsync(ct);
+        return await ListAllowedAgentsAsync(channelId, ct);
+    }
+
+    /// <summary>
+    /// Removes an agent from the channel's allowed agents.
+    /// </summary>
+    public async Task<ChannelAllowedAgentsResponse?> RemoveAllowedAgentAsync(
+        Guid channelId, Guid agentId, CancellationToken ct = default)
+    {
+        var channel = await LoadChannelAsync(channelId, ct);
+        if (channel is null) return null;
+
+        var agent = channel.AllowedAgents.FirstOrDefault(a => a.Id == agentId);
+        if (agent is not null)
+        {
+            channel.AllowedAgents.Remove(agent);
+            await db.SaveChangesAsync(ct);
+        }
+
+        return await ListAllowedAgentsAsync(channelId, ct);
+    }
+
     // ── Private helpers ───────────────────────────────────────────
 
     private async Task<ChannelDB?> LoadChannelAsync(Guid id, CancellationToken ct) =>
         await db.Channels
-            .Include(c => c.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent)
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
-            .Include(c => c.AllowedAgents)
+            .Include(c => c.Agent).ThenInclude(a => a!.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent).ThenInclude(a => a!.Role)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Role)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Role)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.Role)
             .FirstOrDefaultAsync(c => c.Id == id, ct);
 
     private static ChannelResponse ToResponse(
@@ -216,20 +323,28 @@ public sealed class ChannelService(SharpClawDbContext db)
 
         // Effective allowed agents: channel's own, falling back to context's.
         var effectiveAllowed = channel.AllowedAgents.Count > 0
-            ? channel.AllowedAgents.Select(a => a.Id).ToList()
-            : context?.AllowedAgents.Select(a => a.Id).ToList() ?? [];
+            ? channel.AllowedAgents
+            : context?.AllowedAgents ?? (ICollection<AgentDB>)[];
 
         return new(channel.Id,
             channel.Title,
-            effectiveAgent?.Id,
-            effectiveAgent?.Name,
+            effectiveAgent is not null ? ToSummary(effectiveAgent) : null,
             context?.Id,
             context?.Name,
             channel.PermissionSetId,
             channel.PermissionSetId ?? context?.PermissionSetId,
-            effectiveAllowed,
+            effectiveAllowed.Select(ToSummary).ToList(),
             channel.DisableChatHeader,
             channel.CreatedAt,
             channel.UpdatedAt);
     }
+
+    internal static AgentSummary ToSummary(AgentDB agent) =>
+        new(agent.Id,
+            agent.Name,
+            agent.ModelId,
+            agent.Model?.Name ?? "unknown",
+            agent.Model?.Provider?.Name ?? "unknown",
+            agent.RoleId,
+            agent.Role?.Name);
 }

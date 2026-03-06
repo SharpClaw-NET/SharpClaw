@@ -716,8 +716,8 @@ public static class CliDispatcher
             PrintJsonWithShortIds(new
             {
                 ContextId = ctx.Id,
-                DefaultAgentId = ctx.AgentId,
-                AllowedAgentIds = ctx.AllowedAgentIds
+                DefaultAgent = ctx.Agent,
+                AllowedAgents = ctx.AllowedAgents
             });
             return Results.Ok();
         }
@@ -730,7 +730,7 @@ public static class CliDispatcher
             var ctx = await svc.GetByIdAsync(contextId);
             if (ctx is null) return Results.NotFound();
 
-            var updated = ctx.AllowedAgentIds.ToList();
+            var updated = ctx.AllowedAgents.Select(a => a.Id).ToList();
             if (!updated.Contains(agentToAdd))
                 updated.Add(agentToAdd);
 
@@ -746,7 +746,7 @@ public static class CliDispatcher
             var ctx = await svc.GetByIdAsync(contextId);
             if (ctx is null) return Results.NotFound();
 
-            var updated = ctx.AllowedAgentIds.Where(id => id != agentToRemove).ToList();
+            var updated = ctx.AllowedAgents.Select(a => a.Id).Where(id => id != agentToRemove).ToList();
 
             return await ChannelContextHandlers.Update(
                 contextId,
@@ -1207,8 +1207,8 @@ public static class CliDispatcher
             PrintJsonWithShortIds(new
             {
                 ChannelId = ch.Id,
-                DefaultAgentId = ch.AgentId,
-                AllowedAgentIds = ch.AllowedAgentIds
+                DefaultAgent = ch.Agent,
+                AllowedAgents = ch.AllowedAgents
             });
             return Results.Ok();
         }
@@ -1221,7 +1221,7 @@ public static class CliDispatcher
             var ch = await svc.GetByIdAsync(channelId);
             if (ch is null) return Results.NotFound();
 
-            var updated = ch.AllowedAgentIds.ToList();
+            var updated = ch.AllowedAgents.Select(a => a.Id).ToList();
             if (!updated.Contains(agentToAdd))
                 updated.Add(agentToAdd);
 
@@ -1237,7 +1237,7 @@ public static class CliDispatcher
             var ch = await svc.GetByIdAsync(channelId);
             if (ch is null) return Results.NotFound();
 
-            var updated = ch.AllowedAgentIds.Where(id => id != agentToRemove).ToList();
+            var updated = ch.AllowedAgents.Select(a => a.Id).Where(id => id != agentToRemove).ToList();
 
             return await ChannelHandlers.Update(
                 channelId,

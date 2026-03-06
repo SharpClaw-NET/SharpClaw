@@ -1,3 +1,5 @@
+using SharpClaw.Contracts.DTOs.Agents;
+
 namespace SharpClaw.Contracts.DTOs.Channels;
 
 public sealed record CreateChannelRequest(
@@ -18,13 +20,23 @@ public sealed record UpdateChannelRequest(
 public sealed record ChannelResponse(
     Guid Id,
     string Title,
-    Guid? AgentId,
-    string? AgentName,
+    AgentSummary? Agent,
     Guid? ContextId,
     string? ContextName,
     Guid? PermissionSetId,
     Guid? EffectivePermissionSetId,
-    IReadOnlyList<Guid> AllowedAgentIds,
+    IReadOnlyList<AgentSummary> AllowedAgents,
     bool DisableChatHeader,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);
+
+// ── Granular operation DTOs ──────────────────────────────────────
+
+public sealed record SetChannelAgentRequest(Guid AgentId);
+
+public sealed record AddAllowedAgentRequest(Guid AgentId);
+
+public sealed record ChannelAllowedAgentsResponse(
+    Guid ChannelId,
+    AgentSummary? DefaultAgent,
+    IReadOnlyList<AgentSummary> AllowedAgents);
