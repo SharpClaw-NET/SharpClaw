@@ -12,10 +12,12 @@ namespace SharpClaw.Application.Core.Clients;
 /// information for speech recognition.
 /// </para>
 /// <para>
+/// Pipeline: input stream → decode → stereo→mono → resample→16 kHz →
+/// write 16-bit PCM WAV to output stream. No temp files.
+/// </para>
+/// <para>
 /// If the input is already in the target format the bytes are returned
-/// unchanged (zero-copy fast path). Otherwise NAudio handles the
-/// conversion pipeline: stereo→mono, resample→16 kHz, re-encode to
-/// 16-bit PCM WAV.
+/// unchanged (fast path).
 /// </para>
 /// </summary>
 internal static class AudioNormalizer
@@ -29,12 +31,12 @@ internal static class AudioNormalizer
 
     /// <summary>
     /// Ensures the WAV audio is mono, 16 kHz, 16-bit PCM.
-    /// Returns the original bytes if they already match.
+    /// Returns the original bytes when they already match.
     /// </summary>
     internal static byte[] Normalize(byte[] wavData)
     {
-        using var inputStream = new MemoryStream(wavData);
-        using var reader = new WaveFileReader(inputStream);
+        using var input = new MemoryStream(wavData);
+        using var reader = new WaveFileReader(input);
 
         var src = reader.WaveFormat;
 
@@ -47,10 +49,22 @@ internal static class AudioNormalizer
             return wavData;
         }
 
-        // Build conversion pipeline: source → sample provider → mono → resample → 16-bit WAV.
-        ISampleProvider pipeline = reader.ToSampleProvider();
+        using var output = new MemoryStream();
+        Normalize(reader, output);
+        return output.ToArray();
+    }
 
-        if (src.Channels > 1)
+    /// <summary>
+    /// Stream-to-stream normalisation. Reads from <paramref name="input"/>
+    /// and writes a Whisper-ready 16 kHz mono 16-bit PCM WAV into
+    /// <paramref name="output"/>. No temp files are created.
+    /// </summary>
+    internal static void Normalize(WaveFileReader input, Stream output)
+    {
+        ISampleProvider pipeline = input.ToSampleProvider();
+
+        // stereo → mono
+        if (input.WaveFormat.Channels > 1)
         {
             pipeline = new StereoToMonoSampleProvider(pipeline)
             {
@@ -59,27 +73,26 @@ internal static class AudioNormalizer
             };
         }
 
-        if (src.SampleRate != TargetSampleRate)
+        // resample → 16 kHz
+        if (input.WaveFormat.SampleRate != TargetSampleRate)
         {
             pipeline = new WdlResamplingSampleProvider(pipeline, TargetSampleRate);
         }
 
-        using var output = new MemoryStream();
-        var target16 = pipeline.ToWaveProvider16();
-        using (var writer = new WaveFileWriter(new IgnoreDisposeStream(output), target16.WaveFormat))
-        {
-            var buf = new byte[4096];
-            int read;
-            while ((read = target16.Read(buf, 0, buf.Length)) > 0)
-                writer.Write(buf, 0, read);
-        }
+        // write 16-bit PCM WAV
+        using var writer = new WaveFileWriter(new IgnoreDisposeStream(output), TargetFormat);
 
-        return output.ToArray();
+        var buffer = new float[TargetSampleRate]; // 1 second of samples
+        int read;
+        while ((read = pipeline.Read(buffer, 0, buffer.Length)) > 0)
+        {
+            writer.WriteSamples(buffer, 0, read);
+        }
     }
 
     /// <summary>
     /// Wraps a stream to prevent <see cref="WaveFileWriter"/> from
-    /// closing the underlying <see cref="MemoryStream"/>.
+    /// closing the underlying stream on dispose.
     /// </summary>
     private sealed class IgnoreDisposeStream(Stream inner) : Stream
     {
