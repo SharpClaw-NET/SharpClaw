@@ -1291,11 +1291,11 @@ IConfiguration configuration)
         AddLog(job, $"Capturing display: {device.Name} (index {device.DisplayIndex})");
         await db.SaveChangesAsync(ct);
 
-        byte[] pngBytes;
+        byte[] imageBytes;
 
         if (OperatingSystem.IsWindows())
         {
-            pngBytes = CaptureWindowsDisplay(device.DisplayIndex);
+            imageBytes = CaptureWindowsDisplay(device.DisplayIndex);
         }
         else
         {
@@ -1303,21 +1303,18 @@ IConfiguration configuration)
                 "Display capture is currently only supported on Windows.");
         }
 
-        return $"Screenshot captured ({pngBytes.Length} bytes) of display '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(pngBytes)}";
+        return $"Screenshot captured ({imageBytes.Length} bytes) of display '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(imageBytes)}";
     }
 
     /// <summary>
     /// Captures a single monitor on Windows using GDI+ via
     /// <c>System.Drawing</c> interop (available on .NET 10 Windows).
+    /// The image is downscaled to a max dimension of 1280px and
+    /// encoded as JPEG to keep the base64 payload under API limits.
     /// </summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static byte[] CaptureWindowsDisplay(int displayIndex)
     {
-        // Screen bounds via the virtual-screen approach; when a specific
-        // display is requested we shell out to a tiny PowerShell snippet
-        // that uses System.Windows.Forms.Screen because .NET 10 doesn't
-        // ship System.Windows.Forms by default in non-WinForms apps.
-        // Alternatively, we use the simple P/Invoke approach.
         var bounds = GetDisplayBounds(displayIndex);
 
         using var bitmap = new System.Drawing.Bitmap(bounds.Width, bounds.Height);
@@ -1326,9 +1323,40 @@ IConfiguration configuration)
             g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
         }
 
-        using var ms = new System.IO.MemoryStream();
-        bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
-        return ms.ToArray();
+        // Downscale to max 1280px on the longest side to reduce payload.
+        const int maxDimension = 1280;
+        var scale = Math.Min(1.0, (double)maxDimension / Math.Max(bounds.Width, bounds.Height));
+
+        System.Drawing.Bitmap toEncode;
+        if (scale < 1.0)
+        {
+            var newW = (int)(bounds.Width * scale);
+            var newH = (int)(bounds.Height * scale);
+            toEncode = new System.Drawing.Bitmap(bitmap, newW, newH);
+        }
+        else
+        {
+            toEncode = bitmap;
+        }
+
+        try
+        {
+            using var ms = new System.IO.MemoryStream();
+            var jpegEncoder = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders()
+                .First(e => e.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
+            var encoderParams = new System.Drawing.Imaging.EncoderParameters(1)
+            {
+                Param = [new System.Drawing.Imaging.EncoderParameter(
+                    System.Drawing.Imaging.Encoder.Quality, 80L)]
+            };
+            toEncode.Save(ms, jpegEncoder, encoderParams);
+            return ms.ToArray();
+        }
+        finally
+        {
+            if (!ReferenceEquals(toEncode, bitmap))
+                toEncode.Dispose();
+        }
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -1440,8 +1468,8 @@ IConfiguration configuration)
         PerformClick(absX, absY, button, clickType);
 
         // Capture a follow-up screenshot so the model can see the result
-        var pngBytes = CaptureWindowsDisplay(device.DisplayIndex);
-        return $"Clicked {button} ({clickType}) at ({payload.X},{payload.Y}) on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(pngBytes)}";
+        var imageBytes = CaptureWindowsDisplay(device.DisplayIndex);
+        return $"Clicked {button} ({clickType}) at ({payload.X},{payload.Y}) on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(imageBytes)}";
     }
 
     /// <summary>
@@ -1488,8 +1516,8 @@ IConfiguration configuration)
 
         // Brief pause for UI to settle, then screenshot
         await Task.Delay(200, ct);
-        var pngBytes = CaptureWindowsDisplay(device.DisplayIndex);
-        return $"Typed {payload.Text.Length} characters on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(pngBytes)}";
+        var imageBytes = CaptureWindowsDisplay(device.DisplayIndex);
+        return $"Typed {payload.Text.Length} characters on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(imageBytes)}";
     }
 
     // ── Win32 SendInput helpers ───────────────────────────────────

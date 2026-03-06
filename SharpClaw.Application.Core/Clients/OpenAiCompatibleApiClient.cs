@@ -593,7 +593,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                     input.Add(new RespInputMessage
                     {
                         Role = "user",
-                        Content = BuildMultipartContent(msg.Content!, msg.ImageBase64!, msg.ImageMediaType ?? "image/png")
+                        Content = BuildRespMultipartContent(msg.Content!, msg.ImageBase64!, msg.ImageMediaType ?? "image/png")
                     });
                     break;
                 case { Role: "user" }:
@@ -614,6 +614,24 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                     break;
                 case { Role: "assistant" }:
                     input.Add(new RespInputMessage { Role = "assistant", Content = msg.Content });
+                    break;
+                case { Role: "tool", HasImage: true }:
+                    // Responses API function_call_output only accepts a
+                    // string, so include the text result there and follow
+                    // with a user message that carries the actual image.
+                    input.Add(new RespFunctionCallOutputItem
+                    {
+                        CallId = msg.ToolCallId!,
+                        Output = msg.Content ?? ""
+                    });
+                    input.Add(new RespInputMessage
+                    {
+                        Role = "user",
+                        Content = BuildRespMultipartContent(
+                            "Screenshot from the tool result above:",
+                            msg.ImageBase64!,
+                            msg.ImageMediaType ?? "image/png")
+                    });
                     break;
                 case { Role: "tool" }:
                     input.Add(new RespFunctionCallOutputItem
@@ -657,6 +675,8 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         // Accumulate tool calls by call_id
         var toolCallAccumulator = new Dictionary<string, (string Name, System.Text.StringBuilder Args)>();
         var toolCallOrder = new List<string>();
+        // Map output_index → call_id for providers that omit call_id from delta/done events
+        var outputIndexToCallId = new Dictionary<int, string>();
 
         while (!reader.EndOfStream)
         {
@@ -690,24 +710,44 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                     break;
 
                 case "response.function_call_arguments.delta":
-                    if (evt.CallId is not null && evt.Delta is not null)
                     {
-                        if (!toolCallAccumulator.TryGetValue(evt.CallId, out var acc))
+                        // Resolve call_id: use explicit call_id, or fall back to output_index mapping
+                        var deltaCallId = evt.CallId
+                            ?? (evt.OutputIndex.HasValue && outputIndexToCallId.TryGetValue(evt.OutputIndex.Value, out var mapped) ? mapped : null);
+
+                        if (deltaCallId is not null && evt.Delta is not null)
                         {
-                            acc = (evt.Name ?? "", new System.Text.StringBuilder());
-                            toolCallAccumulator[evt.CallId] = acc;
-                            toolCallOrder.Add(evt.CallId);
+                            if (!toolCallAccumulator.TryGetValue(deltaCallId, out var acc))
+                            {
+                                acc = (evt.Name ?? "", new System.Text.StringBuilder());
+                                toolCallAccumulator[deltaCallId] = acc;
+                                toolCallOrder.Add(deltaCallId);
+                            }
+                            acc.Args.Append(evt.Delta);
+                            toolCallAccumulator[deltaCallId] = acc;
                         }
-                        acc.Args.Append(evt.Delta);
-                        toolCallAccumulator[evt.CallId] = acc;
                     }
                     break;
 
                 case "response.function_call_arguments.done":
-                    if (evt.CallId is not null && !toolCallAccumulator.ContainsKey(evt.CallId))
                     {
-                        toolCallAccumulator[evt.CallId] = (evt.Name ?? "", new System.Text.StringBuilder(evt.Arguments ?? "{}"));
-                        toolCallOrder.Add(evt.CallId);
+                        var doneCallId = evt.CallId
+                            ?? (evt.OutputIndex.HasValue && outputIndexToCallId.TryGetValue(evt.OutputIndex.Value, out var mapped) ? mapped : null);
+
+                        if (doneCallId is not null)
+                        {
+                            if (toolCallAccumulator.TryGetValue(doneCallId, out var existing))
+                            {
+                                // If deltas were missed or incomplete, overwrite with final arguments
+                                if (existing.Args.Length == 0 && evt.Arguments is not null)
+                                    toolCallAccumulator[doneCallId] = (existing.Name, new System.Text.StringBuilder(evt.Arguments));
+                            }
+                            else
+                            {
+                                toolCallAccumulator[doneCallId] = (evt.Name ?? "", new System.Text.StringBuilder(evt.Arguments ?? "{}"));
+                                toolCallOrder.Add(doneCallId);
+                            }
+                        }
                     }
                     break;
 
@@ -726,6 +766,10 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                             var existing = toolCallAccumulator[item.CallId];
                             toolCallAccumulator[item.CallId] = (item.Name, existing.Args);
                         }
+
+                        // Register output_index → call_id mapping for delta/done correlation
+                        if (evt.OutputIndex.HasValue)
+                            outputIndexToCallId[evt.OutputIndex.Value] = item.CallId;
                     }
                     break;
 
@@ -751,12 +795,38 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         });
     }
 
+    /// <summary>
+    /// Builds multipart content for the Responses API which uses
+    /// <c>input_text</c> / <c>input_image</c> content part types
+    /// (unlike Chat Completions which uses <c>text</c> / <c>image_url</c>).
+    /// </summary>
+    private static List<object> BuildRespMultipartContent(string text, string imageBase64, string mediaType)
+    {
+        return
+        [
+            new RespTextContentPart { Text = text },
+            new RespImageContentPart { ImageUrl = $"data:{mediaType};base64,{imageBase64}" }
+        ];
+    }
+
     // ── Responses API DTOs ────────────────────────────────────────
 
     private sealed class RespInputMessage
     {
         [JsonPropertyName("role")] public required string Role { get; init; }
         [JsonPropertyName("content")] public object? Content { get; init; }
+    }
+
+    private sealed class RespTextContentPart
+    {
+        [JsonPropertyName("type")] public string Type => "input_text";
+        [JsonPropertyName("text")] public required string Text { get; init; }
+    }
+
+    private sealed class RespImageContentPart
+    {
+        [JsonPropertyName("type")] public string Type => "input_image";
+        [JsonPropertyName("image_url")] public required string ImageUrl { get; init; }
     }
 
     private sealed class RespFunctionCallItem
@@ -799,6 +869,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("call_id")] public string? CallId { get; set; }
         [JsonPropertyName("name")] public string? Name { get; set; }
         [JsonPropertyName("arguments")] public string? Arguments { get; set; }
+        [JsonPropertyName("output_index")] public int? OutputIndex { get; set; }
         // output_item.added carries an item object
         [JsonPropertyName("item")] public RespOutputItem? Item { get; set; }
     }

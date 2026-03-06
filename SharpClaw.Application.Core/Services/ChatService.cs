@@ -1114,7 +1114,7 @@ public sealed partial class ChatService(
         if (imageBase64 is not null && supportsVision)
         {
             return ToolAwareMessage.ToolResultWithImage(
-                toolCallId, resultContent, imageBase64, "image/png");
+                toolCallId, resultContent, imageBase64, "image/jpeg");
         }
 
         // Non-vision model: append a note that the screenshot was captured
