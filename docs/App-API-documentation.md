@@ -135,7 +135,8 @@ Sandboxed DSL — never invokes a real shell interpreter.
 ### ChatClientType
 
 ```
-CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode, Other
+CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode,
+UnoWindows, UnoAndroid, UnoMacOS, UnoLinux, UnoBrowser, Other
 ```
 
 Identifies the client interface that originated a chat message. Included
@@ -1035,7 +1036,7 @@ no history is sent to the model (one-shot). Body:
 {
   "message": "string",
   "agentId": "guid | null",
-  "clientType": "CLI | API | Telegram | Discord | WhatsApp | VisualStudio | VisualStudioCode | Other",
+  "clientType": "CLI | API | Telegram | Discord | WhatsApp | VisualStudio | VisualStudioCode | UnoWindows | UnoAndroid | UnoMacOS | UnoLinux | UnoBrowser | Other",
   "editorContext": {
     "editorType": "VisualStudio2026 | VisualStudioCode | Other",
     "editorVersion": "string | null",

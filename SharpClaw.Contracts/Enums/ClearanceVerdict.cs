@@ -6,18 +6,18 @@ namespace SharpClaw.Contracts.Enums;
 public enum ClearanceVerdict
 {
     /// <summary>The agent does not hold the required permission at all.</summary>
-    Denied,
+    Denied = 0,
 
     /// <summary>
     /// The agent holds the permission but the caller does not satisfy the
     /// required clearance level. The action is paused until an authorised
     /// user or agent approves it.
     /// </summary>
-    PendingApproval,
+    PendingApproval = 1,
 
     /// <summary>
     /// The agent holds the permission and the caller satisfies the required
     /// clearance. The action may proceed immediately.
     /// </summary>
-    Approved
+    Approved = 2
 }

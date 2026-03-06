@@ -26,6 +26,23 @@ public sealed class RoleService(SharpClawDbContext db)
             .ToListAsync(ct);
     }
 
+    /// <summary>
+    /// Creates a new role with an empty permission set.
+    /// </summary>
+    public async Task<RoleResponse> CreateAsync(
+        string name, CancellationToken ct = default)
+    {
+        var ps = new PermissionSetDB();
+        db.PermissionSets.Add(ps);
+        await db.SaveChangesAsync(ct);
+
+        var role = new RoleDB { Name = name, PermissionSetId = ps.Id };
+        db.Roles.Add(role);
+        await db.SaveChangesAsync(ct);
+
+        return new RoleResponse(role.Id, role.Name, role.PermissionSetId);
+    }
+
     public async Task<RoleResponse?> GetByIdAsync(
         Guid roleId, CancellationToken ct = default)
     {
@@ -96,6 +113,8 @@ public sealed class RoleService(SharpClawDbContext db)
             ps.LocalInfoStorePermissions.Clear();
             ps.ExternalInfoStorePermissions.Clear();
             ps.AudioDeviceAccesses.Clear();
+            ps.DisplayDeviceAccesses.Clear();
+            ps.EditorSessionAccesses.Clear();
             ps.AgentPermissions.Clear();
             ps.TaskPermissions.Clear();
             ps.SkillPermissions.Clear();
@@ -150,6 +169,14 @@ public sealed class RoleService(SharpClawDbContext db)
         AddGrants(ps.AudioDeviceAccesses, request.AudioDeviceAccesses,
             (g, psId) => new AudioDeviceAccessDB
             { PermissionSetId = psId, AudioDeviceId = g.ResourceId, Clearance = g.Clearance });
+
+        AddGrants(ps.DisplayDeviceAccesses, request.DisplayDeviceAccesses,
+            (g, psId) => new DisplayDeviceAccessDB
+            { PermissionSetId = psId, DisplayDeviceId = g.ResourceId, Clearance = g.Clearance });
+
+        AddGrants(ps.EditorSessionAccesses, request.EditorSessionAccesses,
+            (g, psId) => new EditorSessionAccessDB
+            { PermissionSetId = psId, EditorSessionId = g.ResourceId, Clearance = g.Clearance });
 
         AddGrants(ps.AgentPermissions, request.AgentAccesses,
             (g, psId) => new AgentManagementAccessDB
@@ -241,6 +268,10 @@ public sealed class RoleService(SharpClawDbContext db)
             callerPs?.ExternalInfoStorePermissions, a => a.ExternalInformationStoreId);
         ValidateCollection("AudioDeviceAccesses", request.AudioDeviceAccesses,
             callerPs?.AudioDeviceAccesses, a => a.AudioDeviceId);
+        ValidateCollection("DisplayDeviceAccesses", request.DisplayDeviceAccesses,
+            callerPs?.DisplayDeviceAccesses, a => a.DisplayDeviceId);
+        ValidateCollection("EditorSessionAccesses", request.EditorSessionAccesses,
+            callerPs?.EditorSessionAccesses, a => a.EditorSessionId);
         ValidateCollection("AgentAccesses", request.AgentAccesses,
             callerPs?.AgentPermissions, a => a.AgentId);
         ValidateCollection("TaskAccesses", request.TaskAccesses,
@@ -322,6 +353,8 @@ public sealed class RoleService(SharpClawDbContext db)
             .Include(p => p.LocalInfoStorePermissions)
             .Include(p => p.ExternalInfoStorePermissions)
             .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.DisplayDeviceAccesses)
+            .Include(p => p.EditorSessionAccesses)
             .Include(p => p.AgentPermissions)
             .Include(p => p.TaskPermissions)
             .Include(p => p.SkillPermissions)
@@ -349,6 +382,8 @@ public sealed class RoleService(SharpClawDbContext db)
             LocalInfoStoreAccesses: MapGrants(ps?.LocalInfoStorePermissions, a => a.LocalInformationStoreId, a => a.Clearance),
             ExternalInfoStoreAccesses: MapGrants(ps?.ExternalInfoStorePermissions, a => a.ExternalInformationStoreId, a => a.Clearance),
             AudioDeviceAccesses: MapGrants(ps?.AudioDeviceAccesses, a => a.AudioDeviceId, a => a.Clearance),
+            DisplayDeviceAccesses: MapGrants(ps?.DisplayDeviceAccesses, a => a.DisplayDeviceId, a => a.Clearance),
+            EditorSessionAccesses: MapGrants(ps?.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance),
             AgentAccesses: MapGrants(ps?.AgentPermissions, a => a.AgentId, a => a.Clearance),
             TaskAccesses: MapGrants(ps?.TaskPermissions, a => a.ScheduledTaskId, a => a.Clearance),
             SkillAccesses: MapGrants(ps?.SkillPermissions, a => a.SkillId, a => a.Clearance));

@@ -19,8 +19,8 @@ namespace SharpClaw.Contracts.Enums;
 /// </summary>
 public enum DangerousShellType
 {
-    Bash,
-    PowerShell,
-    CommandPrompt,
-    Git
+    Bash = 0,
+    PowerShell = 1,
+    CommandPrompt = 2,
+    Git = 3
 }

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -343,6 +344,13 @@ public sealed partial class ChatService(
                 if (agentGrants.Count > 0)
                     sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
             }
+        }
+        else
+        {
+            // Agent has no role — emit a minimal self-awareness line so the
+            // model knows it has no permissions and must rely on user-supplied
+            // resource IDs from the conversation.
+            sb.Append(" | agent-role: (none) clearance=Unset");
         }
 
         if (editorContext is not null)
@@ -972,12 +980,20 @@ public sealed partial class ChatService(
 
         try
         {
+            Debug.WriteLine(
+                $"[ParseToolCall] {toolCall.Name} (id={toolCall.Id}) args: {toolCall.ArgumentsJson}",
+                "SharpClaw.CLI");
+
             var payload = JsonSerializer.Deserialize<ToolCallPayload>(toolCall.ArgumentsJson, JsonOptions);
             if (payload is null) return null;
 
             Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
             // TargetId is the generic "resourceId" alias for non-shell tools
             resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
+
+            Debug.WriteLine(
+                $"[ParseToolCall] {toolCall.Name} → resourceId={resourceId}, targetId={payload.TargetId}",
+                "SharpClaw.CLI");
 
             Guid? transcriptionModelId = Guid.TryParse(payload.TranscriptionModelId, out var tmid) ? tmid : null;
 

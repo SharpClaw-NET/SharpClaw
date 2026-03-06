@@ -183,7 +183,7 @@ Thread chat:
   POST   /channels/{id}/chat/threads/{threadId}
   GET    /channels/{id}/chat/threads/{threadId}/history
 
-ChatClientType: CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode, Other.
+ChatClientType: CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode, UnoWindows, UnoAndroid, UnoMacOS, UnoLinux, UnoBrowser, Other.
 
 editorContext: { editorType, editorVersion?, workspacePath?, activeFilePath?, activeFileLanguage?, selectionStartLine?, selectionEndLine?, selectedText? }
 

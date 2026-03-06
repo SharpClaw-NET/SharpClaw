@@ -6,12 +6,17 @@ namespace SharpClaw.Contracts.Enums;
 /// </summary>
 public enum ChatClientType
 {
-    CLI,
-    API,
-    Telegram,
-    Discord,
-    WhatsApp,
-    VisualStudio,
-    VisualStudioCode,
-    Other
+    CLI = 0,
+    API = 1,
+    Telegram = 2,
+    Discord = 3,
+    WhatsApp = 4,
+    VisualStudio = 5,
+    VisualStudioCode = 6,
+    UnoWindows = 7,
+    UnoAndroid = 8,
+    UnoMacOS = 9,
+    UnoLinux = 10,
+    UnoBrowser = 11,
+    Other = 12
 }

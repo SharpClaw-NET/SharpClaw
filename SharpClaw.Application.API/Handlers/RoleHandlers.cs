@@ -13,6 +13,17 @@ public static class RoleHandlers
     public static async Task<IResult> List(RoleService svc)
         => Results.Ok(await svc.ListAsync());
 
+    [MapPost]
+    public static async Task<IResult> Create(
+        CreateRoleRequest request, RoleService svc)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return Results.BadRequest("Role name is required.");
+
+        var result = await svc.CreateAsync(request.Name);
+        return Results.Created($"/roles/{result.Id}", result);
+    }
+
     [MapGet("/{id:guid}")]
     public static async Task<IResult> GetById(Guid id, RoleService svc)
     {

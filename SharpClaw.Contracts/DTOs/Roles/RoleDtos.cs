@@ -5,6 +5,11 @@ namespace SharpClaw.Contracts.DTOs.Roles;
 // ── Requests ──────────────────────────────────────────────────────
 
 /// <summary>
+/// Creates a new role with an empty permission set.
+/// </summary>
+public sealed record CreateRoleRequest(string Name);
+
+/// <summary>
 /// Replaces the entire permission set of a role. The calling user must
 /// hold every permission they are granting — you cannot give what you
 /// don't have.
@@ -30,6 +35,8 @@ public sealed record SetRolePermissionsRequest(
     IReadOnlyList<ResourceGrant>? LocalInfoStoreAccesses = null,
     IReadOnlyList<ResourceGrant>? ExternalInfoStoreAccesses = null,
     IReadOnlyList<ResourceGrant>? AudioDeviceAccesses = null,
+    IReadOnlyList<ResourceGrant>? DisplayDeviceAccesses = null,
+    IReadOnlyList<ResourceGrant>? EditorSessionAccesses = null,
     IReadOnlyList<ResourceGrant>? AgentAccesses = null,
     IReadOnlyList<ResourceGrant>? TaskAccesses = null,
     IReadOnlyList<ResourceGrant>? SkillAccesses = null);
@@ -71,6 +78,8 @@ public sealed record RolePermissionsResponse(
     IReadOnlyList<ResourceGrant> LocalInfoStoreAccesses,
     IReadOnlyList<ResourceGrant> ExternalInfoStoreAccesses,
     IReadOnlyList<ResourceGrant> AudioDeviceAccesses,
+    IReadOnlyList<ResourceGrant> DisplayDeviceAccesses,
+    IReadOnlyList<ResourceGrant> EditorSessionAccesses,
     IReadOnlyList<ResourceGrant> AgentAccesses,
     IReadOnlyList<ResourceGrant> TaskAccesses,
     IReadOnlyList<ResourceGrant> SkillAccesses);

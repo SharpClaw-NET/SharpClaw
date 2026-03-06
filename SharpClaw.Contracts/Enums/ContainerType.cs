@@ -12,5 +12,5 @@ public enum ContainerType
     /// in the database; the local path is resolved at runtime from the
     /// machine's <c>%APPDATA%/mk8.shell/sandboxes.json</c>.
     /// </summary>
-    Mk8Shell,
+    Mk8Shell = 0,
 }

@@ -24,6 +24,7 @@ public sealed partial class FirstSetupPage : Page
     private TaskCompletionSource<bool>? _apiKeyTcs;
     private TaskCompletionSource<Guid?>? _agentTcs;
     private TaskCompletionSource<bool>? _localModelTcs;
+    private TaskCompletionSource<bool>? _roleTcs;
     private bool _localOnly;
     private List<ProviderDto>? _providers;
 
@@ -251,6 +252,7 @@ public sealed partial class FirstSetupPage : Page
         AppendStep("Checking contexts and channels...");
         var contexts = await FetchListAsync<ContextDto>("/channel-contexts");
         var hasFullSetup = false;
+        Guid? selectedAgentId = null;
         if (contexts is { Count: > 0 })
         {
             // Check if any context has a channel with a thread
@@ -273,6 +275,19 @@ public sealed partial class FirstSetupPage : Page
 
         if (hasFullSetup)
         {
+            // Resolve the agent from the existing context so Step 6
+            // can still check/assign its role.
+            selectedAgentId = contexts!
+                .Select(c => c.Agent?.Id)
+                .FirstOrDefault(id => id.HasValue);
+
+            // If contexts don't carry AgentId (older API), try the agent list.
+            if (selectedAgentId is null)
+            {
+                agents ??= await FetchListAsync<AgentDto>("/agents") ?? [];
+                selectedAgentId = agents.FirstOrDefault()?.Id;
+            }
+
             ReplaceLastStep("Default context, channel, and thread exist.", done: true);
         }
         else
@@ -284,7 +299,7 @@ public sealed partial class FirstSetupPage : Page
             PopulateAgentSelector(agents);
             AgentSelectorPanel.Visibility = Visibility.Visible;
             _agentTcs = new TaskCompletionSource<Guid?>();
-            var selectedAgentId = await _agentTcs.Task;
+            selectedAgentId = await _agentTcs.Task;
             AgentSelectorPanel.Visibility = Visibility.Collapsed;
 
             if (selectedAgentId is null)
@@ -332,6 +347,56 @@ public sealed partial class FirstSetupPage : Page
             {
                 ReplaceLastStep($"Failed: {ex.Message}", error: true);
                 return;
+            }
+        }
+
+        // ── Step 6: Role & permissions for the selected agent ──
+        if (selectedAgentId is not null)
+        {
+            AppendStep("Checking agent role...");
+            var needsRole = true;
+
+            try
+            {
+                var agentResp = await Api.GetAsync($"/agents/{selectedAgentId}");
+                if (agentResp.IsSuccessStatusCode)
+                {
+                    using var agDoc = JsonDocument.Parse(await agentResp.Content.ReadAsStringAsync());
+                    if (agDoc.RootElement.TryGetProperty("roleId", out var rp)
+                        && rp.ValueKind == JsonValueKind.String)
+                    {
+                        needsRole = false;
+                        ReplaceLastStep("Agent already has a role.", done: true);
+                    }
+                }
+            }
+            catch { /* continue to create role */ }
+
+            if (needsRole)
+            {
+                ReplaceLastStep("Agent has no role. Set up permissions so it can use tools.");
+                PopulateClearanceSelector();
+                RolePermissionsPanel.Visibility = Visibility.Visible;
+                _roleTcs = new TaskCompletionSource<bool>();
+                var roleCreated = await _roleTcs.Task;
+                RolePermissionsPanel.Visibility = Visibility.Collapsed;
+
+                if (roleCreated)
+                {
+                    try
+                    {
+                        await CreateRoleAndAssignAsync(selectedAgentId.Value);
+                        ReplaceLastStep("Role created and permissions applied.", done: true);
+                    }
+                    catch (Exception ex)
+                    {
+                        ReplaceLastStep($"Failed to create role: {ex.Message}", error: true);
+                    }
+                }
+                else
+                {
+                    ReplaceLastStep("Role setup skipped. Agent has no permissions.", done: true);
+                }
             }
         }
 
@@ -612,12 +677,105 @@ public sealed partial class FirstSetupPage : Page
         _apiKeyTcs?.TrySetResult(false);
         _agentTcs?.TrySetResult(null);
         _localModelTcs?.TrySetResult(false);
+        _roleTcs?.TrySetResult(false);
 
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
 
         var navigator = App.Services!.GetRequiredService<INavigator>();
         await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+    }
+
+    private void OnRoleSubmitClick(object sender, RoutedEventArgs e)
+        => _roleTcs?.TrySetResult(true);
+
+    private void OnRoleSkipClick(object sender, RoutedEventArgs e)
+        => _roleTcs?.TrySetResult(false);
+
+    private void PopulateClearanceSelector()
+    {
+        ClearanceSelector.Items.Clear();
+        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Independent (auto-approved)", Tag = "Independent" });
+        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "ApprovedBySameLevelUser", Tag = "ApprovedBySameLevelUser" });
+        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "ApprovedByWhitelistedUser", Tag = "ApprovedByWhitelistedUser" });
+        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "ApprovedByPermittedAgent", Tag = "ApprovedByPermittedAgent" });
+        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "ApprovedByWhitelistedAgent", Tag = "ApprovedByWhitelistedAgent" });
+        ClearanceSelector.SelectedIndex = 0; // Default to Independent for first-time setup
+    }
+
+    private async Task CreateRoleAndAssignAsync(Guid agentId)
+    {
+        // 1. Create a new role via POST /roles
+        var roleBody = JsonSerializer.Serialize(new { name = "Default Agent Role" }, Json);
+        var roleResp = await Api.PostAsync("/roles",
+            new StringContent(roleBody, Encoding.UTF8, "application/json"));
+
+        if (!roleResp.IsSuccessStatusCode)
+        {
+            var err = await roleResp.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"Failed to create role: {(int)roleResp.StatusCode} {err}");
+        }
+
+        Guid roleId;
+        using (var roleDoc = JsonDocument.Parse(await roleResp.Content.ReadAsStringAsync()))
+            roleId = roleDoc.RootElement.GetProperty("id").GetGuid();
+
+        // 2. Assign the role to the agent
+        var assignBody = JsonSerializer.Serialize(new { roleId }, Json);
+        var assignResp = await Api.PutAsync($"/agents/{agentId}/role",
+            new StringContent(assignBody, Encoding.UTF8, "application/json"));
+
+        if (!assignResp.IsSuccessStatusCode)
+        {
+            var err = await assignResp.Content.ReadAsStringAsync();
+            throw new InvalidOperationException($"Failed to assign role: {(int)assignResp.StatusCode} {err}");
+        }
+
+        // 3. Build the permission set from the UI checkboxes
+        var clearance = ClearanceSelector.SelectedItem is ComboBoxItem { Tag: string cl } ? cl : "Independent";
+
+        // AllResources wildcard for per-resource grants
+        var allResources = "ffffffff-ffff-ffff-ffff-ffffffffffff";
+        var wildcardGrant = new[] { new { resourceId = allResources, clearance } };
+
+        var permBody = JsonSerializer.Serialize(new
+        {
+            defaultClearance = clearance,
+
+            // Global flags
+            canCreateSubAgents = ChkCreateSubAgents.IsChecked == true,
+            canCreateContainers = ChkCreateContainers.IsChecked == true,
+            canRegisterInfoStores = ChkRegisterInfoStores.IsChecked == true,
+            canAccessLocalhostInBrowser = ChkLocalhostBrowser.IsChecked == true,
+            canAccessLocalhostCli = ChkLocalhostCli.IsChecked == true,
+            canClickDesktop = ChkClickDesktop.IsChecked == true,
+            canTypeOnDesktop = ChkTypeOnDesktop.IsChecked == true,
+
+            // Per-resource grants (wildcard)
+            safeShellAccesses = ChkSafeShell.IsChecked == true ? wildcardGrant : null,
+            dangerousShellAccesses = ChkDangerousShell.IsChecked == true ? wildcardGrant : null,
+            containerAccesses = ChkContainerAccess.IsChecked == true ? wildcardGrant : null,
+            websiteAccesses = ChkWebsiteAccess.IsChecked == true ? wildcardGrant : null,
+            searchEngineAccesses = ChkSearchEngineAccess.IsChecked == true ? wildcardGrant : null,
+            localInfoStoreAccesses = ChkLocalInfoStore.IsChecked == true ? wildcardGrant : null,
+            externalInfoStoreAccesses = ChkExternalInfoStore.IsChecked == true ? wildcardGrant : null,
+            audioDeviceAccesses = ChkAudioDevice.IsChecked == true ? wildcardGrant : null,
+            displayDeviceAccesses = ChkDisplayDevice.IsChecked == true ? wildcardGrant : null,
+            editorSessionAccesses = ChkEditorSession.IsChecked == true ? wildcardGrant : null,
+            agentAccesses = ChkAgentManagement.IsChecked == true ? wildcardGrant : null,
+            taskAccesses = ChkTaskManagement.IsChecked == true ? wildcardGrant : null,
+            skillAccesses = ChkSkillManagement.IsChecked == true ? wildcardGrant : null,
+        }, Json);
+
+        var permResp = await Api.PutAsync($"/roles/{roleId}/permissions",
+            new StringContent(permBody, Encoding.UTF8, "application/json"));
+
+        if (!permResp.IsSuccessStatusCode)
+        {
+            var errorText = await permResp.Content.ReadAsStringAsync();
+            throw new InvalidOperationException(
+                $"Failed to set permissions: {(int)permResp.StatusCode} {errorText}");
+        }
     }
 
     // ── Populate helpers ────────────────────────────────────────
@@ -714,7 +872,9 @@ public sealed partial class FirstSetupPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record AgentDto(Guid Id, string Name, Guid ModelId, string ModelName, string ProviderName);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record ContextDto(Guid Id, string Name);
+    private sealed partial record ContextDto(Guid Id, string Name, ContextAgentDto? Agent = null);
+    [ImplicitKeys(IsEnabled = false)]
+    private sealed partial record ContextAgentDto(Guid Id, string? Name = null);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ChannelDto(Guid Id, string Title, Guid? ContextId);
     [ImplicitKeys(IsEnabled = false)]

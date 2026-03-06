@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Runtime.InteropServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -24,6 +25,29 @@ public sealed partial class MainPage : Page
     private bool _suppressThreadSelection;
     private readonly Dictionary<Guid, bool> _expandedContexts = [];
     private List<AgentDto> _allAgents = [];
+    private static readonly int _clientType = DetectClientType();
+
+    /// <summary>
+    /// Returns the <c>ChatClientType</c> enum integer value matching the
+    /// current Uno Platform runtime host.
+    /// </summary>
+    private static int DetectClientType()
+    {
+        // ChatClientType enum values:
+        // 7 = UnoWindows, 8 = UnoAndroid, 9 = UnoMacOS,
+        // 10 = UnoLinux, 11 = UnoBrowser
+        if (RuntimeInformation.IsOSPlatform(OSPlatform.Create("BROWSER")))
+            return 11; // UnoBrowser
+        if (OperatingSystem.IsAndroid())
+            return 8;  // UnoAndroid
+        if (OperatingSystem.IsMacOS() || OperatingSystem.IsMacCatalyst())
+            return 9;  // UnoMacOS
+        if (OperatingSystem.IsLinux())
+            return 10; // UnoLinux
+        if (OperatingSystem.IsWindows())
+            return 7;  // UnoWindows
+        return 12; // Other
+    }
 
     public MainPage()
     {
@@ -863,7 +887,7 @@ public sealed partial class MainPage : Page
 
         try
         {
-            var body = JsonSerializer.Serialize(new { message = text, agentId = _selectedAgentId, clientType = 1 }, Json);
+            var body = JsonSerializer.Serialize(new { message = text, agentId = _selectedAgentId, clientType = _clientType }, Json);
             var content = new StringContent(body, Encoding.UTF8, "application/json");
             var streamUrl = _selectedThreadId is { } tid
                 ? $"/channels/{channelId}/chat/threads/{tid}/stream"
@@ -882,6 +906,7 @@ public sealed partial class MainPage : Page
             using var reader = new System.IO.StreamReader(stream);
 
             string? eventType = null;
+            var lastWasToolEvent = false;
 
             await Task.Run(async () =>
             {
@@ -906,6 +931,11 @@ public sealed partial class MainPage : Page
                                     if (doc.RootElement.TryGetProperty("delta", out var dp)
                                         && dp.GetString() is { } delta)
                                     {
+                                        if (lastWasToolEvent)
+                                        {
+                                            accumulated.Append('\n');
+                                            lastWasToolEvent = false;
+                                        }
                                         accumulated.Append(delta);
                                         var snapshot = accumulated.ToString();
                                         dispatcher.TryEnqueue(() =>
@@ -914,6 +944,78 @@ public sealed partial class MainPage : Page
                                             ScrollToBottom();
                                         });
                                     }
+                                }
+                                break;
+
+                            case "ToolCallStart":
+                                using (var doc = JsonDocument.Parse(payload))
+                                {
+                                    var action = "tool";
+                                    if (doc.RootElement.TryGetProperty("job", out var jobProp)
+                                        && jobProp.TryGetProperty("actionType", out var atProp))
+                                        action = atProp.GetString() ?? "tool";
+                                    accumulated.Append($"\n⚙ [{action}] running…");
+                                    lastWasToolEvent = true;
+                                    var snap = accumulated.ToString();
+                                    dispatcher.TryEnqueue(() =>
+                                    {
+                                        assistantContent.Text = snap + "▍";
+                                        ScrollToBottom();
+                                    });
+                                }
+                                break;
+
+                            case "ToolCallResult":
+                                using (var doc = JsonDocument.Parse(payload))
+                                {
+                                    var status = "done";
+                                    if (doc.RootElement.TryGetProperty("result", out var resProp)
+                                        && resProp.TryGetProperty("status", out var stProp))
+                                        status = stProp.GetString() ?? "done";
+                                    accumulated.Append($" → {status}");
+                                    lastWasToolEvent = true;
+                                    var snap = accumulated.ToString();
+                                    dispatcher.TryEnqueue(() =>
+                                    {
+                                        assistantContent.Text = snap + "▍";
+                                        ScrollToBottom();
+                                    });
+                                }
+                                break;
+
+                            case "ApprovalRequired":
+                                using (var doc = JsonDocument.Parse(payload))
+                                {
+                                    var action = "action";
+                                    if (doc.RootElement.TryGetProperty("pendingJob", out var pjProp)
+                                        && pjProp.TryGetProperty("actionType", out var atProp2))
+                                        action = atProp2.GetString() ?? "action";
+                                    accumulated.Append($"\n⏳ [{action}] awaiting approval…");
+                                    lastWasToolEvent = true;
+                                    var snap = accumulated.ToString();
+                                    dispatcher.TryEnqueue(() =>
+                                    {
+                                        assistantContent.Text = snap + "▍";
+                                        ScrollToBottom();
+                                    });
+                                }
+                                break;
+
+                            case "ApprovalResult":
+                                using (var doc = JsonDocument.Parse(payload))
+                                {
+                                    var status = "resolved";
+                                    if (doc.RootElement.TryGetProperty("approvalOutcome", out var aoProp)
+                                        && aoProp.TryGetProperty("status", out var stProp2))
+                                        status = stProp2.GetString() ?? "resolved";
+                                    accumulated.Append($" → {status}");
+                                    lastWasToolEvent = true;
+                                    var snap = accumulated.ToString();
+                                    dispatcher.TryEnqueue(() =>
+                                    {
+                                        assistantContent.Text = snap + "▍";
+                                        ScrollToBottom();
+                                    });
                                 }
                                 break;
 

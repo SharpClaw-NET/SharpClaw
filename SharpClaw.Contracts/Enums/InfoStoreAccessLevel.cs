@@ -2,6 +2,6 @@ namespace SharpClaw.Contracts.Enums;
 
 public enum InfoStoreAccessLevel
 {
-    ReadOnly,
-    FullAccess
+    ReadOnly = 0,
+    FullAccess = 1
 }

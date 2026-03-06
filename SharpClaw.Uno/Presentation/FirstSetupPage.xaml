@@ -222,6 +222,125 @@
           </Button>
         </StackPanel>
 
+        <!-- Role permissions panel (hidden until needed) -->
+        <StackPanel x:Name="RolePermissionsPanel"
+                    Visibility="Collapsed"
+                    Spacing="6"
+                    Margin="16,8,0,8">
+          <TextBlock Text="Configure permissions for this agent's role:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC"
+                     TextWrapping="Wrap" />
+          <TextBlock Text="The agent needs permissions to use tools (shell, display capture, etc)."
+                     Style="{StaticResource TerminalText}"
+                     FontSize="11" Foreground="#808080"
+                     TextWrapping="Wrap" />
+
+          <TextBlock Text="clearance level:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#CCCCCC"
+                     Margin="0,6,0,0" />
+          <ComboBox x:Name="ClearanceSelector"
+                    FontFamily="Consolas, Courier New, monospace"
+                    FontSize="12"
+                    Background="#1A1A1A"
+                    Foreground="#CCCCCC"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    MinWidth="260" />
+
+          <TextBlock Text="global permissions:"
+                      Style="{StaticResource TerminalText}"
+                      FontSize="12" Foreground="#CCCCCC"
+                      Margin="0,6,0,0" />
+          <CheckBox x:Name="ChkLocalhostBrowser" Content="Localhost Browser"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkLocalhostCli" Content="Localhost CLI"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkClickDesktop" Content="Click Desktop"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkTypeOnDesktop" Content="Type on Desktop"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkCreateSubAgents" Content="Create Sub-Agents"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkCreateContainers" Content="Create Containers"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkRegisterInfoStores" Content="Register Info Stores"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+
+          <TextBlock Text="per-resource permissions (wildcard):"
+                      Style="{StaticResource TerminalText}"
+                      FontSize="12" Foreground="#CCCCCC"
+                      Margin="0,6,0,0" />
+          <TextBlock Text="Grants access to all resources of each type."
+                      Style="{StaticResource TerminalText}"
+                      FontSize="11" Foreground="#808080"
+                      TextWrapping="Wrap" />
+          <CheckBox x:Name="ChkSafeShell" Content="Safe Shell (mk8.shell)"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkDangerousShell" Content="Dangerous Shell"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkContainerAccess" Content="Container Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkWebsiteAccess" Content="Website Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkSearchEngineAccess" Content="Search Engine Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkLocalInfoStore" Content="Local Info Store Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkExternalInfoStore" Content="External Info Store Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkAudioDevice" Content="Audio Device Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkDisplayDevice" Content="Display Device (Capture)"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkEditorSession" Content="Editor Session Access"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkAgentManagement" Content="Agent Management"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkTaskManagement" Content="Task Management"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+          <CheckBox x:Name="ChkSkillManagement" Content="Skill Management"
+                     FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                     Foreground="#CCCCCC" />
+
+          <Button x:Name="RoleSubmitBtn"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnRoleSubmitClick"
+                  Margin="0,6,0,0">
+            <TextBlock Text="[ Save Permissions &amp; Continue ]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#00FF00"
+                       HorizontalAlignment="Center" />
+          </Button>
+          <Button x:Name="RoleSkipBtn"
+                  Style="{StaticResource TerminalLink}"
+                  Click="OnRoleSkipClick">
+            <TextBlock Text="> Skip (configure later)"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#808080" />
+          </Button>
+        </StackPanel>
+
         <!-- Skip setup -->
         <StackPanel Orientation="Horizontal"
                     Spacing="8"

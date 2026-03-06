@@ -20,5 +20,5 @@ namespace SharpClaw.Contracts.Enums;
 /// </summary>
 public enum SafeShellType
 {
-    Mk8Shell
+    Mk8Shell = 0
 }
