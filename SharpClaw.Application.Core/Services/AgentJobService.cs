@@ -311,6 +311,24 @@ IConfiguration configuration)
         return jobs.Select(ToResponse).ToList();
     }
 
+    /// <summary>
+    /// List lightweight summaries for all jobs in a channel, most recent first.
+    /// Does not load <c>ResultData</c>, <c>ErrorLog</c>, logs, or segments —
+    /// suitable for populating dropdowns or list views without memory pressure.
+    /// </summary>
+    public async Task<IReadOnlyList<AgentJobSummaryResponse>> ListSummariesAsync(
+        Guid channelId, CancellationToken ct = default)
+    {
+        return await db.AgentJobs
+            .Where(j => j.ChannelId == channelId)
+            .OrderByDescending(j => j.CreatedAt)
+            .Select(j => new AgentJobSummaryResponse(
+                j.Id, j.ChannelId, j.AgentId,
+                j.ActionType, j.ResourceId, j.Status,
+                j.CreatedAt, j.StartedAt, j.CompletedAt))
+            .ToListAsync(ct);
+    }
+
     /// <summary>List transcription jobs, optionally filtered by audio device.</summary>
     public async Task<IReadOnlyList<AgentJobResponse>> ListTranscriptionJobsAsync(
         Guid? audioDeviceId = null, CancellationToken ct = default)

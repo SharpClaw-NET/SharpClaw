@@ -211,8 +211,18 @@ public sealed class SharpClawApiClient : IDisposable
                 if (IsTextContent(responseContentType)
                     && responseContentType is not "text/event-stream")
                 {
-                    var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                    Log($"[{id}] <<< Body:\n{responseBody}");
+                    // Skip full body read for large responses to avoid buffering
+                    // multi-MB payloads (e.g. job details with base64 screenshots)
+                    var contentLength = response.Content.Headers.ContentLength;
+                    if (contentLength is not null and > 4096)
+                    {
+                        Log($"[{id}] <<< Body: <{responseContentType}, {contentLength:N0} bytes>");
+                    }
+                    else
+                    {
+                        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
+                        Log($"[{id}] <<< Body:\n{responseBody}");
+                    }
                 }
                 else
                 {

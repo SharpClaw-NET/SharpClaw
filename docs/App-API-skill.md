@@ -207,6 +207,7 @@ AGENT JOBS
 ────────────────────────────────────────
 POST   /channels/{channelId}/jobs              (SubmitAgentJobRequest)
 GET    /channels/{channelId}/jobs
+GET    /channels/{channelId}/jobs/summaries    (lightweight: id, channelId, agentId, actionType, resourceId, status, createdAt, startedAt, completedAt — no resultData/errorLog/logs/segments)
 GET    /channels/{channelId}/jobs/{jobId}
 POST   /channels/{channelId}/jobs/{jobId}/approve   { approverAgentId? }
 POST   /channels/{channelId}/jobs/{jobId}/stop      (transcription: complete normally)

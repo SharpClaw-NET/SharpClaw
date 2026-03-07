@@ -58,3 +58,19 @@ public sealed record AgentJobLogResponse(
     string Message,
     string Level,
     DateTimeOffset Timestamp);
+
+/// <summary>
+/// Lightweight summary returned by the list-summaries endpoint.
+/// Contains only the fields needed to populate a dropdown or list view —
+/// no <c>ResultData</c>, <c>ErrorLog</c>, <c>Logs</c>, or <c>Segments</c>.
+/// </summary>
+public sealed record AgentJobSummaryResponse(
+    Guid Id,
+    Guid ChannelId,
+    Guid AgentId,
+    AgentActionType ActionType,
+    Guid? ResourceId,
+    AgentJobStatus Status,
+    DateTimeOffset CreatedAt,
+    DateTimeOffset? StartedAt,
+    DateTimeOffset? CompletedAt);

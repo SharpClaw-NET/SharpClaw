@@ -1270,6 +1270,33 @@ List all jobs for a channel.
 
 ---
 
+### GET /channels/{channelId}/jobs/summaries
+
+List lightweight summaries for all jobs in a channel. Returns only the
+fields needed for list views / dropdowns — no `resultData`, `errorLog`,
+`logs`, or `segments`. Use this endpoint when you only need to enumerate
+jobs without their heavy payloads.
+
+**Response `200`:** `AgentJobSummaryResponse[]`
+
+```json
+[
+  {
+    "id": "guid",
+    "channelId": "guid",
+    "agentId": "guid",
+    "actionType": "CaptureDisplay",
+    "resourceId": "guid | null",
+    "status": "Completed",
+    "createdAt": "datetime",
+    "startedAt": "datetime | null",
+    "completedAt": "datetime | null"
+  }
+]
+```
+
+---
+
 ### GET /channels/{channelId}/jobs/{jobId}
 
 **Response `200`:** `AgentJobResponse`

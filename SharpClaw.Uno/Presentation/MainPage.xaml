@@ -181,8 +181,39 @@
                        Foreground="#00FF00" />
           </Button>
         </StackPanel>
+        <StackPanel x:Name="JobSelectorPanel"
+                    Orientation="Horizontal"
+                    Spacing="8"
+                    Visibility="Collapsed"
+                    Margin="0,4,0,0">
+          <TextBlock Text="job:"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="11"
+                     Foreground="#999999"
+                     VerticalAlignment="Center" />
+          <ComboBox x:Name="JobSelector"
+                    FontFamily="Consolas, Courier New, monospace"
+                    FontSize="11"
+                    Background="#1A1A1A"
+                    Foreground="#CCCCCC"
+                    BorderBrush="#333333"
+                    BorderThickness="1"
+                    MinWidth="220"
+                    Padding="6,4"
+                    SelectionChanged="OnJobSelectionChanged" />
+          <Button Background="Transparent" BorderThickness="0" Padding="4,2"
+                  Click="OnRefreshJobsClick"
+                  ToolTipService.ToolTip="Refresh jobs"
+                  VerticalAlignment="Center">
+            <TextBlock Text="↻"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="14"
+                       FontWeight="Bold"
+                       Foreground="#00FF00" />
+          </Button>
+        </StackPanel>
         <TextBlock x:Name="OneOffWarning"
-                   Text="⚠ One-off mode — the agent has no conversation history. Select a thread to enable context."
+                   Text="⚠ One-off mode: each message is an isolated prompt with no conversation history. Select a thread to enable history."
                    Style="{StaticResource TerminalText}"
                    FontSize="10"
                    Foreground="#FF4444"
@@ -192,13 +223,13 @@
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
       </StackPanel>
 
-      <!-- Messages -->
+      <!-- Messages (chat view) -->
       <ScrollViewer x:Name="MessagesScroller" Grid.Row="1" Margin="20,8,20,0">
         <StackPanel x:Name="MessagesPanel" Spacing="12" />
       </ScrollViewer>
 
-      <!-- Input area -->
-      <Grid Grid.Row="2" Margin="20,8,20,16">
+      <!-- Input area (chat view) -->
+      <Grid x:Name="ChatInputArea" Grid.Row="2" Margin="20,8,20,16">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
           <RowDefinition Height="Auto" />
@@ -226,6 +257,80 @@
           </Button>
         </Grid>
         <local:TerminalCursor x:Name="Cursor" Grid.Row="1" Margin="0,8,0,0" />
+      </Grid>
+
+      <!-- Job view (replaces chat when a job is selected) -->
+      <Grid x:Name="JobViewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed">
+        <Grid.RowDefinitions>
+          <RowDefinition Height="Auto" />
+          <RowDefinition />
+          <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Job info header -->
+        <StackPanel Grid.Row="0" Margin="20,8,20,0" Spacing="4">
+          <StackPanel Orientation="Horizontal" Spacing="12">
+            <TextBlock x:Name="JobStatusBlock"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#00AAFF" />
+            <TextBlock x:Name="JobActionBlock"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#999999" />
+          </StackPanel>
+          <StackPanel Orientation="Horizontal" Spacing="8">
+            <TextBlock x:Name="JobTimestampBlock"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="10"
+                       Foreground="#666666" />
+          </StackPanel>
+          <Border Height="1" Background="#1A1A1A" Margin="0,6,0,0" />
+        </StackPanel>
+
+        <!-- Job logs -->
+        <ScrollViewer x:Name="JobLogsScroller" Grid.Row="1" Margin="20,8,20,0">
+          <StackPanel x:Name="JobLogsPanel" Spacing="4" />
+        </ScrollViewer>
+
+        <!-- Job controls -->
+        <StackPanel x:Name="JobControlsPanel" Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="20,8,20,16">
+          <Button x:Name="JobApproveButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnJobApproveClick"
+                  Visibility="Collapsed">
+            <TextBlock Text="✓ Approve"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#00FF00" />
+          </Button>
+          <Button x:Name="JobCancelButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnJobCancelClick"
+                  Visibility="Collapsed">
+            <TextBlock Text="✕ Cancel"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#FF4444" />
+          </Button>
+          <Button x:Name="JobStopButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnJobStopClick"
+                  Visibility="Collapsed">
+            <TextBlock Text="■ Stop"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#FFAA00" />
+          </Button>
+          <Button x:Name="JobBackToChatButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnJobBackToChatClick">
+            <TextBlock Text="← Back to chat"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#999999" />
+          </Button>
+        </StackPanel>
       </Grid>
     </Grid>
   </Grid>

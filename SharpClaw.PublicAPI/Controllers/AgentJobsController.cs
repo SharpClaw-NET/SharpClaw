@@ -46,6 +46,21 @@ public class AgentJobsController(InternalApiClient api) : ControllerBase
         }
     }
 
+    [HttpGet("summaries")]
+    public async Task<IActionResult> ListSummaries(Guid channelId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await api.GetAsync<IReadOnlyList<AgentJobSummaryResponse>>(
+                $"/channels/{channelId}/jobs/summaries", ct);
+            return Ok(result);
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
+        }
+    }
+
     [HttpGet("{jobId:guid}")]
     public async Task<IActionResult> GetById(Guid channelId, Guid jobId, CancellationToken ct)
     {

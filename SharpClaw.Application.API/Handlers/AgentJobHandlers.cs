@@ -18,6 +18,10 @@ public static class AgentJobHandlers
     public static async Task<IResult> List(Guid channelId, AgentJobService svc)
         => Results.Ok(await svc.ListAsync(channelId));
 
+    [MapGet("/summaries")]
+    public static async Task<IResult> ListSummaries(Guid channelId, AgentJobService svc)
+        => Results.Ok(await svc.ListSummariesAsync(channelId));
+
     [MapGet("/{jobId:guid}")]
     public static async Task<IResult> GetById(
         Guid channelId, Guid jobId, AgentJobService svc)
