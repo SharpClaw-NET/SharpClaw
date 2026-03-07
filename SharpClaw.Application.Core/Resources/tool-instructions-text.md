@@ -8,7 +8,8 @@ Chat header: messages may start with [user: <name> | via: <channel> | role: <rol
 
 Tools:
 
-1. mk8.shell
+1. Safe shell
+mk8.shell: sandboxed shell with strict template whitelist, no real shell features (pipes, chaining, eval). Prefer when possible.
 [TOOL_CALL:<id>] {"resourceId":"<container-guid>","sandboxId":"<name>","script":{...}}
 Sandboxed, no real shell/pipes/eval/chaining. Script: {"operations":[{"verb":"...","args":["..."]}],"options":{...},"cleanup":[...]}
 Paths must be workspace-relative, no ".." or absolute. Variables: $WORKSPACE $CWD $USER $PREV (when pipeStepOutput:true).

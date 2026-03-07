@@ -1,0 +1,502 @@
+{
+  "af": {
+    "seed": "Dit is 'n gesprek in Afrikaans.",
+    "preamble": "Die volgende is 'n transkripsie van spraak in Afrikaans.",
+    "filler": "Ja, dis reg. Goed, gaan asseblief voort. Baie dankie."
+  },
+  "am": {
+    "seed": "ይህ በአማርኛ የሚደረግ ውይይት ነው።",
+    "preamble": "የሚከተለው በአማርኛ የንግግር ግልባጭ ነው።",
+    "filler": "አዎ፣ ልክ ነው። እሺ፣ እባክዎ ይቀጥሉ። በጣም አመሰግናለሁ።"
+  },
+  "ar": {
+    "seed": "هذه محادثة باللغة العربية.",
+    "preamble": "فيما يلي نسخة من الكلام باللغة العربية.",
+    "filler": "نعم، هذا صحيح. حسنًا، يرجى المتابعة. شكرًا جزيلاً."
+  },
+  "as": {
+    "seed": "এইটো অসমীয়া ভাষাত এটা কথোপকথন।",
+    "preamble": "তলত অসমীয়া ভাষাত বাক্যৰ প্ৰতিলিপি দিয়া হৈছে।",
+    "filler": "হয়, সেয়া শুদ্ধ। ঠিক আছে, অনুগ্ৰহ কৰি আগবাঢ়ক। বহুত ধন্যবাদ।"
+  },
+  "az": {
+    "seed": "Bu Azərbaycan dilində bir söhbətdir.",
+    "preamble": "Aşağıda Azərbaycan dilində nitqin transkripsiyası verilmişdir.",
+    "filler": "Bəli, düzdür. Yaxşı, zəhmət olmasa davam edin. Çox sağ olun."
+  },
+  "ba": {
+    "seed": "Был башҡорт телендә әңгәмә.",
+    "preamble": "Түбәндә башҡорт телендә һөйләүҙең транскрипцияһы бирелгән.",
+    "filler": "Эйе, дөрөҫ. Яҡшы, зинһар, дауам итегеҙ. Бик ҙур рәхмәт."
+  },
+  "be": {
+    "seed": "Гэта размова на беларускай мове.",
+    "preamble": "Далей ідзе транскрыпцыя маўлення на беларускай мове.",
+    "filler": "Так, правільна. Добра, калі ласка, працягвайце. Вялікі дзякуй."
+  },
+  "bg": {
+    "seed": "Това е разговор на български език.",
+    "preamble": "По-долу следва транскрипция на реч на български език.",
+    "filler": "Да, вярно е. Добре, моля продължете. Благодаря много."
+  },
+  "bn": {
+    "seed": "এটি বাংলায় একটি কথোপকথন।",
+    "preamble": "নিম্নলিখিত বাংলায় কথার প্রতিলিপি।",
+    "filler": "হ্যাঁ, ঠিক আছে। দয়া করে চালিয়ে যান। অনেক ধন্যবাদ।"
+  },
+  "bo": {
+    "seed": "འདི་བོད་སྐད་ཀྱི་གླེང་མོལ་ཞིག་རེད།",
+    "preamble": "གཤམ་དུ་བོད་སྐད་ཀྱི་གསུང་གི་ཡིག་བསྒྱུར་ཡིན།",
+    "filler": "ལགས། དེ་ནི་ཡང་དག་རེད། བཟང་། མུ་མཐུད་གནང་རོགས། ཐུགས་རྗེ་ཆེ།"
+  },
+  "br": {
+    "seed": "Hemañ zo ur gomz e brezhoneg.",
+    "preamble": "Setu a-is treuzkrivadur ur gomz e brezhoneg.",
+    "filler": "Ya, gwir eo. Mat, kendalc'hit mar plij. Trugarez bras."
+  },
+  "bs": {
+    "seed": "Ovo je razgovor na bosanskom jeziku.",
+    "preamble": "Sljedeće je transkripcija govora na bosanskom jeziku.",
+    "filler": "Da, to je tačno. U redu, molim vas nastavite. Hvala vam puno."
+  },
+  "ca": {
+    "seed": "Aquesta és una conversa en català.",
+    "preamble": "A continuació hi ha una transcripció de parla en català.",
+    "filler": "Sí, és correcte. D'acord, si us plau continueu. Moltes gràcies."
+  },
+  "cs": {
+    "seed": "Toto je rozhovor v češtině.",
+    "preamble": "Následující je přepis řeči v češtině.",
+    "filler": "Ano, to je správné. Dobře, prosím pokračujte. Děkuji mnohokrát."
+  },
+  "cy": {
+    "seed": "Sgwrs yn Gymraeg yw hon.",
+    "preamble": "Dyma drawsgrifiad o lefaru yn Gymraeg.",
+    "filler": "Ie, mae hynny'n gywir. Iawn, parhewch os gwelwch yn dda. Diolch yn fawr iawn."
+  },
+  "da": {
+    "seed": "Dette er en samtale på dansk.",
+    "preamble": "Følgende er en transskription af tale på dansk.",
+    "filler": "Ja, det er rigtigt. Okay, fortsæt venligst. Mange tak."
+  },
+  "de": {
+    "seed": "Dies ist ein Gespräch auf Deutsch.",
+    "preamble": "Das Folgende ist eine Transkription von Sprache auf Deutsch.",
+    "filler": "Ja, das stimmt. Okay, bitte fahren Sie fort. Vielen Dank."
+  },
+  "el": {
+    "seed": "Αυτή είναι μια συνομιλία στα ελληνικά.",
+    "preamble": "Ακολουθεί μεταγραφή ομιλίας στα ελληνικά.",
+    "filler": "Ναι, αυτό είναι σωστό. Εντάξει, παρακαλώ συνεχίστε. Ευχαριστώ πολύ."
+  },
+  "en": {
+    "seed": "This is a conversation in English.",
+    "preamble": "The following is a transcription of speech in English.",
+    "filler": "Yes, that's right. Okay, please continue. Thank you very much."
+  },
+  "es": {
+    "seed": "Esta es una conversación en español.",
+    "preamble": "Lo siguiente es una transcripción de habla en español.",
+    "filler": "Sí, eso es correcto. De acuerdo, por favor continúe. Muchas gracias."
+  },
+  "et": {
+    "seed": "See on vestlus eesti keeles.",
+    "preamble": "Järgnev on eestikeelse kõne transkriptsioon.",
+    "filler": "Jah, see on õige. Hästi, palun jätkake. Tänan väga."
+  },
+  "eu": {
+    "seed": "Hau euskarazko elkarrizketa bat da.",
+    "preamble": "Jarraian euskarazko hizketaren transkripzioa dago.",
+    "filler": "Bai, hori zuzena da. Ados, mesedez jarraitu. Eskerrik asko."
+  },
+  "fa": {
+    "seed": "این یک مکالمه به زبان فارسی است.",
+    "preamble": "در ادامه رونوشت گفتار به زبان فارسی آمده است.",
+    "filler": "بله، درسته. خب، لطفاً ادامه بدهید. خیلی ممنون."
+  },
+  "fi": {
+    "seed": "Tämä on keskustelu suomeksi.",
+    "preamble": "Seuraava on suomenkielisen puheen litteraatio.",
+    "filler": "Kyllä, se on oikein. Hyvä, ole hyvä ja jatka. Kiitos paljon."
+  },
+  "fo": {
+    "seed": "Hetta er ein samrøða á føroyskum.",
+    "preamble": "Hetta er ein avskrift av talu á føroyskum.",
+    "filler": "Ja, tað er rætt. Gott, vinarliga halt fram. Túsund takk."
+  },
+  "fr": {
+    "seed": "Ceci est une conversation en français.",
+    "preamble": "Ce qui suit est une transcription de parole en français.",
+    "filler": "Oui, c'est exact. D'accord, veuillez continuer. Merci beaucoup."
+  },
+  "gl": {
+    "seed": "Esta é unha conversa en galego.",
+    "preamble": "O seguinte é unha transcrición de fala en galego.",
+    "filler": "Si, iso é correcto. Ben, por favor continúe. Moitas grazas."
+  },
+  "gu": {
+    "seed": "આ ગુજરાતીમાં એક વાતચીત છે.",
+    "preamble": "નીચે ગુજરાતીમાં વાણીનું ટ્રાન્સક્રિપ્શન છે.",
+    "filler": "હા, તે સાચું છે. ઠીક છે, કૃપા કરીને ચાલુ રાખો. ખૂબ ખૂબ આભાર."
+  },
+  "ha": {
+    "seed": "Wannan tattaunawa ce a Hausa.",
+    "preamble": "Mai zuwa shi ne rubuce-rubucen magana cikin Hausa.",
+    "filler": "Eh, daidai ne. To, don Allah ci gaba. Na gode sosai."
+  },
+  "haw": {
+    "seed": "He kamaʻilio kēia ma ka ʻōlelo Hawaiʻi.",
+    "preamble": "Eia ka palapala o ka ʻōlelo ʻana ma ka ʻōlelo Hawaiʻi.",
+    "filler": "ʻAe, pololei kēlā. Hiki nō, e hoʻomau aku. Mahalo nui loa."
+  },
+  "he": {
+    "seed": "זוהי שיחה בעברית.",
+    "preamble": "להלן תמלול של דיבור בעברית.",
+    "filler": "כן, זה נכון. בסדר, בבקשה המשיכו. תודה רבה."
+  },
+  "hi": {
+    "seed": "यह हिंदी में एक बातचीत है।",
+    "preamble": "निम्नलिखित हिंदी में भाषण का प्रतिलेखन है।",
+    "filler": "हाँ, यह सही है। ठीक है, कृपया जारी रखें। बहुत-बहुत धन्यवाद।"
+  },
+  "hr": {
+    "seed": "Ovo je razgovor na hrvatskom jeziku.",
+    "preamble": "Sljedeće je transkripcija govora na hrvatskom jeziku.",
+    "filler": "Da, to je točno. U redu, molim nastavite. Hvala vam puno."
+  },
+  "ht": {
+    "seed": "Sa se yon konvèsasyon an kreyòl ayisyen.",
+    "preamble": "Sa ki anba la se yon transkripsyon diskou an kreyòl ayisyen.",
+    "filler": "Wi, se sa menm. Oke, tanpri kontinye. Mèsi anpil."
+  },
+  "hu": {
+    "seed": "Ez egy beszélgetés magyarul.",
+    "preamble": "Az alábbiakban magyar nyelvű beszéd átirata következik.",
+    "filler": "Igen, ez helyes. Rendben, kérem folytassa. Köszönöm szépen."
+  },
+  "hy": {
+    "seed": "Սա խոսակցություն է հայերենով։",
+    "preamble": "Ստորև ներկայացված է հայերենով խոսքի սաղագրությունը։",
+    "filler": "Այո, ճիշտ է։ Լավ, խնդրում եմ շարունակեք։ Շատ շնորհակալություն։"
+  },
+  "id": {
+    "seed": "Ini adalah percakapan dalam bahasa Indonesia.",
+    "preamble": "Berikut ini adalah transkripsi ucapan dalam bahasa Indonesia.",
+    "filler": "Ya, benar. Baik, silakan lanjutkan. Terima kasih banyak."
+  },
+  "is": {
+    "seed": "Þetta er samtal á íslensku.",
+    "preamble": "Eftirfarandi er umritun á ræðu á íslensku.",
+    "filler": "Já, það er rétt. Allt í lagi, vinsamlegast haltu áfram. Þakka þér kærlega."
+  },
+  "it": {
+    "seed": "Questa è una conversazione in italiano.",
+    "preamble": "Quella che segue è una trascrizione del parlato in italiano.",
+    "filler": "Sì, esatto. Va bene, per favore continui. Grazie mille."
+  },
+  "ja": {
+    "seed": "これは日本語の会話です。",
+    "preamble": "以下は日本語の音声の書き起こしです。",
+    "filler": "はい、その通りです。では、続けてください。どうもありがとうございます。"
+  },
+  "jw": {
+    "seed": "Iki obrolan nganggo basa Jawa.",
+    "preamble": "Ing ngisor iki transkripsi obrolan nganggo basa Jawa.",
+    "filler": "Nggih, leres. Nggih, mangga dipunlajengaken. Matur nuwun sanget."
+  },
+  "ka": {
+    "seed": "ეს არის საუბარი ქართულ ენაზე.",
+    "preamble": "ქვემოთ მოცემულია ქართულ ენაზე მეტყველების ტრანსკრიფცია.",
+    "filler": "დიახ, ეს სწორია. კარგი, გთხოვთ გააგრძელეთ. დიდი მადლობა."
+  },
+  "kk": {
+    "seed": "Бұл қазақ тілінде сөйлесу.",
+    "preamble": "Төменде қазақ тілінде сөйлеудің транскрипциясы берілген.",
+    "filler": "Иә, дұрыс. Жақсы, өтінемін, жалғастырыңыз. Көп рахмет."
+  },
+  "km": {
+    "seed": "នេះជាការសន្ទនាជាភាសាខ្មែរ។",
+    "preamble": "ខាងក្រោមនេះជាការចម្លងសំដីជាភាសាខ្មែរ។",
+    "filler": "បាទ/ចាស ត្រឹមត្រូវហើយ។ បាទ/ចាស សូមបន្ត។ អរគុណច្រើន។"
+  },
+  "kn": {
+    "seed": "ಇದು ಕನ್ನಡದಲ್ಲಿ ಒಂದು ಸಂಭಾಷಣೆ.",
+    "preamble": "ಕೆಳಗಿನದು ಕನ್ನಡದಲ್ಲಿ ಮಾತಿನ ಪ್ರತಿಲೇಖನವಾಗಿದೆ.",
+    "filler": "ಹೌದು, ಅದು ಸರಿಯಾಗಿದೆ. ಸರಿ, ದಯವಿಟ್ಟು ಮುಂದುವರಿಸಿ. ತುಂಬಾ ಧನ್ಯವಾದಗಳು."
+  },
+  "ko": {
+    "seed": "이것은 한국어 대화입니다.",
+    "preamble": "다음은 한국어 음성의 전사입니다.",
+    "filler": "네, 맞습니다. 계속해 주세요. 정말 감사합니다."
+  },
+  "la": {
+    "seed": "Haec est conversatio Latina.",
+    "preamble": "Quod sequitur est transcriptio sermonis Latini.",
+    "filler": "Ita, recte est. Bene, perge quaeso. Gratias tibi maximas."
+  },
+  "lb": {
+    "seed": "Dëst ass eng Konversatioun op Lëtzebuergesch.",
+    "preamble": "Dat Follgend ass eng Transkriptioun vu Ried op Lëtzebuergesch.",
+    "filler": "Jo, dat stëmmt. Gutt, fuert w.e.g. weider. Villmools Merci."
+  },
+  "ln": {
+    "seed": "Oyo ezali lisolo na lingala.",
+    "preamble": "Oyo ezali bokomi ya maloba na lingala.",
+    "filler": "Ee, yango ezali solo. Malamu, nabondeli yo kokoba. Matondi mingi."
+  },
+  "lo": {
+    "seed": "ນີ້ແມ່ນການສົນທະນາເປັນພາສາລາວ.",
+    "preamble": "ຕໍ່ໄປນີ້ແມ່ນການຖອດຄວາມສຽງເວົ້າເປັນພາສາລາວ.",
+    "filler": "ແມ່ນ ຖືກຕ້ອງແລ້ວ. ຕົກລົງ ກະລຸນາສືບຕໍ່. ຂອບໃຈຫຼາຍໆ."
+  },
+  "lt": {
+    "seed": "Tai pokalbis lietuvių kalba.",
+    "preamble": "Toliau pateikiama kalbos transkripcija lietuvių kalba.",
+    "filler": "Taip, tai teisinga. Gerai, prašau tęskite. Labai ačiū."
+  },
+  "lv": {
+    "seed": "Šī ir saruna latviešu valodā.",
+    "preamble": "Tālāk ir runas transkripcija latviešu valodā.",
+    "filler": "Jā, tā ir taisnība. Labi, lūdzu turpiniet. Liels paldies."
+  },
+  "mg": {
+    "seed": "Resaka amin'ny teny malagasy izao.",
+    "preamble": "Ny manaraka dia fandikana lahateny amin'ny teny malagasy.",
+    "filler": "Eny, marina izany. Ekena, mba manohy azafady. Misaotra betsaka."
+  },
+  "mi": {
+    "seed": "He kōrerorero tēnei i te reo Māori.",
+    "preamble": "Ko te whai ake nei he tuhingarua o te kōrero i te reo Māori.",
+    "filler": "Āe, he tika tēnā. Ka pai, tēnā koa haere tonu. Tēnā koe."
+  },
+  "mk": {
+    "seed": "Ова е разговор на македонски јазик.",
+    "preamble": "Во продолжение следува транскрипција на говор на македонски јазик.",
+    "filler": "Да, тоа е точно. Добро, ве молам продолжете. Ви благодарам многу."
+  },
+  "ml": {
+    "seed": "ഇത് മലയാളത്തിലെ ഒരു സംഭാഷണമാണ്.",
+    "preamble": "താഴെ മലയാളത്തിലുള്ള സംഭാഷണത്തിന്റെ പ്രതിലിപിയാണ്.",
+    "filler": "അതെ, അത് ശരിയാണ്. സരി, ദയവായി തുടരുക. നന്ദി നന്ദി."
+  },
+  "mn": {
+    "seed": "Энэ бол монгол хэл дээрх яриа юм.",
+    "preamble": "Дараах нь монгол хэл дээрх ярианы транскрипц юм.",
+    "filler": "Тийм, зөв. Зүгээр, үргэлжлүүлнэ үү. Баярлалаа."
+  },
+  "mr": {
+    "seed": "हा मराठीतील एक संवाद आहे.",
+    "preamble": "खालील मराठीतील भाषणाचे प्रतिलेखन आहे.",
+    "filler": "होय, ते बरोबर आहे. ठीक आहे, कृपया पुढे चालू ठेवा. खूप खूप धन्यवाद."
+  },
+  "ms": {
+    "seed": "Ini adalah perbualan dalam bahasa Melayu.",
+    "preamble": "Berikut ialah transkripsi ucapan dalam bahasa Melayu.",
+    "filler": "Ya, betul. Baik, sila teruskan. Terima kasih banyak."
+  },
+  "mt": {
+    "seed": "Din hija konversazzjoni bil-Malti.",
+    "preamble": "Li ġej hija traskrizzjoni ta' diskors bil-Malti.",
+    "filler": "Iva, hekk hu. Tajjeb, jekk jogħġbok kompli. Grazzi ħafna."
+  },
+  "my": {
+    "seed": "ဒါက မြန်မာဘာသာဖြင့် စကားပြောခြင်း ဖြစ်ပါတယ်။",
+    "preamble": "အောက်ပါသည် မြန်မာဘာသာဖြင့် စကားပြောခြင်းအား စာသားပြန်ဖြစ်ပါသည်။",
+    "filler": "ဟုတ်ကဲ့၍ မှန်ပါတယ်။ ကောင်းပါပြီ၍ ဆက်လုပ်ပါ။ ကျေးဇူးတင်ပါသည်။"
+  },
+  "ne": {
+    "seed": "यो नेपालीमा एक कुराकानी हो।",
+    "preamble": "तल नेपालीमा भाषणको प्रतिलेखन हो।",
+    "filler": "हो, त्यो ठीक छ। हुन्छ, कृपया जारी राख्नुहोस्। धेरै धेरै धन्यवाद।"
+  },
+  "nl": {
+    "seed": "Dit is een gesprek in het Nederlands.",
+    "preamble": "Het volgende is een transcriptie van spraak in het Nederlands.",
+    "filler": "Ja, dat klopt. Oké, ga alstublieft verder. Heel erg bedankt."
+  },
+  "nn": {
+    "seed": "Dette er ein samtale på nynorsk.",
+    "preamble": "Det følgjande er ein transkripsjon av tale på norsk.",
+    "filler": "Ja, det stemmer. Greitt, ver så snill og hald fram. Tusen takk."
+  },
+  "no": {
+    "seed": "Dette er en samtale på norsk.",
+    "preamble": "Det følgende er en transkripsjon av tale på norsk.",
+    "filler": "Ja, det stemmer. Greit, vennligst fortsett. Tusen takk."
+  },
+  "oc": {
+    "seed": "Aquò es una conversacion en occitan.",
+    "preamble": "Çò que seguís es una transcripcion de paraula en occitan.",
+    "filler": "Òc, es corrèct. D'acòrdi, continuatz se vos plai. Grand mercé."
+  },
+  "pa": {
+    "seed": "ਇਹ ਪੰਜਾਬੀ ਵਿੱਚ ਇੱਕ ਗੱਲਬਾਤ ਹੈ।",
+    "preamble": "ਹੇਠਾਂ ਪੰਜਾਬੀ ਵਿੱਚ ਬੋਲੀ ਦੀ ਟ੍ਰਾਂਸਕ੍ਰਿਪਸ਼ਨ ਹੈ।",
+    "filler": "ਹਾਂ, ਇਹ ਸਹੀ ਹੈ। ਠੀਕ ਹੈ, ਕਿਰਪਾ ਕਰਕੇ ਜਾਰੀ ਰੱਖੋ। ਬਹੁਤ ਬਹੁਤ ਧੰਨਵਾਦ।"
+  },
+  "pl": {
+    "seed": "To jest rozmowa po polsku.",
+    "preamble": "Poniżej znajduje się transkrypcja mowy w języku polskim.",
+    "filler": "Tak, zgadza się. Dobrze, proszę kontynuować. Dziękuję bardzo."
+  },
+  "ps": {
+    "seed": "دا په پښتو ژبه کې یوه خبره اترې ده.",
+    "preamble": "لاندې په پښتو ژبه کې د وینا لیکل دی.",
+    "filler": "هو, دا سمه ده. ښه, مهرباني وکړئ مخکې کړئ. ډیره مننه."
+  },
+  "pt": {
+    "seed": "Esta é uma conversa em português.",
+    "preamble": "O que se segue é uma transcrição de fala em português.",
+    "filler": "Sim, isso mesmo. Tudo bem, por favor continue. Muito obrigado."
+  },
+  "ro": {
+    "seed": "Aceasta este o conversație în limba română.",
+    "preamble": "Următoarea este o transcriere a vorbirii în limba română.",
+    "filler": "Da, este corect. Bine, vă rog continuați. Mulțumesc foarte mult."
+  },
+  "ru": {
+    "seed": "Это разговор на русском языке.",
+    "preamble": "Далее следует транскрипция речи на русском языке.",
+    "filler": "Да, верно. Хорошо, пожалуйста, продолжайте. Большое спасибо."
+  },
+  "sa": {
+    "seed": "इदं संस्कृतभाषायां संवादः अस्ति।",
+    "preamble": "अधः संस्कृतभाषायां वाचः प्रतिलेखनम् अस्ति।",
+    "filler": "आम्, सम्यक् एतत्। साधु, कृपया अग्रे गच्छतु। बहु धन्यवादाः।"
+  },
+  "sd": {
+    "seed": "هي سنڌيءَ ۾ هڪ ڳالهه ٻولهه آهي.",
+    "preamble": "هيٺان سنڌي ۾ ڳالهائيءَ جو پنهنجو لک آهي.",
+    "filler": "ها، اهو صحيح آهي. ٺهيڪ آهي، مهرباني ڪري جاري رهو. بهيت شڪريه."
+  },
+  "si": {
+    "seed": "මෙය සිංහලෙන් සංවාදයක් වේ.",
+    "preamble": "පහත සිංහලෙන් කතාවට ප්‍රතිලිපියකි.",
+    "filler": "ඔව්, එක හරියි. හරි, කරුණාකර කරගෙන යන්න. බොහෝම ස්තූතියි."
+  },
+  "sk": {
+    "seed": "Toto je rozhovor v slovenčine.",
+    "preamble": "Nasleduje prepis reči v slovenčine.",
+    "filler": "Áno, to je správne. Dobre, prosím pokračujte. Ďakujem veľmi pekne."
+  },
+  "sl": {
+    "seed": "To je pogovor v slovenščini.",
+    "preamble": "Sledi prepis govora v slovenščini.",
+    "filler": "Da, to je pravilno. V redu, prosim nadaljujte. Najlepša hvala."
+  },
+  "sn": {
+    "seed": "Iyi ingurukuruka iri muShona.",
+    "preamble": "Zviri pasi ndizvo zvakanyorwa zvekutaura muShona.",
+    "filler": "Hongu, ndizvo. Zvakanaka, ndapota rambai machienderera. Mazvita chaizvo."
+  },
+  "so": {
+    "seed": "Tani waa wada sheekeysi af Soomaali ah.",
+    "preamble": "Kan soo socda waa qoraal ka kooban hadal af Soomaali ah.",
+    "filler": "Haa, taasi waa sax. Hagaag, fadlan sii wad. Aad ayaan ugu mahadcelinayaa."
+  },
+  "sq": {
+    "seed": "Kjo është një bisedë në shqip.",
+    "preamble": "Më poshtë është një transkriptim i të folurit në shqip.",
+    "filler": "Po, kjo është e saktë. Mirë, ju lutem vazhdoni. Faleminderit shumë."
+  },
+  "sr": {
+    "seed": "Ово је разговор на српском језику.",
+    "preamble": "У наставку следи транскрипција говора на српском језику.",
+    "filler": "Да, то је тачно. У реду, молим наставите. Хвала вам много."
+  },
+  "su": {
+    "seed": "Ieu mangrupikeun paguneman dina basa Sunda.",
+    "preamble": "Di handap ieu mangrupikeun transkripsi omongan dina basa Sunda.",
+    "filler": "Leres, éta leres. Mangga, teraskeun. Hatur nuhun pisan."
+  },
+  "sv": {
+    "seed": "Det här är ett samtal på svenska.",
+    "preamble": "Följande är en transkription av tal på svenska.",
+    "filler": "Ja, det stämmer. Okej, vänligen fortsätt. Tack så mycket."
+  },
+  "sw": {
+    "seed": "Hii ni mazungumzo kwa Kiswahili.",
+    "preamble": "Ifuatayo ni unukuzi wa hotuba kwa Kiswahili.",
+    "filler": "Ndiyo, hiyo ni sahihi. Sawa, tafadhali endelea. Asante sana."
+  },
+  "ta": {
+    "seed": "இது தமிழில் ஒரு உரையாடல்.",
+    "preamble": "பின்வருவது தமிழில் பேச்சின் படியெடுப்பு.",
+    "filler": "ஆம், அது சரி. சரி, தயவுசெய்து தொடரவும். மிக்க நன்றி."
+  },
+  "te": {
+    "seed": "ఇది తెలుగులో ఒక సంభాషణ.",
+    "preamble": "ఈ క్రింది తెలుగులో ప్రసంగం యొక్క లిప్యంతరీకరణ.",
+    "filler": "అవును, అది సరైనది. సరే, దయచేసి కొనసాగించండి. చాలా ధన్యవాదాలు."
+  },
+  "tg": {
+    "seed": "Ин гуфтугӯ бо забони тоҷикӣ аст.",
+    "preamble": "Дар зер транскрипцияи гуфтор бо забони тоҷикӣ омадааст.",
+    "filler": "Бале, дуруст аст. Хуб, лутфан идома диҳед. Раҳмати калон."
+  },
+  "th": {
+    "seed": "นี่คือบทสนทนาภาษาไทย",
+    "preamble": "ต่อไปนี้เป็นการถอดความเสียงพูดภาษาไทย",
+    "filler": "ใช่ ถูกต้องครับ โอเค กรุณาดำเนินการต่อ ขอบคุณมากครับ"
+  },
+  "tk": {
+    "seed": "Bu türkmen dilinde bir söhbetdir.",
+    "preamble": "Aşakda türkmen dilinde gepleşigiň transkripsiýasy berilyär.",
+    "filler": "Hawa, dogry. Bolyär, dowam ediň hayış. Köp sag boluň."
+  },
+  "tl": {
+    "seed": "Ito ay isang pag-uusap sa Filipino.",
+    "preamble": "Ang sumusunod ay isang transkripsyon ng pananalita sa Filipino.",
+    "filler": "Oo, tama iyan. Sige, pakituloy po. Maraming salamat."
+  },
+  "tr": {
+    "seed": "Bu Türkçe bir konuşmadır.",
+    "preamble": "Aşağıdaki Türkçe konuşmanın transkripsiyonudur.",
+    "filler": "Evet, doğru. Tamam, lütfen devam edin. Çok teşekkür ederim."
+  },
+  "tt": {
+    "seed": "Бу татар телендә сөйләшү.",
+    "preamble": "Түбәндә татар телендә сөйләүнең транскрипциясе бирелгән.",
+    "filler": "Әйе, дөрес. Яхшы, зинһар, дәвам итегез. Бик зур рәхмәт."
+  },
+  "uk": {
+    "seed": "Це розмова українською мовою.",
+    "preamble": "Далі наведено транскрипцію мовлення українською мовою.",
+    "filler": "Так, правильно. Добре, будь ласка, продовжуйте. Дуже дякую."
+  },
+  "ur": {
+    "seed": "یہ اردو میں ایک گفتگو ہے۔",
+    "preamble": "ذیل میں اردو میں تقریر کی نقل ہے۔",
+    "filler": "جی ہاں، یہ صحیح ہے۔ ٹھیک ہے، براہ کرم جاری رکھیں۔ بہت شکریہ۔"
+  },
+  "uz": {
+    "seed": "Bu oʻzbek tilidagi suhbat.",
+    "preamble": "Quyida oʻzbek tilidagi nutqning transkripsiyasi keltirilgan.",
+    "filler": "Ha, toʻgʻri. Yaxshi, iltimos, davom eting. Katta rahmat."
+  },
+  "vi": {
+    "seed": "Đây là một cuộc trò chuyện bằng tiếng Việt.",
+    "preamble": "Sau đây là bản chép lời nói bằng tiếng Việt.",
+    "filler": "Vâng, đúng rồi. Được, xin hãy tiếp tục. Cảm ơn rất nhiều."
+  },
+  "yi": {
+    "seed": "דאָס איז אַ שמועס אויף ייִדיש.",
+    "preamble": "דאָס פֿאָלגנדע איז אַ טראַנסקריפציע פֿון רעדן אויף ייִדיש.",
+    "filler": "יאָ, דאָס איז ריכטיק. גוט, זייִט אַזוי גוט ווײַטער. אַ שיינעם דאַנק."
+  },
+  "yo": {
+    "seed": "Èyí jẹ́ ìfọ̀rọ̀wánilẹ́nuwò ní èdè Yorùbá.",
+    "preamble": "Àtẹ̀lé yìí jẹ́ ìtúp̀alẹ̀ ọ̀rọ̀ sísọ ní èdè Yorùbá.",
+    "filler": "Bẹ́ẹ̀ni, ó tọ̀nà. Ó dára, ẹ jọ̀wọ́ ẹ máa tẹ̀síwájú. E ṣé púpọ̀."
+  },
+  "zh": {
+    "seed": "这是一段中文对话。",
+    "preamble": "以下是中文语音的转录。",
+    "filler": "对，没错。好的，请继续。非常感谢。"
+  },
+  "yue": {
+    "seed": "呢個係一段廣東話對話。",
+    "preamble": "以下是中文语音的转录。",
+    "filler": "对，没错。好的，请继续。非常感谢。"
+  }
+}

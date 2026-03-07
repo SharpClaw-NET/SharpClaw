@@ -136,6 +136,42 @@ public sealed class WasapiAudioCaptureProvider : IAudioCaptureProvider
         }
     }
 
+    public async Task CaptureRawAsync(
+        string? deviceIdentifier,
+        Action<ReadOnlySpan<float>> onSamplesReady,
+        CancellationToken ct)
+    {
+        if (!OperatingSystem.IsWindows())
+            throw new PlatformNotSupportedException(
+                "WASAPI audio capture is only supported on Windows.");
+
+        var enumerator = new MMDeviceEnumerator();
+        var device = string.IsNullOrEmpty(deviceIdentifier) || deviceIdentifier == "default"
+            ? enumerator.GetDefaultAudioEndpoint(DataFlow.Capture, Role.Communications)
+            : enumerator.GetDevice(deviceIdentifier);
+
+        using var capture = new WasapiCapture(device);
+        var targetFormat = new WaveFormat(TargetSampleRate, TargetBitsPerSample, TargetChannels);
+
+        var tcs = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        ct.Register(() => tcs.TrySetResult());
+
+        capture.DataAvailable += (_, e) =>
+        {
+            if (ct.IsCancellationRequested) return;
+
+            var resampled = Resample(e.Buffer, e.BytesRecorded, capture.WaveFormat, targetFormat);
+            var floats = ConvertPcm16ToFloat(resampled);
+            onSamplesReady(floats);
+        };
+
+        capture.RecordingStopped += (_, _) => tcs.TrySetResult();
+        capture.StartRecording();
+
+        await tcs.Task;
+        capture.StopRecording();
+    }
+
     public void Dispose() { }
 
     // ═══════════════════════════════════════════════════════════════
@@ -176,5 +212,20 @@ public sealed class WasapiAudioCaptureProvider : IAudioCaptureProvider
             writer.Flush();
         }
         return ms.ToArray();
+    }
+
+    /// <summary>
+    /// Converts 16-bit PCM byte data to normalised float samples (-1..1).
+    /// </summary>
+    private static float[] ConvertPcm16ToFloat(byte[] pcm16)
+    {
+        var sampleCount = pcm16.Length / 2;
+        var result = new float[sampleCount];
+        for (var i = 0; i < sampleCount; i++)
+        {
+            var sample = BitConverter.ToInt16(pcm16, i * 2);
+            result[i] = sample / 32768f;
+        }
+        return result;
     }
 }

@@ -37,6 +37,30 @@ public interface IAudioCaptureProvider : IDisposable
         CancellationToken ct);
 
     /// <summary>
+    /// Starts recording from the specified device and delivers raw PCM
+    /// float samples (mono, 16 kHz) to <paramref name="onSamplesReady"/>
+    /// continuously. The callback receives each batch of resampled float
+    /// samples as they arrive from the audio device.
+    /// <para>
+    /// <b>Threading contract:</b> same as <see cref="CaptureAsync"/> —
+    /// the callback is invoked sequentially, never concurrently.
+    /// </para>
+    /// </summary>
+    /// <param name="deviceIdentifier">
+    /// OS-level device identifier. Null or "default" selects the system
+    /// default input device.
+    /// </param>
+    /// <param name="onSamplesReady">
+    /// Called with a span of mono 16 kHz float samples each time audio
+    /// data arrives from the device. Must be invoked sequentially.
+    /// </param>
+    /// <param name="ct">Stops recording when cancelled.</param>
+    Task CaptureRawAsync(
+        string? deviceIdentifier,
+        Action<ReadOnlySpan<float>> onSamplesReady,
+        CancellationToken ct);
+
+    /// <summary>
     /// Lists available input (recording) devices on the current system.
     /// Returns tuples of (deviceIdentifier, friendlyName).
     /// </summary>

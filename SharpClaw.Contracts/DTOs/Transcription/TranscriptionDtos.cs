@@ -34,7 +34,8 @@ public sealed record TranscriptionSegmentResponse(
     double StartTime,
     double EndTime,
     double? Confidence,
-    DateTimeOffset Timestamp);
+    DateTimeOffset Timestamp,
+    bool IsProvisional = false);
 
 /// <summary>
 /// Request body for pushing a transcription segment from an external

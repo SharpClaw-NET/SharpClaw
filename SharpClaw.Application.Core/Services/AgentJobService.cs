@@ -124,6 +124,9 @@ IConfiguration configuration)
             WorkingDirectory = request.WorkingDirectory,
             TranscriptionModelId = effectiveTranscriptionModelId,
             Language = request.Language,
+            TranscriptionMode = request.TranscriptionMode,
+            WindowSeconds = request.WindowSeconds,
+            StepSeconds = request.StepSeconds,
         };
 
         db.AgentJobs.Add(job);
@@ -349,7 +352,8 @@ IConfiguration configuration)
     /// </summary>
     public async Task<TranscriptionSegmentResponse?> PushSegmentAsync(
         Guid jobId, string text, double startTime, double endTime,
-        double? confidence = null, CancellationToken ct = default)
+        double? confidence = null, bool isProvisional = false,
+        CancellationToken ct = default)
     {
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null || job.Status != AgentJobStatus.Executing)
@@ -362,7 +366,8 @@ IConfiguration configuration)
             StartTime = startTime,
             EndTime = endTime,
             Confidence = confidence,
-            Timestamp = DateTimeOffset.UtcNow
+            Timestamp = DateTimeOffset.UtcNow,
+            IsProvisional = isProvisional,
         };
 
         db.TranscriptionSegments.Add(segment);
@@ -370,12 +375,72 @@ IConfiguration configuration)
 
         var response = new TranscriptionSegmentResponse(
             segment.Id, segment.Text, segment.StartTime, segment.EndTime,
-            segment.Confidence, segment.Timestamp);
+            segment.Confidence, segment.Timestamp, segment.IsProvisional);
 
         if (_channels.TryGetValue(jobId, out var channel))
             await channel.Writer.WriteAsync(response, ct);
 
         return response;
+    }
+
+    /// <summary>
+    /// Promotes a provisional segment to final, optionally updating its
+    /// text and confidence.  Pushes the updated segment to streaming
+    /// consumers so they can replace the provisional version in-place.
+    /// </summary>
+    public async Task<TranscriptionSegmentResponse?> FinalizeSegmentAsync(
+        Guid jobId, Guid segmentId, string text, double? confidence = null,
+        CancellationToken ct = default)
+    {
+        var segment = await db.TranscriptionSegments
+            .FirstOrDefaultAsync(s => s.Id == segmentId && s.AgentJobId == jobId, ct);
+        if (segment is null)
+            return null;
+
+        segment.Text = text;
+        segment.IsProvisional = false;
+        segment.Timestamp = DateTimeOffset.UtcNow;
+        if (confidence.HasValue)
+            segment.Confidence = confidence;
+
+        await db.SaveChangesAsync(ct);
+
+        var response = new TranscriptionSegmentResponse(
+            segment.Id, segment.Text, segment.StartTime, segment.EndTime,
+            segment.Confidence, segment.Timestamp, IsProvisional: false);
+
+        if (_channels.TryGetValue(jobId, out var channel))
+            await channel.Writer.WriteAsync(response, ct);
+
+        return response;
+    }
+
+    /// <summary>
+    /// Removes a provisional segment that was not confirmed by later
+    /// inference ticks (likely a hallucination).  Deletes the DB record
+    /// and pushes a zero-length "retracted" event so streaming consumers
+    /// can remove it.
+    /// </summary>
+    public async Task RetractSegmentAsync(
+        Guid jobId, Guid segmentId, CancellationToken ct = default)
+    {
+        var segment = await db.TranscriptionSegments
+            .FirstOrDefaultAsync(s => s.Id == segmentId && s.AgentJobId == jobId, ct);
+        if (segment is null)
+            return;
+
+        db.TranscriptionSegments.Remove(segment);
+        await db.SaveChangesAsync(ct);
+
+        // Push a tombstone so streaming consumers know to remove it.
+        if (_channels.TryGetValue(jobId, out var channel))
+        {
+            var tombstone = new TranscriptionSegmentResponse(
+                segment.Id, string.Empty, segment.StartTime, segment.EndTime,
+                Confidence: null, Timestamp: DateTimeOffset.UtcNow,
+                IsProvisional: false);
+            await channel.Writer.WriteAsync(tombstone, ct);
+        }
     }
 
     /// <summary>
@@ -485,7 +550,9 @@ IConfiguration configuration)
         AddLog(job, $"Transcription started with model '{model.Name}' on device '{device.Name}'.");
         await db.SaveChangesAsync(ct);
 
-        orchestrator.Start(job.Id, model.Id, device.DeviceIdentifier, job.Language);
+        orchestrator.Start(
+            job.Id, model.Id, device.DeviceIdentifier, job.Language,
+            job.TranscriptionMode, job.WindowSeconds, job.StepSeconds);
     }
 
     // ── Shell execution routing ─────────────────────────────────
@@ -2213,11 +2280,15 @@ IConfiguration configuration)
             WorkingDirectory: job.WorkingDirectory,
             TranscriptionModelId: job.TranscriptionModelId,
             Language: job.Language,
+            TranscriptionMode: job.TranscriptionMode,
+            WindowSeconds: job.WindowSeconds,
+            StepSeconds: job.StepSeconds,
             Segments: IsTranscriptionAction(job.ActionType)
                 ? job.TranscriptionSegments
                     .OrderBy(s => s.StartTime)
                     .Select(s => new TranscriptionSegmentResponse(
-                        s.Id, s.Text, s.StartTime, s.EndTime, s.Confidence, s.Timestamp))
+                        s.Id, s.Text, s.StartTime, s.EndTime, s.Confidence, s.Timestamp,
+                        s.IsProvisional))
                     .ToList()
                 : null);
 }

@@ -24,6 +24,7 @@
     <EmbeddedResource Include="Resources\tool-instructions-text.md" LogicalName="SharpClaw.Application.Core.tool-instructions-text.md" />
     <EmbeddedResource Include="Resources\tool-instructions-native-suffix.md" LogicalName="SharpClaw.Application.Core.tool-instructions-native-suffix.md" />
     <EmbeddedResource Include="Resources\tool-description-native.md" LogicalName="SharpClaw.Application.Core.tool-description-native.md" />
+    <EmbeddedResource Include="Resources\transcription-language-seeds.json" LogicalName="SharpClaw.Application.Core.transcription-language-seeds.json" />
   </ItemGroup>
 
   <ItemGroup>

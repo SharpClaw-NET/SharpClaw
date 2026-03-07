@@ -25,6 +25,7 @@
     <File Path="Directory.Build.targets" />
     <File Path="Directory.Packages.props" />
     <File Path="docs/App-API-documentation.md" />
+    <File Path="docs/App-API-skill.md" />
     <File Path="global.json" />
     <File Path="LICENSE" />
     <File Path="README.md" />

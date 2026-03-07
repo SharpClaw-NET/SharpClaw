@@ -26,4 +26,10 @@ public class TranscriptionSegmentDB : BaseEntity
 
     /// <summary>Wall-clock time when this segment was recognised.</summary>
     public DateTimeOffset Timestamp { get; set; }
+
+    /// <summary>
+    /// When <see langword="true"/> the segment is a provisional first-pass
+    /// result that may be finalized or retracted by a later inference tick.
+    /// </summary>
+    public bool IsProvisional { get; set; }
 }

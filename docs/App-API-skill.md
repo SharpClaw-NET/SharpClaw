@@ -215,7 +215,9 @@ POST   /channels/{channelId}/jobs/{jobId}/cancel
 SubmitAgentJobRequest:
   actionType (required), resourceId?, agentId?, callerAgentId?,
   dangerousShellType?, safeShellType?, scriptJson?, workingDirectory?,
-  transcriptionModelId?, language?
+  transcriptionModelId?, language?, transcriptionMode?, windowSeconds?, stepSeconds?
+
+TranscriptionMode values: SlidingWindow (default, two-pass), Simple, StrictSlidingWindow.
 
 AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6.
 
@@ -227,7 +229,24 @@ When resourceId is omitted for a per-resource action, default resources are reso
 
 When transcriptionModelId is omitted for transcription actions, the default transcription model is resolved from the channel → context default resource set.
 
-language is a BCP-47 hint (e.g. "en", "de"). Omit for auto-detect. Supplying it improves accuracy on short chunks.
+language is a BCP-47 hint (e.g. "en", "de"). Omit for auto-detect. Supplying it improves accuracy on short chunks. When set, the orchestrator enforces it: prompt is seeded with a target-language phrase, and up to 4 retries with escalating reinforcement if Whisper returns the wrong language. Never drops audio — accepts after retries.
+
+transcriptionMode: SlidingWindow (default), Simple, or StrictSlidingWindow.
+  SlidingWindow: two-pass. Segments emitted provisionally within ~3 s (isProvisional=true),
+    then finalized or retracted after commit delay. Consumers replace provisional in-place.
+  Simple: sequential non-overlapping chunks, segments emitted immediately. Lower latency, fewer API calls.
+  StrictSlidingWindow: single-pass. Segments only emitted after full commit delay + dedup. ~5–8 s latency.
+
+windowSeconds: seconds of audio per inference tick. Clamped [5, 30]. Default 25.
+stepSeconds: seconds between inference ticks (SlidingWindow/StrictSlidingWindow only). Clamped [1, window]. Default 3. Ignored in Simple mode.
+
+TranscriptionMode enum: SlidingWindow=0, Simple=1, StrictSlidingWindow=2.
+
+Two-pass segment lifecycle (SlidingWindow mode):
+  1. Provisional: emitted quickly with isProvisional=true. Text may shift.
+  2. Finalized: same id re-pushed with isProvisional=false, updated text/confidence.
+  3. Retracted: stale provisional deleted, tombstone pushed (empty text, isProvisional=false).
+  StrictSlidingWindow and Simple always emit isProvisional=false.
 
 Audio is automatically normalised to mono 16 kHz 16-bit PCM (Whisper-optimal).
 
@@ -380,12 +399,31 @@ Step 8 — Submit a transcription job with minimal params.
   That's it. No resourceId, no transcriptionModelId, no agentId needed.
   The job is auto-approved (Independent clearance) and begins capturing audio immediately.
 
-  Optional: pass language for better accuracy on short chunks:
+  Optional: pass language for strict enforcement — prompt is seeded in target language, up to 4 retries on mismatch:
 
     POST /channels/CHANNEL_ID/jobs
     {
       "actionType": "TranscribeFromAudioDevice",
       "language": "en"
+    }
+
+  Optional: use Simple mode for cheap, low-latency transcription:
+
+    POST /channels/CHANNEL_ID/jobs
+    {
+      "actionType": "TranscribeFromAudioDevice",
+      "language": "en",
+      "transcriptionMode": "Simple"
+    }
+
+  Optional: custom sliding window timing (20s window, 5s step):
+
+    POST /channels/CHANNEL_ID/jobs
+    {
+      "actionType": "TranscribeFromAudioDevice",
+      "transcriptionMode": "SlidingWindow",
+      "windowSeconds": 20,
+      "stepSeconds": 5
     }
 
 Step 9 — Stream live segments.

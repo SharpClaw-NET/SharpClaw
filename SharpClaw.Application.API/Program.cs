@@ -107,6 +107,7 @@ try
 
     // Audio capture
     builder.Services.AddSingleton<IAudioCaptureProvider, WasapiAudioCaptureProvider>();
+    builder.Services.AddSingleton<SharedAudioCaptureManager>();
 
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ModelService>();

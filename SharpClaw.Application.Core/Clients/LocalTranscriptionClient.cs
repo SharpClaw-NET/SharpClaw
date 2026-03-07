@@ -13,11 +13,36 @@ namespace SharpClaw.Application.Core.Clients;
 /// the GGML/GGUF Whisper model. The <see cref="WhisperModelManager"/>
 /// caches loaded models across calls.
 /// </para>
+/// <para>
+/// Silence suppression is configured through whisper.cpp's native
+/// thresholds (<c>no_speech_threshold</c>, <c>logprob_threshold</c>,
+/// <c>entropy_threshold</c>). <c>WithNoContext()</c> prevents
+/// conditioning on previous text which reduces hallucinated
+/// repetitions when processing overlapping sliding windows.
+/// </para>
 /// </summary>
 public sealed class LocalTranscriptionClient(
     WhisperModelManager whisperManager) : ITranscriptionApiClient
 {
     public ProviderType ProviderType => ProviderType.Local;
+
+    /// <summary>
+    /// Segments with no-speech probability above this threshold are
+    /// suppressed by whisper.cpp before being returned.
+    /// </summary>
+    private const float NoSpeechThreshold = 0.6f;
+
+    /// <summary>
+    /// Segments with average log-probability below this threshold are
+    /// considered low-confidence and suppressed by whisper.cpp.
+    /// </summary>
+    private const float LogProbThreshold = -1.0f;
+
+    /// <summary>
+    /// Entropy (compression ratio proxy) threshold. Segments above
+    /// this value are likely hallucinated/repetitive text.
+    /// </summary>
+    private const float EntropyThreshold = 2.4f;
 
     public async Task<TranscriptionChunkResult> TranscribeAsync(
         HttpClient httpClient,
@@ -25,6 +50,7 @@ public sealed class LocalTranscriptionClient(
         string model,
         byte[] audioData,
         string? language = null,
+        string? prompt = null,
         CancellationToken ct = default)
     {
         // 'model' contains the absolute path to the local Whisper GGML file.
@@ -36,6 +62,23 @@ public sealed class LocalTranscriptionClient(
             builder.WithLanguage(language);
 
         builder.WithThreads(Math.Max(1, Environment.ProcessorCount / 2));
+
+        // Silence suppression: let whisper.cpp discard segments that
+        // are likely noise or hallucinated text.
+        builder.WithNoSpeechThreshold(NoSpeechThreshold);
+        builder.WithLogProbThreshold(LogProbThreshold);
+        builder.WithEntropyThreshold(EntropyThreshold);
+
+        // Prevent auto-conditioning on previous segments within the
+        // same chunk — critical for the sliding-window pipeline where
+        // the same audio is re-processed across overlapping windows.
+        builder.WithNoContext();
+
+        // Explicit prompt conditioning from previously finalized text
+        // is safe even with WithNoContext — it provides vocabulary /
+        // style hints without the hallucination risk of auto-context.
+        if (!string.IsNullOrEmpty(prompt))
+            builder.WithPrompt(prompt);
 
         using var processor = builder.Build();
 
@@ -74,6 +117,6 @@ public sealed class LocalTranscriptionClient(
         }
 
         return new TranscriptionChunkResult(
-            fullText.ToString().Trim(), duration, segments);
+            fullText.ToString().Trim(), duration, segments, Language: null);
     }
 }

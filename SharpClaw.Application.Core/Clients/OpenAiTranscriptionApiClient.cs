@@ -34,6 +34,7 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
         string model,
         byte[] audioData,
         string? language = null,
+        string? prompt = null,
         CancellationToken ct = default)
     {
         // Ensure audio is mono 16 kHz 16-bit PCM — optimal for Whisper / ASR.
@@ -56,6 +57,12 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
 
             if (language is not null)
                 content.Add(new StringContent(language), "language");
+
+            // Prompt conditioning: Whisper uses the last ~224 tokens of
+            // the prompt to maintain style, vocabulary, and continuity
+            // across sliding-window boundaries.
+            if (prompt is not null)
+                content.Add(new StringContent(prompt), "prompt");
 
             using var request = new HttpRequestMessage(HttpMethod.Post,
                 $"{ApiEndpoint}/audio/transcriptions");
@@ -113,7 +120,9 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
                     s.Text?.Trim() ?? "",
                     s.Start,
                     s.End,
-                    s.AvgLogprob.HasValue ? Math.Exp(s.AvgLogprob.Value) : null))
+                    s.AvgLogprob.HasValue ? Math.Exp(s.AvgLogprob.Value) : null,
+                    s.NoSpeechProb,
+                    s.CompressionRatio))
                 .ToList()
                 ?? [];
 
@@ -125,7 +134,8 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
             }
 
             return new TranscriptionChunkResult(
-                result.Text?.Trim() ?? "", result.Duration, segments);
+                result.Text?.Trim() ?? "", result.Duration, segments,
+                result.Language);
         }
     }
 
@@ -142,5 +152,7 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
         [property: JsonPropertyName("start")] double Start,
         [property: JsonPropertyName("end")] double End,
         [property: JsonPropertyName("text")] string? Text,
-        [property: JsonPropertyName("avg_logprob")] double? AvgLogprob);
+        [property: JsonPropertyName("avg_logprob")] double? AvgLogprob,
+        [property: JsonPropertyName("no_speech_prob")] double? NoSpeechProb,
+        [property: JsonPropertyName("compression_ratio")] double? CompressionRatio);
 }

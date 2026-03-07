@@ -1658,7 +1658,8 @@ public static class CliDispatcher
                 "",
                 "Transcription: submit with TranscribeFromAudioDevice and audio device",
                 "  as resourceId.",
-                "  Optional flags: --model <id>, --lang <code>");
+                "  Optional flags: --model <id>, --lang <code>,",
+                "    --mode <sliding|simple|strict>, --window <seconds>, --step <seconds>");
             return Results.Ok();
         }
 
@@ -1723,6 +1724,9 @@ public static class CliDispatcher
         Guid? modelId = null;
         Guid? agentId = null;
         string? language = null;
+        TranscriptionMode? transcriptionMode = null;
+        int? windowSeconds = null;
+        int? stepSeconds = null;
 
         for (var i = flagStart; i < args.Length; i++)
         {
@@ -1737,6 +1741,23 @@ public static class CliDispatcher
                 case "--lang" or "-l" when i + 1 < args.Length:
                     language = args[++i];
                     break;
+                case "--mode" when i + 1 < args.Length:
+                    var modeArg = args[++i];
+                    if (string.Equals(modeArg, "strict", StringComparison.OrdinalIgnoreCase))
+                        transcriptionMode = TranscriptionMode.StrictSlidingWindow;
+                    else if (string.Equals(modeArg, "sliding", StringComparison.OrdinalIgnoreCase))
+                        transcriptionMode = TranscriptionMode.SlidingWindow;
+                    else if (Enum.TryParse<TranscriptionMode>(modeArg, true, out var m))
+                        transcriptionMode = m;
+                    break;
+                case "--window" when i + 1 < args.Length:
+                    if (int.TryParse(args[++i], out var w))
+                        windowSeconds = w;
+                    break;
+                case "--step" when i + 1 < args.Length:
+                    if (int.TryParse(args[++i], out var s))
+                        stepSeconds = s;
+                    break;
             }
         }
 
@@ -1747,7 +1768,10 @@ public static class CliDispatcher
                 resourceId,
                 AgentId: agentId,
                 TranscriptionModelId: modelId,
-                Language: language),
+                Language: language,
+                TranscriptionMode: transcriptionMode,
+                WindowSeconds: windowSeconds,
+                StepSeconds: stepSeconds),
             svc);
     }
 

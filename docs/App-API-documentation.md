@@ -166,6 +166,14 @@ Pending, Downloading, Ready, Failed
 | `Error` | An error occurred during the stream |
 | `Done` | Stream complete; contains the final persisted response |
 
+### TranscriptionMode
+
+| Value | Int | Description |
+|-------|-----|-------------|
+| `SlidingWindow` | 0 | Two-pass sliding window. Segments are emitted provisionally as soon as they pass quality filters, then finalized (or retracted) once the commit delay confirms them. Consumers see text within one inference tick (~3 s) and receive an update when the segment is confirmed. **Default.** |
+| `Simple` | 1 | Sequential non-overlapping chunks. Each chunk transcribed independently, segments emitted immediately. Lower latency, fewer API calls, no cross-window dedup. |
+| `StrictSlidingWindow` | 2 | Single-pass sliding window. Segments only emitted after the full commit delay, deduplication, and hallucination filtering. Higher accuracy but ~5–8 s perceived latency. |
+
 ---
 
 ## Auth
@@ -1179,7 +1187,10 @@ unless overridden via `agentId`.
   "scriptJson": "string | null",
   "workingDirectory": "string | null",
   "transcriptionModelId": "guid | null",
-  "language": "string | null"
+  "language": "string | null",
+  "transcriptionMode": "SlidingWindow | Simple | StrictSlidingWindow | null",
+  "windowSeconds": "int | null",
+  "stepSeconds": "int | null"
 }
 ```
 
@@ -1215,10 +1226,34 @@ For transcription jobs (`TranscribeFromAudioDevice`,
   forwarded to the STT provider. When omitted, the model auto-detects
   the spoken language. **Supplying the correct language code improves
   accuracy and reduces latency** — especially for short audio chunks
-  where auto-detection is unreliable.
+  where auto-detection is unreliable.  When set, the orchestrator
+  enforces the language via prompt seeding: the Whisper prompt is
+  initialised with a natural phrase from an embedded
+  `transcription-language-seeds.json` resource covering all 99
+  Whisper-supported languages. If the API's response-level language
+  tag doesn't match, the chunk is retried up to 4 times with
+  escalating reinforcement (single seed → triple seed → instruction
+  preamble + seed → max saturation block). If all retries still
+  return the wrong language the result is accepted anyway — no audio
+  is ever silently dropped.
+- **`transcriptionMode`** — pipeline mode. `SlidingWindow` (default):
+  two-pass — segments are emitted provisionally within one inference
+  tick, then finalized or retracted once the commit delay confirms
+  them.  `Simple`: sequential non-overlapping chunks, segments emitted
+  immediately.  `StrictSlidingWindow`: single-pass — segments only
+  emitted after the full commit delay + dedup pipeline confirms them
+  (~5–8 s latency).
+- **`windowSeconds`** — seconds of audio sent to Whisper per inference
+  tick. Clamped to [5, 30]. Default 25. Larger windows give more
+  context but cost more per API call.
+- **`stepSeconds`** — seconds between inference ticks (SlidingWindow
+  mode only). Clamped to [1, window]. Default 3. Ignored in Simple
+  mode where step equals window.
 
 > **CLI equivalent:**
-> `job submit <channelId> TranscribeFromAudioDevice <audioDeviceId> --model <id> --lang en`
+> `job submit <channelId> TranscribeFromAudioDevice <audioDeviceId> --model <id> --lang en --mode simple --window 15 --step 5`
+>
+> Mode shortcuts: `sliding` (default, two-pass), `simple`, `strict` (single-pass).
 
 Audio is automatically normalised to mono 16 kHz 16-bit PCM before
 being sent to the transcription model (Whisper-optimal format).
@@ -1336,6 +1371,9 @@ Retrieve transcription segments added after the given timestamp.
   "workingDirectory": "string | null",
   "transcriptionModelId": "guid | null",
   "language": "string | null",
+  "transcriptionMode": "SlidingWindow | Simple | StrictSlidingWindow | null",
+  "windowSeconds": "int | null",
+  "stepSeconds": "int | null",
   "segments": [
     {
       "id": "guid",
@@ -1343,7 +1381,8 @@ Retrieve transcription segments added after the given timestamp.
       "startTime": 0.0,
       "endTime": 1.5,
       "confidence": 0.95,
-      "timestamp": "datetime"
+      "timestamp": "datetime",
+      "isProvisional": false
     }
   ]
 }
@@ -1351,6 +1390,28 @@ Retrieve transcription segments added after the given timestamp.
 
 `segments` is only populated for transcription action types; `null`
 otherwise.
+
+#### Two-pass segment lifecycle (SlidingWindow mode)
+
+In the default `SlidingWindow` mode, segments go through a two-pass
+lifecycle:
+
+1. **Provisional** — emitted as soon as the segment passes quality
+   filters (within one inference tick, ~3 s). `isProvisional: true`.
+   The text may shift slightly in later inference passes.
+
+2. **Finalized** — once the commit delay confirms the segment, a second
+   event is pushed with the same `id`, updated `text` / `confidence`,
+   and `isProvisional: false`. Consumers should replace the provisional
+   version in-place.
+
+3. **Retracted** — if a provisional segment is not confirmed within
+   twice the commit delay (likely a hallucination), it is deleted and a
+   tombstone event is pushed with the same `id`, empty `text`, and
+   `isProvisional: false`. Consumers should remove it.
+
+In `StrictSlidingWindow` mode all segments are final on first emission
+(`isProvisional` is always `false`). In `Simple` mode the same applies.
 
 ---
 

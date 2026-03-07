@@ -17,7 +17,10 @@ string? ScriptJson = null,
 string? WorkingDirectory = null,
 // Transcription-specific
 Guid? TranscriptionModelId = null,
-string? Language = null);
+string? Language = null,
+TranscriptionMode? TranscriptionMode = null,
+int? WindowSeconds = null,
+int? StepSeconds = null);
 
 public sealed record ApproveAgentJobRequest(
     Guid? ApproverAgentId = null);
@@ -46,6 +49,9 @@ string? WorkingDirectory = null,
 // Transcription
 Guid? TranscriptionModelId = null,
 string? Language = null,
+TranscriptionMode? TranscriptionMode = null,
+int? WindowSeconds = null,
+int? StepSeconds = null,
 IReadOnlyList<TranscriptionSegmentResponse>? Segments = null);
 
 public sealed record AgentJobLogResponse(

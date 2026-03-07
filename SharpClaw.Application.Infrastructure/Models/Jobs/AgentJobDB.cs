@@ -74,6 +74,24 @@ public class AgentJobDB : BaseEntity
     public Guid? TranscriptionModelId { get; set; }
     public ModelDB? TranscriptionModel { get; set; }
 
+    /// <summary>
+    /// Pipeline mode: <see cref="Enums.TranscriptionMode.SlidingWindow"/>
+    /// (overlapping, deduped) or <see cref="Enums.TranscriptionMode.Simple"/>
+    /// (sequential chunks, no dedup).  Null = default (SlidingWindow).
+    /// </summary>
+    public TranscriptionMode? TranscriptionMode { get; set; }
+
+    /// <summary>
+    /// Seconds of audio sent to Whisper per inference tick.  Null = default.
+    /// </summary>
+    public int? WindowSeconds { get; set; }
+
+    /// <summary>
+    /// Seconds between inference ticks.  Null = default.  In Simple mode
+    /// this is ignored (step equals window — no overlap).
+    /// </summary>
+    public int? StepSeconds { get; set; }
+
     // ── Channel (required — every job belongs to a channel) ───
     public Guid ChannelId { get; set; }
     public ChannelDB Channel { get; set; } = null!;
