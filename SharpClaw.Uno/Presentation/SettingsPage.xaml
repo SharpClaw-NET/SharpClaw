@@ -1,4 +1,4 @@
-﻿<Page x:Class="SharpClaw.Presentation.SettingsPage"
+<Page x:Class="SharpClaw.Presentation.SettingsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:local="using:SharpClaw.Presentation"
@@ -15,7 +15,7 @@
       <ColumnDefinition />
     </Grid.ColumnDefinitions>
 
-    <!-- ═══ Left tab sidebar ═══ -->
+    <!-- Left tab sidebar -->
     <Grid Grid.Column="0" Background="#0D0D0D">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
@@ -55,9 +55,9 @@
     <!-- Divider -->
     <Border Grid.Column="1" Background="#1A1A1A" />
 
-    <!-- ═══ Right content area ═══ -->
-    <ScrollViewer Grid.Column="2" Margin="24,16,24,16">
-      <StackPanel x:Name="ContentPanel" Spacing="12" MaxWidth="640" />
+    <!-- Right content area -->
+    <ScrollViewer Grid.Column="2" Margin="16,16,24,16">
+      <StackPanel x:Name="ContentPanel" Spacing="12" MaxWidth="640" HorizontalAlignment="Left" />
     </ScrollViewer>
   </Grid>
 </Page>

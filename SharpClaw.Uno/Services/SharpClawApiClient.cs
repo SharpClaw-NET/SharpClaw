@@ -57,6 +57,14 @@ public sealed class SharpClawApiClient : IDisposable
         return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
+    public async Task<HttpResponseMessage> GetStreamAsync(
+        string path, CancellationToken ct = default)
+    {
+        var request = new HttpRequestMessage(HttpMethod.Get, path);
+        AttachApiKey(request);
+        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
+
     public async Task<HttpResponseMessage> PutAsync(
         string path, HttpContent? content, CancellationToken ct = default)
     {
@@ -97,9 +105,15 @@ public sealed class SharpClawApiClient : IDisposable
                 var response = await GetAsync("/ping", cts.Token);
                 if (response.IsSuccessStatusCode)
                     return;
+
+                // API key mismatch — the API process may have restarted
+                // and written a new key to disk.  Clear the cache so the
+                // next attempt re-reads the file.
+                if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
+                    InvalidateApiKey();
             }
             catch (HttpRequestException) { }
-            catch (InvalidOperationException) { }
+            catch (InvalidOperationException) { InvalidateApiKey(); }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(250, cts.Token);

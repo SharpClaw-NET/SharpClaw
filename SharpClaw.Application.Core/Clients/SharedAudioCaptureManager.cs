@@ -153,6 +153,33 @@ public sealed class SharedAudioCaptureManager(
         session.Cts.Dispose();
     }
 
+    /// <summary>
+    /// Checks whether the capture session for the given device is still
+    /// healthy. Returns <c>(true, null)</c> when the capture task is
+    /// running, or <c>(false, errorMessage)</c> when it has faulted or
+    /// completed unexpectedly.
+    /// </summary>
+    public (bool IsHealthy, string? Error) GetCaptureStatus(string? deviceIdentifier)
+    {
+        var key = NormalizeKey(deviceIdentifier);
+
+        lock (_lock)
+        {
+            if (!_sessions.TryGetValue(key, out var session))
+                return (false, "No active capture session for this device.");
+
+            if (session.CaptureTask.IsFaulted)
+                return (false,
+                    session.CaptureTask.Exception?.InnerException?.Message
+                    ?? "Audio capture task faulted.");
+
+            if (session.CaptureTask.IsCompleted)
+                return (false, "Audio capture task completed unexpectedly.");
+
+            return (true, null);
+        }
+    }
+
     private static string NormalizeKey(string? deviceIdentifier) =>
         string.IsNullOrEmpty(deviceIdentifier) || deviceIdentifier == "default"
             ? DefaultDeviceKey

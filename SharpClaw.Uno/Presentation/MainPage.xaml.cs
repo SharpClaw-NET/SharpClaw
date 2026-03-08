@@ -80,6 +80,14 @@ public sealed partial class MainPage : Page
     // ── Resource lookup cache (populated per settings load) ──
     private readonly Dictionary<string, List<ResourceItemDto>> _resourceLookupCache = new(13);
 
+    // ── Transcription mic state ──
+    private Guid? _activeTranscriptionJobId;
+    private CancellationTokenSource? _transcriptionPollCts;
+    private readonly StringBuilder _transcriptionAccumulator = new(capacity: 2048);
+
+    private const string TranscriptionAgentKey = "TranscriptionAgentId";
+    private const string SelectedAudioDeviceKey = "SelectedAudioDeviceId";
+
     private static SolidColorBrush Brush(int rgb)
     {
         if (!_brushCache.TryGetValue(rgb, out var brush))
@@ -616,6 +624,7 @@ public sealed partial class MainPage : Page
         await LoadJobsAsync(id);
         ShowChatView();
         await LoadHistoryAsync(id);
+        UpdateMicState();
 
         DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
     }
@@ -1006,13 +1015,27 @@ public sealed partial class MainPage : Page
                     AppendJobLog(log.Level, TruncateForDisplay(log.Message), log.Timestamp);
             }
 
+            // Transcription segments
+            if (job.Segments is { Count: > 0 })
+            {
+                AppendJobLog("info", $"── transcription segments ({job.Segments.Count}) ──", null);
+                foreach (var seg in job.Segments)
+                {
+                    var timeRange = $"[{FormatSegmentTime(seg.StartTime)} → {FormatSegmentTime(seg.EndTime)}]";
+                    var conf = seg.Confidence.HasValue ? $"  ({seg.Confidence.Value:P0})" : "";
+                    var prov = seg.IsProvisional ? "  [provisional]" : "";
+                    AppendJobLog("result", $"{timeRange}{conf}{prov}  {seg.Text}", seg.Timestamp);
+                }
+            }
+
             // Result / Error data
             if (!string.IsNullOrWhiteSpace(job.ResultData))
                 await AppendJobResultAsync(job.ResultData);
             if (!string.IsNullOrWhiteSpace(job.ErrorLog))
                 AppendJobLog("error", TruncateForDisplay(job.ErrorLog), null);
 
-            if (job.Logs is { Count: 0 } && string.IsNullOrWhiteSpace(job.ResultData) && string.IsNullOrWhiteSpace(job.ErrorLog))
+            if (job.Logs is { Count: 0 } && job.Segments is null or { Count: 0 }
+                && string.IsNullOrWhiteSpace(job.ResultData) && string.IsNullOrWhiteSpace(job.ErrorLog))
                 AppendJobLog("info", "(no log entries yet)", null);
 
             // Show appropriate controls based on status
@@ -1276,6 +1299,14 @@ public sealed partial class MainPage : Page
         JobLogsPanel.Children.Add(row.Root);
     }
 
+    private static string FormatSegmentTime(double seconds)
+    {
+        var ts = TimeSpan.FromSeconds(seconds);
+        return ts.TotalHours >= 1
+            ? ts.ToString(@"h\:mm\:ss\.f")
+            : ts.ToString(@"m\:ss\.f");
+    }
+
     private static string TruncateForDisplay(string text, int maxLength = 2000)
     {
         if (text.Length <= maxLength) return text;
@@ -1340,6 +1371,289 @@ public sealed partial class MainPage : Page
         _suppressJobSelection = false;
         DeallocateJobView();
         ShowChatView();
+    }
+
+    // ── Microphone / voice input ────────────────────────────────
+
+    private void UpdateMicState()
+    {
+        var agentId = LoadLocalSetting(TranscriptionAgentKey);
+        var deviceId = LoadLocalSetting(SelectedAudioDeviceKey);
+        var configured = agentId is not null && Guid.TryParse(agentId, out _)
+                      && deviceId is not null && Guid.TryParse(deviceId, out _)
+                      && _selectedChannelId is not null;
+        var isActive = _activeTranscriptionJobId is not null;
+
+        MicButton.Opacity = configured || isActive ? 1.0 : 0.4;
+
+        if (isActive)
+            ToolTipService.SetToolTip(MicButton, "Stop transcription");
+        else if (configured)
+            ToolTipService.SetToolTip(MicButton, "Start voice input");
+        else
+            ToolTipService.SetToolTip(MicButton, "Set a transcription agent and audio device in channel settings to enable voice input");
+    }
+
+    private async void OnMicClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedChannelId is not { } channelId) return;
+
+        // If a job is active, stop it
+        if (_activeTranscriptionJobId is { } activeJobId)
+        {
+            await StopTranscriptionAsync(channelId, activeJobId);
+            return;
+        }
+
+        var agentIdStr = LoadLocalSetting(TranscriptionAgentKey);
+        var deviceIdStr = LoadLocalSetting(SelectedAudioDeviceKey);
+        if (agentIdStr is null || !Guid.TryParse(agentIdStr, out var agentId)
+            || deviceIdStr is null || !Guid.TryParse(deviceIdStr, out var deviceId))
+            return;
+
+        MicButton.Opacity = 0.6;
+
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try
+        {
+            var body = JsonSerializer.Serialize(new
+            {
+                actionType = "TranscribeFromAudioDevice",
+                resourceId = deviceId,
+                agentId,
+            }, Json);
+            var resp = await api.PostAsync($"/channels/{channelId}/jobs",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            if (!resp.IsSuccessStatusCode)
+            {
+                string errorDetail = $"{(int)resp.StatusCode} {resp.ReasonPhrase}";
+                try
+                {
+                    using var errStream = await resp.Content.ReadAsStreamAsync();
+                    var errMsg = await TryExtractErrorAsync(errStream);
+                    if (errMsg is not null)
+                        errorDetail = errMsg;
+                }
+                catch { /* body not readable */ }
+                AppendMessage("system", $"✗ Failed to start transcription: {errorDetail}", DateTimeOffset.Now, senderName: "system");
+                ScrollToBottom();
+                UpdateMicState();
+                return;
+            }
+
+            using var s = await resp.Content.ReadAsStreamAsync();
+            using var doc = await JsonDocument.ParseAsync(s);
+            var jobId = doc.RootElement.GetProperty("id").GetGuid();
+            _activeTranscriptionJobId = jobId;
+
+            MicIcon.Text = "\uE15B";
+            MicButton.Opacity = 1.0;
+            ToolTipService.SetToolTip(MicButton, "Stop transcription");
+            SetTranscriptionInputState(active: true);
+
+            // Stream live transcription segments via SSE
+            var existingText = MessageInput.Text?.Trim() ?? string.Empty;
+            _transcriptionPollCts = new CancellationTokenSource();
+            _ = StreamTranscriptionSegmentsAsync(jobId, existingText, _transcriptionPollCts.Token);
+        }
+        catch (Exception ex)
+        {
+            AppendMessage("system", $"✗ Transcription error: {ex.Message}", DateTimeOffset.Now, senderName: "system");
+            ScrollToBottom();
+            _activeTranscriptionJobId = null;
+            UpdateMicState();
+        }
+    }
+
+    private async Task StopTranscriptionAsync(Guid channelId, Guid jobId)
+    {
+        _transcriptionPollCts?.Cancel();
+        _transcriptionPollCts = null;
+
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try { await api.PostAsync($"/channels/{channelId}/jobs/{jobId}/stop", null); }
+        catch { /* swallow */ }
+
+        _activeTranscriptionJobId = null;
+        MicIcon.Text = "\uE720";
+        SetTranscriptionInputState(active: false);
+        UpdateMicState();
+    }
+
+    /// <summary>
+    /// Streams live transcription segments via SSE from
+    /// <c>/jobs/{jobId}/stream</c>.  Accumulates segment text into
+    /// <see cref="MessageInput"/> so the user sees the transcription
+    /// grow in real time.  Handles finalization (same ID, updated text)
+    /// and retraction (empty text tombstone).
+    /// </summary>
+    private async Task StreamTranscriptionSegmentsAsync(Guid jobId, string prefixText, CancellationToken ct)
+    {
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        var dispatcher = DispatcherQueue;
+        await Task.Delay(1000, ct).ConfigureAwait(false);
+
+        var segments = new Dictionary<Guid, (string Text, double StartTime)>();
+        var lastUiUpdate = 0L;
+        var throttleTicks = System.Diagnostics.Stopwatch.Frequency * 150 / 1000; // ~150ms
+        var lastDispatchedLength = 0;
+
+        try
+        {
+            using var resp = await api.GetStreamAsync($"/jobs/{jobId}/stream", ct).ConfigureAwait(false);
+            if (!resp.IsSuccessStatusCode)
+            {
+                dispatcher.TryEnqueue(() =>
+                {
+                    AppendMessage("system",
+                        $"\u2717 Failed to connect to transcription stream: {(int)resp.StatusCode}",
+                        DateTimeOffset.Now, senderName: "system");
+                    ScrollToBottom();
+                });
+                return;
+            }
+
+            using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            using var reader = new StreamReader(stream);
+
+            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
+                if (line is null) break;
+
+                if (line.StartsWith("event:"))
+                {
+                    if (line.AsSpan(6).Trim() is "done")
+                        break;
+                    continue;
+                }
+
+                if (!line.StartsWith("data: "))
+                    continue;
+
+                try
+                {
+                    var seg = JsonSerializer.Deserialize<TranscriptionSegmentDto>(
+                        line.AsMemory(6).Span, Json);
+                    if (seg is null) continue;
+
+                    // Retractions (empty text) are ignored on the client
+                    // side — once text has been accumulated into the
+                    // input box it must never silently disappear.
+                    // Finalization (same ID, updated text) replaces in-place.
+                    if (!string.IsNullOrEmpty(seg.Text))
+                        segments[seg.Id] = (seg.Text, seg.StartTime);
+
+                    // Throttle UI dispatches to avoid flooding the
+                    // dispatcher queue and starving the UI thread.
+                    var now = System.Diagnostics.Stopwatch.GetTimestamp();
+                    if (now - lastUiUpdate < throttleTicks)
+                        continue;
+                    lastUiUpdate = now;
+
+                    _transcriptionAccumulator.Clear();
+                    if (prefixText.Length > 0)
+                    {
+                        _transcriptionAccumulator.Append(prefixText);
+                        _transcriptionAccumulator.Append(' ');
+                    }
+                    var first = true;
+                    foreach (var s in segments.Values.OrderBy(s => s.StartTime))
+                    {
+                        if (!first) _transcriptionAccumulator.Append(' ');
+                        _transcriptionAccumulator.Append(s.Text);
+                        first = false;
+                    }
+                    var snapshot = _transcriptionAccumulator.ToString();
+                    lastDispatchedLength = snapshot.Length;
+
+                    dispatcher.TryEnqueue(() =>
+                    {
+                        MessageInput.Text = snapshot;
+                    });
+                }
+                catch { /* malformed SSE line */ }
+            }
+
+            // Final flush for any content throttled in the last interval
+            if (segments.Count > 0)
+            {
+                _transcriptionAccumulator.Clear();
+                if (prefixText.Length > 0)
+                {
+                    _transcriptionAccumulator.Append(prefixText);
+                    _transcriptionAccumulator.Append(' ');
+                }
+                var first = true;
+                foreach (var s in segments.Values.OrderBy(s => s.StartTime))
+                {
+                    if (!first) _transcriptionAccumulator.Append(' ');
+                    _transcriptionAccumulator.Append(s.Text);
+                    first = false;
+                }
+                var finalSnapshot = _transcriptionAccumulator.ToString();
+                if (finalSnapshot.Length >= lastDispatchedLength)
+                    dispatcher.TryEnqueue(() => MessageInput.Text = finalSnapshot);
+            }
+        }
+        catch (OperationCanceledException) { /* expected on stop */ }
+        catch (Exception ex)
+        {
+            dispatcher.TryEnqueue(() =>
+            {
+                AppendMessage("system",
+                    $"\u2717 Transcription stream error: {ex.Message}",
+                    DateTimeOffset.Now, senderName: "system");
+                ScrollToBottom();
+            });
+        }
+
+        dispatcher.TryEnqueue(() =>
+        {
+            if (_activeTranscriptionJobId == jobId)
+            {
+                _activeTranscriptionJobId = null;
+                MicIcon.Text = "\uE720";
+                SetTranscriptionInputState(active: false);
+                UpdateMicState();
+            }
+        });
+    }
+
+    /// <summary>
+    /// Toggles the chat input area between transcription-active (read-only,
+    /// send disabled) and normal (editable, send enabled) states.
+    /// </summary>
+    private void SetTranscriptionInputState(bool active)
+    {
+        MessageInput.IsReadOnly = active;
+        SendButton.IsEnabled = !active;
+
+        if (active)
+        {
+            MessageInput.PlaceholderText = "Listening...";
+            MessageInput.Opacity = 0.7;
+        }
+        else
+        {
+            MessageInput.PlaceholderText = "Type a message...";
+            MessageInput.Opacity = 1.0;
+        }
+    }
+
+    private static string? LoadLocalSetting(string key)
+    {
+        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
+        return settings.Values.TryGetValue(key, out var val) ? val as string : null;
+    }
+
+    private static void SaveLocalSetting(string key, string? value)
+    {
+        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
+        if (value is null)
+            settings.Values.Remove(key);
+        else
+            settings.Values[key] = value;
     }
 
     // ── Messages ─────────────────────────────────────────────────
@@ -1901,6 +2215,7 @@ public sealed partial class MainPage : Page
             _ = ShowJobViewAsync(_selectedJobId.Value);
         else
             ShowChatView();
+        UpdateMicState();
     }
 
     private async void OnTabSettingsClick(object sender, RoutedEventArgs e)
@@ -1936,6 +2251,7 @@ public sealed partial class MainPage : Page
         bool disableChatHeader = false;
         List<(Guid Id, string Name, string ProviderModel)> allowedAgents = [];
         Guid? channelPermSetId = null;
+        Guid? channelDefaultAgentId = null;
 
         try
         {
@@ -1953,6 +2269,10 @@ public sealed partial class MainPage : Page
             disableChatHeader = root.TryGetProperty("disableChatHeader", out var dch) && dch.GetBoolean();
             if (root.TryGetProperty("permissionSetId", out var psi) && psi.ValueKind == JsonValueKind.String)
                 channelPermSetId = psi.GetGuid();
+
+            if (root.TryGetProperty("agent", out var agentProp) && agentProp.ValueKind == JsonValueKind.Object
+                && agentProp.TryGetProperty("id", out var defAgentId) && defAgentId.ValueKind == JsonValueKind.String)
+                channelDefaultAgentId = defAgentId.GetGuid();
 
             if (root.TryGetProperty("allowedAgents", out var aaProp) && aaProp.ValueKind == JsonValueKind.Array)
             {
@@ -1999,6 +2319,7 @@ public sealed partial class MainPage : Page
 
         // Fetch resource lookups for all access types in parallel
         _resourceLookupCache.Clear();
+        HashSet<Guid> transcriptionModelIds = [];
         try
         {
             var lookupTasks = _resourceAccessTypes.Select(async t =>
@@ -2021,7 +2342,29 @@ public sealed partial class MainPage : Page
         }
         catch { /* swallow — settings still work without lookups */ }
 
-        BuildSettingsPanel(channelId, disableChatHeader, allowedAgents, permRoleId, permData);
+        // Fetch models to determine which agents use transcription-capable models
+        try
+        {
+            using var modelsResp = await api.GetAsync("/models");
+            if (modelsResp.IsSuccessStatusCode)
+            {
+                using var modelsStream = await modelsResp.Content.ReadAsStreamAsync();
+                using var modelsDoc = await JsonDocument.ParseAsync(modelsStream);
+                foreach (var m in modelsDoc.RootElement.EnumerateArray())
+                {
+                    if (m.TryGetProperty("capabilities", out var cap)
+                        && cap.GetString() is { } capStr
+                        && capStr.Contains("Transcription", StringComparison.OrdinalIgnoreCase))
+                    {
+                        if (m.TryGetProperty("id", out var mid) && mid.ValueKind == JsonValueKind.String)
+                            transcriptionModelIds.Add(mid.GetGuid());
+                    }
+                }
+            }
+        }
+        catch { /* swallow — all agents shown if models unavailable */ }
+
+        BuildSettingsPanel(channelId, disableChatHeader, allowedAgents, channelDefaultAgentId, permRoleId, permData, transcriptionModelIds);
     }
 
     private static PermSettingsData ParsePermissions(JsonElement root)
@@ -2051,8 +2394,10 @@ public sealed partial class MainPage : Page
         Guid channelId,
         bool disableChatHeader,
         List<(Guid Id, string Name, string ProviderModel)> allowedAgents,
+        Guid? channelDefaultAgentId,
         Guid? permRoleId,
-        PermSettingsData? permData)
+        PermSettingsData? permData,
+        HashSet<Guid> transcriptionModelIds)
     {
         SettingsPanel.Children.Clear();
 
@@ -2178,6 +2523,244 @@ public sealed partial class MainPage : Page
         };
 
         SettingsPanel.Children.Add(agentSearch);
+
+        // ── Transcription Agent (for mic button) ──
+        AddSettingsSection("Transcription Agent", "Agent used for voice-to-text input via the microphone button (must be the channel default or an allowed agent)");
+
+        // Only show agents that are eligible for this channel AND have transcription-capable models.
+        var channelAgentIds = new HashSet<Guid>(allowedAgents.Select(a => a.Id));
+        if (channelDefaultAgentId is { } defId)
+            channelAgentIds.Add(defId);
+        var txAgents = _allAgents
+            .Where(a => channelAgentIds.Contains(a.Id)
+                     && (transcriptionModelIds.Count == 0 || transcriptionModelIds.Contains(a.ModelId)))
+            .ToList();
+        var txDisplayMap = new Dictionary<string, Guid>(txAgents.Count);
+        foreach (var a in txAgents)
+            txDisplayMap.TryAdd($"{a.Name}  ({a.ProviderName}/{a.ModelName})", a.Id);
+
+        var savedTxAgent = LoadLocalSetting(TranscriptionAgentKey);
+        AgentDto? currentTxAgent = null;
+        if (savedTxAgent is not null && Guid.TryParse(savedTxAgent, out var savedTxId))
+            currentTxAgent = _allAgents.FirstOrDefault(a => a.Id == savedTxId);
+
+        var txCurrentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        txCurrentRow.Children.Add(new TextBlock
+        {
+            Text = "current:",
+            FontFamily = _monoFont, FontSize = 11,
+            Foreground = Brush(0xCCCCCC),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var txCurrentLabel = new TextBlock
+        {
+            Text = currentTxAgent is not null
+                ? $"{currentTxAgent.Name}  ({currentTxAgent.ProviderName}/{currentTxAgent.ModelName})"
+                : "(none)",
+            FontFamily = _monoFont, FontSize = 11,
+            Foreground = Brush(currentTxAgent is not null ? 0xE0E0E0 : 0x777777),
+            FontStyle = currentTxAgent is null ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        txCurrentRow.Children.Add(txCurrentLabel);
+
+        if (currentTxAgent is not null)
+        {
+            var txClearBtn = new Button
+            {
+                Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) },
+                Background = _brushTransparent, BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0,
+            };
+            txClearBtn.Click += (_, _) =>
+            {
+                SaveLocalSetting(TranscriptionAgentKey, null);
+                txCurrentLabel.Text = "(none)";
+                txCurrentLabel.Foreground = Brush(0x777777);
+                txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                if (txCurrentRow.Children.Count > 2)
+                    txCurrentRow.Children.RemoveAt(2);
+                UpdateMicState();
+            };
+            txCurrentRow.Children.Add(txClearBtn);
+        }
+
+        SettingsPanel.Children.Add(txCurrentRow);
+
+        var txSearch = new AutoSuggestBox
+        {
+            PlaceholderText = txAgents.Count > 0
+                ? "Search transcription agents..."
+                : "No transcription-capable agents available",
+            FontFamily = _monoFont, FontSize = 11,
+            MinWidth = 300,
+            Margin = new Thickness(0, 4, 0, 0),
+            IsEnabled = txAgents.Count > 0,
+        };
+        ToolTipService.SetToolTip(txSearch, "Type to filter agents with transcription-capable models");
+
+        txSearch.TextChanged += (sender, args) =>
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+            var q = sender.Text.Trim();
+            sender.ItemsSource = string.IsNullOrEmpty(q)
+                ? txDisplayMap.Keys.ToList()
+                : txDisplayMap.Keys
+                    .Where(k => k.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+        };
+
+        txSearch.QuerySubmitted += (sender, args) =>
+        {
+            var chosen = args.ChosenSuggestion?.ToString();
+            if (chosen is null || !txDisplayMap.TryGetValue(chosen, out var aid)) return;
+            sender.Text = string.Empty;
+            SaveLocalSetting(TranscriptionAgentKey, aid.ToString());
+            txCurrentLabel.Text = chosen;
+            txCurrentLabel.Foreground = Brush(0xE0E0E0);
+            txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
+
+            // Add clear button if not already present
+            if (txCurrentRow.Children.Count <= 2)
+            {
+                var clearBtn = new Button
+                {
+                    Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) },
+                    Background = _brushTransparent, BorderThickness = new Thickness(0),
+                    Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0,
+                };
+                clearBtn.Click += (_, _) =>
+                {
+                    SaveLocalSetting(TranscriptionAgentKey, null);
+                    txCurrentLabel.Text = "(none)";
+                    txCurrentLabel.Foreground = Brush(0x777777);
+                    txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                    if (txCurrentRow.Children.Count > 2)
+                        txCurrentRow.Children.RemoveAt(2);
+                    UpdateMicState();
+                };
+                txCurrentRow.Children.Add(clearBtn);
+            }
+
+            UpdateMicState();
+        };
+
+        SettingsPanel.Children.Add(txSearch);
+
+        // ── Audio Device (for mic button) ──
+        AddSettingsSection("Audio Device", "Audio capture device used for voice-to-text transcription (saved locally per device)");
+
+        var audioDevices = _resourceLookupCache.TryGetValue("audioDeviceAccesses", out var adItems) ? adItems : [];
+        var adDisplayMap = new Dictionary<string, Guid>(audioDevices.Count);
+        foreach (var d in audioDevices)
+            adDisplayMap.TryAdd($"{d.Name}  ({d.Id.ToString()[..8]}…)", d.Id);
+
+        var savedAdId = LoadLocalSetting(SelectedAudioDeviceKey);
+        ResourceItemDto? currentAd = null;
+        if (savedAdId is not null && Guid.TryParse(savedAdId, out var savedAdGuid))
+            currentAd = audioDevices.FirstOrDefault(d => d.Id == savedAdGuid);
+
+        var adCurrentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        adCurrentRow.Children.Add(new TextBlock
+        {
+            Text = "current:",
+            FontFamily = _monoFont, FontSize = 11,
+            Foreground = Brush(0xCCCCCC),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        var adCurrentLabel = new TextBlock
+        {
+            Text = currentAd is not null
+                ? $"{currentAd.Name}  ({currentAd.Id.ToString()[..8]}…)"
+                : "(none)",
+            FontFamily = _monoFont, FontSize = 11,
+            Foreground = Brush(currentAd is not null ? 0xE0E0E0 : 0x777777),
+            FontStyle = currentAd is null ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        adCurrentRow.Children.Add(adCurrentLabel);
+
+        if (currentAd is not null)
+        {
+            var adClearBtn = new Button
+            {
+                Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) },
+                Background = _brushTransparent, BorderThickness = new Thickness(0),
+                Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0,
+            };
+            adClearBtn.Click += (_, _) =>
+            {
+                SaveLocalSetting(SelectedAudioDeviceKey, null);
+                adCurrentLabel.Text = "(none)";
+                adCurrentLabel.Foreground = Brush(0x777777);
+                adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                if (adCurrentRow.Children.Count > 2)
+                    adCurrentRow.Children.RemoveAt(2);
+                UpdateMicState();
+            };
+            adCurrentRow.Children.Add(adClearBtn);
+        }
+
+        SettingsPanel.Children.Add(adCurrentRow);
+
+        var adSearch = new AutoSuggestBox
+        {
+            PlaceholderText = audioDevices.Count > 0
+                ? "Search audio devices..."
+                : "No audio devices available",
+            FontFamily = _monoFont, FontSize = 11,
+            MinWidth = 300,
+            Margin = new Thickness(0, 4, 0, 0),
+            IsEnabled = audioDevices.Count > 0,
+        };
+        ToolTipService.SetToolTip(adSearch, "Type to filter, then click a suggestion to select the audio device");
+
+        adSearch.TextChanged += (sender, args) =>
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+            var q = sender.Text.Trim();
+            sender.ItemsSource = string.IsNullOrEmpty(q)
+                ? adDisplayMap.Keys.ToList()
+                : adDisplayMap.Keys
+                    .Where(k => k.Contains(q, StringComparison.OrdinalIgnoreCase))
+                    .ToList();
+        };
+
+        adSearch.QuerySubmitted += (sender, args) =>
+        {
+            var chosen = args.ChosenSuggestion?.ToString();
+            if (chosen is null || !adDisplayMap.TryGetValue(chosen, out var did)) return;
+            sender.Text = string.Empty;
+            SaveLocalSetting(SelectedAudioDeviceKey, did.ToString());
+            adCurrentLabel.Text = chosen;
+            adCurrentLabel.Foreground = Brush(0xE0E0E0);
+            adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
+
+            if (adCurrentRow.Children.Count <= 2)
+            {
+                var clearBtn = new Button
+                {
+                    Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) },
+                    Background = _brushTransparent, BorderThickness = new Thickness(0),
+                    Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0,
+                };
+                clearBtn.Click += (_, _) =>
+                {
+                    SaveLocalSetting(SelectedAudioDeviceKey, null);
+                    adCurrentLabel.Text = "(none)";
+                    adCurrentLabel.Foreground = Brush(0x777777);
+                    adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                    if (adCurrentRow.Children.Count > 2)
+                        adCurrentRow.Children.RemoveAt(2);
+                    UpdateMicState();
+                };
+                adCurrentRow.Children.Add(clearBtn);
+            }
+
+            UpdateMicState();
+        };
+
+        SettingsPanel.Children.Add(adSearch);
 
         // ── Channel Permissions ──
         AddSettingsSection("Channel Permissions", "Pre-authorization overrides that let the agent act without requiring user approval");
@@ -2699,7 +3282,11 @@ public sealed partial class MainPage : Page
     private static string Truncate(string s, int max)
         => s.Length <= max ? s : s[..max] + "…";
 
-    private void OnMessageTextChanged(object sender, TextChangedEventArgs e) => UpdateCursor();
+    private void OnMessageTextChanged(object sender, TextChangedEventArgs e)
+    {
+        if (_activeTranscriptionJobId is not null) return;
+        UpdateCursor();
+    }
 
     private void UpdateCursor(string? overrideMessage = null)
     {
@@ -2750,9 +3337,15 @@ public sealed partial class MainPage : Page
     }
 
     [ImplicitKeys(IsEnabled = false)]
+    private sealed record TranscriptionSegmentDto(
+        Guid Id, string Text, double StartTime, double EndTime,
+        double? Confidence, DateTimeOffset Timestamp, bool IsProvisional = false);
+
+    [ImplicitKeys(IsEnabled = false)]
     private sealed partial record JobDetailDto(
         Guid Id, Guid ChannelId, Guid AgentId, string ActionType, Guid? ResourceId,
         string Status, string? ResultData, string? ErrorLog,
         IReadOnlyList<JobLogDto>? Logs,
-        DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt);
+        DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt,
+        IReadOnlyList<TranscriptionSegmentDto>? Segments = null);
 }

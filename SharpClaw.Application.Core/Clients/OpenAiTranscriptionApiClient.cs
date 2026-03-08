@@ -110,33 +110,45 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
         }
 
         using (response)
-        {
-            var json = await response.Content.ReadAsStringAsync(ct);
-            var result = JsonSerializer.Deserialize<WhisperVerboseResponse>(json)
-                ?? throw new InvalidOperationException("Empty transcription response.");
-
-            var segments = result.Segments?
-                .Select(s => new TranscriptionChunkSegment(
-                    s.Text?.Trim() ?? "",
-                    s.Start,
-                    s.End,
-                    s.AvgLogprob.HasValue ? Math.Exp(s.AvgLogprob.Value) : null,
-                    s.NoSpeechProb,
-                    s.CompressionRatio))
-                .ToList()
-                ?? [];
-
-            // If no segments were returned, create one from the full text
-            if (segments.Count == 0 && !string.IsNullOrWhiteSpace(result.Text))
             {
-                segments.Add(new TranscriptionChunkSegment(
-                    result.Text.Trim(), 0, result.Duration, null));
-            }
+                var json = await response.Content.ReadAsStringAsync(ct);
+                var result = JsonSerializer.Deserialize<WhisperVerboseResponse>(json)
+                    ?? throw new InvalidOperationException("Empty transcription response.");
 
-            return new TranscriptionChunkResult(
-                result.Text?.Trim() ?? "", result.Duration, segments,
-                result.Language);
-        }
+                // The gpt-4o-*-transcribe models only support "json" format which
+                // omits duration, segments, and language.  Estimate from the WAV
+                // audio length so downstream timestamp logic works correctly.
+                var effectiveDuration = result.Duration > 0
+                    ? result.Duration
+                    : EstimateWavDuration(audioData);
+
+                var segments = result.Segments?
+                    .Select(s => new TranscriptionChunkSegment(
+                        s.Text?.Trim() ?? "",
+                        s.Start,
+                        s.End,
+                        s.AvgLogprob.HasValue ? Math.Exp(s.AvgLogprob.Value) : null,
+                        s.NoSpeechProb,
+                        s.CompressionRatio))
+                    .ToList()
+                    ?? [];
+
+                // Track whether the API returned real per-segment timestamps.
+                // When false the orchestrator uses text-diff dedup instead of
+                // time-overlap dedup for the sliding-window pipeline.
+                var hasTimestampedSegments = segments.Count > 0;
+
+                // If no segments were returned, create one from the full text
+                if (segments.Count == 0 && !string.IsNullOrWhiteSpace(result.Text))
+                {
+                    segments.Add(new TranscriptionChunkSegment(
+                        result.Text.Trim(), 0, effectiveDuration, null));
+                }
+
+                return new TranscriptionChunkResult(
+                    result.Text?.Trim() ?? "", effectiveDuration, segments,
+                    result.Language, hasTimestampedSegments);
+            }
     }
 
     // ── Whisper verbose_json response DTO ─────────────────────────
@@ -155,4 +167,28 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
         [property: JsonPropertyName("avg_logprob")] double? AvgLogprob,
         [property: JsonPropertyName("no_speech_prob")] double? NoSpeechProb,
         [property: JsonPropertyName("compression_ratio")] double? CompressionRatio);
+
+    /// <summary>
+    /// Estimates the duration of a WAV audio byte array when the API
+    /// response doesn't include it (e.g. <c>gpt-4o-transcribe</c> in
+    /// <c>json</c> mode).  Assumes standard RIFF WAV with a 44-byte
+    /// header; falls back to the full length if the header is absent.
+    /// </summary>
+    private static double EstimateWavDuration(byte[] audioData)
+    {
+        if (audioData.Length < 44)
+            return 0;
+
+        // Parse from the WAV header for accuracy.
+        // Bytes 24-27: sample rate (uint32 LE)
+        // Bytes 32-33: block align (uint16 LE) = channels × bitsPerSample / 8
+        var sampleRate = BitConverter.ToUInt32(audioData, 24);
+        var blockAlign = BitConverter.ToUInt16(audioData, 32);
+
+        if (sampleRate == 0 || blockAlign == 0)
+            return 0;
+
+        var dataBytes = audioData.Length - 44;
+        return (double)dataBytes / (sampleRate * blockAlign);
+    }
 }

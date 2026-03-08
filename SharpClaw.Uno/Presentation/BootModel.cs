@@ -57,11 +57,13 @@ public sealed class BootModel
         {
             await _backend.EnsureStartedAsync();
 
-            if (!_backend.IsExternal)
-            {
-                _api.InvalidateApiKey();
-                await _api.WaitForReadyAsync(TimeSpan.FromSeconds(15));
-            }
+            // Always re-read the API key from disk and validate it
+            // against the running process.  In external/dev mode the
+            // API may have been restarted (new key), and in bundled
+            // mode we need to wait for the key file to appear.
+            _api.InvalidateApiKey();
+            await _api.WaitForReadyAsync(
+                TimeSpan.FromSeconds(_backend.IsExternal ? 5 : 15));
 
             SetState(new("✓", Green, "Connection established.", Green, false, false));
             NavigateRequested?.Invoke(this, EventArgs.Empty);

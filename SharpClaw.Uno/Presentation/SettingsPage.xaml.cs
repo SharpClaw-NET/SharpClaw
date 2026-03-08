@@ -1024,7 +1024,7 @@ public sealed partial class SettingsPage : Page
         var selIdx = 0; var idx = 0;
         if (includeUnset)
         {
-            box.Items.Add(new ComboBoxItem { Content = "Unset (use default)", Tag = "Unset" });
+            box.Items.Add(new ComboBoxItem { Content = "Unset", Tag = "Unset" });
             if (string.Equals("Unset", selected, StringComparison.OrdinalIgnoreCase)) selIdx = 0;
             idx = 1;
         }

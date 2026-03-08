@@ -186,6 +186,7 @@ try
         return;
 
     // API mode
+    app.UseMiddleware<ExceptionHandlingMiddleware>();
     app.UseSerilogRequestLogging();
     app.UseCors();
     app.UseMiddleware<ApiKeyMiddleware>();

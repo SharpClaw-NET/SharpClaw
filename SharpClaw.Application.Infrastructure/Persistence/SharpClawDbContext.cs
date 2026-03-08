@@ -687,11 +687,31 @@ public class SharpClawDbContext(
             }
         }
 
+        // Capture pending changes BEFORE committing to the InMemory store.
+        // After base.SaveChangesAsync the change tracker resets states to
+        // Unchanged and we lose the information about what was modified.
+        var entityChanges = new List<(Type ClrType, Guid Id, EntityState State)>();
+        var joinTableChanges = new HashSet<string>();
+
+        foreach (var entry in ChangeTracker.Entries())
+        {
+            if (entry.Entity is BaseEntity be
+                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                entityChanges.Add((be.GetType(), be.Id, entry.State));
+            }
+            else if (entry.Metadata.HasSharedClrType
+                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
+            {
+                joinTableChanges.Add(entry.Metadata.Name);
+            }
+        }
+
         var result = await base.SaveChangesAsync(cancellationToken);
 
         var jsonSync = serviceProvider?.GetService<JsonFilePersistenceService>();
-        if (jsonSync is not null)
-            await jsonSync.FlushAsync(cancellationToken);
+        if (jsonSync is not null && (entityChanges.Count > 0 || joinTableChanges.Count > 0))
+            await jsonSync.FlushChangesAsync(entityChanges, joinTableChanges, cancellationToken);
 
         return result;
     }

@@ -293,6 +293,12 @@ public sealed class LiveTranscriptionOrchestrator(
         var consecutiveErrors = 0;
         const int maxConsecutiveErrors = 5;
 
+        // Text-diff dedup for synthetic segments: tracks the full text
+        // returned by the previous API call so we can extract only the
+        // genuinely new portion when the model doesn't return per-segment
+        // timestamps (e.g. gpt-4o-transcribe in json mode).
+        var previousWindowText = "";
+
         // Prompt conditioning: the last N characters of finalized text
         // are sent to Whisper as a style/vocabulary hint.
         // When a language is explicitly set, seed with a target-language
@@ -335,9 +341,76 @@ public sealed class LiveTranscriptionOrchestrator(
             // Give the capture a moment to start filling the buffer
             await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
 
+            // ── Startup verification: ensure audio is actually flowing ──
+            // If the capture task faulted or the device never produces
+            // data, detect it now rather than silently looping forever.
+            const int startupTimeoutMs = 5000;
+            const int startupPollMs = 250;
+            var startupPolls = startupTimeoutMs / startupPollMs;
+
+            for (var i = 0; i < startupPolls && ringBuffer.TotalWritten == 0; i++)
+            {
+                var (isHealthy, captureError) = sharedCapture.GetCaptureStatus(deviceIdentifier);
+                if (!isHealthy)
+                    throw new InvalidOperationException(
+                        $"Audio capture failed to start: {captureError}");
+
+                await Task.Delay(startupPollMs, ct);
+            }
+
+            if (ringBuffer.TotalWritten == 0)
+            {
+                var (_, statusError) = sharedCapture.GetCaptureStatus(deviceIdentifier);
+                throw new InvalidOperationException(
+                    "No audio data received after waiting for device to start. " +
+                    (statusError ?? "Check that the audio device is connected and working."));
+            }
+
+            logger.LogInformation(
+                "Job {JobId}: audio capture verified, {Samples} samples received.",
+                jobId, ringBuffer.TotalWritten);
+
+            // Track data flow for the in-loop watchdog.
+            var lastDataWritten = ringBuffer.TotalWritten;
+            var noDataTicks = 0;
+            const int maxNoDataTicks = 10;
+
             while (!ct.IsCancellationRequested)
             {
                 await Task.Delay(TimeSpan.FromSeconds(effectiveStep), ct);
+
+                // ── Data-flow watchdog ────────────────────────────
+                // Detect when the audio capture has stalled or the
+                // device has stopped producing samples.  This must
+                // run BEFORE the VAD check because an empty buffer
+                // yields RMS=0 which looks like silence.
+                var currentWritten = ringBuffer.TotalWritten;
+                if (currentWritten == lastDataWritten)
+                {
+                    noDataTicks++;
+
+                    var (isHealthy, captureError) = sharedCapture.GetCaptureStatus(deviceIdentifier);
+                    if (!isHealthy)
+                        throw new InvalidOperationException(
+                            $"Audio capture failed during transcription: {captureError}");
+
+                    if (noDataTicks >= maxNoDataTicks)
+                    {
+                        await AddJobLogAsync(jobId,
+                            $"No new audio data for {noDataTicks * effectiveStep}s — capture may have stalled.",
+                            "Error");
+                        throw new InvalidOperationException(
+                            $"No new audio data received for {noDataTicks * effectiveStep} seconds. " +
+                            "Audio capture may have stalled or the device was disconnected.");
+                    }
+
+                    logger.LogDebug(
+                        "Job {JobId}: no new audio data (tick {Tick}/{Max}), waiting.",
+                        jobId, noDataTicks, maxNoDataTicks);
+                    continue;
+                }
+                noDataTicks = 0;
+                lastDataWritten = currentWritten;
 
                 // Adaptive VAD: compute the RMS of the recent step
                 // and update the noise floor when it looks like silence.
@@ -358,16 +431,18 @@ public sealed class LiveTranscriptionOrchestrator(
                     continue;
                 }
 
-                // Extract the sliding window and convert to WAV for the API
-                var windowSamples = ringBuffer.GetLastSeconds(effectiveWindow);
-                if (windowSamples.Length == 0)
-                    continue;
-
-                var windowStartTime = ringBuffer.GetWindowStartTime(effectiveWindow);
-                var wavBytes = FloatSamplesToWav(windowSamples, SampleRate);
-
                 try
                 {
+                    // Extract the sliding window and convert to WAV for the API.
+                    // Inside the try block so a transient NAudio error is counted
+                    // as a consecutive error instead of killing the loop.
+                    var windowSamples = ringBuffer.GetLastSeconds(effectiveWindow);
+                    if (windowSamples.Length == 0)
+                        continue;
+
+                    var windowStartTime = ringBuffer.GetWindowStartTime(effectiveWindow);
+                    var wavBytes = FloatSamplesToWav(windowSamples, SampleRate);
+
                     using var httpClient = httpClientFactory.CreateClient();
 
                     // ── Language-enforced transcription with retry ──
@@ -440,13 +515,46 @@ public sealed class LiveTranscriptionOrchestrator(
                     if (result is null || string.IsNullOrWhiteSpace(result.Text))
                         continue;
 
+                    // ── Synthetic segment text-diff ───────────────────
+                    // Models like gpt-4o-transcribe return only text
+                    // without per-segment timestamps.  The synthetic
+                    // fallback segment covers the full window, which
+                    // breaks overlap-based dedup because consecutive
+                    // 25 s windows share ~88 % of audio.  Instead we
+                    // diff the text against the previous window and
+                    // emit only the genuinely new portion with
+                    // timestamps scoped to the last step.
+                    IReadOnlyList<TranscriptionChunkSegment> processSegments = result.Segments;
+
+                    if (!result.HasTimestampedSegments)
+                    {
+                        var currentText = result.Text.Trim();
+                        var newContent = ExtractNewContent(previousWindowText, currentText);
+                        previousWindowText = currentText;
+
+                        if (string.IsNullOrWhiteSpace(newContent))
+                        {
+                            logger.LogDebug(
+                                "Job {JobId}: no new content in synthetic segment, skipping.",
+                                jobId);
+                            continue;
+                        }
+
+                        // Place the new content in the last step's time
+                        // range so absolute timestamps don't overlap with
+                        // the previously emitted segment.
+                        var newStart = Math.Max(0, result.Duration - effectiveStep);
+                        processSegments = [new TranscriptionChunkSegment(
+                            newContent, newStart, result.Duration, null)];
+                    }
+
                     // Current absolute time for commit-delay filtering
                     var currentAbsTime = (double)ringBuffer.TotalWritten / SampleRate;
 
                     using var scope = scopeFactory.CreateScope();
                     var svc = scope.ServiceProvider.GetRequiredService<AgentJobService>();
 
-                    foreach (var seg in result.Segments)
+                    foreach (var seg in processSegments)
                     {
                         // ── API-level quality filters (cheapest) ──
                         if (seg.NoSpeechProbability.HasValue
@@ -533,6 +641,20 @@ public sealed class LiveTranscriptionOrchestrator(
                                 {
                                     provisionalSegments.Add(new ProvisionalSegment(
                                         prov.Id, seg.Text, absStart, absEnd));
+
+                                    // Update prompt conditioning with provisional
+                                    // text so subsequent inference ticks benefit
+                                    // from Whisper context continuity.  For models
+                                    // that don't return per-segment timestamps
+                                    // (HasTimestampedSegments=false) the confirmed
+                                    // path is never reached because absEnd ≈
+                                    // currentAbsTime and the commit delay never
+                                    // passes.  Without this, the prompt stays
+                                    // empty and Whisper loses vocabulary/style
+                                    // anchoring after the first segment.
+                                    promptBuffer = (promptBuffer + " " + seg.Text).Trim();
+                                    if (promptBuffer.Length > MaxPromptChars)
+                                        promptBuffer = promptBuffer[^MaxPromptChars..];
                                 }
                             }
                             continue;
@@ -572,7 +694,12 @@ public sealed class LiveTranscriptionOrchestrator(
                             promptBuffer = promptBuffer[^MaxPromptChars..];
                     }
 
-                    // ── Retract stale provisionals ──────────────
+                    // ── Finalize stale provisionals ─────────────
+                    // Provisionals that survived beyond 2× the commit delay
+                    // without being matched by a later confirmed segment are
+                    // almost certainly real speech.  Promote them instead of
+                    // retracting so accumulated transcription text is never
+                    // silently deleted.
                     if (isTwoPass)
                     {
                         var staleThreshold = currentAbsTime - CommitDelaySeconds * 2;
@@ -580,11 +707,21 @@ public sealed class LiveTranscriptionOrchestrator(
                         {
                             if (provisionalSegments[i].AbsEnd < staleThreshold)
                             {
+                                var stale = provisionalSegments[i];
                                 logger.LogDebug(
-                                    "Job {JobId}: retracting stale provisional: {Text}",
-                                    jobId, provisionalSegments[i].Text);
-                                await svc.RetractSegmentAsync(
-                                    jobId, provisionalSegments[i].SegmentId, ct);
+                                    "Job {JobId}: finalizing stale provisional: {Text}",
+                                    jobId, stale.Text);
+                                await svc.FinalizeSegmentAsync(
+                                    jobId, stale.SegmentId, stale.Text, ct: ct);
+                                lastEmittedTimestamp = Math.Max(lastEmittedTimestamp, stale.AbsEnd);
+                                TrackEmittedSegment(recentSegments, stale.Text, stale.AbsStart, stale.AbsEnd);
+
+                                // Keep prompt conditioning in sync when
+                                // promoting stale provisionals to final.
+                                promptBuffer = (promptBuffer + " " + stale.Text).Trim();
+                                if (promptBuffer.Length > MaxPromptChars)
+                                    promptBuffer = promptBuffer[^MaxPromptChars..];
+
                                 provisionalSegments.RemoveAt(i);
                             }
                         }
@@ -892,4 +1029,198 @@ public sealed class LiveTranscriptionOrchestrator(
 
         return Math.Sqrt(sum / samples.Length);
     }
+
+    /// <summary>
+    /// Compares the previous and current window transcription text at
+    /// word level and returns only the genuinely new content.
+    /// <para>
+    /// <b>Phase 1 — exact suffix-prefix match:</b> finds the longest
+    /// suffix of <paramref name="previous"/> that exactly matches a
+    /// prefix of <paramref name="current"/>.  This is the fast path
+    /// for the common case where Whisper is consistent.
+    /// </para>
+    /// <para>
+    /// <b>Phase 2 — anchor search (fallback):</b> when the exact match
+    /// fails (e.g. Whisper inserts or drops a word in the overlapping
+    /// audio), searches for the <b>tail</b> of <paramref name="previous"/>
+    /// as a contiguous word sequence <em>anywhere</em> in
+    /// <paramref name="current"/>.  Everything after that anchor in
+    /// <paramref name="current"/> is the genuinely new content.  The
+    /// search starts from the rightmost position so that repeated
+    /// phrases resolve to the latest occurrence.
+    /// </para>
+    /// <para>
+    /// Both texts are normalised before comparison: contractions are
+    /// expanded (<c>I'm → I am</c>) and trailing punctuation is
+    /// stripped from each word.  This prevents Whisper's inconsistent
+    /// contraction/punctuation handling from breaking the overlap
+    /// match.  The returned text comes from the original (unexpanded)
+    /// <paramref name="current"/>.
+    /// </para>
+    /// <para>
+    /// Used for models that don't return per-segment timestamps (e.g.
+    /// <c>gpt-4o-transcribe</c> in <c>json</c> mode) where the full
+    /// window is a single synthetic segment and overlap-based dedup
+    /// cannot work.
+    /// </para>
+    /// </summary>
+    private static string ExtractNewContent(string previous, string current)
+    {
+        if (string.IsNullOrWhiteSpace(previous))
+            return current;
+
+        // Normalise: expand contractions → lowercase so "I'm" and
+        // "I am" compare as identical across Whisper inference runs.
+        var prevNorm = ExpandContractions(previous).ToLowerInvariant();
+        var currNorm = ExpandContractions(current).ToLowerInvariant();
+
+        if (prevNorm == currNorm)
+            return "";
+
+        var prevWords = prevNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var currWords = currNorm.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+
+        // ── Phase 1: exact suffix-of-prev = prefix-of-curr ──────
+        // Find the longest suffix of prevWords whose words match the
+        // corresponding prefix of currWords.  Start from the longest
+        // possible overlap and shrink until a match is found.
+        var bestOverlap = 0;
+        var maxPossible = Math.Min(prevWords.Length, currWords.Length);
+
+        for (var k = maxPossible; k >= 1; k--)
+        {
+            var allMatch = true;
+            for (var j = 0; j < k; j++)
+            {
+                if (StripTrailingPunctuation(prevWords[prevWords.Length - k + j])
+                    != StripTrailingPunctuation(currWords[j]))
+                {
+                    allMatch = false;
+                    break;
+                }
+            }
+
+            if (allMatch)
+            {
+                bestOverlap = k;
+                break;
+            }
+        }
+
+        // ── Phase 2: anchor search (tolerates insertions/deletions) ─
+        // When the exact match fails because Whisper inserted or
+        // dropped a word in the overlapping audio region, search for
+        // the tail of prevWords as a contiguous sequence anywhere in
+        // currWords.  Try decreasing anchor lengths (5 → 2) so that
+        // the longest reliable match wins.  Search from the right so
+        // repeated phrases resolve to the latest (correct) occurrence.
+        if (bestOverlap == 0 && prevWords.Length >= 2 && currWords.Length >= 2)
+        {
+            var anchorMax = Math.Min(5, prevWords.Length);
+
+            for (var a = anchorMax; a >= 2; a--)
+            {
+                var tailStart = prevWords.Length - a;
+
+                for (var pos = currWords.Length - a; pos >= 0; pos--)
+                {
+                    var match = true;
+                    for (var j = 0; j < a; j++)
+                    {
+                        if (StripTrailingPunctuation(prevWords[tailStart + j])
+                            != StripTrailingPunctuation(currWords[pos + j]))
+                        {
+                            match = false;
+                            break;
+                        }
+                    }
+
+                    if (match)
+                    {
+                        bestOverlap = pos + a;
+                        break;
+                    }
+                }
+
+                if (bestOverlap > 0)
+                    break;
+            }
+        }
+
+        if (bestOverlap >= currWords.Length)
+            return "";
+
+        // Map the normalised overlap length back to a position in the
+        // original (unexpanded) current text so the output preserves
+        // Whisper's actual wording.
+        return SkipNormalizedWords(current, bestOverlap);
+    }
+
+    /// <summary>
+    /// Walks through <paramref name="original"/>, expanding each word's
+    /// contractions to count normalised words, and returns the substring
+    /// after <paramref name="normalizedWordCount"/> normalised words have
+    /// been consumed.  A single original word may expand to two
+    /// normalised words (e.g. "I'm" → "I am").
+    /// </summary>
+    private static string SkipNormalizedWords(string original, int normalizedWordCount)
+    {
+        var words = original.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+        var consumed = 0;
+        var origIndex = 0;
+
+        while (consumed < normalizedWordCount && origIndex < words.Length)
+        {
+            var expanded = ExpandContractions(words[origIndex]);
+            consumed += expanded.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length;
+            origIndex++;
+        }
+
+        return origIndex >= words.Length
+            ? ""
+            : string.Join(' ', words[origIndex..]);
+    }
+
+    /// <summary>
+    /// Expands common English contractions that Whisper frequently
+    /// flip-flops between across successive inference windows.
+    /// </summary>
+    private static string ExpandContractions(string text) => text
+        .Replace("I'm", "I am", StringComparison.OrdinalIgnoreCase)
+        .Replace("I've", "I have", StringComparison.OrdinalIgnoreCase)
+        .Replace("I'll", "I will", StringComparison.OrdinalIgnoreCase)
+        .Replace("I'd", "I would", StringComparison.OrdinalIgnoreCase)
+        .Replace("it's", "it is", StringComparison.OrdinalIgnoreCase)
+        .Replace("that's", "that is", StringComparison.OrdinalIgnoreCase)
+        .Replace("there's", "there is", StringComparison.OrdinalIgnoreCase)
+        .Replace("here's", "here is", StringComparison.OrdinalIgnoreCase)
+        .Replace("what's", "what is", StringComparison.OrdinalIgnoreCase)
+        .Replace("who's", "who is", StringComparison.OrdinalIgnoreCase)
+        .Replace("don't", "do not", StringComparison.OrdinalIgnoreCase)
+        .Replace("doesn't", "does not", StringComparison.OrdinalIgnoreCase)
+        .Replace("didn't", "did not", StringComparison.OrdinalIgnoreCase)
+        .Replace("can't", "cannot", StringComparison.OrdinalIgnoreCase)
+        .Replace("won't", "will not", StringComparison.OrdinalIgnoreCase)
+        .Replace("isn't", "is not", StringComparison.OrdinalIgnoreCase)
+        .Replace("aren't", "are not", StringComparison.OrdinalIgnoreCase)
+        .Replace("wasn't", "was not", StringComparison.OrdinalIgnoreCase)
+        .Replace("weren't", "were not", StringComparison.OrdinalIgnoreCase)
+        .Replace("hasn't", "has not", StringComparison.OrdinalIgnoreCase)
+        .Replace("haven't", "have not", StringComparison.OrdinalIgnoreCase)
+        .Replace("couldn't", "could not", StringComparison.OrdinalIgnoreCase)
+        .Replace("wouldn't", "would not", StringComparison.OrdinalIgnoreCase)
+        .Replace("shouldn't", "should not", StringComparison.OrdinalIgnoreCase)
+        .Replace("we're", "we are", StringComparison.OrdinalIgnoreCase)
+        .Replace("they're", "they are", StringComparison.OrdinalIgnoreCase)
+        .Replace("you're", "you are", StringComparison.OrdinalIgnoreCase)
+        .Replace("we've", "we have", StringComparison.OrdinalIgnoreCase)
+        .Replace("they've", "they have", StringComparison.OrdinalIgnoreCase)
+        .Replace("you've", "you have", StringComparison.OrdinalIgnoreCase)
+        .Replace("we'll", "we will", StringComparison.OrdinalIgnoreCase)
+        .Replace("they'll", "they will", StringComparison.OrdinalIgnoreCase)
+        .Replace("you'll", "you will", StringComparison.OrdinalIgnoreCase)
+        .Replace("let's", "let us", StringComparison.OrdinalIgnoreCase);
+
+    private static string StripTrailingPunctuation(string word) =>
+        word.TrimEnd('.', ',', '!', '?', ';', ':');
 }

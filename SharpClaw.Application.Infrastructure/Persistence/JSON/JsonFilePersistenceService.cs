@@ -1,6 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities;
 
@@ -27,6 +28,7 @@ public sealed class JsonFilePersistenceService(
     /// Loads all per-entity JSON files from the data directory into the InMemory database.
     /// Each entity type has its own sub-folder under the data directory, and each entity
     /// is stored as an individual <c>{Id}.json</c> file.
+    /// Many-to-many join tables are loaded from a single <c>_rows.json</c> array file.
     /// Call once at startup after the DbContext is configured.
     /// </summary>
     public async Task LoadAsync(CancellationToken ct = default)
@@ -48,10 +50,9 @@ public sealed class JsonFilePersistenceService(
                     .Where(p => p is not null)
                     .ToList());
 
+        // First pass: load all regular (non-join) entities so FK targets exist.
         foreach (var entityType in context.Model.GetEntityTypes())
         {
-            // Skip shared-type entities (e.g. many-to-many join tables)
-            // — they don't have their own DbSet or JSON file.
             if (entityType.HasSharedClrType)
                 continue;
 
@@ -94,6 +95,18 @@ public sealed class JsonFilePersistenceService(
         }
 
         await context.SaveChangesAsync(ct);
+
+        // Second pass: load many-to-many join tables after all entities
+        // are committed so the FK references resolve correctly.
+        foreach (var entityType in context.Model.GetEntityTypes())
+        {
+            if (!entityType.HasSharedClrType)
+                continue;
+
+            await LoadJoinTableAsync(entityType, ct);
+        }
+
+        await context.SaveChangesAsync(ct);
         DetachAll();
     }
 
@@ -101,6 +114,14 @@ public sealed class JsonFilePersistenceService(
     /// Saves all tracked entity types from the InMemory database to individual JSON files.
     /// Each entity is written as <c>{DataDirectory}/{EntityType}/{Id}.json</c>.
     /// Orphan files for deleted entities are removed.
+    /// Many-to-many join tables (shared-type entities) are written as a single
+    /// <c>_rows.json</c> file containing an array of FK-pair objects.
+    /// <para>
+    /// This full-scan flush should only be used for startup migrations or
+    /// manual bulk operations.  Normal per-save persistence uses the
+    /// incremental <see cref="FlushChangesAsync"/> to avoid race conditions
+    /// between concurrent scopes.
+    /// </para>
     /// </summary>
     public async Task FlushAsync(CancellationToken ct = default)
     {
@@ -108,9 +129,11 @@ public sealed class JsonFilePersistenceService(
 
         foreach (var entityType in context.Model.GetEntityTypes())
         {
-            // Skip shared-type entities (e.g. many-to-many join tables)
             if (entityType.HasSharedClrType)
+            {
+                await FlushJoinTableAsync(entityType, ct);
                 continue;
+            }
 
             var clrType = entityType.ClrType;
             var entityDir = GetEntityDirectory(clrType);
@@ -153,8 +176,184 @@ public sealed class JsonFilePersistenceService(
         }
     }
 
+    /// <summary>
+    /// Incrementally persists only the entities that changed in the most
+    /// recent <see cref="SharpClawDbContext.SaveChangesAsync"/> call.
+    /// <list type="bullet">
+    ///   <item><b>Added / Modified</b> — entity is re-read via
+    ///     <see cref="DbContext.Find(Type, object?[])"/> and written to
+    ///     its <c>{Id}.json</c> file.</item>
+    ///   <item><b>Deleted</b> — the corresponding <c>{Id}.json</c> file
+    ///     is removed from disk.</item>
+    ///   <item><b>Join tables</b> — the entire <c>_rows.json</c> for each
+    ///     affected join table is rewritten.</item>
+    /// </list>
+    /// <para>
+    /// Because each invocation touches only its own changed files (rather
+    /// than scanning every entity directory for orphans), concurrent
+    /// flushes from different DI scopes can no longer delete each other's
+    /// files.
+    /// </para>
+    /// </summary>
+    public async Task FlushChangesAsync(
+        IReadOnlyList<(Type ClrType, Guid Id, EntityState State)> entityChanges,
+        IReadOnlySet<string> joinTableChanges,
+        CancellationToken ct = default)
+    {
+        Directory.CreateDirectory(options.DataDirectory);
+
+        foreach (var (clrType, id, state) in entityChanges)
+        {
+            var entityDir = GetEntityDirectory(clrType);
+            Directory.CreateDirectory(entityDir);
+            var filePath = Path.Combine(entityDir, $"{id}.json");
+
+            try
+            {
+                if (state == EntityState.Deleted)
+                {
+                    if (File.Exists(filePath))
+                        File.Delete(filePath);
+                }
+                else
+                {
+                    // After base.SaveChangesAsync the entity is tracked as
+                    // Unchanged.  Find returns the local (tracked) instance
+                    // first, falling back to the InMemory store.
+                    var entity = context.Find(clrType, id);
+                    if (entity is not null)
+                    {
+                        var json = JsonSerializer.Serialize(entity, clrType, JsonOptions);
+                        await File.WriteAllTextAsync(filePath, json, ct);
+                    }
+                }
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Failed to flush {Type} {Id} to {Path}",
+                    clrType.Name, id, filePath);
+            }
+        }
+
+        if (joinTableChanges.Count > 0)
+        {
+            foreach (var entityType in context.Model.GetEntityTypes())
+            {
+                if (!entityType.HasSharedClrType)
+                    continue;
+                if (!joinTableChanges.Contains(entityType.Name))
+                    continue;
+
+                await FlushJoinTableAsync(entityType, ct);
+            }
+        }
+    }
+
     private string GetEntityDirectory(Type entityType)
         => Path.Combine(options.DataDirectory, entityType.Name);
+
+    private string GetJoinTableDirectory(string tableName)
+        => Path.Combine(options.DataDirectory, tableName);
+
+    /// <summary>
+    /// Flushes a shared-type (many-to-many join table) entity to a single
+    /// <c>_rows.json</c> file. Each row is serialised as a dictionary of
+    /// FK property names to their <see cref="Guid"/> values.
+    /// </summary>
+    private async Task FlushJoinTableAsync(IEntityType entityType, CancellationToken ct)
+    {
+        var tableName = entityType.Name;
+        var tableDir = GetJoinTableDirectory(tableName);
+        Directory.CreateDirectory(tableDir);
+
+        try
+        {
+            var fkProperties = entityType.GetProperties()
+                .Where(p => p.IsForeignKey())
+                .ToList();
+
+            var dbSet = context.Set<Dictionary<string, object>>(tableName);
+            var rows = await dbSet.ToListAsync(ct);
+
+            var filePath = Path.Combine(tableDir, "_rows.json");
+
+            if (rows.Count > 0)
+            {
+                var rowList = new List<Dictionary<string, Guid>>(rows.Count);
+                foreach (var row in rows)
+                {
+                    var dict = new Dictionary<string, Guid>(fkProperties.Count);
+                    foreach (var fk in fkProperties)
+                    {
+                        if (row.TryGetValue(fk.Name, out var val) && val is Guid g)
+                            dict[fk.Name] = g;
+                    }
+                    rowList.Add(dict);
+                }
+
+                var json = JsonSerializer.Serialize(rowList, JsonOptions);
+                await File.WriteAllTextAsync(filePath, json, ct);
+            }
+            else if (File.Exists(filePath))
+            {
+                File.Delete(filePath);
+            }
+
+            logger.LogDebug("Flushed {Count} {Table} join rows", rows.Count, tableName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to flush join table {Table}", tableName);
+        }
+    }
+
+    /// <summary>
+    /// Loads a shared-type (many-to-many join table) entity from its
+    /// <c>_rows.json</c> file and adds each row to the context.
+    /// </summary>
+    private async Task LoadJoinTableAsync(IEntityType entityType, CancellationToken ct)
+    {
+        var tableName = entityType.Name;
+        var tableDir = GetJoinTableDirectory(tableName);
+        var filePath = Path.Combine(tableDir, "_rows.json");
+
+        if (!File.Exists(filePath))
+            return;
+
+        try
+        {
+            var json = await File.ReadAllTextAsync(filePath, ct);
+            var rows = JsonSerializer.Deserialize<List<Dictionary<string, Guid>>>(json, JsonOptions);
+            if (rows is null || rows.Count == 0)
+                return;
+
+            var fkPropertyNames = entityType.GetProperties()
+                .Where(p => p.IsForeignKey())
+                .Select(p => p.Name)
+                .ToList();
+
+            var dbSet = context.Set<Dictionary<string, object>>(entityType.Name);
+
+            foreach (var row in rows)
+            {
+                var entity = new Dictionary<string, object>(fkPropertyNames.Count);
+                foreach (var fkName in fkPropertyNames)
+                {
+                    if (row.TryGetValue(fkName, out var guid))
+                        entity[fkName] = guid;
+                }
+
+                if (entity.Count == fkPropertyNames.Count)
+                    dbSet.Add(entity);
+            }
+
+            logger.LogDebug("Loaded {Count} {Table} join rows", rows.Count, tableName);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to load join table {Table} from {Path}", tableName, filePath);
+        }
+    }
 
     private void DetachAll()
     {

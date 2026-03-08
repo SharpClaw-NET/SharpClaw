@@ -42,11 +42,20 @@ public interface ITranscriptionApiClient
 /// Language detected or confirmed by the model (e.g. "en"). Null when
 /// the provider does not report it.
 /// </param>
+/// <param name="HasTimestampedSegments">
+/// <see langword="true"/> when the API returned real per-segment
+/// timestamps (<c>verbose_json</c>); <see langword="false"/> when a
+/// single synthetic segment was created from the full response text
+/// (e.g. <c>gpt-4o-transcribe</c> in <c>json</c> mode).  The
+/// orchestrator uses this to switch from overlap-based dedup to
+/// text-diff dedup for sliding windows.
+/// </param>
 public sealed record TranscriptionChunkResult(
     string Text,
     double Duration,
     IReadOnlyList<TranscriptionChunkSegment> Segments,
-    string? Language = null);
+    string? Language = null,
+    bool HasTimestampedSegments = true);
 
 /// <summary>
 /// A segment within a transcription chunk result.
