@@ -428,6 +428,47 @@ public sealed class LiveTranscriptionOrchestrator(
                     logger.LogDebug(
                         "Job {JobId}: silence detected (rms={Rms:F5}, floor={Floor:F5}), skipping.",
                         jobId, recentRms, noiseFloor);
+
+                    // ── Finalize stale provisionals during silence ──
+                    // The inference loop is skipped during silence, but
+                    // provisional segments emitted in earlier speech ticks
+                    // must still be promoted once they exceed the staleness
+                    // threshold — otherwise they remain in limbo and the
+                    // client never sees the final text.
+                    if (isTwoPass && provisionalSegments.Count > 0)
+                    {
+                        var silenceAbsTime = (double)ringBuffer.TotalWritten / SampleRate;
+                        var staleThreshold = silenceAbsTime - CommitDelaySeconds * 2;
+                        var hasStale = provisionalSegments.Exists(
+                            p => p.AbsEnd < staleThreshold);
+
+                        if (hasStale)
+                        {
+                            using var scope = scopeFactory.CreateScope();
+                            var svc = scope.ServiceProvider.GetRequiredService<AgentJobService>();
+                            for (var i = provisionalSegments.Count - 1; i >= 0; i--)
+                            {
+                                if (provisionalSegments[i].AbsEnd < staleThreshold)
+                                {
+                                    var stale = provisionalSegments[i];
+                                    logger.LogDebug(
+                                        "Job {JobId}: finalizing stale provisional during silence: {Text}",
+                                        jobId, stale.Text);
+                                    await svc.FinalizeSegmentAsync(
+                                        jobId, stale.SegmentId, stale.Text, ct: ct);
+                                    lastEmittedTimestamp = Math.Max(lastEmittedTimestamp, stale.AbsEnd);
+                                    TrackEmittedSegment(recentSegments, stale.Text, stale.AbsStart, stale.AbsEnd);
+
+                                    promptBuffer = (promptBuffer + " " + stale.Text).Trim();
+                                    if (promptBuffer.Length > MaxPromptChars)
+                                        promptBuffer = promptBuffer[^MaxPromptChars..];
+
+                                    provisionalSegments.RemoveAt(i);
+                                }
+                            }
+                        }
+                    }
+
                     continue;
                 }
 
