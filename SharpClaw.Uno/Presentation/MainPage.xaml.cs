@@ -54,6 +54,7 @@ public sealed partial class MainPage : Page
     private DispatcherTimer? _loadingTimer;
     private int _loadingFrame;
     private TextBlock? _loadingMsgBlock;
+    private JobDetailDto? _currentJobDetail;
 
     // ── Chat bubble pool (avoids per-history-load GC pressure) ──
     private readonly record struct ChatBubbleRow(Border Root, TextBlock Role, TextBlock Time, TextBlock Content);
@@ -1049,6 +1050,14 @@ public sealed partial class MainPage : Page
                 JobCancelButton.Visibility = Visibility.Visible;
                 JobStopButton.Visibility = Visibility.Visible;
             }
+
+            // Store for clipboard copy and show relevant copy buttons
+            _currentJobDetail = job;
+            CopyLogsButton.Visibility = job.Logs is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+            CopySegmentsButton.Visibility = job.Segments is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
+            CopyResultButton.Visibility = !string.IsNullOrWhiteSpace(job.ResultData) || !string.IsNullOrWhiteSpace(job.ErrorLog)
+                ? Visibility.Visible : Visibility.Collapsed;
+            CopyAllButton.Visibility = Visibility.Visible;
         }
         catch (Exception ex)
         {
@@ -1092,6 +1101,11 @@ public sealed partial class MainPage : Page
         JobApproveButton.Visibility = Visibility.Collapsed;
         JobCancelButton.Visibility = Visibility.Collapsed;
         JobStopButton.Visibility = Visibility.Collapsed;
+        CopyLogsButton.Visibility = Visibility.Collapsed;
+        CopySegmentsButton.Visibility = Visibility.Collapsed;
+        CopyResultButton.Visibility = Visibility.Collapsed;
+        CopyAllButton.Visibility = Visibility.Collapsed;
+        _currentJobDetail = null;
     }
 
     private void StartLoadingAnimation()
@@ -1371,6 +1385,106 @@ public sealed partial class MainPage : Page
         _suppressJobSelection = false;
         DeallocateJobView();
         ShowChatView();
+    }
+
+    // ── Job clipboard copy ──────────────────────────────────────
+
+    private void OnCopyJobLogsClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentJobDetail?.Logs is not { Count: > 0 } logs) return;
+        var sb = new StringBuilder();
+        foreach (var log in logs)
+            sb.AppendLine($"[{log.Timestamp.LocalDateTime:yyyy-MM-dd HH:mm:ss}] [{log.Level}] {log.Message}");
+        CopyToClipboard(sb.ToString());
+    }
+
+    private void OnCopySegmentsClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentJobDetail?.Segments is not { Count: > 0 } segments) return;
+        var sb = new StringBuilder();
+        foreach (var seg in segments)
+        {
+            var timeRange = $"[{FormatSegmentTime(seg.StartTime)} → {FormatSegmentTime(seg.EndTime)}]";
+            var conf = seg.Confidence.HasValue ? $"  ({seg.Confidence.Value:P0})" : "";
+            var prov = seg.IsProvisional ? "  [provisional]" : "";
+            sb.AppendLine($"{timeRange}{conf}{prov}  {seg.Text}");
+        }
+        CopyToClipboard(sb.ToString());
+    }
+
+    private void OnCopyResultClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentJobDetail is not { } job) return;
+        var sb = new StringBuilder();
+        if (!string.IsNullOrWhiteSpace(job.ResultData))
+        {
+            var markerIndex = job.ResultData.IndexOf(ScreenshotMarker, StringComparison.Ordinal);
+            sb.AppendLine(markerIndex >= 0 ? job.ResultData[..markerIndex].TrimEnd() : job.ResultData);
+        }
+        if (!string.IsNullOrWhiteSpace(job.ErrorLog))
+        {
+            if (sb.Length > 0) sb.AppendLine();
+            sb.AppendLine($"[error] {job.ErrorLog}");
+        }
+        if (sb.Length > 0)
+            CopyToClipboard(sb.ToString());
+    }
+
+    private void OnCopyAllClick(object sender, RoutedEventArgs e)
+    {
+        if (_currentJobDetail is not { } job) return;
+        var sb = new StringBuilder();
+
+        sb.AppendLine($"Job: {job.Id}");
+        sb.AppendLine($"Action: {job.ActionType}  |  Status: {job.Status}");
+        if (job.CreatedAt != default) sb.AppendLine($"Created: {job.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+        if (job.StartedAt.HasValue) sb.AppendLine($"Started: {job.StartedAt.Value.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+        if (job.CompletedAt.HasValue) sb.AppendLine($"Completed: {job.CompletedAt.Value.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
+
+        if (job.Logs is { Count: > 0 } logs)
+        {
+            sb.AppendLine();
+            sb.AppendLine("── Logs ──");
+            foreach (var log in logs)
+                sb.AppendLine($"[{log.Timestamp.LocalDateTime:yyyy-MM-dd HH:mm:ss}] [{log.Level}] {log.Message}");
+        }
+
+        if (job.Segments is { Count: > 0 } segments)
+        {
+            sb.AppendLine();
+            sb.AppendLine($"── Transcription Segments ({segments.Count}) ──");
+            foreach (var seg in segments)
+            {
+                var timeRange = $"[{FormatSegmentTime(seg.StartTime)} → {FormatSegmentTime(seg.EndTime)}]";
+                var conf = seg.Confidence.HasValue ? $"  ({seg.Confidence.Value:P0})" : "";
+                var prov = seg.IsProvisional ? "  [provisional]" : "";
+                sb.AppendLine($"{timeRange}{conf}{prov}  {seg.Text}");
+            }
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.ResultData))
+        {
+            sb.AppendLine();
+            sb.AppendLine("── Result ──");
+            var markerIndex = job.ResultData.IndexOf(ScreenshotMarker, StringComparison.Ordinal);
+            sb.AppendLine(markerIndex >= 0 ? job.ResultData[..markerIndex].TrimEnd() : job.ResultData);
+        }
+
+        if (!string.IsNullOrWhiteSpace(job.ErrorLog))
+        {
+            sb.AppendLine();
+            sb.AppendLine("── Error ──");
+            sb.AppendLine(job.ErrorLog);
+        }
+
+        CopyToClipboard(sb.ToString());
+    }
+
+    private static void CopyToClipboard(string text)
+    {
+        var dataPackage = new Windows.ApplicationModel.DataTransfer.DataPackage();
+        dataPackage.SetText(text);
+        Windows.ApplicationModel.DataTransfer.Clipboard.SetContent(dataPackage);
     }
 
     // ── Microphone / voice input ────────────────────────────────

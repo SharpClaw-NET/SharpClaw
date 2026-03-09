@@ -379,6 +379,49 @@
                        FontSize="12"
                        Foreground="#999999" />
           </Button>
+
+          <!-- Clipboard copy buttons -->
+          <Border Width="1" Background="#333333" Margin="4,2" />
+          <Button x:Name="CopyLogsButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnCopyJobLogsClick"
+                  Visibility="Collapsed"
+                  ToolTipService.ToolTip="Copy job logs to clipboard">
+            <TextBlock Text="📋 Logs"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#808080" />
+          </Button>
+          <Button x:Name="CopySegmentsButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnCopySegmentsClick"
+                  Visibility="Collapsed"
+                  ToolTipService.ToolTip="Copy transcription segments to clipboard">
+            <TextBlock Text="📋 Segments"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#808080" />
+          </Button>
+          <Button x:Name="CopyResultButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnCopyResultClick"
+                  Visibility="Collapsed"
+                  ToolTipService.ToolTip="Copy result data to clipboard">
+            <TextBlock Text="📋 Result"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#808080" />
+          </Button>
+          <Button x:Name="CopyAllButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnCopyAllClick"
+                  Visibility="Collapsed"
+                  ToolTipService.ToolTip="Copy all job details to clipboard">
+            <TextBlock Text="📋 Copy All"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#808080" />
+          </Button>
         </StackPanel>
       </Grid>
     </Grid>
