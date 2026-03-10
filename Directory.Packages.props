@@ -34,7 +34,7 @@
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Vulkan" Version="0.26.0" />
-    <PackageVersion Include="Whisper.net" Version="1.7.0" />
+    <PackageVersion Include="Whisper.net" Version="1.9.0" />
     <PackageVersion Include="Whisper.net.Runtime" Version="1.7.0" />
     <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.0" />
     <PackageVersion Include="System.Drawing.Common" Version="9.0.5" />
