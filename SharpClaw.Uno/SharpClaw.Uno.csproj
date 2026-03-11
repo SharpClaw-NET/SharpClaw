@@ -119,6 +119,7 @@
   </ItemGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Diagnostics.EventLog" />
     <Page Update="Presentation\SettingsPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>

@@ -36,9 +36,9 @@
     <PackageVersion Include="LLamaSharp.Backend.Vulkan" Version="0.26.0" />
     <PackageVersion Include="Whisper.net" Version="1.7.0" />
     <PackageVersion Include="Whisper.net.Runtime" Version="1.9.0" />
-    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.0" />
+    <PackageVersion Include="System.Diagnostics.EventLog" Version="10.0.4" />
     <PackageVersion Include="System.Drawing.Common" Version="10.0.3" />
-    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.0" />
+    <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.4" />
     <!-- VS 2026 VSIX extension (classic in-proc model) -->
     <PackageVersion Include="Microsoft.VisualStudio.SDK" Version="17.0.32112.339" />
     <PackageVersion Include="Microsoft.VSSDK.BuildTools" Version="17.14.2120" />
