@@ -45,6 +45,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         // Responses API path
@@ -54,7 +55,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             await foreach (var chunk in StreamResponsesApiAsync(
                 httpClient, apiKey, model, systemPrompt,
                 messages.Select(m => new ToolAwareMessage { Role = m.Role, Content = m.Content }).ToList(),
-                [], ct))
+                [], maxCompletionTokens, ct))
             {
                 if (chunk.IsFinished)
                     return chunk.Finished!.Content
@@ -77,7 +78,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         foreach (var msg in messages)
             payloadMessages.Add(new CompletionMessagePayload(msg.Role, msg.Content));
 
-        var payload = new CompletionRequest(model, payloadMessages);
+        var payload = new CompletionRequest(model, payloadMessages) { MaxTokens = maxCompletionTokens };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
@@ -99,6 +100,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         // Responses API path
@@ -106,7 +108,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         {
             ChatCompletionResult? final = null;
             await foreach (var chunk in StreamResponsesApiAsync(
-                httpClient, apiKey, model, systemPrompt, messages, tools, ct))
+                httpClient, apiKey, model, systemPrompt, messages, tools, maxCompletionTokens, ct))
             {
                 if (chunk.IsFinished)
                     final = chunk.Finished;
@@ -128,6 +130,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         {
             Model = model,
             Messages = payloadMessages,
+            MaxTokens = maxCompletionTokens,
             Tools = tools.Select(t => new OaiToolDefinitionPayload
             {
                 Function = new OaiFunctionDefinitionPayload
@@ -222,13 +225,14 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         // Responses API path — delegate entirely
         if (UseResponsesApi(model))
         {
             await foreach (var chunk in StreamResponsesApiAsync(
-                httpClient, apiKey, model, systemPrompt, messages, tools, ct))
+                httpClient, apiKey, model, systemPrompt, messages, tools, maxCompletionTokens, ct))
             {
                 yield return chunk;
             }
@@ -247,6 +251,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         {
             Model = model,
             Messages = payloadMessages,
+            MaxTokens = maxCompletionTokens,
             Tools = tools.Select(t => new OaiToolDefinitionPayload
             {
                 Function = new OaiFunctionDefinitionPayload
@@ -391,7 +396,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 
     private sealed record CompletionRequest(
         [property: JsonPropertyName("model")] string Model,
-        [property: JsonPropertyName("messages")] List<CompletionMessagePayload> Messages);
+        [property: JsonPropertyName("messages")] List<CompletionMessagePayload> Messages)
+    {
+        [JsonPropertyName("max_tokens")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxTokens { get; init; }
+    }
 
     private sealed record CompletionMessagePayload(
         [property: JsonPropertyName("role")] string Role,
@@ -417,6 +427,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("model")] public required string Model { get; init; }
         [JsonPropertyName("messages")] public required List<object> Messages { get; init; }
         [JsonPropertyName("tools")] public required List<OaiToolDefinitionPayload> Tools { get; init; }
+        [JsonPropertyName("max_tokens")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxTokens { get; init; }
     }
 
     private sealed class OaiToolDefinitionPayload
@@ -527,6 +540,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("messages")] public required List<object> Messages { get; init; }
         [JsonPropertyName("tools")] public required List<OaiToolDefinitionPayload> Tools { get; init; }
         [JsonPropertyName("stream")] public bool Stream { get; init; }
+        [JsonPropertyName("max_tokens")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxTokens { get; init; }
     }
 
     private sealed class OaiStreamResponse
@@ -576,6 +592,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
@@ -656,6 +673,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             Model = model,
             Input = input,
             Tools = respTools.Count > 0 ? respTools : null,
+            MaxOutputTokens = maxCompletionTokens,
             Stream = true
         };
 
@@ -858,6 +876,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("input")] public required List<object> Input { get; init; }
         [JsonPropertyName("tools")] public List<RespToolDefinition>? Tools { get; init; }
         [JsonPropertyName("stream")] public bool Stream { get; init; }
+        [JsonPropertyName("max_output_tokens")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? MaxOutputTokens { get; init; }
     }
 
     // Streaming event — covers the subset of fields we care about.

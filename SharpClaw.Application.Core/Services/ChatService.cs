@@ -98,14 +98,15 @@ public sealed partial class ChatService(
         using var httpClient = httpClientFactory.CreateClient();
 
         var modelCapabilities = model.Capabilities;
+        var maxTokens = agent.MaxCompletionTokens;
 
         var loopResult = useNativeTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, approvalCallback, ct)
+                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct)
             : await RunTextToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, approvalCallback, ct);
+                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct);
 
         // Persist both messages
         var senderUserId = jobService.GetSessionUserId();
@@ -605,6 +606,7 @@ public sealed partial class ChatService(
         using var httpClient = httpClientFactory.CreateClient();
 
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
+        var maxTokens = agent.MaxCompletionTokens;
 
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
@@ -621,7 +623,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, AllTools, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, AllTools, maxTokens, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -832,6 +834,7 @@ public sealed partial class ChatService(
         Guid agentId,
         Guid channelId,
         ModelCapability modelCapabilities,
+        int? maxCompletionTokens,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct)
     {
@@ -846,7 +849,7 @@ public sealed partial class ChatService(
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, AllTools, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, AllTools, maxCompletionTokens, ct);
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
                 return new ToolLoopResult(result.Content ?? "", jobResults);
@@ -901,7 +904,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, AllTools, ct);
+                    httpClient, apiKey, modelName, systemPrompt, messages, AllTools, maxCompletionTokens, ct);
                 return new ToolLoopResult(finalResult.Content ?? "", jobResults);
             }
         }
@@ -922,6 +925,7 @@ public sealed partial class ChatService(
         Guid agentId,
         Guid channelId,
         ModelCapability modelCapabilities,
+        int? maxCompletionTokens,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct)
     {
@@ -933,7 +937,7 @@ public sealed partial class ChatService(
         while (true)
         {
             assistantContent = await client.ChatCompletionAsync(
-                httpClient, apiKey, modelName, systemPrompt, history, ct);
+                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
 
             var toolCalls = ParseToolCalls(assistantContent);
             if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
@@ -991,7 +995,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 assistantContent = await client.ChatCompletionAsync(
-                    httpClient, apiKey, modelName, systemPrompt, history, ct);
+                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
                 break;
             }
         }

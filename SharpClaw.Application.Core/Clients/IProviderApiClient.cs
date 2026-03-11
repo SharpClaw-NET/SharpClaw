@@ -22,6 +22,7 @@ public interface IProviderApiClient
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -35,6 +36,7 @@ public interface IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(
@@ -55,6 +57,7 @@ public interface IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(

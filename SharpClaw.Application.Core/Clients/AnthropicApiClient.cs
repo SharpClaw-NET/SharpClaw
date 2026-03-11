@@ -43,12 +43,13 @@ public sealed class AnthropicApiClient : IProviderApiClient
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         var payload = new MessagesRequest
         {
             Model = model,
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             System = systemPrompt,
             Messages = messages
                 .Select(m => new MessagePayload(m.Role, m.Content))
@@ -111,12 +112,13 @@ public sealed class AnthropicApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         var payload = new AntToolCompletionRequest
         {
             Model = model,
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             System = systemPrompt,
             Messages = ConvertToAnthropicMessages(messages),
             Tools = tools.Select(t => new AntToolDefinitionPayload
@@ -366,12 +368,13 @@ public sealed class AnthropicApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var payload = new AntStreamRequest
         {
             Model = model,
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             System = systemPrompt,
             Messages = ConvertToAnthropicMessages(messages),
             Tools = tools.Select(t => new AntToolDefinitionPayload

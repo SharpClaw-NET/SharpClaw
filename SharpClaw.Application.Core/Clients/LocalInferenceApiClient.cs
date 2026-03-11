@@ -61,7 +61,8 @@ public sealed class LocalInferenceApiClient(
 
     public async Task<string> ChatCompletionAsync(
         HttpClient httpClient, string apiKey, string model, string? systemPrompt,
-        IReadOnlyList<ChatCompletionMessage> messages, CancellationToken ct = default)
+        IReadOnlyList<ChatCompletionMessage> messages, int? maxCompletionTokens = null,
+        CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();
 
@@ -78,7 +79,7 @@ public sealed class LocalInferenceApiClient(
 
         var inferParams = new InferenceParams
         {
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
         };
 
@@ -94,6 +95,7 @@ public sealed class LocalInferenceApiClient(
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
         HttpClient httpClient, string apiKey, string model, string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();
@@ -107,7 +109,7 @@ public sealed class LocalInferenceApiClient(
 
         var inferParams = new InferenceParams
         {
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
         };
 
@@ -136,6 +138,7 @@ public sealed class LocalInferenceApiClient(
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
         HttpClient httpClient, string apiKey, string model, string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();
@@ -149,7 +152,7 @@ public sealed class LocalInferenceApiClient(
 
         var inferParams = new InferenceParams
         {
-            MaxTokens = 4096,
+            MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
         };
 

@@ -9,6 +9,14 @@ public class AgentDB : BaseEntity
     public required string Name { get; set; }
     public string? SystemPrompt { get; set; }
 
+    /// <summary>
+    /// Optional cap on the number of tokens the model may generate in a
+    /// single response.  Sent as <c>max_tokens</c>, <c>max_completion_tokens</c>,
+    /// or <c>max_output_tokens</c> depending on the provider and API version.
+    /// <see langword="null"/> means no limit (provider default).
+    /// </summary>
+    public int? MaxCompletionTokens { get; set; }
+
     public Guid ModelId { get; set; }
     public ModelDB Model { get; set; } = null!;
 

@@ -346,5 +346,6 @@ public sealed class ChannelService(SharpClawDbContext db)
             agent.Model?.Name ?? "unknown",
             agent.Model?.Provider?.Name ?? "unknown",
             agent.RoleId,
-            agent.Role?.Name);
+            agent.Role?.Name,
+            agent.MaxCompletionTokens);
 }

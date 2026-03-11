@@ -535,10 +535,10 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "agent add <name> <modelId>  [system prompt]",
+                "agent add <name> <modelId>  [system prompt] [--max-tokens <n>]",
                 "agent get <id>",
                 "agent list",
-                "agent update <id> <name> [modelId] [system prompt]",
+                "agent update <id> <name> [modelId] [system prompt] [--max-tokens <n>]",
                 "agent role <id> <roleId>                  Assign a role (use 'role list')",
                 "agent role <id> none                      Remove role",
                 "agent sync-with-models                    Create default-<model> agents",
@@ -562,14 +562,8 @@ public static class CliDispatcher
             "list" => await AgentHandlers.List(svc),
 
             "update" when args.Length >= 4
-                => await AgentHandlers.Update(
-                    CliIdMap.Resolve(args[2]),
-                    new UpdateAgentRequest(
-                        args[3],
-                        args.Length >= 5 ? TryResolveId(args[4]) : null,
-                        args.Length >= 6 ? string.Join(' ', args[5..]) : null),
-                    svc),
-            "update" => UsageResult("agent update <id> <name> [modelId] [system prompt]"),
+                => await HandleAgentUpdate(args, svc),
+            "update" => UsageResult("agent update <id> <name> [modelId] [system prompt] [--max-tokens <n>]"),
 
             "role" when args.Length >= 4 && args[3].Equals("none", StringComparison.OrdinalIgnoreCase)
                 => await HandleAgentRoleAssign(CliIdMap.Resolve(args[2]), Guid.Empty, svc),
@@ -621,9 +615,55 @@ public static class CliDispatcher
             modelId = localFile.ModelId;
         }
 
-        var prompt = args.Length >= 5 ? string.Join(' ', args[4..]) : null;
+        // Separate flags from positional args (system prompt)
+        int? maxTokens = null;
+        var promptParts = new List<string>();
+        for (var i = 4; i < args.Length; i++)
+        {
+            if (args[i] is "--max-tokens" && i + 1 < args.Length && int.TryParse(args[i + 1], out var mt))
+            {
+                maxTokens = mt; i++;
+            }
+            else
+            {
+                promptParts.Add(args[i]);
+            }
+        }
+
+        var prompt = promptParts.Count > 0 ? string.Join(' ', promptParts) : null;
         return await AgentHandlers.Create(
-            new CreateAgentRequest(args[2], modelId, prompt), svc);
+            new CreateAgentRequest(args[2], modelId, prompt, maxTokens), svc);
+    }
+
+    private static async Task<IResult> HandleAgentUpdate(string[] args, AgentService svc)
+    {
+        var agentId = CliIdMap.Resolve(args[2]);
+        var name = args[3];
+
+        // Separate flags from positional args
+        int? maxTokens = null;
+        var positional = new List<string>();
+        for (var i = 4; i < args.Length; i++)
+        {
+            if (args[i] is "--max-tokens" && i + 1 < args.Length && int.TryParse(args[i + 1], out var mt))
+            {
+                maxTokens = mt; i++;
+            }
+            else
+            {
+                positional.Add(args[i]);
+            }
+        }
+
+        Guid? modelId = positional.Count >= 1 ? TryResolveId(positional[0]) : null;
+        string? prompt = null;
+        if (modelId is not null && positional.Count >= 2)
+            prompt = string.Join(' ', positional.Skip(1));
+        else if (modelId is null && positional.Count >= 1)
+            prompt = string.Join(' ', positional);
+
+        var request = new UpdateAgentRequest(name, modelId, prompt, maxTokens);
+        return await AgentHandlers.Update(agentId, request, svc);
     }
 
     private static async Task<IResult> HandleAgentSyncWithModels(AgentService svc)
