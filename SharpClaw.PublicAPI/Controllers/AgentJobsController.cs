@@ -118,4 +118,42 @@ public class AgentJobsController(InternalApiClient api) : ControllerBase
             return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
         }
     }
+
+    [HttpPut("{jobId:guid}/pause")]
+    public async Task<IActionResult> Pause(Guid channelId, Guid jobId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await api.PutAsync<object, AgentJobResponse>(
+                $"/channels/{channelId}/jobs/{jobId}/pause", new { }, ct);
+            return result is not null ? Ok(result) : NotFound();
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return NotFound(new { error = "Job not found." });
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
+        }
+    }
+
+    [HttpPut("{jobId:guid}/resume")]
+    public async Task<IActionResult> Resume(Guid channelId, Guid jobId, CancellationToken ct)
+    {
+        try
+        {
+            var result = await api.PutAsync<object, AgentJobResponse>(
+                $"/channels/{channelId}/jobs/{jobId}/resume", new { }, ct);
+            return result is not null ? Ok(result) : NotFound();
+        }
+        catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
+        {
+            return NotFound(new { error = "Job not found." });
+        }
+        catch (HttpRequestException)
+        {
+            return StatusCode(StatusCodes.Status502BadGateway, new { error = "Internal service unavailable." });
+        }
+    }
 }

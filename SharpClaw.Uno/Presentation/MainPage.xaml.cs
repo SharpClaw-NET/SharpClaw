@@ -1377,6 +1377,38 @@ public sealed partial class MainPage : Page
         catch (Exception ex) { AppendJobLog("error", $"Stop failed: {ex.Message}", DateTimeOffset.Now); }
     }
 
+    private async void OnJobPauseClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
+
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try
+        {
+            var resp = await api.PutAsync($"/channels/{channelId}/jobs/{jobId}/pause", null);
+            if (resp.IsSuccessStatusCode)
+                await ShowJobViewAsync(jobId);
+            else
+                AppendJobLog("error", $"Pause failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
+        }
+        catch (Exception ex) { AppendJobLog("error", $"Pause failed: {ex.Message}", DateTimeOffset.Now); }
+    }
+
+    private async void OnJobResumeClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
+
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try
+        {
+            var resp = await api.PutAsync($"/channels/{channelId}/jobs/{jobId}/resume", null);
+            if (resp.IsSuccessStatusCode)
+                await ShowJobViewAsync(jobId);
+            else
+                AppendJobLog("error", $"Resume failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
+        }
+        catch (Exception ex) { AppendJobLog("error", $"Resume failed: {ex.Message}", DateTimeOffset.Now); }
+    }
+
     private void OnJobBackToChatClick(object sender, RoutedEventArgs e)
     {
         _selectedJobId = null;

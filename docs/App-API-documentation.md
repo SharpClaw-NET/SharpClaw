@@ -104,6 +104,7 @@ Custom, Local
 | `Failed` | 4 | Action threw an error |
 | `Denied` | 5 | Agent lacks the required permission |
 | `Cancelled` | 6 | Cancelled by a user or agent |
+| `Paused` | 7 | Temporarily paused; can be resumed |
 
 ### ModelCapability (flags)
 
@@ -490,9 +491,15 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 {
   "name": "string",
   "modelId": "guid",
-  "systemPrompt": "string | null"
+  "systemPrompt": "string | null",
+  "maxCompletionTokens": "integer | null"
 }
 ```
+
+`maxCompletionTokens` caps the number of tokens the model may generate per
+response. Sent as `max_tokens`, `max_completion_tokens`, or
+`max_output_tokens` depending on the provider and API version. `null`
+(default) means no limit — the provider default applies.
 
 **Response `200`:** `AgentResponse`
 
@@ -519,7 +526,8 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 {
   "name": "string | null",
   "modelId": "guid | null",
-  "systemPrompt": "string | null"
+  "systemPrompt": "string | null",
+  "maxCompletionTokens": "integer | null"
 }
 ```
 
@@ -564,7 +572,8 @@ Assign a role to an agent.
   "modelName": "string",
   "providerName": "string",
   "roleId": "guid | null",
-  "roleName": "string | null"
+  "roleName": "string | null",
+  "maxCompletionTokens": "integer | null"
 }
 ```
 
@@ -581,7 +590,8 @@ Omits `systemPrompt` to keep payloads compact.
   "modelName": "string",
   "providerName": "string",
   "roleId": "guid | null",
-  "roleName": "string | null"
+  "roleName": "string | null",
+  "maxCompletionTokens": "integer | null"
 }
 ```
 
@@ -715,7 +725,7 @@ Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
 
 `agent` and each entry in `allowedAgents` are full
 [`AgentSummary`](#agentsummary) objects (id, name, modelId, modelName,
-providerName, roleId, roleName).
+providerName, roleId, roleName, maxCompletionTokens).
 
 ### ContextAllowedAgentsResponse
 
@@ -880,7 +890,7 @@ Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
 
 `agent` and each entry in `allowedAgents` are full
 [`AgentSummary`](#agentsummary) objects (id, name, modelId, modelName,
-providerName, roleId, roleName).
+providerName, roleId, roleName, maxCompletionTokens).
 
 ### ChannelAllowedAgentsResponse
 
@@ -1337,6 +1347,7 @@ requirement.
 ### POST /channels/{channelId}/jobs/{jobId}/stop
 
 Stop a long-running transcription job (completes it normally).
+Also accepts `Paused` transcription jobs.
 
 **Response `200`:** `AgentJobResponse`
 **Response `404`:** Not found.
@@ -1345,7 +1356,32 @@ Stop a long-running transcription job (completes it normally).
 
 ### POST /channels/{channelId}/jobs/{jobId}/cancel
 
-Cancel a job that has not yet completed.
+Cancel a job that has not yet completed. Also accepts `Paused` jobs.
+
+**Response `200`:** `AgentJobResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /channels/{channelId}/jobs/{jobId}/pause
+
+Pause a long-running job. For transcription jobs this stops the audio
+capture and inference loop so no further API calls (and therefore no
+token costs) are incurred while paused. The job can be resumed later.
+
+Only jobs with status `Executing` can be paused.
+
+**Response `200`:** `AgentJobResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /channels/{channelId}/jobs/{jobId}/resume
+
+Resume a previously paused job. For transcription jobs this restarts
+the audio capture and inference loop using the original job parameters.
+
+Only jobs with status `Paused` can be resumed.
 
 **Response `200`:** `AgentJobResponse`
 **Response `404`:** Not found.

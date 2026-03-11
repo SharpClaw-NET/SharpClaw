@@ -242,9 +242,11 @@ IConfiguration configuration)
             return ToResponse(job);
         }
 
-        if (IsTranscriptionAction(job.ActionType))
+        if (IsTranscriptionAction(job.ActionType)
+            && job.Status is AgentJobStatus.Executing or AgentJobStatus.Paused)
         {
-            orchestrator.Stop(jobId);
+            if (job.Status == AgentJobStatus.Executing)
+                orchestrator.Stop(jobId);
             CompleteChannel(jobId);
         }
 
@@ -270,14 +272,15 @@ IConfiguration configuration)
             return ToResponse(job);
         }
 
-        if (job.Status != AgentJobStatus.Executing)
+        if (job.Status is not AgentJobStatus.Executing and not AgentJobStatus.Paused)
         {
-            AddLog(job, $"Stop rejected: job is {job.Status}, not Executing.", "Warning");
+            AddLog(job, $"Stop rejected: job is {job.Status}, not Executing or Paused.", "Warning");
             await db.SaveChangesAsync(ct);
             return ToResponse(job);
         }
 
-        orchestrator.Stop(jobId);
+        if (job.Status == AgentJobStatus.Executing)
+            orchestrator.Stop(jobId);
 
         job.Status = AgentJobStatus.Completed;
         job.CompletedAt = DateTimeOffset.UtcNow;
@@ -285,6 +288,63 @@ IConfiguration configuration)
         await db.SaveChangesAsync(ct);
 
         CompleteChannel(jobId);
+
+        return ToResponse(job);
+    }
+
+    /// <summary>
+    /// Pause a long-running job.  For transcription jobs this stops the
+    /// audio capture loop so no further inference calls (and therefore no
+    /// token costs) are incurred.  The job can be resumed later with
+    /// <see cref="ResumeAsync"/>.
+    /// </summary>
+    public async Task<AgentJobResponse?> PauseAsync(
+        Guid jobId, CancellationToken ct = default)
+    {
+        var job = await LoadJobAsync(jobId, ct);
+        if (job is null) return null;
+
+        if (job.Status != AgentJobStatus.Executing)
+        {
+            AddLog(job, $"Pause rejected: job is {job.Status}, not Executing.", "Warning");
+            await db.SaveChangesAsync(ct);
+            return ToResponse(job);
+        }
+
+        if (IsTranscriptionAction(job.ActionType))
+            orchestrator.Stop(jobId);
+
+        job.Status = AgentJobStatus.Paused;
+        AddLog(job, "Job paused.");
+        await db.SaveChangesAsync(ct);
+
+        return ToResponse(job);
+    }
+
+    /// <summary>
+    /// Resume a previously paused job.  For transcription jobs this
+    /// restarts the audio capture and inference loop using the original
+    /// job parameters.
+    /// </summary>
+    public async Task<AgentJobResponse?> ResumeAsync(
+        Guid jobId, CancellationToken ct = default)
+    {
+        var job = await LoadJobAsync(jobId, ct);
+        if (job is null) return null;
+
+        if (job.Status != AgentJobStatus.Paused)
+        {
+            AddLog(job, $"Resume rejected: job is {job.Status}, not Paused.", "Warning");
+            await db.SaveChangesAsync(ct);
+            return ToResponse(job);
+        }
+
+        job.Status = AgentJobStatus.Executing;
+        AddLog(job, "Job resumed.");
+        await db.SaveChangesAsync(ct);
+
+        if (IsTranscriptionAction(job.ActionType))
+            await RestartTranscriptionAsync(job, ct);
 
         return ToResponse(job);
     }
@@ -599,6 +659,25 @@ IConfiguration configuration)
 
         orchestrator.Start(
             job.Id, model.Id, device.DeviceIdentifier, job.Language,
+            job.TranscriptionMode, job.WindowSeconds, job.StepSeconds);
+    }
+
+    /// <summary>
+    /// Restarts the transcription capture loop for a resumed job using
+    /// the parameters already persisted on the <see cref="AgentJobDB"/>.
+    /// </summary>
+    private async Task RestartTranscriptionAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var modelId = job.TranscriptionModelId
+            ?? throw new InvalidOperationException("Paused transcription job has no model.");
+
+        var device = await db.AudioDevices.FirstOrDefaultAsync(d => d.Id == job.ResourceId, ct)
+            ?? throw new InvalidOperationException("Audio device not found.");
+
+        _channels.TryAdd(job.Id, Channel.CreateUnbounded<TranscriptionSegmentResponse>());
+
+        orchestrator.Start(
+            job.Id, modelId, device.DeviceIdentifier, job.Language,
             job.TranscriptionMode, job.WindowSeconds, job.StepSeconds);
     }
 

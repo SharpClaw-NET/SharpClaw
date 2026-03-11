@@ -54,6 +54,22 @@ public static class AgentJobHandlers
         return job is not null ? Results.Ok(job) : Results.NotFound();
     }
 
+    [MapPut("/{jobId:guid}/pause")]
+    public static async Task<IResult> Pause(
+        Guid channelId, Guid jobId, AgentJobService svc)
+    {
+        var job = await svc.PauseAsync(jobId);
+        return job is not null ? Results.Ok(job) : Results.NotFound();
+    }
+
+    [MapPut("/{jobId:guid}/resume")]
+    public static async Task<IResult> Resume(
+        Guid channelId, Guid jobId, AgentJobService svc)
+    {
+        var job = await svc.ResumeAsync(jobId);
+        return job is not null ? Results.Ok(job) : Results.NotFound();
+    }
+
     [MapPost("/{jobId:guid}/segments")]
     public static async Task<IResult> PushSegment(
         Guid channelId, Guid jobId, PushSegmentRequest request, AgentJobService svc)

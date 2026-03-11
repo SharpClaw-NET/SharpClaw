@@ -1686,6 +1686,8 @@ public static class CliDispatcher
                 "job status <jobId>",
                 "job approve <jobId>",
                 "job stop <jobId>                           Stop a transcription job (complete)",
+                "job pause <jobId>                          Pause a long-running job",
+                "job resume <jobId>                         Resume a paused job",
                 "job cancel <jobId>",
                 "job listen <jobId>                         Stream live transcription segments",
                 "",
@@ -1745,6 +1747,14 @@ public static class CliDispatcher
             "cancel" when args.Length >= 3
                 => await AgentJobHandlers.Cancel(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
             "cancel" => UsageResult("job cancel <jobId>"),
+
+            "pause" when args.Length >= 3
+                => await AgentJobHandlers.Pause(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+            "pause" => UsageResult("job pause <jobId>"),
+
+            "resume" when args.Length >= 3
+                => await AgentJobHandlers.Resume(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+            "resume" => UsageResult("job resume <jobId>"),
 
             "listen" when args.Length >= 3
                 => await HandleJobListen(CliIdMap.Resolve(args[2]), svc),

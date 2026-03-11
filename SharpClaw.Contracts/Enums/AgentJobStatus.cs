@@ -25,5 +25,8 @@ public enum AgentJobStatus
     Denied = 5,
 
     /// <summary>Job was cancelled by a user or agent.</summary>
-    Cancelled = 6
+    Cancelled = 6,
+
+    /// <summary>Job is temporarily paused; can be resumed.</summary>
+    Paused = 7
 }

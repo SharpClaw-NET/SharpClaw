@@ -62,16 +62,18 @@ LocalModelStatus: Pending, Downloading, Ready, Failed.
 ────────────────────────────────────────
 AGENTS
 ────────────────────────────────────────
-POST   /agents                     { name, modelId, systemPrompt? }
+POST   /agents                     { name, modelId, systemPrompt?, maxCompletionTokens? }
 GET    /agents
 GET    /agents/{id}
-PUT    /agents/{id}                { name?, modelId?, systemPrompt? }
+PUT    /agents/{id}                { name?, modelId?, systemPrompt?, maxCompletionTokens? }
 DELETE /agents/{id}
 PUT    /agents/{id}/role           { roleId }
 
-AgentResponse includes: id, name, systemPrompt, modelId, modelName, providerName, roleId, roleName.
+maxCompletionTokens (integer|null): caps the number of tokens the model may generate per response. Sent as max_tokens, max_completion_tokens, or max_output_tokens depending on the provider/API version. null (default) = no limit (provider default). Useful for controlling response size and latency — smaller limits yield faster responses.
 
-AgentSummary (embedded in channel/context responses): id, name, modelId, modelName, providerName, roleId, roleName. Same as AgentResponse minus systemPrompt.
+AgentResponse includes: id, name, systemPrompt, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens.
+
+AgentSummary (embedded in channel/context responses): id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens. Same as AgentResponse minus systemPrompt.
 
 ────────────────────────────────────────
 ROLES & PERMISSIONS
@@ -151,7 +153,7 @@ allowedAgentIds on PUT replaces the set. permissionSetId=00000000-... removes th
 ChannelResponse returns: id, title, agent (AgentSummary?), contextId, contextName, permissionSetId, effectivePermissionSetId, allowedAgents (AgentSummary[]), disableChatHeader, createdAt, updatedAt.
 ChannelAllowedAgentsResponse returns: channelId, defaultAgent (AgentSummary?), allowedAgents (AgentSummary[]).
 
-All responses embed full AgentSummary objects (id, name, modelId, modelName, providerName, roleId, roleName) instead of bare GUIDs — no follow-up requests needed to resolve agent details.
+All responses embed full AgentSummary objects (id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens) instead of bare GUIDs — no follow-up requests needed to resolve agent details.
 
 ────────────────────────────────────────
 DEFAULT RESOURCES
@@ -210,8 +212,10 @@ GET    /channels/{channelId}/jobs
 GET    /channels/{channelId}/jobs/summaries    (lightweight: id, channelId, agentId, actionType, resourceId, status, createdAt, startedAt, completedAt — no resultData/errorLog/logs/segments)
 GET    /channels/{channelId}/jobs/{jobId}
 POST   /channels/{channelId}/jobs/{jobId}/approve   { approverAgentId? }
-POST   /channels/{channelId}/jobs/{jobId}/stop      (transcription: complete normally)
-POST   /channels/{channelId}/jobs/{jobId}/cancel
+POST   /channels/{channelId}/jobs/{jobId}/stop      (transcription: complete normally; also accepts Paused)
+POST   /channels/{channelId}/jobs/{jobId}/cancel    (also accepts Paused)
+PUT    /channels/{channelId}/jobs/{jobId}/pause     (pause an Executing job; stops capture/inference)
+PUT    /channels/{channelId}/jobs/{jobId}/resume    (resume a Paused job; restarts capture/inference)
 
 SubmitAgentJobRequest:
   actionType (required), resourceId?, agentId?, callerAgentId?,
@@ -220,7 +224,7 @@ SubmitAgentJobRequest:
 
 TranscriptionMode values: SlidingWindow (default, two-pass), Simple, StrictSlidingWindow.
 
-AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6.
+AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6, Paused=7.
 
 Transcription segments:
   POST   /channels/{channelId}/jobs/{jobId}/segments  { text, startTime, endTime, confidence }
