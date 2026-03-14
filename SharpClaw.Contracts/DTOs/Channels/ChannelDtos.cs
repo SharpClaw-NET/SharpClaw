@@ -8,14 +8,16 @@ public sealed record CreateChannelRequest(
     Guid? ContextId = null,
     Guid? PermissionSetId = null,
     IReadOnlyList<Guid>? AllowedAgentIds = null,
-    bool? DisableChatHeader = null);
+    bool? DisableChatHeader = null,
+    string? CustomId = null);
 
 public sealed record UpdateChannelRequest(
     string? Title = null,
     Guid? ContextId = null,
     Guid? PermissionSetId = null,
     IReadOnlyList<Guid>? AllowedAgentIds = null,
-    bool? DisableChatHeader = null);
+    bool? DisableChatHeader = null,
+    string? CustomId = null);
 
 public sealed record ChannelResponse(
     Guid Id,
@@ -28,7 +30,8 @@ public sealed record ChannelResponse(
     IReadOnlyList<AgentSummary> AllowedAgents,
     bool DisableChatHeader,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? CustomId = null);
 
 // ── Granular operation DTOs ──────────────────────────────────────
 

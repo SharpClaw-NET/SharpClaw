@@ -7,6 +7,7 @@ using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Jobs;
 using SharpClaw.Application.Infrastructure.Models.Messages;
 using SharpClaw.Application.Infrastructure.Models.Resources;
+using SharpClaw.Application.Infrastructure.Models.Tasks;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
@@ -64,6 +65,12 @@ public class SharpClawDbContext(
     public DbSet<AgentJobLogEntryDB> AgentJobLogEntries => Set<AgentJobLogEntryDB>();
     public DbSet<DefaultResourceSetDB> DefaultResourceSets => Set<DefaultResourceSetDB>();
     public DbSet<LocalModelFileDB> LocalModelFiles => Set<LocalModelFileDB>();
+
+    // ── Task scripts ──────────────────────────────────────────────
+    public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
+    public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
+    public DbSet<TaskExecutionLogDB> TaskExecutionLogs => Set<TaskExecutionLogDB>();
+    public DbSet<TaskOutputEntryDB> TaskOutputEntries => Set<TaskOutputEntryDB>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -647,6 +654,33 @@ public class SharpClawDbContext(
             e.HasMany(j => j.TranscriptionSegments)
                 .WithOne(s => s.AgentJob)
                 .HasForeignKey(s => s.AgentJobId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Task definitions & instances ──────────────────────────
+        modelBuilder.Entity<TaskDefinitionDB>(e =>
+        {
+            e.HasIndex(d => d.Name).IsUnique();
+            e.HasMany(d => d.Instances)
+                .WithOne(i => i.TaskDefinition)
+                .HasForeignKey(i => i.TaskDefinitionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<TaskInstanceDB>(e =>
+        {
+            e.Property(i => i.Status).HasConversion<string>();
+            e.HasOne(i => i.Channel)
+                .WithMany()
+                .HasForeignKey(i => i.ChannelId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasMany(i => i.LogEntries)
+                .WithOne(l => l.TaskInstance)
+                .HasForeignKey(l => l.TaskInstanceId)
+                .OnDelete(DeleteBehavior.Cascade);
+            e.HasMany(i => i.OutputEntries)
+                .WithOne(o => o.TaskInstance)
+                .HasForeignKey(o => o.TaskInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 

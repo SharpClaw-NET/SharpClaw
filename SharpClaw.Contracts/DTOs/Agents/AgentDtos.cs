@@ -1,9 +1,9 @@
 namespace SharpClaw.Contracts.DTOs.Agents;
 
-public sealed record CreateAgentRequest(string Name, Guid ModelId, string? SystemPrompt = null, int? MaxCompletionTokens = null);
-public sealed record UpdateAgentRequest(string? Name = null, Guid? ModelId = null, string? SystemPrompt = null, int? MaxCompletionTokens = null);
+public sealed record CreateAgentRequest(string Name, Guid ModelId, string? SystemPrompt = null, int? MaxCompletionTokens = null, string? CustomId = null);
+public sealed record UpdateAgentRequest(string? Name = null, Guid? ModelId = null, string? SystemPrompt = null, int? MaxCompletionTokens = null, string? CustomId = null);
 public sealed record AssignAgentRoleRequest(Guid RoleId);
-public sealed record AgentResponse(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, int? MaxCompletionTokens = null);
+public sealed record AgentResponse(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, int? MaxCompletionTokens = null, string? CustomId = null);
 
 /// <summary>
 /// Lightweight agent summary embedded in channel/context responses so
@@ -18,4 +18,5 @@ public sealed record AgentSummary(
     string ProviderName,
     Guid? RoleId = null,
     string? RoleName = null,
-    int? MaxCompletionTokens = null);
+    int? MaxCompletionTokens = null,
+    string? CustomId = null);

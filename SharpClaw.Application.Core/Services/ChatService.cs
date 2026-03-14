@@ -12,6 +12,7 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Editor;
+using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
@@ -52,8 +53,13 @@ public sealed partial class ChatService(
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
         var agent = ResolveAgent(channel, request.AgentId);
-        var model = agent.Model;
-        var provider = model.Provider;
+        var model = agent.Model
+            ?? throw new InvalidOperationException(
+                $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
+                "Assign a valid model before using this agent for chat.");
+        var provider = model.Provider
+            ?? throw new InvalidOperationException(
+                $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
         var isLocal = provider.ProviderType == ProviderType.Local;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
@@ -87,7 +93,7 @@ public sealed partial class ChatService(
         var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, useNativeTools);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -103,10 +109,12 @@ public sealed partial class ChatService(
         var loopResult = useNativeTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct)
+                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
+                taskContext: request.TaskContext)
             : await RunTextToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct);
+                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
+                taskContext: request.TaskContext);
 
         // Persist both messages
         var senderUserId = jobService.GetSessionUserId();
@@ -267,7 +275,8 @@ public sealed partial class ChatService(
     /// </summary>
     private async Task<string?> BuildChatHeaderAsync(
         ChannelDB channel, AgentDB agent, ChatClientType clientType,
-        EditorContext? editorContext, CancellationToken ct)
+        EditorContext? editorContext, CancellationToken ct,
+        TaskChatContext? taskContext = null)
     {
         // Channel-level flag takes precedence; fall back to context.
         var disabled = channel.DisableChatHeader
@@ -275,6 +284,10 @@ public sealed partial class ChatService(
 
         if (disabled)
             return null;
+
+        // ── Task-sourced message: lightweight header, no user lookup ──
+        if (taskContext is not null)
+            return await BuildTaskChatHeaderAsync(channel, agent, taskContext, ct);
 
         var userId = jobService.GetSessionUserId();
         if (userId is null)
@@ -386,6 +399,88 @@ public sealed partial class ChatService(
                 sb.Append(" file=").Append(editorContext.ActiveFilePath);
             if (editorContext.SelectedText is { Length: > 0 and <= 200 })
                 sb.Append(" selection=\"").Append(editorContext.SelectedText).Append('"');
+        }
+
+        sb.AppendLine("]");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds a compact header for messages originating from an automated
+    /// task.  Unlike the user header, there is no session user — the
+    /// header identifies the task by name so the agent understands the
+    /// request is automated.  Includes light-shared-data inline and
+    /// big-shared-data IDs for tool-based retrieval.
+    /// </summary>
+    private async Task<string> BuildTaskChatHeaderAsync(
+        ChannelDB channel, AgentDB agent, TaskChatContext taskContext, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        sb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
+        sb.Append(" | source: automated task");
+        sb.Append(" | task: ").Append(taskContext.TaskName);
+
+        // ── Shared data visible to the model ──
+        var store = TaskSharedData.Get(taskContext.InstanceId);
+        if (store is not null)
+        {
+            // Light data — plain text (≤500 words)
+            var lightText = store.LightData;
+            if (lightText is not null)
+            {
+                sb.Append(" | shared-data: ").Append(lightText);
+            }
+
+            // Big data — IDs + titles only (use task_read_big_data to get content)
+            var bigEntries = store.ListBig();
+            if (bigEntries.Count > 0)
+            {
+                sb.Append(" | big-data-ids: [");
+                sb.Append(string.Join(", ", bigEntries.Select(e => $"{e.Id}:\"{e.Title}\"")));
+                sb.Append(']');
+            }
+        }
+
+        // ── Agent self-awareness (same as user header) ──
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+            .ThenInclude(r => r!.PermissionSet)
+            .FirstOrDefaultAsync(a => a.Id == agent.Id, ct);
+
+        if (agentWithRole?.Role is { } agentRole)
+        {
+            PermissionSetDB? agentPs = null;
+            if (agentRole.PermissionSetId is { } agentPsId)
+            {
+                agentPs = await db.PermissionSets
+                    .Include(p => p.SafeShellAccesses)
+                    .Include(p => p.ContainerAccesses)
+                    .Include(p => p.WebsiteAccesses)
+                    .Include(p => p.SearchEngineAccesses)
+                    .Include(p => p.LocalInfoStorePermissions)
+                    .Include(p => p.ExternalInfoStorePermissions)
+                    .Include(p => p.AudioDeviceAccesses)
+                    .Include(p => p.DisplayDeviceAccesses)
+                    .Include(p => p.EditorSessionAccesses)
+                    .Include(p => p.AgentPermissions)
+                    .Include(p => p.TaskPermissions)
+                    .Include(p => p.SkillPermissions)
+                    .AsSplitQuery()
+                    .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
+            }
+
+            sb.Append(" | agent-role: ").Append(agentRole.Name);
+            if (agentPs is not null)
+            {
+                sb.Append(" clearance=").Append(agentPs.DefaultClearance);
+                var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
+                if (agentGrants.Count > 0)
+                    sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
+            }
+        }
+        else
+        {
+            sb.Append(" | agent-role: (none) clearance=Unset");
         }
 
         sb.AppendLine("]");
@@ -565,8 +660,13 @@ public sealed partial class ChatService(
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
         var agent = ResolveAgent(channel, request.AgentId);
-        var model = agent.Model;
-        var provider = model.Provider;
+        var model = agent.Model
+            ?? throw new InvalidOperationException(
+                $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
+                "Assign a valid model before using this agent for chat.");
+        var provider = model.Provider
+            ?? throw new InvalidOperationException(
+                $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
         var isLocal = provider.ProviderType == ProviderType.Local;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
@@ -599,7 +699,7 @@ public sealed partial class ChatService(
         var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, nativeToolCalling: true);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 
@@ -607,6 +707,7 @@ public sealed partial class ChatService(
 
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
         var maxTokens = agent.MaxCompletionTokens;
+        var effectiveTools = GetEffectiveTools(request.TaskContext);
 
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
@@ -623,7 +724,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, AllTools, maxTokens, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -649,6 +750,14 @@ public sealed partial class ChatService(
 
             foreach (var tc in roundResult.ToolCalls)
             {
+                // ── Task-specific tool interception ──────────────
+                var (handled, taskResult) = await TryHandleTaskToolAsync(tc, request.TaskContext, ct);
+                if (handled)
+                {
+                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    continue;
+                }
+
                 var parsed = ParseNativeToolCall(tc);
                 if (parsed is null)
                 {
@@ -770,6 +879,332 @@ public sealed partial class ChatService(
         return result.Verdict == ClearanceVerdict.Approved;
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Task-specific tool handling
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Returns the effective tool list for a chat call.  When a task
+    /// context is present, task-specific tools (shared data, output,
+    /// introspection, custom hooks) are appended to the standard set.
+    /// </summary>
+    private static IReadOnlyList<ChatToolDefinition> GetEffectiveTools(TaskChatContext? taskContext)
+    {
+        if (taskContext is null)
+            return AllTools;
+
+        var store = TaskSharedData.Get(taskContext.InstanceId);
+        if (store is null)
+            return AllTools;
+
+        var tools = new List<ChatToolDefinition>(AllTools);
+        tools.AddRange(BuiltInTaskTools);
+
+        // task_output only available when the task declares [AgentOutput]
+        if (store.AllowedOutputFormat is not null)
+            tools.Add(TaskOutputToolDef);
+
+        // Custom [ToolCall] hooks
+        tools.AddRange(store.CustomToolDefinitions);
+
+        return tools;
+    }
+
+    /// <summary>
+    /// Try to handle a native tool call as a task-specific tool.
+    /// Returns <c>true</c> and sets <paramref name="result"/> if handled.
+    /// </summary>
+    private static async Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
+        ChatToolCall toolCall, TaskChatContext? taskContext, CancellationToken ct)
+    {
+        if (taskContext is null)
+            return (false, null);
+
+        var store = TaskSharedData.Get(taskContext.InstanceId);
+        if (store is null)
+            return (false, null);
+
+        try
+        {
+            JsonElement? args = null;
+            if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
+                args = JsonDocument.Parse(toolCall.ArgumentsJson).RootElement;
+
+            switch (toolCall.Name)
+            {
+                case "task_write_light_data":
+                {
+                    var text = args?.GetProperty("text").GetString() ?? "";
+                    var ok = store.TrySetLight(text);
+                    if (ok && store.OnSharedDataChanged is not null)
+                        await store.OnSharedDataChanged(
+                            $"Light data written ({CountWords(text)} words)",
+                            store.LightData, store.BuildBigDataSnapshotJson());
+                    return (true, ok
+                        ? "OK: light shared data written."
+                        : "Error: text exceeds the 500-word limit for light shared data.");
+                }
+
+                case "task_read_light_data":
+                {
+                    var val = store.LightData;
+                    return (true, val ?? "(empty)");
+                }
+
+                case "task_write_big_data":
+                {
+                    var title = args?.GetProperty("title").GetString() ?? "Untitled";
+                    var content = args?.GetProperty("content").GetString() ?? "";
+                    var id = args?.TryGetProperty("id", out var idp) == true ? idp.GetString() : null;
+                    var resultId = store.WriteBig(id, title, content);
+                    if (store.OnSharedDataChanged is not null)
+                        await store.OnSharedDataChanged(
+                            $"Big data '{resultId}' written (title: {title}, {content.Length} chars)",
+                            store.LightData, store.BuildBigDataSnapshotJson());
+                    return (true, $"OK: big-data entry '{resultId}' written (title: {title}, {content.Length} chars).");
+                }
+
+                case "task_read_big_data":
+                {
+                    var id = args?.GetProperty("id").GetString() ?? "";
+                    var entry = store.GetBig(id);
+                    return (true, entry is not null
+                        ? $"[{entry.Id}] {entry.Title}\n{entry.Content}"
+                        : $"Big-data entry '{id}' not found.");
+                }
+
+                case "task_list_big_data":
+                {
+                    var entries = store.ListBig();
+                    if (entries.Count == 0)
+                        return (true, "(no big-data entries)");
+                    var list = string.Join("\n", entries.Select(e => $"- {e.Id}: {e.Title}"));
+                    return (true, list);
+                }
+
+                case "task_output":
+                {
+                    if (store.AllowedOutputFormat is null)
+                        return (true, "Error: task_output is not enabled for this task. The task must declare [AgentOutput(\"format\")].");
+
+                    var data = args?.GetProperty("data").GetString() ?? "";
+                    if (store.OnAgentOutput is not null)
+                        await store.OnAgentOutput(data);
+                    return (true, "OK: output written to task.");
+                }
+
+                case "task_view_info":
+                {
+                    var sb = new StringBuilder();
+                    sb.AppendLine($"Task: {store.TaskName}");
+                    if (store.TaskDescription is not null)
+                        sb.AppendLine($"Description: {store.TaskDescription}");
+                    if (store.TaskParametersJson is not null)
+                        sb.AppendLine($"Parameters: {store.TaskParametersJson}");
+                    if (store.AllowedOutputFormat is not null)
+                        sb.AppendLine($"Agent output format: {store.AllowedOutputFormat}");
+                    return (true, sb.ToString());
+                }
+
+                case "task_view_source":
+                {
+                    return (true, store.TaskSourceText ?? "(source not available)");
+                }
+            }
+
+            // Check custom [ToolCall] hooks
+            if (store.TryGetToolHook(toolCall.Name, out var callback))
+            {
+                var hookResult = await callback(args, ct);
+                return (true, hookResult);
+            }
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error handling task tool '{toolCall.Name}': {ex.Message}");
+        }
+
+        return (false, null);
+    }
+
+
+    // ── Built-in task tool definitions ────────────────────────────
+
+    private static readonly IReadOnlyList<ChatToolDefinition> BuiltInTaskTools = BuildBuiltInTaskTools();
+
+    private static readonly ChatToolDefinition TaskOutputToolDef = BuildTaskOutputToolDef();
+
+    private static IReadOnlyList<ChatToolDefinition> BuildBuiltInTaskTools()
+    {
+        return
+        [
+            new("task_write_light_data",
+                "Write text to the task's light shared data. This text is visible "
+                + "to all agents in the chat header (max 500 words). "
+                + "Use for small metadata like status, progress, or coordination notes. "
+                + "Each write replaces the previous text entirely.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {
+                            "text": { "type": "string", "description": "The text to store (max 500 words)." }
+                        },
+                        "required": ["text"]
+                    }
+                    """)),
+
+            new("task_read_light_data",
+                "Read the current light shared data text.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {}
+                    }
+                    """)),
+
+            new("task_write_big_data",
+                "Write a large data entry to the task's big shared data store. Only the entry "
+                + "ID and title appear in the chat header; the full content must be retrieved "
+                + "with task_read_big_data. Use for large payloads like analysis results, "
+                + "code snippets, or conversation summaries.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string", "description": "Optional entry ID (auto-generated if omitted)." },
+                            "title": { "type": "string", "description": "Short title for the entry." },
+                            "content": { "type": "string", "description": "The full content to store." }
+                        },
+                        "required": ["title", "content"]
+                    }
+                    """)),
+
+            new("task_read_big_data",
+                "Read the full content of a big shared data entry by ID.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {
+                            "id": { "type": "string", "description": "The entry ID to read." }
+                        },
+                        "required": ["id"]
+                    }
+                    """)),
+
+            new("task_list_big_data",
+                "List all big shared data entry IDs and titles.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {}
+                    }
+                    """)),
+
+            new("task_view_info",
+                "View the current task's metadata: name, description, parameters, and output format.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {}
+                    }
+                    """)),
+
+            new("task_view_source",
+                "View the full source code of the current task definition.",
+                BuildJsonSchema("""
+                    {
+                        "type": "object",
+                        "properties": {}
+                    }
+                    """)),
+        ];
+    }
+
+    private static ChatToolDefinition BuildTaskOutputToolDef()
+    {
+        return new("task_output",
+            "Write structured output to the task instance. The output format must match "
+            + "the task's [AgentOutput] annotation. Only available when the task declares it.",
+            BuildJsonSchema("""
+                {
+                    "type": "object",
+                    "properties": {
+                        "data": { "type": "string", "description": "The output data to write to the task." }
+                    },
+                    "required": ["data"]
+                }
+                """));
+    }
+
+    private static JsonElement BuildJsonSchema(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Builds <see cref="ChatToolDefinition"/>s from a task's
+    /// <see cref="TaskToolCallHook"/>s for registration in the
+    /// shared data store.
+    /// </summary>
+    public static IReadOnlyList<ChatToolDefinition> BuildCustomToolDefinitions(
+        IReadOnlyList<Infrastructure.Tasks.Models.TaskToolCallHook> hooks)
+    {
+        if (hooks.Count == 0) return [];
+
+        var defs = new List<ChatToolDefinition>(hooks.Count);
+        foreach (var hook in hooks)
+        {
+            var properties = new Dictionary<string, object>();
+            var required = new List<string>();
+
+            foreach (var param in hook.Parameters)
+            {
+                var prop = new Dictionary<string, string> { ["type"] = MapTypeToJsonType(param.TypeName) };
+                if (param.Description is not null)
+                    prop["description"] = param.Description;
+                properties[param.Name] = prop;
+                required.Add(param.Name);
+            }
+
+            var schema = new Dictionary<string, object>
+            {
+                ["type"] = "object",
+                ["properties"] = properties,
+            };
+            if (required.Count > 0)
+                schema["required"] = required;
+
+            var schemaJson = JsonSerializer.Serialize(schema);
+            defs.Add(new ChatToolDefinition(
+                hook.Name,
+                hook.Description ?? $"Custom task tool: {hook.Name}",
+                BuildJsonSchema(schemaJson)));
+        }
+
+        return defs;
+    }
+
+    private static string MapTypeToJsonType(string csharpType) => csharpType switch
+    {
+        "int" or "long" or "double" or "float" or "decimal" => "number",
+        "bool" => "boolean",
+        _ => "string"
+    };
+
+    private static int CountWords(string text)
+    {
+        if (string.IsNullOrWhiteSpace(text)) return 0;
+        var count = 0;
+        var inWord = false;
+        foreach (var c in text)
+        {
+            if (char.IsWhiteSpace(c)) inWord = false;
+            else if (!inWord) { inWord = true; count++; }
+        }
+        return count;
+    }
+
     /// <summary>
     /// Resolves the container GUID from a <see cref="ParsedToolCall"/>.
     /// If the model provided a valid GUID it is used as-is; otherwise the
@@ -836,7 +1271,8 @@ public sealed partial class ChatService(
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
-        CancellationToken ct)
+        CancellationToken ct,
+        TaskChatContext? taskContext = null)
     {
         var messages = new List<ToolAwareMessage>(dbHistory.Count);
         foreach (var msg in dbHistory)
@@ -845,11 +1281,12 @@ public sealed partial class ChatService(
         var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
         var jobResults = new List<AgentJobResponse>();
         var rounds = 0;
+        var effectiveTools = GetEffectiveTools(taskContext);
 
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, AllTools, maxCompletionTokens, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
                 return new ToolLoopResult(result.Content ?? "", jobResults);
@@ -861,6 +1298,14 @@ public sealed partial class ChatService(
 
             foreach (var tc in result.ToolCalls)
             {
+                // ── Task-specific tool interception ──────────────
+                var (handled, taskResult) = await TryHandleTaskToolAsync(tc, taskContext, ct);
+                if (handled)
+                {
+                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    continue;
+                }
+
                 var parsed = ParseNativeToolCall(tc);
                 if (parsed is null)
                 {
@@ -904,7 +1349,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, AllTools, maxCompletionTokens, ct);
+                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
                 return new ToolLoopResult(finalResult.Content ?? "", jobResults);
             }
         }
@@ -927,7 +1372,8 @@ public sealed partial class ChatService(
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
-        CancellationToken ct)
+        CancellationToken ct,
+        TaskChatContext? taskContext = null)
     {
         var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
         var jobResults = new List<AgentJobResponse>();
@@ -950,6 +1396,16 @@ public sealed partial class ChatService(
 
             foreach (var call in toolCalls)
             {
+                // ── Task-specific tool interception (text-based) ──
+                var syntheticTc = new ChatToolCall(call.CallId, call.CallId, call.ScriptJson ?? "{}");
+                var (handled, taskResult) = await TryHandleTaskToolAsync(syntheticTc, taskContext, ct);
+                if (handled)
+                {
+                    toolResultBuilder.AppendLine(
+                        $"[TOOL_RESULT:{call.CallId}] status=Completed result={taskResult}");
+                    continue;
+                }
+
                 var jobRequest = await BuildJobRequestAsync(call, agentId, ct);
 
                 var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);

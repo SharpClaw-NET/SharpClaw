@@ -2,6 +2,7 @@
   <Folder Name="/Application/">
     <Project Path="SharpClaw.Application.API/SharpClaw.Application.API.csproj" />
     <Project Path="SharpClaw.Application.Core/SharpClaw.Application.Core.csproj" />
+    <Project Path="SharpClaw.Application.Infrastructure.Tasks/SharpClaw.Application.Infrastructure.Tasks.csproj" Id="23769044-e624-4ad4-a4ba-66de30a6eb15" />
     <Project Path="SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj" />
   </Folder>
   <Folder Name="/NativeClient/">

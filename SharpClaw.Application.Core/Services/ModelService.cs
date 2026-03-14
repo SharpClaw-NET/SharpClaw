@@ -16,27 +16,28 @@ public sealed class ModelService(SharpClawDbContext db)
         {
             Name = request.Name,
             ProviderId = provider.Id,
-            Capabilities = request.Capabilities
+            Capabilities = request.Capabilities,
+            CustomId = request.CustomId,
         };
 
         db.Models.Add(model);
         await db.SaveChangesAsync(ct);
 
-        return new ModelResponse(model.Id, model.Name, provider.Id, provider.Name, model.Capabilities);
+        return new ModelResponse(model.Id, model.Name, provider.Id, provider.Name, model.Capabilities, model.CustomId);
     }
 
     public async Task<IReadOnlyList<ModelResponse>> ListAsync(CancellationToken ct = default)
     {
         return await db.Models
             .Include(m => m.Provider)
-            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name, m.Capabilities))
+            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name, m.Capabilities, m.CustomId))
             .ToListAsync(ct);
     }
 
     public async Task<ModelResponse?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var m = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == id, ct);
-        return m is null ? null : new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name, m.Capabilities);
+        return m is null ? null : new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name, m.Capabilities, m.CustomId);
     }
 
     public async Task<ModelResponse?> UpdateAsync(Guid id, UpdateModelRequest request, CancellationToken ct = default)
@@ -46,9 +47,10 @@ public sealed class ModelService(SharpClawDbContext db)
 
         if (request.Name is not null) model.Name = request.Name;
         if (request.Capabilities is not null) model.Capabilities = request.Capabilities.Value;
+        if (request.CustomId is not null) model.CustomId = request.CustomId;
 
         await db.SaveChangesAsync(ct);
-        return new ModelResponse(model.Id, model.Name, model.ProviderId, model.Provider.Name, model.Capabilities);
+        return new ModelResponse(model.Id, model.Name, model.ProviderId, model.Provider.Name, model.Capabilities, model.CustomId);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)

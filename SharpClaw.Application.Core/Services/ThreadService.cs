@@ -18,7 +18,8 @@ public sealed class ThreadService(SharpClawDbContext db)
             Name = request.Name ?? $"Thread {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
             MaxMessages = request.MaxMessages,
             MaxCharacters = request.MaxCharacters,
-            ChannelId = channel.Id
+            ChannelId = channel.Id,
+            CustomId = request.CustomId,
         };
 
         db.ChatThreads.Add(thread);
@@ -43,7 +44,7 @@ public sealed class ThreadService(SharpClawDbContext db)
             .Select(t => new ThreadResponse(
                 t.Id, t.Name, t.ChannelId,
                 t.MaxMessages, t.MaxCharacters,
-                t.CreatedAt, t.UpdatedAt))
+                t.CreatedAt, t.UpdatedAt, t.CustomId))
             .ToListAsync(ct);
     }
 
@@ -59,6 +60,8 @@ public sealed class ThreadService(SharpClawDbContext db)
             thread.MaxMessages = request.MaxMessages.Value == 0 ? null : request.MaxMessages;
         if (request.MaxCharacters is not null)
             thread.MaxCharacters = request.MaxCharacters.Value == 0 ? null : request.MaxCharacters;
+        if (request.CustomId is not null)
+            thread.CustomId = request.CustomId;
 
         await db.SaveChangesAsync(ct);
         return ToResponse(thread);
@@ -77,5 +80,5 @@ public sealed class ThreadService(SharpClawDbContext db)
     private static ThreadResponse ToResponse(ChatThreadDB thread) =>
         new(thread.Id, thread.Name, thread.ChannelId,
             thread.MaxMessages, thread.MaxCharacters,
-            thread.CreatedAt, thread.UpdatedAt);
+            thread.CreatedAt, thread.UpdatedAt, thread.CustomId);
 }

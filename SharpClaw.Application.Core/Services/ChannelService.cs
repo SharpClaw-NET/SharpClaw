@@ -50,7 +50,8 @@ public sealed class ChannelService(SharpClawDbContext db)
             AgentId = agent?.Id,
             AgentContextId = context?.Id,
             PermissionSetId = request.PermissionSetId,
-            DisableChatHeader = request.DisableChatHeader ?? false
+            DisableChatHeader = request.DisableChatHeader ?? false,
+            CustomId = request.CustomId,
         };
 
         if (request.AllowedAgentIds is { Count: > 0 } agentIds)
@@ -160,6 +161,9 @@ public sealed class ChannelService(SharpClawDbContext db)
 
         if (request.DisableChatHeader is not null)
             channel.DisableChatHeader = request.DisableChatHeader.Value;
+
+        if (request.CustomId is not null)
+            channel.CustomId = request.CustomId;
 
         await db.SaveChangesAsync(ct);
         return ToResponse(channel, channel.Agent, channel.AgentContext);
@@ -336,7 +340,8 @@ public sealed class ChannelService(SharpClawDbContext db)
             effectiveAllowed.Select(ToSummary).ToList(),
             channel.DisableChatHeader,
             channel.CreatedAt,
-            channel.UpdatedAt);
+            channel.UpdatedAt,
+            channel.CustomId);
     }
 
     internal static AgentSummary ToSummary(AgentDB agent) =>
@@ -347,5 +352,6 @@ public sealed class ChannelService(SharpClawDbContext db)
             agent.Model?.Provider?.Name ?? "unknown",
             agent.RoleId,
             agent.Role?.Name,
-            agent.MaxCompletionTokens);
+            agent.MaxCompletionTokens,
+            agent.CustomId);
 }

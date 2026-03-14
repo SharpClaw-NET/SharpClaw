@@ -3,12 +3,14 @@ namespace SharpClaw.Contracts.DTOs.Threads;
 public sealed record CreateThreadRequest(
     string? Name = null,
     int? MaxMessages = null,
-    int? MaxCharacters = null);
+    int? MaxCharacters = null,
+    string? CustomId = null);
 
 public sealed record UpdateThreadRequest(
     string? Name = null,
     int? MaxMessages = null,
-    int? MaxCharacters = null);
+    int? MaxCharacters = null,
+    string? CustomId = null);
 
 public sealed record ThreadResponse(
     Guid Id,
@@ -17,4 +19,5 @@ public sealed record ThreadResponse(
     int? MaxMessages,
     int? MaxCharacters,
     DateTimeOffset CreatedAt,
-    DateTimeOffset UpdatedAt);
+    DateTimeOffset UpdatedAt,
+    string? CustomId = null);
