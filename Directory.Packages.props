@@ -29,7 +29,7 @@
     <PackageVersion Include="Microsoft.Extensions.Hosting" Version="10.0.3" />
     <PackageVersion Include="Microsoft.Extensions.Http" Version="10.0.3" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
-    <PackageVersion Include="NAudio" Version="2.2.1" />
+    <PackageVersion Include="NAudio" Version="2.3.0" />
     <PackageVersion Include="LLamaSharp" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12" Version="0.26.0" />
