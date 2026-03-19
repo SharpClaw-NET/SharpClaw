@@ -231,6 +231,23 @@
                    TextWrapping="Wrap"
                    Visibility="Collapsed"
                    Margin="0,6,0,0" />
+        <!-- Token cost bars -->
+        <StackPanel x:Name="CostPanel"
+                    Visibility="Collapsed"
+                    Spacing="2"
+                    Margin="0,6,0,0">
+          <TextBlock x:Name="ChannelCostLabel"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="10"
+                     Foreground="#888888" />
+          <StackPanel x:Name="ChannelCostBreakdown" Spacing="1" />
+          <TextBlock x:Name="ThreadCostLabel"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="10"
+                     Foreground="#888888"
+                     Visibility="Collapsed" />
+          <StackPanel x:Name="ThreadCostBreakdown" Spacing="1" Visibility="Collapsed" />
+        </StackPanel>
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
       </StackPanel>
 

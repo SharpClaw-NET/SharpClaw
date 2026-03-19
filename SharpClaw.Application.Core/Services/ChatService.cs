@@ -141,17 +141,28 @@ public sealed partial class ChatService(
             ThreadId = threadId,
             SenderAgentId = agent.Id,
             SenderAgentName = agent.Name,
-            ClientType = request.ClientType
+            ClientType = request.ClientType,
+            PromptTokens = loopResult.TotalPromptTokens > 0 ? loopResult.TotalPromptTokens : null,
+            CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null
         };
 
         db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
+        // Piggyback cost data on the response so callers don't need
+        // a separate round-trip to the /cost endpoints.
+        var channelCost = await GetChannelCostAsync(channelId, ct);
+        var threadCost = threadId is not null
+            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
+            : null;
+
         return new ChatResponse(
             ToMessageResponse(userMessage),
             ToMessageResponse(assistantMessage),
-            loopResult.JobResults.Count > 0 ? loopResult.JobResults : null);
+            loopResult.JobResults.Count > 0 ? loopResult.JobResults : null,
+            channelCost,
+            threadCost);
 
         } // try
         finally
@@ -185,6 +196,82 @@ public sealed partial class ChatService(
             m.SenderUserId, m.SenderUsername,
             m.SenderAgentId, m.SenderAgentName,
             m.ClientType?.ToString());
+
+    // ═══════════════════════════════════════════════════════════════
+    // Token cost aggregation
+    // ═══════════════════════════════════════════════════════════════
+
+    public async Task<ChannelCostResponse> GetChannelCostAsync(
+        Guid channelId, CancellationToken ct = default)
+    {
+        var rows = await db.ChatMessages
+            .Where(m => m.ChannelId == channelId && m.PromptTokens != null)
+            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
+            .Select(g => new
+            {
+                g.Key.SenderAgentId,
+                g.Key.SenderAgentName,
+                PromptTokens = g.Sum(m => m.PromptTokens!.Value),
+                CompletionTokens = g.Sum(m => m.CompletionTokens ?? 0)
+            })
+            .ToListAsync(ct);
+
+        var breakdown = rows
+            .Where(r => r.SenderAgentId.HasValue)
+            .Select(r => new AgentTokenBreakdown(
+                r.SenderAgentId!.Value,
+                r.SenderAgentName ?? "Unknown",
+                r.PromptTokens,
+                r.CompletionTokens,
+                r.PromptTokens + r.CompletionTokens))
+            .OrderByDescending(b => b.TotalTokens)
+            .ToList();
+
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ChannelCostResponse(
+            channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
+
+    public async Task<ThreadCostResponse?> GetThreadCostAsync(
+        Guid channelId, Guid threadId, CancellationToken ct = default)
+    {
+        var threadExists = await db.ChatThreads
+            .AnyAsync(t => t.Id == threadId && t.ChannelId == channelId, ct);
+        if (!threadExists) return null;
+
+        var rows = await db.ChatMessages
+            .Where(m => m.ThreadId == threadId && m.PromptTokens != null)
+            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
+            .Select(g => new
+            {
+                g.Key.SenderAgentId,
+                g.Key.SenderAgentName,
+                PromptTokens = g.Sum(m => m.PromptTokens!.Value),
+                CompletionTokens = g.Sum(m => m.CompletionTokens ?? 0)
+            })
+            .ToListAsync(ct);
+
+        var breakdown = rows
+            .Where(r => r.SenderAgentId.HasValue)
+            .Select(r => new AgentTokenBreakdown(
+                r.SenderAgentId!.Value,
+                r.SenderAgentName ?? "Unknown",
+                r.PromptTokens,
+                r.CompletionTokens,
+                r.PromptTokens + r.CompletionTokens))
+            .OrderByDescending(b => b.TotalTokens)
+            .ToList();
+
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ThreadCostResponse(
+            threadId, channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Agent resolution
@@ -720,6 +807,8 @@ public sealed partial class ChatService(
         var jobResults = new List<AgentJobResponse>();
         var fullContent = new StringBuilder();
         var rounds = 0;
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
 
         while (true)
         {
@@ -738,6 +827,12 @@ public sealed partial class ChatService(
 
             if (roundResult is null)
                 break;
+
+            if (roundResult.Usage is { } roundUsage)
+            {
+                totalPromptTokens += roundUsage.PromptTokens;
+                totalCompletionTokens += roundUsage.CompletionTokens;
+            }
 
             fullContent.Append(roundResult.Content ?? "");
 
@@ -843,17 +938,26 @@ public sealed partial class ChatService(
             ThreadId = threadId,
             SenderAgentId = agent.Id,
             SenderAgentName = agent.Name,
-            ClientType = request.ClientType
+            ClientType = request.ClientType,
+            PromptTokens = totalPromptTokens > 0 ? totalPromptTokens : null,
+            CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null
         };
 
         db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
+        var channelCost = await GetChannelCostAsync(channelId, ct);
+        var threadCost = threadId is not null
+            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
+            : null;
+
         yield return ChatStreamEvent.Complete(new ChatResponse(
             ToMessageResponse(userMessage),
             ToMessageResponse(assistantMessage),
-            jobResults.Count > 0 ? jobResults : null));
+            jobResults.Count > 0 ? jobResults : null,
+            channelCost,
+            threadCost));
 
         } // try
         finally
@@ -1285,14 +1389,22 @@ public sealed partial class ChatService(
         var jobResults = new List<AgentJobResponse>();
         var rounds = 0;
         var effectiveTools = GetEffectiveTools(taskContext);
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
 
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
                 httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
 
+            if (result.Usage is { } usage)
+            {
+                totalPromptTokens += usage.PromptTokens;
+                totalCompletionTokens += usage.CompletionTokens;
+            }
+
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
-                return new ToolLoopResult(result.Content ?? "", jobResults);
+                return new ToolLoopResult(result.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
 
             // Record assistant turn with tool calls
             messages.Add(ToolAwareMessage.AssistantWithToolCalls(result.ToolCalls, result.Content));
@@ -1353,7 +1465,12 @@ public sealed partial class ChatService(
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
                     httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
-                return new ToolLoopResult(finalResult.Content ?? "", jobResults);
+                if (finalResult.Usage is { } finalUsage)
+                {
+                    totalPromptTokens += finalUsage.PromptTokens;
+                    totalCompletionTokens += finalUsage.CompletionTokens;
+                }
+                return new ToolLoopResult(finalResult.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
             }
         }
     }
@@ -2498,5 +2615,7 @@ public sealed partial class ChatService(
 
     private readonly record struct ToolLoopResult(
         string AssistantContent,
-        List<AgentJobResponse> JobResults);
+        List<AgentJobResponse> JobResults,
+        int TotalPromptTokens = 0,
+        int TotalCompletionTokens = 0);
 }

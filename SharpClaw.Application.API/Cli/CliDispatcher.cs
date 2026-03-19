@@ -284,7 +284,9 @@ public static class CliDispatcher
                 "provider delete <providerId>",
                 "provider set-key <providerId> <apiKey>",
                 "provider login <providerId>",
-                "provider sync-models <providerId>");
+                "provider sync-models <providerId>",
+                "provider cost <providerId> [--days <n>]",
+                "provider cost-total [--days <n>]");
             return Results.Ok();
         }
 
@@ -340,6 +342,13 @@ public static class CliDispatcher
             "refresh-caps" when args.Length >= 3
                 => await HandleRefreshCaps(CliIdMap.Resolve(args[2]), svc),
             "refresh-caps" => UsageResult("provider refresh-caps <id>"),
+
+            "cost" when args.Length >= 3
+                => await HandleProviderCost(CliIdMap.Resolve(args[2]), ParseDaysFlag(args, 3), sp),
+            "cost" => UsageResult("provider cost <id> [--days <n>]"),
+
+            "cost-total"
+                => await HandleProviderCostTotal(ParseDaysFlag(args, 2), sp),
 
             _ => UsageResult($"Unknown sub-command: provider {sub}. Try 'help' for usage.")
         };
@@ -1109,6 +1118,7 @@ public static class CliDispatcher
                 "channel list [agentId]                     List channels",
                 "channel select <id>                        Select active channel",
                 "channel get <id>                           Show channel details",
+                "channel cost <id>                          Show token usage by agent",
                 "channel attach <id> <contextId>            Attach to a context",
                 "channel detach <id>                        Detach from context",
                 "channel agents <id>                        List allowed agents",
@@ -1139,6 +1149,10 @@ public static class CliDispatcher
             "get" when args.Length >= 3
                 => await ChannelHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
             "get" => UsageResult("channel get <id>"),
+
+            "cost" when args.Length >= 3
+                => await ChatHandlers.ChannelCost(CliIdMap.Resolve(args[2]), sp.GetRequiredService<ChatService>()),
+            "cost" => UsageResult("channel cost <id>"),
 
             "attach" when args.Length >= 4
                 => await ChannelHandlers.Update(
@@ -1305,6 +1319,7 @@ public static class CliDispatcher
                 "  Create a thread (current channel if omitted)",
                 "thread list [channelId]                    List threads in a channel",
                 "thread get <id>                            Show thread details",
+                "thread cost <id>                           Show token usage by agent",
                 "thread update <id> [--name <name>] [--max-messages <n>] [--max-chars <n>]",
                 "  Rename a thread or change history limits (0 to reset to default)",
                 "thread select <id>                         Select active thread for chat",
@@ -1325,6 +1340,10 @@ public static class CliDispatcher
             "get" when args.Length >= 3
                 => await HandleThreadGet(CliIdMap.Resolve(args[2]), svc),
             "get" => UsageResult("thread get <id>"),
+
+            "cost" when args.Length >= 3
+                => await HandleThreadCost(CliIdMap.Resolve(args[2]), svc, sp.GetRequiredService<ChatService>()),
+            "cost" => UsageResult("thread cost <id>"),
 
             "update" when args.Length >= 3
                 => await HandleThreadUpdate(args, svc),
@@ -1424,6 +1443,14 @@ public static class CliDispatcher
 
     private static async Task<IResult> HandleThreadGet(Guid threadId, ThreadService svc)
         => await ThreadHandlers.GetById(Guid.Empty, threadId, svc);
+
+    private static async Task<IResult> HandleThreadCost(
+        Guid threadId, ThreadService threadSvc, ChatService chatSvc)
+    {
+        var thread = await threadSvc.GetByIdAsync(threadId);
+        if (thread is null) return Results.NotFound();
+        return await ChatHandlers.ThreadCost(thread.ChannelId, threadId, chatSvc);
+    }
 
     private static async Task<IResult> HandleThreadUpdate(string[] args, ThreadService svc)
     {
@@ -1711,12 +1738,13 @@ public static class CliDispatcher
 
         var sub = args[1].ToLowerInvariant();
         var svc = sp.GetRequiredService<AgentJobService>();
+        var chatSvc = sp.GetRequiredService<ChatService>();
 
         return sub switch
         {
             // job submit <channelId> <actionType> [resourceId] [flags...]
             "submit" when args.Length >= 4 && Enum.TryParse<AgentActionType>(args[3], true, out var at)
-                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), at, 4, svc),
+                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), at, 4, svc, chatSvc),
 
             "submit" when args.Length < 3
                 => UsageResult(
@@ -1732,30 +1760,30 @@ public static class CliDispatcher
             "list" => UsageResult("job list [channelId]  (no current channel selected — specify a channel ID or use 'channel select')"),
 
             "status" when args.Length >= 3
-                => await AgentJobHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await AgentJobHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "status" => UsageResult("job status <jobId>"),
 
             "approve" when args.Length >= 3
                 => await AgentJobHandlers.Approve(
                     Guid.Empty, CliIdMap.Resolve(args[2]),
                     new ApproveAgentJobRequest(),
-                    svc),
+                    svc, chatSvc),
             "approve" => UsageResult("job approve <jobId>"),
 
             "stop" when args.Length >= 3
-                => await AgentJobHandlers.Stop(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await AgentJobHandlers.Stop(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "stop" => UsageResult("job stop <jobId>"),
 
             "cancel" when args.Length >= 3
-                => await AgentJobHandlers.Cancel(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await AgentJobHandlers.Cancel(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "cancel" => UsageResult("job cancel <jobId>"),
 
             "pause" when args.Length >= 3
-                => await AgentJobHandlers.Pause(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await AgentJobHandlers.Pause(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "pause" => UsageResult("job pause <jobId>"),
 
             "resume" when args.Length >= 3
-                => await AgentJobHandlers.Resume(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await AgentJobHandlers.Resume(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "resume" => UsageResult("job resume <jobId>"),
 
             "listen" when args.Length >= 3
@@ -1767,7 +1795,7 @@ public static class CliDispatcher
     }
 
     private static async Task<IResult> HandleJobSubmit(
-        string[] args, Guid channelId, AgentActionType actionType, int nextArg, AgentJobService svc)
+        string[] args, Guid channelId, AgentActionType actionType, int nextArg, AgentJobService svc, ChatService chatSvc)
     {
         // Resource ID is the next positional arg, unless it looks like a flag
         Guid? resourceId = args.Length > nextArg && !args[nextArg].StartsWith("--")
@@ -1826,7 +1854,7 @@ public static class CliDispatcher
                 TranscriptionMode: transcriptionMode,
                 WindowSeconds: windowSeconds,
                 StepSeconds: stepSeconds),
-            svc);
+            svc, chatSvc);
     }
 
     private static async Task<IResult> HandleJobListen(Guid jobId, AgentJobService svc)
@@ -2089,6 +2117,28 @@ public static class CliDispatcher
         return Results.Ok();
     }
 
+    private static async Task<IResult> HandleProviderCost(Guid providerId, int days, IServiceProvider sp)
+    {
+        var costSvc = sp.GetRequiredService<ProviderCostService>();
+        return await ProviderHandlers.GetCost(providerId, costSvc, days);
+    }
+
+    private static async Task<IResult> HandleProviderCostTotal(int days, IServiceProvider sp)
+    {
+        var costSvc = sp.GetRequiredService<ProviderCostService>();
+        return await ProviderHandlers.GetCostTotal(costSvc, days);
+    }
+
+    private static int ParseDaysFlag(string[] args, int startIndex)
+    {
+        for (var i = startIndex; i < args.Length - 1; i++)
+        {
+            if (args[i] is "--days" && int.TryParse(args[i + 1], out var days) && days > 0)
+                return days;
+        }
+        return 30;
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Task definitions & instances
     // ═══════════════════════════════════════════════════════════════
@@ -2119,6 +2169,7 @@ public static class CliDispatcher
 
         var sub = args[1].ToLowerInvariant();
         var svc = sp.GetRequiredService<TaskService>();
+        var chatSvc = sp.GetRequiredService<ChatService>();
 
         return sub switch
         {
@@ -2160,7 +2211,7 @@ public static class CliDispatcher
             "instances" => UsageResult("task instances <taskId>"),
 
             "instance" when args.Length >= 3
-                => await TaskInstanceHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc),
+                => await TaskInstanceHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
             "instance" => UsageResult("task instance <instanceId>"),
 
             "outputs" when args.Length >= 3

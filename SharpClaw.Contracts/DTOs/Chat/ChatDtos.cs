@@ -23,4 +23,6 @@ public sealed record ChatMessageResponse(
 public sealed record ChatResponse(
     ChatMessageResponse UserMessage,
     ChatMessageResponse AssistantMessage,
-    IReadOnlyList<AgentJobResponse>? JobResults = null);
+    IReadOnlyList<AgentJobResponse>? JobResults = null,
+    ChannelCostResponse? ChannelCost = null,
+    ThreadCostResponse? ThreadCost = null);

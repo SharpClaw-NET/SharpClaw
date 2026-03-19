@@ -1,3 +1,4 @@
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.Enums;
 
@@ -52,7 +53,8 @@ string? Language = null,
 TranscriptionMode? TranscriptionMode = null,
 int? WindowSeconds = null,
 int? StepSeconds = null,
-IReadOnlyList<TranscriptionSegmentResponse>? Segments = null);
+IReadOnlyList<TranscriptionSegmentResponse>? Segments = null,
+ChannelCostResponse? ChannelCost = null);
 
 public sealed record AgentJobLogResponse(
     string Message,

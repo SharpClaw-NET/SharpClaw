@@ -166,7 +166,10 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         return new ChatCompletionResult
         {
             Content = choice.Message?.Content,
-            ToolCalls = toolCalls
+            ToolCalls = toolCalls,
+            Usage = result?.Usage is { } u
+                ? new TokenUsage(u.PromptTokens, u.CompletionTokens)
+                : null
         };
     }
 
@@ -261,7 +264,8 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                     Parameters = t.ParametersSchema
                 }
             }).ToList(),
-            Stream = true
+            Stream = true,
+            StreamOptions = new OaiStreamOptions { IncludeUsage = true }
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/chat/completions");
@@ -279,6 +283,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         var contentBuilder = new System.Text.StringBuilder();
         // Accumulate tool calls by index
         var toolCallAccumulator = new Dictionary<int, (string Id, string Name, System.Text.StringBuilder Args)>();
+        TokenUsage? streamUsage = null;
 
         while (!reader.EndOfStream)
         {
@@ -289,17 +294,23 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             var data = line["data: ".Length..];
             if (data == "[DONE]") break;
 
-            OaiStreamChoice? choice;
+            OaiStreamResponse? streamChunk;
             try
             {
-                var chunk = JsonSerializer.Deserialize<OaiStreamResponse>(data);
-                choice = chunk?.Choices?.FirstOrDefault();
+                streamChunk = JsonSerializer.Deserialize<OaiStreamResponse>(data);
             }
             catch (JsonException)
             {
                 continue;
             }
 
+            if (streamChunk is null) continue;
+
+            // Capture usage from the final chunk (sent when stream_options.include_usage is true)
+            if (streamChunk.Usage is { } su)
+                streamUsage = new TokenUsage(su.PromptTokens, su.CompletionTokens);
+
+            var choice = streamChunk.Choices?.FirstOrDefault();
             if (choice?.Delta is null) continue;
 
             // Accumulate text deltas
@@ -346,7 +357,8 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         yield return ChatStreamChunk.Final(new ChatCompletionResult
         {
             Content = contentBuilder.Length > 0 ? contentBuilder.ToString() : null,
-            ToolCalls = toolCalls
+            ToolCalls = toolCalls,
+            Usage = streamUsage
         });
     }
 
@@ -408,10 +420,18 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [property: JsonPropertyName("content")] string Content);
 
     private sealed record CompletionResponse(
-        [property: JsonPropertyName("choices")] List<CompletionChoice>? Choices);
+        [property: JsonPropertyName("choices")] List<CompletionChoice>? Choices,
+        [property: JsonPropertyName("usage")] OaiUsage? Usage = null);
 
     private sealed record CompletionChoice(
         [property: JsonPropertyName("message")] CompletionMessagePayload? Message);
+
+    private sealed class OaiUsage
+    {
+        [JsonPropertyName("prompt_tokens")] public int PromptTokens { get; set; }
+        [JsonPropertyName("completion_tokens")] public int CompletionTokens { get; set; }
+        [JsonPropertyName("total_tokens")] public int TotalTokens { get; set; }
+    }
 
     // ── Tool-aware completion ─────────────────────────────────────
 
@@ -504,6 +524,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     private sealed class OaiToolCompletionResponse
     {
         [JsonPropertyName("choices")] public List<OaiToolCompletionChoice>? Choices { get; set; }
+        [JsonPropertyName("usage")] public OaiUsage? Usage { get; set; }
     }
 
     private sealed class OaiToolCompletionChoice
@@ -540,14 +561,23 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("messages")] public required List<object> Messages { get; init; }
         [JsonPropertyName("tools")] public required List<OaiToolDefinitionPayload> Tools { get; init; }
         [JsonPropertyName("stream")] public bool Stream { get; init; }
+        [JsonPropertyName("stream_options")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public OaiStreamOptions? StreamOptions { get; init; }
         [JsonPropertyName("max_tokens")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? MaxTokens { get; init; }
     }
 
+    private sealed class OaiStreamOptions
+    {
+        [JsonPropertyName("include_usage")] public bool IncludeUsage { get; init; }
+    }
+
     private sealed class OaiStreamResponse
     {
         [JsonPropertyName("choices")] public List<OaiStreamChoice>? Choices { get; set; }
+        [JsonPropertyName("usage")] public OaiUsage? Usage { get; set; }
     }
 
     private sealed class OaiStreamChoice
@@ -695,6 +725,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         var toolCallOrder = new List<string>();
         // Map output_index → call_id for providers that omit call_id from delta/done events
         var outputIndexToCallId = new Dictionary<int, string>();
+        TokenUsage? respUsage = null;
 
         while (!reader.EndOfStream)
         {
@@ -792,6 +823,8 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                     break;
 
                 case "response.completed":
+                    if (evt.Response?.Usage is { } respU)
+                        respUsage = new TokenUsage(respU.InputTokens, respU.OutputTokens);
                     break;
             }
         }
@@ -809,7 +842,8 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         yield return ChatStreamChunk.Final(new ChatCompletionResult
         {
             Content = contentBuilder.Length > 0 ? contentBuilder.ToString() : null,
-            ToolCalls = toolCalls
+            ToolCalls = toolCalls,
+            Usage = respUsage
         });
     }
 
@@ -893,6 +927,19 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("output_index")] public int? OutputIndex { get; set; }
         // output_item.added carries an item object
         [JsonPropertyName("item")] public RespOutputItem? Item { get; set; }
+        // response.completed carries the full response object
+        [JsonPropertyName("response")] public RespCompletedResponse? Response { get; set; }
+    }
+
+    private sealed class RespCompletedResponse
+    {
+        [JsonPropertyName("usage")] public RespUsage? Usage { get; set; }
+    }
+
+    private sealed class RespUsage
+    {
+        [JsonPropertyName("input_tokens")] public int InputTokens { get; set; }
+        [JsonPropertyName("output_tokens")] public int OutputTokens { get; set; }
     }
 
     private sealed class RespOutputItem

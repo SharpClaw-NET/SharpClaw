@@ -110,6 +110,7 @@ try
     builder.Services.AddSingleton<SharedAudioCaptureManager>();
 
     builder.Services.AddScoped<ProviderService>();
+    builder.Services.AddScoped<ProviderCostService>();
     builder.Services.AddScoped<ModelService>();
     builder.Services.AddScoped<AgentService>();
     builder.Services.AddScoped<ChannelService>();

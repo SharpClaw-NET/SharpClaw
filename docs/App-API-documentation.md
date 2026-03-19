@@ -16,21 +16,25 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 - [Health checks](#health-checks)
 - [Enums](#enums)
 - [Auth](#auth)
+- [Users](#users)
 - [Providers](#providers)
 - [Models](#models)
-- [Local models](#local-models)
 - [Agents](#agents)
-- [Roles](#roles)
 - [Channel contexts](#channel-contexts)
 - [Channels](#channels)
-- [Default resources](#default-resources)
 - [Threads](#threads)
 - [Chat (per-channel)](#chat-per-channel)
 - [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
 - [Transcription streaming](#transcription-streaming)
 - [Resources](#resources)
+- [Roles](#roles)
+- [Default resources](#default-resources)
+- [Local models](#local-models)
 - [Editor bridge](#editor-bridge)
+- [Task definitions & instances](#task-definitions--instances)
+- [Token cost tracking](#token-cost-tracking)
+- [Provider cost](#provider-cost)
 - [Permission Resolution](#permission-resolution)
 
 ---
@@ -175,6 +179,26 @@ Pending, Downloading, Ready, Failed
 | `Simple` | 1 | Sequential non-overlapping chunks. Each chunk transcribed independently, segments emitted immediately. Lower latency, fewer API calls, no cross-window dedup. |
 | `StrictSlidingWindow` | 2 | Single-pass sliding window. Segments only emitted after the full commit delay, deduplication, and hallucination filtering. Higher accuracy but ~5–8 s perceived latency. |
 
+### TaskInstanceStatus
+
+| Value | Int | Description |
+|-------|-----|-------------|
+| `Queued` | 0 | Instance created, awaiting execution start |
+| `Running` | 1 | Task entry point is actively running |
+| `Paused` | 2 | Execution temporarily suspended; can be resumed |
+| `Completed` | 3 | Entry point ran to completion successfully |
+| `Failed` | 4 | Entry point threw an unhandled exception |
+| `Cancelled` | 5 | Instance was cancelled by a user or agent |
+
+### TaskOutputEventType
+
+| Value | Description |
+|-------|-------------|
+| `Output` | Task-emitted output (from `Emit(...)`) |
+| `Log` | Log message appended during execution |
+| `StatusChange` | Task status changed (started, completed, failed, etc.) |
+| `Done` | Terminal event — no more events will follow |
+
 ---
 
 ## Auth
@@ -271,6 +295,91 @@ Register a new user.
 ```
 
 **Response `204`:** No content.
+
+---
+
+### GET /auth/me
+
+Get the authenticated user's profile.
+
+**Response `200`:**
+
+```json
+{
+  "id": "guid",
+  "username": "string",
+  "bio": "string | null",
+  "roleId": "guid | null",
+  "roleName": "string | null",
+  "isUserAdmin": false
+}
+```
+
+**Response `401`:** Not authenticated.
+
+---
+
+### PUT /auth/me/role
+
+Self-assign a role. The caller must have permission to assign the
+requested role.
+
+**Request:**
+
+```json
+{
+  "roleId": "guid"
+}
+```
+
+**Response `200`:** Updated user profile.
+**Response `403`:** Caller lacks permission.
+
+---
+
+## Users
+
+Admin-only endpoints for managing registered users.
+
+### GET /users
+
+List all registered users. Requires the caller to be a user admin.
+
+**Response `200`:** `UserEntry[]`
+
+```json
+[
+  {
+    "id": "guid",
+    "username": "string",
+    "bio": "string | null",
+    "roleId": "guid | null",
+    "roleName": "string | null",
+    "isUserAdmin": false
+  }
+]
+```
+
+**Response `403`:** Caller is not a user admin.
+
+---
+
+### PUT /users/{id}/role
+
+Assign a role to a user. Pass `Guid.Empty` as `roleId` to remove the
+role. Requires the caller to be a user admin.
+
+**Request:**
+
+```json
+{
+  "roleId": "guid"
+}
+```
+
+**Response `200`:** Updated `UserEntry`.
+**Response `403`:** Caller is not a user admin.
+**Response `404`:** User not found.
 
 ---
 
@@ -1083,9 +1192,16 @@ Response `200`:
 {
   "userMessage": { "role": "user", "content": "string", "timestamp": "datetime" },
   "assistantMessage": { "role": "assistant", "content": "string", "timestamp": "datetime" },
-  "jobResults": [ /* AgentJobResponse[], if any */ ]
+  "jobResults": [ /* AgentJobResponse[], if any */ ],
+  "channelCost": { /* ChannelCostResponse — see Token cost tracking */ },
+  "threadCost": null
 }
 ```
+
+Every chat response piggybacks the current channel (and thread, when
+applicable) token usage so callers do not need a separate round-trip to
+the `/cost` endpoints. See [Token cost tracking](#token-cost-tracking)
+for the shape of these objects.
 
 When the assistant submits agent jobs during the turn the same
 permission-resolution rules apply (see [Permission Resolution](#permission-resolution)).
@@ -1458,12 +1574,24 @@ Retrieve transcription segments added after the given timestamp.
       "timestamp": "datetime",
       "isProvisional": false
     }
-  ]
+  ],
+  "channelCost": {
+    "channelId": "guid",
+    "totalPromptTokens": 0,
+    "totalCompletionTokens": 0,
+    "totalTokens": 0,
+    "agentBreakdown": []
+  }
 }
 ```
 
 `segments` is only populated for transcription action types; `null`
 otherwise.
+
+`channelCost` is piggybacked on all detail / mutation responses
+(Submit, GetById, Approve, Stop, Cancel, Pause, Resume) so callers
+receive up-to-date token usage without a separate round-trip.
+List and summary endpoints omit it.
 
 #### Two-pass segment lifecycle (SlidingWindow mode)
 
@@ -1678,6 +1806,42 @@ DELETE /resources/editorsessions/{id}
   "createdAt": "datetime"
 }
 ```
+
+### Resource lookup
+
+#### GET /resources/lookup/{type}
+
+Returns lightweight `[{id, name}]` items for the resource type that
+backs a given permission access category. The `type` path parameter
+matches the JSON property names used in the permissions API.
+
+**Valid `type` values:**
+
+| Type | Resource |
+|------|----------|
+| `dangerousShellAccesses` | SystemUsers |
+| `safeShellAccesses` | Containers |
+| `containerAccesses` | Containers |
+| `websiteAccesses` | Websites |
+| `searchEngineAccesses` | SearchEngines |
+| `localInfoStoreAccesses` | LocalInformationStores |
+| `externalInfoStoreAccesses` | ExternalInformationStores |
+| `audioDeviceAccesses` | AudioDevices |
+| `displayDeviceAccesses` | DisplayDevices |
+| `editorSessionAccesses` | EditorSessions |
+| `agentAccesses` | Agents |
+| `taskAccesses` | ScheduledTasks |
+| `skillAccesses` | Skills |
+
+**Response `200`:**
+
+```json
+[
+  { "id": "guid", "name": "string" }
+]
+```
+
+**Response `400`:** Unknown resource type.
 
 ---
 
@@ -2015,6 +2179,356 @@ List all currently connected editor sessions.
     "connectedAt": "datetime"
   }
 ]
+```
+
+---
+
+## Task definitions & instances
+
+Tasks are user-defined C# scripts that run as background processes.
+A **definition** is the registered source code; an **instance** is a
+single execution of that definition.
+
+### POST /tasks
+
+Register a new task definition from raw `.cs` source.
+
+**Request:**
+
+```json
+{
+  "sourceText": "string"
+}
+```
+
+**Response `200`:** `TaskDefinitionResponse`
+
+---
+
+### GET /tasks
+
+List all task definitions.
+
+**Response `200`:** `TaskDefinitionResponse[]`
+
+---
+
+### GET /tasks/{taskId}
+
+**Response `200`:** `TaskDefinitionResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /tasks/{taskId}
+
+Update an existing definition's source or active flag.
+
+**Request:**
+
+```json
+{
+  "sourceText": "string | null",
+  "isActive": "bool | null"
+}
+```
+
+**Response `200`:** `TaskDefinitionResponse`
+**Response `404`:** Not found.
+
+---
+
+### DELETE /tasks/{taskId}
+
+**Response `204`:** Deleted.
+**Response `404`:** Not found.
+
+---
+
+### TaskDefinitionResponse
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "description": "string | null",
+  "outputTypeName": "string | null",
+  "isActive": true,
+  "parameters": [
+    {
+      "name": "string",
+      "typeName": "string",
+      "description": "string | null",
+      "defaultValue": "string | null",
+      "isRequired": true
+    }
+  ],
+  "createdAt": "datetime",
+  "updatedAt": "datetime",
+  "customId": "string | null"
+}
+```
+
+---
+
+### POST /tasks/{taskId}/instances
+
+Start a new instance of a task definition.
+
+**Request:**
+
+```json
+{
+  "channelId": "guid | null",
+  "parameterValues": { "key": "value" }
+}
+```
+
+**Response `200`:** `TaskInstanceResponse`
+
+---
+
+### GET /tasks/{taskId}/instances
+
+List all instances for a definition.
+
+**Response `200`:** `TaskInstanceResponse[]`
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}
+
+Get a single instance by ID. The response includes `channelCost`
+when the instance is bound to a channel (token usage for the
+channel is computed on the fly).
+
+**Response `200`:** `TaskInstanceResponse`
+**Response `404`:** Not found.
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/cancel
+
+Cancel a running instance.
+
+**Response `204`:** Cancelled.
+**Response `404`:** Not found.
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/stop
+
+Gracefully stop an instance via the orchestrator.
+
+**Response `204`**
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/start
+
+Start execution of a queued instance via the orchestrator.
+
+**Response `204`**
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}/outputs?since={datetime}
+
+Retrieve task output entries. Optionally filter by timestamp.
+
+**Response `200`:** `TaskOutputEntryResponse[]`
+
+```json
+[
+  {
+    "id": "guid",
+    "sequence": 1,
+    "data": "string | null",
+    "timestamp": "datetime"
+  }
+]
+```
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}/stream
+
+Streams `TaskOutputEvent` items as server-sent events
+(`text/event-stream`).
+
+Each SSE frame:
+
+```
+data:{"type":"Output","sequence":1,"timestamp":"...","data":"..."}
+```
+
+Event types: `Output`, `Log`, `StatusChange`, `Done`.
+
+---
+
+### TaskInstanceResponse
+
+```json
+{
+  "id": "guid",
+  "taskDefinitionId": "guid",
+  "taskName": "string",
+  "status": "Queued | Running | Paused | Completed | Failed | Cancelled",
+  "outputSnapshotJson": "string | null",
+  "errorMessage": "string | null",
+  "logs": [
+    {
+      "message": "string",
+      "level": "string",
+      "timestamp": "datetime"
+    }
+  ],
+  "createdAt": "datetime",
+  "startedAt": "datetime | null",
+  "completedAt": "datetime | null",
+  "channelId": "guid | null",
+  "channelCost": { /* ChannelCostResponse, see Token cost tracking */ }
+}
+```
+
+`channelCost` is populated on the `GET .../instances/{instanceId}`
+endpoint when the instance is bound to a channel. It shows the
+aggregated token usage for that channel.
+
+---
+
+## Token cost tracking
+
+Token usage is tracked per-message and aggregated at the channel and
+thread level. Cost data is **piggybacked** on the main chat, job,
+and task responses so callers rarely need the dedicated cost endpoints.
+
+### Piggybacked cost fields
+
+| Response type | Field(s) | When populated |
+|---------------|----------|----------------|
+| `ChatResponse` | `channelCost`, `threadCost` | Always (every chat turn) |
+| `AgentJobResponse` | `channelCost` | On detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`) |
+| `TaskInstanceResponse` | `channelCost` | On `GET .../instances/{instanceId}` when bound to a channel |
+| SSE `Done` event | Inside the `ChatResponse` payload | Always |
+
+### ChannelCostResponse
+
+```json
+{
+  "channelId": "guid",
+  "totalPromptTokens": 0,
+  "totalCompletionTokens": 0,
+  "totalTokens": 0,
+  "agentBreakdown": [
+    {
+      "agentId": "guid",
+      "agentName": "string",
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "totalTokens": 0
+    }
+  ]
+}
+```
+
+### ThreadCostResponse
+
+Same shape as `ChannelCostResponse` with an additional `threadId` field:
+
+```json
+{
+  "threadId": "guid",
+  "channelId": "guid",
+  "totalPromptTokens": 0,
+  "totalCompletionTokens": 0,
+  "totalTokens": 0,
+  "agentBreakdown": [ /* AgentTokenBreakdown[] */ ]
+}
+```
+
+### Diagnostic endpoints
+
+Dedicated endpoints for querying cost without a chat/job round-trip:
+
+#### GET /channels/{id}/chat/cost
+
+**Response `200`:** `ChannelCostResponse`
+
+#### GET /channels/{id}/chat/threads/{threadId}/cost
+
+**Response `200`:** `ThreadCostResponse`
+**Response `404`:** Thread not found.
+
+---
+
+## Provider cost
+
+Query real provider-side cost data (where supported by the provider's
+usage API).
+
+### GET /providers/{id}/cost
+
+Get cost data for a single provider.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days` | int | 30 | Number of days to look back |
+| `startDate` | DateTimeOffset | — | Explicit period start (overrides `days`) |
+| `endDate` | DateTimeOffset | — | Explicit period end |
+
+**Response `200`:** `ProviderCostResponse`
+**Response `404`:** Provider not found.
+
+---
+
+### GET /providers/cost/total
+
+Aggregate cost across all providers.
+
+Same query parameters as above.
+
+**Response `200`:** `ProviderCostTotalResponse`
+
+---
+
+### ProviderCostResponse
+
+```json
+{
+  "providerId": "guid",
+  "providerName": "string",
+  "providerType": "OpenAI",
+  "isLocal": false,
+  "costApiSupported": true,
+  "totalCost": 12.34,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "dailyBreakdown": [
+    {
+      "start": "datetime",
+      "end": "datetime",
+      "amount": 1.23,
+      "currency": "USD"
+    }
+  ],
+  "note": "string | null"
+}
+```
+
+### ProviderCostTotalResponse
+
+```json
+{
+  "totalCost": 45.67,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "providers": [ /* ProviderCostResponse[] */ ]
+}
 ```
 
 ---

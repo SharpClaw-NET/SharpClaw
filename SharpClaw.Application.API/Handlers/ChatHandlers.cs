@@ -15,4 +15,15 @@ public static class ChatHandlers
     [MapGet]
     public static async Task<IResult> History(Guid id, ChatService svc)
         => Results.Ok(await svc.GetHistoryAsync(id));
+
+    [MapGet("/cost")]
+    public static async Task<IResult> ChannelCost(Guid id, ChatService svc)
+        => Results.Ok(await svc.GetChannelCostAsync(id));
+
+    [MapGet("/threads/{threadId:guid}/cost")]
+    public static async Task<IResult> ThreadCost(Guid id, Guid threadId, ChatService svc)
+    {
+        var result = await svc.GetThreadCostAsync(id, threadId);
+        return result is not null ? Results.Ok(result) : Results.NotFound();
+    }
 }

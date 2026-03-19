@@ -1,3 +1,4 @@
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Contracts.DTOs.Tasks;
@@ -55,7 +56,9 @@ public sealed record TaskInstanceResponse(
     IReadOnlyList<TaskExecutionLogResponse> Logs,
     DateTimeOffset CreatedAt,
     DateTimeOffset? StartedAt,
-    DateTimeOffset? CompletedAt);
+    DateTimeOffset? CompletedAt,
+    Guid? ChannelId = null,
+    ChannelCostResponse? ChannelCost = null);
 
 public sealed record TaskInstanceSummaryResponse(
     Guid Id,

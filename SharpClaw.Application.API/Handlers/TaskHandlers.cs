@@ -65,10 +65,16 @@ public static class TaskInstanceHandlers
 
     [MapGet("/{instanceId:guid}")]
     public static async Task<IResult> GetById(
-        Guid taskId, Guid instanceId, TaskService svc)
+        Guid taskId, Guid instanceId, TaskService svc, ChatService chatSvc)
     {
         var inst = await svc.GetInstanceAsync(instanceId);
-        return inst is not null ? Results.Ok(inst) : Results.NotFound();
+        if (inst is null) return Results.NotFound();
+        if (inst.ChannelId is { } chId)
+        {
+            var cost = await chatSvc.GetChannelCostAsync(chId);
+            inst = inst with { ChannelCost = cost };
+        }
+        return Results.Ok(inst);
     }
 
     [MapPost("/{instanceId:guid}/cancel")]

@@ -28,6 +28,20 @@ public sealed class ChatCompletionResult
     public string? Content { get; init; }
     public IReadOnlyList<ChatToolCall> ToolCalls { get; init; } = [];
     public bool HasToolCalls => ToolCalls.Count > 0;
+
+    /// <summary>
+    /// Token usage reported by the provider. <see langword="null"/> when
+    /// the provider does not include usage data in the response.
+    /// </summary>
+    public TokenUsage? Usage { get; init; }
+}
+
+/// <summary>
+/// Token counts returned by a provider for a single completion call.
+/// </summary>
+public sealed record TokenUsage(int PromptTokens, int CompletionTokens)
+{
+    public int TotalTokens => PromptTokens + CompletionTokens;
 }
 
 /// <summary>

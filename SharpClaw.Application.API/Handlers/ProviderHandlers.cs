@@ -71,4 +71,24 @@ public static class ProviderHandlers
             return Results.Json(new { status = "expired" }, statusCode: StatusCodes.Status408RequestTimeout);
         }
     }
+
+    // ── Cost / usage endpoints ─────────────────────────────────────
+
+    [MapGet("/{id:guid}/cost")]
+    public static async Task<IResult> GetCost(
+        Guid id, ProviderCostService costSvc,
+        int? days = null, DateTimeOffset? startDate = null, DateTimeOffset? endDate = null)
+    {
+        var result = await costSvc.GetCostAsync(id, days ?? 30, startDate, endDate);
+        return result is not null ? Results.Ok(result) : Results.NotFound();
+    }
+
+    [MapGet("/cost/total")]
+    public static async Task<IResult> GetCostTotal(
+        ProviderCostService costSvc,
+        int? days = null, DateTimeOffset? startDate = null, DateTimeOffset? endDate = null)
+    {
+        var result = await costSvc.GetTotalCostAsync(days ?? 30, startDate, endDate);
+        return Results.Ok(result);
+    }
 }
