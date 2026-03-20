@@ -25,6 +25,7 @@ public sealed partial class FirstSetupPage : Page
     private TaskCompletionSource<Guid?>? _agentTcs;
     private TaskCompletionSource<bool>? _localModelTcs;
     private TaskCompletionSource<bool>? _roleTcs;
+    private TaskCompletionSource<bool>? _upgradePromptTcs;
     private bool _localOnly;
     private bool _switchToCloud;
     private List<ProviderDto>? _providers;
@@ -37,6 +38,36 @@ public sealed partial class FirstSetupPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (FirstSetupMarker.NeedsUpgradeRerun)
+        {
+            // Major version advanced since last setup — ask whether to redo
+            var oldVer = FirstSetupMarker.CompletedMajorVersion;
+            var newVer = FirstSetupMarker.CurrentMajorVersion;
+            var label = oldVer.HasValue
+                ? $"v{oldVer} → v{newVer}"
+                : $"v{newVer}";
+
+            UpgradeVersionLabel.Text = label;
+            UpgradePromptPanel.Visibility = Visibility.Visible;
+            SkipSetupPanel.Visibility = Visibility.Collapsed;
+
+            _upgradePromptTcs = new TaskCompletionSource<bool>();
+            var redo = await _upgradePromptTcs.Task;
+            UpgradePromptPanel.Visibility = Visibility.Collapsed;
+
+            if (!redo)
+            {
+                // User chose to skip — stamp current version and go to Main
+                FirstSetupMarker.MarkCompleted();
+                var navigator = App.Services!.GetRequiredService<INavigator>();
+                await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+                return;
+            }
+
+            // User chose redo — fall through to normal setup
+            SkipSetupPanel.Visibility = Visibility.Visible;
+        }
+
         Cursor.SetCommand("sharpclaw setup ");
         await RunSetupAsync();
     }
@@ -55,7 +86,6 @@ public sealed partial class FirstSetupPage : Page
             Text = icon,
             FontFamily = new FontFamily("Consolas, Courier New, monospace"),
             FontSize = 15,
-            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
             Foreground = new SolidColorBrush(ColorFrom(iconColor)),
         });
         panel.Children.Add(new TextBlock
@@ -63,7 +93,6 @@ public sealed partial class FirstSetupPage : Page
             Text = text,
             FontFamily = new FontFamily("Consolas, Courier New, monospace"),
             FontSize = 15,
-            FontWeight = Microsoft.UI.Text.FontWeights.Medium,
             Foreground = new SolidColorBrush(ColorFrom(textColor)),
             TextWrapping = TextWrapping.Wrap,
         });
@@ -701,6 +730,7 @@ public sealed partial class FirstSetupPage : Page
         _agentTcs?.TrySetResult(null);
         _localModelTcs?.TrySetResult(false);
         _roleTcs?.TrySetResult(false);
+        _upgradePromptTcs?.TrySetResult(false);
 
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
@@ -934,6 +964,14 @@ public sealed partial class FirstSetupPage : Page
 
     private static Windows.UI.Color ColorFrom(int rgb)
         => Windows.UI.Color.FromArgb(255, (byte)((rgb >> 16) & 0xFF), (byte)((rgb >> 8) & 0xFF), (byte)(rgb & 0xFF));
+
+    // ── Upgrade-prompt callbacks ────────────────────────────────
+
+    private void OnUpgradeRedoClick(object sender, RoutedEventArgs e)
+        => _upgradePromptTcs?.TrySetResult(true);
+
+    private void OnUpgradeSkipClick(object sender, RoutedEventArgs e)
+        => _upgradePromptTcs?.TrySetResult(false);
 
     // ── DTOs ────────────────────────────────────────────────────
     // ProviderType may arrive as a string ("OpenAI") or an integer (0)

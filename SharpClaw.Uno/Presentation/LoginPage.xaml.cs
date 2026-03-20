@@ -11,6 +11,7 @@ public sealed partial class LoginPage : Page
     private bool _isRegisterMode;
     private bool _isBusy;
     private bool _needsFirstSetup;
+    private bool _needsUpgradeSetup;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -26,6 +27,7 @@ public sealed partial class LoginPage : Page
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
         _needsFirstSetup = !FirstSetupMarker.IsCompleted;
+        _needsUpgradeSetup = !_needsFirstSetup && FirstSetupMarker.NeedsUpgradeRerun;
         SetupDisclaimer.Visibility = _needsFirstSetup ? Visibility.Visible : Visibility.Collapsed;
         UpdateCursor();
     }
@@ -101,7 +103,7 @@ public sealed partial class LoginPage : Page
                     await Task.Delay(400);
 
                     var navigator = App.Services!.GetRequiredService<INavigator>();
-                    var target = _needsFirstSetup ? "FirstSetup" : "Main";
+                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
                     await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
                     return;
                 }

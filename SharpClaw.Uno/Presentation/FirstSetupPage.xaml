@@ -27,6 +27,42 @@
 
         <!-- Steps are appended dynamically from code-behind -->
 
+        <!-- Version-upgrade prompt (shown when major version advanced) -->
+        <StackPanel x:Name="UpgradePromptPanel"
+                    Visibility="Collapsed"
+                    Spacing="8"
+                    Margin="0,0,0,12">
+          <StackPanel Orientation="Horizontal" Spacing="6">
+            <TextBlock Text="⟳"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="16" Foreground="#FFAA33" />
+            <TextBlock Style="{StaticResource TerminalText}"
+                       FontSize="14" Foreground="#E0E0E0"
+                       VerticalAlignment="Center">
+              <Run Text="New major version detected " />
+              <Run Text="(" /><Run x:Name="UpgradeVersionLabel" /><Run Text=")." />
+            </TextBlock>
+          </StackPanel>
+          <TextBlock Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#AA8844"
+                     TextWrapping="Wrap"
+                     Text="Setup was already completed for an older version. You can redo it to reconfigure providers, models, and agents, or skip to keep your current config." />
+          <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
+            <Button Style="{StaticResource TerminalButton}"
+                    Click="OnUpgradeRedoClick">
+              <TextBlock Text="[ Redo Setup ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="13" Foreground="#00FF00" />
+            </Button>
+            <Button Style="{StaticResource TerminalLink}"
+                    Click="OnUpgradeSkipClick">
+              <TextBlock Text="> Skip, keep current config"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="13" Foreground="#808080" />
+            </Button>
+          </StackPanel>
+        </StackPanel>
+
         <!-- Provider input panel (hidden until needed) -->
         <StackPanel x:Name="ProviderInputPanel"
                     Visibility="Collapsed"
@@ -506,7 +542,8 @@
         </StackPanel>
 
         <!-- Skip setup -->
-        <StackPanel Orientation="Horizontal"
+        <StackPanel x:Name="SkipSetupPanel"
+                    Orientation="Horizontal"
                     Spacing="8"
                     Margin="0,16,0,0">
           <Button x:Name="SkipSetupBtn"
@@ -514,10 +551,10 @@
                   Click="OnSkipSetupClick">
             <TextBlock Text="> Skip setup entirely"
                        Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#FF8800" />
+                       FontSize="13" Foreground="#FFAA33" />
           </Button>
           <TextBlock Style="{StaticResource TerminalText}"
-                     FontSize="11" Foreground="#665500"
+                     FontSize="13" Foreground="#AA8844"
                      VerticalAlignment="Center"
                      Text="(you will need to configure providers, models, and channels manually)" />
         </StackPanel>
