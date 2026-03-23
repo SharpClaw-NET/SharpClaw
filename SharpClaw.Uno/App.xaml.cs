@@ -117,6 +117,8 @@ public partial class App : Application
                     var backendManager = new BackendProcessManager(apiUrl);
                     services.AddSingleton(backendManager);
                     services.AddSingleton(new SharpClawApiClient(apiUrl));
+                    services.AddSingleton(new ClientSettings());
+                    services.AddSingleton(new AccountStore());
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );

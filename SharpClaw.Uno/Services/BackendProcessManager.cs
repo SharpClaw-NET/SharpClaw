@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 
 namespace SharpClaw.Services;
 
@@ -96,7 +98,9 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>
     /// Ensures the API backend is available. Checks in order:
     /// <list type="number">
-    ///   <item>Is the API already reachable? → mark external, done.</item>
+    ///   <item>Is the bundled process already running? → done.</item>
+    ///   <item>Is another SharpClaw process listening on the port? → mark external, done.</item>
+    ///   <item>Is the API already reachable (e.g. dev instance)? → mark external, done.</item>
     ///   <item>Is the bundled backend available? → launch it.</item>
     ///   <item>Neither → throw.</item>
     /// </list>
@@ -105,6 +109,13 @@ public sealed class BackendProcessManager : IDisposable
     {
         if (IsRunning)
             return;
+
+        // Check if another SharpClaw process already owns the port.
+        if (IsSharpClawProcessOnPort())
+        {
+            IsExternal = true;
+            return;
+        }
 
         // Check if an external instance is already serving (dev workflow).
         if (await IsApiReachableAsync(ct))
@@ -119,6 +130,76 @@ public sealed class BackendProcessManager : IDisposable
                 "Start the API project manually or publish with /p:BundleBackend=true.");
 
         Start();
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when another <c>SharpClaw.Application.API</c>
+    /// process is already listening on the configured API port.
+    /// This prevents a second bundled instance from trying to bind to
+    /// the same port when the app is launched again (exe or MSIX).
+    /// </summary>
+    private bool IsSharpClawProcessOnPort()
+    {
+        if (!TryGetPortFromApiUrl(out var targetPort))
+            return false;
+
+        // Check whether anything is listening on the target port.
+        try
+        {
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            bool portInUse = false;
+            foreach (var ep in listeners)
+            {
+                if (ep.Port == targetPort)
+                {
+                    portInUse = true;
+                    break;
+                }
+            }
+
+            if (!portInUse)
+                return false;
+        }
+        catch
+        {
+            // IPGlobalProperties can fail on some restricted environments;
+            // fall through to the HTTP probe instead of blocking startup.
+            return false;
+        }
+
+        // Port is in use — check if a SharpClaw API process owns it.
+        try
+        {
+            var candidates = Process.GetProcessesByName("SharpClaw.Application.API");
+            if (candidates.Length > 0)
+            {
+                // At least one SharpClaw API process is running and the port
+                // is occupied — safe to assume it's the one listening.
+                return true;
+            }
+        }
+        catch
+        {
+            // Process enumeration may fail under restricted permissions
+            // (e.g. AppContainer). Fall through to the HTTP probe.
+        }
+
+        return false;
+    }
+
+    private bool TryGetPortFromApiUrl(out int port)
+    {
+        port = 0;
+        try
+        {
+            var uri = new Uri(_apiUrl);
+            port = uri.Port;
+            return port > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>

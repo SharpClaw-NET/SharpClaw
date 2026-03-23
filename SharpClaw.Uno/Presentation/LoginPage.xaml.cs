@@ -13,6 +13,8 @@ public sealed partial class LoginPage : Page
     private bool _needsFirstSetup;
     private bool _needsUpgradeSetup;
 
+    private static readonly Microsoft.UI.Xaml.Media.FontFamily Mono = new("Consolas, Courier New, monospace");
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -29,6 +31,7 @@ public sealed partial class LoginPage : Page
         _needsFirstSetup = !FirstSetupMarker.IsCompleted;
         _needsUpgradeSetup = !_needsFirstSetup && FirstSetupMarker.NeedsUpgradeRerun;
         SetupDisclaimer.Visibility = _needsFirstSetup ? Visibility.Visible : Visibility.Collapsed;
+        PopulateSavedAccounts();
         UpdateCursor();
     }
 
@@ -85,8 +88,9 @@ public sealed partial class LoginPage : Page
 
         try
         {
+            var rememberMe = RememberMeCheck.IsChecked == true;
             var body = JsonSerializer.Serialize(
-                new { username, password, rememberMe = true }, JsonOptions);
+                new { username, password, rememberMe }, JsonOptions);
             var content = new StringContent(body, Encoding.UTF8, "application/json");
 
             var response = await Api.PostAsync("/auth/login", content);
@@ -99,6 +103,7 @@ public sealed partial class LoginPage : Page
                 if (login?.AccessToken is not null)
                 {
                     Api.SetAccessToken(login.AccessToken);
+                    await PersistLoginAsync(username, login, rememberMe);
                     ShowStatus("✓ Authenticated.", error: false, success: true);
                     await Task.Delay(400);
 
@@ -161,6 +166,202 @@ public sealed partial class LoginPage : Page
         ApplyMode();
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // Multi-account persistence & saved accounts UI
+    // ═══════════════════════════════════════════════════════════════
+
+    private void PopulateSavedAccounts()
+    {
+        var store = App.Services?.GetService<AccountStore>();
+        if (store is null) { SavedAccountsSection.Visibility = Visibility.Collapsed; return; }
+
+        var accounts = store.GetAccounts();
+        SavedAccountsPanel.Children.Clear();
+
+        if (accounts.Count == 0)
+        {
+            SavedAccountsSection.Visibility = Visibility.Collapsed;
+            return;
+        }
+
+        SavedAccountsSection.Visibility = Visibility.Visible;
+
+        foreach (var acct in accounts)
+        {
+            var hasValidRefresh = acct.RememberMe
+                && acct.RefreshToken is not null
+                && acct.RefreshTokenExpiresAt > DateTimeOffset.UtcNow;
+
+            var row = new Grid();
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var btn = new Button
+            {
+                HorizontalAlignment = HorizontalAlignment.Stretch,
+                HorizontalContentAlignment = HorizontalAlignment.Left,
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(8, 4),
+            };
+            var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+            sp.Children.Add(new TextBlock
+            {
+                Text = hasValidRefresh ? "›" : "·", FontFamily = Mono, FontSize = 12,
+                Foreground = new SolidColorBrush(hasValidRefresh ? ColorGreen : ColorGray),
+            });
+            sp.Children.Add(new TextBlock
+            {
+                Text = acct.Username, FontFamily = Mono, FontSize = 12,
+                Foreground = new SolidColorBrush(hasValidRefresh ? ColorGreen : ColorGray),
+            });
+            if (hasValidRefresh)
+                sp.Children.Add(new TextBlock
+                {
+                    Text = "→ click to login", FontFamily = Mono, FontSize = 10,
+                    Foreground = new SolidColorBrush(ColorGray),
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+
+            var captured = acct;
+            btn.Click += async (_, _) =>
+            {
+                if (hasValidRefresh)
+                    await AutoLoginWithRefreshAsync(captured);
+                else
+                {
+                    UsernameBox.Text = captured.Username;
+                    PasswordBox.Focus(FocusState.Programmatic);
+                }
+            };
+            btn.Content = sp;
+            Grid.SetColumn(btn, 0);
+            row.Children.Add(btn);
+
+            var removeBtn = new Button
+            {
+                Content = new TextBlock { Text = "✕", FontFamily = Mono, FontSize = 10,
+                    Foreground = new SolidColorBrush(ColorRed) },
+                Background = new SolidColorBrush(Microsoft.UI.Colors.Transparent),
+                BorderThickness = new Thickness(0),
+                Padding = new Thickness(6, 4), MinWidth = 0, MinHeight = 0,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            removeBtn.Click += (_, _) =>
+            {
+                store.RemoveAccount(captured.UserId);
+                PopulateSavedAccounts();
+            };
+            Grid.SetColumn(removeBtn, 1);
+            row.Children.Add(removeBtn);
+            SavedAccountsPanel.Children.Add(row);
+        }
+    }
+
+    private async Task PersistLoginAsync(string username, LoginResponseDto login, bool rememberMe)
+    {
+        try
+        {
+            Guid? userId = null;
+            using (var meResp = await Api.GetAsync("/auth/me"))
+            {
+                if (meResp.IsSuccessStatusCode)
+                {
+                    using var stream = await meResp.Content.ReadAsStreamAsync();
+                    using var doc = await JsonDocument.ParseAsync(stream);
+                    if (doc.RootElement.TryGetProperty("id", out var idProp))
+                        userId = idProp.GetGuid();
+                }
+            }
+
+            if (userId is not { } uid) return;
+
+            var store = App.Services!.GetRequiredService<AccountStore>();
+            store.SaveAccount(new AccountStore.SavedAccount
+            {
+                UserId = uid,
+                Username = username,
+                AccessToken = login.AccessToken,
+                AccessTokenExpiresAt = login.AccessTokenExpiresAt,
+                RefreshToken = rememberMe ? login.RefreshToken : null,
+                RefreshTokenExpiresAt = rememberMe ? login.RefreshTokenExpiresAt : null,
+                RememberMe = rememberMe,
+            });
+
+            App.Services!.GetRequiredService<ClientSettings>().SwitchUser(uid);
+        }
+        catch { /* best-effort — login still succeeds */ }
+    }
+
+    private async Task AutoLoginWithRefreshAsync(AccountStore.SavedAccount account)
+    {
+        if (_isBusy) return;
+        _isBusy = true;
+        ShowStatus($"> Logging in as {account.Username}...", error: false);
+
+        try
+        {
+            var body = JsonSerializer.Serialize(
+                new { refreshToken = account.RefreshToken }, JsonOptions);
+            var content = new StringContent(body, Encoding.UTF8, "application/json");
+            var response = await Api.PostAsync("/auth/refresh", content);
+
+            if (response.IsSuccessStatusCode)
+            {
+                var json = await response.Content.ReadAsStringAsync();
+                var login = JsonSerializer.Deserialize<LoginResponseDto>(json, JsonOptions);
+
+                if (login?.AccessToken is not null)
+                {
+                    Api.SetAccessToken(login.AccessToken);
+
+                    var store = App.Services!.GetRequiredService<AccountStore>();
+                    store.SaveAccount(new AccountStore.SavedAccount
+                    {
+                        UserId = account.UserId,
+                        Username = account.Username,
+                        AccessToken = login.AccessToken,
+                        AccessTokenExpiresAt = login.AccessTokenExpiresAt,
+                        RefreshToken = login.RefreshToken ?? account.RefreshToken,
+                        RefreshTokenExpiresAt = login.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                        RememberMe = true,
+                    });
+
+                    App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
+
+                    ShowStatus("✓ Authenticated.", error: false, success: true);
+                    await Task.Delay(400);
+
+                    var navigator = App.Services!.GetRequiredService<INavigator>();
+                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
+                    await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
+                    return;
+                }
+            }
+
+            // Refresh failed — clear stale tokens
+            var s = App.Services?.GetService<AccountStore>();
+            if (s is not null)
+            {
+                account.RefreshToken = null;
+                account.RefreshTokenExpiresAt = null;
+                account.RememberMe = false;
+                s.SaveAccount(account);
+            }
+
+            ShowStatus("✗ Session expired. Please log in again.", error: true);
+            PopulateSavedAccounts();
+        }
+        catch (Exception ex)
+        {
+            ShowStatus($"✗ {ex.Message}", error: true);
+        }
+        finally
+        {
+            _isBusy = false;
+        }
+    }
+
     private void ApplyMode()
     {
         if (_isRegisterMode)
@@ -170,6 +371,7 @@ public sealed partial class LoginPage : Page
             ToggleModeLabel.Text = "> Already have an account? Login";
             ConfirmLabel.Visibility = Visibility.Visible;
             ConfirmPasswordBox.Visibility = Visibility.Visible;
+            SavedAccountsSection.Visibility = Visibility.Collapsed;
         }
         else
         {
@@ -178,6 +380,7 @@ public sealed partial class LoginPage : Page
             ToggleModeLabel.Text = "> No account? Register";
             ConfirmLabel.Visibility = Visibility.Collapsed;
             ConfirmPasswordBox.Visibility = Visibility.Collapsed;
+            PopulateSavedAccounts();
         }
 
         StatusBlock.Visibility = Visibility.Collapsed;

@@ -604,7 +604,7 @@ public sealed partial class SettingsPage : Page
         var deviceBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 300 };
         deviceBox.Items.Add(new ComboBoxItem { Content = "(none)", Tag = Guid.Empty });
-        var savedId = LoadLocalSetting(SelectedAudioDeviceKey);
+        var savedId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
         var selIdx = 0;
         for (var i = 0; i < devices.Count; i++)
         {
@@ -619,7 +619,7 @@ public sealed partial class SettingsPage : Page
         {
             if (deviceBox.SelectedItem is ComboBoxItem { Tag: Guid id })
             {
-                SaveLocalSetting(SelectedAudioDeviceKey, id == Guid.Empty ? null : id.ToString());
+                SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, id == Guid.Empty ? null : id.ToString());
                 Status(id == Guid.Empty ? "Input device cleared." : "✓ Input device saved.", id == Guid.Empty ? 0x808080 : 0x00FF00);
             }
         };
@@ -640,19 +640,10 @@ public sealed partial class SettingsPage : Page
     }
 
     private static void SaveLocalSetting(string key, string? value)
-    {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        if (value is null)
-            settings.Values.Remove(key);
-        else
-            settings.Values[key] = value;
-    }
+        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
 
     private static string? LoadLocalSetting(string key)
-    {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        return settings.Values.TryGetValue(key, out var val) ? val as string : null;
-    }
+        => App.Services?.GetService<ClientSettings>()?.Get(key);
 
     // ═══════════════════════════════════════════════════════════════
     // ROLES
@@ -1349,8 +1340,6 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record UserListEntry(Guid Id, string Username, string? Bio, Guid? RoleId, string? RoleName, bool IsUserAdmin);
 
-    private const string SelectedAudioDeviceKey = "SelectedAudioDeviceId";
-
     // ═══════════════════════════════════════════════════════════════
     // DANGER ZONE
     // ═══════════════════════════════════════════════════════════════
@@ -1455,7 +1444,17 @@ public sealed partial class SettingsPage : Page
         // Small delay to let the process release file handles.
         await Task.Delay(500);
 
-        // 2. Delete %LOCALAPPDATA%/SharpClaw (api-key, encryption keys, setup marker).
+        // 2. Clear frontend-only preferences (client-settings.json) in memory
+        //    so they are not re-flushed to disk before the directory is deleted.
+        try { App.Services?.GetService<ClientSettings>()?.Reset(); }
+        catch (Exception ex) { errors.Add($"Client settings: {ex.Message}"); }
+
+        // 2b. Clear saved account store.
+        try { App.Services?.GetService<AccountStore>()?.Reset(); }
+        catch (Exception ex) { errors.Add($"Account store: {ex.Message}"); }
+
+        // 3. Delete %LOCALAPPDATA%/SharpClaw (api-key, encryption keys, setup marker,
+        //    client-settings.json).
         try
         {
             var localAppData = Path.Combine(
@@ -1466,7 +1465,7 @@ public sealed partial class SettingsPage : Page
         }
         catch (Exception ex) { errors.Add($"LocalAppData: {ex.Message}"); }
 
-        // 3. Delete the backend's Data directory (JSON persistence).
+        // 4. Delete the backend's Data directory (JSON persistence).
         //    It lives next to the backend executable or, in dev mode, next
         //    to the Infrastructure assembly.  We check both the bundled
         //    location and the common dev-time location.
@@ -1478,7 +1477,7 @@ public sealed partial class SettingsPage : Page
         }
         catch (Exception ex) { errors.Add($"Data dir: {ex.Message}"); }
 
-        // 4. Delete the backend's Environment directory (config files).
+        // 5. Delete the backend's Environment directory (config files).
         try
         {
             var baseDir = AppContext.BaseDirectory;

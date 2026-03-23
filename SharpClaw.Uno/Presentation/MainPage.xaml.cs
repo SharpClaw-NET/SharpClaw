@@ -110,9 +110,6 @@ public sealed partial class MainPage : Page
     private CancellationTokenSource? _transcriptionPollCts;
     private readonly StringBuilder _transcriptionAccumulator = new(capacity: 2048);
 
-    private const string TranscriptionAgentKey = "TranscriptionAgentId";
-    private const string SelectedAudioDeviceKey = "SelectedAudioDeviceId";
-
     private static SolidColorBrush Brush(int rgb)
     {
         if (!_brushCache.TryGetValue(rgb, out var brush))
@@ -1777,8 +1774,8 @@ public sealed partial class MainPage : Page
 
     private void UpdateMicState()
     {
-        var agentId = LoadLocalSetting(TranscriptionAgentKey);
-        var deviceId = LoadLocalSetting(SelectedAudioDeviceKey);
+        var agentId = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
+        var deviceId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
         var configured = agentId is not null && Guid.TryParse(agentId, out _)
                       && deviceId is not null && Guid.TryParse(deviceId, out _)
                       && _selectedChannelId is not null;
@@ -1810,8 +1807,8 @@ public sealed partial class MainPage : Page
             return;
         }
 
-        var agentIdStr = LoadLocalSetting(TranscriptionAgentKey);
-        var deviceIdStr = LoadLocalSetting(SelectedAudioDeviceKey);
+        var agentIdStr = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
+        var deviceIdStr = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
         if (agentIdStr is null || !Guid.TryParse(agentIdStr, out var agentId)
             || deviceIdStr is null || !Guid.TryParse(deviceIdStr, out var deviceId))
             return;
@@ -2047,19 +2044,10 @@ public sealed partial class MainPage : Page
     }
 
     private static string? LoadLocalSetting(string key)
-    {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        return settings.Values.TryGetValue(key, out var val) ? val as string : null;
-    }
+        => App.Services?.GetService<ClientSettings>()?.Get(key);
 
     private static void SaveLocalSetting(string key, string? value)
-    {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        if (value is null)
-            settings.Values.Remove(key);
-        else
-            settings.Values[key] = value;
-    }
+        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
 
     // ── Messages ─────────────────────────────────────────────────
 
@@ -3958,7 +3946,7 @@ public sealed partial class MainPage : Page
         foreach (var a in txAgents)
             txDisplayMap.TryAdd($"{a.Name}  ({a.ProviderName}/{a.ModelName})", a.Id);
 
-        var savedTxAgent = LoadLocalSetting(TranscriptionAgentKey);
+        var savedTxAgent = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
         AgentDto? currentTxAgent = null;
         if (savedTxAgent is not null && Guid.TryParse(savedTxAgent, out var savedTxId))
             currentTxAgent = _allAgents.FirstOrDefault(a => a.Id == savedTxId);
@@ -3993,7 +3981,7 @@ public sealed partial class MainPage : Page
             };
             txClearBtn.Click += (_, _) =>
             {
-                SaveLocalSetting(TranscriptionAgentKey, null);
+                SaveLocalSetting(ClientSettings.TranscriptionAgentId, null);
                 txCurrentLabel.Text = "(none)";
                 txCurrentLabel.Foreground = Brush(0x777777);
                 txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
@@ -4034,7 +4022,7 @@ public sealed partial class MainPage : Page
             var chosen = args.ChosenSuggestion?.ToString();
             if (chosen is null || !txDisplayMap.TryGetValue(chosen, out var aid)) return;
             sender.Text = string.Empty;
-            SaveLocalSetting(TranscriptionAgentKey, aid.ToString());
+            SaveLocalSetting(ClientSettings.TranscriptionAgentId, aid.ToString());
             txCurrentLabel.Text = chosen;
             txCurrentLabel.Foreground = Brush(0xE0E0E0);
             txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
@@ -4050,7 +4038,7 @@ public sealed partial class MainPage : Page
                 };
                 clearBtn.Click += (_, _) =>
                 {
-                    SaveLocalSetting(TranscriptionAgentKey, null);
+                    SaveLocalSetting(ClientSettings.TranscriptionAgentId, null);
                     txCurrentLabel.Text = "(none)";
                     txCurrentLabel.Foreground = Brush(0x777777);
                     txCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
@@ -4074,7 +4062,7 @@ public sealed partial class MainPage : Page
         foreach (var d in audioDevices)
             adDisplayMap.TryAdd($"{d.Name}  ({d.Id.ToString()[..8]}…)", d.Id);
 
-        var savedAdId = LoadLocalSetting(SelectedAudioDeviceKey);
+        var savedAdId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
         ResourceItemDto? currentAd = null;
         if (savedAdId is not null && Guid.TryParse(savedAdId, out var savedAdGuid))
             currentAd = audioDevices.FirstOrDefault(d => d.Id == savedAdGuid);
@@ -4109,7 +4097,7 @@ public sealed partial class MainPage : Page
             };
             adClearBtn.Click += (_, _) =>
             {
-                SaveLocalSetting(SelectedAudioDeviceKey, null);
+                SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, null);
                 adCurrentLabel.Text = "(none)";
                 adCurrentLabel.Foreground = Brush(0x777777);
                 adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
@@ -4150,7 +4138,7 @@ public sealed partial class MainPage : Page
             var chosen = args.ChosenSuggestion?.ToString();
             if (chosen is null || !adDisplayMap.TryGetValue(chosen, out var did)) return;
             sender.Text = string.Empty;
-            SaveLocalSetting(SelectedAudioDeviceKey, did.ToString());
+            SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, did.ToString());
             adCurrentLabel.Text = chosen;
             adCurrentLabel.Foreground = Brush(0xE0E0E0);
             adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
@@ -4165,7 +4153,7 @@ public sealed partial class MainPage : Page
                 };
                 clearBtn.Click += (_, _) =>
                 {
-                    SaveLocalSetting(SelectedAudioDeviceKey, null);
+                    SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, null);
                     adCurrentLabel.Text = "(none)";
                     adCurrentLabel.Foreground = Brush(0x777777);
                     adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;

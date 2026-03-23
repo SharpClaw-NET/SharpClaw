@@ -45,18 +45,17 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
             }
         }
 
-        // TODO: Temporarily commented out – re-enable when auth flow is ready.
-        // // Enforce authentication on non-exempt paths.
-        // if (!IsExemptPath(context.Request.Path))
-        // {
-        //     var session = context.RequestServices.GetRequiredService<SessionService>();
-        //     if (session.UserId is null)
-        //     {
-        //         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        //         await context.Response.WriteAsync("Authentication required.");
-        //         return;
-        //     }
-        // }
+        // Enforce authentication on non-exempt paths.
+        if (!IsExemptPath(context.Request.Path))
+        {
+            var session = context.RequestServices.GetRequiredService<SessionService>();
+            if (session.UserId is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await context.Response.WriteAsync("Authentication required.");
+                return;
+            }
+        }
 
         await next(context);
     }
