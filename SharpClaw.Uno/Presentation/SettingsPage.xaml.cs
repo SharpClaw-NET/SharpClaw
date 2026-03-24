@@ -472,6 +472,43 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(promptBox);
         ContentPanel.Children.Add(savePromptBtn);
 
+        // Provider parameters
+        Sub("Provider Parameters");
+        Lbl("Optional JSON key-value pairs merged into every API request for this agent's provider "
+            + "(e.g. {\"response_mime_type\":\"application/json\"} for Gemini).", 0x808080);
+        var currentParams = a.ProviderParameters is { Count: > 0 }
+            ? JsonSerializer.Serialize(a.ProviderParameters, new JsonSerializerOptions { WriteIndented = true })
+            : "{}";
+        var paramsBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
+            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Text = currentParams, AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 60 };
+        var saveParamsBtn = GreenButton("Save Parameters");
+        saveParamsBtn.Click += async (_, _) =>
+        {
+            Dictionary<string, JsonElement>? parsed = null;
+            var raw = paramsBox.Text?.Trim();
+            if (!string.IsNullOrEmpty(raw) && raw != "{}")
+            {
+                try
+                {
+                    parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw);
+                }
+                catch (JsonException)
+                {
+                    Status("\u2717 Invalid JSON.", 0xFF4444);
+                    return;
+                }
+            }
+            var body = JsonSerializer.Serialize(new { providerParameters = parsed }, Json);
+            var resp = await Api.PutAsync($"/agents/{a.Id}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Status(resp.IsSuccessStatusCode ? "\u2713 Parameters saved." : "\u2717 Save failed.",
+                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
+        };
+        ContentPanel.Children.Add(paramsBox);
+        ContentPanel.Children.Add(saveParamsBtn);
+
         // Assign role
         Sub("Role");
         _cachedRoles ??= [];
@@ -1043,7 +1080,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModelEntry(Guid Id, string Name, Guid ProviderId, string ProviderName, string Capabilities);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null);
+    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, Dictionary<string, JsonElement>? ProviderParameters = null);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record RoleEntry(Guid Id, string Name, Guid? PermissionSetId = null);
     [ImplicitKeys(IsEnabled = false)]

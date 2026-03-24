@@ -105,15 +105,16 @@ public sealed partial class ChatService(
 
         var modelCapabilities = model.Capabilities;
         var maxTokens = agent.MaxCompletionTokens;
+        var providerParams = agent.ProviderParameters;
 
         var loopResult = useNativeTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, approvalCallback, ct,
                 taskContext: request.TaskContext)
             : await RunTextToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, approvalCallback, ct,
                 taskContext: request.TaskContext);
 
         // Persist both messages
@@ -797,6 +798,7 @@ public sealed partial class ChatService(
 
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
         var maxTokens = agent.MaxCompletionTokens;
+        var providerParams = agent.ProviderParameters;
         var effectiveTools = GetEffectiveTools(request.TaskContext);
 
         // Convert history to tool-aware messages
@@ -816,7 +818,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -1423,6 +1425,7 @@ public sealed partial class ChatService(
         Guid channelId,
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct,
         TaskChatContext? taskContext = null)
@@ -1441,7 +1444,7 @@ public sealed partial class ChatService(
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, ct);
 
             if (result.Usage is { } usage)
             {
@@ -1518,7 +1521,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
+                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, ct);
                 if (finalResult.Usage is { } finalUsage)
                 {
                     totalPromptTokens += finalUsage.PromptTokens;
@@ -1545,6 +1548,7 @@ public sealed partial class ChatService(
         Guid channelId,
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct,
         TaskChatContext? taskContext = null)
@@ -1557,7 +1561,7 @@ public sealed partial class ChatService(
         while (true)
         {
             assistantContent = await client.ChatCompletionAsync(
-                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
+                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, ct);
 
             var toolCalls = ParseToolCalls(assistantContent);
             if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
@@ -1634,7 +1638,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 assistantContent = await client.ChatCompletionAsync(
-                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
+                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, ct);
                 break;
             }
         }

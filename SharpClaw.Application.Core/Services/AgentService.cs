@@ -26,6 +26,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             MaxCompletionTokens = request.MaxCompletionTokens,
             ModelId = model.Id,
             CustomId = request.CustomId,
+            ProviderParameters = request.ProviderParameters,
         };
 
         db.Agents.Add(agent);
@@ -63,7 +64,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
                 a.Id, a.Name, a.SystemPrompt,
                 a.ModelId, a.Model.Name, a.Model.Provider.Name,
                 a.RoleId, a.Role != null ? a.Role.Name : null,
-                a.MaxCompletionTokens, a.CustomId))
+                a.MaxCompletionTokens, a.CustomId, a.ProviderParameters))
             .ToListAsync(ct);
     }
 
@@ -79,6 +80,8 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
         if (request.SystemPrompt is not null) agent.SystemPrompt = request.SystemPrompt;
         if (request.MaxCompletionTokens is not null) agent.MaxCompletionTokens = request.MaxCompletionTokens;
         if (request.CustomId is not null) agent.CustomId = request.CustomId;
+        if (request.ProviderParameters is not null)
+            agent.ProviderParameters = request.ProviderParameters.Count > 0 ? request.ProviderParameters : null;
         if (request.ModelId is { } modelId)
         {
             var model = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == modelId, ct)
@@ -433,5 +436,5 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
 
     private static AgentResponse ToResponse(AgentDB agent, ModelDB model) =>
         new(agent.Id, agent.Name, agent.SystemPrompt, model.Id, model.Name, model.Provider.Name,
-            agent.RoleId, agent.Role?.Name, agent.MaxCompletionTokens, agent.CustomId);
+            agent.RoleId, agent.Role?.Name, agent.MaxCompletionTokens, agent.CustomId, agent.ProviderParameters);
 }

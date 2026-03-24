@@ -1,4 +1,4 @@
-# SharpClaw Application API Reference
+﻿# SharpClaw Application API Reference
 
 > **Base URL:** `http://127.0.0.1:48923`
 >
@@ -202,11 +202,230 @@ Pending, Downloading, Ready, Failed
 
 ---
 
+
 ## Auth
+
+SharpClaw uses a two-layer authentication scheme:
+
+1. **API Key** — Every request (except `GET /echo`) must include an
+   `X-Api-Key` header. The key is auto-generated per session and written
+   to `%LOCALAPPDATA%/SharpClaw/.api-key`. This is for local machine
+   trust, not user identity.
+2. **JWT Bearer Token** — After the API key check, a standard
+   `Authorization: Bearer <token>` header identifies the user. Endpoints
+   that are not exempt (see below) return `401` if the token is missing,
+   expired, or invalid.
+
+**Exempt paths** (no JWT required): `/echo`, `/ping`, `/auth/login`,
+`/auth/register`, `/auth/refresh`, `/editor/ws*`.
+
+### Token lifetimes (defaults)
+
+| Token | Default Lifetime | Configurable via |
+|-------|-----------------|------------------|
+| Access token (JWT) | 30 minutes | `Jwt:AccessTokenLifetime` |
+| Refresh token | 30 days | `Jwt:RefreshTokenLifetime` |
+
+Access tokens are short-lived and stateless (validated by signature +
+expiry). Refresh tokens are stored server-side and support revocation
+and rotation.
+
+### Complete token lifecycle
+
+The diagram below shows the full access / refresh token lifecycle that
+third-party clients should implement.
+
+```
+ ┌──────────────┐                              ┌──────────────┐
+ │  3rd-party   │                              │  SharpClaw   │
+ │   client     │                              │    API       │
+ └──────┬───────┘                              └──────┬───────┘
+        │                                             │
+        │  1. POST /auth/register                     │
+        │   { username, password }                    │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 { id, username } ───────────┤
+        │                                             │
+        │  2. POST /auth/login                        │
+        │   { username, password, rememberMe: true }  │
+        ├────────────────────────────────────────────►│
+        │◄── 200 { accessToken,                  ─────┤
+        │         accessTokenExpiresAt,                │
+        │         refreshToken,                        │
+        │         refreshTokenExpiresAt }              │
+        │                                             │
+        │  3. Use access token on all requests        │
+        │   Authorization: Bearer <accessToken>       │
+        │   X-Api-Key: <key>                          │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 (normal response) ──────────┤
+        │                                             │
+        │  ··· (time passes, token nears expiry) ···  │
+        │                                             │
+        │  4. Access token expired → 401              │
+        │   GET /some-endpoint                        │
+        ├────────────────────────────────────────────►│
+        │◄── 401 { error: "access_token_expired" } ──┤
+        │    WWW-Authenticate: Bearer                 │
+        │      error="invalid_token"                  │
+        │                                             │
+        │  5. POST /auth/refresh                      │
+        │   { refreshToken: "<saved-token>" }         │
+        ├────────────────────────────────────────────►│
+        │◄── 200 { accessToken (new),            ─────┤
+        │         accessTokenExpiresAt,                │
+        │         refreshToken (rotated),              │
+        │         refreshTokenExpiresAt }              │
+        │                                             │
+        │  6. Retry original request with new token   │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 (normal response) ──────────┤
+        │                                             │
+```
+
+**Key implementation notes for third-party clients:**
+
+- Always store both the access token **and** the refresh token.
+- Check `accessTokenExpiresAt` proactively to refresh before expiry, or
+  react to the `401` / `access_token_expired` error code.
+- After a successful refresh, the **old refresh token is revoked** and a
+  new one is returned (rotation). Always replace your stored refresh
+  token with the new one.
+- If the refresh token itself is expired or revoked, `/auth/refresh`
+  returns `401` — the user must log in again.
+- `rememberMe: false` on login omits the refresh token entirely. The
+  access token is the only credential and cannot be renewed after expiry.
+
+### Detecting access token expiry (machine-readable)
+
+When an access token expires (naturally or via server-side invalidation),
+the API returns a specific response that third-party clients can detect
+programmatically:
+
+**Status:** `401 Unauthorized`
+
+**Headers:**
+
+```
+WWW-Authenticate: Bearer error="invalid_token", error_description="The access token has expired"
+```
+
+**Body (`application/json`):**
+
+```json
+{
+  "error": "access_token_expired",
+  "message": "The access token has expired. Use your refresh token to obtain a new one via POST /auth/refresh."
+}
+```
+
+**How to distinguish 401 causes:**
+
+| Cause | Body | Content-Type |
+|-------|------|-------------|
+| Expired access token | `{ "error": "access_token_expired", ... }` | `application/json` |
+| Missing/invalid API key | `"Invalid or missing API key."` | `text/plain` |
+| Missing/malformed JWT | `"Authentication required."` | `text/plain` |
+
+The `AccessTokenExpiredException` class
+(`SharpClaw.Contracts.Exceptions.AccessTokenExpiredException`) exposes a
+constant `ErrorCode = "access_token_expired"` that .NET clients can
+reference directly instead of hard-coding the string.
+
+### Server-side token invalidation
+
+Administrators can force-invalidate tokens without waiting for natural
+expiry:
+
+- **`POST /auth/invalidate-access-tokens`** — Sets an invalidation
+  timestamp on the user record. Any access token issued *before* this
+  timestamp is rejected (returns the `access_token_expired` error).
+  Refresh tokens remain valid — users can still refresh.
+- **`POST /auth/invalidate-refresh-tokens`** — Revokes all refresh
+  tokens for the specified users. Existing access tokens remain valid
+  until their natural expiry.
+
+To fully lock out a user immediately, call both endpoints.
+
+### Example: third-party client refresh flow (pseudocode)
+
+```python
+response = http.get("/agents", headers={
+    "Authorization": f"Bearer {access_token}",
+    "X-Api-Key": api_key,
+})
+
+if response.status == 401:
+    body = response.json()
+    if body.get("error") == "access_token_expired" and refresh_token:
+        refresh_resp = http.post("/auth/refresh", json={
+            "refreshToken": refresh_token
+        }, headers={"X-Api-Key": api_key})
+
+        if refresh_resp.status == 200:
+            tokens = refresh_resp.json()
+            access_token  = tokens["accessToken"]
+            refresh_token = tokens["refreshToken"]   # rotated!
+            # Retry the original request
+            response = http.get("/agents", headers={
+                "Authorization": f"Bearer {access_token}",
+                "X-Api-Key": api_key,
+            })
+        else:
+            # Refresh token expired/revoked → force re-login
+            redirect_to_login()
+    else:
+        # Not an expiry issue → missing or invalid token
+        redirect_to_login()
+```
+
+### Example: C# / .NET client with automatic refresh
+
+```csharp
+public async Task<HttpResponseMessage> SendWithAutoRefreshAsync(
+    HttpClient http, HttpRequestMessage request,
+    TokenStore tokens)
+{
+    request.Headers.Authorization =
+        new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+    request.Headers.Add("X-Api-Key", tokens.ApiKey);
+
+    var response = await http.SendAsync(request);
+
+    if (response.StatusCode == HttpStatusCode.Unauthorized)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (body.Contains(AccessTokenExpiredException.ErrorCode)
+            && tokens.RefreshToken is not null)
+        {
+            var refreshResp = await http.PostAsJsonAsync("/auth/refresh",
+                new { refreshToken = tokens.RefreshToken });
+
+            if (refreshResp.IsSuccessStatusCode)
+            {
+                var login = await refreshResp.Content
+                    .ReadFromJsonAsync<LoginResponse>();
+                tokens.AccessToken  = login!.AccessToken;
+                tokens.RefreshToken = login.RefreshToken;
+
+                // Clone and retry
+                var retry = await CloneRequestAsync(request);
+                retry.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+                response = await http.SendAsync(retry);
+            }
+        }
+    }
+
+    return response;
+}
+```
+
+---
 
 ### POST /auth/register
 
-Register a new user.
+Register a new user. **No JWT required** (but API key is required).
 
 **Request:**
 
@@ -230,6 +449,8 @@ Register a new user.
 
 ### POST /auth/login
 
+Authenticate and receive tokens. **No JWT required.**
+
 **Request:**
 
 ```json
@@ -240,14 +461,18 @@ Register a new user.
 }
 ```
 
+| Field | Description |
+|-------|-------------|
+| `rememberMe` | When `true`, the response includes a refresh token. When `false` (default), only the short-lived access token is returned. |
+
 **Response `200`:**
 
 ```json
 {
-  "accessToken": "string",
-  "accessTokenExpiresAt": "datetime",
-  "refreshToken": "string | null",
-  "refreshTokenExpiresAt": "datetime | null"
+  "accessToken": "eyJhbG...",
+  "accessTokenExpiresAt": "2025-01-15T12:30:00+00:00",
+  "refreshToken": "base64-string | null",
+  "refreshTokenExpiresAt": "2025-02-14T12:00:00+00:00 | null"
 }
 ```
 
@@ -257,6 +482,10 @@ Register a new user.
 
 ### POST /auth/refresh
 
+Exchange a valid refresh token for a new access + refresh token pair.
+**No JWT required.** The old refresh token is **revoked** upon
+successful use (one-time use / rotation).
+
 **Request:**
 
 ```json
@@ -265,13 +494,27 @@ Register a new user.
 }
 ```
 
-**Response `200`:** Same shape as login response.
+**Response `200`:** Same shape as login response (both tokens rotated).
 
-**Response `401`:** Invalid or expired refresh token.
+```json
+{
+  "accessToken": "eyJhbG... (new)",
+  "accessTokenExpiresAt": "2025-01-15T13:00:00+00:00",
+  "refreshToken": "base64-string (new — store this!)",
+  "refreshTokenExpiresAt": "2025-02-14T12:30:00+00:00"
+}
+```
+
+**Response `401`:** Refresh token is invalid, expired, or already
+revoked. The user must log in again.
 
 ---
 
 ### POST /auth/invalidate-access-tokens
+
+Force-expire all access tokens issued before *now* for the given users.
+Existing JWTs become invalid even if they haven't reached their natural
+expiry. Refresh tokens are **not** affected — users can still refresh.
 
 **Request:**
 
@@ -286,6 +529,9 @@ Register a new user.
 ---
 
 ### POST /auth/invalidate-refresh-tokens
+
+Revoke all refresh tokens for the given users. Existing access tokens
+remain valid until their natural expiry.
 
 **Request:**
 

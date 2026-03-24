@@ -1,8 +1,10 @@
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
+using SharpClaw.Contracts.Exceptions;
 
 namespace SharpClaw.Application.API.Api;
 
@@ -12,6 +14,13 @@ namespace SharpClaw.Application.API.Api;
 /// authenticated user's ID.  Runs <b>after</b> the API-key gate so that
 /// only key-authenticated requests are processed.
 /// Non-exempt endpoints return <c>401</c> when no valid JWT is present.
+/// <para>
+/// When a structurally valid JWT has <b>expired</b>, the response includes
+/// a JSON body with <c>"error": "access_token_expired"</c> and a
+/// <c>WWW-Authenticate: Bearer error="invalid_token"</c> header so that
+/// third-party clients can detect expiry programmatically and refresh the
+/// access token via <c>POST /auth/refresh</c>.
+/// </para>
 /// </summary>
 public sealed class JwtSessionMiddleware(RequestDelegate next)
 {
@@ -26,6 +35,8 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
 
     public async Task InvokeAsync(HttpContext context)
     {
+        var tokenExpired = false;
+
         var authHeader = context.Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
@@ -39,8 +50,25 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
                     && result.Claims.TryGetValue(JwtRegisteredClaimNames.Sub, out var sub)
                     && Guid.TryParse(sub?.ToString(), out var userId))
                 {
-                    var session = context.RequestServices.GetRequiredService<SessionService>();
-                    session.UserId = userId;
+                    // Check server-side invalidation (password change, admin action, etc.)
+                    var authService = context.RequestServices.GetRequiredService<AuthService>();
+                    var issuedAt = TokenService.GetIssuedAt(result);
+
+                    if (issuedAt is not null
+                        && !await authService.IsAccessTokenValidForUserAsync(userId, issuedAt.Value))
+                    {
+                        // Token was server-side invalidated — treat as expired
+                        tokenExpired = true;
+                    }
+                    else
+                    {
+                        var session = context.RequestServices.GetRequiredService<SessionService>();
+                        session.UserId = userId;
+                    }
+                }
+                else if (result.Exception is SecurityTokenExpiredException)
+                {
+                    tokenExpired = true;
                 }
             }
         }
@@ -52,7 +80,19 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
             if (session.UserId is null)
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-                await context.Response.WriteAsync("Authentication required.");
+
+                if (tokenExpired)
+                {
+                    // Machine-readable expiry signal for third-party clients
+                    context.Response.Headers["WWW-Authenticate"] = """Bearer error="invalid_token", error_description="The access token has expired" """.Trim();
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(
+                        $$"""{"error":"{{AccessTokenExpiredException.ErrorCode}}","message":"The access token has expired. Use your refresh token to obtain a new one via POST /auth/refresh."}""");
+                }
+                else
+                {
+                    await context.Response.WriteAsync("Authentication required.");
+                }
                 return;
             }
         }

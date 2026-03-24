@@ -1,3 +1,4 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
@@ -139,6 +140,9 @@ public class SharpClawDbContext(
         modelBuilder.Entity<AgentDB>(e =>
         {
             e.HasIndex(a => a.Name).IsUnique();
+            e.Property(a => a.ProviderParameters).HasConversion(
+                v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null) : null,
+                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(v, (JsonSerializerOptions?)null) : null);
             e.HasMany(a => a.Contexts)
                 .WithOne(c => c.Agent)
                 .HasForeignKey(c => c.AgentId)

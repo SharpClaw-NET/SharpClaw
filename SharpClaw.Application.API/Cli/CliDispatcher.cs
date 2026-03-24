@@ -546,10 +546,10 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "agent add <name> <modelId>  [system prompt] [--max-tokens <n>]",
+                "agent add <name> <modelId>  [system prompt] [--max-tokens <n>] [--params <json>]",
                 "agent get <id>",
                 "agent list",
-                "agent update <id> <name> [modelId] [system prompt] [--max-tokens <n>]",
+                "agent update <id> <name> [modelId] [system prompt] [--max-tokens <n>] [--params <json>]",
                 "agent role <id> <roleId>                  Assign a role (use 'role list')",
                 "agent role <id> none                      Remove role",
                 "agent sync-with-models                    Create default-<model> agents",
@@ -628,12 +628,19 @@ public static class CliDispatcher
 
         // Separate flags from positional args (system prompt)
         int? maxTokens = null;
+        Dictionary<string, JsonElement>? providerParams = null;
         var promptParts = new List<string>();
         for (var i = 4; i < args.Length; i++)
         {
             if (args[i] is "--max-tokens" && i + 1 < args.Length && int.TryParse(args[i + 1], out var mt))
             {
                 maxTokens = mt; i++;
+            }
+            else if (args[i] is "--params" && i + 1 < args.Length)
+            {
+                try { providerParams = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args[i + 1]); }
+                catch (JsonException ex) { Console.Error.WriteLine($"Invalid --params JSON: {ex.Message}"); return Results.BadRequest("Invalid --params JSON."); }
+                i++;
             }
             else
             {
@@ -643,7 +650,7 @@ public static class CliDispatcher
 
         var prompt = promptParts.Count > 0 ? string.Join(' ', promptParts) : null;
         return await AgentHandlers.Create(
-            new CreateAgentRequest(args[2], modelId, prompt, maxTokens), svc);
+            new CreateAgentRequest(args[2], modelId, prompt, maxTokens, ProviderParameters: providerParams), svc);
     }
 
     private static async Task<IResult> HandleAgentUpdate(string[] args, AgentService svc)
@@ -653,12 +660,19 @@ public static class CliDispatcher
 
         // Separate flags from positional args
         int? maxTokens = null;
+        Dictionary<string, JsonElement>? providerParams = null;
         var positional = new List<string>();
         for (var i = 4; i < args.Length; i++)
         {
             if (args[i] is "--max-tokens" && i + 1 < args.Length && int.TryParse(args[i + 1], out var mt))
             {
                 maxTokens = mt; i++;
+            }
+            else if (args[i] is "--params" && i + 1 < args.Length)
+            {
+                try { providerParams = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args[i + 1]); }
+                catch (JsonException ex) { Console.Error.WriteLine($"Invalid --params JSON: {ex.Message}"); return Results.BadRequest("Invalid --params JSON."); }
+                i++;
             }
             else
             {
@@ -673,7 +687,7 @@ public static class CliDispatcher
         else if (modelId is null && positional.Count >= 1)
             prompt = string.Join(' ', positional);
 
-        var request = new UpdateAgentRequest(name, modelId, prompt, maxTokens);
+        var request = new UpdateAgentRequest(name, modelId, prompt, maxTokens, ProviderParameters: providerParams);
         return await AgentHandlers.Update(agentId, request, svc);
     }
 

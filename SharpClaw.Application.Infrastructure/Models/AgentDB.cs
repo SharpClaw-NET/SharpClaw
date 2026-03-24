@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Contracts.Entities;
@@ -16,6 +17,14 @@ public class AgentDB : BaseEntity
     /// <see langword="null"/> means no limit (provider default).
     /// </summary>
     public int? MaxCompletionTokens { get; set; }
+
+    /// <summary>
+    /// Optional provider-specific parameters merged into the API request
+    /// payload.  Keys and values are provider-dependent — for example,
+    /// Google Gemini accepts <c>response_mime_type</c> while OpenAI uses
+    /// <c>response_format</c>.  Stored as a JSON string in the database.
+    /// </summary>
+    public Dictionary<string, JsonElement>? ProviderParameters { get; set; }
 
     public Guid ModelId { get; set; }
     public ModelDB Model { get; set; } = null!;

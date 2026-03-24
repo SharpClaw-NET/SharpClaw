@@ -1,3 +1,4 @@
+using System.Text.Json;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Application.Core.Clients;
@@ -23,6 +24,7 @@ public interface IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -37,6 +39,7 @@ public interface IProviderApiClient
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(
@@ -58,6 +61,7 @@ public interface IProviderApiClient
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(

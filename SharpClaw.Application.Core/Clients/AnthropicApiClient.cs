@@ -44,6 +44,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         CancellationToken ct = default)
     {
         var payload = new MessagesRequest
@@ -58,7 +59,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
         AddAuthHeaders(request, apiKey);
-        request.Content = JsonContent.Create(payload, options: WriteOptions);
+        request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
         var response = await httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
@@ -113,6 +114,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         CancellationToken ct = default)
     {
         var payload = new AntToolCompletionRequest
@@ -131,7 +133,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
         AddAuthHeaders(request, apiKey);
-        request.Content = JsonContent.Create(payload, options: WriteOptions);
+        request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
         var response = await httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
@@ -369,6 +371,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var payload = new AntStreamRequest
@@ -388,7 +391,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
         AddAuthHeaders(request, apiKey);
-        request.Content = JsonContent.Create(payload, options: WriteOptions);
+        request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
         using var response = await httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
