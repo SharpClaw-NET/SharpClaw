@@ -38,12 +38,6 @@ public sealed class JwtSessionMiddleware(RequestDelegate next, IConfiguration co
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (_disabled)
-        {
-            await next(context);
-            return;
-        }
-
         var tokenExpired = false;
 
         var authHeader = context.Request.Headers.Authorization.ToString();
@@ -82,8 +76,8 @@ public sealed class JwtSessionMiddleware(RequestDelegate next, IConfiguration co
             }
         }
 
-        // Enforce authentication on non-exempt paths.
-        if (!IsExemptPath(context.Request.Path))
+        // Enforce authentication on non-exempt paths (skipped when disabled via .env).
+        if (!_disabled && !IsExemptPath(context.Request.Path))
         {
             var session = context.RequestServices.GetRequiredService<SessionService>();
             if (session.UserId is null)

@@ -255,9 +255,11 @@ When `DisableApiKeyCheck` is `true`, the `ApiKeyMiddleware` short-circuits
 immediately (equivalent to every request carrying a valid key).
 
 When `DisableAccessTokenCheck` is `true`, the `JwtSessionMiddleware`
-short-circuits immediately — no JWT is parsed, no session is populated,
-and no 401 is returned for missing/expired tokens.  Endpoints that rely
-on `SessionService.UserId` will see `null`.
+skips enforcement — no 401 is returned for missing/expired tokens on
+non-exempt paths.  JWT parsing still runs, so if a valid Bearer token
+is present, `SessionService.UserId` is populated normally.  Endpoints
+that rely on `SessionService.UserId` (e.g. `GET /auth/me`) still work
+when a token is provided; they just won't be *required*.
 
 ### Complete token lifecycle
 
