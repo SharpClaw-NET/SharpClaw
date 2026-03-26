@@ -286,7 +286,7 @@ public static class CliDispatcher
                 "provider login <providerId>",
                 "provider sync-models <providerId>",
                 "provider cost <providerId> [--days <n>]",
-                "provider cost-total [--days <n>]");
+                "provider cost-total [--days <n>] [--simple] [--all]");
             return Results.Ok();
         }
 
@@ -348,7 +348,7 @@ public static class CliDispatcher
             "cost" => UsageResult("provider cost <id> [--days <n>]"),
 
             "cost-total"
-                => await HandleProviderCostTotal(ParseDaysFlag(args, 2), sp),
+                => await HandleProviderCostTotal(args, sp),
 
             _ => UsageResult($"Unknown sub-command: provider {sub}. Try 'help' for usage.")
         };
@@ -629,6 +629,15 @@ public static class CliDispatcher
         // Separate flags from positional args (system prompt)
         int? maxTokens = null;
         Dictionary<string, JsonElement>? providerParams = null;
+        float? temperature = null;
+        float? topP = null;
+        int? topK = null;
+        float? frequencyPenalty = null;
+        float? presencePenalty = null;
+        string[]? stop = null;
+        int? seed = null;
+        JsonElement? responseFormat = null;
+        string? reasoningEffort = null;
         var promptParts = new List<string>();
         for (var i = 4; i < args.Length; i++)
         {
@@ -642,6 +651,44 @@ public static class CliDispatcher
                 catch (JsonException ex) { Console.Error.WriteLine($"Invalid --params JSON: {ex.Message}"); return Results.BadRequest("Invalid --params JSON."); }
                 i++;
             }
+            else if (args[i] is "--temperature" or "--temp" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var temp))
+            {
+                temperature = temp; i++;
+            }
+            else if (args[i] is "--top-p" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var tp))
+            {
+                topP = tp; i++;
+            }
+            else if (args[i] is "--top-k" && i + 1 < args.Length && int.TryParse(args[i + 1], out var tk))
+            {
+                topK = tk; i++;
+            }
+            else if (args[i] is "--frequency-penalty" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var fp))
+            {
+                frequencyPenalty = fp; i++;
+            }
+            else if (args[i] is "--presence-penalty" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var pp))
+            {
+                presencePenalty = pp; i++;
+            }
+            else if (args[i] is "--stop" && i + 1 < args.Length)
+            {
+                stop = args[i + 1].Split(','); i++;
+            }
+            else if (args[i] is "--seed" && i + 1 < args.Length && int.TryParse(args[i + 1], out var sd))
+            {
+                seed = sd; i++;
+            }
+            else if (args[i] is "--response-format" && i + 1 < args.Length)
+            {
+                try { responseFormat = JsonDocument.Parse(args[i + 1]).RootElement.Clone(); }
+                catch (JsonException ex) { Console.Error.WriteLine($"Invalid --response-format JSON: {ex.Message}"); return Results.BadRequest("Invalid --response-format JSON."); }
+                i++;
+            }
+            else if (args[i] is "--reasoning-effort" && i + 1 < args.Length)
+            {
+                reasoningEffort = args[i + 1]; i++;
+            }
             else
             {
                 promptParts.Add(args[i]);
@@ -650,7 +697,11 @@ public static class CliDispatcher
 
         var prompt = promptParts.Count > 0 ? string.Join(' ', promptParts) : null;
         return await AgentHandlers.Create(
-            new CreateAgentRequest(args[2], modelId, prompt, maxTokens, ProviderParameters: providerParams), svc);
+            new CreateAgentRequest(args[2], modelId, prompt, maxTokens,
+                Temperature: temperature, TopP: topP, TopK: topK,
+                FrequencyPenalty: frequencyPenalty, PresencePenalty: presencePenalty,
+                Stop: stop, Seed: seed, ResponseFormat: responseFormat,
+                ReasoningEffort: reasoningEffort, ProviderParameters: providerParams), svc);
     }
 
     private static async Task<IResult> HandleAgentUpdate(string[] args, AgentService svc)
@@ -661,6 +712,15 @@ public static class CliDispatcher
         // Separate flags from positional args
         int? maxTokens = null;
         Dictionary<string, JsonElement>? providerParams = null;
+        float? temperature = null;
+        float? topP = null;
+        int? topK = null;
+        float? frequencyPenalty = null;
+        float? presencePenalty = null;
+        string[]? stop = null;
+        int? seed = null;
+        JsonElement? responseFormat = null;
+        string? reasoningEffort = null;
         var positional = new List<string>();
         for (var i = 4; i < args.Length; i++)
         {
@@ -673,6 +733,44 @@ public static class CliDispatcher
                 try { providerParams = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(args[i + 1]); }
                 catch (JsonException ex) { Console.Error.WriteLine($"Invalid --params JSON: {ex.Message}"); return Results.BadRequest("Invalid --params JSON."); }
                 i++;
+            }
+            else if (args[i] is "--temperature" or "--temp" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var temp))
+            {
+                temperature = temp; i++;
+            }
+            else if (args[i] is "--top-p" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var tp))
+            {
+                topP = tp; i++;
+            }
+            else if (args[i] is "--top-k" && i + 1 < args.Length && int.TryParse(args[i + 1], out var tk))
+            {
+                topK = tk; i++;
+            }
+            else if (args[i] is "--frequency-penalty" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var fp))
+            {
+                frequencyPenalty = fp; i++;
+            }
+            else if (args[i] is "--presence-penalty" && i + 1 < args.Length && float.TryParse(args[i + 1], System.Globalization.CultureInfo.InvariantCulture, out var pp))
+            {
+                presencePenalty = pp; i++;
+            }
+            else if (args[i] is "--stop" && i + 1 < args.Length)
+            {
+                stop = args[i + 1].Split(','); i++;
+            }
+            else if (args[i] is "--seed" && i + 1 < args.Length && int.TryParse(args[i + 1], out var sd))
+            {
+                seed = sd; i++;
+            }
+            else if (args[i] is "--response-format" && i + 1 < args.Length)
+            {
+                try { responseFormat = JsonDocument.Parse(args[i + 1]).RootElement.Clone(); }
+                catch (JsonException ex) { Console.Error.WriteLine($"Invalid --response-format JSON: {ex.Message}"); return Results.BadRequest("Invalid --response-format JSON."); }
+                i++;
+            }
+            else if (args[i] is "--reasoning-effort" && i + 1 < args.Length)
+            {
+                reasoningEffort = args[i + 1]; i++;
             }
             else
             {
@@ -687,7 +785,11 @@ public static class CliDispatcher
         else if (modelId is null && positional.Count >= 1)
             prompt = string.Join(' ', positional);
 
-        var request = new UpdateAgentRequest(name, modelId, prompt, maxTokens, ProviderParameters: providerParams);
+        var request = new UpdateAgentRequest(name, modelId, prompt, maxTokens,
+            Temperature: temperature, TopP: topP, TopK: topK,
+            FrequencyPenalty: frequencyPenalty, PresencePenalty: presencePenalty,
+            Stop: stop, Seed: seed, ResponseFormat: responseFormat,
+            ReasoningEffort: reasoningEffort, ProviderParameters: providerParams);
         return await AgentHandlers.Update(agentId, request, svc);
     }
 
@@ -2137,10 +2239,23 @@ public static class CliDispatcher
         return await ProviderHandlers.GetCost(providerId, costSvc, days);
     }
 
-    private static async Task<IResult> HandleProviderCostTotal(int days, IServiceProvider sp)
+    private static async Task<IResult> HandleProviderCostTotal(string[] args, IServiceProvider sp)
     {
+        var days = ParseDaysFlag(args, 2);
+        var simple = args.Skip(2).Any(a => a is "--simple");
+        var all = args.Skip(2).Any(a => a is "--all");
+
         var costSvc = sp.GetRequiredService<ProviderCostService>();
-        return await ProviderHandlers.GetCostTotal(costSvc, days);
+
+        if (simple)
+        {
+            var result = await costSvc.GetTotalCostAsync(days, includeAll: all);
+            var formatted = ProviderHandlers.FormatSimpleCost(result);
+            Console.WriteLine(formatted.Summary);
+            return Results.Ok();
+        }
+
+        return await ProviderHandlers.GetCostTotal(costSvc, days, all: all);
     }
 
     private static int ParseDaysFlag(string[] args, int startIndex)

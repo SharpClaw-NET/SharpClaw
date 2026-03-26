@@ -195,8 +195,17 @@ try
     Mk8GlobalEnv.Load();
 
     // CLI mode: handle command and exit
-    if (await CliDispatcher.TryHandleAsync(args, app.Services))
+    try
+    {
+        if (await CliDispatcher.TryHandleAsync(args, app.Services))
+            return;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Error: {ex.Message}");
+        Log.Error(ex, "CLI command failed");
         return;
+    }
 
     // API mode
     app.UseMiddleware<ExceptionHandlingMiddleware>();

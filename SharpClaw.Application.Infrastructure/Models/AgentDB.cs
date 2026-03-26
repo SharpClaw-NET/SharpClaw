@@ -18,6 +18,41 @@ public class AgentDB : BaseEntity
     /// </summary>
     public int? MaxCompletionTokens { get; set; }
 
+    // ── First-class completion parameters ─────────────────────────
+
+    /// <summary>Sampling temperature (0.0–2.0 for most providers).</summary>
+    public float? Temperature { get; set; }
+
+    /// <summary>Nucleus sampling probability mass (0.0–1.0).</summary>
+    public float? TopP { get; set; }
+
+    /// <summary>Top-K sampling (Anthropic, Google). Not supported by OpenAI Chat Completions.</summary>
+    public int? TopK { get; set; }
+
+    /// <summary>Penalises tokens that already appeared (OpenAI, OpenRouter).</summary>
+    public float? FrequencyPenalty { get; set; }
+
+    /// <summary>Penalises tokens based on presence in the text so far (OpenAI, OpenRouter).</summary>
+    public float? PresencePenalty { get; set; }
+
+    /// <summary>Up to 4 sequences where the model will stop generating.</summary>
+    public string[]? Stop { get; set; }
+
+    /// <summary>Deterministic sampling seed (OpenAI, Mistral).</summary>
+    public int? Seed { get; set; }
+
+    /// <summary>
+    /// Structured output format.  For OpenAI: <c>{ "type": "json_object" }</c>.
+    /// Stored as a <see cref="JsonElement"/> to preserve arbitrary structure.
+    /// </summary>
+    public JsonElement? ResponseFormat { get; set; }
+
+    /// <summary>
+    /// Reasoning effort hint for models that support it (e.g. OpenAI o-series).
+    /// Values: <c>"low"</c>, <c>"medium"</c>, <c>"high"</c>.
+    /// </summary>
+    public string? ReasoningEffort { get; set; }
+
     /// <summary>
     /// Optional provider-specific parameters merged into the API request
     /// payload.  Keys and values are provider-dependent — for example,

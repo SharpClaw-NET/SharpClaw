@@ -354,5 +354,8 @@ public sealed class ChannelService(SharpClawDbContext db)
             agent.Role?.Name,
             agent.MaxCompletionTokens,
             agent.CustomId,
+            agent.Temperature, agent.TopP, agent.TopK,
+            agent.FrequencyPenalty, agent.PresencePenalty, agent.Stop,
+            agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
             agent.ProviderParameters);
 }

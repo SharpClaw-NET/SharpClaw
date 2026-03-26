@@ -239,6 +239,7 @@ local development and testing.  **Never disable in production.**
 |---|---|---|
 | `Auth:DisableApiKeyCheck` | API-key middleware (`X-Api-Key` header) — all requests pass without a key | `false` |
 | `Auth:DisableAccessTokenCheck` | JWT session middleware — all requests pass without a Bearer token | `false` |
+| `Agent:DisableCustomProviderParameters` | Custom `providerParameters` dictionary — when `true`, the escape-hatch dictionary is stripped before sending to the provider (typed fields still apply) | `false` |
 
 Example `.env` snippet:
 
@@ -247,6 +248,9 @@ Example `.env` snippet:
   "Auth": {
     "DisableApiKeyCheck": true,
     "DisableAccessTokenCheck": true
+  },
+  "Agent": {
+    "DisableCustomProviderParameters": false
   }
 }
 ```
@@ -880,6 +884,15 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
   "modelId": "guid",
   "systemPrompt": "string | null",
   "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
   "providerParameters": { "key": "value" }
 }
 ```
@@ -889,76 +902,23 @@ response. Sent as `max_tokens`, `max_completion_tokens`, or
 `max_output_tokens` depending on the provider and API version. `null`
 (default) means no limit — the provider default applies.
 
-`providerParameters` is an optional JSON object of arbitrary key-value
-pairs merged into every API request payload sent to this agent's
-provider.  Keys that the client already sets (e.g. `model`, `messages`,
-`tools`) are **never overwritten** — user-supplied parameters are
-additive only.  This is useful for provider-specific options such as
-`response_format` (OpenAI), `response_mime_type` (Gemini), etc.
+**First-class completion parameters** — `temperature`, `topP`, `topK`,
+`frequencyPenalty`, `presencePenalty`, `stop`, `seed`, `responseFormat`,
+and `reasoningEffort` are typed, validated against per-provider
+constraints at create/update time, and mapped natively into each
+provider's wire format. Invalid values produce an immediate **HTTP 400**
+with structured error messages identifying the provider, the invalid
+value, and the expected range.
 
-**Automatic parameter translation (Google Gemini / Vertex AI):**
-Google providers in SharpClaw route through OpenAI-compatible endpoints,
-so native Gemini parameter names are **automatically translated** before
-the request is sent:
+`providerParameters` is an optional escape-hatch dictionary of arbitrary
+key-value pairs merged into the API payload after typed fields. Keys
+the client already sets (e.g. `model`, `messages`, `tools`) are never
+overwritten.
 
-| Native Gemini parameter                          | Translated to (OpenAI-compatible)                |
-|--------------------------------------------------|--------------------------------------------------|
-| `"generation_config": { ... }`                   | Unwrapped — inner keys promoted to top level     |
-| `"response_mime_type": "application/json"`       | `"response_format": { "type": "json_object" }`  |
-| `"response_mime_type": "text/plain"`             | *(removed — text is the default)*                |
-
-**`generation_config` unwrapping:** The native Gemini API wraps
-parameters inside a `generation_config` object. SharpClaw automatically
-extracts the inner keys and promotes them to the top level so they work
-on the OpenAI-compatible endpoint. If the same key exists both inside
-`generation_config` and at the top level, the top-level value takes
-precedence.
-
-You may use either form — SharpClaw handles the mapping.
-
-Examples (both work for Google Gemini and Vertex AI agents):
-
-```json
-{ "response_mime_type": "application/json" }
-```
-
-```json
-{
-  "generation_config": {
-    "temperature": 1,
-    "response_mime_type": "application/json"
-  }
-}
-```
-
-Both produce the same result: `temperature` is passed through directly
-and `response_mime_type` is translated to
-`response_format: { "type": "json_object" }`.
-
-**Common `response_format` values (OpenAI / OpenAI-compatible):**
-
-| Value | Description |
-|-------|-------------|
-| `{ "type": "text" }` | Plain text output (default) |
-| `{ "type": "json_object" }` | Forces valid JSON output |
-| `{ "type": "json_schema", "json_schema": { "name": "...", "schema": { ... } } }` | Structured output with a strict JSON schema |
-
-> ⚠️ When using `"type": "json_schema"` you **must** include the
-> `json_schema` object with a `name` and `schema` — omitting it causes
-> the provider to return a 400 error.
-
-**Error handling:** Invalid or unrecognised provider parameters cause
-the upstream provider to reject the request. SharpClaw surfaces this as
-**HTTP 502 Bad Gateway** with the provider's original error message:
-
-```json
-{ "error": "Provider API error 400 (Bad Request): Missing required parameter: 'response_format.json_schema'." }
-```
-
-> ⚠️ **Parameters are provider-dependent.** Passing a parameter the
-> provider does not recognise will cause a **502** error at chat time.
-> SharpClaw does not validate unknown parameter names — the user is
-> responsible for correctness.
+> 📖 **For the complete provider support matrix, valid ranges, wire
+> format mapping, Google Gemini translation rules, `responseFormat`
+> values, and validation details, see
+> [Provider-Parameters.md](Provider-Parameters.md).**
 
 **Response `200`:** `AgentResponse`
 
@@ -987,12 +947,24 @@ the upstream provider to reject the request. SharpClaw surfaces this as
   "modelId": "guid | null",
   "systemPrompt": "string | null",
   "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
   "providerParameters": { "key": "value" }
 }
 ```
 
 Pass `providerParameters` as `{}` (empty object) to clear existing
 parameters.  Omit the field (or pass `null`) to leave them unchanged.
+
+For typed completion parameters: omit a field (or pass `null`) to leave
+it unchanged. Pass `stop` as `[]` (empty array) to clear stop sequences.
 
 **Response `200`:** `AgentResponse`
 **Response `404`:** Not found.
@@ -1037,6 +1009,15 @@ Assign a role to an agent.
   "roleId": "guid | null",
   "roleName": "string | null",
   "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
   "providerParameters": { "key": "value" }
 }
 ```
@@ -1056,6 +1037,15 @@ Omits `systemPrompt` to keep payloads compact.
   "roleId": "guid | null",
   "roleName": "string | null",
   "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
   "providerParameters": { "key": "value" }
 }
 ```
@@ -2842,11 +2832,24 @@ Get cost data for a single provider.
 
 ### GET /providers/cost/total
 
-Aggregate cost across all providers.
+Aggregate cost across providers.
 
-Same query parameters as above.
+By default, only providers with an API key configured are included.
+Pass `all=true` to include all providers (previous default behavior).
+Pass `simple=true` to receive a simplified summary with just the total.
 
-**Response `200`:** `ProviderCostTotalResponse`
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days` | int | 30 | Number of days to look back |
+| `startDate` | DateTimeOffset | — | Explicit period start (overrides `days`) |
+| `endDate` | DateTimeOffset | — | Explicit period end |
+| `all` | bool | false | Include all providers regardless of API key status |
+| `simple` | bool | false | Return a simplified `ProviderCostSimpleResponse` |
+
+**Response `200` (default):** `ProviderCostTotalResponse`
+**Response `200` (simple):** `ProviderCostSimpleResponse`
 
 ---
 
@@ -2886,6 +2889,24 @@ Same query parameters as above.
   "providers": [ /* ProviderCostResponse[] */ ]
 }
 ```
+
+### ProviderCostSimpleResponse
+
+Returned when `simple=true` is passed.
+
+```json
+{
+  "totalCost": 45.67,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "summary": "Cost is 45.67$ + GoogleGemini provider cost",
+  "untrackedProviders": ["GoogleGemini"]
+}
+```
+
+`untrackedProviders` lists providers that have an API key but do not
+expose a billing API. The field is `null` when all providers are tracked.
 
 ---
 

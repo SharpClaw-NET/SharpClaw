@@ -25,6 +25,7 @@ public interface IProviderApiClient
         IReadOnlyList<ChatCompletionMessage> messages,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default);
 
     /// <summary>
@@ -40,6 +41,7 @@ public interface IProviderApiClient
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(
@@ -62,6 +64,7 @@ public interface IProviderApiClient
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         throw new NotSupportedException(

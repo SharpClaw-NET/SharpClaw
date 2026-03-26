@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts;
@@ -19,6 +20,9 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             .FirstOrDefaultAsync(m => m.Id == request.ModelId, ct)
             ?? throw new ArgumentException($"Model {request.ModelId} not found.");
 
+        // Validate typed completion parameters against provider constraints
+        ValidateCompletionParameters(request, model.Provider.ProviderType);
+
         var agent = new AgentDB
         {
             Name = request.Name,
@@ -26,6 +30,15 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             MaxCompletionTokens = request.MaxCompletionTokens,
             ModelId = model.Id,
             CustomId = request.CustomId,
+            Temperature = request.Temperature,
+            TopP = request.TopP,
+            TopK = request.TopK,
+            FrequencyPenalty = request.FrequencyPenalty,
+            PresencePenalty = request.PresencePenalty,
+            Stop = request.Stop,
+            Seed = request.Seed,
+            ResponseFormat = request.ResponseFormat,
+            ReasoningEffort = request.ReasoningEffort,
             ProviderParameters = request.ProviderParameters,
         };
 
@@ -64,7 +77,11 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
                 a.Id, a.Name, a.SystemPrompt,
                 a.ModelId, a.Model.Name, a.Model.Provider.Name,
                 a.RoleId, a.Role != null ? a.Role.Name : null,
-                a.MaxCompletionTokens, a.CustomId, a.ProviderParameters))
+                a.MaxCompletionTokens, a.CustomId,
+                a.Temperature, a.TopP, a.TopK,
+                a.FrequencyPenalty, a.PresencePenalty, a.Stop,
+                a.Seed, a.ResponseFormat, a.ReasoningEffort,
+                a.ProviderParameters))
             .ToListAsync(ct);
     }
 
@@ -80,6 +97,15 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
         if (request.SystemPrompt is not null) agent.SystemPrompt = request.SystemPrompt;
         if (request.MaxCompletionTokens is not null) agent.MaxCompletionTokens = request.MaxCompletionTokens;
         if (request.CustomId is not null) agent.CustomId = request.CustomId;
+        if (request.Temperature is not null) agent.Temperature = request.Temperature;
+        if (request.TopP is not null) agent.TopP = request.TopP;
+        if (request.TopK is not null) agent.TopK = request.TopK;
+        if (request.FrequencyPenalty is not null) agent.FrequencyPenalty = request.FrequencyPenalty;
+        if (request.PresencePenalty is not null) agent.PresencePenalty = request.PresencePenalty;
+        if (request.Stop is not null) agent.Stop = request.Stop.Length > 0 ? request.Stop : null;
+        if (request.Seed is not null) agent.Seed = request.Seed;
+        if (request.ResponseFormat is not null) agent.ResponseFormat = request.ResponseFormat;
+        if (request.ReasoningEffort is not null) agent.ReasoningEffort = request.ReasoningEffort;
         if (request.ProviderParameters is not null)
             agent.ProviderParameters = request.ProviderParameters.Count > 0 ? request.ProviderParameters : null;
         if (request.ModelId is { } modelId)
@@ -89,6 +115,9 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             agent.ModelId = model.Id;
             agent.Model = model;
         }
+
+        // Validate the effective completion parameters against the (possibly updated) provider
+        ValidateCompletionParameters(agent, agent.Model.Provider.ProviderType);
 
         await db.SaveChangesAsync(ct);
         return ToResponse(agent, agent.Model);
@@ -436,5 +465,51 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
 
     private static AgentResponse ToResponse(AgentDB agent, ModelDB model) =>
         new(agent.Id, agent.Name, agent.SystemPrompt, model.Id, model.Name, model.Provider.Name,
-            agent.RoleId, agent.Role?.Name, agent.MaxCompletionTokens, agent.CustomId, agent.ProviderParameters);
+            agent.RoleId, agent.Role?.Name, agent.MaxCompletionTokens, agent.CustomId,
+            agent.Temperature, agent.TopP, agent.TopK,
+            agent.FrequencyPenalty, agent.PresencePenalty, agent.Stop,
+            agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
+            agent.ProviderParameters);
+
+    /// <summary>
+    /// Validates the typed completion parameters from a create request
+    /// against the target provider's constraints.
+    /// </summary>
+    private static void ValidateCompletionParameters(CreateAgentRequest request, ProviderType providerType)
+    {
+        var cp = new CompletionParameters
+        {
+            Temperature = request.Temperature,
+            TopP = request.TopP,
+            TopK = request.TopK,
+            FrequencyPenalty = request.FrequencyPenalty,
+            PresencePenalty = request.PresencePenalty,
+            Stop = request.Stop,
+            Seed = request.Seed,
+            ResponseFormat = request.ResponseFormat,
+            ReasoningEffort = request.ReasoningEffort,
+        };
+        CompletionParameterValidator.ValidateOrThrow(cp, providerType);
+    }
+
+    /// <summary>
+    /// Validates the effective completion parameters on an agent entity
+    /// (after fields have been applied) against the target provider.
+    /// </summary>
+    private static void ValidateCompletionParameters(AgentDB agent, ProviderType providerType)
+    {
+        var cp = new CompletionParameters
+        {
+            Temperature = agent.Temperature,
+            TopP = agent.TopP,
+            TopK = agent.TopK,
+            FrequencyPenalty = agent.FrequencyPenalty,
+            PresencePenalty = agent.PresencePenalty,
+            Stop = agent.Stop,
+            Seed = agent.Seed,
+            ResponseFormat = agent.ResponseFormat,
+            ReasoningEffort = agent.ReasoningEffort,
+        };
+        CompletionParameterValidator.ValidateOrThrow(cp, providerType);
+    }
 }

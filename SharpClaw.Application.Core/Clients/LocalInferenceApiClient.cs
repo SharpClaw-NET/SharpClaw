@@ -63,6 +63,7 @@ public sealed class LocalInferenceApiClient(
         HttpClient httpClient, string apiKey, string model, string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages, int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();
@@ -98,6 +99,7 @@ public sealed class LocalInferenceApiClient(
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();
@@ -142,6 +144,7 @@ public sealed class LocalInferenceApiClient(
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var loaded = GetLoadedOrThrow();

@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
@@ -26,7 +27,8 @@ public sealed partial class ChatService(
     ProviderApiClientFactory clientFactory,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
-    LocalModelService localModelService)
+    LocalModelService localModelService,
+    IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
     private const int MaxHistoryCharacters = 100_000;
@@ -37,6 +39,9 @@ public sealed partial class ChatService(
     /// tool calls.
     /// </summary>
     private const int MaxToolCallRounds = 10;
+
+    private readonly bool _disableCustomProviderParameters =
+        configuration.GetValue<bool>("Agent:DisableCustomProviderParameters");
 
     public async Task<ChatResponse> SendMessageAsync(
         Guid channelId, ChatRequest request,
@@ -105,16 +110,18 @@ public sealed partial class ChatService(
 
         var modelCapabilities = model.Capabilities;
         var maxTokens = agent.MaxCompletionTokens;
-        var providerParams = agent.ProviderParameters;
+        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
 
         var loopResult = useNativeTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, approvalCallback, ct,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
                 taskContext: request.TaskContext)
             : await RunTextToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, approvalCallback, ct,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
                 taskContext: request.TaskContext);
 
         // Persist both messages
@@ -798,7 +805,9 @@ public sealed partial class ChatService(
 
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
         var maxTokens = agent.MaxCompletionTokens;
-        var providerParams = agent.ProviderParameters;
+        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
         var effectiveTools = GetEffectiveTools(request.TaskContext);
 
         // Convert history to tool-aware messages
@@ -818,7 +827,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -1426,6 +1435,7 @@ public sealed partial class ChatService(
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
         Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct,
         TaskChatContext? taskContext = null)
@@ -1444,7 +1454,7 @@ public sealed partial class ChatService(
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
 
             if (result.Usage is { } usage)
             {
@@ -1521,7 +1531,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, ct);
+                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
                 if (finalResult.Usage is { } finalUsage)
                 {
                     totalPromptTokens += finalUsage.PromptTokens;
@@ -1549,6 +1559,7 @@ public sealed partial class ChatService(
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
         Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct,
         TaskChatContext? taskContext = null)
@@ -1561,7 +1572,7 @@ public sealed partial class ChatService(
         while (true)
         {
             assistantContent = await client.ChatCompletionAsync(
-                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, ct);
+                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
 
             var toolCalls = ParseToolCalls(assistantContent);
             if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
@@ -1638,7 +1649,7 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 assistantContent = await client.ChatCompletionAsync(
-                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, ct);
+                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
                 break;
             }
         }
@@ -2714,4 +2725,26 @@ public sealed partial class ChatService(
         List<AgentJobResponse> JobResults,
         int TotalPromptTokens = 0,
         int TotalCompletionTokens = 0);
+
+    /// <summary>
+    /// Maps the typed provider parameter fields from <see cref="AgentDB"/> into
+    /// a <see cref="CompletionParameters"/> instance. Returns <see langword="null"/>
+    /// when all fields are their default (null) values.
+    /// </summary>
+    private static CompletionParameters? BuildCompletionParameters(AgentDB agent)
+    {
+        var cp = new CompletionParameters
+        {
+            Temperature = agent.Temperature,
+            TopP = agent.TopP,
+            TopK = agent.TopK,
+            FrequencyPenalty = agent.FrequencyPenalty,
+            PresencePenalty = agent.PresencePenalty,
+            Stop = agent.Stop,
+            Seed = agent.Seed,
+            ResponseFormat = agent.ResponseFormat,
+            ReasoningEffort = agent.ReasoningEffort,
+        };
+        return cp.IsEmpty ? null : cp;
+    }
 }

@@ -27,3 +27,14 @@ public sealed record ProviderCostTotalResponse(
     DateTimeOffset PeriodStart,
     DateTimeOffset PeriodEnd,
     IReadOnlyList<ProviderCostResponse> Providers);
+
+/// <summary>
+/// Simplified cost summary returned by <c>GET /providers/cost/total?simple=true</c>.
+/// </summary>
+public sealed record ProviderCostSimpleResponse(
+    decimal TotalCost,
+    string Currency,
+    DateTimeOffset PeriodStart,
+    DateTimeOffset PeriodEnd,
+    string Summary,
+    IReadOnlyList<string>? UntrackedProviders);

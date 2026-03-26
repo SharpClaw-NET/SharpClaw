@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Serilog;
+using SharpClaw.Application.Core.Clients;
 
 namespace SharpClaw.Application.API.Api;
 
@@ -16,6 +17,21 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         try
         {
             await next(context);
+        }
+        catch (CompletionParameterValidationException ex)
+        {
+            Log.Warning(ex, "Completion parameter validation failed on {Method} {Path}", context.Request.Method, context.Request.Path);
+            if (!context.Response.HasStarted)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                context.Response.ContentType = "application/json";
+                await context.Response.WriteAsync(JsonSerializer.Serialize(new
+                {
+                    error = "Invalid completion parameters",
+                    provider = ex.ProviderType.ToString(),
+                    validationErrors = ex.ValidationErrors,
+                }, JsonOptions));
+            }
         }
         catch (InvalidOperationException ex)
         {

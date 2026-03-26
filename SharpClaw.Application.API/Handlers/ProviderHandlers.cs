@@ -86,9 +86,36 @@ public static class ProviderHandlers
     [MapGet("/cost/total")]
     public static async Task<IResult> GetCostTotal(
         ProviderCostService costSvc,
-        int? days = null, DateTimeOffset? startDate = null, DateTimeOffset? endDate = null)
+        int? days = null, DateTimeOffset? startDate = null, DateTimeOffset? endDate = null,
+        bool? all = null, bool? simple = null)
     {
-        var result = await costSvc.GetTotalCostAsync(days ?? 30, startDate, endDate);
+        var includeAll = all ?? false;
+        var result = await costSvc.GetTotalCostAsync(days ?? 30, startDate, endDate, includeAll);
+
+        if (simple ?? false)
+            return Results.Ok(FormatSimpleCost(result));
+
         return Results.Ok(result);
+    }
+
+    internal static ProviderCostSimpleResponse FormatSimpleCost(ProviderCostTotalResponse total)
+    {
+        var untracked = total.Providers
+            .Where(p => !p.CostApiSupported && !p.IsLocal)
+            .Select(p => p.ProviderName)
+            .ToList();
+
+        var currencySymbol = total.Currency.Equals("usd", StringComparison.OrdinalIgnoreCase)
+            ? "$" : $" {total.Currency.ToUpperInvariant()}";
+
+        var summary = untracked.Count == 0
+            ? $"Cost is {total.TotalCost:F2}{currencySymbol}"
+            : $"Cost is {total.TotalCost:F2}{currencySymbol} + "
+              + string.Join(" + ", untracked.Select(n => $"{n} provider cost"));
+
+        return new ProviderCostSimpleResponse(
+            total.TotalCost, total.Currency,
+            total.PeriodStart, total.PeriodEnd,
+            summary, untracked.Count > 0 ? untracked : null);
     }
 }

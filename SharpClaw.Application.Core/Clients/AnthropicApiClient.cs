@@ -45,6 +45,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         IReadOnlyList<ChatCompletionMessage> messages,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         var payload = new MessagesRequest
@@ -54,7 +55,11 @@ public sealed class AnthropicApiClient : IProviderApiClient
             System = systemPrompt,
             Messages = messages
                 .Select(m => new MessagePayload(m.Role, m.Content))
-                .ToList()
+                .ToList(),
+            Temperature = completionParameters?.Temperature,
+            TopP = completionParameters?.TopP,
+            TopK = completionParameters?.TopK,
+            StopSequences = completionParameters?.Stop,
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
@@ -91,6 +96,18 @@ public sealed class AnthropicApiClient : IProviderApiClient
         [JsonPropertyName("max_tokens")] public required int MaxTokens { get; init; }
         [JsonPropertyName("system")] public string? System { get; init; }
         [JsonPropertyName("messages")] public required List<MessagePayload> Messages { get; init; }
+        [JsonPropertyName("temperature")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? Temperature { get; init; }
+        [JsonPropertyName("top_p")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? TopP { get; init; }
+        [JsonPropertyName("top_k")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? TopK { get; init; }
+        [JsonPropertyName("stop_sequences")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? StopSequences { get; init; }
     }
 
     private sealed record MessagePayload(
@@ -115,6 +132,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         CancellationToken ct = default)
     {
         var payload = new AntToolCompletionRequest
@@ -128,7 +146,11 @@ public sealed class AnthropicApiClient : IProviderApiClient
                 Name = t.Name,
                 Description = t.Description,
                 InputSchema = t.ParametersSchema
-            }).ToList()
+            }).ToList(),
+            Temperature = completionParameters?.Temperature,
+            TopP = completionParameters?.TopP,
+            TopK = completionParameters?.TopK,
+            StopSequences = completionParameters?.Stop,
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
@@ -287,6 +309,18 @@ public sealed class AnthropicApiClient : IProviderApiClient
         [JsonPropertyName("system")] public string? System { get; init; }
         [JsonPropertyName("messages")] public required List<object> Messages { get; init; }
         [JsonPropertyName("tools")] public required List<AntToolDefinitionPayload> Tools { get; init; }
+        [JsonPropertyName("temperature")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? Temperature { get; init; }
+        [JsonPropertyName("top_p")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? TopP { get; init; }
+        [JsonPropertyName("top_k")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? TopK { get; init; }
+        [JsonPropertyName("stop_sequences")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? StopSequences { get; init; }
     }
 
     private sealed class AntToolDefinitionPayload
@@ -372,6 +406,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
         var payload = new AntStreamRequest
@@ -386,7 +421,11 @@ public sealed class AnthropicApiClient : IProviderApiClient
                 Description = t.Description,
                 InputSchema = t.ParametersSchema
             }).ToList(),
-            Stream = true
+            Stream = true,
+            Temperature = completionParameters?.Temperature,
+            TopP = completionParameters?.TopP,
+            TopK = completionParameters?.TopK,
+            StopSequences = completionParameters?.Stop,
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
@@ -477,6 +516,18 @@ public sealed class AnthropicApiClient : IProviderApiClient
         [JsonPropertyName("messages")] public required List<object> Messages { get; init; }
         [JsonPropertyName("tools")] public required List<AntToolDefinitionPayload> Tools { get; init; }
         [JsonPropertyName("stream")] public bool Stream { get; init; }
+        [JsonPropertyName("temperature")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? Temperature { get; init; }
+        [JsonPropertyName("top_p")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public float? TopP { get; init; }
+        [JsonPropertyName("top_k")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public int? TopK { get; init; }
+        [JsonPropertyName("stop_sequences")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string[]? StopSequences { get; init; }
     }
 
     // Streaming event DTOs
