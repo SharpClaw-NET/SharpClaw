@@ -35,6 +35,14 @@ public sealed class BackendProcessManager : IDisposable
     public string ApiUrl => _apiUrl;
 
     /// <summary>
+    /// When <c>true</c>, <see cref="EnsureStartedAsync"/> will never launch
+    /// the bundled backend process — it only probes for an external API.
+    /// Set this when the user has the core installed separately or wants to
+    /// connect to a remote instance.
+    /// </summary>
+    public bool SkipLaunch { get; set; }
+
+    /// <summary>
     /// All stdout + stderr lines captured from the bundled process
     /// (most recent last). Thread-safe snapshot.
     /// </summary>
@@ -122,6 +130,17 @@ public sealed class BackendProcessManager : IDisposable
         {
             IsExternal = true;
             return;
+        }
+
+        // When backend launch is disabled (e.g. remote API or separate
+        // install), skip process start — the echo/ping probes will
+        // determine whether the configured URL is reachable.
+        if (SkipLaunch)
+        {
+            IsExternal = true;
+            throw new InvalidOperationException(
+                $"Backend launch is disabled (Backend:Enabled = false). " +
+                $"Ensure the API is running at {_apiUrl}.");
         }
 
         if (!IsAvailable)

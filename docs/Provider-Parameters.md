@@ -20,6 +20,35 @@ The canonical source of truth in code is
 
 ---
 
+## First-class support philosophy
+
+SharpClaw's goal is **first-class provider parameter support** — you
+should never need to have two or three provider docs open alongside
+SharpClaw's own just to get something working. Every parameter that
+SharpClaw models as a typed field is validated, documented, and mapped
+to the correct wire format automatically. You configure it once and it
+works across providers that support it.
+
+If something is missing, broken, or the docs here are incomplete,
+**please open a GitHub issue first:**
+
+> 🐛 **https://github.com/mkn8rn/SharpClaw/issues**
+
+This is the fastest way to get a typed parameter added, a validation
+range corrected, or a new provider endpoint wired in. The project
+actively tracks upstream API changes, and issues ensure nothing falls
+through the cracks.
+
+The [`providerParameters` escape-hatch](#providerparameters-escape-hatch)
+exists as a **temporary fallback** — it lets you unblock yourself
+immediately by injecting raw key-value pairs into the API request while
+a proper typed field is being added. It is not intended as the primary
+way to use SharpClaw long-term. If you find yourself relying on it for
+a common parameter, that is a sign the typed support should be expanded
+and an issue is welcome.
+
+---
+
 ## Parameter support matrix
 
 | Parameter | OpenAI | Anthropic | OpenRouter | Google Vertex AI | Google Gemini | xAI (Grok) | Groq | Cerebras | Mistral | GitHub Copilot | ZAI | Vercel AI | Minimax | Local | Custom |
@@ -247,13 +276,18 @@ Both produce the same result: `temperature` is passed through and
 ## `providerParameters` escape-hatch
 
 The `providerParameters` dictionary (`Dictionary<string, JsonElement>?`)
-is an escape-hatch for provider-specific options that SharpClaw does not
-yet model as typed fields. Keys are merged into the API request payload
-**after** typed parameters, so they can override or supply additional
-values.
+is a **temporary fallback** for provider-specific options that SharpClaw
+does not yet model as typed fields. Keys are merged into the API request
+payload **after** typed parameters, so they can override or supply
+additional values.
 
 Keys that the client already sets (e.g. `model`, `messages`, `tools`)
 are **never overwritten** — user-supplied parameters are additive only.
+
+> ℹ️ **This is a stopgap, not a feature.** If you find yourself using
+> `providerParameters` for something that should be a typed field,
+> please [open a GitHub issue](https://github.com/mkn8rn/SharpClaw/issues)
+> so it can be added with proper validation and documentation.
 
 > The `.env` flag `Agent:DisableCustomProviderParameters=true` disables
 > the escape-hatch entirely. When set, `providerParameters` is ignored

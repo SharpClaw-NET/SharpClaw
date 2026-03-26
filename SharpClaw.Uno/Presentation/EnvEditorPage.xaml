@@ -1,0 +1,132 @@
+﻿<Page x:Class="SharpClaw.Presentation.EnvEditorPage"
+      xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+      xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+      xmlns:d="http://schemas.microsoft.com/expression/blend/2008"
+      xmlns:mc="http://schemas.openxmlformats.org/markup-compatibility/2006"
+      mc:Ignorable="d"
+      NavigationCacheMode="Disabled"
+      Background="Black">
+
+  <Grid>
+    <Grid.RowDefinitions>
+      <RowDefinition Height="Auto" />
+      <RowDefinition />
+      <RowDefinition Height="Auto" />
+    </Grid.RowDefinitions>
+
+    <!-- Header -->
+    <StackPanel Grid.Row="0" Margin="24,20,24,12" Spacing="8">
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Background="Transparent" BorderThickness="0" Padding="4"
+                Click="OnBackClick"
+                ToolTipService.ToolTip="Back">
+          <TextBlock Text="&#x2039;"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="18"
+                     FontWeight="Bold"
+                     Foreground="#00FF00" />
+        </Button>
+        <TextBlock x:Name="TitleBlock"
+                   Text="Environment Editor"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="16"
+                   FontWeight="Bold"
+                   Foreground="#00FF00"
+                   VerticalAlignment="Center" />
+
+        <!-- View mode toggle -->
+        <Button x:Name="ViewToggleButton"
+                Background="Transparent"
+                BorderBrush="#333333"
+                BorderThickness="1"
+                CornerRadius="4"
+                Padding="10,4"
+                Click="OnViewToggleClick"
+                VerticalAlignment="Center"
+                ToolTipService.ToolTip="Switch between options view and JSON view">
+          <TextBlock x:Name="ViewToggleLabel"
+                     Text="{}{ } JSON"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12"
+                     Foreground="#66CCFF" />
+        </Button>
+      </StackPanel>
+      <TextBlock x:Name="PathBlock"
+                 Style="{StaticResource TerminalText}"
+                 FontSize="11"
+                 Foreground="#666666" />
+      <Border Height="1" Background="#1A1A1A" />
+    </StackPanel>
+
+    <!-- Env entries (options view) -->
+    <ScrollViewer x:Name="EntriesScroller" Grid.Row="1" Margin="24,0,24,0">
+      <StackPanel x:Name="EntriesPanel" Spacing="16" MaxWidth="640" HorizontalAlignment="Left" />
+    </ScrollViewer>
+
+    <!-- JSON raw editor (json view, hidden by default) -->
+    <Grid x:Name="JsonPanel" Grid.Row="1" Margin="24,0,24,0" Visibility="Collapsed">
+      <TextBox x:Name="JsonTextBox"
+               AcceptsReturn="True"
+               TextWrapping="Wrap"
+               IsSpellCheckEnabled="False"
+               FontFamily="Consolas"
+               FontSize="12"
+               Foreground="#CCCCCC"
+               Background="#0D0D0D"
+               BorderBrush="#333333"
+               Padding="12"
+               VerticalAlignment="Stretch"
+               HorizontalAlignment="Stretch" />
+    </Grid>
+
+    <!-- Status + actions footer -->
+    <StackPanel Grid.Row="2" Margin="24,12,24,20" Spacing="8">
+      <Border Height="1" Background="#1A1A1A" />
+      <TextBlock x:Name="StatusBlock"
+                 Style="{StaticResource TerminalText}"
+                 FontSize="12"
+                 Foreground="#808080"
+                 Visibility="Collapsed" />
+      <StackPanel Orientation="Horizontal" Spacing="12">
+        <Button Style="{StaticResource TerminalButton}"
+                Click="OnSaveClick"
+                Padding="16,8">
+          <TextBlock Text="[ Save permanently ]"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="13"
+                     Foreground="#00FF00" />
+        </Button>
+        <Button Style="{StaticResource TerminalButton}"
+                Click="OnRunOnceClick"
+                Padding="16,8">
+          <TextBlock Text="[ Run once ]"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="13"
+                     Foreground="#CCCC66" />
+        </Button>
+
+        <!-- JSON view actions -->
+        <Button x:Name="CopyJsonButton"
+                Style="{StaticResource TerminalButton}"
+                Click="OnCopyJsonClick"
+                Padding="16,8"
+                Visibility="Collapsed">
+          <TextBlock Text="[ &#x2398; Copy ]"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="13"
+                     Foreground="#66CCFF" />
+        </Button>
+        <Button x:Name="PasteJsonButton"
+                Style="{StaticResource TerminalButton}"
+                Click="OnPasteJsonClick"
+                Padding="16,8"
+                Visibility="Collapsed">
+          <TextBlock Text="[ &#x21EA; Upload ]"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="13"
+                     Foreground="#FF9944" />
+        </Button>
+      </StackPanel>
+    </StackPanel>
+  </Grid>
+</Page>

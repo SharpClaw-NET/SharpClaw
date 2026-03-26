@@ -21,7 +21,15 @@ public static class LocalEnvironment
 
           // -- API Server -----------------------------------------------
           // Base URL for the SharpClaw API service.
-          "Api": { "Url": "http://127.0.0.1:48923" }
+          // Change this to a remote address (e.g. "http://192.168.1.50:48923")
+          // when connecting to an API instance running on another machine.
+          "Api": { "Url": "http://127.0.0.1:48923" },
+
+          // -- Backend Process -------------------------------------------
+          // Set Enabled to false to prevent the client from launching a
+          // bundled backend process. Use this when the API is installed
+          // separately, runs as a system service, or is on another host.
+          //"Backend": { "Enabled": "false" }
         }
         """;
 
@@ -33,6 +41,20 @@ public static class LocalEnvironment
     {
         var config = BuildConfiguration(isDevelopment);
         return config["Api:Url"] ?? DefaultApiUrl;
+    }
+
+    /// <summary>
+    /// Reads <c>Backend:Enabled</c> from the environment files.
+    /// Defaults to <c>true</c> when not configured.
+    /// Set to <c>false</c> to prevent the client from launching a bundled
+    /// backend process (useful when the API is installed separately or on
+    /// another host).
+    /// </summary>
+    public static bool LoadBackendEnabled(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        var value = config["Backend:Enabled"];
+        return value is null || !bool.TryParse(value, out var enabled) || enabled;
     }
 
     public static IConfigurationBuilder AddLocalEnvironment(

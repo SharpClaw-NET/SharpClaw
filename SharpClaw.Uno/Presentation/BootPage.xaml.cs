@@ -467,4 +467,11 @@ public sealed partial class BootPage : Page
             return false;
         }
     }
+
+    private void OnEnvClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services is not { } services) return;
+        EnvMenuPage.PendingOrigin = "Boot";
+        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+    }
 }

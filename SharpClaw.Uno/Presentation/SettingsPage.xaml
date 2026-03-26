@@ -1,4 +1,4 @@
-<Page x:Class="SharpClaw.Presentation.SettingsPage"
+﻿<Page x:Class="SharpClaw.Presentation.SettingsPage"
       xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
       xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
       xmlns:local="using:SharpClaw.Presentation"
@@ -41,6 +41,13 @@
       <!-- Footer -->
       <StackPanel Grid.Row="2" Margin="16,0,16,12" Spacing="6">
         <Border Height="1" Background="#1A1A1A" Margin="0,0,0,4" />
+        <Button Background="Transparent" BorderThickness="0" Padding="0"
+                Click="OnEnvClick">
+          <TextBlock Text=">env"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12"
+                     Foreground="#555555" />
+        </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 Click="OnBackClick">
           <TextBlock Text="&lt; Back to Chat"

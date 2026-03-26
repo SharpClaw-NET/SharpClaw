@@ -31,7 +31,7 @@ POST   /providers/{id}/set-key     { apiKey }  → 204
 POST   /providers/{id}/sync-models → synced model list
 POST   /providers/{id}/auth/device-code  → { userCode, verificationUri, expiresInSeconds }
 
-ProviderType values: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom, Local.
+ProviderType values: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Minimax, Custom, Local.
 
 apiEndpoint required for Custom only. sync-models is the preferred way to add models.
 
@@ -583,3 +583,21 @@ Step 4 — Chat without a thread on the same channel is one-shot (no history).
     { "message": "Unrelated question" }
 
   This sees no prior messages.
+
+────────────────────────────────────────
+ENV FILE MANAGEMENT
+────────────────────────────────────────
+Two .env files (JSON-with-comments, loaded into IConfiguration):
+  Core — server-side (Infrastructure/Environment/.env). Managed exclusively via API.
+  Interface — client-side (SharpClaw.Uno/Environment/.env). Direct file I/O by client.
+
+All /env/core/* endpoints require JWT auth. Caller must be admin OR EnvEditor:AllowNonAdmin=true in Core .env.
+
+GET  /env/core/auth  → { authorised: bool }  (pre-check — is caller allowed to edit Core .env?)
+GET  /env/core       → { content: "raw JSON string" }  (403 if not authorised, 404 if file missing)
+PUT  /env/core       { content }  → { saved: true }  (403 if not authorised)
+
+Core .env keys: Encryption:Key, Jwt:Secret, Jwt:AccessTokenLifetime, Jwt:RefreshTokenLifetime, ConnectionStrings:Postgres, Api:ListenUrl, Admin:Username, Admin:Password, Browser:Executable, Browser:Arguments, Local:GpuLayerCount, Local:ContextSize, Local:KeepLoaded, Local:IdleCooldownMinutes, EnvEditor:AllowNonAdmin, Backend:Enabled, Auth:DisableApiKeyCheck, Auth:DisableAccessTokenCheck, Agent:DisableCustomProviderParameters.
+Interface .env keys: Api:Url (default http://127.0.0.1:48923), Backend:Enabled (default true).
+
+Changes to Core .env require a backend restart to take effect.

@@ -229,21 +229,15 @@ public sealed partial class MainPage
         _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "Login", qualifier: Qualifiers.ClearBackStack);
     }
 
+    private async void OnReportIssueClick(object sender, RoutedEventArgs e) => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/mkn8rn/SharpClaw/issues"));
     private async void OnOfficialWebsiteClick(object sender, RoutedEventArgs e) => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://sharpclaw.mkn8rn.com"));
     private async void OnMatrixCommunityClick(object sender, RoutedEventArgs e) => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://matrix.to/#/#p1:matrix.mkn8rn.com"));
     private async void OnCreatorBlogClick(object sender, RoutedEventArgs e) => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://blog.mkn8rn.com"));
 
-    private async void OnLegalNoticesClick(object sender, RoutedEventArgs e)
+    private void OnLegalNoticesClick(object sender, RoutedEventArgs e)
     {
-        try
-        {
-            var file = await Windows.Storage.StorageFile.GetFileFromApplicationUriAsync(new Uri("ms-appx:///Assets/PRIVACY_POLICY.txt"));
-            var text = await Windows.Storage.FileIO.ReadTextAsync(file);
-            var scroll = new ScrollViewer { Content = new TextBlock { Text = text, FontFamily = _monoFont, FontSize = 11, Foreground = Brush(0x00FF00), TextWrapping = TextWrapping.Wrap }, MaxHeight = 480 };
-            var dialog = new ContentDialog { Title = "Legal Notices", Content = scroll, CloseButtonText = "Close", XamlRoot = this.XamlRoot };
-            await dialog.ShowAsync();
-        }
-        catch { /* asset missing */ }
+        if (App.Services is not { } services) return;
+        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "LegalNotices");
     }
 
     // ── Role assignment (right-click context menu) ─────────────

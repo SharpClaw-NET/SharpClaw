@@ -11,6 +11,29 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 
 ---
 
+## First-class support philosophy
+
+SharpClaw aims to be **self-contained** — you should not need to cross-
+reference two or three upstream provider docs just to get a feature
+working. Provider parameters, cost tracking, model capabilities, and
+wire-format mapping are all handled with typed, validated first-class
+support.
+
+If our docs are incomplete, a feature is not working correctly, or you
+hit a gap in provider coverage, **open a GitHub issue before reaching
+for a workaround:**
+
+> 🐛 **https://github.com/mkn8rn/SharpClaw/issues**
+
+Fallback mechanisms like the
+[`providerParameters` escape-hatch](Provider-Parameters.md#providerparameters-escape-hatch)
+exist so you can unblock yourself immediately, but they are intended as
+**temporary** stopgaps. If you are relying on one regularly, that is a
+sign the typed support needs to be expanded — and an issue is the
+fastest way to make that happen.
+
+---
+
 ## Table of Contents
 
 - [Health checks](#health-checks)
@@ -36,6 +59,7 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 - [Task definitions & instances](#task-definitions--instances)
 - [Token cost tracking](#token-cost-tracking)
 - [Provider cost](#provider-cost)
+- [Env file management](#env-file-management)
 - [Permission Resolution](#permission-resolution)
 
 ---
@@ -73,10 +97,11 @@ Authentication check — requires a valid `X-Api-Key` header.
 ```
 OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
 ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot,
-Custom, Local
+Minimax, Custom, Local
 ```
 
 `Local` is used for in-process LLamaSharp / Whisper.net models.
+`Minimax` is the Minimax AI provider.
 
 ### AgentActionType
 
@@ -2907,6 +2932,114 @@ Returned when `simple=true` is passed.
 
 `untrackedProviders` lists providers that have an API key but do not
 expose a billing API. The field is `null` when all providers are tracked.
+
+---
+
+## Env file management
+
+SharpClaw manages two `.env` configuration files:
+
+- **Core** — server-side application configuration
+  (`SharpClaw.Application.Infrastructure/Environment/.env`). Managed
+  exclusively through the API endpoints below. Contains encryption keys,
+  JWT secrets, database connection strings, local inference settings, and
+  admin credentials.
+- **Interface** — client-side configuration
+  (`SharpClaw.Uno/Environment/.env`). Read and written directly by the
+  Uno client (not exposed via the API).
+
+Both files use JSON-with-comments format and are loaded via
+`PhysicalFileProvider` into `IConfiguration`.
+
+All Core `.env` endpoints require authentication (JWT) and enforce
+server-side authorisation: the caller must be a user admin **or** the
+`EnvEditor:AllowNonAdmin` setting must be `true` in the Core `.env`.
+
+### GET /env/core/auth
+
+Check whether the current user is authorised to read/write the Core
+`.env` file. Useful as a lightweight pre-check before navigating to an
+editor UI.
+
+**Response `200`:**
+
+```json
+{ "authorised": true }
+```
+
+---
+
+### GET /env/core
+
+Read the raw content of the Core `.env` file.
+
+**Response `200`:**
+
+```json
+{ "content": "{ ... raw JSON-with-comments content ... }" }
+```
+
+**Response `403`:** Caller is not authorised (not admin and
+`EnvEditor:AllowNonAdmin` is not enabled).
+
+**Response `404`:** Core `.env` file not found on disk.
+
+---
+
+### PUT /env/core
+
+Overwrite the Core `.env` file with new content.
+
+**Request:**
+
+```json
+{
+  "content": "string"
+}
+```
+
+**Response `200`:**
+
+```json
+{ "saved": true }
+```
+
+**Response `403`:** Caller is not authorised.
+
+> ⚠️ **Changes to the Core `.env` require a backend restart to take
+> effect.** The Uno client's env editor automatically restarts the
+> backend after saving.
+
+### Core `.env` keys
+
+| Key | Description |
+|-----|-------------|
+| `Encryption:Key` | AES-GCM key for encrypting provider API keys at rest |
+| `Jwt:Secret` | HMAC signing key for JWT access tokens |
+| `Jwt:AccessTokenLifetime` | Access token lifetime (e.g. `"00:30:00"`) |
+| `Jwt:RefreshTokenLifetime` | Refresh token lifetime (e.g. `"30.00:00:00"`) |
+| `ConnectionStrings:Postgres` | Optional Postgres connection string (default: EF InMemory + JSON sync) |
+| `Api:ListenUrl` | HTTP listen URL (default: `http://127.0.0.1:48923`) |
+| `Admin:Username` | Seeded admin username |
+| `Admin:Password` | Seeded admin password |
+| `Browser:Executable` | Chromium executable path for `AccessLocalhostInBrowser` |
+| `Browser:Arguments` | Extra browser launch arguments |
+| `Local:GpuLayerCount` | Default GPU layers for local inference (default: `-1` = auto) |
+| `Local:ContextSize` | Default context size for local models |
+| `Local:KeepLoaded` | Keep models pinned after use |
+| `Local:IdleCooldownMinutes` | Idle minutes before unloading unpinned models |
+| `EnvEditor:AllowNonAdmin` | When `true`, non-admin users can edit the Core `.env` via the API |
+| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend |
+| `Auth:DisableApiKeyCheck` | Disable API-key middleware (dev only) |
+| `Auth:DisableAccessTokenCheck` | Disable JWT enforcement (dev only) |
+| `Agent:DisableCustomProviderParameters` | Strip `providerParameters` escape-hatch before sending to provider |
+
+### Interface `.env` keys
+
+| Key | Description |
+|-----|-------------|
+| `Api:Url` | API base URL (default: `http://127.0.0.1:48923`) |
+| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend (default: `true`) |
 
 ---
 

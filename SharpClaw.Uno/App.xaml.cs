@@ -113,8 +113,12 @@ public partial class App : Application
                 {
                     var isDev = context.HostingEnvironment.IsDevelopment();
                     var apiUrl = LocalEnvironment.LoadApiUrl(isDev);
+                    var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
 
-                    var backendManager = new BackendProcessManager(apiUrl);
+                    var backendManager = new BackendProcessManager(apiUrl)
+                    {
+                        SkipLaunch = !backendEnabled
+                    };
                     services.AddSingleton(backendManager);
                     services.AddSingleton(new SharpClawApiClient(apiUrl));
                     services.AddSingleton(new ClientSettings());
@@ -159,7 +163,10 @@ public partial class App : Application
             new ViewMap<LoginPage>(),
             new ViewMap<FirstSetupPage>(),
             new ViewMap<MainPage>(),
-            new ViewMap<SettingsPage>()
+            new ViewMap<SettingsPage>(),
+            new ViewMap<LegalNoticesPage>(),
+            new ViewMap<EnvMenuPage>(),
+            new ViewMap<EnvEditorPage>()
         );
 
         routes.Register(
@@ -170,7 +177,10 @@ public partial class App : Application
                     new ("Login", View: views.FindByView<LoginPage>()),
                     new ("FirstSetup", View: views.FindByView<FirstSetupPage>()),
                     new ("Main", View: views.FindByView<MainPage>(), IsDefault:true),
-                    new ("Settings", View: views.FindByView<SettingsPage>())
+                    new ("Settings", View: views.FindByView<SettingsPage>()),
+                    new ("LegalNotices", View: views.FindByView<LegalNoticesPage>()),
+                    new ("EnvMenu", View: views.FindByView<EnvMenuPage>()),
+                    new ("EnvEditor", View: views.FindByView<EnvEditorPage>())
                 ]
             )
         );

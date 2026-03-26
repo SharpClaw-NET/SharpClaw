@@ -17,7 +17,10 @@ public static class LocalEnvironment
           // SharpClaw Environment Configuration
           // Values here are loaded for all environments.
 
-          "Admin": { "Username": "admin", "Password": "123456" }
+          "Admin": { "Username": "admin", "Password": "123456" },
+
+          // Allow non-admin users to edit this file from the Uno client.
+          //"EnvEditor": { "AllowNonAdmin": "false" }
         }
         """;
 

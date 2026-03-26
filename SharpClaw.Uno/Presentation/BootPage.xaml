@@ -164,5 +164,17 @@
                  IsTabStop="True" />
       </StackPanel>
     </StackPanel>
+
+    <!-- Bottom-left env button -->
+    <Button Background="Transparent" BorderThickness="0" Padding="8"
+            VerticalAlignment="Bottom" HorizontalAlignment="Left"
+            Margin="16,0,0,16"
+            Click="OnEnvClick"
+            ToolTipService.ToolTip="Environment Configuration">
+      <TextBlock Text=">env"
+                 Style="{StaticResource TerminalText}"
+                 FontSize="12"
+                 Foreground="#555555" />
+    </Button>
   </Grid>
 </Page>

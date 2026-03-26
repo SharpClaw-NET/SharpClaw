@@ -390,4 +390,11 @@ public sealed partial class LoginPage : Page
         DateTimeOffset? AccessTokenExpiresAt,
         string? RefreshToken,
         DateTimeOffset? RefreshTokenExpiresAt);
+
+    private void OnEnvClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services is not { } services) return;
+        EnvMenuPage.PendingOrigin = "Login";
+        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+    }
 }

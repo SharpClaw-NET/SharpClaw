@@ -138,6 +138,7 @@ try
     builder.Services.AddScoped<EditorSessionService>();
     builder.Services.AddSingleton<EditorBridgeService>();
     builder.Services.AddScoped<TaskService>();
+    builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
 
     // Local inference (in-process via LLamaSharp)

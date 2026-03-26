@@ -917,6 +917,13 @@ public sealed partial class SettingsPage : Page
         _ = navigator.NavigateRouteAsync(this, "Main");
     }
 
+    private void OnEnvClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services is not { } services) return;
+        EnvMenuPage.PendingOrigin = "Settings";
+        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Current user info & permission helpers
     // ═══════════════════════════════════════════════════════════════

@@ -131,9 +131,7 @@
     The property is only set by the script; normal dev builds are unaffected.
   -->
   <ItemGroup Condition="'$(BackendStagingDir)' != '' AND Exists('$(BackendStagingDir)')">
-    <Content Include="$(BackendStagingDir)\**"
-             Link="backend\%(RecursiveDir)%(FileName)%(Extension)"
-             CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="$(BackendStagingDir)\**" Link="backend\%(RecursiveDir)%(FileName)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -142,6 +140,24 @@
 
   <ItemGroup>
     <PackageReference Include="System.Diagnostics.EventLog" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\LegalNoticesPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\EnvMenuPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\EnvEditorPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
 
 </Project>
