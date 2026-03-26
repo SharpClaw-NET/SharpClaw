@@ -57,7 +57,15 @@ public class PermissionSetDB : BaseEntity
     public bool CanReadCrossThreadHistory { get; set; }
     public PermissionClearance ReadCrossThreadHistoryClearance { get; set; } = PermissionClearance.Unset;
 
-    // ── Per-resource grant collections ────────────────────────────
+    /// <summary>Edit the custom chat header of specific agents.</summary>
+    public bool CanEditAgentHeader { get; set; }
+    public PermissionClearance EditAgentHeaderClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Edit the custom chat header of specific channels.</summary>
+    public bool CanEditChannelHeader { get; set; }
+    public PermissionClearance EditChannelHeaderClearance { get; set; } = PermissionClearance.Unset;
+
+    // ── Per-resource grant collections ────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];
     public ICollection<SafeShellAccessDB> SafeShellAccesses { get; set; } = [];
@@ -72,6 +80,8 @@ public class PermissionSetDB : BaseEntity
     public ICollection<AgentManagementAccessDB> AgentPermissions { get; set; } = [];
     public ICollection<TaskManageAccessDB> TaskPermissions { get; set; } = [];
     public ICollection<SkillManageAccessDB> SkillPermissions { get; set; } = [];
+    public ICollection<AgentHeaderAccessDB> AgentHeaderAccesses { get; set; } = [];
+    public ICollection<ChannelHeaderAccessDB> ChannelHeaderAccesses { get; set; } = [];
 
     // ── Default resource accesses ─────────────────────────────────
     // Optional defaults used when starting a job and no specific

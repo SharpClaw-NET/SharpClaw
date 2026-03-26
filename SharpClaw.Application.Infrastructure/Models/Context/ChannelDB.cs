@@ -57,6 +57,13 @@ public class ChannelDB : BaseEntity
     public bool DisableChatHeader { get; set; }
 
     /// <summary>
+    /// Optional custom chat header template for this channel.  When set,
+    /// overrides the agent's <see cref="AgentDB.CustomChatHeader"/> and
+    /// the default system header.  Tag placeholders are expanded at runtime.
+    /// </summary>
+    public string? CustomChatHeader { get; set; }
+
+    /// <summary>
     /// Additional agents allowed to operate on this channel.  The
     /// primary <see cref="Agent"/> is always implicitly allowed and
     /// is NOT included in this collection.  When a job or chat

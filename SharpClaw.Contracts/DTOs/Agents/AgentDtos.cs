@@ -17,7 +17,8 @@ public sealed record CreateAgentRequest(
     int? Seed = null,
     JsonElement? ResponseFormat = null,
     string? ReasoningEffort = null,
-    Dictionary<string, JsonElement>? ProviderParameters = null);
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    string? CustomChatHeader = null);
 
 public sealed record UpdateAgentRequest(
     string? Name = null,
@@ -34,7 +35,8 @@ public sealed record UpdateAgentRequest(
     int? Seed = null,
     JsonElement? ResponseFormat = null,
     string? ReasoningEffort = null,
-    Dictionary<string, JsonElement>? ProviderParameters = null);
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    string? CustomChatHeader = null);
 
 public sealed record AssignAgentRoleRequest(Guid RoleId);
 
@@ -58,10 +60,11 @@ public sealed record AgentResponse(
     int? Seed = null,
     JsonElement? ResponseFormat = null,
     string? ReasoningEffort = null,
-    Dictionary<string, JsonElement>? ProviderParameters = null);
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    string? CustomChatHeader = null);
 
 /// <summary>
-/// Lightweight agent summary embedded in channel/context responses so
+/// Lightweight agent summary
 /// consumers don't need additional requests to resolve agent details.
 /// Excludes <c>SystemPrompt</c> to keep payloads compact.
 /// </summary>
@@ -84,4 +87,5 @@ public sealed record AgentSummary(
     int? Seed = null,
     JsonElement? ResponseFormat = null,
     string? ReasoningEffort = null,
-    Dictionary<string, JsonElement>? ProviderParameters = null);
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    string? CustomChatHeader = null);

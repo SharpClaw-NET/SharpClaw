@@ -28,6 +28,7 @@ public sealed partial class ChatService(
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
     LocalModelService localModelService,
+    HeaderTagProcessor headerTagProcessor,
     IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
@@ -384,6 +385,15 @@ public sealed partial class ChatService(
         if (taskContext is not null)
             return await BuildTaskChatHeaderAsync(channel, agent, taskContext, ct);
 
+        // ── Custom header resolution: channel overrides agent ────────
+        var customTemplate = channel.CustomChatHeader ?? agent.CustomChatHeader;
+        if (customTemplate is not null)
+        {
+            var userId2 = jobService.GetSessionUserId();
+            return await headerTagProcessor.ExpandAsync(
+                customTemplate, channel, agent, clientType, editorContext, userId2, ct);
+        }
+
         var userId = jobService.GetSessionUserId();
         if (userId is null)
             return null;
@@ -415,6 +425,8 @@ public sealed partial class ChatService(
                 .Include(p => p.AgentPermissions)
                 .Include(p => p.TaskPermissions)
                 .Include(p => p.SkillPermissions)
+                .Include(p => p.AgentHeaderAccesses)
+                .Include(p => p.ChannelHeaderAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == psId, ct);
         }
@@ -462,6 +474,8 @@ public sealed partial class ChatService(
                     .Include(p => p.AgentPermissions)
                     .Include(p => p.TaskPermissions)
                     .Include(p => p.SkillPermissions)
+                    .Include(p => p.AgentHeaderAccesses)
+                    .Include(p => p.ChannelHeaderAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
@@ -575,6 +589,8 @@ public sealed partial class ChatService(
                     .Include(p => p.AgentPermissions)
                     .Include(p => p.TaskPermissions)
                     .Include(p => p.SkillPermissions)
+                    .Include(p => p.AgentHeaderAccesses)
+                    .Include(p => p.ChannelHeaderAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }

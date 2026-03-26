@@ -108,6 +108,8 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
         if (request.ReasoningEffort is not null) agent.ReasoningEffort = request.ReasoningEffort;
         if (request.ProviderParameters is not null)
             agent.ProviderParameters = request.ProviderParameters.Count > 0 ? request.ProviderParameters : null;
+        if (request.CustomChatHeader is not null)
+            agent.CustomChatHeader = request.CustomChatHeader.Length > 0 ? request.CustomChatHeader : null;
         if (request.ModelId is { } modelId)
         {
             var model = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == modelId, ct)
@@ -469,7 +471,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             agent.Temperature, agent.TopP, agent.TopK,
             agent.FrequencyPenalty, agent.PresencePenalty, agent.Stop,
             agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
-            agent.ProviderParameters);
+            agent.ProviderParameters, agent.CustomChatHeader);
 
     /// <summary>
     /// Validates the typed completion parameters from a create request

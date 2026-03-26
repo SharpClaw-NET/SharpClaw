@@ -37,6 +37,7 @@ public sealed partial class MainPage
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
 
         bool disableChatHeader = false;
+        string? customChatHeader = null;
         List<(Guid Id, string Name, string ProviderModel)> allowedAgents = [];
         Guid? channelPermSetId = null;
         Guid? channelDefaultAgentId = null;
@@ -51,6 +52,7 @@ public sealed partial class MainPage
             var root = chDoc.RootElement;
 
             disableChatHeader = root.TryGetProperty("disableChatHeader", out var dch) && dch.GetBoolean();
+            if (root.TryGetProperty("customChatHeader", out var cch) && cch.ValueKind == JsonValueKind.String) customChatHeader = cch.GetString();
             if (root.TryGetProperty("permissionSetId", out var psi) && psi.ValueKind == JsonValueKind.String) channelPermSetId = psi.GetGuid();
             if (root.TryGetProperty("agent", out var agentProp) && agentProp.ValueKind == JsonValueKind.Object
                 && agentProp.TryGetProperty("id", out var defAgentId) && defAgentId.ValueKind == JsonValueKind.String) channelDefaultAgentId = defAgentId.GetGuid();
@@ -114,10 +116,10 @@ public sealed partial class MainPage
         }
         catch { /* swallow */ }
 
-        await BuildSettingsPanelAsync(api, channelId, disableChatHeader, allowedAgents, channelDefaultAgentId, permRoleId, permJson, transcriptionModelIds);
+        await BuildSettingsPanelAsync(api, channelId, disableChatHeader, customChatHeader, allowedAgents, channelDefaultAgentId, permRoleId, permJson, transcriptionModelIds);
     }
 
-    private async Task BuildSettingsPanelAsync(SharpClawApiClient api, Guid channelId, bool disableChatHeader,
+    private async Task BuildSettingsPanelAsync(SharpClawApiClient api, Guid channelId, bool disableChatHeader, string? customChatHeader,
         List<(Guid Id, string Name, string ProviderModel)> allowedAgents,
         Guid? channelDefaultAgentId, Guid? permRoleId, JsonElement? permJson, HashSet<Guid> transcriptionModelIds)
     {
@@ -137,6 +139,26 @@ public sealed partial class MainPage
         };
         headerRow.Children.Add(toggle);
         SettingsPanel.Children.Add(headerRow);
+
+        // Custom chat header template
+        SettingsPanel.Children.Add(new TextBlock { Text = "custom chat header:", FontFamily = _monoFont, FontSize = 11, Foreground = Brush(0xCCCCCC), Margin = new Thickness(0, 8, 0, 2) });
+        SettingsPanel.Children.Add(new TextBlock { Text = "Template override for the metadata header. Use {{tag}} placeholders (e.g. {{time}}, {{user}}, {{agent-role}}, {{Models:{Name}}}).", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0x808080), TextWrapping = TextWrapping.Wrap, MaxWidth = 520, Margin = new Thickness(0, 0, 0, 4) });
+        var customHeaderBox = new TextBox { FontFamily = _monoFont, FontSize = 11, Foreground = Brush(0x00FF00),
+            Background = Brush(0x1A1A1A), BorderBrush = Brush(0x333333), BorderThickness = new Thickness(1),
+            Text = customChatHeader ?? "", AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 60,
+            PlaceholderText = "(uses agent header or default)" };
+        ToolTipService.SetToolTip(customHeaderBox, "Overrides the agent's custom header and the default header. Leave empty to inherit.");
+        var saveHeaderBtn = new Button { Content = new TextBlock { Text = "Save Header", FontFamily = _monoFont, FontSize = 12, Foreground = Brush(0x00FF00) }, Background = Brush(0x1A2A1A), BorderBrush = Brush(0x00FF00), BorderThickness = new Thickness(1), Padding = new Thickness(12, 6), Margin = new Thickness(0, 4, 0, 0) };
+        saveHeaderBtn.Click += async (_, _) =>
+        {
+            var header = string.IsNullOrWhiteSpace(customHeaderBox.Text) ? null : customHeaderBox.Text.Trim();
+            var body = JsonSerializer.Serialize(new { customChatHeader = header }, Json);
+            try { await api.PutAsync($"/channels/{channelId}", new StringContent(body, Encoding.UTF8, "application/json")); }
+            catch { /* swallow */ }
+        };
+        SettingsPanel.Children.Add(customHeaderBox);
+        SettingsPanel.Children.Add(saveHeaderBtn);
 
         // ── Allowed Agents ──
         AddSettingsSection("Allowed Agents", "Additional agents permitted to respond in this channel besides the default");

@@ -60,6 +60,8 @@ public class SharpClawDbContext(
     public DbSet<AgentManagementAccessDB> AgentPermissions => Set<AgentManagementAccessDB>();
     public DbSet<TaskManageAccessDB> TaskPermissions => Set<TaskManageAccessDB>();
     public DbSet<SkillManageAccessDB> SkillPermissions => Set<SkillManageAccessDB>();
+    public DbSet<AgentHeaderAccessDB> AgentHeaderAccesses => Set<AgentHeaderAccessDB>();
+    public DbSet<ChannelHeaderAccessDB> ChannelHeaderAccesses => Set<ChannelHeaderAccessDB>();
     public DbSet<ClearanceUserWhitelistEntryDB> ClearanceUserWhitelistEntries => Set<ClearanceUserWhitelistEntryDB>();
     public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
     public DbSet<AgentJobDB> AgentJobs => Set<AgentJobDB>();
@@ -299,6 +301,16 @@ public class SharpClawDbContext(
             e.HasMany(p => p.SkillPermissions)
                 .WithOne(s => s.PermissionSet)
                 .HasForeignKey(s => s.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.AgentHeaderAccesses)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.ChannelHeaderAccesses)
+                .WithOne(c => c.PermissionSet)
+                .HasForeignKey(c => c.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
             e.HasMany(p => p.ClearanceUserWhitelist)

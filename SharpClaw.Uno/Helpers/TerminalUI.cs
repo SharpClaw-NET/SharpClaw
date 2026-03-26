@@ -68,17 +68,21 @@ internal static class TerminalUI
         ("agentAccesses", "Agent Management"),
         ("taskAccesses", "Task Management"),
         ("skillAccesses", "Skill Management"),
+        ("agentHeaderAccesses", "Agent Header Editing"),
+        ("channelHeaderAccesses", "Channel Header Editing"),
     ];
 
     public static readonly string[] GlobalFlagNames =
         ["canCreateSubAgents", "canCreateContainers", "canRegisterInfoStores",
          "canAccessLocalhostInBrowser", "canAccessLocalhostCli",
-         "canClickDesktop", "canTypeOnDesktop", "canReadCrossThreadHistory"];
+         "canClickDesktop", "canTypeOnDesktop", "canReadCrossThreadHistory",
+         "canEditAgentHeader", "canEditChannelHeader"];
 
     public static readonly string[] GlobalFlagClearanceNames =
         ["createSubAgentsClearance", "createContainersClearance", "registerInfoStoresClearance",
          "accessLocalhostInBrowserClearance", "accessLocalhostCliClearance",
-         "clickDesktopClearance", "typeOnDesktopClearance", "readCrossThreadHistoryClearance"];
+         "clickDesktopClearance", "typeOnDesktopClearance", "readCrossThreadHistoryClearance",
+         "editAgentHeaderClearance", "editChannelHeaderClearance"];
 
     public static readonly Dictionary<string, string> GlobalFlagTooltips = new()
     {
@@ -90,6 +94,8 @@ internal static class TerminalUI
         ["canClickDesktop"] = "Allow the agent to simulate mouse clicks on the desktop",
         ["canTypeOnDesktop"] = "Allow the agent to simulate keyboard input on the desktop",
         ["canReadCrossThreadHistory"] = "Allow the agent to read conversation history from other threads and channels",
+        ["canEditAgentHeader"] = "Allow editing the custom chat header of specific agents",
+        ["canEditChannelHeader"] = "Allow editing the custom chat header of specific channels",
     };
 
     public static readonly Dictionary<string, string> ResourceAccessTooltips = new()
@@ -107,6 +113,8 @@ internal static class TerminalUI
         ["agentAccesses"] = "Manage other agents (create, update, delete)",
         ["taskAccesses"] = "Manage scheduled tasks and jobs",
         ["skillAccesses"] = "Access registered skills and their definitions",
+        ["agentHeaderAccesses"] = "Edit the custom chat header of specific agents",
+        ["channelHeaderAccesses"] = "Edit the custom chat header of specific channels",
     };
 
     public static readonly (string Tag, string Label)[] ClearanceOptions =

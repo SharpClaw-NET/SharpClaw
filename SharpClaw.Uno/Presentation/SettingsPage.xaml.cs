@@ -509,6 +509,28 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(paramsBox);
         ContentPanel.Children.Add(saveParamsBtn);
 
+        // Custom chat header
+        Sub("Custom Chat Header");
+        Lbl("Template override for the metadata header prepended to each message. "
+            + "Use {{tag}} placeholders (e.g. {{time}}, {{user}}, {{agent-role}}, {{Agents:{Name} ({Id})}}).", 0x808080);
+        var headerBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
+            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Text = a.CustomChatHeader ?? "", AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 80,
+            PlaceholderText = "(uses default header)" };
+        var saveHeaderBtn = GreenButton("Save Header");
+        saveHeaderBtn.Click += async (_, _) =>
+        {
+            var header = string.IsNullOrWhiteSpace(headerBox.Text) ? null : headerBox.Text.Trim();
+            var body = JsonSerializer.Serialize(new { customChatHeader = header }, Json);
+            var resp = await Api.PutAsync($"/agents/{a.Id}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Status(resp.IsSuccessStatusCode ? "\u2713 Header saved." : "\u2717 Save failed.",
+                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
+        };
+        ContentPanel.Children.Add(headerBox);
+        ContentPanel.Children.Add(saveHeaderBtn);
+
         // Assign role
         Sub("Role");
         _cachedRoles ??= [];
@@ -1087,7 +1109,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModelEntry(Guid Id, string Name, Guid ProviderId, string ProviderName, string Capabilities);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, Dictionary<string, JsonElement>? ProviderParameters = null);
+    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, Dictionary<string, JsonElement>? ProviderParameters = null, string? CustomChatHeader = null);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record RoleEntry(Guid Id, string Name, Guid? PermissionSetId = null);
     [ImplicitKeys(IsEnabled = false)]

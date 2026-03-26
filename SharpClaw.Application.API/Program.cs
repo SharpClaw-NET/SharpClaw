@@ -128,6 +128,7 @@ try
     builder.Services.AddScoped<ContextService>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
+    builder.Services.AddScoped<HeaderTagProcessor>();
     builder.Services.AddScoped<ChatService>();
     builder.Services.AddScoped<RoleService>();
     builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();

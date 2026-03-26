@@ -118,6 +118,8 @@ public sealed class RoleService(SharpClawDbContext db)
             ps.AgentPermissions.Clear();
             ps.TaskPermissions.Clear();
             ps.SkillPermissions.Clear();
+            ps.AgentHeaderAccesses.Clear();
+            ps.ChannelHeaderAccesses.Clear();
         }
         else
         {
@@ -145,6 +147,10 @@ public sealed class RoleService(SharpClawDbContext db)
         ps.TypeOnDesktopClearance = request.TypeOnDesktopClearance;
         ps.CanReadCrossThreadHistory = request.CanReadCrossThreadHistory;
         ps.ReadCrossThreadHistoryClearance = request.ReadCrossThreadHistoryClearance;
+        ps.CanEditAgentHeader = request.CanEditAgentHeader;
+        ps.EditAgentHeaderClearance = request.EditAgentHeaderClearance;
+        ps.CanEditChannelHeader = request.CanEditChannelHeader;
+        ps.EditChannelHeaderClearance = request.EditChannelHeaderClearance;
 
         // Apply per-resource grants.
         AddGrants(ps.DangerousShellAccesses, request.DangerousShellAccesses,
@@ -199,6 +205,14 @@ public sealed class RoleService(SharpClawDbContext db)
             (g, psId) => new SkillManageAccessDB
             { PermissionSetId = psId, SkillId = g.ResourceId, Clearance = g.Clearance });
 
+        AddGrants(ps.AgentHeaderAccesses, request.AgentHeaderAccesses,
+            (g, psId) => new AgentHeaderAccessDB
+            { PermissionSetId = psId, AgentId = g.ResourceId, Clearance = g.Clearance });
+
+        AddGrants(ps.ChannelHeaderAccesses, request.ChannelHeaderAccesses,
+            (g, psId) => new ChannelHeaderAccessDB
+            { PermissionSetId = psId, ChannelId = g.ResourceId, Clearance = g.Clearance });
+
         await db.SaveChangesAsync(ct);
 
         return ToResponse(role, ps);
@@ -222,7 +236,9 @@ public sealed class RoleService(SharpClawDbContext db)
                     CanAccessLocalhostCli: false,
                     CanClickDesktop: false,
                     CanTypeOnDesktop: false,
-                    CanReadCrossThreadHistory: false
+                    CanReadCrossThreadHistory: false,
+                    CanEditAgentHeader: false,
+                    CanEditChannelHeader: false
                 })
                 return;
 
@@ -261,6 +277,14 @@ public sealed class RoleService(SharpClawDbContext db)
         if (request.CanReadCrossThreadHistory && !callerPs.CanReadCrossThreadHistory)
             throw new UnauthorizedAccessException(
                 "Cannot grant CanReadCrossThreadHistory — you do not hold this permission.");
+
+        if (request.CanEditAgentHeader && !callerPs.CanEditAgentHeader)
+            throw new UnauthorizedAccessException(
+                "Cannot grant CanEditAgentHeader — you do not hold this permission.");
+
+        if (request.CanEditChannelHeader && !callerPs.CanEditChannelHeader)
+            throw new UnauthorizedAccessException(
+                "Cannot grant CanEditChannelHeader — you do not hold this permission.");
     }
 
     private static void ValidateResourceGrants(
@@ -292,6 +316,10 @@ public sealed class RoleService(SharpClawDbContext db)
             callerPs?.TaskPermissions, a => a.ScheduledTaskId);
         ValidateCollection("SkillAccesses", request.SkillAccesses,
             callerPs?.SkillPermissions, a => a.SkillId);
+        ValidateCollection("AgentHeaderAccesses", request.AgentHeaderAccesses,
+            callerPs?.AgentHeaderAccesses, a => a.AgentId);
+        ValidateCollection("ChannelHeaderAccesses", request.ChannelHeaderAccesses,
+            callerPs?.ChannelHeaderAccesses, a => a.ChannelId);
     }
 
     /// <summary>
@@ -372,6 +400,8 @@ public sealed class RoleService(SharpClawDbContext db)
             .Include(p => p.AgentPermissions)
             .Include(p => p.TaskPermissions)
             .Include(p => p.SkillPermissions)
+            .Include(p => p.AgentHeaderAccesses)
+            .Include(p => p.ChannelHeaderAccesses)
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == psId, ct);
     }
@@ -397,6 +427,10 @@ public sealed class RoleService(SharpClawDbContext db)
             TypeOnDesktopClearance: ps?.TypeOnDesktopClearance ?? PermissionClearance.Unset,
             CanReadCrossThreadHistory: ps?.CanReadCrossThreadHistory ?? false,
             ReadCrossThreadHistoryClearance: ps?.ReadCrossThreadHistoryClearance ?? PermissionClearance.Unset,
+            CanEditAgentHeader: ps?.CanEditAgentHeader ?? false,
+            EditAgentHeaderClearance: ps?.EditAgentHeaderClearance ?? PermissionClearance.Unset,
+            CanEditChannelHeader: ps?.CanEditChannelHeader ?? false,
+            EditChannelHeaderClearance: ps?.EditChannelHeaderClearance ?? PermissionClearance.Unset,
             DangerousShellAccesses: MapGrants(ps?.DangerousShellAccesses, a => a.SystemUserId, a => a.Clearance),
             SafeShellAccesses: MapGrants(ps?.SafeShellAccesses, a => a.ContainerId, a => a.Clearance),
             ContainerAccesses: MapGrants(ps?.ContainerAccesses, a => a.ContainerId, a => a.Clearance),
@@ -409,7 +443,9 @@ public sealed class RoleService(SharpClawDbContext db)
             EditorSessionAccesses: MapGrants(ps?.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance),
             AgentAccesses: MapGrants(ps?.AgentPermissions, a => a.AgentId, a => a.Clearance),
             TaskAccesses: MapGrants(ps?.TaskPermissions, a => a.ScheduledTaskId, a => a.Clearance),
-            SkillAccesses: MapGrants(ps?.SkillPermissions, a => a.SkillId, a => a.Clearance));
+            SkillAccesses: MapGrants(ps?.SkillPermissions, a => a.SkillId, a => a.Clearance),
+            AgentHeaderAccesses: MapGrants(ps?.AgentHeaderAccesses, a => a.AgentId, a => a.Clearance),
+            ChannelHeaderAccesses: MapGrants(ps?.ChannelHeaderAccesses, a => a.ChannelId, a => a.Clearance));
 
     private static IReadOnlyList<ResourceGrant> MapGrants<T>(
         ICollection<T>? accesses,

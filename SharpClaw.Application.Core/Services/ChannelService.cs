@@ -165,6 +165,9 @@ public sealed class ChannelService(SharpClawDbContext db)
         if (request.CustomId is not null)
             channel.CustomId = request.CustomId;
 
+        if (request.CustomChatHeader is not null)
+            channel.CustomChatHeader = request.CustomChatHeader.Length > 0 ? request.CustomChatHeader : null;
+
         await db.SaveChangesAsync(ct);
         return ToResponse(channel, channel.Agent, channel.AgentContext);
     }
@@ -341,7 +344,8 @@ public sealed class ChannelService(SharpClawDbContext db)
             channel.DisableChatHeader,
             channel.CreatedAt,
             channel.UpdatedAt,
-            channel.CustomId);
+            channel.CustomId,
+            channel.CustomChatHeader);
     }
 
     internal static AgentSummary ToSummary(AgentDB agent) =>
@@ -357,5 +361,5 @@ public sealed class ChannelService(SharpClawDbContext db)
             agent.Temperature, agent.TopP, agent.TopK,
             agent.FrequencyPenalty, agent.PresencePenalty, agent.Stop,
             agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
-            agent.ProviderParameters);
+            agent.ProviderParameters, agent.CustomChatHeader);
 }

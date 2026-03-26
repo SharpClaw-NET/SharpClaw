@@ -61,6 +61,13 @@ public class AgentDB : BaseEntity
     /// </summary>
     public Dictionary<string, JsonElement>? ProviderParameters { get; set; }
 
+    /// <summary>
+    /// Optional custom chat header template. When set, replaces the default
+    /// system-generated header for this agent. Tag placeholders like
+    /// <c>{{time}}</c> or <c>{{SafeShellAccesses}}</c> are expanded at runtime.
+    /// </summary>
+    public string? CustomChatHeader { get; set; }
+
     public Guid ModelId { get; set; }
     public ModelDB Model { get; set; } = null!;
 

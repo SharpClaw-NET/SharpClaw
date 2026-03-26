@@ -47,5 +47,9 @@ public enum AgentActionType
     EditorRunTerminal = 30,
 
     // ── Cross-thread context access (global flag) ─────────────────
-    ReadCrossThreadHistory = 31
+    ReadCrossThreadHistory = 31,
+
+    // ── Header editing (per-resource: target agent / channel) ──────
+    EditAgentHeader = 32,
+    EditChannelHeader = 33
 }
