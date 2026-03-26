@@ -484,6 +484,20 @@ public sealed partial class ChatService(
             sb.Append(" | agent-role: (none) clearance=Unset (no permissions)");
         }
 
+        // ── Accessible cross-thread history ──────────────────────
+        var accessibleThreads = await GetAccessibleThreadsAsync(agent.Id, channel.Id, ct);
+        if (accessibleThreads.Count > 0)
+        {
+            sb.Append(" | accessible-threads: ");
+            for (var i = 0; i < accessibleThreads.Count; i++)
+            {
+                if (i > 0) sb.Append(", ");
+                var (threadId, threadName, _, channelTitle) = accessibleThreads[i];
+                sb.Append(threadName).Append(" [").Append(channelTitle)
+                  .Append("] (").Append(threadId.ToString("D")).Append(')');
+            }
+        }
+
         if (editorContext is not null)
         {
             sb.Append(" | editor: ").Append(editorContext.EditorType);
@@ -599,6 +613,7 @@ public sealed partial class ChatService(
         if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
         if (ps.CanClickDesktop) grants.Add("ClickDesktop");
         if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
+        if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
         if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
         if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
         if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
@@ -633,6 +648,7 @@ public sealed partial class ChatService(
         if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
         if (ps.CanClickDesktop) grants.Add("ClickDesktop");
         if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
+        if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
 
         await AppendResourceGrantAsync(grants, "DangerousShell",
             ps.DangerousShellAccesses.Select(a => a.SystemUserId),
@@ -868,7 +884,7 @@ public sealed partial class ChatService(
                 }
 
                 // ── Inline tool interception (no permissions) ────
-                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, ct);
+                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, agent.Id, channelId, ct);
                 if (inlineHandled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
@@ -1154,16 +1170,31 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
-    /// Try to handle a tool call as a permission-free inline tool (e.g. <c>wait</c>).
+    /// Try to handle a tool call as a permission-free inline tool (e.g. <c>wait</c>)
+    /// or a cross-thread context tool (e.g. <c>list_accessible_threads</c>,
+    /// <c>read_thread_history</c>).
     /// Returns <c>true</c> and sets <paramref name="result"/> if handled.
     /// These tools never enter the job/permission pipeline.
     /// </summary>
-    private static async Task<(bool Handled, string? Result)> TryHandleInlineToolAsync(
+    private async Task<(bool Handled, string? Result)> TryHandleInlineToolAsync(
+        ChatToolCall toolCall, Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        switch (toolCall.Name)
+        {
+            case "wait":
+                return await HandleWaitToolAsync(toolCall, ct);
+            case "list_accessible_threads":
+                return await HandleListAccessibleThreadsAsync(agentId, channelId, ct);
+            case "read_thread_history":
+                return await HandleReadThreadHistoryAsync(toolCall, agentId, channelId, ct);
+            default:
+                return (false, null);
+        }
+    }
+
+    private static async Task<(bool, string?)> HandleWaitToolAsync(
         ChatToolCall toolCall, CancellationToken ct)
     {
-        if (toolCall.Name != "wait")
-            return (false, null);
-
         try
         {
             var seconds = 5; // default
@@ -1191,6 +1222,186 @@ public sealed partial class ChatService(
         }
     }
 
+    private async Task<(bool, string?)> HandleListAccessibleThreadsAsync(
+        Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        try
+        {
+            var threads = await GetAccessibleThreadsAsync(agentId, channelId, ct);
+            if (threads.Count == 0)
+                return (true, "No accessible threads found. Either the agent lacks the ReadCrossThreadHistory permission, or no other channels have opted in.");
+
+            var result = threads.Select(t => new
+            {
+                threadId = t.ThreadId.ToString("D"),
+                threadName = t.ThreadName,
+                channelId = t.ChannelId.ToString("D"),
+                channelTitle = t.ChannelTitle,
+            });
+
+            return (true, JsonSerializer.Serialize(result));
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error listing accessible threads: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool, string?)> HandleReadThreadHistoryAsync(
+        ChatToolCall toolCall, Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        try
+        {
+            Guid threadId = Guid.Empty;
+            int maxMessages = 50;
+
+            if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
+            {
+                using var doc = JsonDocument.Parse(toolCall.ArgumentsJson);
+                if (doc.RootElement.TryGetProperty("threadId", out var tidEl))
+                    Guid.TryParse(tidEl.GetString(), out threadId);
+                if (doc.RootElement.TryGetProperty("maxMessages", out var maxEl))
+                    maxMessages = Math.Clamp(maxEl.GetInt32(), 1, 200);
+            }
+
+            if (threadId == Guid.Empty)
+                return (true, "Error: threadId is required.");
+
+            // Load thread with its channel
+            var thread = await db.ChatThreads
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.AllowedAgents)
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.PermissionSet)
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.AgentContext)
+                        .ThenInclude(ctx => ctx!.PermissionSet)
+                .FirstOrDefaultAsync(t => t.Id == threadId, ct);
+
+            if (thread is null)
+                return (true, "Error: thread not found.");
+
+            // Must not be the current channel (use normal history for that)
+            if (thread.ChannelId == channelId)
+                return (true, "Error: use normal chat history to access threads in the current channel.");
+
+            // Check agent has access to the target channel
+            var targetChannel = thread.Channel;
+            var isAgentOnChannel = targetChannel.AgentId == agentId
+                || targetChannel.AllowedAgents.Any(a => a.Id == agentId);
+            if (!isAgentOnChannel)
+                return (true, "Error: agent is not assigned to the target channel.");
+
+            // Check agent has ReadCrossThreadHistory permission
+            var agentWithRole = await db.Agents
+                .Include(a => a.Role)
+                    .ThenInclude(r => r!.PermissionSet)
+                .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+
+            var agentPs = agentWithRole?.Role?.PermissionSet;
+            if (agentPs is not { CanReadCrossThreadHistory: true })
+                return (true, "Error: agent lacks ReadCrossThreadHistory permission.");
+
+            // Check channel opt-in (unless Independent clearance)
+            if (agentPs.ReadCrossThreadHistoryClearance != PermissionClearance.Independent)
+            {
+                var effectivePs = targetChannel.PermissionSet
+                    ?? targetChannel.AgentContext?.PermissionSet;
+                if (effectivePs?.CanReadCrossThreadHistory != true)
+                    return (true, "Error: the target channel has not opted in to cross-thread history sharing.");
+            }
+
+            // Fetch messages
+            var messages = await db.ChatMessages
+                .Where(m => m.ThreadId == threadId)
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(maxMessages)
+                .OrderBy(m => m.CreatedAt)
+                .Select(m => new
+                {
+                    role = m.Role,
+                    content = m.Content,
+                    sender = m.SenderUsername ?? m.SenderAgentName ?? "unknown",
+                    timestamp = m.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            if (messages.Count == 0)
+                return (true, "Thread exists but has no messages.");
+
+            return (true, JsonSerializer.Serialize(messages));
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error reading thread history: {ex.Message}");
+        }
+    }
+
+
+    /// <summary>
+    /// Finds threads accessible to this agent via cross-thread history
+    /// sharing.  A thread is accessible when:
+    /// <list type="number">
+    ///   <item>The agent has <c>CanReadCrossThreadHistory</c>.</item>
+    ///   <item>The agent is primary or allowed on the thread's channel.</item>
+    ///   <item>The channel's effective permission set also has
+    ///         <c>CanReadCrossThreadHistory</c> — unless the agent has
+    ///         <c>Independent</c> clearance for the flag.</item>
+    /// </list>
+    /// The current channel is excluded (the agent already has its own
+    /// history there).
+    /// </summary>
+    private async Task<List<(Guid ThreadId, string ThreadName, Guid ChannelId, string ChannelTitle)>>
+        GetAccessibleThreadsAsync(Guid agentId, Guid currentChannelId, CancellationToken ct)
+    {
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+                .ThenInclude(r => r!.PermissionSet)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+
+        if (agentWithRole?.Role?.PermissionSet is not { CanReadCrossThreadHistory: true } agentPs)
+            return [];
+
+        var isIndependent = agentPs.ReadCrossThreadHistoryClearance == PermissionClearance.Independent;
+
+        // Channels where the agent is primary or allowed, excluding current
+        var channels = await db.Channels
+            .Include(c => c.AllowedAgents)
+            .Include(c => c.PermissionSet)
+            .Include(c => c.AgentContext)
+                .ThenInclude(ctx => ctx!.PermissionSet)
+            .Where(c => c.Id != currentChannelId)
+            .Where(c => c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId))
+            .ToListAsync(ct);
+
+        // Filter by channel opt-in unless Independent
+        if (!isIndependent)
+        {
+            channels = channels
+                .Where(c =>
+                {
+                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
+                    return effectivePs?.CanReadCrossThreadHistory == true;
+                })
+                .ToList();
+        }
+
+        if (channels.Count == 0)
+            return [];
+
+        var channelIds = channels.Select(c => c.Id).ToList();
+        var threads = await db.ChatThreads
+            .Where(t => channelIds.Contains(t.ChannelId))
+            .OrderByDescending(t => t.UpdatedAt)
+            .Select(t => new { t.Id, t.Name, t.ChannelId })
+            .ToListAsync(ct);
+
+        var channelTitles = channels.ToDictionary(c => c.Id, c => c.Title);
+
+        return threads
+            .Select(t => (t.Id, t.Name, t.ChannelId, channelTitles[t.ChannelId]))
+            .ToList();
+    }
 
     // ── Built-in task tool definitions ────────────────────────────
 
@@ -1481,7 +1692,7 @@ public sealed partial class ChatService(
                 }
 
                 // ── Inline tool interception (no permissions) ────
-                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, ct);
+                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, agentId, channelId, ct);
                 if (inlineHandled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
@@ -1596,7 +1807,7 @@ public sealed partial class ChatService(
                 }
 
                 // ── Inline tool interception (no permissions) ────
-                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(syntheticTc, ct);
+                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(syntheticTc, agentId, channelId, ct);
                 if (inlineHandled)
                 {
                     toolResultBuilder.AppendLine(
@@ -2000,6 +2211,7 @@ public sealed partial class ChatService(
         var editorShowDiffSchema = BuildEditorShowDiffSchema();
         var editorRunTerminalSchema = BuildEditorRunTerminalSchema();
         var waitSchema = BuildWaitSchema();
+        var readThreadHistorySchema = BuildReadThreadHistorySchema();
 
         return
         [
@@ -2011,6 +2223,20 @@ public sealed partial class ChatService(
                 + "wasting tokens on polling. The tool call thread is blocked for the "
                 + "duration; no inference or token cost is incurred while waiting.",
                 waitSchema),
+
+            // ── Cross-thread context tools ────────────────────
+            new("list_accessible_threads",
+                "List threads from other channels that you can read. Returns thread IDs, "
+                + "names, and their parent channel info. Requires ReadCrossThreadHistory "
+                + "permission. Only threads in channels that have opted in to cross-thread "
+                + "sharing (or where you have Independent clearance) are returned.",
+                globalSchema),
+            new("read_thread_history",
+                "Read conversation history from a thread in another channel. Provide "
+                + "the threadId (GUID) and optionally maxMessages (1–200, default 50). "
+                + "Requires ReadCrossThreadHistory permission and the target channel "
+                + "must have opted in to cross-thread sharing.",
+                readThreadHistorySchema),
 
             // ── Shell execution ───────────────────────────────
             new("execute_mk8_shell", Mk8ShellToolDescription, mk8Schema),
@@ -2187,6 +2413,27 @@ public sealed partial class ChatService(
                     }
                 },
                 "required": ["seconds"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildReadThreadHistorySchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "string",
+                        "description": "GUID of the thread to read. Use list_accessible_threads to discover available thread IDs."
+                    },
+                    "maxMessages": {
+                        "type": "integer",
+                        "description": "Maximum number of messages to return (1–200). Default 50."
+                    }
+                },
+                "required": ["threadId"]
             }
             """);
         return doc.RootElement.Clone();

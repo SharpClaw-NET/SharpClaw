@@ -143,6 +143,8 @@ public sealed class RoleService(SharpClawDbContext db)
         ps.ClickDesktopClearance = request.ClickDesktopClearance;
         ps.CanTypeOnDesktop = request.CanTypeOnDesktop;
         ps.TypeOnDesktopClearance = request.TypeOnDesktopClearance;
+        ps.CanReadCrossThreadHistory = request.CanReadCrossThreadHistory;
+        ps.ReadCrossThreadHistoryClearance = request.ReadCrossThreadHistoryClearance;
 
         // Apply per-resource grants.
         AddGrants(ps.DangerousShellAccesses, request.DangerousShellAccesses,
@@ -219,7 +221,8 @@ public sealed class RoleService(SharpClawDbContext db)
                     CanAccessLocalhostInBrowser: false,
                     CanAccessLocalhostCli: false,
                     CanClickDesktop: false,
-                    CanTypeOnDesktop: false
+                    CanTypeOnDesktop: false,
+                    CanReadCrossThreadHistory: false
                 })
                 return;
 
@@ -254,6 +257,10 @@ public sealed class RoleService(SharpClawDbContext db)
         if (request.CanTypeOnDesktop && !callerPs.CanTypeOnDesktop)
             throw new UnauthorizedAccessException(
                 "Cannot grant CanTypeOnDesktop — you do not hold this permission.");
+
+        if (request.CanReadCrossThreadHistory && !callerPs.CanReadCrossThreadHistory)
+            throw new UnauthorizedAccessException(
+                "Cannot grant CanReadCrossThreadHistory — you do not hold this permission.");
     }
 
     private static void ValidateResourceGrants(
@@ -388,6 +395,8 @@ public sealed class RoleService(SharpClawDbContext db)
             ClickDesktopClearance: ps?.ClickDesktopClearance ?? PermissionClearance.Unset,
             CanTypeOnDesktop: ps?.CanTypeOnDesktop ?? false,
             TypeOnDesktopClearance: ps?.TypeOnDesktopClearance ?? PermissionClearance.Unset,
+            CanReadCrossThreadHistory: ps?.CanReadCrossThreadHistory ?? false,
+            ReadCrossThreadHistoryClearance: ps?.ReadCrossThreadHistoryClearance ?? PermissionClearance.Unset,
             DangerousShellAccesses: MapGrants(ps?.DangerousShellAccesses, a => a.SystemUserId, a => a.Clearance),
             SafeShellAccesses: MapGrants(ps?.SafeShellAccesses, a => a.ContainerId, a => a.Clearance),
             ContainerAccesses: MapGrants(ps?.ContainerAccesses, a => a.ContainerId, a => a.Clearance),

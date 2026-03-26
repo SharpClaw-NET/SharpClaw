@@ -73,12 +73,12 @@ internal static class TerminalUI
     public static readonly string[] GlobalFlagNames =
         ["canCreateSubAgents", "canCreateContainers", "canRegisterInfoStores",
          "canAccessLocalhostInBrowser", "canAccessLocalhostCli",
-         "canClickDesktop", "canTypeOnDesktop"];
+         "canClickDesktop", "canTypeOnDesktop", "canReadCrossThreadHistory"];
 
     public static readonly string[] GlobalFlagClearanceNames =
         ["createSubAgentsClearance", "createContainersClearance", "registerInfoStoresClearance",
          "accessLocalhostInBrowserClearance", "accessLocalhostCliClearance",
-         "clickDesktopClearance", "typeOnDesktopClearance"];
+         "clickDesktopClearance", "typeOnDesktopClearance", "readCrossThreadHistoryClearance"];
 
     public static readonly Dictionary<string, string> GlobalFlagTooltips = new()
     {
@@ -89,6 +89,7 @@ internal static class TerminalUI
         ["canAccessLocalhostCli"] = "Allow the agent to make direct HTTP requests to localhost",
         ["canClickDesktop"] = "Allow the agent to simulate mouse clicks on the desktop",
         ["canTypeOnDesktop"] = "Allow the agent to simulate keyboard input on the desktop",
+        ["canReadCrossThreadHistory"] = "Allow the agent to read conversation history from other threads and channels",
     };
 
     public static readonly Dictionary<string, string> ResourceAccessTooltips = new()

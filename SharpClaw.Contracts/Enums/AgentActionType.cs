@@ -44,5 +44,8 @@ public enum AgentActionType
     EditorDeleteFile = 27,
     EditorShowDiff = 28,
     EditorRunBuild = 29,
-    EditorRunTerminal = 30
+    EditorRunTerminal = 30,
+
+    // ── Cross-thread context access (global flag) ─────────────────
+    ReadCrossThreadHistory = 31
 }

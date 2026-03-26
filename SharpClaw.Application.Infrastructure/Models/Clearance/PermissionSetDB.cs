@@ -49,6 +49,14 @@ public class PermissionSetDB : BaseEntity
     public bool CanTypeOnDesktop { get; set; }
     public PermissionClearance TypeOnDesktopClearance { get; set; } = PermissionClearance.Unset;
 
+    /// <summary>
+    /// Read conversation history from other threads/channels where this
+    /// agent is allowed. The target channel must also opt-in by having
+    /// this flag set in its own (or its context's) permission set.
+    /// </summary>
+    public bool CanReadCrossThreadHistory { get; set; }
+    public PermissionClearance ReadCrossThreadHistoryClearance { get; set; } = PermissionClearance.Unset;
+
     // ── Per-resource grant collections ────────────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];

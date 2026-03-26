@@ -1660,6 +1660,7 @@ public static class CliDispatcher
                 "  --localhost-cli                         Grant CanAccessLocalhostCli",
                 "  --click-desktop                         Grant CanClickDesktop",
                 "  --type-on-desktop                       Grant CanTypeOnDesktop",
+                "  --read-cross-thread-history             Grant CanReadCrossThreadHistory",
                 "  --dangerous-shell <id>[:<clearance>]    Add DangerousShell grant",
                 "  --safe-shell <id>[:<clearance>]         Add SafeShell grant",
                 "  --container <id>[:<clearance>]          Add Container grant",
@@ -1729,6 +1730,7 @@ public static class CliDispatcher
         var localhostCli = false;
         var clickDesktop = false;
         var typeOnDesktop = false;
+        var readCrossThreadHistory = false;
 
         var dangerousShell = new List<ResourceGrant>();
         var safeShell = new List<ResourceGrant>();
@@ -1757,6 +1759,7 @@ public static class CliDispatcher
                 case "--localhost-cli": localhostCli = true; break;
                 case "--click-desktop": clickDesktop = true; break;
                 case "--type-on-desktop": typeOnDesktop = true; break;
+                case "--read-cross-thread-history": readCrossThreadHistory = true; break;
                 case "--dangerous-shell" when i + 1 < args.Length:
                     dangerousShell.Add(ParseResourceGrant(args[++i])); break;
                 case "--safe-shell" when i + 1 < args.Length:
@@ -1791,6 +1794,7 @@ public static class CliDispatcher
             CanAccessLocalhostCli: localhostCli,
             CanClickDesktop: clickDesktop,
             CanTypeOnDesktop: typeOnDesktop,
+            CanReadCrossThreadHistory: readCrossThreadHistory,
             DangerousShellAccesses: dangerousShell.Count > 0 ? dangerousShell : null,
             SafeShellAccesses: safeShell.Count > 0 ? safeShell : null,
             ContainerAccesses: container.Count > 0 ? container : null,

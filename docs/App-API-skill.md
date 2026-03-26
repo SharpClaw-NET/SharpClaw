@@ -85,7 +85,7 @@ PUT    /roles/{id}/permissions     (full replacement)
 
 SetRolePermissionsRequest fields:
   defaultClearance (PermissionClearance enum)
-  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop
+  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop, canReadCrossThreadHistory
   Per-resource arrays (each entry is { resourceId, clearance }):
     dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses
 
@@ -274,10 +274,15 @@ Dedup pipeline (non-timestamped API responses):
 Audio is automatically normalised to mono 16 kHz 16-bit PCM (Whisper-optimal).
 
 AgentActionType categories:
-  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop
+  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop, ReadCrossThreadHistory
   Per-resource: UnsafeExecuteAsDangerousShell, ExecuteAsSafeShell, AccessLocalInfoStore, AccessExternalInfoStore, AccessWebsite, QuerySearchEngine, AccessContainer, ManageAgent, EditTask, AccessSkill, CaptureDisplay
   Transcription: TranscribeFromAudioDevice, TranscribeFromAudioStream, TranscribeFromAudioFile
   Editor: EditorReadFile, EditorGetOpenFiles, EditorGetSelection, EditorGetDiagnostics, EditorApplyEdit, EditorCreateFile, EditorDeleteFile, EditorShowDiff, EditorRunBuild, EditorRunTerminal
+
+Inline tools (no job created, handled in the chat inference loop):
+  wait — pause 1–300 seconds. No permissions required.
+  list_accessible_threads — list threads from other channels the agent can read. Requires ReadCrossThreadHistory permission.
+  read_thread_history — read conversation history from a cross-channel thread. Params: threadId (required), maxMessages (optional, 1–200). Requires ReadCrossThreadHistory + channel opt-in.
 
 DangerousShellType: Bash, PowerShell, CommandPrompt, Git.
 SafeShellType: Mk8Shell.
@@ -315,6 +320,13 @@ Stage 1 — Agent capability: role's PermissionSetDB checked. Independent → ap
 Stage 2 — Channel/context pre-auth: channel PS checked first; if it addresses the action, that result is final (context not consulted). If channel doesn't address it, context PS checked. Independent → pre-approved. Otherwise → AwaitingApproval.
 
 Channel PS checked → context PS → fallback AwaitingApproval.
+
+Cross-thread history access (double-gate):
+  Agent role PS must have CanReadCrossThreadHistory=true AND target channel effective PS must also have CanReadCrossThreadHistory=true (opt-in).
+  Channels without opt-in are private even if the agent holds the permission.
+  Independent clearance on the agent overrides the channel opt-in requirement.
+  Agent must be primary or in AllowedAgents on the target channel.
+  Accessible threads listed in chat header (accessible-threads section) and via list_accessible_threads / read_thread_history inline tools.
 
 ────────────────────────────────────────────────────────────────────
 ADVANCED EXAMPLE: Transcription Channel Setup
@@ -366,6 +378,7 @@ Step 3 — Set up a role with Independent transcription permission for all audio
       "canAccessLocalhostCli": false,
       "canClickDesktop": false,
       "canTypeOnDesktop": false,
+      "canReadCrossThreadHistory": false,
       "audioDeviceAccesses": [
         { "resourceId": "ffffffff-ffff-ffff-ffff-ffffffffffff", "clearance": "Independent" }
       ]

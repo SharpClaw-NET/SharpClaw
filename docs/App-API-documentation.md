@@ -107,7 +107,7 @@ Minimax, Custom, Local
 
 | Category | Values |
 |----------|--------|
-| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop` |
+| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop`, `ReadCrossThreadHistory` |
 | Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill`, `CaptureDisplay` |
 | Transcription | `TranscribeFromAudioDevice`, `TranscribeFromAudioStream`, `TranscribeFromAudioFile` |
 | Editor | `EditorReadFile`, `EditorGetOpenFiles`, `EditorGetSelection`, `EditorGetDiagnostics`, `EditorApplyEdit`, `EditorCreateFile`, `EditorDeleteFile`, `EditorShowDiff`, `EditorRunBuild`, `EditorRunTerminal` |
@@ -2040,6 +2040,56 @@ multi-layer dedup pipeline to extract genuinely new content:
 
 ---
 
+## Inline tools
+
+Inline tools are handled directly within the chat inference loop and do
+not create agent jobs. They execute immediately and return results to
+the model in the same turn.
+
+### wait
+
+Pause execution for a specified number of seconds (1–300). No
+permissions required. Useful for waiting on external processes without
+wasting tokens on polling.
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `seconds` | integer | yes | Number of seconds to wait (1–300) |
+
+### list_accessible_threads
+
+List threads from other channels that the agent can read. Returns
+thread IDs, names, and parent channel info. Requires
+`ReadCrossThreadHistory` permission on the agent's role.
+
+A channel's threads are accessible when:
+- The agent is the channel's primary agent or is in `AllowedAgents`.
+- The channel's effective permission set has `CanReadCrossThreadHistory = true`.
+- If the agent's role has `Independent` clearance for this flag, the
+  channel opt-in requirement is bypassed.
+
+**Parameters:** none (uses `globalSchema` — empty object).
+
+**Returns:** JSON array of `{ threadId, threadName, channelId, channelTitle }`.
+
+### read_thread_history
+
+Read conversation history from a thread in another channel. Requires
+the same double-gate as `list_accessible_threads`.
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `threadId` | string (GUID) | yes | ID of the thread to read |
+| `maxMessages` | integer | no | Max messages to return (1–200, default 50) |
+
+**Returns:** formatted conversation history as text.
+
+---
+
 ## Transcription streaming
 
 Two streaming transports are provided for live transcription segments.
@@ -2266,6 +2316,7 @@ don't have.
   "canAccessLocalhostCli": false,
   "canClickDesktop": false,
   "canTypeOnDesktop": false,
+  "canReadCrossThreadHistory": false,
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "containerAccesses": null,
@@ -2317,6 +2368,7 @@ wildcard grant that covers all resources of that type.
   "canAccessLocalhostCli": false,
   "canClickDesktop": false,
   "canTypeOnDesktop": false,
+  "canReadCrossThreadHistory": false,
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [],
   "containerAccesses": [],
@@ -3073,3 +3125,22 @@ pending job can execute immediately without per-job approval.
 - Clearances ≥ 3 (`ApprovedByPermittedAgent`, `ApprovedByWhitelistedAgent`) always require explicit per-job approval.
 
 The resolver checks in order: channel's own permission set → parent context → fallback (AwaitingApproval).
+
+### Cross-thread history access
+
+Reading another channel's thread history uses a **double-gate** model:
+
+1. The agent's role permission set must have `CanReadCrossThreadHistory = true`.
+2. The target channel's effective permission set must also have
+   `CanReadCrossThreadHistory = true` (opt-in).
+
+Channels that have not opted in are effectively private, even if the
+agent holds the permission. `Independent` clearance on the agent's role
+overrides the channel opt-in requirement.
+
+The agent must also be the channel's primary agent or listed in its
+`AllowedAgents` (channel-level first, context-level fallback).
+
+Accessible threads are surfaced in the chat header
+(`accessible-threads:` section) and via the `list_accessible_threads`
+and `read_thread_history` inline tools.

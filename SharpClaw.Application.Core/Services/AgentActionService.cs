@@ -76,6 +76,13 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, caller, p => p.CanTypeOnDesktop, p => p.TypeOnDesktopClearance,
             "type on desktop", onApproved, ct);
 
+    public Task<AgentActionResult> ReadCrossThreadHistoryAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanReadCrossThreadHistory, p => p.ReadCrossThreadHistoryClearance,
+            "read cross-thread history", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Per-resource actions
     // ═══════════════════════════════════════════════════════════════

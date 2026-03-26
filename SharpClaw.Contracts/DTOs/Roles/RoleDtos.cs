@@ -32,6 +32,8 @@ public sealed record SetRolePermissionsRequest(
     PermissionClearance ClickDesktopClearance = PermissionClearance.Unset,
     bool CanTypeOnDesktop = false,
     PermissionClearance TypeOnDesktopClearance = PermissionClearance.Unset,
+    bool CanReadCrossThreadHistory = false,
+    PermissionClearance ReadCrossThreadHistoryClearance = PermissionClearance.Unset,
 
     // Per-resource grants
     IReadOnlyList<ResourceGrant>? DangerousShellAccesses = null,
@@ -83,6 +85,8 @@ public sealed record RolePermissionsResponse(
     PermissionClearance ClickDesktopClearance,
     bool CanTypeOnDesktop,
     PermissionClearance TypeOnDesktopClearance,
+    bool CanReadCrossThreadHistory,
+    PermissionClearance ReadCrossThreadHistoryClearance,
 
     IReadOnlyList<ResourceGrant> DangerousShellAccesses,
     IReadOnlyList<ResourceGrant> SafeShellAccesses,
