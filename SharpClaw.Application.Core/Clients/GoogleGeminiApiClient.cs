@@ -8,6 +8,12 @@ public sealed class GoogleGeminiApiClient : OpenAiCompatibleApiClient
     protected override string ApiEndpoint => "https://generativelanguage.googleapis.com/v1beta/openai";
     public override ProviderType ProviderType => ProviderType.GoogleGemini;
 
+    /// <summary>
+    /// Google Gemini's OpenAI-compatible endpoint does not support
+    /// <c>parallel_tool_calls</c>; omit it from the serialized payload.
+    /// </summary>
+    protected override bool? ParallelToolCallsDefault => null;
+
     /// <inheritdoc />
     protected override Dictionary<string, JsonElement>? TranslateProviderParameters(
         Dictionary<string, JsonElement>? providerParameters)

@@ -145,6 +145,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             Model = model,
             Messages = payloadMessages,
             MaxTokens = maxCompletionTokens,
+            ParallelToolCalls = ParallelToolCallsDefault,
             Tools = tools.Select(t => new OaiToolDefinitionPayload
             {
                 Function = new OaiFunctionDefinitionPayload
@@ -278,6 +279,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             Model = model,
             Messages = payloadMessages,
             MaxTokens = maxCompletionTokens,
+            ParallelToolCalls = ParallelToolCallsDefault,
             Tools = tools.Select(t => new OaiToolDefinitionPayload
             {
                 Function = new OaiFunctionDefinitionPayload
@@ -427,6 +429,15 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     protected virtual void ConfigureRequest(HttpRequestMessage request) { }
 
     /// <summary>
+    /// Returns the value for the <c>parallel_tool_calls</c> field in tool-aware
+    /// completion requests.  Default is <see langword="true"/>.  Override and
+    /// return <see langword="null"/> in subclasses whose endpoints do not
+    /// support this parameter (e.g. Google Gemini / Vertex AI) so it is omitted
+    /// from the serialized JSON.
+    /// </summary>
+    protected virtual bool? ParallelToolCallsDefault => true;
+
+    /// <summary>
     /// Returns <see langword="true"/> when the given model should use the
     /// Responses API (<c>/v1/responses</c>) instead of Chat Completions.
     /// Override in provider subclasses that support it. Default: <see langword="false"/>.
@@ -529,7 +540,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("max_tokens")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? MaxTokens { get; init; }
-        [JsonPropertyName("parallel_tool_calls")] public bool ParallelToolCalls { get; init; } = true;
+        [JsonPropertyName("parallel_tool_calls")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? ParallelToolCalls { get; init; }
         [JsonPropertyName("temperature")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public float? Temperature { get; init; }
@@ -668,7 +681,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         [JsonPropertyName("max_tokens")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public int? MaxTokens { get; init; }
-        [JsonPropertyName("parallel_tool_calls")] public bool ParallelToolCalls { get; init; } = true;
+        [JsonPropertyName("parallel_tool_calls")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public bool? ParallelToolCalls { get; init; }
         [JsonPropertyName("temperature")]
         [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
         public float? Temperature { get; init; }
