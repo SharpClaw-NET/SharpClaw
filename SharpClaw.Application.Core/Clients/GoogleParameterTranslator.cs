@@ -17,11 +17,12 @@ internal static class GoogleParameterTranslator
     ///     promoted to the top level (existing top-level keys take precedence).
     ///   </item>
     ///   <item>
-    ///     <c>response_mime_type: "application/json"</c> →
-    ///     <c>response_format: { "type": "json_object" }</c>
-    ///   </item>
-    ///   <item>
-    ///     <c>response_mime_type: "text/plain"</c> → removed (text is the default).
+    ///     <c>response_mime_type</c> — removed.  Google's OpenAI compatibility
+    ///     endpoint does not support the simplified
+    ///     <c>response_format: { "type": "json_object" }</c> form; it only
+    ///     supports the full <c>json_schema</c> variant via the SDK's
+    ///     <c>parse()</c> method.  Keeping <c>response_mime_type</c> in the
+    ///     payload would also be rejected (not an OpenAI field).
     ///   </item>
     /// </list>
     /// </summary>
@@ -51,17 +52,12 @@ internal static class GoogleParameterTranslator
             }
         }
 
-        // Phase 2: Translate response_mime_type → response_format.
-        // This covers both direct top-level usage and values unwrapped
-        // from generation_config in phase 1.
-        if (translated.Remove("response_mime_type", out var mimeElement) &&
-            mimeElement.ValueKind == JsonValueKind.String &&
-            mimeElement.GetString() is "application/json" &&
-            !translated.ContainsKey("response_format"))
-        {
-            translated["response_format"] =
-                JsonSerializer.SerializeToElement(new { type = "json_object" });
-        }
+        // Phase 2: Remove response_mime_type — it's a native Gemini parameter
+        // with no working equivalent in Google's OpenAI compatibility layer.
+        // The simplified response_format: {"type":"json_object"} is not
+        // supported by Google's /openai/chat/completions endpoint (their docs
+        // only show the full json_schema variant via the parse() API).
+        translated.Remove("response_mime_type");
 
         return translated;
     }
