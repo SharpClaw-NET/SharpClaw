@@ -512,6 +512,7 @@ public sealed partial class MainPage
         _jobsMode = true;
         _settingsMode = false;
         _tasksMode = false;
+        _botsMode = false;
         UpdateTabHighlight();
 
         MessagesScroller.Visibility = Visibility.Collapsed;
@@ -519,6 +520,7 @@ public sealed partial class MainPage
         SettingsScroller.Visibility = Visibility.Collapsed;
         TaskViewPanel.Visibility = Visibility.Collapsed;
         DeallocateTaskView();
+        BotViewPanel.Visibility = Visibility.Collapsed;
         AgentSelectorPanel.Visibility = Visibility.Collapsed;
         ThreadSelectorPanel.Visibility = Visibility.Collapsed;
         OneOffWarning.Visibility = Visibility.Collapsed;

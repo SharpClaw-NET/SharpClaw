@@ -60,6 +60,28 @@ DELETE /models/local/{id}
 LocalModelStatus: Pending, Downloading, Ready, Failed.
 
 ────────────────────────────────────────
+BOT INTEGRATIONS
+────────────────────────────────────────
+GET    /bots                       → list all bot integrations
+GET    /bots/{id}                  → get by id
+GET    /bots/type/{type}           → get by type name (telegram, discord, whatsapp)
+PUT    /bots/{id}                  { enabled?, botToken?, defaultChannelId? }
+GET    /bots/config/{type}         → decrypted config for gateway use (enabled, botToken, defaultChannelId)
+
+Rows are pre-seeded on startup for each BotType — no POST/DELETE.
+Bot tokens are AES-GCM encrypted at rest (same as provider API keys).
+PUT fields are all optional (partial update):
+  enabled (bool): enable/disable the bot.
+  botToken (string): set or replace the encrypted token. Empty string clears it.
+  defaultChannelId (guid|null): the SharpClaw channel the bot forwards messages to. Guid.Empty clears it.
+
+BotType values: Telegram, Discord, WhatsApp.
+
+BotIntegrationResponse: id, botType, enabled, hasBotToken, defaultChannelId, createdAt, updatedAt.
+
+CLI: bot list, bot get <id>, bot update <id> [--enabled true|false] [--token <tok>] [--channel <channelId>], bot config <type>.
+
+────────────────────────────────────────
 AGENTS
 ────────────────────────────────────────
 POST   /agents                     { name, modelId, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }

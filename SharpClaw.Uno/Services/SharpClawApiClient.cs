@@ -182,6 +182,13 @@ public sealed class SharpClawApiClient : IDisposable
     }
 
     /// <summary>
+    /// The currently cached API key, or <c>null</c> if not yet resolved.
+    /// Used to forward the verified key to child processes (e.g. gateway)
+    /// without file I/O that may break under MSIX VFS virtualisation.
+    /// </summary>
+    public string? CachedApiKey => _cachedApiKey;
+
+    /// <summary>
     /// Clears the cached API key so the next request re-reads from disk.
     /// Call this after restarting the API process.
     /// </summary>

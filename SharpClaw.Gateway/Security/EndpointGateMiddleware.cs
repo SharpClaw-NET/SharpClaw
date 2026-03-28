@@ -1,5 +1,6 @@
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Configuration;
+using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Security;
 
@@ -19,8 +20,8 @@ public sealed class EndpointGateMiddleware(
 
         if (!opts.Enabled)
         {
-            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            await context.Response.WriteAsync("Gateway is disabled.");
+            await GatewayErrors.WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
+                "Gateway is disabled.", GatewayErrors.GatewayDisabled);
             return;
         }
 
@@ -30,8 +31,8 @@ public sealed class EndpointGateMiddleware(
         if (group is not null && !opts.IsEndpointEnabled(group))
         {
             logger.LogInformation("Gateway endpoint group '{Group}' is disabled. Rejecting {Path}.", group, path);
-            context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
-            await context.Response.WriteAsync($"The '{group}' endpoint is disabled.");
+            await GatewayErrors.WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
+                $"The '{group}' endpoint is disabled.", GatewayErrors.EndpointDisabled);
             return;
         }
 

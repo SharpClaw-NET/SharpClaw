@@ -1,3 +1,4 @@
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +17,12 @@ namespace SharpClaw.Application.API.Api;
 /// only key-authenticated requests are processed.
 /// Non-exempt endpoints return <c>401</c> when no valid JWT is present.
 /// <para>
+/// The gateway may authenticate with a dedicated <c>X-Gateway-Token</c>
+/// header instead of a user JWT. This proves the request originates from
+/// the trusted gateway process and allows service-level calls (e.g. bot
+/// config) that have no user context.
+/// </para>
+/// <para>
 /// When a structurally valid JWT has <b>expired</b>, the response includes
 /// a JSON body with <c>"error": "access_token_expired"</c> and a
 /// <c>WWW-Authenticate: Bearer error="invalid_token"</c> header so that
@@ -23,7 +30,10 @@ namespace SharpClaw.Application.API.Api;
 /// access token via <c>POST /auth/refresh</c>.
 /// </para>
 /// </summary>
-public sealed class JwtSessionMiddleware(RequestDelegate next, IConfiguration configuration)
+public sealed class JwtSessionMiddleware(
+    RequestDelegate next,
+    IConfiguration configuration,
+    ApiKeyProvider apiKeyProvider)
 {
     private static readonly HashSet<string> ExemptPaths = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -80,7 +90,7 @@ public sealed class JwtSessionMiddleware(RequestDelegate next, IConfiguration co
         if (!_disabled && !IsExemptPath(context.Request.Path))
         {
             var session = context.RequestServices.GetRequiredService<SessionService>();
-            if (session.UserId is null)
+            if (session.UserId is null && !IsGatewayAuthenticated(context))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
 
@@ -101,6 +111,22 @@ public sealed class JwtSessionMiddleware(RequestDelegate next, IConfiguration co
         }
 
         await next(context);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the request carries a valid
+    /// <c>X-Gateway-Token</c> header, proving it originates from
+    /// the trusted gateway process.
+    /// </summary>
+    private bool IsGatewayAuthenticated(HttpContext context)
+    {
+        if (!context.Request.Headers.TryGetValue("X-Gateway-Token", out var provided)
+            || string.IsNullOrEmpty(provided.ToString()))
+            return false;
+
+        return CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(provided.ToString()),
+            System.Text.Encoding.UTF8.GetBytes(apiKeyProvider.GatewayToken));
     }
 
     private static bool IsExemptPath(PathString path)

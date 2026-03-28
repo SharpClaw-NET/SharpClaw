@@ -22,41 +22,67 @@ public static class GatewayEnvironment
         {
           // SharpClaw Gateway Environment Configuration
           // Values here are loaded for all environments.
+          //
+          // DEFAULT POSTURE: only bot integrations are enabled.
+          // All public-facing REST/streaming endpoints are disabled.
+          // To expose the full REST API, set the individual endpoint
+          // toggles to "true" (or flip the master "Enabled" switch).
 
           // ── Internal API ───────────────────────────────────────────
-          // Base URL of the internal SharpClaw Application API.
-          "InternalApi": { "BaseUrl": "http://127.0.0.1:48923" },
+          // Base URL + timeout for the internal SharpClaw Application API.
+          // TimeoutSeconds should be generous — agent tool-call chains
+          // (wait, screenshot, click, type, inference) can take minutes.
+          "InternalApi": {
+            "BaseUrl": "http://127.0.0.1:48923",
+            "TimeoutSeconds": "300"
+          },
 
-          // ── Endpoint Toggles ───────────────────────────────────────
-          // Master kill-switch and per-group enable/disable.
-          // Set "Enabled" to false to disable the entire gateway.
+          // ── Request Queue ──────────────────────────────────────────
+          // Buffers mutation requests and forwards them to the core API
+          // sequentially (or with bounded concurrency).
           "Gateway": {
+            "RequestQueue": {
+              "Enabled": "true",
+              "MaxConcurrency": "1",
+              "TimeoutSeconds": "30",
+              "MaxRetries": "2",
+              "RetryDelayMs": "500",
+              "MaxQueueSize": "500"
+            },
+
+            // ── Endpoint Toggles ───────────────────────────────────────
+            // Master kill-switch and per-group enable/disable.
+            // By default everything except "Bots" is disabled so the
+            // gateway acts purely as a bot relay. Enable individual
+            // groups as needed to expose the public REST surface.
             "Endpoints": {
               "Enabled": "true",
-              "Auth": "true",
-              "Agents": "true",
-              "Channels": "true",
-              "ChannelContexts": "true",
-              "Chat": "true",
-              "ChatStream": "true",
-              "Threads": "true",
-              "ThreadChat": "true",
-              "Jobs": "true",
-              "Models": "true",
-              "Providers": "true",
-              "Roles": "true",
-              "Users": "true",
-              "AudioDevices": "true",
-              "Transcription": "true",
-              "TranscriptionStreaming": "true",
-              "Cost": "true",
+              "Auth": "false",
+              "Agents": "false",
+              "Channels": "false",
+              "ChannelContexts": "false",
+              "Chat": "false",
+              "ChatStream": "false",
+              "Threads": "false",
+              "ThreadChat": "false",
+              "Jobs": "false",
+              "Models": "false",
+              "Providers": "false",
+              "Roles": "false",
+              "Users": "false",
+              "AudioDevices": "false",
+              "Transcription": "false",
+              "TranscriptionStreaming": "false",
+              "Cost": "false",
               "Bots": "true"
             },
 
             // ── Bot Integrations ───────────────────────────────────────
+            // Bots are enabled by default — configure tokens via the
+            // Uno settings page or directly in this file.
             "Bots": {
               "Telegram": {
-                "Enabled": "false",
+                "Enabled": "true",
                 "BotToken": ""
               },
               "Discord": {

@@ -29,6 +29,7 @@ public sealed partial class ChatService(
     AgentJobService jobService,
     LocalModelService localModelService,
     HeaderTagProcessor headerTagProcessor,
+    ThreadActivitySignal threadActivity,
     IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
@@ -78,6 +79,15 @@ public sealed partial class ChatService(
         if (isLocal)
             await localModelService.EnsureReadyForChatAsync(model.Id, ct);
 
+        // Acquire per-thread lock for sequential processing
+        IDisposable? threadLock = null;
+        if (threadId is not null)
+        {
+            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
+        }
+
         try
         {
 
@@ -105,7 +115,8 @@ public sealed partial class ChatService(
             : BuildSystemPrompt(agent.SystemPrompt, useNativeTools);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -141,7 +152,7 @@ public sealed partial class ChatService(
         var senderUserId = jobService.GetSessionUserId();
         var senderUsername = senderUserId.HasValue
             ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
-            : null;
+            : request.ExternalDisplayName ?? request.ExternalUsername;
 
         var userMessage = new ChatMessageDB
         {
@@ -171,6 +182,10 @@ public sealed partial class ChatService(
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
+        if (threadId is not null)
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
+
         // Piggyback cost data on the response so callers don't need
         // a separate round-trip to the /cost endpoints.
         var channelCost = await GetChannelCostAsync(channelId, ct);
@@ -188,6 +203,7 @@ public sealed partial class ChatService(
         } // try
         finally
         {
+            threadLock?.Dispose();
             if (isLocal)
                 localModelService.ReleaseAfterChat(model.Id);
         }
@@ -202,8 +218,10 @@ public sealed partial class ChatService(
 
         return await query
             .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
             .Take(limit)
             .OrderBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
             .Select(m => new ChatMessageResponse(
                 m.Role, m.Content, m.CreatedAt,
                 m.SenderUserId, m.SenderUsername,
@@ -384,7 +402,8 @@ public sealed partial class ChatService(
     private async Task<string?> BuildChatHeaderAsync(
         ChannelDB channel, AgentDB agent, ChatClientType clientType,
         EditorContext? editorContext, CancellationToken ct,
-        TaskChatContext? taskContext = null)
+        TaskChatContext? taskContext = null,
+        string? externalUsername = null, string? externalDisplayName = null)
     {
         // Channel-level flag takes precedence; fall back to context.
         var disabled = channel.DisableChatHeader
@@ -407,6 +426,11 @@ public sealed partial class ChatService(
         }
 
         var userId = jobService.GetSessionUserId();
+
+        // ── External user (bot-forwarded message): no DB session ─────
+        if (userId is null && externalUsername is not null)
+            return await BuildExternalUserHeaderAsync(channel, agent, clientType, externalUsername, externalDisplayName, ct);
+
         if (userId is null)
             return null;
 
@@ -521,6 +545,72 @@ public sealed partial class ChatService(
                 sb.Append(" file=").Append(editorContext.ActiveFilePath);
             if (editorContext.SelectedText is { Length: > 0 and <= 200 })
                 sb.Append(" selection=\"").Append(editorContext.SelectedText).Append('"');
+        }
+
+        sb.AppendLine("]");
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Builds a header for bot-forwarded messages where there is no
+    /// authenticated DB user.  Uses the external username/display name
+    /// provided by the gateway from the messaging platform metadata.
+    /// </summary>
+    private async Task<string> BuildExternalUserHeaderAsync(
+        ChannelDB channel, AgentDB agent, ChatClientType clientType,
+        string externalUsername, string? externalDisplayName, CancellationToken ct)
+    {
+        var sb = new StringBuilder();
+        sb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
+        sb.Append(" | user: ").Append(externalDisplayName ?? externalUsername);
+        if (externalDisplayName is not null && externalUsername != externalDisplayName)
+            sb.Append(" (@").Append(externalUsername).Append(')');
+        sb.Append(" | via: ").Append(clientType);
+
+        // Agent self-awareness (same logic as the authenticated path)
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+            .ThenInclude(r => r!.PermissionSet)
+            .FirstOrDefaultAsync(a => a.Id == agent.Id, ct);
+
+        if (agentWithRole?.Role is { } agentRole)
+        {
+            PermissionSetDB? agentPs = null;
+            if (agentRole.PermissionSetId is { } agentPsId)
+            {
+                agentPs = await db.PermissionSets
+                    .Include(p => p.SafeShellAccesses)
+                    .Include(p => p.ContainerAccesses)
+                    .Include(p => p.WebsiteAccesses)
+                    .Include(p => p.SearchEngineAccesses)
+                    .Include(p => p.LocalInfoStorePermissions)
+                    .Include(p => p.ExternalInfoStorePermissions)
+                    .Include(p => p.AudioDeviceAccesses)
+                    .Include(p => p.DisplayDeviceAccesses)
+                    .Include(p => p.EditorSessionAccesses)
+                    .Include(p => p.AgentPermissions)
+                    .Include(p => p.TaskPermissions)
+                    .Include(p => p.SkillPermissions)
+                    .Include(p => p.AgentHeaderAccesses)
+                    .Include(p => p.ChannelHeaderAccesses)
+                    .AsSplitQuery()
+                    .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
+            }
+
+            sb.Append(" | agent-role: ").Append(agentRole.Name);
+            if (agentPs is not null)
+            {
+                sb.Append(" clearance=").Append(agentPs.DefaultClearance);
+                var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
+                if (agentGrants.Count > 0)
+                    sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
+                else
+                    sb.Append(" (no grants)");
+            }
+        }
+        else
+        {
+            sb.Append(" | agent-role: (none) clearance=Unset (no permissions)");
         }
 
         sb.AppendLine("]");
@@ -807,6 +897,15 @@ public sealed partial class ChatService(
         if (isLocal)
             await localModelService.EnsureReadyForChatAsync(model.Id, ct);
 
+        // Acquire per-thread lock for sequential processing
+        IDisposable? threadLock = null;
+        if (threadId is not null)
+        {
+            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
+        }
+
         try
         {
 
@@ -832,7 +931,8 @@ public sealed partial class ChatService(
             : BuildSystemPrompt(agent.SystemPrompt, nativeToolCalling: true);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 
@@ -976,7 +1076,7 @@ public sealed partial class ChatService(
         var senderUserId = jobService.GetSessionUserId();
         var senderUsername = senderUserId.HasValue
             ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
-            : null;
+            : request.ExternalDisplayName ?? request.ExternalUsername;
 
         var userMessage = new ChatMessageDB
         {
@@ -1006,6 +1106,10 @@ public sealed partial class ChatService(
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
+        if (threadId is not null)
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
+
         var channelCost = await GetChannelCostAsync(channelId, ct);
         var threadCost = threadId is not null
             ? await GetThreadCostAsync(channelId, threadId.Value, ct)
@@ -1021,6 +1125,7 @@ public sealed partial class ChatService(
         } // try
         finally
         {
+            threadLock?.Dispose();
             if (isLocal)
                 localModelService.ReleaseAfterChat(model.Id);
         }

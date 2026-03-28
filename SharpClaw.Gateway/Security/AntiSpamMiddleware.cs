@@ -1,3 +1,5 @@
+using SharpClaw.Gateway.Infrastructure;
+
 namespace SharpClaw.Gateway.Security;
 
 /// <summary>
@@ -22,8 +24,8 @@ public sealed class AntiSpamMiddleware(
             logger.LogWarning("Anti-spam: oversized body from {Ip} ({Bytes} bytes)",
                 ip, context.Request.ContentLength);
             banService.RecordViolation(ip);
-            context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
-            await context.Response.WriteAsync("Request body too large.");
+            await GatewayErrors.WriteAsync(context, StatusCodes.Status413PayloadTooLarge,
+                "Request body too large.", GatewayErrors.PayloadTooLarge);
             return;
         }
 
@@ -32,8 +34,8 @@ public sealed class AntiSpamMiddleware(
             && context.Request.ContentType is null)
         {
             banService.RecordViolation(ip);
-            context.Response.StatusCode = StatusCodes.Status415UnsupportedMediaType;
-            await context.Response.WriteAsync("Content-Type header is required.");
+            await GatewayErrors.WriteAsync(context, StatusCodes.Status415UnsupportedMediaType,
+                "Content-Type header is required.", GatewayErrors.UnsupportedMediaType);
             return;
         }
 

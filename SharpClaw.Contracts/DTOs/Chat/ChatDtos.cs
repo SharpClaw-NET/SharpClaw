@@ -10,7 +10,9 @@ public sealed record ChatRequest(
     Guid? AgentId = null,
     ChatClientType ClientType = ChatClientType.API,
     EditorContext? EditorContext = null,
-    TaskChatContext? TaskContext = null);
+    TaskChatContext? TaskContext = null,
+    string? ExternalUsername = null,
+    string? ExternalDisplayName = null);
 public sealed record ChatMessageResponse(
     string Role,
     string Content,

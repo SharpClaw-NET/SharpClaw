@@ -1,3 +1,5 @@
+using SharpClaw.Gateway.Infrastructure;
+
 namespace SharpClaw.Gateway.Security;
 
 /// <summary>
@@ -11,8 +13,8 @@ public sealed class IpBanMiddleware(RequestDelegate next, IpBanService banServic
 
         if (banService.IsBanned(ip))
         {
-            context.Response.StatusCode = StatusCodes.Status403Forbidden;
-            await context.Response.WriteAsync("Forbidden.");
+            await GatewayErrors.WriteAsync(context, StatusCodes.Status403Forbidden,
+                "Forbidden.", GatewayErrors.IpBanned);
             return;
         }
 

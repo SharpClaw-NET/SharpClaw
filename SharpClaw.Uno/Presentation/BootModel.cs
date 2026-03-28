@@ -177,6 +177,10 @@ public sealed class BootModel
 
         try
         {
+            // Forward the verified API key so the gateway can authenticate
+            // with the core API without relying on file I/O (MSIX VFS safe).
+            _gateway.ApiKey = _api.CachedApiKey;
+
             await _gateway.EnsureStartedAsync(ct);
 
             var mode = _gateway.IsExternal ? "external" : "bundled";

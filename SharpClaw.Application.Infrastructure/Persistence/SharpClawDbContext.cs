@@ -71,6 +71,9 @@ public class SharpClawDbContext(
     public DbSet<ToolAwarenessSetDB> ToolAwarenessSets => Set<ToolAwarenessSetDB>();
     public DbSet<LocalModelFileDB> LocalModelFiles => Set<LocalModelFileDB>();
 
+    // ── Bot integrations ──────────────────────────────────────────
+    public DbSet<BotIntegrationDB> BotIntegrations => Set<BotIntegrationDB>();
+
     // ── Task scripts ──────────────────────────────────────────────
     public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
     public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
@@ -717,6 +720,13 @@ public class SharpClawDbContext(
                 .WithOne(o => o.TaskInstance)
                 .HasForeignKey(o => o.TaskInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Bot integrations ──────────────────────────────────
+        modelBuilder.Entity<BotIntegrationDB>(e =>
+        {
+            e.HasIndex(b => b.BotType).IsUnique();
+            e.Property(b => b.BotType).HasConversion<string>();
         });
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);

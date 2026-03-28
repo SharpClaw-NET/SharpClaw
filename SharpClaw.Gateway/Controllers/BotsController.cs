@@ -1,162 +1,217 @@
 using System.Text.Json;
-using System.Text.Json.Nodes;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
-using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Configuration;
+using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Controllers;
 
 /// <summary>
-/// Status, configuration read and write endpoints for bot integrations.
+/// Proxies bot integration management to the core API.
+/// GETs are forwarded directly; mutations (PUT) are routed through the
+/// <see cref="RequestQueueService"/> for sequential processing.
 /// </summary>
 [ApiController]
 [Route("api/[controller]")]
 [EnableRateLimiting(Security.RateLimiterConfiguration.GlobalPolicy)]
-public class BotsController(
-    IOptions<TelegramBotOptions> telegramOptions,
-    IOptions<DiscordBotOptions> discordOptions) : ControllerBase
+public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal reloadSignal) : ControllerBase
 {
-    private static readonly string EnvFilePath = Path.Combine(
-        Path.GetDirectoryName(typeof(GatewayEnvironment).Assembly.Location)!,
-        "Environment", ".env");
-
-    [HttpGet("status")]
-    public IActionResult Status()
-    {
-        var telegram = telegramOptions.Value;
-        var discord = discordOptions.Value;
-
-        return Ok(new
-        {
-            telegram = new
-            {
-                enabled = telegram.Enabled,
-                configured = !string.IsNullOrWhiteSpace(telegram.BotToken)
-            },
-            discord = new
-            {
-                enabled = discord.Enabled,
-                configured = !string.IsNullOrWhiteSpace(discord.BotToken)
-            }
-        });
-    }
-
     /// <summary>
-    /// Returns the current bot configuration (tokens masked).
+    /// Lists all bot integrations from the core database.
     /// </summary>
-    [HttpGet("config")]
-    public IActionResult GetConfig()
-    {
-        var telegram = telegramOptions.Value;
-        var discord = discordOptions.Value;
-
-        return Ok(new
-        {
-            telegram = new
-            {
-                enabled = telegram.Enabled,
-                botToken = telegram.BotToken ?? ""
-            },
-            discord = new
-            {
-                enabled = discord.Enabled,
-                botToken = discord.BotToken ?? ""
-            }
-        });
-    }
-
-    /// <summary>
-    /// Updates bot configuration in the gateway <c>.env</c> file.
-    /// The gateway must be restarted for changes to take full effect.
-    /// </summary>
-    [HttpPut("config")]
-    public async Task<IActionResult> UpdateConfig([FromBody] BotConfigRequest request)
+    [HttpGet("list")]
+    public async Task<IActionResult> List(CancellationToken ct)
     {
         try
         {
-            if (!System.IO.File.Exists(EnvFilePath))
-                return StatusCode(500, new { error = "Gateway .env file not found." });
-
-            var json = await System.IO.File.ReadAllTextAsync(EnvFilePath);
-
-            // Strip JSON comments before parsing (// line comments)
-            var cleaned = StripJsonComments(json);
-            var root = JsonNode.Parse(cleaned);
-            if (root is null)
-                return StatusCode(500, new { error = "Failed to parse gateway .env." });
-
-            // Ensure path exists: Gateway -> Bots -> Telegram / Discord
-            var gateway = root["Gateway"]?.AsObject();
-            if (gateway is null) { gateway = new JsonObject(); root["Gateway"] = gateway; }
-            var bots = gateway["Bots"]?.AsObject();
-            if (bots is null) { bots = new JsonObject(); gateway["Bots"] = bots; }
-
-            if (request.Telegram is not null)
-            {
-                bots["Telegram"] = new JsonObject
-                {
-                    ["Enabled"] = request.Telegram.Enabled.ToString().ToLowerInvariant(),
-                    ["BotToken"] = request.Telegram.BotToken ?? ""
-                };
-            }
-
-            if (request.Discord is not null)
-            {
-                bots["Discord"] = new JsonObject
-                {
-                    ["Enabled"] = request.Discord.Enabled.ToString().ToLowerInvariant(),
-                    ["BotToken"] = request.Discord.BotToken ?? ""
-                };
-            }
-
-            var options = new JsonSerializerOptions { WriteIndented = true };
-            await System.IO.File.WriteAllTextAsync(EnvFilePath, root.ToJsonString(options));
-
-            return Ok(new { saved = true, restartRequired = true });
+            var bots = await dispatcher.GetAsync<JsonElement>("/bots", ct);
+            return Ok(bots);
         }
         catch (Exception ex)
         {
-            return StatusCode(500, new { error = ex.Message });
+            return StatusCode(502, new { error = $"Core API unreachable: {ex.Message}" });
         }
     }
 
-    private static string StripJsonComments(string json)
+    /// <summary>
+    /// Creates a new bot integration in the core database.
+    /// </summary>
+    [HttpPost]
+    public async Task<IActionResult> Create([FromBody] JsonElement body, CancellationToken ct)
     {
-        var sb = new System.Text.StringBuilder(json.Length);
-        bool inString = false;
-        for (int i = 0; i < json.Length; i++)
+        var result = await dispatcher.PostAsync("/bots", body, ct);
+        if (result.IsSuccess) reloadSignal.Signal();
+        return StatusCode((int)result.StatusCode, result.IsSuccess
+            ? DeserializeOrRaw(result.JsonBody)
+            : new { error = result.Error });
+    }
+
+    /// <summary>
+    /// Returns a single bot integration by id.
+    /// </summary>
+    [HttpGet("{id:guid}")]
+    public async Task<IActionResult> GetById(Guid id, CancellationToken ct)
+    {
+        try
         {
-            var c = json[i];
-            if (inString)
-            {
-                sb.Append(c);
-                if (c == '"' && (i == 0 || json[i - 1] != '\\'))
-                    inString = false;
-                continue;
-            }
-
-            if (c == '"')
-            {
-                inString = true;
-                sb.Append(c);
-                continue;
-            }
-
-            if (c == '/' && i + 1 < json.Length && json[i + 1] == '/')
-            {
-                // Skip to end of line
-                while (i < json.Length && json[i] != '\n')
-                    i++;
-                if (i < json.Length) sb.Append('\n');
-                continue;
-            }
-
-            sb.Append(c);
+            var bot = await dispatcher.GetAsync<JsonElement>($"/bots/{id}", ct);
+            return Ok(bot);
         }
-        return sb.ToString();
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { error = $"Core API unreachable: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Updates a single bot integration by id.
+    /// Routed through the request queue for sequential processing.
+    /// </summary>
+    [HttpPut("{id:guid}")]
+    public async Task<IActionResult> Update(Guid id, [FromBody] JsonElement body, CancellationToken ct)
+    {
+        var result = await dispatcher.PutAsync($"/bots/{id}", body, ct);
+        if (result.IsSuccess) reloadSignal.Signal();
+        return StatusCode((int)result.StatusCode, result.IsSuccess
+            ? DeserializeOrRaw(result.JsonBody)
+            : new { error = result.Error });
+    }
+
+    /// <summary>
+    /// Deletes a bot integration by id.
+    /// </summary>
+    [HttpDelete("{id:guid}")]
+    public async Task<IActionResult> Delete(Guid id, CancellationToken ct)
+    {
+        var result = await dispatcher.DeleteAsync($"/bots/{id}", ct);
+        if (result.IsSuccess) reloadSignal.Signal();
+        return StatusCode((int)result.StatusCode, result.IsSuccess
+            ? DeserializeOrRaw(result.JsonBody)
+            : new { error = result.Error });
+    }
+
+    /// <summary>
+    /// Fires the bot reload signal so running bot services re-fetch their
+    /// configuration. Called by clients that mutate bot rows via the core
+    /// API directly (bypassing the gateway proxy).
+    /// </summary>
+    [HttpPost("reload")]
+    public IActionResult Reload()
+    {
+        reloadSignal.Signal();
+        return Ok(new { reloaded = true });
+    }
+
+    /// <summary>
+    /// Returns a combined status/config view for quick reachability checks.
+    /// </summary>
+    [HttpGet("status")]
+    public async Task<IActionResult> Status(CancellationToken ct)
+    {
+        try
+        {
+            var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
+            var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
+
+            return Ok(new
+            {
+                telegram = new { enabled = telegram?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(telegram?.BotToken) },
+                discord = new { enabled = discord?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(discord?.BotToken) },
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { error = $"Core API unreachable: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Returns the current bot configuration (tokens included — core decrypts them).
+    /// </summary>
+    [HttpGet("config")]
+    public async Task<IActionResult> GetConfig(CancellationToken ct)
+    {
+        try
+        {
+            var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
+            var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
+
+            return Ok(new
+            {
+                telegram = new { enabled = telegram?.Enabled ?? false, botToken = telegram?.BotToken ?? "" },
+                discord = new { enabled = discord?.Enabled ?? false, botToken = discord?.BotToken ?? "" },
+            });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { error = $"Core API unreachable: {ex.Message}" });
+        }
+    }
+
+    /// <summary>
+    /// Updates bot configuration via the core API.
+    /// Accepts the legacy <see cref="BotConfigRequest"/> shape for backward compatibility.
+    /// </summary>
+    [HttpPut("config")]
+    public async Task<IActionResult> UpdateConfig([FromBody] BotConfigRequest request, CancellationToken ct)
+    {
+        try
+        {
+            if (request.Telegram is not null)
+                await UpdateBotByTypeAsync("telegram", request.Telegram, ct);
+            if (request.Discord is not null)
+                await UpdateBotByTypeAsync("discord", request.Discord, ct);
+
+            return Ok(new { saved = true });
+        }
+        catch (Exception ex)
+        {
+            return StatusCode(502, new { error = $"Core API error: {ex.Message}" });
+        }
+    }
+
+    private async Task UpdateBotByTypeAsync(string type, BotConfigEntry entry, CancellationToken ct)
+    {
+        // Resolve the bot id via a direct GET (reads bypass the queue)
+        var bot = await dispatcher.GetAsync<BotIntegrationDto>($"/bots/type/{type}", ct)
+            ?? throw new InvalidOperationException($"Bot integration for '{type}' not found in core.");
+
+        var update = new { enabled = entry.Enabled, botToken = entry.BotToken };
+        var result = await dispatcher.PutAsync($"/bots/{bot.Id}", update, ct);
+        if (!result.IsSuccess)
+            throw new HttpRequestException($"Core PUT /bots/{bot.Id} failed: {result.Error}");
+    }
+
+    private static object DeserializeOrRaw(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return new { };
+        try { return JsonSerializer.Deserialize<JsonElement>(json); }
+        catch { return json; }
     }
 }
+
+// ── DTOs for core API responses ──────────────────────────────────
+
+internal sealed class BotConfigDto
+{
+    public bool Enabled { get; set; }
+    public string? BotToken { get; set; }
+    public Guid? DefaultChannelId { get; set; }
+    public Guid? DefaultThreadId { get; set; }
+}
+
+internal sealed class BotIntegrationDto
+{
+    public Guid Id { get; set; }
+    public string? Name { get; set; }
+    public string? BotType { get; set; }
+    public bool Enabled { get; set; }
+    public bool HasBotToken { get; set; }
+    public Guid? DefaultChannelId { get; set; }
+    public Guid? DefaultThreadId { get; set; }
+}
+
+// ── Legacy request DTOs (kept for backward compat) ───────────────
 
 public sealed class BotConfigEntry
 {

@@ -5,9 +5,96 @@ using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
-// Chat messages, history loading, sending, SSE streaming, cost bars.
+// Chat messages, history loading, sending, SSE streaming, cost bars,
+// and thread activity watch (real-time updates from other clients).
 public sealed partial class MainPage
 {
+    // ── Thread activity watch ────────────────────────────────────
+
+    private void ConnectThreadWatch(Guid channelId, Guid threadId)
+    {
+        DisconnectThreadWatch();
+        var cts = new CancellationTokenSource();
+        _threadWatchCts = cts;
+        _ = RunThreadWatchAsync(channelId, threadId, cts.Token);
+    }
+
+    private void DisconnectThreadWatch()
+    {
+        if (_threadWatchCts is not null)
+        {
+            _threadWatchCts.Cancel();
+            _threadWatchCts.Dispose();
+            _threadWatchCts = null;
+        }
+        _isThreadBusy = false;
+    }
+
+    private async Task RunThreadWatchAsync(Guid channelId, Guid threadId, CancellationToken ct)
+    {
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try
+        {
+            using var resp = await api.GetStreamAsync(
+                $"/channels/{channelId}/chat/threads/{threadId}/watch", ct);
+            if (!resp.IsSuccessStatusCode) return;
+
+            using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            using var reader = new StreamReader(stream);
+
+            ReadOnlyMemory<char> eventTypeMem = default;
+
+            while (!ct.IsCancellationRequested)
+            {
+                var line = await reader.ReadLineAsync(ct);
+                if (line is null) break;
+
+                if (line.StartsWith("event: "))
+                {
+                    eventTypeMem = line.AsMemory(7);
+                }
+                else if (line.StartsWith("data: ") && eventTypeMem.Length > 0)
+                {
+                    var evtSpan = eventTypeMem.Span;
+
+                    if (evtSpan.SequenceEqual("Processing"))
+                    {
+                        DispatcherQueue.TryEnqueue(() =>
+                        {
+                            _isThreadBusy = true;
+                            if (!_isSending)
+                            {
+                                SendButton.IsEnabled = false;
+                                MessageInput.IsEnabled = false;
+                            }
+                        });
+                    }
+                    else if (evtSpan.SequenceEqual("NewMessages"))
+                    {
+                        DispatcherQueue.TryEnqueue(async () =>
+                        {
+                            _isThreadBusy = false;
+                            if (!_isSending)
+                            {
+                                SendButton.IsEnabled = true;
+                                MessageInput.IsEnabled = true;
+                            }
+                            if (_selectedChannelId is { } chId)
+                            {
+                                await LoadHistoryAsync(chId);
+                                await LoadCostAsync(chId);
+                                ScrollToBottom();
+                            }
+                        });
+                    }
+
+                    eventTypeMem = default;
+                }
+            }
+        }
+        catch (OperationCanceledException) { /* normal disconnect */ }
+        catch { /* swallow — server unreachable or stream ended */ }
+    }
     // ── Cost bars ────────────────────────────────────────────────
 
     private async Task LoadCostAsync(Guid channelId)
@@ -274,7 +361,7 @@ public sealed partial class MainPage
 
     private void OnMessageKeyDown(object sender, Microsoft.UI.Xaml.Input.KeyRoutedEventArgs e)
     {
-        if (e.Key == Windows.System.VirtualKey.Enter && !string.IsNullOrWhiteSpace(MessageInput.Text))
+        if (e.Key == Windows.System.VirtualKey.Enter && !_isSending && !_isThreadBusy && !string.IsNullOrWhiteSpace(MessageInput.Text))
         {
             e.Handled = true;
             _ = SendMessageAsync();
@@ -283,14 +370,17 @@ public sealed partial class MainPage
 
     private void OnSendClick(object sender, RoutedEventArgs e)
     {
-        if (!string.IsNullOrWhiteSpace(MessageInput.Text))
+        if (!_isSending && !_isThreadBusy && !string.IsNullOrWhiteSpace(MessageInput.Text))
             _ = SendMessageAsync();
     }
 
     private async Task SendMessageAsync()
     {
         var text = MessageInput.Text.Trim();
-        if (string.IsNullOrEmpty(text)) return;
+        if (string.IsNullOrEmpty(text) || _isSending || _isThreadBusy) return;
+        _isSending = true;
+        SendButton.IsEnabled = false;
+        MessageInput.IsEnabled = false;
 
         MessageInput.Text = string.Empty;
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
@@ -603,6 +693,9 @@ public sealed partial class MainPage
         }
         finally
         {
+            _isSending = false;
+            SendButton.IsEnabled = !_isThreadBusy;
+            MessageInput.IsEnabled = !_isThreadBusy;
             if (doneCostChannel is not null)
                 RenderInlineCost(doneCostChannel, doneCostThread);
             ScrollToBottom();

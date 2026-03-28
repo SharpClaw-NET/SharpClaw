@@ -128,6 +128,7 @@ public sealed partial class BootPage : Page
             }
 
             // -- Step 3: Type "sharpclaw ping" → run ping probe --
+            Cursor.Freeze();
             PingCursor.Visibility = Visibility.Visible;
             await PingCursor.TypeCommandAsync("sharpclaw ping");
             StartDots(PingDotsBlock);
@@ -252,7 +253,9 @@ public sealed partial class BootPage : Page
     private void ResetAllVisuals()
     {
         StopDots();
+        Cursor.Unfreeze();
         Cursor.ClearCommand();
+        PingCursor.Unfreeze();
         PingCursor.ClearCommand();
         EchoResultPanel.Visibility = Visibility.Collapsed;
         PingCursor.Visibility = Visibility.Collapsed;

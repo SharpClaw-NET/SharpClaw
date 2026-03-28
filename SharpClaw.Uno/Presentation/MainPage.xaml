@@ -187,6 +187,16 @@
                        FontSize="11"
                        Foreground="#666666" />
           </Button>
+          <Button x:Name="TabBotsButton"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Padding="0,2,0,2"
+                  Click="OnTabBotsClick">
+            <TextBlock Text="[bots]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="11"
+                       Foreground="#666666" />
+          </Button>
         </StackPanel>
         <StackPanel x:Name="AgentSelectorPanel"
                     Orientation="Horizontal"
@@ -712,6 +722,20 @@
           </Button>
         </StackPanel>
       </Grid>
+
+      <!-- ── Bot view panel ──────────────────────────────────── -->
+      <Grid x:Name="BotViewPanel"
+            Grid.Row="1"
+            Grid.RowSpan="2"
+            Visibility="Collapsed">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      Margin="20,8,20,16">
+          <StackPanel x:Name="BotContentPanel"
+                      Spacing="8"
+                      Padding="0,0,0,16" />
+        </ScrollViewer>
+      </Grid>
+
     </Grid>
   </Grid>
 </Page>

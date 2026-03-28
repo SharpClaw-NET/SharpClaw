@@ -11,8 +11,21 @@ public sealed class InternalApiOptions
     public string BaseUrl { get; set; } = "http://127.0.0.1:48923";
 
     /// <summary>
+    /// Timeout in seconds for requests to the internal API.
+    /// Agent tool-call chains (wait, screenshot, click, type) can take
+    /// several minutes, so the default is generous. Default: 300 (5 min).
+    /// </summary>
+    public int TimeoutSeconds { get; set; } = 300;
+
+    /// <summary>
     /// Explicit API key. When <c>null</c>, the key is read from the well-known
     /// file written by the internal API's <c>ApiKeyProvider</c>.
     /// </summary>
     public string? ApiKey { get; set; }
+
+    /// <summary>
+    /// Gateway service token for authenticating with the core API without
+    /// a user JWT. When <c>null</c>, read from the <c>.gateway-token</c> file.
+    /// </summary>
+    public string? GatewayToken { get; set; }
 }

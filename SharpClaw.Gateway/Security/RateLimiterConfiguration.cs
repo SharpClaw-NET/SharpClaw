@@ -1,5 +1,6 @@
 using System.Threading.RateLimiting;
 using Microsoft.AspNetCore.RateLimiting;
+using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Security;
 
@@ -20,16 +21,22 @@ public static class RateLimiterConfiguration
                 var banService = context.HttpContext.RequestServices.GetRequiredService<IpBanService>();
                 banService.RecordViolation(ip);
 
-                context.HttpContext.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                var path = context.HttpContext.Request.Path.Value ?? string.Empty;
+                var limit = ResolveRateLimit(path);
+
+                context.HttpContext.Response.Headers["X-RateLimit-Limit"] = limit.ToString();
+                context.HttpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
 
                 if (context.Lease.TryGetMetadata(MetadataName.RetryAfter, out var retryAfter))
                 {
                     context.HttpContext.Response.Headers.RetryAfter =
                         ((int)retryAfter.TotalSeconds).ToString();
+                    context.HttpContext.Response.Headers["X-RateLimit-Reset"] =
+                        DateTimeOffset.UtcNow.Add(retryAfter).ToUnixTimeSeconds().ToString();
                 }
 
-                await context.HttpContext.Response.WriteAsync(
-                    "Too many requests. Slow down.", ct);
+                await GatewayErrors.WriteAsync(context.HttpContext, StatusCodes.Status429TooManyRequests,
+                    "Too many requests. Slow down.", GatewayErrors.TooManyRequests);
             };
 
             // ── Global policy: sliding window ─────────────────────
@@ -72,5 +79,17 @@ public static class RateLimiterConfiguration
         });
 
         return services;
+    }
+
+    /// <summary>
+    /// Infers the per-minute rate limit for a given request path so the
+    /// <c>X-RateLimit-Limit</c> header reflects the applicable policy.
+    /// </summary>
+    public static int ResolveRateLimit(string path)
+    {
+        var lower = path.ToLowerInvariant();
+        if (lower.StartsWith("/api/auth")) return 5;
+        if (lower.Contains("/chat")) return 20;
+        return 60;
     }
 }

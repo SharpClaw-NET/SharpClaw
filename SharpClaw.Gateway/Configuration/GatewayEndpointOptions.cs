@@ -6,6 +6,11 @@ namespace SharpClaw.Gateway.Configuration;
 /// When <see cref="Enabled"/> is <c>false</c>, the entire gateway
 /// returns <c>503 Service Unavailable</c> for every request.
 /// Individual endpoint groups can be toggled independently.
+/// <para>
+/// Default posture: only <see cref="Bots"/> is enabled so the gateway
+/// acts purely as a bot relay.  Enable individual groups as needed to
+/// expose the public REST surface.
+/// </para>
 /// </summary>
 public sealed class GatewayEndpointOptions
 {
@@ -14,23 +19,23 @@ public sealed class GatewayEndpointOptions
     /// <summary>Master kill-switch for the entire public gateway.</summary>
     public bool Enabled { get; set; } = true;
 
-    public bool Auth { get; set; } = true;
-    public bool Agents { get; set; } = true;
-    public bool Channels { get; set; } = true;
-    public bool ChannelContexts { get; set; } = true;
-    public bool Chat { get; set; } = true;
-    public bool ChatStream { get; set; } = true;
-    public bool Threads { get; set; } = true;
-    public bool ThreadChat { get; set; } = true;
-    public bool Jobs { get; set; } = true;
-    public bool Models { get; set; } = true;
-    public bool Providers { get; set; } = true;
-    public bool Roles { get; set; } = true;
-    public bool Users { get; set; } = true;
-    public bool AudioDevices { get; set; } = true;
-    public bool Transcription { get; set; } = true;
-    public bool TranscriptionStreaming { get; set; } = true;
-    public bool Cost { get; set; } = true;
+    public bool Auth { get; set; }
+    public bool Agents { get; set; }
+    public bool Channels { get; set; }
+    public bool ChannelContexts { get; set; }
+    public bool Chat { get; set; }
+    public bool ChatStream { get; set; }
+    public bool Threads { get; set; }
+    public bool ThreadChat { get; set; }
+    public bool Jobs { get; set; }
+    public bool Models { get; set; }
+    public bool Providers { get; set; }
+    public bool Roles { get; set; }
+    public bool Users { get; set; }
+    public bool AudioDevices { get; set; }
+    public bool Transcription { get; set; }
+    public bool TranscriptionStreaming { get; set; }
+    public bool Cost { get; set; }
     public bool Bots { get; set; } = true;
 
     /// <summary>

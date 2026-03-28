@@ -16,6 +16,7 @@ public sealed partial class MainPage
         _settingsMode = true;
         _tasksMode = false;
         _jobsMode = false;
+        _botsMode = false;
         UpdateTabHighlight();
         MessagesScroller.Visibility = Visibility.Collapsed;
         ChatInputArea.Visibility = Visibility.Collapsed;
@@ -23,6 +24,7 @@ public sealed partial class MainPage
         DeallocateJobView();
         TaskViewPanel.Visibility = Visibility.Collapsed;
         DeallocateTaskView();
+        BotViewPanel.Visibility = Visibility.Collapsed;
         AgentSelectorPanel.Visibility = Visibility.Collapsed;
         ThreadSelectorPanel.Visibility = Visibility.Collapsed;
         OneOffWarning.Visibility = Visibility.Collapsed;

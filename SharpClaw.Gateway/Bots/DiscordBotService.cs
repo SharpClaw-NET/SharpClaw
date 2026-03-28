@@ -1,8 +1,7 @@
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
-using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Configuration;
+using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Bots;
 
@@ -11,15 +10,13 @@ namespace SharpClaw.Gateway.Bots;
 /// API (v10). Receives incoming messages and will eventually forward
 /// them to the SharpClaw core via <c>InternalApiClient</c>.
 /// <para>
-/// Requires a valid <see cref="DiscordBotOptions.BotToken"/>.
-/// The actual message-to-core relay is not yet implemented — this
-/// scaffold handles connection lifecycle, heartbeating, identification,
-/// and message reception.
+/// Bot configuration (enabled flag and token) is fetched from the core
+/// database via <see cref="InternalApiClient"/> at startup.
 /// </para>
 /// </summary>
 public sealed class DiscordBotService : BackgroundService
 {
-    private readonly IOptions<DiscordBotOptions> _options;
+    private readonly InternalApiClient _coreApi;
     private readonly ILogger<DiscordBotService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
 
@@ -30,26 +27,38 @@ public sealed class DiscordBotService : BackgroundService
     private const int GatewayIntents = (1 << 0) | (1 << 9) | (1 << 15);
 
     public DiscordBotService(
-        IOptions<DiscordBotOptions> options,
+        InternalApiClient coreApi,
         ILogger<DiscordBotService> logger,
         IHttpClientFactory httpClientFactory)
     {
-        _options = options;
+        _coreApi = coreApi;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        var opts = _options.Value;
+        // Wait briefly for the core API to be ready after startup
+        await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
 
-        if (!opts.Enabled)
+        BotConfigResponse? config;
+        try
+        {
+            config = await _coreApi.GetAsync<BotConfigResponse>("/bots/config/discord", stoppingToken);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Failed to fetch Discord bot config from core API. Stopping.");
+            return;
+        }
+
+        if (config is null || !config.Enabled)
         {
             _logger.LogInformation("Discord bot is disabled.");
             return;
         }
 
-        if (string.IsNullOrWhiteSpace(opts.BotToken))
+        if (string.IsNullOrWhiteSpace(config.BotToken))
         {
             _logger.LogWarning("Discord bot is enabled but no BotToken is configured. Stopping.");
             return;
@@ -58,7 +67,7 @@ public sealed class DiscordBotService : BackgroundService
         _logger.LogInformation("Discord bot starting...");
 
         // Validate token via REST before connecting to the gateway
-        if (!await ValidateBotTokenAsync(opts.BotToken, stoppingToken))
+        if (!await ValidateBotTokenAsync(config.BotToken, stoppingToken))
         {
             _logger.LogError("Discord bot token validation failed. Stopping.");
             return;
@@ -68,7 +77,7 @@ public sealed class DiscordBotService : BackgroundService
         {
             try
             {
-                await RunGatewaySessionAsync(opts.BotToken, stoppingToken);
+                await RunGatewaySessionAsync(config.BotToken, stoppingToken);
             }
             catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
             {
@@ -280,5 +289,12 @@ public sealed class DiscordBotService : BackgroundService
         public JsonElement? D { get; init; }
         public int? S { get; init; }
         public string? T { get; init; }
+    }
+
+    private sealed record BotConfigResponse
+    {
+        public bool Enabled { get; init; }
+        public string? BotToken { get; init; }
+        public Guid? DefaultChannelId { get; init; }
     }
 }

@@ -9,6 +9,8 @@ public sealed partial class TerminalCursor : UserControl
     private bool _cursorVisible = true;
     private TaskCompletionSource? _typeTcs;
 
+    private bool _frozen;
+
     public TerminalCursor()
     {
         this.InitializeComponent();
@@ -51,7 +53,7 @@ public sealed partial class TerminalCursor : UserControl
         CommandBlock.Text = string.Empty;
         _typeTcs = new TaskCompletionSource();
 
-        _typewriterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(35) };
+        _typewriterTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(23) };
         _typewriterTimer.Tick += OnTypewriterTick;
         _typewriterTimer.Start();
     }
@@ -78,6 +80,29 @@ public sealed partial class TerminalCursor : UserControl
             _typewriterTimer?.Stop();
             _typeTcs?.TrySetResult();
         }
+    }
+
+    /// <summary>
+    /// Stops the blinking cursor and hides the caret.
+    /// The command text is preserved.
+    /// </summary>
+    public void Freeze()
+    {
+        _frozen = true;
+        _blinkTimer.Stop();
+        BlinkBlock.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>
+    /// Resumes blinking after a previous <see cref="Freeze"/> call.
+    /// </summary>
+    public void Unfreeze()
+    {
+        _frozen = false;
+        BlinkBlock.Visibility = Visibility.Visible;
+        BlinkBlock.Text = "_";
+        _cursorVisible = true;
+        _blinkTimer.Start();
     }
 
     private void StopTypewriter()

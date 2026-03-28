@@ -55,6 +55,7 @@ fastest way to make that happen.
 - [Roles](#roles)
 - [Default resources](#default-resources)
 - [Local models](#local-models)
+- [Bot integrations](#bot-integrations)
 - [Editor bridge](#editor-bridge)
 - [Task definitions & instances](#task-definitions--instances)
 - [Token cost tracking](#token-cost-tracking)
@@ -2609,6 +2610,101 @@ Delete the local model file and its DB record.
 ```
 
 `status` is a `LocalModelStatus`: `Pending`, `Downloading`, `Ready`, `Failed`.
+
+---
+
+## Bot integrations
+
+Bot integration rows are **pre-seeded** on startup for each `BotType`
+(`Telegram`, `Discord`, `WhatsApp`). There are no POST or DELETE
+endpoints — you only update existing rows to enable/disable a bot or
+set its token.
+
+Bot tokens are AES-GCM encrypted at rest (same mechanism as provider
+API keys).
+
+### GET /bots
+
+List all bot integrations.
+
+**Response `200`:** array of `BotIntegrationResponse`.
+
+### GET /bots/{id}
+
+Get a single bot integration by ID.
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### GET /bots/type/{type}
+
+Get a bot integration by type name (`telegram`, `discord`, `whatsapp`).
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### PUT /bots/{id}
+
+Update a bot integration. All fields are optional (partial update).
+
+**Request:**
+
+```json
+{
+  "enabled": true,
+  "botToken": "string | null",
+  "defaultChannelId": "guid | null"
+}
+```
+
+| Field | Behaviour |
+|---|---|
+| `enabled` | Enable or disable the bot. |
+| `botToken` | Non-empty string → encrypt and store. Empty string (`""`) → clear the stored token. Omit to leave unchanged. |
+| `defaultChannelId` | GUID → set the default SharpClaw channel for forwarded messages. `Guid.Empty` → clear. Omit to leave unchanged. |
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### GET /bots/config/{type}
+
+Return the **decrypted** bot configuration for gateway consumption.
+Intended for internal use by the gateway process.
+
+**Response `200`:**
+
+```json
+{
+  "enabled": true,
+  "botToken": "plaintext-token",
+  "defaultChannelId": "guid | null"
+}
+```
+
+### BotIntegrationResponse
+
+```json
+{
+  "id": "guid",
+  "botType": "Telegram",
+  "enabled": false,
+  "hasBotToken": true,
+  "defaultChannelId": "guid | null",
+  "createdAt": "2025-01-01T00:00:00Z",
+  "updatedAt": "2025-01-01T00:00:00Z"
+}
+```
+
+`hasBotToken` indicates whether an encrypted token is stored — the
+actual token is never returned by list/get endpoints.
+
+### CLI
+
+```
+bot list                                        List all bot integrations
+bot get <id>                                    Show a single integration
+bot update <id> [--enabled true|false]          Enable/disable
+                [--token <tok>]                 Set bot token
+                [--channel <channelId>]          Set default channel
+bot config <type>                               Show decrypted config
+```
 
 ---
 

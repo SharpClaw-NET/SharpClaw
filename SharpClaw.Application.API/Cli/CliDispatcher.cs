@@ -25,6 +25,7 @@ using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
+using SharpClaw.Contracts.DTOs.Bots;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -218,6 +219,7 @@ public static class CliDispatcher
             "resource" => await HandleResourceCommand(args, sp),
             "task" => await HandleTaskCommand(args, sp),
             "tools" => await HandleToolAwarenessSetCommand(args, sp),
+            "bot" => await HandleBotCommand(args, sp),
             "bio" => await HandleBioCommand(args, sp),
             "me" => await AuthHandlers.Me(
                 sp.GetRequiredService<SessionService>(),
@@ -2927,6 +2929,75 @@ public static class CliDispatcher
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Bot integrations
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<IResult?> HandleBotCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "bot list                                  List all bot integrations",
+                "bot get <id>                              Show a bot integration",
+                "bot update <id> [--enabled true|false] [--token <tok>] [--channel <channelId>]",
+                "                                          Update a bot integration",
+                "bot config <type>                         Show decrypted config (telegram|discord|whatsapp)");
+            return Results.Ok();
+        }
+
+        var svc = sp.GetRequiredService<BotIntegrationService>();
+        var sub = args[1].ToLowerInvariant();
+
+        return sub switch
+        {
+            "list" => await BotHandlers.List(svc),
+
+            "get" when args.Length >= 3
+                => await BotHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
+            "get" => UsageResult("bot get <id>"),
+
+            "update" when args.Length >= 3
+                => await HandleBotUpdate(args, svc),
+            "update" => UsageResult("bot update <id> [--name <name>] [--enabled true|false] [--token <tok>] [--channel <channelId>]"),
+
+            "config" when args.Length >= 3
+                => await BotHandlers.GetConfig(args[2], svc),
+            "config" => UsageResult("bot config <type>  (telegram|discord|whatsapp)"),
+
+            _ => UsageResult($"Unknown sub-command: bot {sub}. Try 'bot list', 'bot get', etc.")
+        };
+    }
+
+    private static async Task<IResult> HandleBotUpdate(string[] args, BotIntegrationService svc)
+    {
+        var id = CliIdMap.Resolve(args[2]);
+        string? name = null;
+        bool? enabled = null;
+        string? token = null;
+        Guid? channelId = null;
+
+        for (var i = 3; i < args.Length - 1; i++)
+        {
+            switch (args[i].ToLowerInvariant())
+            {
+                case "--name":
+                    name = args[++i]; break;
+                case "--enabled" when bool.TryParse(args[i + 1], out var e):
+                    enabled = e; i++; break;
+                case "--token":
+                    token = args[++i]; break;
+                case "--channel" when Guid.TryParse(args[i + 1], out var ch):
+                    channelId = ch; i++; break;
+                case "--channel" when args[i + 1].ToLowerInvariant() is "none" or "clear":
+                    channelId = Guid.Empty; i++; break;
+            }
+        }
+
+        var request = new UpdateBotIntegrationRequest(name, enabled, token, channelId);
+        return await BotHandlers.Update(id, request, svc);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Bio
     // ═══════════════════════════════════════════════════════════════
 
@@ -3175,6 +3246,12 @@ public static class CliDispatcher
               json: '{"tool_name": true, ...}' — omitted tools default to enabled.
               Assign to agents/channels via --tools <setId>.
               Override chain: channel → agent → null (all enabled).
+
+            Bot:       bot <sub> [args]
+              bot list                           List all bot integrations
+              bot get <id>                       Show a bot integration
+              bot update <id> [--enabled true|false] [--token <tok>] [--channel <channelId>]
+              bot config <type>                  Show decrypted config (telegram|discord|whatsapp)
 
               exit / quit
             """);
