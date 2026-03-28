@@ -133,22 +133,8 @@ public sealed partial class ChatService(
         CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
         var toolAwareness = disableTools ? null : (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools);
 
-        var loopResult = disableTools
-            ? await RunTextToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext)
-            : useNativeTools
-            ? await RunNativeToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext, toolAwareness: toolAwareness)
-            : await RunTextToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext);
-
-        // Persist both messages
+        // Persist user message immediately so it gets an accurate
+        // CreatedAt and survives crashes during LLM inference.
         var senderUserId = jobService.GetSessionUserId();
         var senderUsername = senderUserId.HasValue
             ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
@@ -165,6 +151,25 @@ public sealed partial class ChatService(
             ClientType = request.ClientType
         };
 
+        db.ChatMessages.Add(userMessage);
+        await db.SaveChangesAsync(ct);
+
+        var loopResult = disableTools
+            ? await RunTextToolLoopAsync(
+                client, httpClient, apiKey, model.Name, systemPrompt,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
+                taskContext: request.TaskContext)
+            : useNativeTools
+            ? await RunNativeToolLoopAsync(
+                client, httpClient, apiKey, model.Name, systemPrompt,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
+                taskContext: request.TaskContext, toolAwareness: toolAwareness)
+            : await RunTextToolLoopAsync(
+                client, httpClient, apiKey, model.Name, systemPrompt,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
+                taskContext: request.TaskContext);
+
+        // Persist assistant message after LLM completes
         var assistantMessage = new ChatMessageDB
         {
             Role = "assistant",
@@ -178,7 +183,6 @@ public sealed partial class ChatService(
             CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null
         };
 
-        db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
@@ -950,6 +954,27 @@ public sealed partial class ChatService(
             ? []
             : GetEffectiveTools(request.TaskContext, toolAwareness);
 
+        // Persist user message immediately so it gets an accurate
+        // CreatedAt and survives crashes during LLM inference.
+        var senderUserId = jobService.GetSessionUserId();
+        var senderUsername = senderUserId.HasValue
+            ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
+            : request.ExternalDisplayName ?? request.ExternalUsername;
+
+        var userMessage = new ChatMessageDB
+        {
+            Role = "user",
+            Content = request.Message,
+            ChannelId = channelId,
+            ThreadId = threadId,
+            SenderUserId = senderUserId,
+            SenderUsername = senderUsername,
+            ClientType = request.ClientType
+        };
+
+        db.ChatMessages.Add(userMessage);
+        await db.SaveChangesAsync(ct);
+
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
         foreach (var msg in history)
@@ -1070,24 +1095,8 @@ public sealed partial class ChatService(
             }
         }
 
-        // Persist both messages
+        // Persist assistant message after LLM completes
         var assistantContent = fullContent.ToString();
-
-        var senderUserId = jobService.GetSessionUserId();
-        var senderUsername = senderUserId.HasValue
-            ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
-            : request.ExternalDisplayName ?? request.ExternalUsername;
-
-        var userMessage = new ChatMessageDB
-        {
-            Role = "user",
-            Content = request.Message,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderUserId = senderUserId,
-            SenderUsername = senderUsername,
-            ClientType = request.ClientType
-        };
 
         var assistantMessage = new ChatMessageDB
         {
@@ -1102,7 +1111,6 @@ public sealed partial class ChatService(
             CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null
         };
 
-        db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
 
