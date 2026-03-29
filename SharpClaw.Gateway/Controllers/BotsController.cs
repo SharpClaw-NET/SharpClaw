@@ -111,11 +111,13 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
         {
             var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
             var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
+            var whatsapp = await dispatcher.GetAsync<BotConfigDto>("/bots/config/whatsapp", ct);
 
             return Ok(new
             {
                 telegram = new { enabled = telegram?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(telegram?.BotToken) },
                 discord = new { enabled = discord?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(discord?.BotToken) },
+                whatsapp = new { enabled = whatsapp?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(whatsapp?.BotToken) },
             });
         }
         catch (Exception ex)
@@ -134,11 +136,13 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
         {
             var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
             var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
+            var whatsapp = await dispatcher.GetAsync<BotConfigDto>("/bots/config/whatsapp", ct);
 
             return Ok(new
             {
                 telegram = new { enabled = telegram?.Enabled ?? false, botToken = telegram?.BotToken ?? "" },
                 discord = new { enabled = discord?.Enabled ?? false, botToken = discord?.BotToken ?? "" },
+                whatsapp = new { enabled = whatsapp?.Enabled ?? false, botToken = whatsapp?.BotToken ?? "" },
             });
         }
         catch (Exception ex)
@@ -160,6 +164,8 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
                 await UpdateBotByTypeAsync("telegram", request.Telegram, ct);
             if (request.Discord is not null)
                 await UpdateBotByTypeAsync("discord", request.Discord, ct);
+            if (request.WhatsApp is not null)
+                await UpdateBotByTypeAsync("whatsapp", request.WhatsApp, ct);
 
             return Ok(new { saved = true });
         }
@@ -223,4 +229,5 @@ public sealed class BotConfigRequest
 {
     public BotConfigEntry? Telegram { get; set; }
     public BotConfigEntry? Discord { get; set; }
+    public BotConfigEntry? WhatsApp { get; set; }
 }

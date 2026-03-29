@@ -1931,11 +1931,20 @@ public sealed partial class ChatService(
         var jobResults = new List<AgentJobResponse>();
         string assistantContent;
         var rounds = 0;
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
 
         while (true)
         {
-            assistantContent = await client.ChatCompletionAsync(
+            var completionResult = await client.ChatCompletionAsync(
                 httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
+
+            assistantContent = completionResult.Content ?? "";
+            if (completionResult.Usage is { } usage)
+            {
+                totalPromptTokens += usage.PromptTokens;
+                totalCompletionTokens += usage.CompletionTokens;
+            }
 
             var toolCalls = ParseToolCalls(assistantContent);
             if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
@@ -2011,14 +2020,20 @@ public sealed partial class ChatService(
 
             if (anyUnresolvableApproval)
             {
-                assistantContent = await client.ChatCompletionAsync(
+                var finalResult = await client.ChatCompletionAsync(
                     httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
+                assistantContent = finalResult.Content ?? "";
+                if (finalResult.Usage is { } finalUsage)
+                {
+                    totalPromptTokens += finalUsage.PromptTokens;
+                    totalCompletionTokens += finalUsage.CompletionTokens;
+                }
                 break;
             }
         }
 
         assistantContent = StripToolCallBlocks(assistantContent);
-        return new ToolLoopResult(assistantContent, jobResults);
+        return new ToolLoopResult(assistantContent, jobResults, totalPromptTokens, totalCompletionTokens);
     }
 
     /// <summary>

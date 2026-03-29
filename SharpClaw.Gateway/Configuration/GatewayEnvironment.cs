@@ -88,6 +88,11 @@ public static class GatewayEnvironment
               "Discord": {
                 "Enabled": "false",
                 "BotToken": ""
+              },
+              "WhatsApp": {
+                "Enabled": "false",
+                "PhoneNumberId": "",
+                "VerifyToken": ""
               }
             }
           }

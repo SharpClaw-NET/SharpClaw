@@ -41,9 +41,15 @@ builder.Services.AddHttpContextAccessor();
 builder.Services.AddSingleton<BotReloadSignal>();
 builder.Services.AddHttpClient("TelegramBot");
 builder.Services.AddHttpClient("DiscordBot");
+builder.Services.AddHttpClient("WhatsAppBot");
+
+builder.Services.Configure<WhatsAppBotOptions>(
+    builder.Configuration.GetSection(WhatsAppBotOptions.SectionName));
+builder.Services.AddSingleton<WhatsAppBotState>();
 
 builder.Services.AddHostedService<TelegramBotService>();
 builder.Services.AddHostedService<DiscordBotService>();
+builder.Services.AddHostedService<WhatsAppBotService>();
 
 // ── Security ─────────────────────────────────────────────────────
 builder.Services.AddSingleton<IpBanService>();
@@ -214,5 +220,6 @@ app.UseAuthorization();
 app.MapControllers();
 app.MapTranscriptionStreamingProxy();
 app.MapChatStreamProxy();
+app.MapWhatsAppWebhookProxy();
 
 app.Run();

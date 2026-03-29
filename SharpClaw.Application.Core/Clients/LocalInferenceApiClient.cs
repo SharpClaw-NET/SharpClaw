@@ -59,7 +59,7 @@ public sealed class LocalInferenceApiClient(
         HttpClient httpClient, string apiKey, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>([]);
 
-    public async Task<string> ChatCompletionAsync(
+    public async Task<ChatCompletionResult> ChatCompletionAsync(
         HttpClient httpClient, string apiKey, string model, string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages, int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
@@ -91,7 +91,7 @@ public sealed class LocalInferenceApiClient(
 
         var result = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
         LogResponse(result);
-        return result;
+        return new ChatCompletionResult { Content = result };
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(

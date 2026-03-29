@@ -39,7 +39,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             .ToList() ?? [];
     }
 
-    public async Task<string> ChatCompletionAsync(
+    public async Task<ChatCompletionResult> ChatCompletionAsync(
         HttpClient httpClient,
         string apiKey,
         string model,
@@ -53,21 +53,16 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         // Responses API path
         if (UseResponsesApi(model))
         {
-            var sb = new System.Text.StringBuilder();
+            ChatCompletionResult? final = null;
             await foreach (var chunk in StreamResponsesApiAsync(
                 httpClient, apiKey, model, systemPrompt,
                 messages.Select(m => new ToolAwareMessage { Role = m.Role, Content = m.Content }).ToList(),
                 [], maxCompletionTokens, providerParameters, completionParameters, ct))
             {
                 if (chunk.IsFinished)
-                    return chunk.Finished!.Content
-                        ?? throw new InvalidOperationException("No response content from provider.");
-                if (chunk.Delta is not null)
-                    sb.Append(chunk.Delta);
+                    final = chunk.Finished;
             }
-            return sb.Length > 0
-                ? sb.ToString()
-                : throw new InvalidOperationException("No response content from provider.");
+            return final ?? throw new InvalidOperationException("No response content from provider.");
         }
 
         var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
@@ -102,8 +97,16 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<CompletionResponse>(ct);
-        return result?.Choices?.FirstOrDefault()?.Message?.Content
+        var content = result?.Choices?.FirstOrDefault()?.Message?.Content
             ?? throw new InvalidOperationException("No response content from provider.");
+
+        return new ChatCompletionResult
+        {
+            Content = content,
+            Usage = result?.Usage is { } u
+                ? new TokenUsage(u.PromptTokens, u.CompletionTokens)
+                : null
+        };
     }
 
     public virtual async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(

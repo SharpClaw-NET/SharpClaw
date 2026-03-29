@@ -72,6 +72,7 @@ has no access to `DbContext`, services, or business logic.
 - [Transcription](#transcription)
 - [Transcription streaming](#transcription-streaming)
 - [Bots](#bots)
+- [WhatsApp webhook](#whatsapp-webhook-endpoints)
 - [Error handling](#error-handling)
 - [Response headers](#response-headers)
 - [Rate limiting details](#rate-limiting-details)
@@ -213,6 +214,11 @@ A default `.env` is auto-created on first run if missing.
       "Discord": {
         "Enabled": "false",
         "BotToken": ""
+      },
+      "WhatsApp": {
+        "Enabled": "false",
+        "PhoneNumberId": "",
+        "VerifyToken": ""
       }
     }
   }
@@ -256,6 +262,9 @@ A default `.env` is auto-created on first run if missing.
 | `Gateway:Bots:Telegram` | `BotToken` | *(empty)* | Token from @BotFather |
 | `Gateway:Bots:Discord` | `Enabled` | `false` | Enable Discord bot service |
 | `Gateway:Bots:Discord` | `BotToken` | *(empty)* | Token from Discord Developer Portal |
+| `Gateway:Bots:WhatsApp` | `Enabled` | `false` | Enable WhatsApp bot service |
+| `Gateway:Bots:WhatsApp` | `PhoneNumberId` | *(empty)* | WhatsApp Business phone number ID from Meta Cloud API |
+| `Gateway:Bots:WhatsApp` | `VerifyToken` | *(empty)* | Arbitrary token for Meta webhook verification |
 
 ---
 
@@ -1033,7 +1042,7 @@ Lists all bot integrations from the core database.
 Creates a new bot integration. Triggers bot reload on success.
 
 ```json
-{ "name": "string", "botType": "Telegram",
+{ "name": "string", "botType": "Telegram|Discord|WhatsApp",
   "enabled": true, "botToken": "string",
   "defaultChannelId?": "guid", "defaultThreadId?": "guid" }
 ```
@@ -1088,7 +1097,8 @@ Returns the enabled/configured state of bot integrations.
 ```json
 {
   "telegram": { "enabled": true, "configured": false },
-  "discord":  { "enabled": false, "configured": false }
+  "discord":  { "enabled": false, "configured": false },
+  "whatsapp": { "enabled": false, "configured": false }
 }
 ```
 
@@ -1107,7 +1117,8 @@ decrypts them).
 ```json
 {
   "telegram": { "enabled": true, "botToken": "" },
-  "discord":  { "enabled": false, "botToken": "" }
+  "discord":  { "enabled": false, "botToken": "" },
+  "whatsapp": { "enabled": false, "botToken": "" }
 }
 ```
 
@@ -1121,7 +1132,8 @@ payload:
 ```json
 {
   "telegram": { "enabled": true, "botToken": "123:ABC" },
-  "discord":  { "enabled": false, "botToken": "" }
+  "discord":  { "enabled": false, "botToken": "" },
+  "whatsapp": { "enabled": false, "botToken": "" }
 }
 ```
 
@@ -1156,14 +1168,83 @@ Configuration: `Gateway:Bots:Telegram:Enabled` (default `true`) +
 ### Discord bot service
 
 `DiscordBotService` is a `BackgroundService` that connects to the
-Discord Gateway WebSocket (v10). It validates the token via
+Discord Gateway WebSocket (v10). On startup it fetches its configuration
+from the core API (`GET /bots/config/discord`), validates the token via
 `/users/@me`, sends `Identify` with intents
-`GUILDS | GUILD_MESSAGES | MESSAGE_CONTENT`, and handles heartbeating.
+`GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT`, and
+handles heartbeating.
+
 `MESSAGE_CREATE` events from non-bot users are forwarded to the core
-API in the same way as Telegram messages.
+API via `POST /channels/{channelId}/chat/threads/{threadId}` using the
+bot’s `defaultChannelId` and `defaultThreadId`. The core processes the
+message (including any agent tool calls) and returns a response, which
+the bot sends back to the Discord channel via the REST API
+(`POST /channels/{channelId}/messages`).
+
+The service automatically reloads its configuration when
+`BotReloadSignal` fires (e.g. after bot settings are changed via the
+gateway or the Uno settings page). Discord has a 2 000-character message
+limit; responses exceeding this are truncated.
 
 Configuration: `Gateway:Bots:Discord:Enabled` (default `false`) +
 `BotToken`.
+
+---
+
+### WhatsApp bot service
+
+`WhatsAppBotService` is a `BackgroundService` that manages the WhatsApp
+bot lifecycle. Unlike Telegram (polling) and Discord (WebSocket),
+WhatsApp Cloud API uses **webhooks** — Meta sends HTTP requests to the
+gateway when messages arrive.
+
+On startup the service fetches its configuration from the core API
+(`GET /bots/config/whatsapp`) for the access token, channel, and thread,
+then merges WhatsApp-specific settings from the gateway `.env`
+(`PhoneNumberId`, `VerifyToken`). It validates the Meta access token via
+`GET https://graph.facebook.com/v21.0/me`, and publishes the combined
+configuration to the `WhatsAppBotState` singleton so the webhook
+endpoints can process incoming messages.
+
+The service automatically reloads configuration when `BotReloadSignal`
+fires.
+
+Configuration:
+- Core database: `BotToken` (Meta Graph API access token),
+  `DefaultChannelId`, `DefaultThreadId`
+- Gateway `.env`: `Gateway:Bots:WhatsApp:Enabled` (default `false`),
+  `PhoneNumberId`, `VerifyToken`
+
+---
+
+### WhatsApp webhook endpoints
+
+Registered via minimal API (`MapWhatsAppWebhookProxy`). These handle
+the Meta Cloud API webhook protocol.
+
+#### GET /api/bots/whatsapp/webhook
+
+Meta webhook verification (subscription challenge-response).
+
+Query parameters:
+- `hub.mode` — must be `subscribe`
+- `hub.verify_token` — must match the gateway’s `VerifyToken`
+- `hub.challenge` — challenge string to echo back
+
+**200** → plain text challenge
+**400** → invalid `hub.mode`
+**401** → token mismatch
+**503** → bot not configured
+
+#### POST /api/bots/whatsapp/webhook
+
+Incoming message handler. Returns `200` immediately (Meta requires
+fast acknowledgement), then processes the message asynchronously:
+forwards text messages to the core API and replies via the WhatsApp
+Cloud API (`POST https://graph.facebook.com/v21.0/{phoneNumberId}/messages`).
+
+**200** → always (async processing)
+**503** → bot not configured
 
 ---
 
@@ -1253,13 +1334,17 @@ IP's ban counter. Exceeding **10 violations in 5 minutes** triggers a
 SharpClaw.Gateway/
 ├── Bots/
 │   ├── DiscordBotService.cs          BackgroundService — WebSocket Gateway v10
-│   └── TelegramBotService.cs         BackgroundService — HTTP long-polling
+│   ├── TelegramBotService.cs         BackgroundService — HTTP long-polling
+│   ├── WhatsAppBotService.cs         BackgroundService — config lifecycle
+│   ├── WhatsAppBotState.cs           Singleton config holder for webhook proxy
+│   └── WhatsAppWebhookProxy.cs       Minimal API — Meta webhook endpoints
 ├── Configuration/
 │   ├── DiscordBotOptions.cs           IOptions<T> for Gateway:Bots:Discord
 │   ├── GatewayEndpointOptions.cs      IOptions<T> for Gateway:Endpoints
 │   ├── GatewayEnvironment.cs          .env loader + default template
 │   ├── RequestQueueOptions.cs         IOptions<T> for Gateway:RequestQueue
-│   └── TelegramBotOptions.cs          IOptions<T> for Gateway:Bots:Telegram
+│   ├── TelegramBotOptions.cs          IOptions<T> for Gateway:Bots:Telegram
+│   └── WhatsAppBotOptions.cs          IOptions<T> for Gateway:Bots:WhatsApp
 ├── Controllers/
 │   ├── AgentsController.cs            GET list, GET by id
 │   ├── AgentJobsController.cs         Full job lifecycle

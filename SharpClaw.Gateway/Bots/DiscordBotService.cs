@@ -1,3 +1,4 @@
+using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
@@ -7,11 +8,11 @@ namespace SharpClaw.Gateway.Bots;
 
 /// <summary>
 /// Hosted service that runs the Discord bot using the Gateway WebSocket
-/// API (v10). Receives incoming messages and will eventually forward
-/// them to the SharpClaw core via <c>InternalApiClient</c>.
+/// API (v10). Receives incoming messages and forwards them to the
+/// SharpClaw core via <see cref="InternalApiClient"/>.
 /// <para>
-/// Bot configuration (enabled flag and token) is fetched from the core
-/// database via <see cref="InternalApiClient"/> at startup.
+/// Automatically reloads configuration when <see cref="BotReloadSignal"/>
+/// fires (e.g. after bot settings are changed via the gateway).
 /// </para>
 /// </summary>
 public sealed class DiscordBotService : BackgroundService
@@ -19,21 +20,29 @@ public sealed class DiscordBotService : BackgroundService
     private readonly InternalApiClient _coreApi;
     private readonly ILogger<DiscordBotService> _logger;
     private readonly IHttpClientFactory _httpClientFactory;
+    private readonly BotReloadSignal _reloadSignal;
+
+    private Guid? _defaultChannelId;
+    private Guid? _defaultThreadId;
+    private string? _botToken;
 
     private const string DiscordGatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
     private const string DiscordApiBase = "https://discord.com/api/v10/";
 
-    // Gateway intents: GUILDS (1 << 0) | GUILD_MESSAGES (1 << 9) | MESSAGE_CONTENT (1 << 15)
-    private const int GatewayIntents = (1 << 0) | (1 << 9) | (1 << 15);
+    // Gateway intents: GUILDS (1<<0) | GUILD_MESSAGES (1<<9) |
+    // DIRECT_MESSAGES (1<<12) | MESSAGE_CONTENT (1<<15)
+    private const int GatewayIntents = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
 
     public DiscordBotService(
         InternalApiClient coreApi,
         ILogger<DiscordBotService> logger,
-        IHttpClientFactory httpClientFactory)
+        IHttpClientFactory httpClientFactory,
+        BotReloadSignal reloadSignal)
     {
         _coreApi = coreApi;
         _logger = logger;
         _httpClientFactory = httpClientFactory;
+        _reloadSignal = reloadSignal;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -41,56 +50,97 @@ public sealed class DiscordBotService : BackgroundService
         // Wait briefly for the core API to be ready after startup
         await Task.Delay(TimeSpan.FromSeconds(3), stoppingToken);
 
-        BotConfigResponse? config;
-        try
-        {
-            config = await _coreApi.GetAsync<BotConfigResponse>("/bots/config/discord", stoppingToken);
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "Failed to fetch Discord bot config from core API. Stopping.");
-            return;
-        }
-
-        if (config is null || !config.Enabled)
-        {
-            _logger.LogInformation("Discord bot is disabled.");
-            return;
-        }
-
-        if (string.IsNullOrWhiteSpace(config.BotToken))
-        {
-            _logger.LogWarning("Discord bot is enabled but no BotToken is configured. Stopping.");
-            return;
-        }
-
-        _logger.LogInformation("Discord bot starting...");
-
-        // Validate token via REST before connecting to the gateway
-        if (!await ValidateBotTokenAsync(config.BotToken, stoppingToken))
-        {
-            _logger.LogError("Discord bot token validation failed. Stopping.");
-            return;
-        }
-
+        // Outer loop: fetch config, run gateway session, restart on reload signal
         while (!stoppingToken.IsCancellationRequested)
         {
+            BotConfigResponse? config;
             try
             {
-                await RunGatewaySessionAsync(config.BotToken, stoppingToken);
-            }
-            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
-            {
-                break;
+                config = await _coreApi.GetAsync<BotConfigResponse>(
+                    "/bots/config/discord", stoppingToken);
             }
             catch (Exception ex)
             {
-                _logger.LogError(ex, "Discord gateway session failed. Reconnecting in 5 seconds...");
-                await Task.Delay(TimeSpan.FromSeconds(5), stoppingToken);
+                _logger.LogWarning(ex,
+                    "Failed to fetch Discord bot config from core API. Retrying on reload...");
+                config = null;
             }
+
+            if (config is null || !config.Enabled
+                || string.IsNullOrWhiteSpace(config.BotToken))
+            {
+                if (config is { Enabled: true } && string.IsNullOrWhiteSpace(config.BotToken))
+                    _logger.LogWarning(
+                        "Discord bot is enabled but no BotToken is configured.");
+                else
+                    _logger.LogInformation(
+                        "Discord bot is disabled or not configured. Waiting for reload signal...");
+
+                try { await _reloadSignal.WaitAsync(stoppingToken); }
+                catch (OperationCanceledException) { break; }
+                continue;
+            }
+
+            _defaultChannelId = config.DefaultChannelId;
+            _defaultThreadId = config.DefaultThreadId;
+            _botToken = config.BotToken;
+
+            _logger.LogInformation("Discord bot starting...");
+
+            if (!await ValidateBotTokenAsync(config.BotToken, stoppingToken))
+            {
+                _logger.LogError(
+                    "Discord bot token validation failed. Waiting for reload signal...");
+                try { await _reloadSignal.WaitAsync(stoppingToken); }
+                catch (OperationCanceledException) { break; }
+                continue;
+            }
+
+            // Inner loop: run gateway session, restart on error or reload
+            using var sessionCts = CancellationTokenSource.CreateLinkedTokenSource(stoppingToken);
+            var reloadTask = WaitForReloadAsync(sessionCts);
+
+            while (!sessionCts.Token.IsCancellationRequested)
+            {
+                try
+                {
+                    await RunGatewaySessionAsync(config.BotToken, sessionCts.Token);
+                }
+                catch (OperationCanceledException) when (sessionCts.Token.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex, "Discord gateway session failed. Reconnecting in 5 seconds...");
+                    try { await Task.Delay(TimeSpan.FromSeconds(5), sessionCts.Token); }
+                    catch (OperationCanceledException) { break; }
+                }
+            }
+
+            if (!stoppingToken.IsCancellationRequested)
+                _logger.LogInformation("Discord bot reloading configuration...");
+
+            await reloadTask;
         }
 
         _logger.LogInformation("Discord bot stopped.");
+    }
+
+    /// <summary>
+    /// Waits for a reload signal and then cancels the session CTS so the inner loop exits.
+    /// </summary>
+    private async Task WaitForReloadAsync(CancellationTokenSource sessionCts)
+    {
+        try
+        {
+            await _reloadSignal.WaitAsync(sessionCts.Token);
+            await sessionCts.CancelAsync();
+        }
+        catch (OperationCanceledException)
+        {
+            // App shutdown or session already ended — nothing to do
+        }
     }
 
     private async Task<bool> ValidateBotTokenAsync(string token, CancellationToken ct)
@@ -229,7 +279,7 @@ public sealed class DiscordBotService : BackgroundService
         }
     }
 
-    private Task HandleDispatchAsync(
+    private async Task HandleDispatchAsync(
         ClientWebSocket ws, string token, GatewayPayload payload, CancellationToken ct)
     {
         switch (payload.T)
@@ -239,18 +289,16 @@ public sealed class DiscordBotService : BackgroundService
                 break;
 
             case "MESSAGE_CREATE":
-                HandleMessageCreate(payload);
+                await HandleMessageCreateAsync(payload, ct);
                 break;
 
             default:
                 _logger.LogDebug("Discord dispatch: {EventName}.", payload.T);
                 break;
         }
-
-        return Task.CompletedTask;
     }
 
-    private void HandleMessageCreate(GatewayPayload payload)
+    private async Task HandleMessageCreateAsync(GatewayPayload payload, CancellationToken ct)
     {
         if (payload.D is not { } data) return;
 
@@ -259,20 +307,75 @@ public sealed class DiscordBotService : BackgroundService
             && author.TryGetProperty("username", out var u)
                 ? u.GetString()
                 : "unknown";
-        var channelId = data.TryGetProperty("channel_id", out var ch)
+        var discordChannelId = data.TryGetProperty("channel_id", out var ch)
             ? ch.GetString()
-            : "unknown";
+            : null;
         var isBot = data.TryGetProperty("author", out var a2)
             && a2.TryGetProperty("bot", out var b) && b.GetBoolean();
 
-        if (isBot) return; // Ignore messages from other bots (and ourselves)
+        if (isBot || string.IsNullOrWhiteSpace(content) || discordChannelId is null)
+            return;
 
         _logger.LogInformation(
             "Discord message from @{User} in channel {ChannelId}: {Content}",
-            authorName, channelId, content);
+            authorName, discordChannelId, content);
 
-        // TODO: Forward to SharpClaw core via InternalApiClient and return the response.
-        // Will need to POST to the Discord channel via REST to reply.
+        if (_defaultChannelId is null)
+        {
+            await SendDiscordMessageAsync(discordChannelId,
+                "\u26a0 No default channel configured for this bot.", ct);
+            return;
+        }
+
+        try
+        {
+            var chatRequest = new DiscordChatRequest(
+                content, null, "Discord", authorName, authorName);
+
+            var chatPath = _defaultThreadId is not null
+                ? $"/channels/{_defaultChannelId}/chat/threads/{_defaultThreadId}"
+                : $"/channels/{_defaultChannelId}/chat";
+
+            var response = await _coreApi
+                .PostAsync<DiscordChatRequest, DiscordChatResponse>(
+                    chatPath, chatRequest, ct);
+
+            var reply = response?.AssistantMessage?.Content ?? "No response from agent.";
+            await SendDiscordMessageAsync(discordChannelId, reply, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "Failed to relay Discord message to core.");
+            await SendDiscordMessageAsync(discordChannelId,
+                "\u26a0 Failed to process message.", ct);
+        }
+    }
+
+    private async Task SendDiscordMessageAsync(
+        string channelId, string text, CancellationToken ct)
+    {
+        try
+        {
+            var client = _httpClientFactory.CreateClient("DiscordBot");
+            client.BaseAddress = new Uri(DiscordApiBase);
+            client.DefaultRequestHeaders.Authorization =
+                new AuthenticationHeaderValue("Bot", _botToken);
+
+            // Discord has a 2000-character message limit
+            if (text.Length > 2000)
+                text = text[..1997] + "...";
+
+            var payload = JsonSerializer.Serialize(
+                new { content = text }, JsonOptions);
+            using var body = new StringContent(payload, Encoding.UTF8, "application/json");
+
+            await client.PostAsync($"channels/{channelId}/messages", body, ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Failed to send Discord message to channel {ChannelId}.", channelId);
+        }
     }
 
     private static readonly JsonSerializerOptions JsonOptions = new()
@@ -296,5 +399,25 @@ public sealed class DiscordBotService : BackgroundService
         public bool Enabled { get; init; }
         public string? BotToken { get; init; }
         public Guid? DefaultChannelId { get; init; }
+        public Guid? DefaultThreadId { get; init; }
+    }
+
+    // ── Core API chat DTOs ───────────────────────────────────────
+
+    private sealed record DiscordChatRequest(
+        string Message,
+        Guid? AgentId,
+        string ClientType,
+        string? ExternalUsername,
+        string? ExternalDisplayName);
+
+    private sealed record DiscordChatResponse
+    {
+        public DiscordChatMessageDto? AssistantMessage { get; init; }
+    }
+
+    private sealed record DiscordChatMessageDto
+    {
+        public string? Content { get; init; }
     }
 }

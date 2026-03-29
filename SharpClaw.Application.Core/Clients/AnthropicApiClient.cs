@@ -37,7 +37,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
             .ToList() ?? [];
     }
 
-    public async Task<string> ChatCompletionAsync(
+    public async Task<ChatCompletionResult> ChatCompletionAsync(
         HttpClient httpClient,
         string apiKey,
         string model,
@@ -70,8 +70,16 @@ public sealed class AnthropicApiClient : IProviderApiClient
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<MessagesResponse>(ct);
-        return result?.Content?.FirstOrDefault(c => c.Type == "text")?.Text
+        var content = result?.Content?.FirstOrDefault(c => c.Type == "text")?.Text
             ?? throw new InvalidOperationException("No response content from Anthropic.");
+
+        return new ChatCompletionResult
+        {
+            Content = content,
+            Usage = result?.Usage is { } u
+                ? new TokenUsage(u.InputTokens, u.OutputTokens)
+                : null
+        };
     }
 
     private static void AddAuthHeaders(HttpRequestMessage request, string apiKey)
@@ -115,7 +123,14 @@ public sealed class AnthropicApiClient : IProviderApiClient
         [property: JsonPropertyName("content")] string Content);
 
     private sealed record MessagesResponse(
-        [property: JsonPropertyName("content")] List<ContentBlock>? Content);
+        [property: JsonPropertyName("content")] List<ContentBlock>? Content,
+        [property: JsonPropertyName("usage")] AntUsage? Usage = null);
+
+    private sealed class AntUsage
+    {
+        [JsonPropertyName("input_tokens")] public int InputTokens { get; set; }
+        [JsonPropertyName("output_tokens")] public int OutputTokens { get; set; }
+    }
 
     private sealed record ContentBlock(
         [property: JsonPropertyName("type")] string? Type,

@@ -17,7 +17,7 @@ public interface IProviderApiClient
     Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default);
 
-    Task<string> ChatCompletionAsync(
+    Task<ChatCompletionResult> ChatCompletionAsync(
         HttpClient httpClient,
         string apiKey,
         string model,
