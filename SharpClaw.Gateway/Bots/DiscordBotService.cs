@@ -313,11 +313,14 @@ public sealed class DiscordBotService : BackgroundService
         var isBot = data.TryGetProperty("author", out var a2)
             && a2.TryGetProperty("bot", out var b) && b.GetBoolean();
 
-        if (isBot || string.IsNullOrWhiteSpace(content) || discordChannelId is null)
+        // Only handle direct messages (DMs have no guild_id)
+        var isGuildMessage = data.TryGetProperty("guild_id", out _);
+
+        if (isBot || isGuildMessage || string.IsNullOrWhiteSpace(content) || discordChannelId is null)
             return;
 
         _logger.LogInformation(
-            "Discord message from @{User} in channel {ChannelId}: {Content}",
+            "Discord DM from @{User} in channel {ChannelId}: {Content}",
             authorName, discordChannelId, content);
 
         if (_defaultChannelId is null)

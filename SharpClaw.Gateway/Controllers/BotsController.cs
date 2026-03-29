@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.RateLimiting;
+using SharpClaw.Contracts.Enums;
 using SharpClaw.Gateway.Infrastructure;
 
 namespace SharpClaw.Gateway.Controllers;
@@ -109,16 +110,15 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
     {
         try
         {
-            var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
-            var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
-            var whatsapp = await dispatcher.GetAsync<BotConfigDto>("/bots/config/whatsapp", ct);
-
-            return Ok(new
+            var result = new Dictionary<string, object>();
+            foreach (var type in Enum.GetValues<BotType>())
             {
-                telegram = new { enabled = telegram?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(telegram?.BotToken) },
-                discord = new { enabled = discord?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(discord?.BotToken) },
-                whatsapp = new { enabled = whatsapp?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(whatsapp?.BotToken) },
-            });
+                var name = type.ToString().ToLowerInvariant();
+                var cfg = await dispatcher.GetAsync<BotConfigDto>($"/bots/config/{name}", ct);
+                result[name] = new { enabled = cfg?.Enabled ?? false, configured = !string.IsNullOrWhiteSpace(cfg?.BotToken) };
+            }
+
+            return Ok(result);
         }
         catch (Exception ex)
         {
@@ -134,16 +134,15 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
     {
         try
         {
-            var telegram = await dispatcher.GetAsync<BotConfigDto>("/bots/config/telegram", ct);
-            var discord = await dispatcher.GetAsync<BotConfigDto>("/bots/config/discord", ct);
-            var whatsapp = await dispatcher.GetAsync<BotConfigDto>("/bots/config/whatsapp", ct);
-
-            return Ok(new
+            var result = new Dictionary<string, object>();
+            foreach (var type in Enum.GetValues<BotType>())
             {
-                telegram = new { enabled = telegram?.Enabled ?? false, botToken = telegram?.BotToken ?? "" },
-                discord = new { enabled = discord?.Enabled ?? false, botToken = discord?.BotToken ?? "" },
-                whatsapp = new { enabled = whatsapp?.Enabled ?? false, botToken = whatsapp?.BotToken ?? "" },
-            });
+                var name = type.ToString().ToLowerInvariant();
+                var cfg = await dispatcher.GetAsync<BotConfigDto>($"/bots/config/{name}", ct);
+                result[name] = new { enabled = cfg?.Enabled ?? false, botToken = cfg?.BotToken ?? "" };
+            }
+
+            return Ok(result);
         }
         catch (Exception ex)
         {
@@ -153,19 +152,30 @@ public class BotsController(GatewayRequestDispatcher dispatcher, BotReloadSignal
 
     /// <summary>
     /// Updates bot configuration via the core API.
-    /// Accepts the legacy <see cref="BotConfigRequest"/> shape for backward compatibility.
+    /// Accepts the <see cref="BotConfigRequest"/> shape with a property per bot type.
     /// </summary>
     [HttpPut("config")]
     public async Task<IActionResult> UpdateConfig([FromBody] BotConfigRequest request, CancellationToken ct)
     {
         try
         {
-            if (request.Telegram is not null)
-                await UpdateBotByTypeAsync("telegram", request.Telegram, ct);
-            if (request.Discord is not null)
-                await UpdateBotByTypeAsync("discord", request.Discord, ct);
-            if (request.WhatsApp is not null)
-                await UpdateBotByTypeAsync("whatsapp", request.WhatsApp, ct);
+            var entries = new (string Type, BotConfigEntry? Entry)[]
+            {
+                ("telegram", request.Telegram),
+                ("discord", request.Discord),
+                ("whatsapp", request.WhatsApp),
+                ("slack", request.Slack),
+                ("matrix", request.Matrix),
+                ("signal", request.Signal),
+                ("email", request.Email),
+                ("teams", request.Teams),
+            };
+
+            foreach (var (type, entry) in entries)
+            {
+                if (entry is not null)
+                    await UpdateBotByTypeAsync(type, entry, ct);
+            }
 
             return Ok(new { saved = true });
         }
@@ -230,4 +240,9 @@ public sealed class BotConfigRequest
     public BotConfigEntry? Telegram { get; set; }
     public BotConfigEntry? Discord { get; set; }
     public BotConfigEntry? WhatsApp { get; set; }
+    public BotConfigEntry? Slack { get; set; }
+    public BotConfigEntry? Matrix { get; set; }
+    public BotConfigEntry? Signal { get; set; }
+    public BotConfigEntry? Email { get; set; }
+    public BotConfigEntry? Teams { get; set; }
 }

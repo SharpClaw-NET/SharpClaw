@@ -102,6 +102,10 @@ public static class WhatsAppWebhookProxy
                         if (message.Type != "text" || message.Text?.Body is null)
                             continue;
 
+                        // Only handle direct (individual) messages, skip group chats
+                        if (message.GroupId is not null)
+                            continue;
+
                         var from = message.From ?? "unknown";
                         var displayName = contacts.GetValueOrDefault(from, from);
                         var text = message.Text.Body;
@@ -212,6 +216,12 @@ public static class WhatsAppWebhookProxy
         public string? From { get; init; }
         public string? Type { get; init; }
         public WebhookTextBody? Text { get; init; }
+
+        /// <summary>
+        /// Present when the message originates from a group chat.
+        /// Absent (null) for individual/DM messages.
+        /// </summary>
+        public string? GroupId { get; init; }
     }
 
     private sealed record WebhookTextBody
