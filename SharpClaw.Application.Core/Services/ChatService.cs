@@ -2,7 +2,6 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
@@ -21,7 +20,7 @@ using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Services;
 
-public sealed partial class ChatService(
+public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
     ProviderApiClientFactory clientFactory,
@@ -110,9 +109,10 @@ public sealed partial class ChatService(
             lic.CurrentModelId = model.Id;
         var useNativeTools = client.SupportsNativeToolCalling;
         var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
-        var systemPrompt = disableTools
-            ? agent.SystemPrompt ?? ""
-            : BuildSystemPrompt(agent.SystemPrompt, useNativeTools);
+        var enableTools = !disableTools && useNativeTools;
+        var systemPrompt = enableTools
+            ? BuildSystemPrompt(agent.SystemPrompt)
+            : agent.SystemPrompt ?? "";
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
@@ -131,7 +131,7 @@ public sealed partial class ChatService(
         var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
         var completionParams = BuildCompletionParameters(agent);
         CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
-        var toolAwareness = disableTools ? null : (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools);
+        var toolAwareness = enableTools ? (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools) : null;
 
         // Persist user message immediately so it gets an accurate
         // CreatedAt and survives crashes during LLM inference.
@@ -154,20 +154,14 @@ public sealed partial class ChatService(
         db.ChatMessages.Add(userMessage);
         await db.SaveChangesAsync(ct);
 
-        var loopResult = disableTools
-            ? await RunTextToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext)
-            : useNativeTools
+        var loopResult = enableTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
                 history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
                 taskContext: request.TaskContext, toolAwareness: toolAwareness)
-            : await RunTextToolLoopAsync(
+            : await RunPlainCompletionAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext);
+                history, maxTokens, providerParams, completionParams, ct);
 
         // Persist assistant message after LLM completes
         var assistantMessage = new ChatMessageDB
@@ -808,7 +802,7 @@ public sealed partial class ChatService(
             streamLic.CurrentModelId = model.Id;
         var systemPrompt = channel.DisableToolSchemas || agent.DisableToolSchemas
             ? agent.SystemPrompt ?? ""
-            : BuildSystemPrompt(agent.SystemPrompt, nativeToolCalling: true);
+            : BuildSystemPrompt(agent.SystemPrompt);
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
@@ -1782,134 +1776,30 @@ public sealed partial class ChatService(
     }
 
     /// <summary>
-    /// Text-based fallback for providers that lack native tool calling.
-    /// The model is instructed via the system prompt to emit
-    /// <c>[TOOL_CALL:...]</c> markers which are parsed post-hoc.
+    /// Simple single-call completion for providers without native tool support
+    /// or when tools are explicitly disabled.
     /// </summary>
-    private async Task<ToolLoopResult> RunTextToolLoopAsync(
+    private static async Task<ToolLoopResult> RunPlainCompletionAsync(
         IProviderApiClient client,
         HttpClient httpClient,
         string apiKey,
         string modelName,
         string systemPrompt,
         List<ChatCompletionMessage> history,
-        Guid agentId,
-        Guid channelId,
-        ModelCapability modelCapabilities,
         int? maxCompletionTokens,
         Dictionary<string, JsonElement>? providerParameters,
         CompletionParameters? completionParameters,
-        Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
-        CancellationToken ct,
-        TaskChatContext? taskContext = null)
+        CancellationToken ct)
     {
-        var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
-        var jobResults = new List<AgentJobResponse>();
-        string assistantContent;
-        var rounds = 0;
-        var totalPromptTokens = 0;
-        var totalCompletionTokens = 0;
+        var result = await client.ChatCompletionAsync(
+            httpClient, apiKey, modelName, systemPrompt, history,
+            maxCompletionTokens, providerParameters, completionParameters, ct);
 
-        while (true)
-        {
-            var completionResult = await client.ChatCompletionAsync(
-                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
-
-            assistantContent = completionResult.Content ?? "";
-            if (completionResult.Usage is { } usage)
-            {
-                totalPromptTokens += usage.PromptTokens;
-                totalCompletionTokens += usage.CompletionTokens;
-            }
-
-            var toolCalls = ParseToolCalls(assistantContent);
-            if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
-                break;
-
-            history.Add(new ChatCompletionMessage("assistant", assistantContent));
-
-            var toolResultBuilder = new StringBuilder();
-            var anyUnresolvableApproval = false;
-
-            foreach (var call in toolCalls)
-            {
-                // ── Task-specific tool interception (text-based) ──
-                var syntheticTc = new ChatToolCall(call.CallId, call.CallId, call.RawJson ?? call.ScriptJson ?? "{}");
-                var (handled, taskResult) = await TryHandleTaskToolAsync(syntheticTc, taskContext, ct);
-                if (handled)
-                {
-                    toolResultBuilder.AppendLine(
-                        $"[TOOL_RESULT:{call.CallId}] status=Completed result={taskResult}");
-                    continue;
-                }
-
-                // ── Inline tool interception (no permissions) ────
-                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(syntheticTc, agentId, channelId, ct);
-                if (inlineHandled)
-                {
-                    toolResultBuilder.AppendLine(
-                        $"[TOOL_RESULT:{call.CallId}] status=Completed result={inlineResult}");
-                    continue;
-                }
-
-                var jobRequest = await BuildJobRequestAsync(call, agentId, ct);
-
-                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
-
-                // ── Inline approval (when callback available) ────
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval
-                    && approvalCallback is not null)
-                {
-                    var canApprove = await CanSessionUserApproveAsync(
-                        agentId, jobRequest.ActionType, jobRequest.ResourceId, ct);
-
-                    if (canApprove)
-                    {
-                        var approved = await approvalCallback(jobResponse, ct);
-                        jobResponse = approved
-                            ? await jobService.ApproveAsync(jobResponse.Id, new ApproveAgentJobRequest(), ct) ?? jobResponse
-                            : await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                    else
-                    {
-                        jobResponse = await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                }
-
-                jobResults.Add(jobResponse);
-
-                // For the text-based loop, screenshots are stripped from the
-                // result text because the simple ChatCompletionMessage doesn't
-                // support multipart content in the same way.
-                var (textResult, _) = ExtractScreenshotData(jobResponse);
-
-                toolResultBuilder.AppendLine(
-                    $"[TOOL_RESULT:{call.CallId}] status={jobResponse.Status}" +
-                    (textResult is not null ? $" result={textResult}" : "") +
-                    (jobResponse.ErrorLog is not null ? $" error={jobResponse.ErrorLog}" : ""));
-
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
-                    anyUnresolvableApproval = true;
-            }
-
-            history.Add(new ChatCompletionMessage("user", toolResultBuilder.ToString()));
-
-            if (anyUnresolvableApproval)
-            {
-                var finalResult = await client.ChatCompletionAsync(
-                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, providerParameters, completionParameters, ct);
-                assistantContent = finalResult.Content ?? "";
-                if (finalResult.Usage is { } finalUsage)
-                {
-                    totalPromptTokens += finalUsage.PromptTokens;
-                    totalCompletionTokens += finalUsage.CompletionTokens;
-                }
-                break;
-            }
-        }
-
-        assistantContent = StripToolCallBlocks(assistantContent);
-        return new ToolLoopResult(assistantContent, jobResults, totalPromptTokens, totalCompletionTokens);
+        return new ToolLoopResult(
+            result.Content ?? "",
+            [],
+            result.Usage?.PromptTokens ?? 0,
+            result.Usage?.CompletionTokens ?? 0);
     }
 
     /// <summary>
@@ -2073,156 +1963,16 @@ public sealed partial class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Tool-call parsing (text-based fallback)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Matches the <c>[TOOL_CALL:id]</c> marker emitted by the model.
-    /// The JSON payload that follows is extracted separately via
-    /// <see cref="ExtractJsonObject"/> to support nested objects
-    /// (e.g. mk8.shell scripts).
-    /// </summary>
-    [GeneratedRegex(
-        @"\[TOOL_CALL:(?<id>[^\]]+)\]\s*",
-        RegexOptions.Compiled | RegexOptions.Multiline)]
-    private static partial Regex ToolCallMarkerPattern();
-
-    /// <summary>
-    /// Extracts a balanced JSON object starting at <paramref name="startIndex"/>.
-    /// Returns <see langword="null"/> if the character at that position is not
-    /// <c>{</c> or if the braces never balance.
-    /// </summary>
-    private static string? ExtractJsonObject(string text, int startIndex)
-    {
-        if (startIndex >= text.Length || text[startIndex] != '{')
-            return null;
-
-        var depth = 0;
-        var inString = false;
-        var escaped = false;
-
-        for (var i = startIndex; i < text.Length; i++)
-        {
-            var c = text[i];
-
-            if (escaped) { escaped = false; continue; }
-            if (c == '\\' && inString) { escaped = true; continue; }
-            if (c == '"') { inString = !inString; continue; }
-            if (inString) continue;
-
-            if (c == '{') depth++;
-            else if (c == '}')
-            {
-                depth--;
-                if (depth == 0)
-                    return text[startIndex..(i + 1)];
-            }
-        }
-
-        return null;
-    }
-
-    private static IReadOnlyList<ParsedToolCall> ParseToolCalls(string content)
-    {
-        var markers = ToolCallMarkerPattern().Matches(content);
-        if (markers.Count == 0)
-            return [];
-
-        var calls = new List<ParsedToolCall>(markers.Count);
-        foreach (Match marker in markers)
-        {
-            var callId = marker.Groups["id"].Value;
-            var jsonStart = marker.Index + marker.Length;
-            var json = ExtractJsonObject(content, jsonStart);
-
-            if (json is null)
-                continue;
-
-            try
-            {
-                var payload = JsonSerializer.Deserialize<ToolCallPayload>(json, JsonOptions);
-                if (payload is not null)
-                {
-                    Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
-                    resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
-
-                    // Default to mk8.shell for backwards compatibility
-                    var actionType = AgentActionType.ExecuteAsSafeShell;
-
-                    Guid? transcriptionModelId = Guid.TryParse(
-                        payload.TranscriptionModelId, out var tmid) ? tmid : null;
-
-                    DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
-                        payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
-
-                    if (dangerousShell.HasValue)
-                        actionType = AgentActionType.UnsafeExecuteAsDangerousShell;
-                    else if (transcriptionModelId.HasValue)
-                        actionType = AgentActionType.TranscribeFromAudioDevice;
-
-                    calls.Add(new ParsedToolCall(
-                        callId,
-                        actionType,
-                        resourceId,
-                        payload.SandboxId,
-                        payload.Script is { } script
-                            ? script.GetRawText()
-                            : payload.Command,
-                        dangerousShell,
-                        actionType == AgentActionType.ExecuteAsSafeShell
-                            ? SafeShellType.Mk8Shell : null,
-                        transcriptionModelId,
-                        payload.Language,
-                        payload.WorkingDirectory,
-                        json));
-                }
-            }
-            catch (JsonException)
-            {
-                // Malformed JSON — skip this call
-            }
-        }
-
-        return calls;
-    }
-
-    private static string StripToolCallBlocks(string content)
-    {
-        var markers = ToolCallMarkerPattern().Matches(content);
-        if (markers.Count == 0)
-            return content;
-
-        var sb = new StringBuilder(content);
-        for (var i = markers.Count - 1; i >= 0; i--)
-        {
-            var marker = markers[i];
-            var jsonStart = marker.Index + marker.Length;
-            var json = ExtractJsonObject(content, jsonStart);
-            var endIndex = json is not null
-                ? jsonStart + json.Length
-                : marker.Index + marker.Length;
-            sb.Remove(marker.Index, endIndex - marker.Index);
-        }
-
-        return sb.ToString().Trim();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     // System prompt & tool definitions (loaded from embedded resources)
     // ═══════════════════════════════════════════════════════════════
 
-    private static string BuildSystemPrompt(string? agentPrompt, bool nativeToolCalling)
+    private static string BuildSystemPrompt(string? agentPrompt)
     {
-        var suffix = nativeToolCalling ? NativeToolSystemSuffix : ToolInstructions;
-
         if (string.IsNullOrEmpty(agentPrompt))
-            return suffix;
+            return NativeToolSystemSuffix;
 
-        return agentPrompt + "\n\n" + suffix;
+        return agentPrompt + "\n\n" + NativeToolSystemSuffix;
     }
-
-    private static readonly string ToolInstructions =
-        LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-text.md");
 
     private static readonly string NativeToolSystemSuffix =
         LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-native-suffix.md");
