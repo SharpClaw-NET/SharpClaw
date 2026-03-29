@@ -1057,7 +1057,7 @@ public sealed partial class SettingsPage : Page
             FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 200,
         };
-        foreach (var t in new[] { "Telegram", "Discord", "WhatsApp" })
+        foreach (var t in new[] { "Telegram", "Discord", "WhatsApp", "Slack", "Matrix", "Signal", "Email", "Teams" })
             typeBox.Items.Add(new ComboBoxItem { Content = t, Tag = t });
         typeBox.SelectedIndex = 0;
 
@@ -1069,6 +1069,42 @@ public sealed partial class SettingsPage : Page
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
             MinWidth = 260, Padding = new Thickness(8, 6),
         };
+
+        // ── Platform-specific config fields (shown dynamically) ──
+        var platformConfigPanel = new StackPanel { Spacing = 4 };
+        var platformInputs = new Dictionary<string, TextBox>();
+
+        void RebuildPlatformFields(string type)
+        {
+            platformConfigPanel.Children.Clear();
+            platformInputs.Clear();
+            var fields = GetPlatformConfigFields(type);
+            if (fields.Length == 0) return;
+            platformConfigPanel.Children.Add(new TextBlock
+            {
+                Text = "platform config:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC),
+            });
+            foreach (var (key, placeholder, hint) in fields)
+            {
+                if (hint is not null)
+                    platformConfigPanel.Children.Add(new TextBlock
+                    {
+                        Text = hint, FontFamily = Mono, FontSize = 10, Foreground = B(0x666666),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                var input = MakeInput(placeholder);
+                platformInputs[key] = input;
+                platformConfigPanel.Children.Add(input);
+            }
+        }
+
+        typeBox.SelectionChanged += (_, _) =>
+        {
+            var sel = typeBox.SelectedItem is ComboBoxItem { Tag: string t } ? t : "Telegram";
+            tokenBox.PlaceholderText = GetTokenPlaceholder(sel);
+            RebuildPlatformFields(sel);
+        };
+        RebuildPlatformFields("Telegram");
 
         var enabledToggle = new ToggleSwitch
         {
@@ -1086,6 +1122,8 @@ public sealed partial class SettingsPage : Page
             var token = string.IsNullOrEmpty(tokenBox.Password) ? null : tokenBox.Password;
             var payload = new JsonObject { ["name"] = name, ["botType"] = type, ["enabled"] = enabledToggle.IsOn };
             if (token is not null) payload["botToken"] = token;
+            var pc = BuildPlatformConfigJson(platformInputs);
+            if (pc is not null) payload["platformConfig"] = pc;
             try
             {
                 using var gwHttp = CreateGatewayClient();
@@ -1107,6 +1145,7 @@ public sealed partial class SettingsPage : Page
         form.Children.Add(typeBox);
         form.Children.Add(new TextBlock { Text = "token:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC) });
         form.Children.Add(tokenBox);
+        form.Children.Add(platformConfigPanel);
         form.Children.Add(enabledToggle);
         form.Children.Add(createBtn);
 
@@ -1203,21 +1242,42 @@ public sealed partial class SettingsPage : Page
 
         // ── Bot token ──
         Sub("Bot Token");
-        var tokenHint = bot.BotType.Equals("Telegram", StringComparison.OrdinalIgnoreCase)
-            ? "Bot token from @BotFather on Telegram."
-            : bot.BotType.Equals("Discord", StringComparison.OrdinalIgnoreCase)
-                ? "Bot token from the Discord Developer Portal."
-                : "Bot token for this integration.";
+        var tokenHint = GetTokenHint(bot.BotType);
         Lbl(tokenHint, 0x666666);
         var tokenBox = new PasswordBox
         {
-            PlaceholderText = bot.HasBotToken ? "(token set — enter new value to replace)" : "Paste bot token…",
+            PlaceholderText = bot.HasBotToken ? "(token set — enter new value to replace)" : GetTokenPlaceholder(bot.BotType),
             FontFamily = Mono, FontSize = 12,
             Foreground = B(0x00FF00), Background = B(0x1A1A1A),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
             MinWidth = 360, Padding = new Thickness(8, 6),
         };
         ContentPanel.Children.Add(tokenBox);
+
+        // ── Platform-specific config fields ──
+        var platformInputs = new Dictionary<string, TextBox>();
+        var fields = GetPlatformConfigFields(bot.BotType);
+        Dictionary<string, string>? existingConfig = null;
+        if (bot.PlatformConfig is not null)
+        {
+            try { existingConfig = JsonSerializer.Deserialize<Dictionary<string, string>>(bot.PlatformConfig, Json); }
+            catch { /* ignore malformed */ }
+        }
+
+        if (fields.Length > 0)
+        {
+            Sub("Platform Configuration");
+            foreach (var (key, placeholder, hint) in fields)
+            {
+                if (hint is not null)
+                    Lbl(hint, 0x666666);
+                var input = MakeInput(placeholder);
+                if (existingConfig is not null && existingConfig.TryGetValue(key, out var val))
+                    input.Text = val;
+                platformInputs[key] = input;
+                ContentPanel.Children.Add(input);
+            }
+        }
 
         // ── Save ──
         var saveBtn = GreenButton("Save");
@@ -1234,6 +1294,9 @@ public sealed partial class SettingsPage : Page
                 var newToken = tokenBox.Password;
                 if (!string.IsNullOrEmpty(newToken))
                     payload["botToken"] = newToken;
+                var pc = BuildPlatformConfigJson(platformInputs);
+                if (pc is not null)
+                    payload["platformConfig"] = pc;
 
                 using var gwHttp = CreateGatewayClient();
                 using var resp = await gwHttp.PutAsync($"/api/bots/{bot.Id}",
@@ -1253,6 +1316,94 @@ public sealed partial class SettingsPage : Page
             finally { saveBtn.IsEnabled = true; }
         };
         ContentPanel.Children.Add(saveBtn);
+    }
+
+    // ── Bot platform config helpers ─────────────────────────────
+
+    /// <summary>
+    /// Returns the platform-specific config fields needed for each bot type.
+    /// Platforms that only require a bot token return an empty array.
+    /// </summary>
+    private static (string Key, string Placeholder, string? Hint)[] GetPlatformConfigFields(string type) => type switch
+    {
+        "WhatsApp" =>
+        [
+            ("PhoneNumberId", "Phone Number ID…", "WhatsApp Business phone number ID from Meta Cloud API."),
+            ("VerifyToken", "Webhook verify token…", "Arbitrary string used for Meta webhook verification."),
+        ],
+        "Slack" =>
+        [
+            ("SigningSecret", "Slack signing secret…", "App signing secret from the Slack API dashboard, used to verify webhook requests."),
+        ],
+        "Matrix" =>
+        [
+            ("HomeserverUrl", "https://matrix.org", "Matrix homeserver base URL (e.g. https://matrix.org)."),
+        ],
+        "Signal" =>
+        [
+            ("ApiUrl", "http://localhost:8080", "signal-cli REST API base URL."),
+            ("PhoneNumber", "+1234567890", "Registered phone number in E.164 format."),
+        ],
+        "Email" =>
+        [
+            ("ImapHost", "imap.example.com", "IMAP server hostname for receiving email."),
+            ("ImapPort", "993", "IMAP port (default 993 for TLS)."),
+            ("SmtpHost", "smtp.example.com", "SMTP server hostname for sending replies."),
+            ("SmtpPort", "587", "SMTP port (default 587 for STARTTLS)."),
+            ("Username", "bot@example.com", "Email account username / address."),
+            ("PollIntervalSeconds", "30", "IMAP poll interval in seconds."),
+        ],
+        "Teams" =>
+        [
+            ("AppId", "00000000-0000-0000-0000-000000000000", "Microsoft App ID (GUID) from Azure Bot registration."),
+        ],
+        _ => [], // Telegram, Discord — token only
+    };
+
+    private static string GetTokenPlaceholder(string type) => type switch
+    {
+        "Telegram" => "Bot token from @BotFather…",
+        "Discord" => "Bot token from Developer Portal…",
+        "WhatsApp" => "Meta Graph API access token…",
+        "Slack" => "Bot User OAuth Token (xoxb-…)…",
+        "Matrix" => "Matrix access token…",
+        "Signal" => "(unused — signal-cli handles auth)",
+        "Email" => "Email password / app password…",
+        "Teams" => "Azure AD client secret…",
+        _ => "Bot API token…",
+    };
+
+    private static string GetTokenHint(string type) => type switch
+    {
+        "Telegram" => "Bot token from @BotFather on Telegram.",
+        "Discord" => "Bot token from the Discord Developer Portal.",
+        "WhatsApp" => "Meta Graph API access token (permanent system user token recommended).",
+        "Slack" => "Bot User OAuth Token (xoxb-…) from the Slack API dashboard.",
+        "Matrix" => "Matrix access token — obtain via /_matrix/client/v3/login.",
+        "Signal" => "Not used — signal-cli handles authentication via the registered phone number.",
+        "Email" => "Email account password or app-specific password.",
+        "Teams" => "Azure AD client secret from the Azure Bot registration.",
+        _ => "Bot token for this integration.",
+    };
+
+    /// <summary>
+    /// Serialises the platform-specific input fields into a JSON string
+    /// suitable for the <c>platformConfig</c> API field. Returns
+    /// <see langword="null"/> when no fields have values.
+    /// </summary>
+    private static string? BuildPlatformConfigJson(Dictionary<string, TextBox> inputs)
+    {
+        if (inputs.Count == 0) return null;
+        var obj = new JsonObject();
+        var hasValues = false;
+        foreach (var (key, box) in inputs)
+        {
+            var val = box.Text.Trim();
+            if (string.IsNullOrEmpty(val)) continue;
+            obj[key] = val;
+            hasValues = true;
+        }
+        return hasValues ? obj.ToJsonString() : null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1729,7 +1880,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record UserListEntry(Guid Id, string Username, string? Bio, Guid? RoleId, string? RoleName, bool IsUserAdmin);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record BotIntegrationEntry(Guid Id, string Name, string BotType, bool Enabled, bool HasBotToken, Guid? DefaultChannelId = null);
+    private sealed record BotIntegrationEntry(Guid Id, string Name, string BotType, bool Enabled, bool HasBotToken, Guid? DefaultChannelId = null, string? PlatformConfig = null);
 
     // ═══════════════════════════════════════════════════════════════
     // DANGER ZONE

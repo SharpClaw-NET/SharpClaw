@@ -29,9 +29,13 @@ public sealed class DiscordBotService : BackgroundService
     private const string DiscordGatewayUrl = "wss://gateway.discord.gg/?v=10&encoding=json";
     private const string DiscordApiBase = "https://discord.com/api/v10/";
 
-    // Gateway intents: GUILDS (1<<0) | GUILD_MESSAGES (1<<9) |
-    // DIRECT_MESSAGES (1<<12) | MESSAGE_CONTENT (1<<15)
-    private const int GatewayIntents = (1 << 0) | (1 << 9) | (1 << 12) | (1 << 15);
+    // Gateway intents: GUILDS (1<<0) | GUILD_MESSAGES (1<<9) | DIRECT_MESSAGES (1<<12)
+    // MESSAGE_CONTENT (1<<15) is privileged and NOT needed for DMs — Discord
+    // always delivers message content in direct messages with the bot.
+    private const int GatewayIntents = (1 << 0) | (1 << 9) | (1 << 12);
+
+    // Discord close codes that indicate a configuration error (non-recoverable by reconnecting)
+    private static readonly HashSet<int> FatalCloseCodes = [4003, 4004, 4010, 4011, 4012, 4013, 4014];
 
     public DiscordBotService(
         InternalApiClient coreApi,
@@ -110,6 +114,15 @@ public sealed class DiscordBotService : BackgroundService
                 {
                     break;
                 }
+                catch (DiscordFatalCloseException ex)
+                {
+                    _logger.LogError(
+                        "Discord gateway fatal error (code {Code}: {Reason}). " +
+                        "Check the Discord Developer Portal → Bot → Privileged Gateway Intents. " +
+                        "Waiting for reload signal...",
+                        ex.CloseCode, ex.Reason);
+                    break; // exit inner loop → awaits reload signal
+                }
                 catch (Exception ex)
                 {
                     _logger.LogError(ex, "Discord gateway session failed. Reconnecting in 5 seconds...");
@@ -187,8 +200,14 @@ public sealed class DiscordBotService : BackgroundService
             var result = await ws.ReceiveAsync(buffer, ct);
             if (result.MessageType == WebSocketMessageType.Close)
             {
-                _logger.LogWarning("Discord gateway closed: {Status} {Description}.",
-                    ws.CloseStatus, ws.CloseStatusDescription);
+                var closeCode = (int?)ws.CloseStatus;
+                _logger.LogWarning("Discord gateway closed: {Code} {Description}.",
+                    closeCode, ws.CloseStatusDescription);
+
+                if (closeCode.HasValue && FatalCloseCodes.Contains(closeCode.Value))
+                    throw new DiscordFatalCloseException(closeCode.Value,
+                        ws.CloseStatusDescription ?? "unknown");
+
                 break;
             }
 
@@ -422,5 +441,12 @@ public sealed class DiscordBotService : BackgroundService
     private sealed record DiscordChatMessageDto
     {
         public string? Content { get; init; }
+    }
+
+    private sealed class DiscordFatalCloseException(int code, string reason)
+        : Exception($"Discord fatal close {code}: {reason}")
+    {
+        public int CloseCode => code;
+        public string Reason => reason;
     }
 }

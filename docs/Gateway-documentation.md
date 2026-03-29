@@ -1,4 +1,4 @@
-# SharpClaw Gateway API Reference
+﻿# SharpClaw Gateway API Reference
 
 > **Default URL:** `https://your-domain.example.com` (user-configured)
 >
@@ -1087,10 +1087,25 @@ Lists all bot integrations from the core database.
 Creates a new bot integration. Triggers bot reload on success.
 
 ```json
-{ "name": "string", "botType": "Telegram|Discord|WhatsApp",
+{ "name": "string", "botType": "Telegram|Discord|WhatsApp|Slack|Matrix|Signal|Email|Teams",
   "enabled": true, "botToken": "string",
-  "defaultChannelId?": "guid", "defaultThreadId?": "guid" }
+  "defaultChannelId?": "guid", "defaultThreadId?": "guid",
+  "platformConfig?": "json-string" }
 ```
+
+The `platformConfig` field is a JSON string containing platform-specific
+settings. Required fields vary by platform:
+
+| Platform | `platformConfig` fields | Description |
+|----------|------------------------|-------------|
+| Telegram | *(none)* | Token only |
+| Discord | *(none)* | Token only |
+| WhatsApp | `PhoneNumberId`, `VerifyToken` | Meta Cloud API phone number ID and webhook verify token |
+| Slack | `SigningSecret` | Slack app signing secret for webhook verification |
+| Matrix | `HomeserverUrl` | Matrix homeserver base URL |
+| Signal | `ApiUrl`, `PhoneNumber` | signal-cli REST API URL and E.164 phone number |
+| Email | `ImapHost`, `ImapPort`, `SmtpHost`, `SmtpPort`, `Username`, `PollIntervalSeconds` | IMAP/SMTP mail server settings |
+| Teams | `AppId` | Microsoft App ID (GUID) from Azure Bot registration |
 
 **201** → `BotIntegrationResponse`
 
@@ -1109,7 +1124,8 @@ Updates a bot integration. Triggers bot reload on success.
 
 ```json
 { "enabled?": true, "botToken?": "string",
-  "defaultChannelId?": "guid", "defaultThreadId?": "guid" }
+  "defaultChannelId?": "guid", "defaultThreadId?": "guid",
+  "platformConfig?": "json-string" }
 ```
 
 **200** → `BotIntegrationResponse`
@@ -1143,12 +1159,18 @@ Returns the enabled/configured state of bot integrations.
 {
   "telegram": { "enabled": true, "configured": false },
   "discord":  { "enabled": false, "configured": false },
-  "whatsapp": { "enabled": false, "configured": false }
+  "whatsapp": { "enabled": false, "configured": false },
+  "slack":    { "enabled": false, "configured": false },
+  "matrix":   { "enabled": false, "configured": false },
+  "signal":   { "enabled": false, "configured": false },
+  "email":    { "enabled": false, "configured": false },
+  "teams":    { "enabled": false, "configured": false }
 }
 ```
 
 `enabled` reflects the core database value. `configured` is `true`
-when a non-empty `BotToken` is present.
+when a non-empty `BotToken` is present (or for Signal, when `ApiUrl`
+and `PhoneNumber` are set in platform config).
 
 ---
 
@@ -1161,9 +1183,14 @@ decrypts them).
 
 ```json
 {
-  "telegram": { "enabled": true, "botToken": "" },
-  "discord":  { "enabled": false, "botToken": "" },
-  "whatsapp": { "enabled": false, "botToken": "" }
+  "telegram": { "enabled": true, "botToken": "", "platformConfig": null },
+  "discord":  { "enabled": false, "botToken": "", "platformConfig": null },
+  "whatsapp": { "enabled": false, "botToken": "", "platformConfig": "{...}" },
+  "slack":    { "enabled": false, "botToken": "", "platformConfig": "{...}" },
+  "matrix":   { "enabled": false, "botToken": "", "platformConfig": "{...}" },
+  "signal":   { "enabled": false, "botToken": "", "platformConfig": "{...}" },
+  "email":    { "enabled": false, "botToken": "", "platformConfig": "{...}" },
+  "teams":    { "enabled": false, "botToken": "", "platformConfig": "{...}" }
 }
 ```
 
@@ -1216,19 +1243,24 @@ Configuration: `Gateway:Bots:Telegram:Enabled` (default `true`) +
 Discord Gateway WebSocket (v10). On startup it fetches its configuration
 from the core API (`GET /bots/config/discord`), validates the token via
 `/users/@me`, sends `Identify` with intents
-`GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES | MESSAGE_CONTENT`, and
-handles heartbeating.
+`GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES`, and handles heartbeating.
+The `MESSAGE_CONTENT` privileged intent is not required — Discord
+always delivers full message content in DMs without it.
 
-`MESSAGE_CREATE` events from non-bot users are forwarded to the core
-API via `POST /channels/{channelId}/chat/threads/{threadId}` using the
-bot’s `defaultChannelId` and `defaultThreadId`. The core processes the
-message (including any agent tool calls) and returns a response, which
-the bot sends back to the Discord channel via the REST API
+Only direct messages are processed — `MESSAGE_CREATE` events in guild
+channels and from bot users are ignored. DM messages are forwarded to
+the core API via `POST /channels/{channelId}/chat/threads/{threadId}`
+using the bot’s `defaultChannelId` and `defaultThreadId`. The core
+processes the message (including any agent tool calls) and returns a
+response, which the bot sends back via the Discord REST API
 (`POST /channels/{channelId}/messages`).
+
+The service recognises fatal Gateway close codes (4003, 4004,
+4010–4014) and stops without reconnecting when one is received.
 
 The service automatically reloads its configuration when
 `BotReloadSignal` fires (e.g. after bot settings are changed via the
-gateway or the Uno settings page). Discord has a 2 000-character message
+gateway or the Uno settings page). Discord has a 2 000-character message
 limit; responses exceeding this are truncated.
 
 Configuration: `Gateway:Bots:Discord:Enabled` (default `false`) +
