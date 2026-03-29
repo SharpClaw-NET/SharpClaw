@@ -36,6 +36,7 @@ AgentActionService actions,
 LiveTranscriptionOrchestrator orchestrator,
 EditorBridgeService editorBridge,
 SessionService session,
+BotMessageSenderService botMessageSender,
 IConfiguration configuration)
 {
     /// <summary>
@@ -755,6 +756,10 @@ IConfiguration configuration)
             AgentActionType.EditorRunBuild or
             AgentActionType.EditorRunTerminal
                 => await ExecuteEditorActionAsync(job, ct),
+
+            // Bot messaging
+            AgentActionType.SendBotMessage
+                => await ExecuteSendBotMessageAsync(job, ct),
 
             _ => $"Action '{job.ActionType}' executed successfully " +
                  $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
@@ -2051,6 +2056,52 @@ IConfiguration configuration)
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // BOT MESSAGING
+    // ═══════════════════════════════════════════════════════════════
+
+    private sealed class SendBotMessagePayload
+    {
+        public string? ResourceId { get; set; }
+        public string? RecipientId { get; set; }
+        public string? Message { get; set; }
+        public string? Subject { get; set; }
+    }
+
+    private async Task<string?> ExecuteSendBotMessageAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(job.ScriptJson))
+            throw new InvalidOperationException(
+                "SendBotMessage requires a JSON payload in ScriptJson.");
+
+        var payload = JsonSerializer.Deserialize<SendBotMessagePayload>(
+            job.ScriptJson, _payloadJsonOptions)
+            ?? throw new InvalidOperationException(
+                "Failed to deserialise SendBotMessage payload.");
+
+        if (string.IsNullOrWhiteSpace(payload.RecipientId))
+            throw new InvalidOperationException(
+                "SendBotMessage payload requires a 'recipientId' field.");
+
+        if (string.IsNullOrWhiteSpace(payload.Message))
+            throw new InvalidOperationException(
+                "SendBotMessage payload requires a 'message' field.");
+
+        if (!job.ResourceId.HasValue)
+            throw new InvalidOperationException(
+                "SendBotMessage requires a ResourceId (bot integration ID).");
+
+        AddLog(job, $"Sending bot message via integration {job.ResourceId}");
+        await db.SaveChangesAsync(ct);
+
+        await botMessageSender.SendMessageAsync(
+            job.ResourceId.Value, payload.RecipientId, payload.Message,
+            payload.Subject, ct);
+
+        return $"Message sent successfully via bot integration {job.ResourceId} to recipient '{payload.RecipientId}'.";
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Permission dispatch
     // ═══════════════════════════════════════════════════════════════
 
@@ -2113,6 +2164,8 @@ IConfiguration configuration)
             AgentActionType.EditorRunBuild or
             AgentActionType.EditorRunTerminal when resourceId.HasValue
                 => actions.AccessEditorSessionAsync(agentId, resourceId.Value, caller, ct: ct),
+            AgentActionType.SendBotMessage when resourceId.HasValue
+                => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
             _ when IsPerResourceAction(actionType) && !resourceId.HasValue
                 => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
             _ => Task.FromResult(AgentActionResult.Denied($"Unknown action type: {actionType}."))
@@ -2143,7 +2196,8 @@ IConfiguration configuration)
             or AgentActionType.EditorDeleteFile
             or AgentActionType.EditorShowDiff
             or AgentActionType.EditorRunBuild
-            or AgentActionType.EditorRunTerminal;
+            or AgentActionType.EditorRunTerminal
+            or AgentActionType.SendBotMessage;
 
     // ═══════════════════════════════════════════════════════════════
     // Default resource resolution
@@ -2213,6 +2267,7 @@ IConfiguration configuration)
             .Include(p => p.DefaultAgentPermission)
             .Include(p => p.DefaultTaskPermission)
             .Include(p => p.DefaultSkillPermission)
+            .Include(p => p.DefaultBotIntegrationAccess)
             .ToListAsync(ct);
 
         foreach (var psId in permissionSetIds)
@@ -2278,6 +2333,7 @@ IConfiguration configuration)
         AgentActionType.EditorShowDiff or
         AgentActionType.EditorRunBuild or
         AgentActionType.EditorRunTerminal => drs.EditorSessionResourceId,
+        AgentActionType.SendBotMessage => drs.BotIntegrationResourceId,
         _ => null,
     };
 
@@ -2327,6 +2383,8 @@ IConfiguration configuration)
         AgentActionType.EditorRunBuild or
         AgentActionType.EditorRunTerminal
             => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
+        AgentActionType.SendBotMessage
+            => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
         _ => null,
     };
 
@@ -2499,6 +2557,10 @@ IConfiguration configuration)
         AgentActionType.EditorRunTerminal when resourceId.HasValue
             => ps.EditorSessionAccesses.Any(a =>
                 a.EditorSessionId == resourceId || a.EditorSessionId == WellKnownIds.AllResources),
+
+        AgentActionType.SendBotMessage when resourceId.HasValue
+            => ps.BotIntegrationAccesses.Any(a =>
+                a.BotIntegrationId == resourceId || a.BotIntegrationId == WellKnownIds.AllResources),
 
         _ => false,
     };

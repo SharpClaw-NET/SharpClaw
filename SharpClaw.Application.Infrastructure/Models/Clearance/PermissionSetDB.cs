@@ -82,6 +82,7 @@ public class PermissionSetDB : BaseEntity
     public ICollection<SkillManageAccessDB> SkillPermissions { get; set; } = [];
     public ICollection<AgentHeaderAccessDB> AgentHeaderAccesses { get; set; } = [];
     public ICollection<ChannelHeaderAccessDB> ChannelHeaderAccesses { get; set; } = [];
+    public ICollection<BotIntegrationAccessDB> BotIntegrationAccesses { get; set; } = [];
 
     // ── Default resource accesses ─────────────────────────────────
     // Optional defaults used when starting a job and no specific
@@ -125,6 +126,9 @@ public class PermissionSetDB : BaseEntity
 
     public Guid? DefaultSkillPermissionId { get; set; }
     public SkillManageAccessDB? DefaultSkillPermission { get; set; }
+
+    public Guid? DefaultBotIntegrationAccessId { get; set; }
+    public BotIntegrationAccessDB? DefaultBotIntegrationAccess { get; set; }
 
     // ── Clearance whitelists ──────────────────────────────────────
 

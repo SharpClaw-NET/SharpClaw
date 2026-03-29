@@ -73,6 +73,7 @@ public class SharpClawDbContext(
 
     // ── Bot integrations ──────────────────────────────────────────
     public DbSet<BotIntegrationDB> BotIntegrations => Set<BotIntegrationDB>();
+    public DbSet<BotIntegrationAccessDB> BotIntegrationAccesses => Set<BotIntegrationAccessDB>();
 
     // ── Task scripts ──────────────────────────────────────────────
     public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
@@ -335,6 +336,11 @@ public class SharpClawDbContext(
                 .HasForeignKey(c => c.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasMany(p => p.BotIntegrationAccesses)
+                .WithOne(b => b.PermissionSet)
+                .HasForeignKey(b => b.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             e.HasMany(p => p.ClearanceUserWhitelist)
                 .WithOne(w => w.PermissionSet)
                 .HasForeignKey(w => w.PermissionSetId)
@@ -409,6 +415,11 @@ public class SharpClawDbContext(
             e.HasOne(p => p.DefaultSkillPermission)
                 .WithMany()
                 .HasForeignKey(p => p.DefaultSkillPermissionId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(p => p.DefaultBotIntegrationAccess)
+                .WithMany()
+                .HasForeignKey(p => p.DefaultBotIntegrationAccessId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -727,6 +738,16 @@ public class SharpClawDbContext(
         {
             e.HasIndex(b => b.BotType).IsUnique();
             e.Property(b => b.BotType).HasConversion<string>();
+            e.HasMany(b => b.Accesses)
+                .WithOne(a => a.BotIntegration)
+                .HasForeignKey(a => a.BotIntegrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BotIntegrationAccessDB>(e =>
+        {
+            e.HasIndex(a => new { a.PermissionSetId, a.BotIntegrationId }).IsUnique();
+            e.Property(a => a.Clearance).HasConversion<string>();
         });
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);

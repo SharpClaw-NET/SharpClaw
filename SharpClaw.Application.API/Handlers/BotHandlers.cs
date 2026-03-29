@@ -76,7 +76,7 @@ public static class BotHandlers
         if (!Enum.TryParse<BotType>(type, ignoreCase: true, out var botType))
             return Results.BadRequest(new { error = $"Unknown bot type: {type}" });
 
-        var (enabled, token, defaultChannelId, defaultThreadId) = await svc.GetBotConfigAsync(botType);
-        return Results.Ok(new { enabled, botToken = token ?? "", defaultChannelId, defaultThreadId });
+        var (enabled, token, defaultChannelId, defaultThreadId, platformConfig) = await svc.GetBotConfigAsync(botType);
+        return Results.Ok(new { enabled, botToken = token ?? "", defaultChannelId, defaultThreadId, platformConfig });
     }
 }

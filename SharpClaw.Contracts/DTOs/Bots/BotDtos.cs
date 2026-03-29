@@ -6,14 +6,16 @@ public sealed record CreateBotIntegrationRequest(
     string Name,
     BotType BotType,
     string? BotToken = null,
-    bool Enabled = true);
+    bool Enabled = true,
+    string? PlatformConfig = null);
 
 public sealed record UpdateBotIntegrationRequest(
     string? Name = null,
     bool? Enabled = null,
     string? BotToken = null,
     Guid? DefaultChannelId = null,
-    Guid? DefaultThreadId = null);
+    Guid? DefaultThreadId = null,
+    string? PlatformConfig = null);
 
 public sealed record BotIntegrationResponse(
     Guid Id,
@@ -23,5 +25,6 @@ public sealed record BotIntegrationResponse(
     bool HasBotToken,
     Guid? DefaultChannelId,
     Guid? DefaultThreadId,
+    string? PlatformConfig,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt);

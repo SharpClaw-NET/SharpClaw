@@ -20,6 +20,7 @@ public sealed class BotIntegrationService(
                 b.EncryptedBotToken != null,
                 b.DefaultChannelId,
                 b.DefaultThreadId,
+                b.PlatformConfig,
                 b.CreatedAt, b.UpdatedAt))
             .ToListAsync(ct);
     }
@@ -48,6 +49,9 @@ public sealed class BotIntegrationService(
 
         if (!string.IsNullOrWhiteSpace(request.BotToken))
             bot.EncryptedBotToken = ApiKeyEncryptor.Encrypt(request.BotToken, encryptionOptions.Key);
+
+        if (!string.IsNullOrWhiteSpace(request.PlatformConfig))
+            bot.PlatformConfig = request.PlatformConfig;
 
         db.BotIntegrations.Add(bot);
         await db.SaveChangesAsync(ct);
@@ -89,6 +93,12 @@ public sealed class BotIntegrationService(
                 ? null
                 : request.DefaultThreadId.Value;
         }
+        if (request.PlatformConfig is not null)
+        {
+            bot.PlatformConfig = string.IsNullOrWhiteSpace(request.PlatformConfig)
+                ? null
+                : request.PlatformConfig;
+        }
 
         await db.SaveChangesAsync(ct);
         return ToResponse(bot);
@@ -126,22 +136,22 @@ public sealed class BotIntegrationService(
     /// Returns the decrypted bot token for a given type.
     /// Used by the gateway to start bot services.
     /// </summary>
-    public async Task<(bool enabled, string? token, Guid? defaultChannelId, Guid? defaultThreadId)> GetBotConfigAsync(
+    public async Task<(bool enabled, string? token, Guid? defaultChannelId, Guid? defaultThreadId, string? platformConfig)> GetBotConfigAsync(
         BotType type, CancellationToken ct = default)
     {
         var b = await db.BotIntegrations.FirstOrDefaultAsync(x => x.BotType == type, ct);
-        if (b is null) return (false, null, null, null);
+        if (b is null) return (false, null, null, null, null);
 
         var token = b.EncryptedBotToken is not null
             ? ApiKeyEncryptor.Decrypt(b.EncryptedBotToken, encryptionOptions.Key)
             : null;
 
-        return (b.Enabled, token, b.DefaultChannelId, b.DefaultThreadId);
+        return (b.Enabled, token, b.DefaultChannelId, b.DefaultThreadId, b.PlatformConfig);
     }
 
     private static BotIntegrationResponse ToResponse(BotIntegrationDB b) =>
         new(b.Id, b.Name, b.BotType, b.Enabled, b.EncryptedBotToken is not null,
-            b.DefaultChannelId, b.DefaultThreadId, b.CreatedAt, b.UpdatedAt);
+            b.DefaultChannelId, b.DefaultThreadId, b.PlatformConfig, b.CreatedAt, b.UpdatedAt);
 
     /// <summary>
     /// Finds the latest thread in a channel, or creates a "Default" thread if none exist.

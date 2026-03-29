@@ -122,6 +122,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
                     .Include(p => p.SkillPermissions)
                     .Include(p => p.AgentHeaderAccesses)
                     .Include(p => p.ChannelHeaderAccesses)
+                    .Include(p => p.BotIntegrationAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == psId, ct);
             }
@@ -149,6 +150,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
                 .Include(p => p.SkillPermissions)
                 .Include(p => p.AgentHeaderAccesses)
                 .Include(p => p.ChannelHeaderAccesses)
+                .Include(p => p.BotIntegrationAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
         }
@@ -345,6 +347,10 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             ps.ChannelHeaderAccesses.Select(a => a.ChannelId),
             () => db.Channels.Select(c => c.Id).ToListAsync(ct));
 
+        await AppendResourceGrantAsync(grants, "BotIntegration",
+            ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
+            () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct));
+
         return grants;
     }
 
@@ -493,6 +499,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             "externalinfostores" => Cast(await db.ExternalInformationStores.ToListAsync(ct)),
             "scheduledtasks" or "scheduledjobs" => Cast(await db.ScheduledTasks.ToListAsync(ct)),
             "tasks" or "taskdefinitions" => Cast(await db.TaskDefinitions.ToListAsync(ct)),
+            "botintegrations" => Cast(await db.BotIntegrations.ToListAsync(ct)),
             _ => null
         };
 

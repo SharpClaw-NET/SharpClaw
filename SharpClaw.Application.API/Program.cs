@@ -144,6 +144,7 @@ try
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
     builder.Services.AddScoped<BotIntegrationService>();
+    builder.Services.AddScoped<BotMessageSenderService>();
 
     // Local inference (in-process via LLamaSharp)
     // Configure native library: prefer CUDA > Vulkan > CPU; suppress verbose logs.

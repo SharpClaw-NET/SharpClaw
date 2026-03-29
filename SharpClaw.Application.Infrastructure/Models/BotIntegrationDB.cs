@@ -1,3 +1,4 @@
+using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
@@ -37,4 +38,17 @@ public class BotIntegrationDB : BaseEntity
     /// Auto-assigned when <see cref="DefaultChannelId"/> is set.
     /// </summary>
     public Guid? DefaultThreadId { get; set; }
+
+    /// <summary>
+    /// JSON blob with platform-specific configuration needed for sending
+    /// outbound messages (e.g. WhatsApp PhoneNumberId, Matrix HomeserverUrl,
+    /// Signal ApiUrl/PhoneNumber, Email SMTP settings, Teams AppId).
+    /// Platforms that only need the bot token (Telegram, Discord, Slack) can
+    /// leave this <see langword="null"/>.
+    /// </summary>
+    [HeaderSensitive]
+    public string? PlatformConfig { get; set; }
+
+    /// <summary>Permission grants linking roles to this bot integration.</summary>
+    public ICollection<BotIntegrationAccessDB> Accesses { get; set; } = [];
 }

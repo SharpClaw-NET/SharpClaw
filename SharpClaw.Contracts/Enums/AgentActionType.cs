@@ -51,5 +51,8 @@ public enum AgentActionType
 
     // ── Header editing (per-resource: target agent / channel) ──────
     EditAgentHeader = 32,
-    EditChannelHeader = 33
+    EditChannelHeader = 33,
+
+    // ── Bot messaging (per-resource: bot integration) ──────────────
+    SendBotMessage = 34
 }
