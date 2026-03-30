@@ -1022,6 +1022,118 @@ public sealed partial class SettingsPage : Page
             RefreshLogConsole();
             refreshBtn.IsEnabled = true;
         };
+
+        // ── Process Lifecycle settings ───────────────────────────
+        BuildProcessLifecycleSection();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // PROCESS LIFECYCLE
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Renders the "Process Lifecycle" card inside the Gateway tab with
+    /// toggles for persistent mode and Windows auto-start.
+    /// </summary>
+    private void BuildProcessLifecycleSection()
+    {
+        var backend = App.Services?.GetService<BackendProcessManager>();
+        var gw = Gateway;
+
+        // ── Section header ───────────────────────────────────────
+        ContentPanel.Children.Add(new TextBlock
+        {
+            Text = "Process Lifecycle",
+            FontFamily = Mono, FontSize = 13,
+            Foreground = B(0xBBBBBB),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            Margin = new Thickness(0, 24, 0, 0),
+        });
+
+        Lbl("Control whether backend and gateway survive frontend exit and auto-launch at login.", 0x808080);
+
+        var card = new Border
+        {
+            BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Background = B(0x141414), CornerRadius = new CornerRadius(4),
+            Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(16, 12),
+        };
+        var panel = new StackPanel { Spacing = 12 };
+
+        // ── Persistent toggle ────────────────────────────────────
+        var persistentToggle = new ToggleSwitch
+        {
+            IsOn = backend?.Persistent ?? false,
+            OnContent = new TextBlock { Text = "Keep processes running on exit", FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00) },
+            OffContent = new TextBlock { Text = "Stop processes on exit", FontFamily = Mono, FontSize = 11, Foreground = B(0x666666) },
+        };
+        var persistentStatus = new TextBlock { FontFamily = Mono, FontSize = 10, Foreground = B(0x555555), TextWrapping = TextWrapping.Wrap };
+        persistentStatus.Text = persistentToggle.IsOn
+            ? "Backend and gateway will remain running as background processes when you close the app."
+            : "Backend and gateway will be stopped when you close the app.";
+
+        persistentToggle.Toggled += (_, _) =>
+        {
+            var on = persistentToggle.IsOn;
+            if (backend is not null) backend.Persistent = on;
+            if (gw is not null) gw.Persistent = on;
+
+            persistentStatus.Text = on
+                ? "Backend and gateway will remain running as background processes when you close the app."
+                : "Backend and gateway will be stopped when you close the app.";
+            persistentStatus.Foreground = on ? B(0x00FF00) : B(0x555555);
+
+            Status(on ? "✓ Persistent mode enabled." : "Persistent mode disabled.", on ? 0x00FF00 : 0x808080);
+        };
+        panel.Children.Add(persistentToggle);
+        panel.Children.Add(persistentStatus);
+
+        // ── Windows auto-start toggle ────────────────────────────
+        if (OperatingSystem.IsWindows())
+        {
+            panel.Children.Add(new Border
+            {
+                BorderBrush = B(0x222222), BorderThickness = new Thickness(0, 1, 0, 0),
+                Margin = new Thickness(0, 4, 0, 4),
+            });
+
+            var autoStartEnabled = WindowsStartupManager.IsBackendAutoStartEnabled()
+                                || WindowsStartupManager.IsGatewayAutoStartEnabled();
+
+            var autoStartToggle = new ToggleSwitch
+            {
+                IsOn = autoStartEnabled,
+                OnContent = new TextBlock { Text = "Launch at Windows login", FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00) },
+                OffContent = new TextBlock { Text = "No auto-start", FontFamily = Mono, FontSize = 11, Foreground = B(0x666666) },
+            };
+            var autoStartStatus = new TextBlock { FontFamily = Mono, FontSize = 10, Foreground = B(0x555555), TextWrapping = TextWrapping.Wrap };
+            autoStartStatus.Text = autoStartEnabled
+                ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
+                : "Processes only run when the app is open (unless persistent mode is on and they're already running).";
+
+            autoStartToggle.Toggled += (_, _) =>
+            {
+                var on = autoStartToggle.IsOn;
+
+                if (backend is not null)
+                    WindowsStartupManager.SetBackendAutoStart(on && !backend.SkipLaunch, backend.ExecutablePath, backend.ApiUrl);
+
+                if (gw is not null)
+                    WindowsStartupManager.SetGatewayAutoStart(on && !gw.SkipLaunch, gw.ExecutablePath, gw.GatewayUrl);
+
+                autoStartStatus.Text = on
+                    ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
+                    : "Processes only run when the app is open (unless persistent mode is on and they're already running).";
+                autoStartStatus.Foreground = on ? B(0x00FF00) : B(0x555555);
+
+                Status(on ? "✓ Auto-start registered." : "Auto-start removed.", on ? 0x00FF00 : 0x808080);
+            };
+            panel.Children.Add(autoStartToggle);
+            panel.Children.Add(autoStartStatus);
+        }
+
+        card.Child = panel;
+        ContentPanel.Children.Add(card);
     }
 
     // ═══════════════════════════════════════════════════════════════

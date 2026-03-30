@@ -35,7 +35,12 @@ public static class LocalEnvironment
           // -- Public Gateway -----------------------------------------------
           // Set Enabled to false to prevent the client from launching the
           // gateway proxy. Url controls the address/port the gateway binds to.
-          //"Gateway": { "Enabled": "false", "Url": "http://0.0.0.0:48924" }
+          //"Gateway": { "Enabled": "false", "Url": "http://0.0.0.0:48924" },
+
+          // -- Process Lifecycle --------------------------------------------
+          // Persistent: keep backend/gateway running when the frontend exits.
+          // AutoStart:  register them to launch at Windows login (startup folder).
+          //"Processes": { "Persistent": "true", "AutoStart": "true" }
         }
         """;
 
@@ -84,6 +89,32 @@ public static class LocalEnvironment
     {
         var config = BuildConfiguration(isDevelopment);
         return config["Gateway:Url"] ?? DefaultGatewayUrl;
+    }
+
+    /// <summary>
+    /// Reads <c>Processes:Persistent</c> from the environment files.
+    /// Defaults to <c>false</c> when not configured.
+    /// When <c>true</c>, backend and gateway processes remain alive
+    /// after the frontend shuts down.
+    /// </summary>
+    public static bool LoadProcessesPersistent(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        var value = config["Processes:Persistent"];
+        return value is not null && bool.TryParse(value, out var p) && p;
+    }
+
+    /// <summary>
+    /// Reads <c>Processes:AutoStart</c> from the environment files.
+    /// Defaults to <c>false</c> when not configured.
+    /// When <c>true</c> on Windows, backend/gateway startup scripts
+    /// are placed in <c>shell:startup</c> so they launch at login.
+    /// </summary>
+    public static bool LoadProcessesAutoStart(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        var value = config["Processes:AutoStart"];
+        return value is not null && bool.TryParse(value, out var a) && a;
     }
 
     public static IConfigurationBuilder AddLocalEnvironment(

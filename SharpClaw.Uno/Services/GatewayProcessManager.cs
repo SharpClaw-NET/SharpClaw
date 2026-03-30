@@ -32,6 +32,9 @@ public sealed class GatewayProcessManager : IDisposable
     /// <summary>Current gateway base URL (bind address for the server).</summary>
     public string GatewayUrl => _gatewayUrl;
 
+    /// <summary>Full path to the bundled gateway executable.</summary>
+    public string ExecutablePath => _executablePath;
+
     /// <summary>
     /// Client-connectable URL. Replaces the non-routable <c>0.0.0.0</c>
     /// bind address with <c>127.0.0.1</c> so HTTP calls from the Uno
@@ -45,6 +48,13 @@ public sealed class GatewayProcessManager : IDisposable
     /// Defaults to <c>true</c> (gateway is opt-in).
     /// </summary>
     public bool SkipLaunch { get; set; } = true;
+
+    /// <summary>
+    /// When <c>true</c>, the process is left running when the frontend
+    /// shuts down instead of being killed. The next frontend launch will
+    /// detect it via port/process probes and attach as external.
+    /// </summary>
+    public bool Persistent { get; set; }
 
     /// <summary>
     /// Pre-verified API key to forward to the gateway process via the
@@ -353,9 +363,34 @@ public sealed class GatewayProcessManager : IDisposable
         catch { /* best-effort */ }
     }
 
+    /// <summary>
+    /// Releases the process handle without killing the child process.
+    /// The gateway continues running as an orphaned background process
+    /// and will be detected via port/process probes on the next launch.
+    /// </summary>
+    public void Detach()
+    {
+        if (_process is null or { HasExited: true })
+            return;
+
+        try
+        {
+            _process.CancelOutputRead();
+            _process.CancelErrorRead();
+        }
+        catch { /* best-effort */ }
+
+        _process.Dispose();
+        _process = null;
+    }
+
     public void Dispose()
     {
-        Stop();
+        if (Persistent && _process is { HasExited: false })
+            Detach();
+        else
+            Stop();
+
         _process?.Dispose();
     }
 }

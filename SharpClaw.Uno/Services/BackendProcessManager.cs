@@ -34,6 +34,9 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>Current API base URL.</summary>
     public string ApiUrl => _apiUrl;
 
+    /// <summary>Full path to the bundled backend executable.</summary>
+    public string ExecutablePath => _executablePath;
+
     /// <summary>
     /// When <c>true</c>, <see cref="EnsureStartedAsync"/> will never launch
     /// the bundled backend process — it only probes for an external API.
@@ -41,6 +44,13 @@ public sealed class BackendProcessManager : IDisposable
     /// connect to a remote instance.
     /// </summary>
     public bool SkipLaunch { get; set; }
+
+    /// <summary>
+    /// When <c>true</c>, the process is left running when the frontend
+    /// shuts down instead of being killed. The next frontend launch will
+    /// detect it via port/process probes and attach as external.
+    /// </summary>
+    public bool Persistent { get; set; }
 
     /// <summary>
     /// All stdout + stderr lines captured from the bundled process
@@ -297,9 +307,35 @@ public sealed class BackendProcessManager : IDisposable
         catch { /* best-effort */ }
     }
 
+    /// <summary>
+    /// Releases the process handle without killing the child process.
+    /// The backend continues running as an orphaned background process
+    /// and will be detected via port/process probes on the next launch.
+    /// </summary>
+    public void Detach()
+    {
+        if (_process is null or { HasExited: true })
+            return;
+
+        try
+        {
+            // Cancel async stdout/stderr reads before releasing the handle.
+            _process.CancelOutputRead();
+            _process.CancelErrorRead();
+        }
+        catch { /* best-effort */ }
+
+        _process.Dispose();
+        _process = null;
+    }
+
     public void Dispose()
     {
-        Stop();
+        if (Persistent && _process is { HasExited: false })
+            Detach();
+        else
+            Stop();
+
         _process?.Dispose();
     }
 }
