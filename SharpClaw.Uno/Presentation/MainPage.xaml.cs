@@ -29,6 +29,7 @@ public sealed partial class MainPage : Page
     private bool _botsMode;
     private bool _isSending;
     private bool _isThreadBusy;
+    private bool _historyStaleAfterSend;
     private CancellationTokenSource? _threadWatchCts;
     private bool _suppressThreadSelection;
     private bool _suppressJobSelection;

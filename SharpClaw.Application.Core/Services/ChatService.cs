@@ -562,20 +562,22 @@ public sealed class ChatService(
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
 
+            // NOTE: DefaultClearance is intentionally NOT included in the header.
+            // It is an internal fallback sentinel that agents misinterpret as
+            // "no clearance" or "disabled." Effective clearance is resolved
+            // per-action at runtime (see AgentActionService.ResolveClearance).
+            // The grants list already tells the agent what it can do.
             sb.Append(" | agent-role: ").Append(agentRole.Name);
             if (agentPs is not null)
             {
-                sb.Append(" clearance=").Append(agentPs.DefaultClearance);
                 var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
                 if (agentGrants.Count > 0)
                     sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
-                else
-                    sb.Append(" (zero resource-grants — tool-calls unauthorized)");
             }
         }
         else
         {
-            sb.Append(" | agent-role: (none) clearance=Unset (no permissions)");
+            sb.Append(" | agent-role: (none)");
         }
 
         sb.Append(" | policy: unlisted-resource/GUID=denied; disclose gaps to user");
@@ -689,6 +691,7 @@ public sealed class ChatService(
     /// type are loaded from the database so the agent sees the resolved
     /// list instead of the wildcard.
     /// </summary>
+
     private static async Task AppendResourceGrantAsync(
         List<string> grants,
         string grantName,
@@ -899,6 +902,9 @@ public sealed class ChatService(
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    var taskNotation = FormatTaskToolNotation(tc.Name);
+                    fullContent.Append(taskNotation);
+                    yield return ChatStreamEvent.TextDelta(taskNotation);
                     continue;
                 }
 
@@ -907,6 +913,9 @@ public sealed class ChatService(
                 if (inlineHandled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
+                    var inlineNotation = FormatInlineToolNotation(tc.Name);
+                    fullContent.Append(inlineNotation);
+                    yield return ChatStreamEvent.TextDelta(inlineNotation);
                     continue;
                 }
 
@@ -960,6 +969,10 @@ public sealed class ChatService(
                 }
 
                 jobResults.Add(jobResponse);
+
+                // Inject standardized tool notation into persisted content
+                var notation = FormatToolNotation(jobResponse);
+                fullContent.Append(notation);
 
                 messages.Add(BuildToolResultMessage(tc.Id, jobResponse, supportsVision));
             }
@@ -1679,6 +1692,7 @@ public sealed class ChatService(
 
         var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
         var jobResults = new List<AgentJobResponse>();
+        var toolNotation = new StringBuilder();
         var rounds = 0;
         var effectiveTools = GetEffectiveTools(taskContext, toolAwareness);
         var totalPromptTokens = 0;
@@ -1696,7 +1710,13 @@ public sealed class ChatService(
             }
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
-                return new ToolLoopResult(result.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
+            {
+                // Compose final content: tool notation followed by model text
+                var finalContent = toolNotation.Length > 0
+                    ? toolNotation.ToString() + "\n" + (result.Content ?? "")
+                    : result.Content ?? "";
+                return new ToolLoopResult(finalContent, jobResults, totalPromptTokens, totalCompletionTokens);
+            }
 
             // Record assistant turn with tool calls
             messages.Add(ToolAwareMessage.AssistantWithToolCalls(result.ToolCalls, result.Content));
@@ -1710,6 +1730,7 @@ public sealed class ChatService(
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    toolNotation.Append(FormatTaskToolNotation(tc.Name));
                     continue;
                 }
 
@@ -1718,6 +1739,7 @@ public sealed class ChatService(
                 if (inlineHandled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
+                    toolNotation.Append(FormatInlineToolNotation(tc.Name));
                     continue;
                 }
 
@@ -1755,6 +1777,9 @@ public sealed class ChatService(
 
                 jobResults.Add(jobResponse);
 
+                // Record standardized tool notation for persistence
+                toolNotation.Append(FormatToolNotation(jobResponse));
+
                 messages.Add(BuildToolResultMessage(tc.Id, jobResponse, supportsVision));
 
                 if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
@@ -1770,7 +1795,10 @@ public sealed class ChatService(
                     totalPromptTokens += finalUsage.PromptTokens;
                     totalCompletionTokens += finalUsage.CompletionTokens;
                 }
-                return new ToolLoopResult(finalResult.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
+                var finalContent = toolNotation.Length > 0
+                    ? toolNotation.ToString() + "\n" + (finalResult.Content ?? "")
+                    : finalResult.Content ?? "";
+                return new ToolLoopResult(finalContent, jobResults, totalPromptTokens, totalCompletionTokens);
             }
         }
     }
@@ -2689,6 +2717,42 @@ public sealed class ChatService(
         List<AgentJobResponse> JobResults,
         int TotalPromptTokens = 0,
         int TotalCompletionTokens = 0);
+
+    // ═══════════════════════════════════════════════════════════════
+    // Tool call notation (persisted in assistant message content)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Formats a standardized tool call notation line for a job that
+    /// was submitted and executed (no approval flow).
+    /// Format: <c>\n⚙ [ActionType] → Status</c>
+    /// </summary>
+    private static string FormatToolNotation(AgentJobResponse job)
+        => $"\n⚙ [{job.ActionType}] → {job.Status}";
+
+    /// <summary>
+    /// Formats a tool call notation line for a job that required
+    /// approval, showing the final outcome.
+    /// Format: <c>\n⏳ [ActionType] awaiting approval → Status</c>
+    /// </summary>
+    private static string FormatApprovalNotation(AgentJobResponse job)
+        => $"\n⏳ [{job.ActionType}] awaiting approval → {job.Status}";
+
+    /// <summary>
+    /// Formats a tool call notation line for an inline tool (wait,
+    /// list_accessible_threads, etc.) that does not go through the
+    /// job pipeline.
+    /// Format: <c>\n⚙ [tool_name] → done</c>
+    /// </summary>
+    private static string FormatInlineToolNotation(string toolName)
+        => $"\n⚙ [{toolName}] → done";
+
+    /// <summary>
+    /// Formats a tool call notation line for task-specific tools.
+    /// Format: <c>\n⚙ [tool_name] → done</c>
+    /// </summary>
+    private static string FormatTaskToolNotation(string toolName)
+        => $"\n⚙ [{toolName}] → done";
 
     /// <summary>
     /// Maps the typed provider parameter fields from <see cref="AgentDB"/> into

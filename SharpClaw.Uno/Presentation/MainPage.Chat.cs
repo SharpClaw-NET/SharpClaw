@@ -79,6 +79,19 @@ public sealed partial class MainPage
                                 SendButton.IsEnabled = true;
                                 MessageInput.IsEnabled = true;
                             }
+
+                            // Skip history reload while actively streaming — the
+                            // streaming bubble is already showing live content, and
+                            // LoadHistoryAsync would wipe it out (clearing all
+                            // children including the live bubble and tool-call
+                            // markers).  Instead, flag the history as stale so a
+                            // reload happens once streaming completes.
+                            if (_isSending)
+                            {
+                                _historyStaleAfterSend = true;
+                                return;
+                            }
+
                             if (_selectedChannelId is { } chId)
                             {
                                 await LoadHistoryAsync(chId);
@@ -577,12 +590,8 @@ public sealed partial class MainPage
                         }
                         else if (evtSpan.SequenceEqual("ToolCallStart"))
                         {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var action = "tool";
-                            if (doc.RootElement.TryGetProperty("job", out var jobProp)
-                                && jobProp.TryGetProperty("actionType", out var atProp))
-                                action = atProp.GetString() ?? "tool";
-                            accumulated.Append($"\n⚙ [{action}] running…");
+                            // Server now sends tool notation via TextDelta events;
+                            // no client-side marker generation needed.
                             lastWasToolEvent = true;
                             lastFlushedLength = accumulated.Length;
                             var snap = accumulated.ToString();
@@ -594,12 +603,8 @@ public sealed partial class MainPage
                         }
                         else if (evtSpan.SequenceEqual("ToolCallResult"))
                         {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var status = "done";
-                            if (doc.RootElement.TryGetProperty("result", out var resProp)
-                                && resProp.TryGetProperty("status", out var stProp))
-                                status = stProp.GetString() ?? "done";
-                            accumulated.Append($" → {status}");
+                            // Server now sends tool notation via TextDelta events;
+                            // no client-side marker generation needed.
                             lastWasToolEvent = true;
                             lastFlushedLength = accumulated.Length;
                             var snap = accumulated.ToString();
@@ -611,12 +616,8 @@ public sealed partial class MainPage
                         }
                         else if (evtSpan.SequenceEqual("ApprovalRequired"))
                         {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var action = "action";
-                            if (doc.RootElement.TryGetProperty("pendingJob", out var pjProp)
-                                && pjProp.TryGetProperty("actionType", out var atProp2))
-                                action = atProp2.GetString() ?? "action";
-                            accumulated.Append($"\n⏳ [{action}] awaiting approval…");
+                            // Server now sends approval notation via TextDelta events;
+                            // no client-side marker generation needed.
                             lastWasToolEvent = true;
                             lastFlushedLength = accumulated.Length;
                             var snap = accumulated.ToString();
@@ -628,12 +629,8 @@ public sealed partial class MainPage
                         }
                         else if (evtSpan.SequenceEqual("ApprovalResult"))
                         {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var status = "resolved";
-                            if (doc.RootElement.TryGetProperty("approvalOutcome", out var aoProp)
-                                && aoProp.TryGetProperty("status", out var stProp2))
-                                status = stProp2.GetString() ?? "resolved";
-                            accumulated.Append($" → {status}");
+                            // Server now sends approval notation via TextDelta events;
+                            // no client-side marker generation needed.
                             lastWasToolEvent = true;
                             lastFlushedLength = accumulated.Length;
                             var snap = accumulated.ToString();
@@ -701,6 +698,17 @@ public sealed partial class MainPage
             ScrollToBottom();
             UpdateCursor();
             DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
+
+            // If the thread watch fired NewMessages while we were streaming,
+            // history is stale — reload now to pick up persisted messages
+            // (our own + any from other clients).
+            if (_historyStaleAfterSend && _selectedChannelId is { } staleChId)
+            {
+                _historyStaleAfterSend = false;
+                await LoadHistoryAsync(staleChId);
+                await LoadCostAsync(staleChId);
+                ScrollToBottom();
+            }
         }
     }
 }

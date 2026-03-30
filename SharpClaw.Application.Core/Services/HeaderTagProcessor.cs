@@ -177,7 +177,8 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             "bio" => ctx.User?.Bio ?? "",
             "agent-name" => ctx.Agent.Name,
             "agent-role" => await FormatAgentRoleAsync(ctx, ct),
-            "clearance" => ctx.AgentPs?.DefaultClearance.ToString() ?? "Unset",
+            // clearance is intentionally omitted; see FormatAgentRoleAsync comment.
+            "clearance" => "(per-action; see grants)",
             "grants" => FormatGrants(ctx.UserPs),
             "agent-grants" => await FormatAgentGrantsAsync(ctx, ct),
             "editor" => FormatEditor(ctx.EditorContext),
@@ -203,20 +204,23 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             : ctx.User.Role.Name;
     }
 
+    // NOTE: DefaultClearance is intentionally NOT included in the header.
+    // It is an internal fallback sentinel that agents misinterpret as "no
+    // clearance" or "disabled." Effective clearance is resolved per-action
+    // at runtime (AgentActionService.ResolveClearance). The grants list
+    // already tells the agent what it can do. Do not re-add it.
     private async Task<string> FormatAgentRoleAsync(HeaderContext ctx, CancellationToken ct)
     {
         if (ctx.AgentRole is null)
-            return "(none) clearance=Unset";
+            return "(none)";
 
         var sb = new StringBuilder();
         sb.Append(ctx.AgentRole.Name);
-        sb.Append(" clearance=").Append(ctx.AgentPs?.DefaultClearance ?? PermissionClearance.Unset);
         if (ctx.AgentPs is not null)
         {
             var grants = await CollectGrantNamesWithResourcesAsync(ctx.AgentPs, ct);
-            sb.Append(grants.Count > 0
-                ? $" ({string.Join(", ", grants)})"
-                : " (no grants)");
+            if (grants.Count > 0)
+                sb.Append(" (").Append(string.Join(", ", grants)).Append(')');
         }
         return sb.ToString();
     }
