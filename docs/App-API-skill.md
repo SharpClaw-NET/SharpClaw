@@ -250,7 +250,7 @@ SubmitAgentJobRequest:
   dangerousShellType?, safeShellType?, scriptJson?, workingDirectory?,
   transcriptionModelId?, language?, transcriptionMode?, windowSeconds?, stepSeconds?
 
-TranscriptionMode values: SlidingWindow (default, two-pass), StrictStep, StrictWindow.
+TranscriptionMode values: SlidingWindow (default, two-pass), StrictWindow.
 
 AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6, Paused=7.
 
@@ -264,26 +264,25 @@ When transcriptionModelId is omitted for transcription actions, the default tran
 
 language is a BCP-47 hint (e.g. "en", "de"). Omit for auto-detect. Supplying it improves accuracy on short chunks. When set, the orchestrator enforces it: prompt is seeded with a target-language phrase, and up to 4 retries with escalating reinforcement if Whisper returns the wrong language. Never drops audio — accepts after retries.
 
-transcriptionMode: SlidingWindow (default), StrictStep, or StrictWindow.
+transcriptionMode: SlidingWindow (default) or StrictWindow.
   SlidingWindow: two-pass with multi-layer dedup. Audio flows: mic → ring buffer → silence gate → sliding window → STT API → dedup → emit.
     Every step interval, a window of audio is extracted and sent to the API. The response is diffed against
     the previous window's text to extract genuinely new content. New text is split into per-sentence segments
     with proportionally distributed timestamps. Segments are emitted provisionally within ~2 s (isProvisional=true),
     then finalized after the commit delay confirms them. A HashSet of all emitted texts prevents hallucination
     replay (where the API regurgitates the entire transcript as new speech).
-  StrictStep: sequential non-overlapping short chunks (default 2 s). Each chunk transcribed independently, segments emitted immediately. Lowest latency, minimal API cost. Prompt conditioning provides linguistic continuity.
-  StrictWindow: non-overlapping sequential windows (default 10 s). Each window transcribed exactly once — one API call per window. Full dedup pipeline runs as safety net. Minimal token cost; perceived latency equals the window length.
+  StrictWindow: non-overlapping sequential windows (default 10 s). Each window transcribed exactly once — one API call per window. Full dedup pipeline runs as safety net. Minimal token cost; perceived latency equals the window length. Use windowSeconds to control window size (clamped [5, 15]).
 
-windowSeconds: seconds of audio per inference tick. Clamped [5, 15] for SlidingWindow/StrictWindow, [2, 15] for StrictStep. Default 10 (SlidingWindow/StrictWindow) or 2 (StrictStep).
-stepSeconds: seconds between inference ticks (SlidingWindow mode only). Clamped [1, window]. Default 2. Ignored in StrictStep and StrictWindow modes where step equals window.
+windowSeconds: seconds of audio per inference tick. Clamped [5, 15]. Default 10.
+stepSeconds: seconds between inference ticks (SlidingWindow mode only). Clamped [1, window]. Default 2. Ignored in StrictWindow mode where step equals window.
 
-TranscriptionMode enum: SlidingWindow=0, StrictStep=1, StrictWindow=2.
+TranscriptionMode enum: SlidingWindow=0, StrictWindow=2.
 
 Two-pass segment lifecycle (SlidingWindow mode):
   1. Provisional: emitted quickly with isProvisional=true after passing the dedup pipeline (~2 s). Text may shift.
   2. Finalized: same id re-pushed with isProvisional=false, updated text/confidence after commit delay (2 s).
   3. Retracted: stale provisional deleted, tombstone pushed (empty text, isProvisional=false).
-  StrictWindow and StrictStep always emit isProvisional=false.
+  StrictWindow always emits isProvisional=false.
 
 Dedup pipeline (non-timestamped API responses):
   When the STT API returns the full window as a single text blob without timestamps:
@@ -471,13 +470,13 @@ Step 8 — Submit a transcription job with minimal params.
       "language": "en"
     }
 
-  Optional: use StrictStep mode for cheap, low-latency transcription:
+  Optional: use StrictWindow mode for cheap, sequential transcription:
 
     POST /channels/CHANNEL_ID/jobs
     {
       "actionType": "TranscribeFromAudioDevice",
       "language": "en",
-      "transcriptionMode": "StrictStep"
+      "transcriptionMode": "StrictWindow"
     }
 
   Optional: custom sliding window timing (12s window, 4s step):

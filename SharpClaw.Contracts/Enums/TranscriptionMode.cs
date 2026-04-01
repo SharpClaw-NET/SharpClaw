@@ -15,20 +15,13 @@ public enum TranscriptionMode
     SlidingWindow = 0,
 
     /// <summary>
-    /// Sequential non-overlapping short chunks (default 2 s).  Each chunk
-    /// is transcribed independently and emitted immediately.  Lowest
-    /// perceived latency but no cross-window audio context.  Prompt
-    /// conditioning still provides linguistic continuity across chunks.
-    /// </summary>
-    StrictStep = 1,
-
-    /// <summary>
     /// Non-overlapping sequential windows (default 10 s).  Each window of
     /// audio is transcribed exactly once — one API call per window.
     /// Cross-window continuity is maintained through prompt conditioning.
     /// The full deduplication and hallucination filtering pipeline still
     /// runs as a safety net.  Minimal token cost; perceived latency
-    /// equals the window length.
+    /// equals the window length.  Use <c>windowSeconds</c> to control
+    /// the window size (clamped to [5, 15]).
     /// </summary>
     StrictWindow = 2,
 }

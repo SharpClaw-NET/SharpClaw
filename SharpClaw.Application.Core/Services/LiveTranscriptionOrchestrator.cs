@@ -152,18 +152,16 @@ public sealed class LiveTranscriptionOrchestrator(
         var effectiveLanguage = language;
         var tickCount = 0;
 
-        var effectiveWindow = mode == TranscriptionMode.StrictStep
-            ? Clamp(windowSecondsOverride, 2, BufferCapacitySeconds, InferenceIntervalSeconds)
-            : Clamp(windowSecondsOverride, 5, BufferCapacitySeconds, WindowSeconds);
+        var effectiveWindow = Clamp(windowSecondsOverride, 5, BufferCapacitySeconds, WindowSeconds);
         var effectiveStep = mode == TranscriptionMode.SlidingWindow
             ? Clamp(stepSecondsOverride, 1, effectiveWindow, InferenceIntervalSeconds)
             : effectiveWindow;
         var isTwoPass = mode == TranscriptionMode.SlidingWindow;
 
         // Poll cadence is always short (2 s) so the loop reacts
-        // quickly to new audio.  For modes where step == window
-        // (StrictStep, StrictWindow), inference only fires once
-        // a full window of new samples has accumulated.
+        // quickly to new audio.  For StrictWindow (step == window),
+        // inference only fires once a full window of new samples
+        // has accumulated.
         var pollSeconds = InferenceIntervalSeconds;
         var samplesPerWindow = (long)effectiveWindow * SampleRate;
         var lastInferenceSample = ringBuffer.TotalWritten;
@@ -209,9 +207,18 @@ public sealed class LiveTranscriptionOrchestrator(
             const int maxNoDataTicks = 10;
 
             var pollInterval = TimeSpan.FromSeconds(pollSeconds);
+            // Fast-start for SlidingWindow only: fire the first
+            // inference after 1 s so users hear feedback sooner.
+            // The two-pass provisional→finalized lifecycle corrects
+            // any inaccuracies from short initial audio clips.
+            // Non-two-pass modes (StrictWindow) MUST wait
+            // for a full window — each segment is emitted as final and
+            // Whisper hallucinates on clips shorter than ~2 s,
+            // poisoning dedup state, prompt buffer, and time cursors.
             var nextPollDelay = isTwoPass
-                ? pollInterval
+                ? TimeSpan.FromSeconds(1)
                 : ComputeAccumulationDelay(ringBuffer, lastInferenceSample, samplesPerWindow);
+            var pipelineStart = Stopwatch.GetTimestamp();
 
             while (!ct.IsCancellationRequested)
             {
@@ -254,8 +261,13 @@ public sealed class LiveTranscriptionOrchestrator(
                 // ── Accumulation gate ─────────────────────────────
                 // For modes where step == window, wait until a full
                 // window of new audio has been captured before firing
-                // inference.  SlidingWindow already uses a short step
-                // so it fires every poll tick.
+                // inference.  SlidingWindow bypasses this gate (its
+                // short step fires every poll tick) and uses a two-
+                // pass lifecycle to correct early inaccuracies.
+                // StrictWindow MUST accumulate a full window —
+                // segments are emitted as final and short clips
+                // cause Whisper hallucinations that poison the dedup
+                // set, prompt buffer, and time cursors.
                 if (!isTwoPass
                     && currentWritten - lastInferenceSample < samplesPerWindow)
                 {
@@ -275,7 +287,13 @@ public sealed class LiveTranscriptionOrchestrator(
                     // seconds) is silent, re-transcribing the full
                     // window would only produce duplicate segments —
                     // skip the API call entirely.
-                    if (effectiveStep < effectiveWindow)
+                    //
+                    // Skip this gate on tick 1: there is no "already
+                    // processed" audio yet, so ALL captured audio is
+                    // new.  Applying the step-region check here would
+                    // act as a pure silence gate and delay the first
+                    // inference unnecessarily in quiet rooms.
+                    if (tickCount > 1 && effectiveStep < effectiveWindow)
                     {
                         var stepSamples = ringBuffer.GetLastSeconds(effectiveStep);
                         if (stepSamples.Length > 0 && ComputeRms(stepSamples) < 0.005)
@@ -519,6 +537,13 @@ public sealed class LiveTranscriptionOrchestrator(
                                     prov.Id, seg.Text, absEnd));
                         }
 
+                        if (lastSeenEnd == 0.0)
+                        {
+                            var firstSegElapsed = Stopwatch.GetElapsedTime(pipelineStart);
+                            logger.LogInformation(
+                                "Job {JobId}: first segment emitted {Elapsed}ms after pipeline start",
+                                jobId, (long)firstSegElapsed.TotalMilliseconds);
+                        }
                         logger.LogTrace(
                             "Job {JobId}: [tick {Tick}] cursor: lastSeenEnd {From} -> {To}",
                             jobId, tickCount, lastSeenEnd, absEnd);

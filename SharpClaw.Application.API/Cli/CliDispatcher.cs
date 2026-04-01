@@ -2014,8 +2014,6 @@ public static class CliDispatcher
                     var modeArg = args[++i];
                     if (string.Equals(modeArg, "sliding", StringComparison.OrdinalIgnoreCase))
                         transcriptionMode = TranscriptionMode.SlidingWindow;
-                    else if (string.Equals(modeArg, "step", StringComparison.OrdinalIgnoreCase))
-                        transcriptionMode = TranscriptionMode.StrictStep;
                     else if (string.Equals(modeArg, "window", StringComparison.OrdinalIgnoreCase))
                         transcriptionMode = TranscriptionMode.StrictWindow;
                     else if (Enum.TryParse<TranscriptionMode>(modeArg, true, out var m))
