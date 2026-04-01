@@ -1919,7 +1919,7 @@ public static class CliDispatcher
                 "Transcription: submit with TranscribeFromAudioDevice and audio device",
                 "  as resourceId.",
                 "  Optional flags: --model <id>, --lang <code>,",
-                "    --mode <sliding|simple|strict>, --window <seconds>, --step <seconds>");
+                "    --mode <sliding|step|window>, --window <seconds>, --step <seconds>");
             return Results.Ok();
         }
 
@@ -2012,10 +2012,12 @@ public static class CliDispatcher
                     break;
                 case "--mode" when i + 1 < args.Length:
                     var modeArg = args[++i];
-                    if (string.Equals(modeArg, "strict", StringComparison.OrdinalIgnoreCase))
-                        transcriptionMode = TranscriptionMode.StrictSlidingWindow;
-                    else if (string.Equals(modeArg, "sliding", StringComparison.OrdinalIgnoreCase))
+                    if (string.Equals(modeArg, "sliding", StringComparison.OrdinalIgnoreCase))
                         transcriptionMode = TranscriptionMode.SlidingWindow;
+                    else if (string.Equals(modeArg, "step", StringComparison.OrdinalIgnoreCase))
+                        transcriptionMode = TranscriptionMode.StrictStep;
+                    else if (string.Equals(modeArg, "window", StringComparison.OrdinalIgnoreCase))
+                        transcriptionMode = TranscriptionMode.StrictWindow;
                     else if (Enum.TryParse<TranscriptionMode>(modeArg, true, out var m))
                         transcriptionMode = m;
                     break;

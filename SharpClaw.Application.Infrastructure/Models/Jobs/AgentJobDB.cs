@@ -76,8 +76,9 @@ public class AgentJobDB : BaseEntity
 
     /// <summary>
     /// Pipeline mode: <see cref="Enums.TranscriptionMode.SlidingWindow"/>
-    /// (overlapping, deduped) or <see cref="Enums.TranscriptionMode.Simple"/>
-    /// (sequential chunks, no dedup).  Null = default (SlidingWindow).
+    /// (overlapping, deduped), <see cref="Enums.TranscriptionMode.StrictStep"/>
+    /// (sequential short chunks), or <see cref="Enums.TranscriptionMode.StrictWindow"/>
+    /// (sequential full windows).  Null = default (SlidingWindow).
     /// </summary>
     public TranscriptionMode? TranscriptionMode { get; set; }
 

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -151,7 +152,7 @@ public sealed class LiveTranscriptionOrchestrator(
         var effectiveLanguage = language;
         var tickCount = 0;
 
-        var effectiveWindow = mode == TranscriptionMode.Simple
+        var effectiveWindow = mode == TranscriptionMode.StrictStep
             ? Clamp(windowSecondsOverride, 2, BufferCapacitySeconds, InferenceIntervalSeconds)
             : Clamp(windowSecondsOverride, 5, BufferCapacitySeconds, WindowSeconds);
         var effectiveStep = mode == TranscriptionMode.SlidingWindow
@@ -161,7 +162,7 @@ public sealed class LiveTranscriptionOrchestrator(
 
         // Poll cadence is always short (2 s) so the loop reacts
         // quickly to new audio.  For modes where step == window
-        // (Simple, StrictSlidingWindow), inference only fires once
+        // (StrictStep, StrictWindow), inference only fires once
         // a full window of new samples has accumulated.
         var pollSeconds = InferenceIntervalSeconds;
         var samplesPerWindow = (long)effectiveWindow * SampleRate;
@@ -210,9 +211,13 @@ public sealed class LiveTranscriptionOrchestrator(
             var noDataTicks = 0;
             const int maxNoDataTicks = 10;
 
+            var pollInterval = TimeSpan.FromSeconds(pollSeconds);
+            var nextPollDelay = pollInterval;
+
             while (!ct.IsCancellationRequested)
             {
-                await Task.Delay(TimeSpan.FromSeconds(pollSeconds), ct);
+                await Task.Delay(nextPollDelay, ct);
+                nextPollDelay = pollInterval;
 
                 // ── Data-flow watchdog ────────────────────────────
                 // Detect when the audio capture has stalled or the
@@ -306,12 +311,23 @@ public sealed class LiveTranscriptionOrchestrator(
 
                     using var httpClient = httpClientFactory.CreateClient();
 
+                    var inferenceStart = Stopwatch.GetTimestamp();
+
                     var result = await sttClient.TranscribeAsync(
                         httpClient, apiKey, modelName, wavBytes,
                         effectiveLanguage, promptBuffer, ct);
 
                     consecutiveErrors = 0;
                     lastInferenceSample = currentWritten;
+
+                    // Compensate next poll delay for time spent in
+                    // inference so total tick cadence stays close to
+                    // pollSeconds rather than pollSeconds + inference.
+                    var inferenceElapsed = Stopwatch.GetElapsedTime(inferenceStart);
+                    var compensated = pollInterval - inferenceElapsed;
+                    nextPollDelay = compensated > TimeSpan.FromMilliseconds(100)
+                        ? compensated
+                        : TimeSpan.Zero;
 
                     if (effectiveLanguage is null
                         && !string.IsNullOrWhiteSpace(result.Language))

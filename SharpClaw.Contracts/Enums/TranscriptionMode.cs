@@ -20,15 +20,15 @@ public enum TranscriptionMode
     /// perceived latency but no cross-window audio context.  Prompt
     /// conditioning still provides linguistic continuity across chunks.
     /// </summary>
-    Simple = 1,
+    StrictStep = 1,
 
     /// <summary>
-    /// Non-overlapping sequential windows.  Each window of audio is
-    /// transcribed exactly once — one API call per window.  Cross-window
-    /// continuity is maintained through prompt conditioning.  The full
-    /// deduplication and hallucination filtering pipeline still runs as
-    /// a safety net.  Minimal token cost; perceived latency equals the
-    /// window length.
+    /// Non-overlapping sequential windows (default 10 s).  Each window of
+    /// audio is transcribed exactly once — one API call per window.
+    /// Cross-window continuity is maintained through prompt conditioning.
+    /// The full deduplication and hallucination filtering pipeline still
+    /// runs as a safety net.  Minimal token cost; perceived latency
+    /// equals the window length.
     /// </summary>
-    StrictSlidingWindow = 2,
+    StrictWindow = 2,
 }
