@@ -15,10 +15,10 @@ public enum TranscriptionMode
     SlidingWindow = 0,
 
     /// <summary>
-    /// Sequential non-overlapping chunks.  Each chunk is transcribed
-    /// independently and all segments are emitted immediately.  Lower
-    /// latency, fewer API calls, but no cross-window context and no
-    /// deduplication.
+    /// Sequential non-overlapping short chunks (default 2 s).  Each chunk
+    /// is transcribed independently and emitted immediately.  Lowest
+    /// perceived latency but no cross-window audio context.  Prompt
+    /// conditioning still provides linguistic continuity across chunks.
     /// </summary>
     Simple = 1,
 

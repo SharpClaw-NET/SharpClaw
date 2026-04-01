@@ -151,7 +151,9 @@ public sealed class LiveTranscriptionOrchestrator(
         var effectiveLanguage = language;
         var tickCount = 0;
 
-        var effectiveWindow = Clamp(windowSecondsOverride, 5, BufferCapacitySeconds, WindowSeconds);
+        var effectiveWindow = mode == TranscriptionMode.Simple
+            ? Clamp(windowSecondsOverride, 2, BufferCapacitySeconds, InferenceIntervalSeconds)
+            : Clamp(windowSecondsOverride, 5, BufferCapacitySeconds, WindowSeconds);
         var effectiveStep = mode == TranscriptionMode.SlidingWindow
             ? Clamp(stepSecondsOverride, 1, effectiveWindow, InferenceIntervalSeconds)
             : effectiveWindow;
