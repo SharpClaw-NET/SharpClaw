@@ -174,14 +174,11 @@ public sealed class LiveTranscriptionOrchestrator(
 
         try
         {
-            // Give the capture a moment to start filling the buffer
-            await Task.Delay(TimeSpan.FromMilliseconds(500), ct);
-
             // ── Startup verification: ensure audio is actually flowing ──
             // If the capture task faulted or the device never produces
             // data, detect it now rather than silently looping forever.
             const int startupTimeoutMs = 5000;
-            const int startupPollMs = 250;
+            const int startupPollMs = 100;
             var startupPolls = startupTimeoutMs / startupPollMs;
 
             for (var i = 0; i < startupPolls && ringBuffer.TotalWritten == 0; i++)
@@ -546,6 +543,15 @@ public sealed class LiveTranscriptionOrchestrator(
                                 provisionals.RemoveAt(i);
                             }
                         }
+
+                        // Refine the poll delay to account for total tick
+                        // processing (dedup + emission + finalization) that
+                        // the post-inference estimate could not predict.
+                        var totalElapsed = Stopwatch.GetElapsedTime(inferenceStart);
+                        var refined = pollInterval - totalElapsed;
+                        nextPollDelay = refined > TimeSpan.FromMilliseconds(50)
+                            ? refined
+                            : TimeSpan.Zero;
                     }
                 }
                 catch (HttpRequestException ex) when (
