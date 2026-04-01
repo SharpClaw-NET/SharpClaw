@@ -212,7 +212,9 @@ public sealed class LiveTranscriptionOrchestrator(
             const int maxNoDataTicks = 10;
 
             var pollInterval = TimeSpan.FromSeconds(pollSeconds);
-            var nextPollDelay = pollInterval;
+            var nextPollDelay = isTwoPass
+                ? pollInterval
+                : ComputeAccumulationDelay(ringBuffer, lastInferenceSample, samplesPerWindow);
 
             while (!ct.IsCancellationRequested)
             {
@@ -259,7 +261,11 @@ public sealed class LiveTranscriptionOrchestrator(
                 // so it fires every poll tick.
                 if (!isTwoPass
                     && currentWritten - lastInferenceSample < samplesPerWindow)
+                {
+                    nextPollDelay = ComputeAccumulationDelay(
+                        ringBuffer, lastInferenceSample, samplesPerWindow);
                     continue;
+                }
 
                 try
                 {
@@ -277,9 +283,9 @@ public sealed class LiveTranscriptionOrchestrator(
                         var stepSamples = ringBuffer.GetLastSeconds(effectiveStep);
                         if (stepSamples.Length > 0 && ComputeRms(stepSamples) < 0.005)
                         {
-                            await AddJobLogAsync(jobId,
-                                $"[tick {tickCount}] step-region silence (RMS<0.005), " +
-                                "skipping inference", "Trace");
+                            logger.LogTrace(
+                                "Job {JobId}: [tick {Tick}] step-region silence (RMS<0.005), skipping inference",
+                                jobId, tickCount);
                             continue;
                         }
                     }
@@ -295,8 +301,12 @@ public sealed class LiveTranscriptionOrchestrator(
                         // modes don't re-check the same silent window
                         // every poll tick.
                         lastInferenceSample = currentWritten;
-                        await AddJobLogAsync(jobId,
-                            $"[tick {tickCount}] silence gate: RMS={rms:F6}, skipping", "Trace");
+                        if (!isTwoPass)
+                            nextPollDelay = ComputeAccumulationDelay(
+                                ringBuffer, lastInferenceSample, samplesPerWindow);
+                        logger.LogTrace(
+                            "Job {JobId}: [tick {Tick}] silence gate: RMS={Rms}, skipping",
+                            jobId, tickCount, rms);
                         continue;
                     }
 
@@ -304,10 +314,10 @@ public sealed class LiveTranscriptionOrchestrator(
                     var wavBytes = FloatSamplesToWav(windowSamples, SampleRate);
                     var currentAbsTime = (double)ringBuffer.TotalWritten / SampleRate;
 
-                    await AddJobLogAsync(jobId,
-                        $"[tick {tickCount}] window=[{windowStartTime:F2}, {windowStartTime + effectiveWindow:F2}] " +
-                        $"RMS={rms:F4} absTime={currentAbsTime:F2} lastSeenEnd={lastSeenEnd:F2} " +
-                        $"provisionals={provisionals.Count}", "Trace");
+                    logger.LogTrace(
+                        "Job {JobId}: [tick {Tick}] window=[{Start}, {End}] RMS={Rms} absTime={AbsTime} lastSeenEnd={LastSeen} provisionals={Provs}",
+                        jobId, tickCount, windowStartTime, windowStartTime + effectiveWindow,
+                        rms, currentAbsTime, lastSeenEnd, provisionals.Count);
 
                     using var httpClient = httpClientFactory.CreateClient();
 
@@ -321,13 +331,23 @@ public sealed class LiveTranscriptionOrchestrator(
                     lastInferenceSample = currentWritten;
 
                     // Compensate next poll delay for time spent in
-                    // inference so total tick cadence stays close to
-                    // pollSeconds rather than pollSeconds + inference.
+                    // inference.  For non-two-pass modes, compute a
+                    // precise delay from the sample deficit so the next
+                    // inference fires as soon as a full window
+                    // accumulates rather than on a fixed cadence.
                     var inferenceElapsed = Stopwatch.GetElapsedTime(inferenceStart);
-                    var compensated = pollInterval - inferenceElapsed;
-                    nextPollDelay = compensated > TimeSpan.FromMilliseconds(100)
-                        ? compensated
-                        : TimeSpan.Zero;
+                    if (!isTwoPass)
+                    {
+                        nextPollDelay = ComputeAccumulationDelay(
+                            ringBuffer, lastInferenceSample, samplesPerWindow);
+                    }
+                    else
+                    {
+                        var compensated = pollInterval - inferenceElapsed;
+                        nextPollDelay = compensated > TimeSpan.FromMilliseconds(100)
+                            ? compensated
+                            : TimeSpan.Zero;
+                    }
 
                     if (effectiveLanguage is null
                         && !string.IsNullOrWhiteSpace(result.Language))
@@ -335,24 +355,26 @@ public sealed class LiveTranscriptionOrchestrator(
 
                     if (result is null || string.IsNullOrWhiteSpace(result.Text))
                     {
-                        await AddJobLogAsync(jobId,
-                            $"[tick {tickCount}] API returned empty result, skipping", "Trace");
+                        logger.LogTrace(
+                            "Job {JobId}: [tick {Tick}] API returned empty result, skipping",
+                            jobId, tickCount);
                         continue;
                     }
 
                     IReadOnlyList<TranscriptionChunkSegment> segments = result.Segments;
 
-                    await AddJobLogAsync(jobId,
-                        $"[tick {tickCount}] API returned {segments.Count} segment(s), " +
-                        $"hasTimestamps={result.HasTimestampedSegments}, " +
-                        $"duration={result.Duration:F2}, lang={result.Language ?? "null"}", "Trace");
+                    logger.LogTrace(
+                        "Job {JobId}: [tick {Tick}] API returned {Count} segment(s), hasTimestamps={HasTs}, duration={Dur}, lang={Lang}",
+                        jobId, tickCount, segments.Count, result.HasTimestampedSegments,
+                        result.Duration, result.Language ?? "null");
 
                     for (var si = 0; si < segments.Count; si++)
                     {
                         var s = segments[si];
-                        await AddJobLogAsync(jobId,
-                            $"[tick {tickCount}]   raw seg[{si}]: [{s.Start:F2},{s.End:F2}] " +
-                            $"conf={s.Confidence?.ToString("F3") ?? "null"} \"{Truncate(s.Text, 80)}\"", "Trace");
+                        logger.LogTrace(
+                            "Job {JobId}: [tick {Tick}]   raw seg[{Idx}]: [{Start},{End}] conf={Conf} \"{Text}\"",
+                            jobId, tickCount, si, s.Start, s.End,
+                            s.Confidence?.ToString("F3") ?? "null", Truncate(s.Text, 80));
                     }
 
                     if (!result.HasTimestampedSegments)
@@ -360,9 +382,9 @@ public sealed class LiveTranscriptionOrchestrator(
                         var currentText = result.Text.Trim();
                         var newText = RemoveOverlap(previousWindowText, currentText);
 
-                        await AddJobLogAsync(jobId,
-                            $"[tick {tickCount}] synthetic diff: prev={previousWindowText.Length} chars, " +
-                            $"curr={currentText.Length} chars, new=\"{Truncate(newText, 80)}\"", "Trace");
+                        logger.LogTrace(
+                            "Job {JobId}: [tick {Tick}] synthetic diff: prev={PrevLen} chars, curr={CurrLen} chars, new=\"{New}\"",
+                            jobId, tickCount, previousWindowText.Length, currentText.Length, Truncate(newText, 80));
 
                         // When the overlap check found nothing new, only
                         // upgrade previousWindowText to a LONGER response —
@@ -453,18 +475,18 @@ public sealed class LiveTranscriptionOrchestrator(
 
                         if (absEnd <= lastSeenEnd)
                         {
-                            await AddJobLogAsync(jobId,
-                                $"[tick {tickCount}] SKIP (absEnd {absEnd:F2} <= lastSeenEnd {lastSeenEnd:F2}): " +
-                                $"\"{Truncate(seg.Text, 60)}\"", "Trace");
+                            logger.LogTrace(
+                                "Job {JobId}: [tick {Tick}] SKIP (absEnd {AbsEnd} <= lastSeenEnd {LastSeen}): \"{Text}\"",
+                                jobId, tickCount, absEnd, lastSeenEnd, Truncate(seg.Text, 60));
                             continue;
                         }
 
                         var normalizedText = seg.Text.Trim().TrimEnd('.');
                         if (!emittedTexts.Add(normalizedText))
                         {
-                            await AddJobLogAsync(jobId,
-                                $"[tick {tickCount}] SKIP duplicate text: " +
-                                $"\"{Truncate(seg.Text, 60)}\"", "Trace");
+                            logger.LogTrace(
+                                "Job {JobId}: [tick {Tick}] SKIP duplicate text: \"{Text}\"",
+                                jobId, tickCount, Truncate(seg.Text, 60));
                             continue;
                         }
 
@@ -500,8 +522,9 @@ public sealed class LiveTranscriptionOrchestrator(
                                     prov.Id, seg.Text, absEnd));
                         }
 
-                        await AddJobLogAsync(jobId,
-                            $"[tick {tickCount}] cursor: lastSeenEnd {lastSeenEnd:F2} -> {absEnd:F2}", "Trace");
+                        logger.LogTrace(
+                            "Job {JobId}: [tick {Tick}] cursor: lastSeenEnd {From} -> {To}",
+                            jobId, tickCount, lastSeenEnd, absEnd);
                         lastSeenEnd = absEnd;
                         AppendPrompt(ref promptBuffer, seg.Text);
                     }
@@ -731,6 +754,15 @@ public sealed class LiveTranscriptionOrchestrator(
         {
             logger.LogWarning(ex, "Failed to write log entry for job {JobId}: {Message}", jobId, message);
         }
+    }
+
+    private static TimeSpan ComputeAccumulationDelay(
+        AudioRingBuffer ringBuffer, long lastInferenceSample, long samplesPerWindow)
+    {
+        var deficit = samplesPerWindow - (ringBuffer.TotalWritten - lastInferenceSample);
+        return deficit > 0
+            ? TimeSpan.FromSeconds(Math.Max((double)deficit / SampleRate, 0.05))
+            : TimeSpan.FromMilliseconds(50);
     }
 
     private static int Clamp(int? value, int min, int max, int defaultValue) =>
