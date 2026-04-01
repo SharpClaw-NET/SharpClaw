@@ -20,7 +20,7 @@ You hereby grant the Licensor a perpetual, worldwide, irrevocable, royalty-free,
 - publish, perform, and distribute it;
 - sublicense it to third parties;
 - sell, license, or otherwise commercially exploit it, whether as part of SharpClaw or independently;
-- license or relicense it under any terms chosen by the Licensor, including but not limited to PolyForm Non-Commercial 1.0 and commercial proprietary licenses.
+- license or relicense it under any terms chosen by the Licensor, including but not limited to AGPL-3.0 (or any later version) and commercial proprietary licenses.
 
 3. Patent License Grant
 

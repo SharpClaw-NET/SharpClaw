@@ -26,10 +26,16 @@ public sealed class ModelService(SharpClawDbContext db)
         return new ModelResponse(model.Id, model.Name, provider.Id, provider.Name, model.Capabilities, model.CustomId);
     }
 
-    public async Task<IReadOnlyList<ModelResponse>> ListAsync(CancellationToken ct = default)
+    public async Task<IReadOnlyList<ModelResponse>> ListAsync(Guid? providerId = null, CancellationToken ct = default)
     {
-        return await db.Models
+        var query = db.Models
             .Include(m => m.Provider)
+            .AsQueryable();
+
+        if (providerId is not null)
+            query = query.Where(m => m.ProviderId == providerId);
+
+        return await query
             .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name, m.Capabilities, m.CustomId))
             .ToListAsync(ct);
     }

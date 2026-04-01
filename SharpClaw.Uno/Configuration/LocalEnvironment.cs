@@ -12,6 +12,7 @@ namespace SharpClaw.Configuration;
 public static class LocalEnvironment
 {
     public const string DefaultApiUrl = "http://127.0.0.1:48923";
+    public const string DefaultGatewayUrl = "http://0.0.0.0:48924";
 
     private const string DefaultEnvContent =
         """
@@ -21,7 +22,20 @@ public static class LocalEnvironment
 
           // -- API Server -----------------------------------------------
           // Base URL for the SharpClaw API service.
-          "Api": { "Url": "http://127.0.0.1:48923" }
+          // Change this to a remote address (e.g. "http://192.168.1.50:48923")
+          // when connecting to an API instance running on another machine.
+          "Api": { "Url": "http://127.0.0.1:48923" },
+
+          // -- Backend Process -------------------------------------------
+          // Set Enabled to false to prevent the client from launching a
+          // bundled backend process. Use this when the API is installed
+          // separately, runs as a system service, or is on another host.
+          //"Backend": { "Enabled": "false" },
+
+          // -- Public Gateway -----------------------------------------------
+          // Set Enabled to false to prevent the client from launching the
+          // gateway proxy. Url controls the address/port the gateway binds to.
+          //"Gateway": { "Enabled": "false", "Url": "http://0.0.0.0:48924" }
         }
         """;
 
@@ -33,6 +47,43 @@ public static class LocalEnvironment
     {
         var config = BuildConfiguration(isDevelopment);
         return config["Api:Url"] ?? DefaultApiUrl;
+    }
+
+    /// <summary>
+    /// Reads <c>Backend:Enabled</c> from the environment files.
+    /// Defaults to <c>true</c> when not configured.
+    /// Set to <c>false</c> to prevent the client from launching a bundled
+    /// backend process (useful when the API is installed separately or on
+    /// another host).
+    /// </summary>
+    public static bool LoadBackendEnabled(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        var value = config["Backend:Enabled"];
+        return value is null || !bool.TryParse(value, out var enabled) || enabled;
+    }
+
+    /// <summary>
+    /// Reads <c>Gateway:Enabled</c> from the environment files.
+    /// Defaults to <c>true</c> when not configured.
+    /// Set to <c>false</c> to prevent the client from launching the
+    /// gateway proxy.
+    /// </summary>
+    public static bool LoadGatewayEnabled(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        var value = config["Gateway:Enabled"];
+        return value is null || !bool.TryParse(value, out var enabled) || enabled;
+    }
+
+    /// <summary>
+    /// Reads <c>Gateway:Url</c> from the environment files, falling back
+    /// to <see cref="DefaultGatewayUrl"/> when not configured.
+    /// </summary>
+    public static string LoadGatewayUrl(bool isDevelopment = false)
+    {
+        var config = BuildConfiguration(isDevelopment);
+        return config["Gateway:Url"] ?? DefaultGatewayUrl;
     }
 
     public static IConfigurationBuilder AddLocalEnvironment(

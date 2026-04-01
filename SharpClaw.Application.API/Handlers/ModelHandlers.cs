@@ -13,8 +13,8 @@ public static class ModelHandlers
         => Results.Ok(await svc.CreateAsync(request));
 
     [MapGet]
-    public static async Task<IResult> List(ModelService svc)
-        => Results.Ok(await svc.ListAsync());
+    public static async Task<IResult> List(ModelService svc, Guid? providerId = null)
+        => Results.Ok(await svc.ListAsync(providerId));
 
     [MapGet("/{id:guid}")]
     public static async Task<IResult> GetById(Guid id, ModelService svc)

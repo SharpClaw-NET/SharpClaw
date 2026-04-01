@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="Environment\.env" CopyToOutputDirectory="PreserveNewest" />
+    <None Include="Environment\.dev.env" CopyToOutputDirectory="PreserveNewest" Condition="Exists('Environment\.dev.env')" />
+  </ItemGroup>
+
+</Project>

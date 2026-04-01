@@ -25,6 +25,27 @@ public sealed class JsonFilePersistenceService(
     };
 
     /// <summary>
+    /// Lazily-built lookup: CLR type → list of navigation PropertyInfos.
+    /// Used to strip navigation properties before serialization so each
+    /// JSON file contains only scalar/FK data, not the entire object graph.
+    /// </summary>
+    private Dictionary<Type, List<System.Reflection.PropertyInfo>>? _navigations;
+
+    private Dictionary<Type, List<System.Reflection.PropertyInfo>> GetNavigations()
+    {
+        return _navigations ??= context.Model.GetEntityTypes()
+            .GroupBy(e => e.ClrType)
+            .ToDictionary(
+                g => g.Key,
+                g => g.First()
+                    .GetNavigations()
+                    .Select(n => n.PropertyInfo)
+                    .Concat(g.First().GetSkipNavigations().Select(n => n.PropertyInfo))
+                    .Where(p => p is not null)
+                    .ToList()!);
+    }
+
+    /// <summary>
     /// Loads all per-entity JSON files from the data directory into the InMemory database.
     /// Each entity type has its own sub-folder under the data directory, and each entity
     /// is stored as an individual <c>{Id}.json</c> file.
@@ -35,22 +56,10 @@ public sealed class JsonFilePersistenceService(
     {
         Directory.CreateDirectory(options.DataDirectory);
 
-        // Collect navigation property names per CLR type so we can null them
-        // after deserialization, preventing EF from traversing the object graph
-        // and hitting duplicate-key conflicts on related entities.
-        // This includes both regular navigations AND skip navigations (m2m).
-        var navigations = context.Model.GetEntityTypes()
-            .GroupBy(e => e.ClrType)
-            .ToDictionary(
-                g => g.Key,
-                g => g.First()
-                    .GetNavigations()
-                    .Select(n => n.PropertyInfo)
-                    .Concat(g.First().GetSkipNavigations().Select(n => n.PropertyInfo))
-                    .Where(p => p is not null)
-                    .ToList());
+        var navigations = GetNavigations();
 
         // First pass: load all regular (non-join) entities so FK targets exist.
+        // File I/O is parallelised per entity type to reduce wall-clock time.
         foreach (var entityType in context.Model.GetEntityTypes())
         {
             if (entityType.HasSharedClrType)
@@ -65,12 +74,36 @@ public sealed class JsonFilePersistenceService(
             var navProps = navigations.GetValueOrDefault(clrType);
             var files = Directory.GetFiles(entityDir, "*.json");
 
-            foreach (var file in files)
+            if (files.Length == 0)
+                continue;
+
+            // Read all files for this entity type in parallel.
+            var readTasks = files.Select(async file =>
             {
                 try
                 {
                     var json = await File.ReadAllTextAsync(file, ct);
-                    var entity = JsonSerializer.Deserialize(json, clrType, JsonOptions);
+                    return (Json: json, File: file, Error: (Exception?)null);
+                }
+                catch (Exception ex)
+                {
+                    return (Json: (string?)null, File: file, Error: ex);
+                }
+            });
+
+            var results = await Task.WhenAll(readTasks);
+
+            foreach (var result in results)
+            {
+                if (result.Error is not null)
+                {
+                    logger.LogError(result.Error, "Failed to read {Type} from {Path}", clrType.Name, result.File);
+                    continue;
+                }
+
+                try
+                {
+                    var entity = JsonSerializer.Deserialize(result.Json!, clrType, JsonOptions);
 
                     if (entity is null)
                         continue;
@@ -87,7 +120,7 @@ public sealed class JsonFilePersistenceService(
                 }
                 catch (Exception ex)
                 {
-                    logger.LogError(ex, "Failed to load {Type} from {Path}", clrType.Name, file);
+                    logger.LogError(ex, "Failed to load {Type} from {Path}", clrType.Name, result.File);
                 }
             }
 
@@ -108,6 +141,26 @@ public sealed class JsonFilePersistenceService(
 
         await context.SaveChangesAsync(ct);
         DetachAll();
+    }
+
+    /// <summary>
+    /// Checks whether the on-disk JSON files appear to contain bloated
+    /// navigation-property graphs (a legacy serialization issue) and, if
+    /// so, performs a full <see cref="FlushAsync"/> to recompact them.
+    /// A sentinel file (<c>.compacted</c>) is written after a successful
+    /// recompact so subsequent startups skip the check.
+    /// </summary>
+    public async Task RecompactIfNeededAsync(CancellationToken ct = default)
+    {
+        var sentinelPath = Path.Combine(options.DataDirectory, ".compacted");
+        if (File.Exists(sentinelPath))
+            return;
+
+        logger.LogInformation("Recompacting JSON data files (one-time migration)...");
+        await FlushAsync(ct);
+
+        await File.WriteAllTextAsync(sentinelPath, DateTimeOffset.UtcNow.ToString("O"), ct);
+        logger.LogInformation("JSON data files recompacted successfully.");
     }
 
     /// <summary>
@@ -149,6 +202,7 @@ public sealed class JsonFilePersistenceService(
 
                 var entities = await queryable.ToListAsync(ct);
                 var activeIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                var navProps = GetNavigations().GetValueOrDefault(clrType);
 
                 foreach (var entity in entities)
                 {
@@ -156,7 +210,7 @@ public sealed class JsonFilePersistenceService(
                     activeIds.Add($"{id}.json");
 
                     var filePath = Path.Combine(entityDir, $"{id}.json");
-                    var json = JsonSerializer.Serialize(entity, clrType, JsonOptions);
+                    var json = SerializeEntity(entity, clrType, navProps);
                     await File.WriteAllTextAsync(filePath, json, ct);
                 }
 
@@ -223,7 +277,8 @@ public sealed class JsonFilePersistenceService(
                     var entity = context.Find(clrType, id);
                     if (entity is not null)
                     {
-                        var json = JsonSerializer.Serialize(entity, clrType, JsonOptions);
+                        var navProps = GetNavigations().GetValueOrDefault(clrType);
+                        var json = SerializeEntity(entity, clrType, navProps);
                         await File.WriteAllTextAsync(filePath, json, ct);
                     }
                 }
@@ -352,6 +407,38 @@ public sealed class JsonFilePersistenceService(
         catch (Exception ex)
         {
             logger.LogError(ex, "Failed to load join table {Table} from {Path}", tableName, filePath);
+        }
+    }
+
+    /// <summary>
+    /// Serializes an entity to JSON, temporarily nulling navigation properties
+    /// so only scalar and FK columns are persisted.  This prevents the JSON
+    /// files from bloating with the entire related object graph (e.g. every
+    /// ModelDB file embedding the full Provider with all its sibling models).
+    /// </summary>
+    private static string SerializeEntity(
+        object entity, Type clrType,
+        List<System.Reflection.PropertyInfo>? navProps)
+    {
+        if (navProps is null || navProps.Count == 0)
+            return JsonSerializer.Serialize(entity, clrType, JsonOptions);
+
+        // Snapshot current navigation values, null them, serialize, restore.
+        var saved = new object?[navProps.Count];
+        for (var i = 0; i < navProps.Count; i++)
+        {
+            saved[i] = navProps[i]!.GetValue(entity);
+            navProps[i]!.SetValue(entity, null);
+        }
+
+        try
+        {
+            return JsonSerializer.Serialize(entity, clrType, JsonOptions);
+        }
+        finally
+        {
+            for (var i = 0; i < navProps.Count; i++)
+                navProps[i]!.SetValue(entity, saved[i]);
         }
     }
 

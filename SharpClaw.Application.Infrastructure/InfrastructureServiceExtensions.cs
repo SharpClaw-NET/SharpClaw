@@ -41,12 +41,17 @@ public static class InfrastructureServiceExtensions
     /// <summary>
     /// Initializes the infrastructure layer (e.g. loads persisted JSON data
     /// into the InMemory database). Call once after building the host.
+    /// On the first run after a navigation-stripping fix, a full re-flush
+    /// recompacts any bloated JSON files.
     /// </summary>
     public static async Task InitializeInfrastructureAsync(this IServiceProvider services)
     {
         using var scope = services.CreateScope();
         var jsonSync = scope.ServiceProvider.GetService<JsonFilePersistenceService>();
         if (jsonSync is not null)
+        {
             await jsonSync.LoadAsync();
+            await jsonSync.RecompactIfNeededAsync();
+        }
     }
 }

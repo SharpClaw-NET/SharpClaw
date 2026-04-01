@@ -310,6 +310,10 @@ public sealed class ProviderService(
             || name.StartsWith("yi-") || name.StartsWith("jamba"))
             return true;
 
+        // Minimax: MiniMax-Text-01, MiniMax-M1, abab6.5s, etc.
+        if (name.StartsWith("minimax") || name.StartsWith("abab"))
+            return true;
+
         return false;
     }
 
@@ -346,6 +350,10 @@ public sealed class ProviderService(
 
         // xAI: grok-2-vision*, grok-3*
         if (name.StartsWith("grok-2-vision") || name.StartsWith("grok-3"))
+            return true;
+
+        // Minimax: MiniMax-VL-*
+        if (name.StartsWith("minimax-vl"))
             return true;
 
         return false;

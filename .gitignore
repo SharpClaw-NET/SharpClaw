@@ -6,6 +6,14 @@
 .github/upgrades
 .github/copilot-instructions.md
 
+# Publish output
+publish/
+
+# MSIX signing certificates
+signing/
+*.pfx
+*.cer
+
 # Visual Studio 2022 detritus
 .vs/
 

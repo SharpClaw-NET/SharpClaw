@@ -10,8 +10,8 @@
       <Deploy />
     </Project>
   </Folder>
-  <Folder Name="/PublicAPI/">
-    <Project Path="SharpClaw.PublicAPI/SharpClaw.PublicAPI.csproj" />
+  <Folder Name="/Gateway/">
+    <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
   <Folder Name="/Shared/">
     <Project Path="mk8.shell.startup/mk8.shell.startup.csproj" Id="77f11c7c-0e3d-41a2-ab70-1ef0c037a928" />
@@ -27,8 +27,11 @@
     <File Path="Directory.Packages.props" />
     <File Path="docs/App-API-documentation.md" />
     <File Path="docs/App-API-skill.md" />
+    <File Path="docs/Gateway-documentation.md" />
+    <File Path="docs/Provider-Parameters.md" />
     <File Path="global.json" />
     <File Path="LICENSE" />
+    <File Path="publish-release.ps1" />
     <File Path="README.md" />
   </Folder>
   <Folder Name="/Tests/">

@@ -11,26 +11,58 @@ Timestamps are ISO 8601 (`DateTimeOffset`).
 
 ---
 
+## First-class support philosophy
+
+SharpClaw aims to be **self-contained** — you should not need to cross-
+reference two or three upstream provider docs just to get a feature
+working. Provider parameters, cost tracking, model capabilities, and
+wire-format mapping are all handled with typed, validated first-class
+support.
+
+If our docs are incomplete, a feature is not working correctly, or you
+hit a gap in provider coverage, **open a GitHub issue before reaching
+for a workaround:**
+
+> 🐛 **https://github.com/mkn8rn/SharpClaw/issues**
+
+Fallback mechanisms like the
+[`providerParameters` escape-hatch](Provider-Parameters.md#providerparameters-escape-hatch)
+exist so you can unblock yourself immediately, but they are intended as
+**temporary** stopgaps. If you are relying on one regularly, that is a
+sign the typed support needs to be expanded — and an issue is the
+fastest way to make that happen.
+
+---
+
 ## Table of Contents
 
 - [Health checks](#health-checks)
 - [Enums](#enums)
 - [Auth](#auth)
+- [Users](#users)
 - [Providers](#providers)
 - [Models](#models)
-- [Local models](#local-models)
 - [Agents](#agents)
-- [Roles](#roles)
 - [Channel contexts](#channel-contexts)
 - [Channels](#channels)
-- [Default resources](#default-resources)
 - [Threads](#threads)
 - [Chat (per-channel)](#chat-per-channel)
 - [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
+- [Inline tools](#inline-tools)
 - [Transcription streaming](#transcription-streaming)
 - [Resources](#resources)
+- [Roles](#roles)
+- [Default resources](#default-resources)
+- [Local models](#local-models)
+- [Bot integrations](#bot-integrations)
 - [Editor bridge](#editor-bridge)
+- [Task definitions & instances](#task-definitions--instances)
+- [Token cost tracking](#token-cost-tracking)
+- [Provider cost](#provider-cost)
+- [Env file management](#env-file-management)
+- [Custom chat header](#custom-chat-header)
+- [Tool awareness sets](#tool-awareness-sets)
 - [Permission Resolution](#permission-resolution)
 
 ---
@@ -68,16 +100,17 @@ Authentication check — requires a valid `X-Api-Key` header.
 ```
 OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
 ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot,
-Custom, Local
+Minimax, Custom, Local
 ```
 
 `Local` is used for in-process LLamaSharp / Whisper.net models.
+`Minimax` is the Minimax AI provider.
 
 ### AgentActionType
 
 | Category | Values |
 |----------|--------|
-| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop` |
+| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop`, `ReadCrossThreadHistory` |
 | Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill`, `CaptureDisplay` |
 | Transcription | `TranscribeFromAudioDevice`, `TranscribeFromAudioStream`, `TranscribeFromAudioFile` |
 | Editor | `EditorReadFile`, `EditorGetOpenFiles`, `EditorGetSelection`, `EditorGetDiagnostics`, `EditorApplyEdit`, `EditorCreateFile`, `EditorDeleteFile`, `EditorShowDiff`, `EditorRunBuild`, `EditorRunTerminal` |
@@ -175,13 +208,287 @@ Pending, Downloading, Ready, Failed
 | `Simple` | 1 | Sequential non-overlapping chunks. Each chunk transcribed independently, segments emitted immediately. Lower latency, fewer API calls, no cross-window dedup. |
 | `StrictSlidingWindow` | 2 | Single-pass sliding window. Segments only emitted after the full commit delay, deduplication, and hallucination filtering. Higher accuracy but ~5–8 s perceived latency. |
 
+### TaskInstanceStatus
+
+| Value | Int | Description |
+|-------|-----|-------------|
+| `Queued` | 0 | Instance created, awaiting execution start |
+| `Running` | 1 | Task entry point is actively running |
+| `Paused` | 2 | Execution temporarily suspended; can be resumed |
+| `Completed` | 3 | Entry point ran to completion successfully |
+| `Failed` | 4 | Entry point threw an unhandled exception |
+| `Cancelled` | 5 | Instance was cancelled by a user or agent |
+
+### TaskOutputEventType
+
+| Value | Description |
+|-------|-------------|
+| `Output` | Task-emitted output (from `Emit(...)`) |
+| `Log` | Log message appended during execution |
+| `StatusChange` | Task status changed (started, completed, failed, etc.) |
+| `Done` | Terminal event — no more events will follow |
+
 ---
+
 
 ## Auth
 
+SharpClaw uses a two-layer authentication scheme:
+
+1. **API Key** — Every request (except `GET /echo`) must include an
+   `X-Api-Key` header. The key is auto-generated per session and written
+   to `%LOCALAPPDATA%/SharpClaw/.api-key`. This is for local machine
+   trust, not user identity.
+2. **JWT Bearer Token** — After the API key check, a standard
+   `Authorization: Bearer <token>` header identifies the user. Endpoints
+   that are not exempt (see below) return `401` if the token is missing,
+   expired, or invalid.
+
+**Exempt paths** (no JWT required): `/echo`, `/ping`, `/auth/login`,
+`/auth/register`, `/auth/refresh`, `/editor/ws*`.
+
+### Token lifetimes (defaults)
+
+| Token | Default Lifetime | Configurable via |
+|-------|-----------------|------------------|
+| Access token (JWT) | 30 minutes | `Jwt:AccessTokenLifetime` |
+| Refresh token | 30 days | `Jwt:RefreshTokenLifetime` |
+
+Access tokens are short-lived and stateless (validated by signature +
+expiry). Refresh tokens are stored server-side and support revocation
+and rotation.
+
+### Development / testing auth flags
+
+Both authentication layers can be individually disabled via `.env` for
+local development and testing.  **Never disable in production.**
+
+| `.env` key | Layer disabled | Default |
+|---|---|---|
+| `Auth:DisableApiKeyCheck` | API-key middleware (`X-Api-Key` header) — all requests pass without a key | `false` |
+| `Auth:DisableAccessTokenCheck` | JWT session middleware — all requests pass without a Bearer token | `false` |
+| `Agent:DisableCustomProviderParameters` | Custom `providerParameters` dictionary — when `true`, the escape-hatch dictionary is stripped before sending to the provider (typed fields still apply) | `false` |
+
+Example `.env` snippet:
+
+```json
+{
+  "Auth": {
+    "DisableApiKeyCheck": true,
+    "DisableAccessTokenCheck": true
+  },
+  "Agent": {
+    "DisableCustomProviderParameters": false
+  }
+}
+```
+
+When `DisableApiKeyCheck` is `true`, the `ApiKeyMiddleware` short-circuits
+immediately (equivalent to every request carrying a valid key).
+
+When `DisableAccessTokenCheck` is `true`, the `JwtSessionMiddleware`
+skips enforcement — no 401 is returned for missing/expired tokens on
+non-exempt paths.  JWT parsing still runs, so if a valid Bearer token
+is present, `SessionService.UserId` is populated normally.  Endpoints
+that rely on `SessionService.UserId` (e.g. `GET /auth/me`) still work
+when a token is provided; they just won't be *required*.
+
+### Complete token lifecycle
+
+The diagram below shows the full access / refresh token lifecycle that
+third-party clients should implement.
+
+```
+ ┌──────────────┐                              ┌──────────────┐
+ │  3rd-party   │                              │  SharpClaw   │
+ │   client     │                              │    API       │
+ └──────┬───────┘                              └──────┬───────┘
+        │                                             │
+        │  1. POST /auth/register                     │
+        │   { username, password }                    │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 { id, username } ───────────┤
+        │                                             │
+        │  2. POST /auth/login                        │
+        │   { username, password, rememberMe: true }  │
+        ├────────────────────────────────────────────►│
+        │◄── 200 { accessToken,                  ─────┤
+        │         accessTokenExpiresAt,                │
+        │         refreshToken,                        │
+        │         refreshTokenExpiresAt }              │
+        │                                             │
+        │  3. Use access token on all requests        │
+        │   Authorization: Bearer <accessToken>       │
+        │   X-Api-Key: <key>                          │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 (normal response) ──────────┤
+        │                                             │
+        │  ··· (time passes, token nears expiry) ···  │
+        │                                             │
+        │  4. Access token expired → 401              │
+        │   GET /some-endpoint                        │
+        ├────────────────────────────────────────────►│
+        │◄── 401 { error: "access_token_expired" } ──┤
+        │    WWW-Authenticate: Bearer                 │
+        │      error="invalid_token"                  │
+        │                                             │
+        │  5. POST /auth/refresh                      │
+        │   { refreshToken: "<saved-token>" }         │
+        ├────────────────────────────────────────────►│
+        │◄── 200 { accessToken (new),            ─────┤
+        │         accessTokenExpiresAt,                │
+        │         refreshToken (rotated),              │
+        │         refreshTokenExpiresAt }              │
+        │                                             │
+        │  6. Retry original request with new token   │
+        ├────────────────────────────────────────────►│
+        │◄─────────── 200 (normal response) ──────────┤
+        │                                             │
+```
+
+**Key implementation notes for third-party clients:**
+
+- Always store both the access token **and** the refresh token.
+- Check `accessTokenExpiresAt` proactively to refresh before expiry, or
+  react to the `401` / `access_token_expired` error code.
+- After a successful refresh, the **old refresh token is revoked** and a
+  new one is returned (rotation). Always replace your stored refresh
+  token with the new one.
+- If the refresh token itself is expired or revoked, `/auth/refresh`
+  returns `401` — the user must log in again.
+- `rememberMe: false` on login omits the refresh token entirely. The
+  access token is the only credential and cannot be renewed after expiry.
+
+### Detecting access token expiry (machine-readable)
+
+When an access token expires (naturally or via server-side invalidation),
+the API returns a specific response that third-party clients can detect
+programmatically:
+
+**Status:** `401 Unauthorized`
+
+**Headers:**
+
+```
+WWW-Authenticate: Bearer error="invalid_token", error_description="The access token has expired"
+```
+
+**Body (`application/json`):**
+
+```json
+{
+  "error": "access_token_expired",
+  "message": "The access token has expired. Use your refresh token to obtain a new one via POST /auth/refresh."
+}
+```
+
+**How to distinguish 401 causes:**
+
+| Cause | Body | Content-Type |
+|-------|------|-------------|
+| Expired access token | `{ "error": "access_token_expired", ... }` | `application/json` |
+| Missing/invalid API key | `"Invalid or missing API key."` | `text/plain` |
+| Missing/malformed JWT | `"Authentication required."` | `text/plain` |
+
+The `AccessTokenExpiredException` class
+(`SharpClaw.Contracts.Exceptions.AccessTokenExpiredException`) exposes a
+constant `ErrorCode = "access_token_expired"` that .NET clients can
+reference directly instead of hard-coding the string.
+
+### Server-side token invalidation
+
+Administrators can force-invalidate tokens without waiting for natural
+expiry:
+
+- **`POST /auth/invalidate-access-tokens`** — Sets an invalidation
+  timestamp on the user record. Any access token issued *before* this
+  timestamp is rejected (returns the `access_token_expired` error).
+  Refresh tokens remain valid — users can still refresh.
+- **`POST /auth/invalidate-refresh-tokens`** — Revokes all refresh
+  tokens for the specified users. Existing access tokens remain valid
+  until their natural expiry.
+
+To fully lock out a user immediately, call both endpoints.
+
+### Example: third-party client refresh flow (pseudocode)
+
+```python
+response = http.get("/agents", headers={
+    "Authorization": f"Bearer {access_token}",
+    "X-Api-Key": api_key,
+})
+
+if response.status == 401:
+    body = response.json()
+    if body.get("error") == "access_token_expired" and refresh_token:
+        refresh_resp = http.post("/auth/refresh", json={
+            "refreshToken": refresh_token
+        }, headers={"X-Api-Key": api_key})
+
+        if refresh_resp.status == 200:
+            tokens = refresh_resp.json()
+            access_token  = tokens["accessToken"]
+            refresh_token = tokens["refreshToken"]   # rotated!
+            # Retry the original request
+            response = http.get("/agents", headers={
+                "Authorization": f"Bearer {access_token}",
+                "X-Api-Key": api_key,
+            })
+        else:
+            # Refresh token expired/revoked → force re-login
+            redirect_to_login()
+    else:
+        # Not an expiry issue → missing or invalid token
+        redirect_to_login()
+```
+
+### Example: C# / .NET client with automatic refresh
+
+```csharp
+public async Task<HttpResponseMessage> SendWithAutoRefreshAsync(
+    HttpClient http, HttpRequestMessage request,
+    TokenStore tokens)
+{
+    request.Headers.Authorization =
+        new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+    request.Headers.Add("X-Api-Key", tokens.ApiKey);
+
+    var response = await http.SendAsync(request);
+
+    if (response.StatusCode == HttpStatusCode.Unauthorized)
+    {
+        var body = await response.Content.ReadAsStringAsync();
+        if (body.Contains(AccessTokenExpiredException.ErrorCode)
+            && tokens.RefreshToken is not null)
+        {
+            var refreshResp = await http.PostAsJsonAsync("/auth/refresh",
+                new { refreshToken = tokens.RefreshToken });
+
+            if (refreshResp.IsSuccessStatusCode)
+            {
+                var login = await refreshResp.Content
+                    .ReadFromJsonAsync<LoginResponse>();
+                tokens.AccessToken  = login!.AccessToken;
+                tokens.RefreshToken = login.RefreshToken;
+
+                // Clone and retry
+                var retry = await CloneRequestAsync(request);
+                retry.Headers.Authorization =
+                    new AuthenticationHeaderValue("Bearer", tokens.AccessToken);
+                response = await http.SendAsync(retry);
+            }
+        }
+    }
+
+    return response;
+}
+```
+
+---
+
 ### POST /auth/register
 
-Register a new user.
+Register a new user. **No JWT required** (but API key is required).
 
 **Request:**
 
@@ -205,6 +512,8 @@ Register a new user.
 
 ### POST /auth/login
 
+Authenticate and receive tokens. **No JWT required.**
+
 **Request:**
 
 ```json
@@ -215,14 +524,18 @@ Register a new user.
 }
 ```
 
+| Field | Description |
+|-------|-------------|
+| `rememberMe` | When `true`, the response includes a refresh token. When `false` (default), only the short-lived access token is returned. |
+
 **Response `200`:**
 
 ```json
 {
-  "accessToken": "string",
-  "accessTokenExpiresAt": "datetime",
-  "refreshToken": "string | null",
-  "refreshTokenExpiresAt": "datetime | null"
+  "accessToken": "eyJhbG...",
+  "accessTokenExpiresAt": "2025-01-15T12:30:00+00:00",
+  "refreshToken": "base64-string | null",
+  "refreshTokenExpiresAt": "2025-02-14T12:00:00+00:00 | null"
 }
 ```
 
@@ -232,6 +545,10 @@ Register a new user.
 
 ### POST /auth/refresh
 
+Exchange a valid refresh token for a new access + refresh token pair.
+**No JWT required.** The old refresh token is **revoked** upon
+successful use (one-time use / rotation).
+
 **Request:**
 
 ```json
@@ -240,13 +557,27 @@ Register a new user.
 }
 ```
 
-**Response `200`:** Same shape as login response.
+**Response `200`:** Same shape as login response (both tokens rotated).
 
-**Response `401`:** Invalid or expired refresh token.
+```json
+{
+  "accessToken": "eyJhbG... (new)",
+  "accessTokenExpiresAt": "2025-01-15T13:00:00+00:00",
+  "refreshToken": "base64-string (new — store this!)",
+  "refreshTokenExpiresAt": "2025-02-14T12:30:00+00:00"
+}
+```
+
+**Response `401`:** Refresh token is invalid, expired, or already
+revoked. The user must log in again.
 
 ---
 
 ### POST /auth/invalidate-access-tokens
+
+Force-expire all access tokens issued before *now* for the given users.
+Existing JWTs become invalid even if they haven't reached their natural
+expiry. Refresh tokens are **not** affected — users can still refresh.
 
 **Request:**
 
@@ -262,6 +593,9 @@ Register a new user.
 
 ### POST /auth/invalidate-refresh-tokens
 
+Revoke all refresh tokens for the given users. Existing access tokens
+remain valid until their natural expiry.
+
 **Request:**
 
 ```json
@@ -271,6 +605,93 @@ Register a new user.
 ```
 
 **Response `204`:** No content.
+
+---
+
+### GET /auth/me
+
+Get the authenticated user's profile.
+
+**CLI:** `me`
+
+**Response `200`:**
+
+```json
+{
+  "id": "guid",
+  "username": "string",
+  "bio": "string | null",
+  "roleId": "guid | null",
+  "roleName": "string | null",
+  "isUserAdmin": false
+}
+```
+
+**Response `401`:** Not authenticated.
+
+---
+
+### PUT /auth/me/role
+
+Self-assign a role. The caller must have permission to assign the
+requested role.
+
+**Request:**
+
+```json
+{
+  "roleId": "guid"
+}
+```
+
+**Response `200`:** Updated user profile.
+**Response `403`:** Caller lacks permission.
+
+---
+
+## Users
+
+Admin-only endpoints for managing registered users.
+
+### GET /users
+
+List all registered users. Requires the caller to be a user admin.
+
+**Response `200`:** `UserEntry[]`
+
+```json
+[
+  {
+    "id": "guid",
+    "username": "string",
+    "bio": "string | null",
+    "roleId": "guid | null",
+    "roleName": "string | null",
+    "isUserAdmin": false
+  }
+]
+```
+
+**Response `403`:** Caller is not a user admin.
+
+---
+
+### PUT /users/{id}/role
+
+Assign a role to a user. Pass `Guid.Empty` as `roleId` to remove the
+role. Requires the caller to be a user admin.
+
+**Request:**
+
+```json
+{
+  "roleId": "guid"
+}
+```
+
+**Response `200`:** Updated `UserEntry`.
+**Response `403`:** Caller is not a user admin.
+**Response `404`:** User not found.
 
 ---
 
@@ -433,6 +854,10 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
 
 ### GET /models
 
+| Query param  | Type   | Required | Description                         |
+|--------------|--------|----------|-------------------------------------|
+| `providerId` | `guid` | No       | Filter models by provider.          |
+
 **Response `200`:** `ModelResponse[]`
 
 ---
@@ -492,14 +917,58 @@ Start an OAuth device code flow for providers that require it (e.g. GitHub Copil
   "name": "string",
   "modelId": "guid",
   "systemPrompt": "string | null",
-  "maxCompletionTokens": "integer | null"
+  "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
+  "providerParameters": { "key": "value" },
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": false
 }
 ```
 
-`maxCompletionTokens` caps the number of tokens the model may generate per
+`disableToolSchemas` suppresses all tool-call schemas and the tool
+instruction suffix from the model prompt. When `true`, the model sees
+only the system prompt and conversation history — no tools are offered.
+The channel's value overrides the agent's (`channel || agent`).
+
+`maxCompletionTokens` caps the number
 response. Sent as `max_tokens`, `max_completion_tokens`, or
 `max_output_tokens` depending on the provider and API version. `null`
 (default) means no limit — the provider default applies.
+
+`customChatHeader` is an optional template string that overrides the
+default chat header for this agent. See [Custom chat header](#custom-chat-header)
+for the full tag reference and examples.
+
+`toolAwarenessSetId` links a [tool awareness set](#tool-awareness-sets)
+that controls which tool-call schemas are included in API requests.
+Channel's set overrides the agent's; `null` means all tools enabled.
+
+**First-class completion parameters** — `temperature`, `topP`, `topK`,
+`frequencyPenalty`, `presencePenalty`, `stop`, `seed`, `responseFormat`,
+and `reasoningEffort` are typed, validated against per-provider
+constraints at create/update time, and mapped natively into each
+provider's wire format. Invalid values produce an immediate **HTTP 400**
+with structured error messages identifying the provider, the invalid
+value, and the expected range.
+
+`providerParameters` is an optional escape-hatch dictionary of arbitrary
+key-value pairs merged into the API payload after typed fields. Keys
+the client already sets (e.g. `model`, `messages`, `tools`) are never
+overwritten.
+
+> 📖 **For the complete provider support matrix, valid ranges, wire
+> format mapping, Google Gemini translation rules, `responseFormat`
+> values, and validation details, see
+> [Provider-Parameters.md](Provider-Parameters.md).**
 
 **Response `200`:** `AgentResponse`
 
@@ -527,9 +996,34 @@ response. Sent as `max_tokens`, `max_completion_tokens`, or
   "name": "string | null",
   "modelId": "guid | null",
   "systemPrompt": "string | null",
-  "maxCompletionTokens": "integer | null"
+  "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
+  "providerParameters": { "key": "value" },
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": "bool | null"
 }
 ```
+
+Pass `providerParameters` as `{}`
+parameters.  Omit the field (or pass `null`) to leave them unchanged.
+
+`customChatHeader`: pass a template string to set, `""` (empty string)
+to clear, or `null` / omit to leave unchanged.
+
+`toolAwarenessSetId`: pass a GUID to assign, `Guid.Empty`
+(`00000000-...`) to clear, or `null` to leave unchanged.
+
+For typed completion parameters: omit a field (or pass `null`) to leave
+it unchanged. Pass `stop` as `[]` (empty array) to clear stop sequences.
 
 **Response `200`:** `AgentResponse`
 **Response `404`:** Not found.
@@ -573,7 +1067,20 @@ Assign a role to an agent.
   "providerName": "string",
   "roleId": "guid | null",
   "roleName": "string | null",
-  "maxCompletionTokens": "integer | null"
+  "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
+  "providerParameters": { "key": "value" },
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": false
 }
 ```
 
@@ -591,7 +1098,19 @@ Omits `systemPrompt` to keep payloads compact.
   "providerName": "string",
   "roleId": "guid | null",
   "roleName": "string | null",
-  "maxCompletionTokens": "integer | null"
+  "maxCompletionTokens": "integer | null",
+  "temperature": "number | null",
+  "topP": "number | null",
+  "topK": "integer | null",
+  "frequencyPenalty": "number | null",
+  "presencePenalty": "number | null",
+  "stop": ["string"] | null,
+  "seed": "integer | null",
+  "responseFormat": { "type": "json_object" } | null,
+  "reasoningEffort": "string | null",
+  "providerParameters": { "key": "value" },
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": false
 }
 ```
 
@@ -756,12 +1275,25 @@ Request (example):
   "title": "string | null",
   "contextId": "guid | null",
   "permissionSetId": "guid | null",
-  "allowedAgentIds": ["guid", ...] | null
+  "allowedAgentIds": ["guid", ...] | null,
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": false
 }
 ```
 
+`disableToolSchemas` suppresses all tool-call schemas for this channel,
+overriding the agent's setting. See [Tool awareness sets](#tool-awareness-sets).
+
+`customChatHeader` is an optional template string that overrides the
+agent's header
+[Custom chat header](#custom-chat-header) for the full tag reference.
+
+`toolAwarenessSetId` links a [tool awareness set](#tool-awareness-sets).
+Overrides the agent's set when present.
+
 `allowedAgentIds` specifies additional agents (beyond the default
-`agentId`) allowed to operate on this channel. The model used for
+`agentId`) allowed to operate on this channel.
 completions is always the resolved agent's model.
 
 Response `200`: `ChannelResponse`
@@ -787,11 +1319,23 @@ Request (example):
   "title": "string | null",
   "contextId": "guid | null",
   "permissionSetId": "guid | null",
-  "allowedAgentIds": ["guid", ...] | null
+  "allowedAgentIds": ["guid", ...] | null,
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
+  "disableToolSchemas": "bool | null"
 }
 ```
 
-When `allowedAgentIds` is provided it replaces the current set.
+`customChatHeader`: pass a template string to set, `""` (empty string)
+to clear, or `null` / omit to leave unchanged.
+
+`toolAwarenessSetId`: pass a GUID to assign, `Guid.Empty`
+(`00000000-...`) to clear, or `null` to leave unchanged.
+
+`disableToolSchemas`: pass `true`/`false` to set, or `null` to leave
+unchanged.
+
+When `allowedAgentIds` is provided
 `permissionSetId` set to `Guid.Empty` removes the override; `null` leaves
 it unchanged.
 
@@ -883,14 +1427,16 @@ Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
   "effectivePermissionSetId": "guid | null",
   "allowedAgents": [ { /* AgentSummary */ } ],
   "disableChatHeader": false,
+  "disableToolSchemas": false,
+  "customChatHeader": "string | null",
+  "toolAwarenessSetId": "guid | null",
   "createdAt": "datetime",
   "updatedAt": "datetime"
 }
 ```
 
 `agent` and each entry in `allowedAgents` are full
-[`AgentSummary`](#agentsummary) objects (id, name, modelId, modelName,
-providerName, roleId, roleName, maxCompletionTokens).
+[`AgentSummary`](#agentsummary) objects.
 
 ### ChannelAllowedAgentsResponse
 
@@ -1083,9 +1629,16 @@ Response `200`:
 {
   "userMessage": { "role": "user", "content": "string", "timestamp": "datetime" },
   "assistantMessage": { "role": "assistant", "content": "string", "timestamp": "datetime" },
-  "jobResults": [ /* AgentJobResponse[], if any */ ]
+  "jobResults": [ /* AgentJobResponse[], if any */ ],
+  "channelCost": { /* ChannelCostResponse — see Token cost tracking */ },
+  "threadCost": null
 }
 ```
+
+Every chat response piggybacks the current channel (and thread, when
+applicable) token usage so callers do not need a separate round-trip to
+the `/cost` endpoints. See [Token cost tracking](#token-cost-tracking)
+for the shape of these objects.
 
 When the assistant submits agent jobs during the turn the same
 permission-resolution rules apply (see [Permission Resolution](#permission-resolution)).
@@ -1458,12 +2011,24 @@ Retrieve transcription segments added after the given timestamp.
       "timestamp": "datetime",
       "isProvisional": false
     }
-  ]
+  ],
+  "channelCost": {
+    "channelId": "guid",
+    "totalPromptTokens": 0,
+    "totalCompletionTokens": 0,
+    "totalTokens": 0,
+    "agentBreakdown": []
+  }
 }
 ```
 
 `segments` is only populated for transcription action types; `null`
 otherwise.
+
+`channelCost` is piggybacked on all detail / mutation responses
+(Submit, GetById, Approve, Stop, Cancel, Pause, Resume) so callers
+receive up-to-date token usage without a separate round-trip.
+List and summary endpoints omit it.
 
 #### Two-pass segment lifecycle (SlidingWindow mode)
 
@@ -1532,6 +2097,56 @@ multi-layer dedup pipeline to extract genuinely new content:
 
 6. **Timestamp guard** — segments whose `absEnd ≤ lastSeenEnd` are
    skipped to prevent backward-looking duplicates.
+
+---
+
+## Inline tools
+
+Inline tools are handled directly within the chat inference loop and do
+not create agent jobs. They execute immediately and return results to
+the model in the same turn.
+
+### wait
+
+Pause execution for a specified number of seconds (1–300). No
+permissions required. Useful for waiting on external processes without
+wasting tokens on polling.
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `seconds` | integer | yes | Number of seconds to wait (1–300) |
+
+### list_accessible_threads
+
+List threads from other channels that the agent can read. Returns
+thread IDs, names, and parent channel info. Requires
+`ReadCrossThreadHistory` permission on the agent's role.
+
+A channel's threads are accessible when:
+- The agent is the channel's primary agent or is in `AllowedAgents`.
+- The channel's effective permission set has `CanReadCrossThreadHistory = true`.
+- If the agent's role has `Independent` clearance for this flag, the
+  channel opt-in requirement is bypassed.
+
+**Parameters:** none (uses `globalSchema` — empty object).
+
+**Returns:** JSON array of `{ threadId, threadName, channelId, channelTitle }`.
+
+### read_thread_history
+
+Read conversation history from a thread in another channel. Requires
+the same double-gate as `list_accessible_threads`.
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `threadId` | string (GUID) | yes | ID of the thread to read |
+| `maxMessages` | integer | no | Max messages to return (1–200, default 50) |
+
+**Returns:** formatted conversation history as text.
 
 ---
 
@@ -1679,6 +2294,42 @@ DELETE /resources/editorsessions/{id}
 }
 ```
 
+### Resource lookup
+
+#### GET /resources/lookup/{type}
+
+Returns lightweight `[{id, name}]` items for the resource type that
+backs a given permission access category. The `type` path parameter
+matches the JSON property names used in the permissions API.
+
+**Valid `type` values:**
+
+| Type | Resource |
+|------|----------|
+| `dangerousShellAccesses` | SystemUsers |
+| `safeShellAccesses` | Containers |
+| `containerAccesses` | Containers |
+| `websiteAccesses` | Websites |
+| `searchEngineAccesses` | SearchEngines |
+| `localInfoStoreAccesses` | LocalInformationStores |
+| `externalInfoStoreAccesses` | ExternalInformationStores |
+| `audioDeviceAccesses` | AudioDevices |
+| `displayDeviceAccesses` | DisplayDevices |
+| `editorSessionAccesses` | EditorSessions |
+| `agentAccesses` | Agents |
+| `taskAccesses` | ScheduledTasks |
+| `skillAccesses` | Skills |
+
+**Response `200`:**
+
+```json
+[
+  { "id": "guid", "name": "string" }
+]
+```
+
+**Response `400`:** Unknown resource type.
+
 ---
 
 ## Roles
@@ -1725,6 +2376,9 @@ don't have.
   "canAccessLocalhostCli": false,
   "canClickDesktop": false,
   "canTypeOnDesktop": false,
+  "canReadCrossThreadHistory": false,
+  "canEditAgentHeader": false,
+  "canEditChannelHeader": false,
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "containerAccesses": null,
@@ -1735,7 +2389,9 @@ don't have.
   "audioDeviceAccesses": null,
   "agentAccesses": null,
   "taskAccesses": null,
-  "skillAccesses": null
+  "skillAccesses": null,
+  "agentHeaderAccesses": null,
+  "channelHeaderAccesses": null
 }
 ```
 
@@ -1776,6 +2432,9 @@ wildcard grant that covers all resources of that type.
   "canAccessLocalhostCli": false,
   "canClickDesktop": false,
   "canTypeOnDesktop": false,
+  "canReadCrossThreadHistory": false,
+  "canEditAgentHeader": false,
+  "canEditChannelHeader": false,
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [],
   "containerAccesses": [],
@@ -1786,7 +2445,9 @@ wildcard grant that covers all resources of that type.
   "audioDeviceAccesses": [],
   "agentAccesses": [],
   "taskAccesses": [],
-  "skillAccesses": []
+  "skillAccesses": [],
+  "agentHeaderAccesses": [],
+  "channelHeaderAccesses": []
 }
 ```
 
@@ -1952,6 +2613,101 @@ Delete the local model file and its DB record.
 
 ---
 
+## Bot integrations
+
+Bot integration rows are **pre-seeded** on startup for each `BotType`
+(`Telegram`, `Discord`, `WhatsApp`). There are no POST or DELETE
+endpoints — you only update existing rows to enable/disable a bot or
+set its token.
+
+Bot tokens are AES-GCM encrypted at rest (same mechanism as provider
+API keys).
+
+### GET /bots
+
+List all bot integrations.
+
+**Response `200`:** array of `BotIntegrationResponse`.
+
+### GET /bots/{id}
+
+Get a single bot integration by ID.
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### GET /bots/type/{type}
+
+Get a bot integration by type name (`telegram`, `discord`, `whatsapp`).
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### PUT /bots/{id}
+
+Update a bot integration. All fields are optional (partial update).
+
+**Request:**
+
+```json
+{
+  "enabled": true,
+  "botToken": "string | null",
+  "defaultChannelId": "guid | null"
+}
+```
+
+| Field | Behaviour |
+|---|---|
+| `enabled` | Enable or disable the bot. |
+| `botToken` | Non-empty string → encrypt and store. Empty string (`""`) → clear the stored token. Omit to leave unchanged. |
+| `defaultChannelId` | GUID → set the default SharpClaw channel for forwarded messages. `Guid.Empty` → clear. Omit to leave unchanged. |
+
+**Response `200`:** `BotIntegrationResponse`.
+
+### GET /bots/config/{type}
+
+Return the **decrypted** bot configuration for gateway consumption.
+Intended for internal use by the gateway process.
+
+**Response `200`:**
+
+```json
+{
+  "enabled": true,
+  "botToken": "plaintext-token",
+  "defaultChannelId": "guid | null"
+}
+```
+
+### BotIntegrationResponse
+
+```json
+{
+  "id": "guid",
+  "botType": "Telegram",
+  "enabled": false,
+  "hasBotToken": true,
+  "defaultChannelId": "guid | null",
+  "createdAt": "2025-01-01T00:00:00Z",
+  "updatedAt": "2025-01-01T00:00:00Z"
+}
+```
+
+`hasBotToken` indicates whether an encrypted token is stored — the
+actual token is never returned by list/get endpoints.
+
+### CLI
+
+```
+bot list                                        List all bot integrations
+bot get <id>                                    Show a single integration
+bot update <id> [--enabled true|false]          Enable/disable
+                [--token <tok>]                 Set bot token
+                [--channel <channelId>]          Set default channel
+bot config <type>                               Show decrypted config
+```
+
+---
+
 ## Editor bridge
 
 The editor bridge provides a WebSocket connection for IDE extensions
@@ -2019,6 +2775,843 @@ List all currently connected editor sessions.
 
 ---
 
+## Task definitions & instances
+
+Tasks are user-defined C# scripts that run as background processes.
+A **definition** is the registered source code; an **instance** is a
+single execution of that definition.
+
+### POST /tasks
+
+Register a new task definition from raw `.cs` source.
+
+**Request:**
+
+```json
+{
+  "sourceText": "string"
+}
+```
+
+**Response `200`:** `TaskDefinitionResponse`
+
+---
+
+### GET /tasks
+
+List all task definitions.
+
+**Response `200`:** `TaskDefinitionResponse[]`
+
+---
+
+### GET /tasks/{taskId}
+
+**Response `200`:** `TaskDefinitionResponse`
+**Response `404`:** Not found.
+
+---
+
+### PUT /tasks/{taskId}
+
+Update an existing definition's source or active flag.
+
+**Request:**
+
+```json
+{
+  "sourceText": "string | null",
+  "isActive": "bool | null"
+}
+```
+
+**Response `200`:** `TaskDefinitionResponse`
+**Response `404`:** Not found.
+
+---
+
+### DELETE /tasks/{taskId}
+
+**Response `204`:** Deleted.
+**Response `404`:** Not found.
+
+---
+
+### TaskDefinitionResponse
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "description": "string | null",
+  "outputTypeName": "string | null",
+  "isActive": true,
+  "parameters": [
+    {
+      "name": "string",
+      "typeName": "string",
+      "description": "string | null",
+      "defaultValue": "string | null",
+      "isRequired": true
+    }
+  ],
+  "createdAt": "datetime",
+  "updatedAt": "datetime",
+  "customId": "string | null"
+}
+```
+
+---
+
+### POST /tasks/{taskId}/instances
+
+Start a new instance of a task definition.
+
+**Request:**
+
+```json
+{
+  "channelId": "guid | null",
+  "parameterValues": { "key": "value" }
+}
+```
+
+**Response `200`:** `TaskInstanceResponse`
+
+---
+
+### GET /tasks/{taskId}/instances
+
+List all instances for a definition.
+
+**Response `200`:** `TaskInstanceResponse[]`
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}
+
+Get a single instance by ID. The response includes `channelCost`
+when the instance is bound to a channel (token usage for the
+channel is computed on the fly).
+
+**Response `200`:** `TaskInstanceResponse`
+**Response `404`:** Not found.
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/cancel
+
+Cancel a running instance.
+
+**Response `204`:** Cancelled.
+**Response `404`:** Not found.
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/stop
+
+Gracefully stop an instance via the orchestrator.
+
+**Response `204`**
+
+---
+
+### POST /tasks/{taskId}/instances/{instanceId}/start
+
+Start execution of a queued instance via the orchestrator.
+
+**Response `204`**
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}/outputs?since={datetime}
+
+Retrieve task output entries. Optionally filter by timestamp.
+
+**Response `200`:** `TaskOutputEntryResponse[]`
+
+```json
+[
+  {
+    "id": "guid",
+    "sequence": 1,
+    "data": "string | null",
+    "timestamp": "datetime"
+  }
+]
+```
+
+---
+
+### GET /tasks/{taskId}/instances/{instanceId}/stream
+
+Streams `TaskOutputEvent` items as server-sent events
+(`text/event-stream`).
+
+Each SSE frame:
+
+```
+data:{"type":"Output","sequence":1,"timestamp":"...","data":"..."}
+```
+
+Event types: `Output`, `Log`, `StatusChange`, `Done`.
+
+---
+
+### TaskInstanceResponse
+
+```json
+{
+  "id": "guid",
+  "taskDefinitionId": "guid",
+  "taskName": "string",
+  "status": "Queued | Running | Paused | Completed | Failed | Cancelled",
+  "outputSnapshotJson": "string | null",
+  "errorMessage": "string | null",
+  "logs": [
+    {
+      "message": "string",
+      "level": "string",
+      "timestamp": "datetime"
+    }
+  ],
+  "createdAt": "datetime",
+  "startedAt": "datetime | null",
+  "completedAt": "datetime | null",
+  "channelId": "guid | null",
+  "channelCost": { /* ChannelCostResponse, see Token cost tracking */ }
+}
+```
+
+`channelCost` is populated on the `GET .../instances/{instanceId}`
+endpoint when the instance is bound to a channel. It shows the
+aggregated token usage for that channel.
+
+---
+
+## Token cost tracking
+
+Token usage is tracked per-message and aggregated at the channel and
+thread level. Cost data is **piggybacked** on the main chat, job,
+and task responses so callers rarely need the dedicated cost endpoints.
+
+### Piggybacked cost fields
+
+| Response type | Field(s) | When populated |
+|---------------|----------|----------------|
+| `ChatResponse` | `channelCost`, `threadCost` | Always (every chat turn) |
+| `AgentJobResponse` | `channelCost` | On detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`) |
+| `TaskInstanceResponse` | `channelCost` | On `GET .../instances/{instanceId}` when bound to a channel |
+| SSE `Done` event | Inside the `ChatResponse` payload | Always |
+
+### ChannelCostResponse
+
+```json
+{
+  "channelId": "guid",
+  "totalPromptTokens": 0,
+  "totalCompletionTokens": 0,
+  "totalTokens": 0,
+  "agentBreakdown": [
+    {
+      "agentId": "guid",
+      "agentName": "string",
+      "promptTokens": 0,
+      "completionTokens": 0,
+      "totalTokens": 0
+    }
+  ]
+}
+```
+
+### ThreadCostResponse
+
+Same shape as `ChannelCostResponse` with an additional `threadId` field:
+
+```json
+{
+  "threadId": "guid",
+  "channelId": "guid",
+  "totalPromptTokens": 0,
+  "totalCompletionTokens": 0,
+  "totalTokens": 0,
+  "agentBreakdown": [ /* AgentTokenBreakdown[] */ ]
+}
+```
+
+### Diagnostic endpoints
+
+Dedicated endpoints for querying cost without a chat/job round-trip:
+
+#### GET /channels/{id}/chat/cost
+
+**Response `200`:** `ChannelCostResponse`
+
+#### GET /channels/{id}/chat/threads/{threadId}/cost
+
+**Response `200`:** `ThreadCostResponse`
+**Response `404`:** Thread not found.
+
+---
+
+## Provider cost
+
+Query real provider-side cost data (where supported by the provider's
+usage API).
+
+### GET /providers/{id}/cost
+
+Get cost data for a single provider.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days` | int | 30 | Number of days to look back |
+| `startDate` | DateTimeOffset | — | Explicit period start (overrides `days`) |
+| `endDate` | DateTimeOffset | — | Explicit period end |
+
+**Response `200`:** `ProviderCostResponse`
+**Response `404`:** Provider not found.
+
+---
+
+### GET /providers/cost/total
+
+Aggregate cost across providers.
+
+By default, only providers with an API key configured are included.
+Pass `all=true` to include all providers (previous default behavior).
+Pass `simple=true` to receive a simplified summary with just the total.
+
+**Query parameters:**
+
+| Param | Type | Default | Description |
+|-------|------|---------|-------------|
+| `days` | int | 30 | Number of days to look back |
+| `startDate` | DateTimeOffset | — | Explicit period start (overrides `days`) |
+| `endDate` | DateTimeOffset | — | Explicit period end |
+| `all` | bool | false | Include all providers regardless of API key status |
+| `simple` | bool | false | Return a simplified `ProviderCostSimpleResponse` |
+
+**Response `200` (default):** `ProviderCostTotalResponse`
+**Response `200` (simple):** `ProviderCostSimpleResponse`
+
+---
+
+### ProviderCostResponse
+
+```json
+{
+  "providerId": "guid",
+  "providerName": "string",
+  "providerType": "OpenAI",
+  "isLocal": false,
+  "costApiSupported": true,
+  "totalCost": 12.34,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "dailyBreakdown": [
+    {
+      "start": "datetime",
+      "end": "datetime",
+      "amount": 1.23,
+      "currency": "USD"
+    }
+  ],
+  "note": "string | null"
+}
+```
+
+### ProviderCostTotalResponse
+
+```json
+{
+  "totalCost": 45.67,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "providers": [ /* ProviderCostResponse[] */ ]
+}
+```
+
+### ProviderCostSimpleResponse
+
+Returned when `simple=true` is passed.
+
+```json
+{
+  "totalCost": 45.67,
+  "currency": "USD",
+  "periodStart": "datetime",
+  "periodEnd": "datetime",
+  "summary": "Cost is 45.67$ + GoogleGemini provider cost",
+  "untrackedProviders": ["GoogleGemini"]
+}
+```
+
+`untrackedProviders` lists providers that have an API key but do not
+expose a billing API. The field is `null` when all providers are tracked.
+
+---
+
+## Env file management
+
+SharpClaw manages two `.env` configuration files:
+
+- **Core** — server-side application configuration
+  (`SharpClaw.Application.Infrastructure/Environment/.env`). Managed
+  exclusively through the API endpoints below. Contains encryption keys,
+  JWT secrets, database connection strings, local inference settings, and
+  admin credentials.
+- **Interface** — client-side configuration
+  (`SharpClaw.Uno/Environment/.env`). Read and written directly by the
+  Uno client (not exposed via the API).
+
+Both files use JSON-with-comments format and are loaded via
+`PhysicalFileProvider` into `IConfiguration`.
+
+All Core `.env` endpoints require authentication (JWT) and enforce
+server-side authorisation: the caller must be a user admin **or** the
+`EnvEditor:AllowNonAdmin` setting must be `true` in the Core `.env`.
+
+### GET /env/core/auth
+
+Check whether the current user is authorised to read/write the Core
+`.env` file. Useful as a lightweight pre-check before navigating to an
+editor UI.
+
+**Response `200`:**
+
+```json
+{ "authorised": true }
+```
+
+---
+
+### GET /env/core
+
+Read the raw content of the Core `.env` file.
+
+**Response `200`:**
+
+```json
+{ "content": "{ ... raw JSON-with-comments content ... }" }
+```
+
+**Response `403`:** Caller is not authorised (not admin and
+`EnvEditor:AllowNonAdmin` is not enabled).
+
+**Response `404`:** Core `.env` file not found on disk.
+
+---
+
+### PUT /env/core
+
+Overwrite the Core `.env` file with new content.
+
+**Request:**
+
+```json
+{
+  "content": "string"
+}
+```
+
+**Response `200`:**
+
+```json
+{ "saved": true }
+```
+
+**Response `403`:** Caller is not authorised.
+
+> ⚠️ **Changes to the Core `.env` require a backend restart to take
+> effect.** The Uno client's env editor automatically restarts the
+> backend after saving.
+
+### Core `.env` keys
+
+| Key | Description |
+|-----|-------------|
+| `Encryption:Key` | AES-GCM key for encrypting provider API keys at rest |
+| `Jwt:Secret` | HMAC signing key for JWT access tokens |
+| `Jwt:AccessTokenLifetime` | Access token lifetime (e.g. `"00:30:00"`) |
+| `Jwt:RefreshTokenLifetime` | Refresh token lifetime (e.g. `"30.00:00:00"`) |
+| `ConnectionStrings:Postgres` | Optional Postgres connection string (default: EF InMemory + JSON sync) |
+| `Api:ListenUrl` | HTTP listen URL (default: `http://127.0.0.1:48923`) |
+| `Admin:Username` | Seeded admin username |
+| `Admin:Password` | Seeded admin password |
+| `Admin:ReconcilePermissions` | When `true`, reconcile the Admin role's permission set on every startup to back-fill newly added flags and wildcard grants (default: `false`) |
+| `Browser:Executable` | Chromium executable path for `AccessLocalhostInBrowser` |
+| `Browser:Arguments` | Extra browser launch arguments |
+| `Local:GpuLayerCount` | Default GPU layers for local inference (default: `-1` = auto) |
+| `Local:ContextSize` | Default context size for local models |
+| `Local:KeepLoaded` | Keep models pinned after use |
+| `Local:IdleCooldownMinutes` | Idle minutes before unloading unpinned models |
+| `EnvEditor:AllowNonAdmin` | When `true`, non-admin users can edit the Core `.env` via the API |
+| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend |
+| `Auth:DisableApiKeyCheck` | Disable API-key middleware (dev only) |
+| `Auth:DisableAccessTokenCheck` | Disable JWT enforcement (dev only) |
+| `Agent:DisableCustomProviderParameters` | Strip `providerParameters` escape-hatch before sending to provider |
+
+### Interface `.env` keys
+
+| Key | Description |
+|-----|-------------|
+| `Api:Url` | API base URL (default: `http://127.0.0.1:48923`) |
+| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend (default: `true`) |
+
+---
+
+## Custom chat header
+
+By default every user message sent to the model is prefixed with a
+metadata header built by `ChatService.BuildChatHeaderAsync`. The
+`customChatHeader` field on agents and channels lets you **replace** that
+default with a free-form template string containing `{{tag}}`
+placeholders that are expanded at send time.
+
+### Override chain
+
+| Priority | Source | How to set |
+|----------|--------|------------|
+| 1 (highest) | `channel.customChatHeader` | `PUT /channels/{id}` |
+| 2 | `agent.customChatHeader` | `PUT /agents/{id}` |
+| 3 (lowest) | Built-in default header | — |
+
+If `disableChatHeader` is `true` on the channel (or inherited from its
+context), **no header is sent** regardless of `customChatHeader`.
+
+### Template syntax
+
+Placeholders use double-brace syntax: `{{tagName}}`. Tags are
+case-insensitive.
+
+**Context tags** resolve to a single value:
+
+| Tag | Output | Example |
+|-----|--------|---------|
+| `{{time}}` | Current UTC timestamp | `2025-07-14 09:30:00 UTC` |
+| `{{user}}` | Logged-in username | `marko` |
+| `{{via}}` | `ChatClientType` of the caller | `CLI` |
+| `{{role}}` | User role name with granted permission names | `Admin (CreateSubAgents, SafeShell)` |
+| `{{bio}}` | User bio text | `Backend developer, likes Rust` |
+| `{{agent-name}}` | Agent display name | `CodeReview Agent` |
+| `{{agent-role}}` | Agent role with clearance and resource-ID grants | `DevOps clearance=Independent (SafeShell[...], ManageAgent[...])` |
+| `{{clearance}}` | Agent default clearance level | `Independent` |
+| `{{grants}}` | User permission grant names (name-only) | `CreateSubAgents, SafeShell, ManageAgent` |
+| `{{agent-grants}}` | Agent grants with enumerated resource IDs | `SafeShell[3fa85f64-...], EditTask[7c9e6679-...]` |
+| `{{editor}}` | IDE context (type, file, selection) | `VisualStudio2026 18.4 file=Program.cs lang=csharp sel=10-15` |
+| `{{accessible-threads}}` | Cross-channel threads the agent can read | `Debug Session [Ops Channel] (guid)` |
+
+When a grant includes the wildcard resource
+(`ffffffff-ffff-ffff-ffff-ffffffffffff`), all concrete resource IDs of
+that type are resolved from the database and listed individually.
+
+**Resource tags** enumerate entities from the database:
+
+| Tag | Entities loaded |
+|-----|-----------------|
+| `{{Agents}}` | All agents |
+| `{{Models}}` | All models (includes provider) |
+| `{{Providers}}` | All providers |
+| `{{Channels}}` | All channels |
+| `{{Threads}}` | All threads |
+| `{{Roles}}` | All roles |
+| `{{Users}}` | All users |
+| `{{Containers}}` | All containers |
+| `{{Websites}}` | All websites |
+| `{{SearchEngines}}` | All search engines |
+| `{{AudioDevices}}` | All audio devices |
+| `{{DisplayDevices}}` | All display devices |
+| `{{EditorSessions}}` | All editor sessions |
+| `{{Skills}}` | All skills |
+| `{{SystemUsers}}` | All system users |
+| `{{LocalInfoStores}}` | All local information stores |
+| `{{ExternalInfoStores}}` | All external information stores |
+| `{{ScheduledTasks}}` | All scheduled tasks |
+| `{{Tasks}}` | All task definitions |
+
+Without a per-item template, resource tags emit comma-separated GUIDs.
+With a template, each entity is formatted using `{FieldName}` property
+placeholders:
+
+```
+{{Agents:{Name} ({Id})}}
+```
+
+Fields decorated with `[HeaderSensitive]` (e.g. `PasswordHash`,
+`EncryptedApiKey`) are replaced with `[redacted]`. Unknown field names
+produce `[FieldName?]`.
+
+### Permissions
+
+Editing custom headers is controlled by two global permission flags and
+two per-resource grant collections:
+
+| Permission | Scope |
+|------------|-------|
+| `canEditAgentHeader` | Global flag — can edit any agent's header |
+| `canEditChannelHeader` | Global flag — can edit any channel's header |
+| `agentHeaderAccesses` | Per-agent grants (resource = agent ID) |
+| `channelHeaderAccesses` | Per-channel grants (resource = channel ID) |
+
+### Examples
+
+#### Minimal context-only header
+
+**Template:**
+
+```
+[{{time}} | {{user}} via {{via}}]
+```
+
+**Output:**
+
+```
+[2025-07-14 09:30:00 UTC | marko via CLI]
+```
+
+#### Agent self-awareness header
+
+**Template:**
+
+```
+[time: {{time}} | user: {{user}} | agent: {{agent-name}} | role: {{agent-role}} | clearance: {{clearance}}]
+```
+
+**Output:**
+
+```
+[time: 2025-07-14 09:30:00 UTC | user: marko | agent: CodeReview Agent | role: DevOps clearance=Independent (SafeShell[3fa85f64-5717-4562-b3fc-2c963f66afa6], ManageAgent[7c9e6679-a0f9-11d2-9e96-0060976f8900]) | clearance: Independent]
+```
+
+#### Resource inventory header
+
+**Template:**
+
+```
+[{{time}}] user={{user}} bio="{{bio}}"
+Available agents: {{Agents:{Name} (model={ModelName}, provider={ProviderName})}}
+Available models: {{Models:{Name} ({Id})}}
+```
+
+**Output:**
+
+```
+[2025-07-14 09:30:00 UTC] user=marko bio="Backend developer, likes Rust"
+Available agents: CodeReview Agent (model=gpt-4o, provider=OpenAI), DevOps Agent (model=claude-sonnet-4-20250514, provider=Anthropic)
+Available models: gpt-4o (3fa85f64-5717-4562-b3fc-2c963f66afa6), claude-sonnet-4-20250514 (7c9e6679-a0f9-11d2-9e96-0060976f8900)
+```
+
+#### Full header matching default format
+
+The built-in default header can be reproduced exactly:
+
+**Template:**
+
+```
+[time: {{time}} | user: {{user}} | via: {{via}} | role: {{role}} | bio: {{bio}} | agent-role: {{agent-role}}]
+```
+
+**Output:**
+
+```
+[time: 2025-07-14 09:30:00 UTC | user: marko | via: CLI | role: Admin (CreateSubAgents, SafeShell, ManageAgent) | bio: Backend developer, likes Rust | agent-role: DevOps clearance=Independent (SafeShell[3fa85f64-5717-4562-b3fc-2c963f66afa6], ManageAgent[7c9e6679-a0f9-11d2-9e96-0060976f8900])]
+```
+
+#### Editor-aware header (IDE extensions)
+
+**Template:**
+
+```
+[{{time}} | {{user}} | {{editor}}]
+```
+
+**Output:**
+
+```
+[2025-07-14 09:30:00 UTC | marko | VisualStudio2026 18.4.2 workspace=E:\source\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
+```
+
+#### GUIDs-only resource list
+
+**Template:**
+
+```
+Containers: {{Containers}}
+```
+
+**Output:**
+
+```
+Containers: 3fa85f64-5717-4562-b3fc-2c963f66afa6, 7c9e6679-a0f9-11d2-9e96-0060976f8900
+```
+
+#### Sensitive field protection
+
+**Template:**
+
+```
+Users: {{Users:{Username} hash={PasswordHash}}}
+```
+
+**Output:**
+
+```
+Users: marko hash=[redacted], admin hash=[redacted]
+```
+
+#### Cross-thread awareness
+
+**Template:**
+
+```
+[{{time}} | {{user}} | threads: {{accessible-threads}}]
+```
+
+**Output:**
+
+```
+[2025-07-14 09:30:00 UTC | marko | threads: Debug Session [Ops Channel] (d4e5f6a7-b8c9-0d1e-2f3a-4b5c6d7e8f90), Planning [Strategy Channel] (a1b2c3d4-e5f6-7890-abcd-ef1234567890)]
+```
+
+When the agent has no cross-thread access or no accessible threads
+exist, the tag outputs `(none)`.
+
+---
+
+## Tool awareness sets
+
+A tool awareness set is a **reusable named configuration** that controls
+which tool-call schemas are sent in API requests. By disabling tools the
+agent will never use, you can **significantly reduce prompt-token
+overhead** — each tool schema adds hundreds of tokens to every request.
+
+### Override chain
+
+| Priority | Source | How to set |
+|----------|--------|------------|
+| 1 (highest) | `channel.disableToolSchemas` or `agent.disableToolSchemas` | `POST /channels`, `PUT /channels/{id}`, `POST /agents`, `PUT /agents/{id}`, CLI `--no-tools` |
+| 2 | Channel's `toolAwarenessSetId` | `POST /channels`, `PUT /channels/{id}`, CLI `channel add --tools <setId>` |
+| 3 | Agent's `toolAwarenessSetId` | `POST /agents`, `PUT /agents/{id}`, CLI `agent add --tools <setId>` |
+| 4 (default) | `null` — all tools enabled | Omit the field or set `Guid.Empty` to clear |
+
+When `disableToolSchemas` is `true` on either the channel or the agent
+(`channel || agent`), **no tool schemas or tool instruction suffix are
+sent** — the model sees only the system prompt and conversation history.
+This takes precedence over any tool awareness set.
+
+### Filtering logic
+
+Tools whose key is **`true`** or **absent** from the set's `tools`
+dictionary are included. Only tools explicitly set to `false` are
+excluded. This means a new tool awareness set with an empty dictionary
+(`{}`) enables all tools — you opt tools **out**, not in.
+
+### REST endpoints
+
+Route group: `/tool-awareness-sets`
+
+#### POST /tool-awareness-sets
+
+Create a new set.
+
+**Request:**
+
+```json
+{
+  "name": "string",
+  "tools": { "tool_name": true | false, ... } | null
+}
+```
+
+`tools` defaults to `{}` (empty — all tools enabled).
+
+**Response `200`:** `ToolAwarenessSetResponse`
+
+---
+
+#### GET /tool-awareness-sets
+
+List all sets.
+
+**Response `200`:** `ToolAwarenessSetResponse[]`
+
+---
+
+#### GET /tool-awareness-sets/{id}
+
+**Response `200`:** `ToolAwarenessSetResponse`
+**Response `404`:** Not found.
+
+---
+
+#### PUT /tool-awareness-sets/{id}
+
+**Request:**
+
+```json
+{
+  "name": "string | null",
+  "tools": { "tool_name": true | false, ... } | null
+}
+```
+
+Omit a field (or pass `null`) to leave it unchanged. Pass `tools` as
+`{}` (empty object) to reset to all-enabled.
+
+**Response `200`:** `ToolAwarenessSetResponse`
+**Response `404`:** Not found.
+
+---
+
+#### DELETE /tool-awareness-sets/{id}
+
+Deletes the set. Any agents or channels referencing it will have their
+`toolAwarenessSetId` set to `null` (cascade `SetNull`).
+
+**Response `204`:** Deleted.
+**Response `404`:** Not found.
+
+---
+
+### ToolAwarenessSetResponse
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "tools": { "tool_name": true | false, ... },
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+### CLI
+
+```
+tools add <name> [json]                   Create a tool awareness set
+tools list                                List all tool awareness sets
+tools get <id>                            Show a set
+tools update <id> [--name <n>] [json]     Update a set
+tools delete <id>                         Delete a set
+```
+
+Assign to agents and channels with `--tools <setId>`.
+Disable all tools with `--no-tools`:
+
+```
+agent add MyAgent #42 --tools #5
+agent add MyAgent #42 --no-tools
+channel add --agent #3 --tools #5 "My Channel"
+channel add --agent #3 --no-tools "My Channel"
+```
+
+---
+
 ## Permission Resolution
 
 When an agent action is submitted as a job, the permission system
@@ -2043,3 +3636,22 @@ pending job can execute immediately without per-job approval.
 - Clearances ≥ 3 (`ApprovedByPermittedAgent`, `ApprovedByWhitelistedAgent`) always require explicit per-job approval.
 
 The resolver checks in order: channel's own permission set → parent context → fallback (AwaitingApproval).
+
+### Cross-thread history access
+
+Reading another channel's thread history uses a **double-gate** model:
+
+1. The agent's role permission set must have `CanReadCrossThreadHistory = true`.
+2. The target channel's effective permission set must also have
+   `CanReadCrossThreadHistory = true` (opt-in).
+
+Channels that have not opted in are effectively private, even if the
+agent holds the permission. `Independent` clearance on the agent's role
+overrides the channel opt-in requirement.
+
+The agent must also be the channel's primary agent or listed in its
+`AllowedAgents` (channel-level first, context-level fallback).
+
+Accessible threads are surfaced in the chat header
+(`accessible-threads:` section) and via the `list_accessible_threads`
+and `read_thread_history` inline tools.

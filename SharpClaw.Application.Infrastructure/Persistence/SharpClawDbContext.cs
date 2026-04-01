@@ -1,6 +1,8 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Application.Infrastructure.Models;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
@@ -59,12 +61,19 @@ public class SharpClawDbContext(
     public DbSet<AgentManagementAccessDB> AgentPermissions => Set<AgentManagementAccessDB>();
     public DbSet<TaskManageAccessDB> TaskPermissions => Set<TaskManageAccessDB>();
     public DbSet<SkillManageAccessDB> SkillPermissions => Set<SkillManageAccessDB>();
+    public DbSet<AgentHeaderAccessDB> AgentHeaderAccesses => Set<AgentHeaderAccessDB>();
+    public DbSet<ChannelHeaderAccessDB> ChannelHeaderAccesses => Set<ChannelHeaderAccessDB>();
     public DbSet<ClearanceUserWhitelistEntryDB> ClearanceUserWhitelistEntries => Set<ClearanceUserWhitelistEntryDB>();
     public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
     public DbSet<AgentJobDB> AgentJobs => Set<AgentJobDB>();
     public DbSet<AgentJobLogEntryDB> AgentJobLogEntries => Set<AgentJobLogEntryDB>();
     public DbSet<DefaultResourceSetDB> DefaultResourceSets => Set<DefaultResourceSetDB>();
+    public DbSet<ToolAwarenessSetDB> ToolAwarenessSets => Set<ToolAwarenessSetDB>();
     public DbSet<LocalModelFileDB> LocalModelFiles => Set<LocalModelFileDB>();
+
+    // ── Bot integrations ──────────────────────────────────────────
+    public DbSet<BotIntegrationDB> BotIntegrations => Set<BotIntegrationDB>();
+    public DbSet<BotIntegrationAccessDB> BotIntegrationAccesses => Set<BotIntegrationAccessDB>();
 
     // ── Task scripts ──────────────────────────────────────────────
     public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
@@ -135,10 +144,22 @@ public class SharpClawDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
+        // ── Tool Awareness Sets ────────────────────────────────────
+        modelBuilder.Entity<ToolAwarenessSetDB>(e =>
+        {
+            e.HasIndex(t => t.Name).IsUnique();
+            e.Property(t => t.Tools).HasConversion(
+                v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
+                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(v, (JsonSerializerOptions?)null)! : new());
+        });
+
         // ── Agents & Chat ─────────────────────────────────────────
         modelBuilder.Entity<AgentDB>(e =>
         {
             e.HasIndex(a => a.Name).IsUnique();
+            e.Property(a => a.ProviderParameters).HasConversion(
+                v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null) : null,
+                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(v, (JsonSerializerOptions?)null) : null);
             e.HasMany(a => a.Contexts)
                 .WithOne(c => c.Agent)
                 .HasForeignKey(c => c.AgentId)
@@ -151,6 +172,10 @@ public class SharpClawDbContext(
             e.HasOne(a => a.Role)
                 .WithMany()
                 .HasForeignKey(a => a.RoleId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(a => a.ToolAwarenessSet)
+                .WithMany()
+                .HasForeignKey(a => a.ToolAwarenessSetId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -193,6 +218,10 @@ public class SharpClawDbContext(
             e.HasOne(c => c.DefaultResourceSet)
                 .WithMany()
                 .HasForeignKey(c => c.DefaultResourceSetId)
+                .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne(c => c.ToolAwarenessSet)
+                .WithMany()
+                .HasForeignKey(c => c.ToolAwarenessSetId)
                 .OnDelete(DeleteBehavior.SetNull);
             e.HasMany(c => c.AllowedAgents)
                 .WithMany(a => a.AllowedChannels)
@@ -297,6 +326,21 @@ public class SharpClawDbContext(
                 .HasForeignKey(s => s.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasMany(p => p.AgentHeaderAccesses)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.ChannelHeaderAccesses)
+                .WithOne(c => c.PermissionSet)
+                .HasForeignKey(c => c.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.BotIntegrationAccesses)
+                .WithOne(b => b.PermissionSet)
+                .HasForeignKey(b => b.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             e.HasMany(p => p.ClearanceUserWhitelist)
                 .WithOne(w => w.PermissionSet)
                 .HasForeignKey(w => w.PermissionSetId)
@@ -371,6 +415,11 @@ public class SharpClawDbContext(
             e.HasOne(p => p.DefaultSkillPermission)
                 .WithMany()
                 .HasForeignKey(p => p.DefaultSkillPermissionId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(p => p.DefaultBotIntegrationAccess)
+                .WithMany()
+                .HasForeignKey(p => p.DefaultBotIntegrationAccessId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
@@ -682,6 +731,23 @@ public class SharpClawDbContext(
                 .WithOne(o => o.TaskInstance)
                 .HasForeignKey(o => o.TaskInstanceId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // ── Bot integrations ──────────────────────────────────
+        modelBuilder.Entity<BotIntegrationDB>(e =>
+        {
+            e.HasIndex(b => b.BotType).IsUnique();
+            e.Property(b => b.BotType).HasConversion<string>();
+            e.HasMany(b => b.Accesses)
+                .WithOne(a => a.BotIntegration)
+                .HasForeignKey(a => a.BotIntegrationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<BotIntegrationAccessDB>(e =>
+        {
+            e.HasIndex(a => new { a.PermissionSetId, a.BotIntegrationId }).IsUnique();
+            e.Property(a => a.Clearance).HasConversion<string>();
         });
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);

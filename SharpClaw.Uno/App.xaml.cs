@@ -113,10 +113,26 @@ public partial class App : Application
                 {
                     var isDev = context.HostingEnvironment.IsDevelopment();
                     var apiUrl = LocalEnvironment.LoadApiUrl(isDev);
+                    var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
 
-                    var backendManager = new BackendProcessManager(apiUrl);
+                    var backendManager = new BackendProcessManager(apiUrl)
+                    {
+                        SkipLaunch = !backendEnabled
+                    };
                     services.AddSingleton(backendManager);
+
+                    var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
+                    var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
+
+                    var gatewayManager = new GatewayProcessManager(gatewayUrl)
+                    {
+                        SkipLaunch = !gatewayEnabled
+                    };
+                    services.AddSingleton(gatewayManager);
+
                     services.AddSingleton(new SharpClawApiClient(apiUrl));
+                    services.AddSingleton(new ClientSettings());
+                    services.AddSingleton(new AccountStore());
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
@@ -139,11 +155,12 @@ public partial class App : Application
                 await navigator.NavigateRouteAsync(this, "Boot", qualifier: Qualifiers.Nested);
             });
 
-        // Stop the backend process when the app window closes.
+        // Stop managed processes when the app window closes.
         if (MainWindow is not null)
         {
             MainWindow.Closed += (_, _) =>
             {
+                Host?.Services.GetService<GatewayProcessManager>()?.Dispose();
                 Host?.Services.GetService<BackendProcessManager>()?.Dispose();
             };
         }
@@ -157,7 +174,10 @@ public partial class App : Application
             new ViewMap<LoginPage>(),
             new ViewMap<FirstSetupPage>(),
             new ViewMap<MainPage>(),
-            new ViewMap<SettingsPage>()
+            new ViewMap<SettingsPage>(),
+            new ViewMap<LegalNoticesPage>(),
+            new ViewMap<EnvMenuPage>(),
+            new ViewMap<EnvEditorPage>()
         );
 
         routes.Register(
@@ -168,7 +188,10 @@ public partial class App : Application
                     new ("Login", View: views.FindByView<LoginPage>()),
                     new ("FirstSetup", View: views.FindByView<FirstSetupPage>()),
                     new ("Main", View: views.FindByView<MainPage>(), IsDefault:true),
-                    new ("Settings", View: views.FindByView<SettingsPage>())
+                    new ("Settings", View: views.FindByView<SettingsPage>()),
+                    new ("LegalNotices", View: views.FindByView<LegalNoticesPage>()),
+                    new ("EnvMenu", View: views.FindByView<EnvMenuPage>()),
+                    new ("EnvEditor", View: views.FindByView<EnvEditorPage>())
                 ]
             )
         );

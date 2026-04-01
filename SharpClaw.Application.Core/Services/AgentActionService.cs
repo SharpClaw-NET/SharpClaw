@@ -76,6 +76,13 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, caller, p => p.CanTypeOnDesktop, p => p.TypeOnDesktopClearance,
             "type on desktop", onApproved, ct);
 
+    public Task<AgentActionResult> ReadCrossThreadHistoryAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanReadCrossThreadHistory, p => p.ReadCrossThreadHistoryClearance,
+            "read cross-thread history", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Per-resource actions
     // ═══════════════════════════════════════════════════════════════
@@ -183,6 +190,14 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, editorSessionId, caller,
             p => p.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance,
             "editor session access", onApproved, ct);
+
+    public Task<AgentActionResult> AccessBotIntegrationAsync(
+        Guid agentId, Guid botIntegrationId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateResourceAccessAsync(
+            agentId, botIntegrationId, caller,
+            p => p.BotIntegrationAccesses, a => a.BotIntegrationId, a => a.Clearance,
+            "bot integration access", onApproved, ct);
 
     // ═══════════════════════════════════════════════════════════════
     // Core evaluation engine
@@ -397,6 +412,9 @@ public sealed class AgentActionService(SharpClawDbContext db)
             .Include(p => p.AgentPermissions)
             .Include(p => p.TaskPermissions)
             .Include(p => p.SkillPermissions)
+            .Include(p => p.AgentHeaderAccesses)
+            .Include(p => p.ChannelHeaderAccesses)
+            .Include(p => p.BotIntegrationAccesses)
             .Include(p => p.ClearanceUserWhitelist)
             .Include(p => p.ClearanceAgentWhitelist)
             .FirstOrDefaultAsync(p => p.Id == permissionSetId, ct);

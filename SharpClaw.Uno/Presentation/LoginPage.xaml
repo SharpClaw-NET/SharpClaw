@@ -50,6 +50,21 @@
                    Text="Default admin credentials: username admin, password 123456 unless otherwise configured in SharpClaw.Application/Environments/.env. You are encouraged to change them after finishing first-time setup." />
       </Border>
 
+      <!-- Saved accounts (populated in code-behind) -->
+      <StackPanel x:Name="SavedAccountsSection"
+                  Visibility="Collapsed"
+                  Spacing="4"
+                  Margin="0,0,0,8">
+        <TextBlock Text="> Saved accounts"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="12"
+                   Foreground="#666666" />
+        <StackPanel x:Name="SavedAccountsPanel" Spacing="2" />
+        <Border BorderBrush="#333333"
+                BorderThickness="0,0,0,1"
+                Margin="0,4,0,4" />
+      </StackPanel>
+
       <!-- Username -->
       <TextBlock Text="username:"
                  Style="{StaticResource TerminalText}"
@@ -72,6 +87,16 @@
                    PasswordChanged="OnCredentialChanged"
                    PlaceholderText="••••••••"
                    HorizontalAlignment="Stretch" />
+
+      <!-- Remember me -->
+      <CheckBox x:Name="RememberMeCheck"
+                IsChecked="True"
+                Margin="0,4,0,0">
+        <TextBlock Text="Remember me"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="12"
+                   Foreground="#999999" />
+      </CheckBox>
 
       <!-- Confirm password (register mode only) -->
       <TextBlock x:Name="ConfirmLabel"
@@ -123,5 +148,17 @@
       <!-- Cursor -->
       <local:TerminalCursor x:Name="Cursor" Margin="0,8,0,0" />
     </StackPanel>
+
+    <!-- Bottom-left env button -->
+    <Button Background="Transparent" BorderThickness="0" Padding="8"
+            VerticalAlignment="Bottom" HorizontalAlignment="Left"
+            Margin="16,0,0,16"
+            Click="OnEnvClick"
+            ToolTipService.ToolTip="Environment Configuration">
+      <TextBlock Text=">env"
+                 Style="{StaticResource TerminalText}"
+                 FontSize="12"
+                 Foreground="#555555" />
+    </Button>
   </Grid>
 </Page>

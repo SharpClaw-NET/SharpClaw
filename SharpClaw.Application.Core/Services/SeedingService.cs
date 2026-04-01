@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Resources;
 using SharpClaw.Contracts;
@@ -52,14 +53,21 @@ public sealed class SeedingService(
             .FirstOrDefaultAsync(r => r.Name == AdminRoleName, ct);
         if (existing is not null)
         {
-            // Ensure the permissions record exists for pre-existing roles
             if (existing.PermissionSetId is null)
             {
+                // No permission set at all — create the full set.
                 var ps = CreateAdminPermissions();
                 db.PermissionSets.Add(ps);
                 await db.SaveChangesAsync(ct);
                 existing.PermissionSetId = ps.Id;
                 await db.SaveChangesAsync(ct);
+            }
+            else if (configuration.GetValue<bool>("Admin:ReconcilePermissions"))
+            {
+                // Reconcile: bring the existing permission set up to date
+                // in case new flags or grant types were added after initial seeding.
+                // Off by default — enable via Admin:ReconcilePermissions = true in .env.
+                await ReconcileAdminPermissionsAsync(db, existing.PermissionSetId.Value, ct);
             }
             return existing;
         }
@@ -87,24 +95,136 @@ public sealed class SeedingService(
         CanAccessLocalhostCli = true,
         CanClickDesktop = true,
         CanTypeOnDesktop = true,
+        CanReadCrossThreadHistory = true,
+        CanEditAgentHeader = true,
+        CanEditChannelHeader = true,
 
         // Wildcard grants — access to ALL resources of each type.
         // WellKnownIds.AllResources is recognised as a universal match
         // by AgentActionService and is immutable at runtime.
-        DangerousShellAccesses      = [new() { SystemUserId              = WellKnownIds.AllResources }],
-        SafeShellAccesses           = [new() { ContainerId              = WellKnownIds.AllResources }],
-        LocalInfoStorePermissions   = [new() { LocalInformationStoreId   = WellKnownIds.AllResources }],
+        DangerousShellAccesses       = [new() { SystemUserId               = WellKnownIds.AllResources }],
+        SafeShellAccesses            = [new() { ContainerId               = WellKnownIds.AllResources }],
+        LocalInfoStorePermissions    = [new() { LocalInformationStoreId    = WellKnownIds.AllResources }],
         ExternalInfoStorePermissions = [new() { ExternalInformationStoreId = WellKnownIds.AllResources }],
-        WebsiteAccesses             = [new() { WebsiteId                 = WellKnownIds.AllResources }],
-        SearchEngineAccesses        = [new() { SearchEngineId            = WellKnownIds.AllResources }],
-        ContainerAccesses           = [new() { ContainerId               = WellKnownIds.AllResources }],
-        AudioDeviceAccesses         = [new() { AudioDeviceId             = WellKnownIds.AllResources }],
-        DisplayDeviceAccesses       = [new() { DisplayDeviceId           = WellKnownIds.AllResources }],
-        EditorSessionAccesses       = [new() { EditorSessionId           = WellKnownIds.AllResources }],
-        AgentPermissions            = [new() { AgentId                   = WellKnownIds.AllResources }],
-        TaskPermissions             = [new() { ScheduledTaskId           = WellKnownIds.AllResources }],
-        SkillPermissions            = [new() { SkillId                   = WellKnownIds.AllResources }],
+        WebsiteAccesses              = [new() { WebsiteId                  = WellKnownIds.AllResources }],
+        SearchEngineAccesses         = [new() { SearchEngineId             = WellKnownIds.AllResources }],
+        ContainerAccesses            = [new() { ContainerId                = WellKnownIds.AllResources }],
+        AudioDeviceAccesses          = [new() { AudioDeviceId              = WellKnownIds.AllResources }],
+        DisplayDeviceAccesses        = [new() { DisplayDeviceId            = WellKnownIds.AllResources }],
+        EditorSessionAccesses        = [new() { EditorSessionId            = WellKnownIds.AllResources }],
+        AgentPermissions             = [new() { AgentId                    = WellKnownIds.AllResources }],
+        TaskPermissions              = [new() { ScheduledTaskId            = WellKnownIds.AllResources }],
+        SkillPermissions             = [new() { SkillId                    = WellKnownIds.AllResources }],
+        AgentHeaderAccesses          = [new() { AgentId                    = WellKnownIds.AllResources }],
+        ChannelHeaderAccesses        = [new() { ChannelId                  = WellKnownIds.AllResources }],
     };
+
+    /// <summary>
+    /// Ensures an existing admin permission set has all current flags enabled
+    /// and all wildcard resource grants present. Runs on every startup so newly
+    /// added permission types are automatically back-filled.
+    /// </summary>
+    private async Task ReconcileAdminPermissionsAsync(
+        SharpClawDbContext db, Guid psId, CancellationToken ct)
+    {
+        var ps = await db.PermissionSets
+            .Include(p => p.DangerousShellAccesses)
+            .Include(p => p.SafeShellAccesses)
+            .Include(p => p.ContainerAccesses)
+            .Include(p => p.WebsiteAccesses)
+            .Include(p => p.SearchEngineAccesses)
+            .Include(p => p.LocalInfoStorePermissions)
+            .Include(p => p.ExternalInfoStorePermissions)
+            .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.DisplayDeviceAccesses)
+            .Include(p => p.EditorSessionAccesses)
+            .Include(p => p.AgentPermissions)
+            .Include(p => p.TaskPermissions)
+            .Include(p => p.SkillPermissions)
+            .Include(p => p.AgentHeaderAccesses)
+            .Include(p => p.ChannelHeaderAccesses)
+            .AsSplitQuery()
+            .FirstOrDefaultAsync(p => p.Id == psId, ct);
+
+        if (ps is null)
+            return;
+
+        var changed = false;
+
+        // ── Global flags ──────────────────────────────────────────
+        if (ps.DefaultClearance != PermissionClearance.Independent)
+        {
+            ps.DefaultClearance = PermissionClearance.Independent;
+            changed = true;
+        }
+        changed |= ReconcileFlag(v => ps.CanCreateSubAgents = v, ps.CanCreateSubAgents);
+        changed |= ReconcileFlag(v => ps.CanCreateContainers = v, ps.CanCreateContainers);
+        changed |= ReconcileFlag(v => ps.CanRegisterInfoStores = v, ps.CanRegisterInfoStores);
+        changed |= ReconcileFlag(v => ps.CanAccessLocalhostInBrowser = v, ps.CanAccessLocalhostInBrowser);
+        changed |= ReconcileFlag(v => ps.CanAccessLocalhostCli = v, ps.CanAccessLocalhostCli);
+        changed |= ReconcileFlag(v => ps.CanClickDesktop = v, ps.CanClickDesktop);
+        changed |= ReconcileFlag(v => ps.CanTypeOnDesktop = v, ps.CanTypeOnDesktop);
+        changed |= ReconcileFlag(v => ps.CanReadCrossThreadHistory = v, ps.CanReadCrossThreadHistory);
+        changed |= ReconcileFlag(v => ps.CanEditAgentHeader = v, ps.CanEditAgentHeader);
+        changed |= ReconcileFlag(v => ps.CanEditChannelHeader = v, ps.CanEditChannelHeader);
+
+        // ── Wildcard resource grants ──────────────────────────────
+        changed |= EnsureWildcard(ps.DangerousShellAccesses, a => a.SystemUserId,
+            () => new DangerousShellAccessDB { PermissionSetId = psId, SystemUserId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.SafeShellAccesses, a => a.ContainerId,
+            () => new SafeShellAccessDB { PermissionSetId = psId, ContainerId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.ContainerAccesses, a => a.ContainerId,
+            () => new ContainerAccessDB { PermissionSetId = psId, ContainerId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.WebsiteAccesses, a => a.WebsiteId,
+            () => new WebsiteAccessDB { PermissionSetId = psId, WebsiteId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.SearchEngineAccesses, a => a.SearchEngineId,
+            () => new SearchEngineAccessDB { PermissionSetId = psId, SearchEngineId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.LocalInfoStorePermissions, a => a.LocalInformationStoreId,
+            () => new LocalInfoStoreAccessDB { PermissionSetId = psId, LocalInformationStoreId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.ExternalInfoStorePermissions, a => a.ExternalInformationStoreId,
+            () => new ExternalInfoStoreAccessDB { PermissionSetId = psId, ExternalInformationStoreId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.AudioDeviceAccesses, a => a.AudioDeviceId,
+            () => new AudioDeviceAccessDB { PermissionSetId = psId, AudioDeviceId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.DisplayDeviceAccesses, a => a.DisplayDeviceId,
+            () => new DisplayDeviceAccessDB { PermissionSetId = psId, DisplayDeviceId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.EditorSessionAccesses, a => a.EditorSessionId,
+            () => new EditorSessionAccessDB { PermissionSetId = psId, EditorSessionId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.AgentPermissions, a => a.AgentId,
+            () => new AgentManagementAccessDB { PermissionSetId = psId, AgentId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.TaskPermissions, a => a.ScheduledTaskId,
+            () => new TaskManageAccessDB { PermissionSetId = psId, ScheduledTaskId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.SkillPermissions, a => a.SkillId,
+            () => new SkillManageAccessDB { PermissionSetId = psId, SkillId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.AgentHeaderAccesses, a => a.AgentId,
+            () => new AgentHeaderAccessDB { PermissionSetId = psId, AgentId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.ChannelHeaderAccesses, a => a.ChannelId,
+            () => new ChannelHeaderAccessDB { PermissionSetId = psId, ChannelId = WellKnownIds.AllResources });
+
+        if (changed)
+        {
+            logger.LogInformation("Reconciled admin permissions — added missing grants.");
+            await db.SaveChangesAsync(ct);
+        }
+
+        return;
+
+        // Local helpers ────────────────────────────────────────────
+        static bool ReconcileFlag(Action<bool> setter, bool current)
+        {
+            if (current) return false;
+            setter(true);
+            return true;
+        }
+
+        static bool EnsureWildcard<T>(
+            ICollection<T> collection, Func<T, Guid> selector, Func<T> factory)
+        {
+            if (collection.Any(a => selector(a) == WellKnownIds.AllResources))
+                return false;
+            collection.Add(factory());
+            return true;
+        }
+    }
 
     private async Task SeedAdminUserAsync(SharpClawDbContext db, RoleDB adminRole, CancellationToken ct)
     {

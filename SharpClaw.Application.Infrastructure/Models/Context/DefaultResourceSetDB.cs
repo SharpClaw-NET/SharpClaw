@@ -55,6 +55,9 @@ public class DefaultResourceSetDB : BaseEntity
     /// <summary>Default Skill for AccessSkill.</summary>
     public Guid? SkillResourceId { get; set; }
 
+    /// <summary>Default BotIntegration for SendBotMessage.</summary>
+    public Guid? BotIntegrationResourceId { get; set; }
+
     // ── Non-resource defaults ─────────────────────────────────────
 
     /// <summary>

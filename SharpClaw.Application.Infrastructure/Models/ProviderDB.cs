@@ -1,3 +1,4 @@
+using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
@@ -13,6 +14,7 @@ public class ProviderDB : BaseEntity
     /// </summary>
     public string? ApiEndpoint { get; set; }
 
+    [HeaderSensitive]
     public string? EncryptedApiKey { get; set; }
 
     public ICollection<ModelDB> Models { get; set; } = [];

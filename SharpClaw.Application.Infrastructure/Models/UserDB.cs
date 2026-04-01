@@ -1,4 +1,5 @@
 using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 
 namespace SharpClaw.Infrastructure.Models;
@@ -6,7 +7,11 @@ namespace SharpClaw.Infrastructure.Models;
 public class UserDB : BaseEntity
 {
     public required string Username { get; set; }
+
+    [HeaderSensitive]
     public required byte[] PasswordHash { get; set; }
+
+    [HeaderSensitive]
     public required byte[] PasswordSalt { get; set; }
 
     /// <summary>

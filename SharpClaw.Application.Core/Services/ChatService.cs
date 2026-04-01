@@ -2,8 +2,8 @@ using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
@@ -20,13 +20,16 @@ using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Services;
 
-public sealed partial class ChatService(
+public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
     ProviderApiClientFactory clientFactory,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
-    LocalModelService localModelService)
+    LocalModelService localModelService,
+    HeaderTagProcessor headerTagProcessor,
+    ThreadActivitySignal threadActivity,
+    IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
     private const int MaxHistoryCharacters = 100_000;
@@ -38,6 +41,9 @@ public sealed partial class ChatService(
     /// </summary>
     private const int MaxToolCallRounds = 10;
 
+    private readonly bool _disableCustomProviderParameters =
+        configuration.GetValue<bool>("Agent:DisableCustomProviderParameters");
+
     public async Task<ChatResponse> SendMessageAsync(
         Guid channelId, ChatRequest request,
         Guid? threadId = null,
@@ -46,7 +52,10 @@ public sealed partial class ChatService(
     {
         var channel = await db.Channels
             .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent!).ThenInclude(a => a.ToolAwarenessSet)
+            .Include(c => c.ToolAwarenessSet)
             .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.ToolAwarenessSet)
             .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
@@ -69,6 +78,15 @@ public sealed partial class ChatService(
         if (isLocal)
             await localModelService.EnsureReadyForChatAsync(model.Id, ct);
 
+        // Acquire per-thread lock for sequential processing
+        IDisposable? threadLock = null;
+        if (threadId is not null)
+        {
+            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
+        }
+
         try
         {
 
@@ -90,10 +108,15 @@ public sealed partial class ChatService(
         if (client is LocalInferenceApiClient lic)
             lic.CurrentModelId = model.Id;
         var useNativeTools = client.SupportsNativeToolCalling;
-        var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, useNativeTools);
+        var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
+        var enableTools = !disableTools && useNativeTools;
+        var systemPrompt = enableTools
+            ? BuildSystemPrompt(agent.SystemPrompt)
+            : agent.SystemPrompt ?? "";
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -105,22 +128,17 @@ public sealed partial class ChatService(
 
         var modelCapabilities = model.Capabilities;
         var maxTokens = agent.MaxCompletionTokens;
+        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+        var toolAwareness = enableTools ? (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools) : null;
 
-        var loopResult = useNativeTools
-            ? await RunNativeToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
-                taskContext: request.TaskContext)
-            : await RunTextToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilities, maxTokens, approvalCallback, ct,
-                taskContext: request.TaskContext);
-
-        // Persist both messages
+        // Persist user message immediately so it gets an accurate
+        // CreatedAt and survives crashes during LLM inference.
         var senderUserId = jobService.GetSessionUserId();
         var senderUsername = senderUserId.HasValue
             ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
-            : null;
+            : request.ExternalDisplayName ?? request.ExternalUsername;
 
         var userMessage = new ChatMessageDB
         {
@@ -133,6 +151,19 @@ public sealed partial class ChatService(
             ClientType = request.ClientType
         };
 
+        db.ChatMessages.Add(userMessage);
+        await db.SaveChangesAsync(ct);
+
+        var loopResult = enableTools
+            ? await RunNativeToolLoopAsync(
+                client, httpClient, apiKey, model.Name, systemPrompt,
+                history, agent.Id, channelId, modelCapabilities, maxTokens, providerParams, completionParams, approvalCallback, ct,
+                taskContext: request.TaskContext, toolAwareness: toolAwareness)
+            : await RunPlainCompletionAsync(
+                client, httpClient, apiKey, model.Name, systemPrompt,
+                history, maxTokens, providerParams, completionParams, ct);
+
+        // Persist assistant message after LLM completes
         var assistantMessage = new ChatMessageDB
         {
             Role = "assistant",
@@ -141,21 +172,36 @@ public sealed partial class ChatService(
             ThreadId = threadId,
             SenderAgentId = agent.Id,
             SenderAgentName = agent.Name,
-            ClientType = request.ClientType
+            ClientType = request.ClientType,
+            PromptTokens = loopResult.TotalPromptTokens > 0 ? loopResult.TotalPromptTokens : null,
+            CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null
         };
 
-        db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
+
+        if (threadId is not null)
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
+
+        // Piggyback cost data on the response so callers don't need
+        // a separate round-trip to the /cost endpoints.
+        var channelCost = await GetChannelCostAsync(channelId, ct);
+        var threadCost = threadId is not null
+            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
+            : null;
 
         return new ChatResponse(
             ToMessageResponse(userMessage),
             ToMessageResponse(assistantMessage),
-            loopResult.JobResults.Count > 0 ? loopResult.JobResults : null);
+            loopResult.JobResults.Count > 0 ? loopResult.JobResults : null,
+            channelCost,
+            threadCost);
 
         } // try
         finally
         {
+            threadLock?.Dispose();
             if (isLocal)
                 localModelService.ReleaseAfterChat(model.Id);
         }
@@ -170,8 +216,10 @@ public sealed partial class ChatService(
 
         return await query
             .OrderByDescending(m => m.CreatedAt)
+            .ThenByDescending(m => m.Id)
             .Take(limit)
             .OrderBy(m => m.CreatedAt)
+            .ThenBy(m => m.Id)
             .Select(m => new ChatMessageResponse(
                 m.Role, m.Content, m.CreatedAt,
                 m.SenderUserId, m.SenderUsername,
@@ -185,6 +233,82 @@ public sealed partial class ChatService(
             m.SenderUserId, m.SenderUsername,
             m.SenderAgentId, m.SenderAgentName,
             m.ClientType?.ToString());
+
+    // ═══════════════════════════════════════════════════════════════
+    // Token cost aggregation
+    // ═══════════════════════════════════════════════════════════════
+
+    public async Task<ChannelCostResponse> GetChannelCostAsync(
+        Guid channelId, CancellationToken ct = default)
+    {
+        var rows = await db.ChatMessages
+            .Where(m => m.ChannelId == channelId && m.PromptTokens != null)
+            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
+            .Select(g => new
+            {
+                g.Key.SenderAgentId,
+                g.Key.SenderAgentName,
+                PromptTokens = g.Sum(m => m.PromptTokens!.Value),
+                CompletionTokens = g.Sum(m => m.CompletionTokens ?? 0)
+            })
+            .ToListAsync(ct);
+
+        var breakdown = rows
+            .Where(r => r.SenderAgentId.HasValue)
+            .Select(r => new AgentTokenBreakdown(
+                r.SenderAgentId!.Value,
+                r.SenderAgentName ?? "Unknown",
+                r.PromptTokens,
+                r.CompletionTokens,
+                r.PromptTokens + r.CompletionTokens))
+            .OrderByDescending(b => b.TotalTokens)
+            .ToList();
+
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ChannelCostResponse(
+            channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
+
+    public async Task<ThreadCostResponse?> GetThreadCostAsync(
+        Guid channelId, Guid threadId, CancellationToken ct = default)
+    {
+        var threadExists = await db.ChatThreads
+            .AnyAsync(t => t.Id == threadId && t.ChannelId == channelId, ct);
+        if (!threadExists) return null;
+
+        var rows = await db.ChatMessages
+            .Where(m => m.ThreadId == threadId && m.PromptTokens != null)
+            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
+            .Select(g => new
+            {
+                g.Key.SenderAgentId,
+                g.Key.SenderAgentName,
+                PromptTokens = g.Sum(m => m.PromptTokens!.Value),
+                CompletionTokens = g.Sum(m => m.CompletionTokens ?? 0)
+            })
+            .ToListAsync(ct);
+
+        var breakdown = rows
+            .Where(r => r.SenderAgentId.HasValue)
+            .Select(r => new AgentTokenBreakdown(
+                r.SenderAgentId!.Value,
+                r.SenderAgentName ?? "Unknown",
+                r.PromptTokens,
+                r.CompletionTokens,
+                r.PromptTokens + r.CompletionTokens))
+            .OrderByDescending(b => b.TotalTokens)
+            .ToList();
+
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ThreadCostResponse(
+            threadId, channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Agent resolution
@@ -276,7 +400,8 @@ public sealed partial class ChatService(
     private async Task<string?> BuildChatHeaderAsync(
         ChannelDB channel, AgentDB agent, ChatClientType clientType,
         EditorContext? editorContext, CancellationToken ct,
-        TaskChatContext? taskContext = null)
+        TaskChatContext? taskContext = null,
+        string? externalUsername = null, string? externalDisplayName = null)
     {
         // Channel-level flag takes precedence; fall back to context.
         var disabled = channel.DisableChatHeader
@@ -287,9 +412,57 @@ public sealed partial class ChatService(
 
         // ── Task-sourced message: lightweight header, no user lookup ──
         if (taskContext is not null)
-            return await BuildTaskChatHeaderAsync(channel, agent, taskContext, ct);
+        {
+            var taskSb = new StringBuilder();
+            taskSb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
+            taskSb.Append(" | source: automated task");
+            taskSb.Append(" | task: ").Append(taskContext.TaskName);
+
+            var store = TaskSharedData.Get(taskContext.InstanceId);
+            if (store is not null)
+            {
+                var lightText = store.LightData;
+                if (lightText is not null)
+                    taskSb.Append(" | shared-data: ").Append(lightText);
+
+                var bigEntries = store.ListBig();
+                if (bigEntries.Count > 0)
+                {
+                    taskSb.Append(" | big-data-ids: [");
+                    taskSb.Append(string.Join(", ", bigEntries.Select(e => $"{e.Id}:\"{e.Title}\"")));
+                    taskSb.Append(']');
+                }
+            }
+
+            await AppendAgentSuffixAsync(taskSb, agent.Id, channel.Id, editorContext: null, ct);
+            return taskSb.ToString();
+        }
+
+        // ── Custom header resolution: channel overrides agent ────────
+        var customTemplate = channel.CustomChatHeader ?? agent.CustomChatHeader;
+        if (customTemplate is not null)
+        {
+            var userId2 = jobService.GetSessionUserId();
+            return await headerTagProcessor.ExpandAsync(
+                customTemplate, channel, agent, clientType, editorContext, userId2, ct);
+        }
 
         var userId = jobService.GetSessionUserId();
+
+        // ── External user (bot-forwarded message): no DB session ─────
+        if (userId is null && externalUsername is not null)
+        {
+            var extSb = new StringBuilder();
+            extSb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
+            extSb.Append(" | user: ").Append(externalDisplayName ?? externalUsername);
+            if (externalDisplayName is not null && externalUsername != externalDisplayName)
+                extSb.Append(" (@").Append(externalUsername).Append(')');
+            extSb.Append(" | via: ").Append(clientType);
+
+            await AppendAgentSuffixAsync(extSb, agent.Id, channel.Id, editorContext: null, ct);
+            return extSb.ToString();
+        }
+
         if (userId is null)
             return null;
 
@@ -320,6 +493,9 @@ public sealed partial class ChatService(
                 .Include(p => p.AgentPermissions)
                 .Include(p => p.TaskPermissions)
                 .Include(p => p.SkillPermissions)
+                .Include(p => p.AgentHeaderAccesses)
+                .Include(p => p.ChannelHeaderAccesses)
+                .Include(p => p.BotIntegrationAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == psId, ct);
         }
@@ -331,7 +507,7 @@ public sealed partial class ChatService(
 
         if (user.Role is not null && ps is not null)
         {
-            var grants = CollectGrants(ps);
+            var grants = await CollectGrantsWithResourcesAsync(ps, ct);
 
             if (grants.Count > 0)
                 sb.Append(" | role: ").Append(user.Role.Name)
@@ -343,11 +519,23 @@ public sealed partial class ChatService(
         if (!string.IsNullOrWhiteSpace(user.Bio))
             sb.Append(" | bio: ").Append(user.Bio);
 
-        // ── Agent self-awareness: own role, clearance, permissions ─
+        await AppendAgentSuffixAsync(sb, agent.Id, channel.Id, editorContext, ct);
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Appends the shared agent-role, policy, accessible-threads, optional
+    /// editor context, and closing bracket to a header being constructed.
+    /// Shared across all header paths (authenticated user, external user, task).
+    /// </summary>
+    private async Task AppendAgentSuffixAsync(
+        StringBuilder sb, Guid agentId, Guid channelId,
+        EditorContext? editorContext, CancellationToken ct)
+    {
         var agentWithRole = await db.Agents
             .Include(a => a.Role)
             .ThenInclude(r => r!.PermissionSet)
-            .FirstOrDefaultAsync(a => a.Id == agent.Id, ct);
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
 
         if (agentWithRole?.Role is { } agentRole)
         {
@@ -367,6 +555,9 @@ public sealed partial class ChatService(
                     .Include(p => p.AgentPermissions)
                     .Include(p => p.TaskPermissions)
                     .Include(p => p.SkillPermissions)
+                    .Include(p => p.AgentHeaderAccesses)
+                    .Include(p => p.ChannelHeaderAccesses)
+                    .Include(p => p.BotIntegrationAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
@@ -378,14 +569,23 @@ public sealed partial class ChatService(
                 var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
                 if (agentGrants.Count > 0)
                     sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
+                else
+                    sb.Append(" (zero resource-grants — tool-calls unauthorized)");
             }
         }
         else
         {
-            // Agent has no role — emit a minimal self-awareness line so the
-            // model knows it has no permissions and must rely on user-supplied
-            // resource IDs from the conversation.
-            sb.Append(" | agent-role: (none) clearance=Unset");
+            sb.Append(" | agent-role: (none) clearance=Unset (no permissions)");
+        }
+
+        sb.Append(" | policy: unlisted-resource/GUID=denied; disclose gaps to user");
+
+        var accessibleThreads = await GetAccessibleThreadsAsync(agentId, channelId, ct);
+        if (accessibleThreads.Count > 0)
+        {
+            sb.Append(" | accessible-threads: ");
+            sb.Append(string.Join(", ", accessibleThreads.Select(
+                t => $"{t.ThreadName} [{t.ChannelTitle}] ({t.ThreadId:D})")));
         }
 
         if (editorContext is not null)
@@ -402,127 +602,14 @@ public sealed partial class ChatService(
         }
 
         sb.AppendLine("]");
-        return sb.ToString();
     }
 
     /// <summary>
-    /// Builds a compact header for messages originating from an automated
-    /// task.  Unlike the user header, there is no session user — the
-    /// header identifies the task by name so the agent understands the
-    /// request is automated.  Includes light-shared-data inline and
-    /// big-shared-data IDs for tool-based retrieval.
-    /// </summary>
-    private async Task<string> BuildTaskChatHeaderAsync(
-        ChannelDB channel, AgentDB agent, TaskChatContext taskContext, CancellationToken ct)
-    {
-        var sb = new StringBuilder();
-        sb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
-        sb.Append(" | source: automated task");
-        sb.Append(" | task: ").Append(taskContext.TaskName);
-
-        // ── Shared data visible to the model ──
-        var store = TaskSharedData.Get(taskContext.InstanceId);
-        if (store is not null)
-        {
-            // Light data — plain text (≤500 words)
-            var lightText = store.LightData;
-            if (lightText is not null)
-            {
-                sb.Append(" | shared-data: ").Append(lightText);
-            }
-
-            // Big data — IDs + titles only (use task_read_big_data to get content)
-            var bigEntries = store.ListBig();
-            if (bigEntries.Count > 0)
-            {
-                sb.Append(" | big-data-ids: [");
-                sb.Append(string.Join(", ", bigEntries.Select(e => $"{e.Id}:\"{e.Title}\"")));
-                sb.Append(']');
-            }
-        }
-
-        // ── Agent self-awareness (same as user header) ──
-        var agentWithRole = await db.Agents
-            .Include(a => a.Role)
-            .ThenInclude(r => r!.PermissionSet)
-            .FirstOrDefaultAsync(a => a.Id == agent.Id, ct);
-
-        if (agentWithRole?.Role is { } agentRole)
-        {
-            PermissionSetDB? agentPs = null;
-            if (agentRole.PermissionSetId is { } agentPsId)
-            {
-                agentPs = await db.PermissionSets
-                    .Include(p => p.SafeShellAccesses)
-                    .Include(p => p.ContainerAccesses)
-                    .Include(p => p.WebsiteAccesses)
-                    .Include(p => p.SearchEngineAccesses)
-                    .Include(p => p.LocalInfoStorePermissions)
-                    .Include(p => p.ExternalInfoStorePermissions)
-                    .Include(p => p.AudioDeviceAccesses)
-                    .Include(p => p.DisplayDeviceAccesses)
-                    .Include(p => p.EditorSessionAccesses)
-                    .Include(p => p.AgentPermissions)
-                    .Include(p => p.TaskPermissions)
-                    .Include(p => p.SkillPermissions)
-                    .AsSplitQuery()
-                    .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
-            }
-
-            sb.Append(" | agent-role: ").Append(agentRole.Name);
-            if (agentPs is not null)
-            {
-                sb.Append(" clearance=").Append(agentPs.DefaultClearance);
-                var agentGrants = await CollectGrantsWithResourcesAsync(agentPs, ct);
-                if (agentGrants.Count > 0)
-                    sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
-            }
-        }
-        else
-        {
-            sb.Append(" | agent-role: (none) clearance=Unset");
-        }
-
-        sb.AppendLine("]");
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Collects human-readable grant names from a permission set for
-    /// inclusion in the chat header.
-    /// </summary>
-    private static List<string> CollectGrants(PermissionSetDB ps)
-    {
-        var grants = new List<string>();
-        if (ps.CanCreateSubAgents) grants.Add("CreateSubAgents");
-        if (ps.CanCreateContainers) grants.Add("CreateContainers");
-        if (ps.CanRegisterInfoStores) grants.Add("RegisterInfoStores");
-        if (ps.CanAccessLocalhostInBrowser) grants.Add("LocalhostBrowser");
-        if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
-        if (ps.CanClickDesktop) grants.Add("ClickDesktop");
-        if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
-        if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
-        if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
-        if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
-        if (ps.WebsiteAccesses.Count > 0) grants.Add("WebsiteAccess");
-        if (ps.SearchEngineAccesses.Count > 0) grants.Add("SearchEngineAccess");
-        if (ps.LocalInfoStorePermissions.Count > 0) grants.Add("LocalInfoStore");
-        if (ps.ExternalInfoStorePermissions.Count > 0) grants.Add("ExternalInfoStore");
-        if (ps.AudioDeviceAccesses.Count > 0) grants.Add("AudioDevice");
-        if (ps.DisplayDeviceAccesses.Count > 0) grants.Add("DisplayDevice");
-        if (ps.EditorSessionAccesses.Count > 0) grants.Add("EditorSession");
-        if (ps.AgentPermissions.Count > 0) grants.Add("ManageAgent");
-        if (ps.TaskPermissions.Count > 0) grants.Add("EditTask");
-        if (ps.SkillPermissions.Count > 0) grants.Add("AccessSkill");
-        return grants;
-    }
-
-    /// <summary>
-    /// Collects grant names with enumerated resource IDs for the agent
-    /// self-awareness header. When a wildcard grant
+    /// Collects grant names with enumerated resource IDs for the chat
+    /// header (both user and agent sections). When a wildcard grant
     /// (<see cref="WellKnownIds.AllResources"/>) is present, all resource
-    /// IDs of that type are resolved from the database so the agent knows
-    /// exactly which resources it can act on.
+    /// IDs of that type are resolved from the database so the reader
+    /// knows exactly which resources the permission set covers.
     /// </summary>
     private async Task<List<string>> CollectGrantsWithResourcesAsync(
         PermissionSetDB ps, CancellationToken ct)
@@ -535,6 +622,7 @@ public sealed partial class ChatService(
         if (ps.CanAccessLocalhostCli) grants.Add("LocalhostCli");
         if (ps.CanClickDesktop) grants.Add("ClickDesktop");
         if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
+        if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
 
         await AppendResourceGrantAsync(grants, "DangerousShell",
             ps.DangerousShellAccesses.Select(a => a.SystemUserId),
@@ -587,6 +675,10 @@ public sealed partial class ChatService(
         await AppendResourceGrantAsync(grants, "AccessSkill",
             ps.SkillPermissions.Select(a => a.SkillId),
             () => db.Skills.Select(s => s.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "BotIntegration",
+            ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
+            () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct), ct);
 
         return grants;
     }
@@ -653,7 +745,10 @@ public sealed partial class ChatService(
     {
         var channel = await db.Channels
             .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.Agent!).ThenInclude(a => a.ToolAwarenessSet)
+            .Include(c => c.ToolAwarenessSet)
             .Include(c => c.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
+            .Include(c => c.AllowedAgents).ThenInclude(a => a.ToolAwarenessSet)
             .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.Agent).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
@@ -676,6 +771,15 @@ public sealed partial class ChatService(
         if (isLocal)
             await localModelService.EnsureReadyForChatAsync(model.Id, ct);
 
+        // Acquire per-thread lock for sequential processing
+        IDisposable? threadLock = null;
+        if (threadId is not null)
+        {
+            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
+        }
+
         try
         {
 
@@ -696,10 +800,13 @@ public sealed partial class ChatService(
         var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
         if (client is LocalInferenceApiClient streamLic)
             streamLic.CurrentModelId = model.Id;
-        var systemPrompt = BuildSystemPrompt(agent.SystemPrompt, nativeToolCalling: true);
+        var systemPrompt = channel.DisableToolSchemas || agent.DisableToolSchemas
+            ? agent.SystemPrompt ?? ""
+            : BuildSystemPrompt(agent.SystemPrompt);
 
         // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct, taskContext: request.TaskContext);
+        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 
@@ -707,7 +814,36 @@ public sealed partial class ChatService(
 
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
         var maxTokens = agent.MaxCompletionTokens;
-        var effectiveTools = GetEffectiveTools(request.TaskContext);
+        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+        var toolAwareness = channel.DisableToolSchemas || agent.DisableToolSchemas
+            ? null
+            : (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools);
+        var effectiveTools = channel.DisableToolSchemas || agent.DisableToolSchemas
+            ? []
+            : GetEffectiveTools(request.TaskContext, toolAwareness);
+
+        // Persist user message immediately so it gets an accurate
+        // CreatedAt and survives crashes during LLM inference.
+        var senderUserId = jobService.GetSessionUserId();
+        var senderUsername = senderUserId.HasValue
+            ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
+            : request.ExternalDisplayName ?? request.ExternalUsername;
+
+        var userMessage = new ChatMessageDB
+        {
+            Role = "user",
+            Content = request.Message,
+            ChannelId = channelId,
+            ThreadId = threadId,
+            SenderUserId = senderUserId,
+            SenderUsername = senderUsername,
+            ClientType = request.ClientType
+        };
+
+        db.ChatMessages.Add(userMessage);
+        await db.SaveChangesAsync(ct);
 
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
@@ -717,6 +853,8 @@ public sealed partial class ChatService(
         var jobResults = new List<AgentJobResponse>();
         var fullContent = new StringBuilder();
         var rounds = 0;
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
 
         while (true)
         {
@@ -724,7 +862,7 @@ public sealed partial class ChatService(
             ChatCompletionResult? roundResult = null;
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct))
             {
                 if (chunk.Delta is not null)
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
@@ -735,6 +873,12 @@ public sealed partial class ChatService(
 
             if (roundResult is null)
                 break;
+
+            if (roundResult.Usage is { } roundUsage)
+            {
+                totalPromptTokens += roundUsage.PromptTokens;
+                totalCompletionTokens += roundUsage.CompletionTokens;
+            }
 
             fullContent.Append(roundResult.Content ?? "");
 
@@ -755,6 +899,14 @@ public sealed partial class ChatService(
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    continue;
+                }
+
+                // ── Inline tool interception (no permissions) ────
+                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, agent.Id, channelId, ct);
+                if (inlineHandled)
+                {
+                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
                     continue;
                 }
 
@@ -813,24 +965,8 @@ public sealed partial class ChatService(
             }
         }
 
-        // Persist both messages
+        // Persist assistant message after LLM completes
         var assistantContent = fullContent.ToString();
-
-        var senderUserId = jobService.GetSessionUserId();
-        var senderUsername = senderUserId.HasValue
-            ? (await db.Users.Where(u => u.Id == senderUserId.Value).Select(u => u.Username).FirstOrDefaultAsync(ct))
-            : null;
-
-        var userMessage = new ChatMessageDB
-        {
-            Role = "user",
-            Content = request.Message,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderUserId = senderUserId,
-            SenderUsername = senderUsername,
-            ClientType = request.ClientType
-        };
 
         var assistantMessage = new ChatMessageDB
         {
@@ -840,21 +976,34 @@ public sealed partial class ChatService(
             ThreadId = threadId,
             SenderAgentId = agent.Id,
             SenderAgentName = agent.Name,
-            ClientType = request.ClientType
+            ClientType = request.ClientType,
+            PromptTokens = totalPromptTokens > 0 ? totalPromptTokens : null,
+            CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null
         };
 
-        db.ChatMessages.Add(userMessage);
         db.ChatMessages.Add(assistantMessage);
         await db.SaveChangesAsync(ct);
+
+        if (threadId is not null)
+            threadActivity.Publish(threadId.Value,
+                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
+
+        var channelCost = await GetChannelCostAsync(channelId, ct);
+        var threadCost = threadId is not null
+            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
+            : null;
 
         yield return ChatStreamEvent.Complete(new ChatResponse(
             ToMessageResponse(userMessage),
             ToMessageResponse(assistantMessage),
-            jobResults.Count > 0 ? jobResults : null));
+            jobResults.Count > 0 ? jobResults : null,
+            channelCost,
+            threadCost));
 
         } // try
         finally
         {
+            threadLock?.Dispose();
             if (isLocal)
                 localModelService.ReleaseAfterChat(model.Id);
         }
@@ -887,27 +1036,48 @@ public sealed partial class ChatService(
     /// Returns the effective tool list for a chat call.  When a task
     /// context is present, task-specific tools (shared data, output,
     /// introspection, custom hooks) are appended to the standard set.
+    /// When a <paramref name="toolAwareness"/> filter is provided, only
+    /// tools whose key is <see langword="true"/> or absent are kept.
     /// </summary>
-    private static IReadOnlyList<ChatToolDefinition> GetEffectiveTools(TaskChatContext? taskContext)
+    private static IReadOnlyList<ChatToolDefinition> GetEffectiveTools(
+        TaskChatContext? taskContext, Dictionary<string, bool>? toolAwareness = null)
     {
+        IReadOnlyList<ChatToolDefinition> baseTools;
+
         if (taskContext is null)
-            return AllTools;
+        {
+            baseTools = AllTools;
+        }
+        else
+        {
+            var store = TaskSharedData.Get(taskContext.InstanceId);
+            if (store is null)
+            {
+                baseTools = AllTools;
+            }
+            else
+            {
+                var tools = new List<ChatToolDefinition>(AllTools);
+                tools.AddRange(BuiltInTaskTools);
 
-        var store = TaskSharedData.Get(taskContext.InstanceId);
-        if (store is null)
-            return AllTools;
+                // task_output only available when the task declares [AgentOutput]
+                if (store.AllowedOutputFormat is not null)
+                    tools.Add(TaskOutputToolDef);
 
-        var tools = new List<ChatToolDefinition>(AllTools);
-        tools.AddRange(BuiltInTaskTools);
+                // Custom [ToolCall] hooks
+                tools.AddRange(store.CustomToolDefinitions);
 
-        // task_output only available when the task declares [AgentOutput]
-        if (store.AllowedOutputFormat is not null)
-            tools.Add(TaskOutputToolDef);
+                baseTools = tools;
+            }
+        }
 
-        // Custom [ToolCall] hooks
-        tools.AddRange(store.CustomToolDefinitions);
+        if (toolAwareness is null or { Count: 0 })
+            return baseTools;
 
-        return tools;
+        // Filter: include only tools whose key is true or absent in the set.
+        return baseTools
+            .Where(t => !toolAwareness.TryGetValue(t.Name, out var enabled) || enabled)
+            .ToList();
     }
 
     /// <summary>
@@ -1027,6 +1197,239 @@ public sealed partial class ChatService(
         return (false, null);
     }
 
+    /// <summary>
+    /// Try to handle a tool call as a permission-free inline tool (e.g. <c>wait</c>)
+    /// or a cross-thread context tool (e.g. <c>list_accessible_threads</c>,
+    /// <c>read_thread_history</c>).
+    /// Returns <c>true</c> and sets <paramref name="result"/> if handled.
+    /// These tools never enter the job/permission pipeline.
+    /// </summary>
+    private async Task<(bool Handled, string? Result)> TryHandleInlineToolAsync(
+        ChatToolCall toolCall, Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        switch (toolCall.Name)
+        {
+            case "wait":
+                return await HandleWaitToolAsync(toolCall, ct);
+            case "list_accessible_threads":
+                return await HandleListAccessibleThreadsAsync(agentId, channelId, ct);
+            case "read_thread_history":
+                return await HandleReadThreadHistoryAsync(toolCall, agentId, channelId, ct);
+            default:
+                return (false, null);
+        }
+    }
+
+    private static async Task<(bool, string?)> HandleWaitToolAsync(
+        ChatToolCall toolCall, CancellationToken ct)
+    {
+        try
+        {
+            var seconds = 5; // default
+
+            if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
+            {
+                using var doc = JsonDocument.Parse(toolCall.ArgumentsJson);
+                if (doc.RootElement.TryGetProperty("seconds", out var secEl))
+                    seconds = secEl.GetInt32();
+            }
+
+            seconds = Math.Clamp(seconds, 1, 300);
+
+            await Task.Delay(TimeSpan.FromSeconds(seconds), ct);
+
+            return (true, $"Waited {seconds} second{(seconds == 1 ? "" : "s")}.");
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error in wait tool: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool, string?)> HandleListAccessibleThreadsAsync(
+        Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        try
+        {
+            var threads = await GetAccessibleThreadsAsync(agentId, channelId, ct);
+            if (threads.Count == 0)
+                return (true, "No accessible threads found. Either the agent lacks the ReadCrossThreadHistory permission, or no other channels have opted in.");
+
+            var result = threads.Select(t => new
+            {
+                threadId = t.ThreadId.ToString("D"),
+                threadName = t.ThreadName,
+                channelId = t.ChannelId.ToString("D"),
+                channelTitle = t.ChannelTitle,
+            });
+
+            return (true, JsonSerializer.Serialize(result));
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error listing accessible threads: {ex.Message}");
+        }
+    }
+
+    private async Task<(bool, string?)> HandleReadThreadHistoryAsync(
+        ChatToolCall toolCall, Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        try
+        {
+            Guid threadId = Guid.Empty;
+            int maxMessages = 50;
+
+            if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
+            {
+                using var doc = JsonDocument.Parse(toolCall.ArgumentsJson);
+                if (doc.RootElement.TryGetProperty("threadId", out var tidEl))
+                    Guid.TryParse(tidEl.GetString(), out threadId);
+                if (doc.RootElement.TryGetProperty("maxMessages", out var maxEl))
+                    maxMessages = Math.Clamp(maxEl.GetInt32(), 1, 200);
+            }
+
+            if (threadId == Guid.Empty)
+                return (true, "Error: threadId is required.");
+
+            // Load thread with its channel
+            var thread = await db.ChatThreads
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.AllowedAgents)
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.PermissionSet)
+                .Include(t => t.Channel)
+                    .ThenInclude(c => c.AgentContext)
+                        .ThenInclude(ctx => ctx!.PermissionSet)
+                .FirstOrDefaultAsync(t => t.Id == threadId, ct);
+
+            if (thread is null)
+                return (true, "Error: thread not found.");
+
+            // Must not be the current channel (use normal history for that)
+            if (thread.ChannelId == channelId)
+                return (true, "Error: use normal chat history to access threads in the current channel.");
+
+            // Check agent has access to the target channel
+            var targetChannel = thread.Channel;
+            var isAgentOnChannel = targetChannel.AgentId == agentId
+                || targetChannel.AllowedAgents.Any(a => a.Id == agentId);
+            if (!isAgentOnChannel)
+                return (true, "Error: agent is not assigned to the target channel.");
+
+            // Check agent has ReadCrossThreadHistory permission
+            var agentWithRole = await db.Agents
+                .Include(a => a.Role)
+                    .ThenInclude(r => r!.PermissionSet)
+                .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+
+            var agentPs = agentWithRole?.Role?.PermissionSet;
+            if (agentPs is not { CanReadCrossThreadHistory: true })
+                return (true, "Error: agent lacks ReadCrossThreadHistory permission.");
+
+            // Check channel opt-in (unless Independent clearance)
+            if (agentPs.ReadCrossThreadHistoryClearance != PermissionClearance.Independent)
+            {
+                var effectivePs = targetChannel.PermissionSet
+                    ?? targetChannel.AgentContext?.PermissionSet;
+                if (effectivePs?.CanReadCrossThreadHistory != true)
+                    return (true, "Error: the target channel has not opted in to cross-thread history sharing.");
+            }
+
+            // Fetch messages
+            var messages = await db.ChatMessages
+                .Where(m => m.ThreadId == threadId)
+                .OrderByDescending(m => m.CreatedAt)
+                .Take(maxMessages)
+                .OrderBy(m => m.CreatedAt)
+                .Select(m => new
+                {
+                    role = m.Role,
+                    content = m.Content,
+                    sender = m.SenderUsername ?? m.SenderAgentName ?? "unknown",
+                    timestamp = m.CreatedAt
+                })
+                .ToListAsync(ct);
+
+            if (messages.Count == 0)
+                return (true, "Thread exists but has no messages.");
+
+            return (true, JsonSerializer.Serialize(messages));
+        }
+        catch (Exception ex)
+        {
+            return (true, $"Error reading thread history: {ex.Message}");
+        }
+    }
+
+
+    /// <summary>
+    /// Finds threads accessible to this agent via cross-thread history
+    /// sharing.  A thread is accessible when:
+    /// <list type="number">
+    ///   <item>The agent has <c>CanReadCrossThreadHistory</c>.</item>
+    ///   <item>The agent is primary or allowed on the thread's channel.</item>
+    ///   <item>The channel's effective permission set also has
+    ///         <c>CanReadCrossThreadHistory</c> — unless the agent has
+    ///         <c>Independent</c> clearance for the flag.</item>
+    /// </list>
+    /// The current channel is excluded (the agent already has its own
+    /// history there).
+    /// </summary>
+    private async Task<List<(Guid ThreadId, string ThreadName, Guid ChannelId, string ChannelTitle)>>
+        GetAccessibleThreadsAsync(Guid agentId, Guid currentChannelId, CancellationToken ct)
+    {
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+                .ThenInclude(r => r!.PermissionSet)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+
+        if (agentWithRole?.Role?.PermissionSet is not { CanReadCrossThreadHistory: true } agentPs)
+            return [];
+
+        var isIndependent = agentPs.ReadCrossThreadHistoryClearance == PermissionClearance.Independent;
+
+        // Channels where the agent is primary or allowed, excluding current
+        var channels = await db.Channels
+            .Include(c => c.AllowedAgents)
+            .Include(c => c.PermissionSet)
+            .Include(c => c.AgentContext)
+                .ThenInclude(ctx => ctx!.PermissionSet)
+            .Where(c => c.Id != currentChannelId)
+            .Where(c => c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId))
+            .ToListAsync(ct);
+
+        // Filter by channel opt-in unless Independent
+        if (!isIndependent)
+        {
+            channels = channels
+                .Where(c =>
+                {
+                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
+                    return effectivePs?.CanReadCrossThreadHistory == true;
+                })
+                .ToList();
+        }
+
+        if (channels.Count == 0)
+            return [];
+
+        var channelIds = channels.Select(c => c.Id).ToList();
+        var threads = await db.ChatThreads
+            .Where(t => channelIds.Contains(t.ChannelId))
+            .OrderByDescending(t => t.UpdatedAt)
+            .Select(t => new { t.Id, t.Name, t.ChannelId })
+            .ToListAsync(ct);
+
+        var channelTitles = channels.ToDictionary(c => c.Id, c => c.Title);
+
+        return threads
+            .Select(t => (t.Id, t.Name, t.ChannelId, channelTitles[t.ChannelId]))
+            .ToList();
+    }
 
     // ── Built-in task tool definitions ────────────────────────────
 
@@ -1039,15 +1442,12 @@ public sealed partial class ChatService(
         return
         [
             new("task_write_light_data",
-                "Write text to the task's light shared data. This text is visible "
-                + "to all agents in the chat header (max 500 words). "
-                + "Use for small metadata like status, progress, or coordination notes. "
-                + "Each write replaces the previous text entirely.",
+                "Write to light shared data (visible in header, max 500 words). Replaces previous.",
                 BuildJsonSchema("""
                     {
                         "type": "object",
                         "properties": {
-                            "text": { "type": "string", "description": "The text to store (max 500 words)." }
+                            "text": { "type": "string", "description": "Text (max 500 words)." }
                         },
                         "required": ["text"]
                     }
@@ -1063,36 +1463,33 @@ public sealed partial class ChatService(
                     """)),
 
             new("task_write_big_data",
-                "Write a large data entry to the task's big shared data store. Only the entry "
-                + "ID and title appear in the chat header; the full content must be retrieved "
-                + "with task_read_big_data. Use for large payloads like analysis results, "
-                + "code snippets, or conversation summaries.",
+                "Write a large entry to big shared data. Only ID+title in header; use task_read_big_data for content.",
                 BuildJsonSchema("""
                     {
                         "type": "object",
                         "properties": {
-                            "id": { "type": "string", "description": "Optional entry ID (auto-generated if omitted)." },
-                            "title": { "type": "string", "description": "Short title for the entry." },
-                            "content": { "type": "string", "description": "The full content to store." }
+                            "id": { "type": "string", "description": "Entry ID (auto-generated if omitted)." },
+                            "title": { "type": "string", "description": "Short title." },
+                            "content": { "type": "string", "description": "Full content." }
                         },
                         "required": ["title", "content"]
                     }
                     """)),
 
             new("task_read_big_data",
-                "Read the full content of a big shared data entry by ID.",
+                "Read a big shared data entry by ID.",
                 BuildJsonSchema("""
                     {
                         "type": "object",
                         "properties": {
-                            "id": { "type": "string", "description": "The entry ID to read." }
+                            "id": { "type": "string", "description": "Entry ID." }
                         },
                         "required": ["id"]
                     }
                     """)),
 
             new("task_list_big_data",
-                "List all big shared data entry IDs and titles.",
+                "List big shared data entries (IDs and titles).",
                 BuildJsonSchema("""
                     {
                         "type": "object",
@@ -1101,7 +1498,7 @@ public sealed partial class ChatService(
                     """)),
 
             new("task_view_info",
-                "View the current task's metadata: name, description, parameters, and output format.",
+                "View task metadata (name, description, parameters, output format).",
                 BuildJsonSchema("""
                     {
                         "type": "object",
@@ -1110,7 +1507,7 @@ public sealed partial class ChatService(
                     """)),
 
             new("task_view_source",
-                "View the full source code of the current task definition.",
+                "View the task definition source code.",
                 BuildJsonSchema("""
                     {
                         "type": "object",
@@ -1123,13 +1520,12 @@ public sealed partial class ChatService(
     private static ChatToolDefinition BuildTaskOutputToolDef()
     {
         return new("task_output",
-            "Write structured output to the task instance. The output format must match "
-            + "the task's [AgentOutput] annotation. Only available when the task declares it.",
+            "Write structured output to the task. Format must match [AgentOutput] annotation.",
             BuildJsonSchema("""
                 {
                     "type": "object",
                     "properties": {
-                        "data": { "type": "string", "description": "The output data to write to the task." }
+                        "data": { "type": "string", "description": "Output data." }
                     },
                     "required": ["data"]
                 }
@@ -1270,9 +1666,12 @@ public sealed partial class ChatService(
         Guid channelId,
         ModelCapability modelCapabilities,
         int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct,
-        TaskChatContext? taskContext = null)
+        TaskChatContext? taskContext = null,
+        Dictionary<string, bool>? toolAwareness = null)
     {
         var messages = new List<ToolAwareMessage>(dbHistory.Count);
         foreach (var msg in dbHistory)
@@ -1281,15 +1680,23 @@ public sealed partial class ChatService(
         var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
         var jobResults = new List<AgentJobResponse>();
         var rounds = 0;
-        var effectiveTools = GetEffectiveTools(taskContext);
+        var effectiveTools = GetEffectiveTools(taskContext, toolAwareness);
+        var totalPromptTokens = 0;
+        var totalCompletionTokens = 0;
 
         while (true)
         {
             var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
+                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+
+            if (result.Usage is { } usage)
+            {
+                totalPromptTokens += usage.PromptTokens;
+                totalCompletionTokens += usage.CompletionTokens;
+            }
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
-                return new ToolLoopResult(result.Content ?? "", jobResults);
+                return new ToolLoopResult(result.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
 
             // Record assistant turn with tool calls
             messages.Add(ToolAwareMessage.AssistantWithToolCalls(result.ToolCalls, result.Content));
@@ -1303,6 +1710,14 @@ public sealed partial class ChatService(
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
+                    continue;
+                }
+
+                // ── Inline tool interception (no permissions) ────
+                var (inlineHandled, inlineResult) = await TryHandleInlineToolAsync(tc, agentId, channelId, ct);
+                if (inlineHandled)
+                {
+                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult ?? ""));
                     continue;
                 }
 
@@ -1349,115 +1764,42 @@ public sealed partial class ChatService(
             if (anyUnresolvableApproval)
             {
                 var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, ct);
-                return new ToolLoopResult(finalResult.Content ?? "", jobResults);
+                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+                if (finalResult.Usage is { } finalUsage)
+                {
+                    totalPromptTokens += finalUsage.PromptTokens;
+                    totalCompletionTokens += finalUsage.CompletionTokens;
+                }
+                return new ToolLoopResult(finalResult.Content ?? "", jobResults, totalPromptTokens, totalCompletionTokens);
             }
         }
     }
 
     /// <summary>
-    /// Text-based fallback for providers that lack native tool calling.
-    /// The model is instructed via the system prompt to emit
-    /// <c>[TOOL_CALL:...]</c> markers which are parsed post-hoc.
+    /// Simple single-call completion for providers without native tool support
+    /// or when tools are explicitly disabled.
     /// </summary>
-    private async Task<ToolLoopResult> RunTextToolLoopAsync(
+    private static async Task<ToolLoopResult> RunPlainCompletionAsync(
         IProviderApiClient client,
         HttpClient httpClient,
         string apiKey,
         string modelName,
         string systemPrompt,
         List<ChatCompletionMessage> history,
-        Guid agentId,
-        Guid channelId,
-        ModelCapability modelCapabilities,
         int? maxCompletionTokens,
-        Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
-        CancellationToken ct,
-        TaskChatContext? taskContext = null)
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        CancellationToken ct)
     {
-        var supportsVision = modelCapabilities.HasFlag(ModelCapability.Vision);
-        var jobResults = new List<AgentJobResponse>();
-        string assistantContent;
-        var rounds = 0;
+        var result = await client.ChatCompletionAsync(
+            httpClient, apiKey, modelName, systemPrompt, history,
+            maxCompletionTokens, providerParameters, completionParameters, ct);
 
-        while (true)
-        {
-            assistantContent = await client.ChatCompletionAsync(
-                httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
-
-            var toolCalls = ParseToolCalls(assistantContent);
-            if (toolCalls.Count == 0 || ++rounds > MaxToolCallRounds)
-                break;
-
-            history.Add(new ChatCompletionMessage("assistant", assistantContent));
-
-            var toolResultBuilder = new StringBuilder();
-            var anyUnresolvableApproval = false;
-
-            foreach (var call in toolCalls)
-            {
-                // ── Task-specific tool interception (text-based) ──
-                var syntheticTc = new ChatToolCall(call.CallId, call.CallId, call.ScriptJson ?? "{}");
-                var (handled, taskResult) = await TryHandleTaskToolAsync(syntheticTc, taskContext, ct);
-                if (handled)
-                {
-                    toolResultBuilder.AppendLine(
-                        $"[TOOL_RESULT:{call.CallId}] status=Completed result={taskResult}");
-                    continue;
-                }
-
-                var jobRequest = await BuildJobRequestAsync(call, agentId, ct);
-
-                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
-
-                // ── Inline approval (when callback available) ────
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval
-                    && approvalCallback is not null)
-                {
-                    var canApprove = await CanSessionUserApproveAsync(
-                        agentId, jobRequest.ActionType, jobRequest.ResourceId, ct);
-
-                    if (canApprove)
-                    {
-                        var approved = await approvalCallback(jobResponse, ct);
-                        jobResponse = approved
-                            ? await jobService.ApproveAsync(jobResponse.Id, new ApproveAgentJobRequest(), ct) ?? jobResponse
-                            : await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                    else
-                    {
-                        jobResponse = await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                }
-
-                jobResults.Add(jobResponse);
-
-                // For the text-based loop, screenshots are stripped from the
-                // result text because the simple ChatCompletionMessage doesn't
-                // support multipart content in the same way.
-                var (textResult, _) = ExtractScreenshotData(jobResponse);
-
-                toolResultBuilder.AppendLine(
-                    $"[TOOL_RESULT:{call.CallId}] status={jobResponse.Status}" +
-                    (textResult is not null ? $" result={textResult}" : "") +
-                    (jobResponse.ErrorLog is not null ? $" error={jobResponse.ErrorLog}" : ""));
-
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
-                    anyUnresolvableApproval = true;
-            }
-
-            history.Add(new ChatCompletionMessage("user", toolResultBuilder.ToString()));
-
-            if (anyUnresolvableApproval)
-            {
-                assistantContent = await client.ChatCompletionAsync(
-                    httpClient, apiKey, modelName, systemPrompt, history, maxCompletionTokens, ct);
-                break;
-            }
-        }
-
-        assistantContent = StripToolCallBlocks(assistantContent);
-        return new ToolLoopResult(assistantContent, jobResults);
+        return new ToolLoopResult(
+            result.Content ?? "",
+            [],
+            result.Usage?.PromptTokens ?? 0,
+            result.Usage?.CompletionTokens ?? 0);
     }
 
     /// <summary>
@@ -1558,6 +1900,7 @@ public sealed partial class ChatService(
         ["editor_show_diff"]               = AgentActionType.EditorShowDiff,
         ["editor_run_build"]               = AgentActionType.EditorRunBuild,
         ["editor_run_terminal"]            = AgentActionType.EditorRunTerminal,
+        ["send_bot_message"]               = AgentActionType.SendBotMessage,
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -1606,7 +1949,7 @@ public sealed partial class ChatService(
         if (imageBase64 is not null && supportsVision)
         {
             return ToolAwareMessage.ToolResultWithImage(
-                toolCallId, resultContent, imageBase64, "image/jpeg");
+                toolCallId, resultContent, imageBase64, "image/png");
         }
 
         // Non-vision model: append a note that the screenshot was captured
@@ -1620,155 +1963,16 @@ public sealed partial class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Tool-call parsing (text-based fallback)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Matches the <c>[TOOL_CALL:id]</c> marker emitted by the model.
-    /// The JSON payload that follows is extracted separately via
-    /// <see cref="ExtractJsonObject"/> to support nested objects
-    /// (e.g. mk8.shell scripts).
-    /// </summary>
-    [GeneratedRegex(
-        @"\[TOOL_CALL:(?<id>[^\]]+)\]\s*",
-        RegexOptions.Compiled | RegexOptions.Multiline)]
-    private static partial Regex ToolCallMarkerPattern();
-
-    /// <summary>
-    /// Extracts a balanced JSON object starting at <paramref name="startIndex"/>.
-    /// Returns <see langword="null"/> if the character at that position is not
-    /// <c>{</c> or if the braces never balance.
-    /// </summary>
-    private static string? ExtractJsonObject(string text, int startIndex)
-    {
-        if (startIndex >= text.Length || text[startIndex] != '{')
-            return null;
-
-        var depth = 0;
-        var inString = false;
-        var escaped = false;
-
-        for (var i = startIndex; i < text.Length; i++)
-        {
-            var c = text[i];
-
-            if (escaped) { escaped = false; continue; }
-            if (c == '\\' && inString) { escaped = true; continue; }
-            if (c == '"') { inString = !inString; continue; }
-            if (inString) continue;
-
-            if (c == '{') depth++;
-            else if (c == '}')
-            {
-                depth--;
-                if (depth == 0)
-                    return text[startIndex..(i + 1)];
-            }
-        }
-
-        return null;
-    }
-
-    private static IReadOnlyList<ParsedToolCall> ParseToolCalls(string content)
-    {
-        var markers = ToolCallMarkerPattern().Matches(content);
-        if (markers.Count == 0)
-            return [];
-
-        var calls = new List<ParsedToolCall>(markers.Count);
-        foreach (Match marker in markers)
-        {
-            var callId = marker.Groups["id"].Value;
-            var jsonStart = marker.Index + marker.Length;
-            var json = ExtractJsonObject(content, jsonStart);
-
-            if (json is null)
-                continue;
-
-            try
-            {
-                var payload = JsonSerializer.Deserialize<ToolCallPayload>(json, JsonOptions);
-                if (payload is not null)
-                {
-                    Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
-                    resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
-
-                    // Default to mk8.shell for backwards compatibility
-                    var actionType = AgentActionType.ExecuteAsSafeShell;
-
-                    Guid? transcriptionModelId = Guid.TryParse(
-                        payload.TranscriptionModelId, out var tmid) ? tmid : null;
-
-                    DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
-                        payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
-
-                    if (dangerousShell.HasValue)
-                        actionType = AgentActionType.UnsafeExecuteAsDangerousShell;
-                    else if (transcriptionModelId.HasValue)
-                        actionType = AgentActionType.TranscribeFromAudioDevice;
-
-                    calls.Add(new ParsedToolCall(
-                        callId,
-                        actionType,
-                        resourceId,
-                        payload.SandboxId,
-                        payload.Script is { } script
-                            ? script.GetRawText()
-                            : payload.Command,
-                        dangerousShell,
-                        actionType == AgentActionType.ExecuteAsSafeShell
-                            ? SafeShellType.Mk8Shell : null,
-                        transcriptionModelId,
-                        payload.Language,
-                        payload.WorkingDirectory));
-                }
-            }
-            catch (JsonException)
-            {
-                // Malformed JSON — skip this call
-            }
-        }
-
-        return calls;
-    }
-
-    private static string StripToolCallBlocks(string content)
-    {
-        var markers = ToolCallMarkerPattern().Matches(content);
-        if (markers.Count == 0)
-            return content;
-
-        var sb = new StringBuilder(content);
-        for (var i = markers.Count - 1; i >= 0; i--)
-        {
-            var marker = markers[i];
-            var jsonStart = marker.Index + marker.Length;
-            var json = ExtractJsonObject(content, jsonStart);
-            var endIndex = json is not null
-                ? jsonStart + json.Length
-                : marker.Index + marker.Length;
-            sb.Remove(marker.Index, endIndex - marker.Index);
-        }
-
-        return sb.ToString().Trim();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     // System prompt & tool definitions (loaded from embedded resources)
     // ═══════════════════════════════════════════════════════════════
 
-    private static string BuildSystemPrompt(string? agentPrompt, bool nativeToolCalling)
+    private static string BuildSystemPrompt(string? agentPrompt)
     {
-        var suffix = nativeToolCalling ? NativeToolSystemSuffix : ToolInstructions;
-
         if (string.IsNullOrEmpty(agentPrompt))
-            return suffix;
+            return NativeToolSystemSuffix;
 
-        return agentPrompt + "\n\n" + suffix;
+        return agentPrompt + "\n\n" + NativeToolSystemSuffix;
     }
-
-    private static readonly string ToolInstructions =
-        LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-text.md");
 
     private static readonly string NativeToolSystemSuffix =
         LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-native-suffix.md");
@@ -1800,170 +2004,156 @@ public sealed partial class ChatService(
         var editorCreateFileSchema = BuildEditorCreateFileSchema();
         var editorShowDiffSchema = BuildEditorShowDiffSchema();
         var editorRunTerminalSchema = BuildEditorRunTerminalSchema();
+        var waitSchema = BuildWaitSchema();
+        var readThreadHistorySchema = BuildReadThreadHistorySchema();
+        var sendBotMessageSchema = BuildSendBotMessageSchema();
 
         return
         [
+            // ── Inline tools (no permissions) ─────────────────
+            new("wait",
+                "Pause for 1–300 seconds. No tokens consumed while waiting.",
+                waitSchema),
+
+            // ── Cross-thread context tools ────────────────────
+            new("list_accessible_threads",
+                "List readable threads from other channels (IDs, names, parent channel).",
+                globalSchema),
+            new("read_thread_history",
+                "Read cross-channel thread history. Optional maxMessages (1–200, default 50).",
+                readThreadHistorySchema),
+
             // ── Shell execution ───────────────────────────────
             new("execute_mk8_shell", Mk8ShellToolDescription, mk8Schema),
             new("execute_dangerous_shell",
-                "Execute a raw shell command via Bash, PowerShell, CommandPrompt, or Git. "
-                + "Requires UnsafeExecuteAsDangerousShell permission. The command string is "
-                + "passed directly to the interpreter with NO sandboxing. "
-                + "Optional workingDirectory overrides the SystemUser's default CWD.",
+                "Raw shell command (Bash/PowerShell/Cmd/Git), unsandboxed. Optional workingDirectory.",
                 dangerousShellSchema),
 
             // ── Transcription ────────────────────────────────
             new("transcribe_from_audio_device",
-                "Start live transcription from a system audio device. Requires a "
-                + "transcription-capable model and an audio device resource.",
+                "Live-transcribe a system audio device.",
                 transcriptionSchema),
             new("transcribe_from_audio_stream",
-                "Transcribe an incoming audio stream. [NOT YET IMPLEMENTED — job will "
-                + "execute but produce a stub result.]",
+                "Transcribe audio stream. [Stub.]",
                 transcriptionSchema),
             new("transcribe_from_audio_file",
-                "Transcribe a pre-recorded audio file. [NOT YET IMPLEMENTED — job will "
-                + "execute but produce a stub result.]",
+                "Transcribe audio file. [Stub.]",
                 transcriptionSchema),
 
             // ── Global flags ─────────────────────────────────────
             new("create_sub_agent",
-                "Create a new sub-agent under the calling agent. Provide a name, "
-                + "modelId (GUID of the model to use), and optional systemPrompt. "
-                + "Requires CreateSubAgent global permission.",
+                "Create a sub-agent (name, modelId, optional systemPrompt).",
                 createSubAgentSchema),
             new("create_container",
-                "Create a new mk8.shell sandbox container. Provide a name (English "
-                + "letters and digits only) and a path (parent directory where the "
-                + "sandbox folder will be created). Requires CreateContainer global "
-                + "permission.",
+                "Create an mk8.shell sandbox container. Alphanumeric name only.",
                 createContainerSchema),
             new("register_info_store",
-                "Register a new information store (local or external). [NOT YET "
-                + "IMPLEMENTED — job will execute but produce a stub result.] Requires "
-                + "RegisterInfoStore global permission.",
+                "Register an information store. [Stub.]",
                 globalSchema),
             new("access_localhost_in_browser",
-                "Access a localhost URL through a headless browser (Chrome by "
-                + "default). Set mode to 'html' (default) for the DOM content or "
-                + "'screenshot' for a PNG image (vision models only — if the model "
-                + "lacks vision, use 'html' instead). Only localhost/127.0.0.1 URLs "
-                + "are allowed. Requires AccessLocalhostInBrowser permission.",
+                "Headless GET localhost. html=DOM (default), screenshot=PNG (vision). localhost/127.0.0.1 only.",
                 localhostBrowserSchema),
             new("access_localhost_cli",
-                "Make a direct HTTP GET to a localhost URL and return the status "
-                + "code, headers, and response body. No browser involved. Only "
-                + "localhost/127.0.0.1 URLs are allowed. Requires "
-                + "AccessLocalhostCli permission.",
+                "HTTP GET localhost; returns status+headers+body. localhost/127.0.0.1 only.",
                 localhostCliSchema),
 
             // ── Per-resource ─────────────────────────────────────
-            new("access_local_info_store",
-                "Query or retrieve data from a local information store. [NOT YET "
-                + "IMPLEMENTED — job will execute but produce a stub result.] "
-                + "Requires AccessLocalInfoStore permission for the target resource.",
-                resourceOnly),
-            new("access_external_info_store",
-                "Query or retrieve data from an external information store. [NOT YET "
-                + "IMPLEMENTED — job will execute but produce a stub result.] "
-                + "Requires AccessExternalInfoStore permission for the target resource.",
-                resourceOnly),
-            new("access_website",
-                "Access or interact with a registered website resource. [NOT YET "
-                + "IMPLEMENTED — job will execute but produce a stub result.] "
-                + "Requires AccessWebsite permission for the target resource.",
-                resourceOnly),
-            new("query_search_engine",
-                "Query a registered search engine resource. [NOT YET IMPLEMENTED — job "
-                + "will execute but produce a stub result.] Requires QuerySearchEngine "
-                + "permission for the target resource.",
-                resourceOnly),
-            new("access_container",
-                "Access a container resource (read metadata, inspect). [NOT YET "
-                + "IMPLEMENTED — job will execute but produce a stub result.] "
-                + "Requires AccessContainer permission for the target resource.",
-                resourceOnly),
-            new("manage_agent",
-                "Update another agent's name, system prompt, or model. Provide "
-                + "targetId (the agent GUID) and the fields to update. "
-                + "Requires ManageAgent permission for the target.",
-                manageAgentSchema),
-            new("edit_task",
-                "Edit a specific scheduled task's name, interval, or retry "
-                + "settings. Provide targetId (the task GUID) and the fields "
-                + "to update. Requires EditTask permission.",
-                editTaskSchema),
-            new("access_skill",
-                "Retrieve the instruction text of a registered skill. Returns the "
-                + "full SkillText so the agent can learn how to use the associated "
-                + "resource. Requires AccessSkill permission for the target skill.",
-                resourceOnly),
-            new("capture_display",
-                "Capture a screenshot of a system display/monitor. Returns a base64-encoded "
-                + "PNG image (vision models only — if the model lacks vision, you will "
-                + "receive only a text description). Requires CaptureDisplay permission "
-                + "for the target display device resource.",
-                resourceOnly),
-            new("click_desktop",
-                "Simulate a mouse click at specific coordinates on a display. "
-                + "Coordinates are relative to the display's top-left corner. "
-                + "Returns a follow-up screenshot so you can verify the result. "
-                + "Requires CanClickDesktop global permission. Provide the "
-                + "target display device GUID.",
-                clickDesktopSchema),
-            new("type_on_desktop",
-                "Type text using keyboard input. Optionally click at coordinates "
-                + "first to focus an input field. Returns a follow-up screenshot "
-                + "so you can verify the result. Requires CanTypeOnDesktop "
-                + "global permission. Provide the target display device GUID.",
-                typeOnDesktopSchema),
+            new("access_local_info_store", "Query local info store. [Stub.]", resourceOnly),
+            new("access_external_info_store", "Query external info store. [Stub.]", resourceOnly),
+            new("access_website", "Access registered website. [Stub.]", resourceOnly),
+            new("query_search_engine", "Query registered search engine. [Stub.]", resourceOnly),
+            new("access_container", "Access container resource. [Stub.]", resourceOnly),
+            new("manage_agent", "Update agent name, systemPrompt, or modelId.", manageAgentSchema),
+            new("edit_task", "Edit task name, interval, or retries.", editTaskSchema),
+            new("access_skill", "Retrieve a skill's instruction text.", resourceOnly),
+            new("capture_display", "Screenshot a display; base64 PNG (vision) or text fallback.", resourceOnly),
+            new("click_desktop", "Click (x,y) on display. Returns screenshot.", clickDesktopSchema),
+            new("type_on_desktop", "Type text; optional (x,y) to focus first. Returns screenshot.", typeOnDesktopSchema),
 
             // ── Editor actions ────────────────────────────────────
-            new("editor_read_file",
-                "Read a file's contents from the connected IDE. Provide the file path "
-                + "relative to the workspace root. Optionally specify startLine/endLine "
-                + "to read a range. Requires EditorSession permission.",
-                editorReadFileSchema),
-            new("editor_get_open_files",
-                "List all currently open files/tabs in the connected IDE. "
-                + "Requires EditorSession permission.",
-                resourceOnly),
-            new("editor_get_selection",
-                "Get the active file path, cursor position, and currently "
-                + "selected text in the connected IDE. Requires EditorSession permission.",
-                resourceOnly),
-            new("editor_get_diagnostics",
-                "Get compilation errors and warnings from the connected IDE. "
-                + "Optionally specify a filePath to scope to one file. "
-                + "Requires EditorSession permission.",
-                editorFileOptionalSchema),
-            new("editor_apply_edit",
-                "Apply a text edit in the connected IDE. Specify the file path, "
-                + "line range (startLine/endLine), and the newText to replace that range. "
-                + "Requires EditorSession permission.",
-                editorApplyEditSchema),
-            new("editor_create_file",
-                "Create a new file in the connected IDE's workspace. Provide "
-                + "the file path and content. Requires EditorSession permission.",
-                editorCreateFileSchema),
-            new("editor_delete_file",
-                "Delete a file from the connected IDE's workspace. "
-                + "Requires EditorSession permission.",
-                editorFileRequiredSchema),
-            new("editor_show_diff",
-                "Show a diff/proposed changes view in the connected IDE. Provide "
-                + "the file path and the proposed new content. The user can accept "
-                + "or reject. Requires EditorSession permission.",
-                editorShowDiffSchema),
-            new("editor_run_build",
-                "Trigger a build in the connected IDE and return the build output "
-                + "including any errors. Requires EditorSession permission.",
-                resourceOnly),
-            new("editor_run_terminal",
-                "Execute a command in the connected IDE's integrated terminal. "
-                + "Returns the command output. Requires EditorSession permission.",
-                editorRunTerminalSchema),
+            new("editor_read_file", "Read file; optional line range.", editorReadFileSchema),
+            new("editor_get_open_files", "List open files/tabs.", resourceOnly),
+            new("editor_get_selection", "Active file, cursor, and selection.", resourceOnly),
+            new("editor_get_diagnostics", "Errors/warnings; optional filePath scope.", editorFileOptionalSchema),
+            new("editor_apply_edit", "Replace line range with newText.", editorApplyEditSchema),
+            new("editor_create_file", "Create file in workspace.", editorCreateFileSchema),
+            new("editor_delete_file", "Delete file from workspace.", editorFileRequiredSchema),
+            new("editor_show_diff", "Show diff; user accepts/rejects.", editorShowDiffSchema),
+            new("editor_run_build", "Trigger build; return output/errors.", resourceOnly),
+            new("editor_run_terminal", "Run command in IDE terminal.", editorRunTerminalSchema),
+
+            // ── Bot messaging ─────────────────────────────────────────
+            new("send_bot_message",
+                "Send DM via bot (Telegram/Discord/WhatsApp/Slack/Matrix/Signal/Email/Teams). recipientId is platform-specific; subject for email only.",
+                sendBotMessageSchema),
         ];
+    }
+
+    private static JsonElement BuildWaitSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "seconds": {
+                        "type": "integer",
+                        "description": "Seconds (1–300)."
+                    }
+                },
+                "required": ["seconds"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildReadThreadHistorySchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "threadId": {
+                        "type": "string",
+                        "description": "Thread GUID (from list_accessible_threads)."
+                    },
+                    "maxMessages": {
+                        "type": "integer",
+                        "description": "Max messages (1–200, default 50)."
+                    }
+                },
+                "required": ["threadId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSendBotMessageSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "resourceId": {
+                        "type": "string",
+                        "description": "Bot integration GUID."
+                    },
+                    "recipientId": {
+                        "type": "string",
+                        "description": "Platform-specific recipient: Telegram chat ID, Discord user ID, WhatsApp phone (E.164), Slack user ID, Matrix user ID (@user:server), Signal phone (E.164), email address, or Teams user ID."
+                    },
+                    "message": {
+                        "type": "string",
+                        "description": "Message text to send."
+                    },
+                    "subject": {
+                        "type": "string",
+                        "description": "Email subject line (email only, optional)."
+                    }
+                },
+                "required": ["resourceId", "recipientId", "message"]
+            }
+            """);
+        return doc.RootElement.Clone();
     }
 
     private static JsonElement BuildMk8ShellToolSchema()
@@ -1974,19 +2164,19 @@ public sealed partial class ChatService(
                 "properties": {
                     "resourceId": {
                         "type": "string",
-                        "description": "The GUID of the container resource to execute against."
+                        "description": "Container GUID."
                     },
                     "sandboxId": {
                         "type": "string",
-                        "description": "The mk8.shell sandbox name (resolved from the local registry)."
+                        "description": "Sandbox name."
                     },
                     "script": {
                         "type": "object",
-                        "description": "The mk8.shell script object.",
+                        "description": "Script object.",
                         "properties": {
                             "operations": {
                                 "type": "array",
-                                "description": "Ordered list of operations. Each needs verb and args.",
+                                "description": "Ordered operations.",
                                 "items": {
                                     "type": "object",
                                     "properties": {
@@ -1994,7 +2184,7 @@ public sealed partial class ChatService(
                                         "args": { "type": "array", "items": { "type": "string" } },
                                         "workingDirectory": {
                                             "type": "string",
-                                            "description": "Optional per-step working directory override (e.g. '$WORKSPACE/bananaapp'). ProcRun processes spawn with this as their CWD instead of the sandbox root. Use this instead of flags like git -C which are not in the template whitelist."
+                                            "description": "Per-step CWD override (e.g. '$WORKSPACE/subdir')."
                                         }
                                     },
                                     "required": ["verb", "args"]
@@ -2010,7 +2200,7 @@ public sealed partial class ChatService(
                                         "args": { "type": "array", "items": { "type": "string" } },
                                         "workingDirectory": {
                                             "type": "string",
-                                            "description": "Optional per-step working directory override."
+                                            "description": "Per-step CWD override."
                                         }
                                     },
                                     "required": ["verb", "args"]
@@ -2034,7 +2224,7 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the target resource."
+                        "description": "Resource GUID."
                     }
                 },
                 "required": ["targetId"]
@@ -2063,20 +2253,20 @@ public sealed partial class ChatService(
                 "properties": {
                     "resourceId": {
                         "type": "string",
-                        "description": "The GUID of the SystemUser resource to execute as."
+                        "description": "SystemUser GUID."
                     },
                     "shellType": {
                         "type": "string",
                         "enum": ["Bash", "PowerShell", "CommandPrompt", "Git"],
-                        "description": "The shell interpreter to use."
+                        "description": "Shell interpreter."
                     },
                     "command": {
                         "type": "string",
-                        "description": "The raw command string to pass to the interpreter."
+                        "description": "Raw command string."
                     },
                     "workingDirectory": {
                         "type": "string",
-                        "description": "Absolute path where the shell process should be spawned. Overrides the SystemUser's default working directory when set."
+                        "description": "Optional CWD override."
                     }
                 },
                 "required": ["resourceId", "shellType", "command"]
@@ -2093,15 +2283,15 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the audio device resource."
+                        "description": "Audio device GUID."
                     },
                     "transcriptionModelId": {
                         "type": "string",
-                        "description": "The GUID of the transcription-capable model to use."
+                        "description": "Transcription model GUID."
                     },
                     "language": {
                         "type": "string",
-                        "description": "Optional BCP-47 language code (e.g. 'en', 'de')."
+                        "description": "BCP-47 code (e.g. 'en')."
                     }
                 },
                 "required": ["targetId", "transcriptionModelId"]
@@ -2118,15 +2308,15 @@ public sealed partial class ChatService(
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Name for the new sub-agent."
+                        "description": "Agent name."
                     },
                     "modelId": {
                         "type": "string",
-                        "description": "The GUID of the model the sub-agent should use."
+                        "description": "Model GUID."
                     },
                     "systemPrompt": {
                         "type": "string",
-                        "description": "Optional system prompt for the sub-agent."
+                        "description": "System prompt."
                     }
                 },
                 "required": ["name", "modelId"]
@@ -2143,15 +2333,15 @@ public sealed partial class ChatService(
                 "properties": {
                     "name": {
                         "type": "string",
-                        "description": "Sandbox name (English letters and digits only)."
+                        "description": "Name (alphanumeric)."
                     },
                     "path": {
                         "type": "string",
-                        "description": "Absolute parent directory where the sandbox folder will be created."
+                        "description": "Absolute parent directory."
                     },
                     "description": {
                         "type": "string",
-                        "description": "Optional description for the container."
+                        "description": "Description."
                     }
                 },
                 "required": ["name", "path"]
@@ -2168,19 +2358,19 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the agent to manage."
+                        "description": "Agent GUID."
                     },
                     "name": {
                         "type": "string",
-                        "description": "New name for the agent."
+                        "description": "New name."
                     },
                     "systemPrompt": {
                         "type": "string",
-                        "description": "New system prompt for the agent."
+                        "description": "New system prompt."
                     },
                     "modelId": {
                         "type": "string",
-                        "description": "GUID of the new model to assign."
+                        "description": "New model GUID."
                     }
                 },
                 "required": ["targetId"]
@@ -2197,19 +2387,19 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the scheduled task to edit."
+                        "description": "Task GUID."
                     },
                     "name": {
                         "type": "string",
-                        "description": "New name for the task."
+                        "description": "New name."
                     },
                     "repeatIntervalMinutes": {
                         "type": "integer",
-                        "description": "New repeat interval in minutes. 0 to remove."
+                        "description": "Minutes. 0=remove."
                     },
                     "maxRetries": {
                         "type": "integer",
-                        "description": "New maximum retry count."
+                        "description": "Max retries."
                     }
                 },
                 "required": ["targetId"]
@@ -2226,12 +2416,12 @@ public sealed partial class ChatService(
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The localhost URL to access (e.g. 'http://localhost:5000/api/health'). Only localhost/127.0.0.1/[::1] allowed."
+                        "description": "Localhost URL."
                     },
                     "mode": {
                         "type": "string",
                         "enum": ["html", "screenshot"],
-                        "description": "Return mode. 'html' (default) returns the DOM content. 'screenshot' returns a base64-encoded PNG."
+                        "description": "'html' (default)=DOM, 'screenshot'=PNG."
                     }
                 },
                 "required": ["url"]
@@ -2248,7 +2438,7 @@ public sealed partial class ChatService(
                 "properties": {
                     "url": {
                         "type": "string",
-                        "description": "The localhost URL to GET (e.g. 'http://localhost:5000/api/health'). Only localhost/127.0.0.1/[::1] allowed."
+                        "description": "Localhost URL."
                     }
                 },
                 "required": ["url"]
@@ -2265,25 +2455,25 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the display device to click on."
+                        "description": "Display GUID."
                     },
                     "x": {
                         "type": "integer",
-                        "description": "X coordinate relative to the display's top-left corner."
+                        "description": "X coordinate."
                     },
                     "y": {
                         "type": "integer",
-                        "description": "Y coordinate relative to the display's top-left corner."
+                        "description": "Y coordinate."
                     },
                     "button": {
                         "type": "string",
                         "enum": ["left", "right", "middle"],
-                        "description": "Mouse button. Defaults to 'left'."
+                        "description": "Default 'left'."
                     },
                     "clickType": {
                         "type": "string",
                         "enum": ["single", "double"],
-                        "description": "Click type. Defaults to 'single'."
+                        "description": "Default 'single'."
                     }
                 },
                 "required": ["targetId", "x", "y"]
@@ -2300,19 +2490,19 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": {
                         "type": "string",
-                        "description": "The GUID of the display device to type on."
+                        "description": "Display GUID."
                     },
                     "text": {
                         "type": "string",
-                        "description": "The text to type. Each character is sent as a keyboard event."
+                        "description": "Text to type."
                     },
                     "x": {
                         "type": "integer",
-                        "description": "Optional X coordinate to click before typing (to focus an input field)."
+                        "description": "X click-to-focus."
                     },
                     "y": {
                         "type": "integer",
-                        "description": "Optional Y coordinate to click before typing (to focus an input field)."
+                        "description": "Y click-to-focus."
                     }
                 },
                 "required": ["targetId", "text"]
@@ -2378,9 +2568,9 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": { "type": "string", "description": "EditorSession GUID." },
                     "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "startLine": { "type": "integer", "description": "Start line of the range to replace (1-based)." },
-                    "endLine": { "type": "integer", "description": "End line of the range to replace (1-based, inclusive)." },
-                    "newText": { "type": "string", "description": "The replacement text for the specified range." }
+                    "startLine": { "type": "integer", "description": "Start line (1-based)." },
+                    "endLine": { "type": "integer", "description": "End line (1-based, inclusive)." },
+                    "newText": { "type": "string", "description": "Replacement text." }
                 },
                 "required": ["targetId", "filePath", "startLine", "endLine", "newText"]
             }
@@ -2412,8 +2602,8 @@ public sealed partial class ChatService(
                 "properties": {
                     "targetId": { "type": "string", "description": "EditorSession GUID." },
                     "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "proposedContent": { "type": "string", "description": "The proposed new file content." },
-                    "diffTitle": { "type": "string", "description": "Optional title for the diff view." }
+                    "proposedContent": { "type": "string", "description": "Proposed file content." },
+                    "diffTitle": { "type": "string", "description": "Diff view title." }
                 },
                 "required": ["targetId", "filePath", "proposedContent"]
             }
@@ -2428,8 +2618,8 @@ public sealed partial class ChatService(
                 "type": "object",
                 "properties": {
                     "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "command": { "type": "string", "description": "The command to execute." },
-                    "workingDirectory": { "type": "string", "description": "Optional working directory." }
+                    "command": { "type": "string", "description": "Command to run." },
+                    "workingDirectory": { "type": "string", "description": "Working directory." }
                 },
                 "required": ["targetId", "command"]
             }
@@ -2469,7 +2659,8 @@ public sealed partial class ChatService(
         SafeShellType? SafeShellType = null,
         Guid? TranscriptionModelId = null,
         string? Language = null,
-        string? WorkingDirectory = null);
+        string? WorkingDirectory = null,
+        string? RawJson = null);
 
     private sealed class ToolCallPayload
     {
@@ -2495,5 +2686,29 @@ public sealed partial class ChatService(
 
     private readonly record struct ToolLoopResult(
         string AssistantContent,
-        List<AgentJobResponse> JobResults);
+        List<AgentJobResponse> JobResults,
+        int TotalPromptTokens = 0,
+        int TotalCompletionTokens = 0);
+
+    /// <summary>
+    /// Maps the typed provider parameter fields from <see cref="AgentDB"/> into
+    /// a <see cref="CompletionParameters"/> instance. Returns <see langword="null"/>
+    /// when all fields are their default (null) values.
+    /// </summary>
+    private static CompletionParameters? BuildCompletionParameters(AgentDB agent)
+    {
+        var cp = new CompletionParameters
+        {
+            Temperature = agent.Temperature,
+            TopP = agent.TopP,
+            TopK = agent.TopK,
+            FrequencyPenalty = agent.FrequencyPenalty,
+            PresencePenalty = agent.PresencePenalty,
+            Stop = agent.Stop,
+            Seed = agent.Seed,
+            ResponseFormat = agent.ResponseFormat,
+            ReasoningEffort = agent.ReasoningEffort,
+        };
+        return cp.IsEmpty ? null : cp;
+    }
 }

@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Net;
+using System.Net.NetworkInformation;
 
 namespace SharpClaw.Services;
 
@@ -20,6 +22,8 @@ public sealed class BackendProcessManager : IDisposable
     private Process? _process;
     private readonly string _executablePath;
     private string _apiUrl;
+    private readonly List<string> _processOutput = [];
+    private readonly object _outputLock = new();
 
     /// <summary>
     /// <c>true</c> when we confirmed the API is reachable but was not
@@ -29,6 +33,26 @@ public sealed class BackendProcessManager : IDisposable
 
     /// <summary>Current API base URL.</summary>
     public string ApiUrl => _apiUrl;
+
+    /// <summary>
+    /// When <c>true</c>, <see cref="EnsureStartedAsync"/> will never launch
+    /// the bundled backend process — it only probes for an external API.
+    /// Set this when the user has the core installed separately or wants to
+    /// connect to a remote instance.
+    /// </summary>
+    public bool SkipLaunch { get; set; }
+
+    /// <summary>
+    /// All stdout + stderr lines captured from the bundled process
+    /// (most recent last). Thread-safe snapshot.
+    /// </summary>
+    public IReadOnlyList<string> ProcessOutput
+    {
+        get { lock (_outputLock) return [.. _processOutput]; }
+    }
+
+    /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
+    public int? ExitCode => _process is { HasExited: true } p ? p.ExitCode : null;
 
     public BackendProcessManager(string apiUrl)
     {
@@ -82,7 +106,9 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>
     /// Ensures the API backend is available. Checks in order:
     /// <list type="number">
-    ///   <item>Is the API already reachable? → mark external, done.</item>
+    ///   <item>Is the bundled process already running? → done.</item>
+    ///   <item>Is another SharpClaw process listening on the port? → mark external, done.</item>
+    ///   <item>Is the API already reachable (e.g. dev instance)? → mark external, done.</item>
     ///   <item>Is the bundled backend available? → launch it.</item>
     ///   <item>Neither → throw.</item>
     /// </list>
@@ -92,11 +118,29 @@ public sealed class BackendProcessManager : IDisposable
         if (IsRunning)
             return;
 
+        // Check if another SharpClaw process already owns the port.
+        if (IsSharpClawProcessOnPort())
+        {
+            IsExternal = true;
+            return;
+        }
+
         // Check if an external instance is already serving (dev workflow).
         if (await IsApiReachableAsync(ct))
         {
             IsExternal = true;
             return;
+        }
+
+        // When backend launch is disabled (e.g. remote API or separate
+        // install), skip process start — the echo/ping probes will
+        // determine whether the configured URL is reachable.
+        if (SkipLaunch)
+        {
+            IsExternal = true;
+            throw new InvalidOperationException(
+                $"Backend launch is disabled (Backend:Enabled = false). " +
+                $"Ensure the API is running at {_apiUrl}.");
         }
 
         if (!IsAvailable)
@@ -105,6 +149,76 @@ public sealed class BackendProcessManager : IDisposable
                 "Start the API project manually or publish with /p:BundleBackend=true.");
 
         Start();
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when another <c>SharpClaw.Application.API</c>
+    /// process is already listening on the configured API port.
+    /// This prevents a second bundled instance from trying to bind to
+    /// the same port when the app is launched again (exe or MSIX).
+    /// </summary>
+    private bool IsSharpClawProcessOnPort()
+    {
+        if (!TryGetPortFromApiUrl(out var targetPort))
+            return false;
+
+        // Check whether anything is listening on the target port.
+        try
+        {
+            var listeners = IPGlobalProperties.GetIPGlobalProperties().GetActiveTcpListeners();
+            bool portInUse = false;
+            foreach (var ep in listeners)
+            {
+                if (ep.Port == targetPort)
+                {
+                    portInUse = true;
+                    break;
+                }
+            }
+
+            if (!portInUse)
+                return false;
+        }
+        catch
+        {
+            // IPGlobalProperties can fail on some restricted environments;
+            // fall through to the HTTP probe instead of blocking startup.
+            return false;
+        }
+
+        // Port is in use — check if a SharpClaw API process owns it.
+        try
+        {
+            var candidates = Process.GetProcessesByName("SharpClaw.Application.API");
+            if (candidates.Length > 0)
+            {
+                // At least one SharpClaw API process is running and the port
+                // is occupied — safe to assume it's the one listening.
+                return true;
+            }
+        }
+        catch
+        {
+            // Process enumeration may fail under restricted permissions
+            // (e.g. AppContainer). Fall through to the HTTP probe.
+        }
+
+        return false;
+    }
+
+    private bool TryGetPortFromApiUrl(out int port)
+    {
+        port = 0;
+        try
+        {
+            var uri = new Uri(_apiUrl);
+            port = uri.Port;
+            return port > 0;
+        }
+        catch
+        {
+            return false;
+        }
     }
 
     /// <summary>
@@ -120,6 +234,10 @@ public sealed class BackendProcessManager : IDisposable
                 $"SharpClaw API backend not found at '{_executablePath}'. " +
                 "Ensure the backend is published into the 'backend' subfolder.");
 
+        // Clear stale output from any previous run.
+        lock (_outputLock) _processOutput.Clear();
+        IsExternal = false;
+
         var psi = new ProcessStartInfo
         {
             FileName = _executablePath,
@@ -133,7 +251,31 @@ public sealed class BackendProcessManager : IDisposable
         // Pass the URL so the API binds to the expected port.
         psi.EnvironmentVariables["ASPNETCORE_URLS"] = _apiUrl;
 
+        // Redirect the data directory to a writable location.
+        // Inside MSIX, the install folder (C:\Program Files\WindowsApps\...) is
+        // read-only, so JSON persistence and logs must go to %LOCALAPPDATA%.
+        var dataDir = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SharpClaw", "Data");
+        psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = dataDir;
+
         _process = Process.Start(psi);
+
+        // Consume stdout/stderr asynchronously to prevent pipe-buffer
+        // deadlock — ASP.NET Core writes startup logs that fill the OS
+        // buffer and block the process before Kestrel binds the port.
+        _process!.OutputDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+                lock (_outputLock) _processOutput.Add(e.Data);
+        };
+        _process.ErrorDataReceived += (_, e) =>
+        {
+            if (e.Data is not null)
+                lock (_outputLock) _processOutput.Add($"[stderr] {e.Data}");
+        };
+        _process.BeginOutputReadLine();
+        _process.BeginErrorReadLine();
     }
 
     /// <summary>

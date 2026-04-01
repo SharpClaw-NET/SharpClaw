@@ -1,83 +1,27 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml.Media;
+using SharpClaw.Helpers;
 using SharpClaw.Services;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace SharpClaw.Presentation;
 
 public sealed partial class SettingsPage : Page
 {
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
+    private static JsonSerializerOptions Json => TerminalUI.Json;
 
-    private static readonly FontFamily Mono = new("Consolas, Courier New, monospace");
-    private static readonly SolidColorBrush Trans = new(Microsoft.UI.Colors.Transparent);
-    private static readonly Dictionary<int, SolidColorBrush> BrushMap = [];
+    private static FontFamily Mono => TerminalUI.Mono;
+    private static SolidColorBrush Trans => TerminalUI.Transparent;
     private SharpClawApiClient Api => App.Services!.GetRequiredService<SharpClawApiClient>();
 
     private string _activeTab = "Providers";
 
-    // ── Clearance display labels ────────────────────────────────
-    private static readonly (string Tag, string Label)[] _clearanceOptions =
-    [
-        ("Independent",                "Can act without approval"),
-        ("ApprovedByWhitelistedAgent", "Only with approval from a managing agent"),
-        ("ApprovedByPermittedAgent",   "Only with approval from an agent that has clearance to act"),
-        ("ApprovedByWhitelistedUser",  "Only with approval from a user"),
-        ("ApprovedBySameLevelUser",    "Only with approval from a user that can grant the permission"),
-    ];
-
-    private static readonly string[] _globalFlagNames =
-        ["canCreateSubAgents", "canCreateContainers", "canRegisterInfoStores",
-         "canAccessLocalhostInBrowser", "canAccessLocalhostCli",
-         "canClickDesktop", "canTypeOnDesktop"];
-
-    private static readonly string[] _globalFlagClearanceNames =
-        ["createSubAgentsClearance", "createContainersClearance", "registerInfoStoresClearance",
-         "accessLocalhostInBrowserClearance", "accessLocalhostCliClearance",
-         "clickDesktopClearance", "typeOnDesktopClearance"];
-
-    private static readonly Dictionary<string, string> _globalFlagTooltips = new()
-    {
-        ["canCreateSubAgents"] = "Allow the agent to spawn child agents on its own",
-        ["canCreateContainers"] = "Allow the agent to create sandboxed execution containers",
-        ["canRegisterInfoStores"] = "Allow the agent to register local or external information stores",
-        ["canAccessLocalhostInBrowser"] = "Allow the agent to open localhost URLs in a headless browser",
-        ["canAccessLocalhostCli"] = "Allow the agent to make direct HTTP requests to localhost",
-        ["canClickDesktop"] = "Allow the agent to simulate mouse clicks on the desktop",
-        ["canTypeOnDesktop"] = "Allow the agent to simulate keyboard input on the desktop",
-    };
-
-    private static readonly (string ApiName, string DisplayName)[] _resourceAccessTypes =
-    [
-        ("dangerousShellAccesses", "Dangerous Shell"), ("safeShellAccesses", "Safe Shell"),
-        ("containerAccesses", "Containers"), ("websiteAccesses", "Websites"),
-        ("searchEngineAccesses", "Search Engines"), ("localInfoStoreAccesses", "Local Info Stores"),
-        ("externalInfoStoreAccesses", "External Info Stores"), ("audioDeviceAccesses", "Audio Devices"),
-        ("displayDeviceAccesses", "Display Devices"), ("editorSessionAccesses", "Editor Sessions"),
-        ("agentAccesses", "Agent Management"), ("taskAccesses", "Task Management"),
-        ("skillAccesses", "Skill Management"),
-    ];
-
-    private static readonly Guid AllResourcesId = Guid.Parse("ffffffff-ffff-ffff-ffff-ffffffffffff");
-
-    private static readonly string[] _providerTypeNames =
-        ["OpenAI", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
-         "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot", "Custom"];
-
-    private static readonly HashSet<string> DeviceCodeProviderTypes = ["GitHubCopilot"];
-
     // Role editor state
-    private readonly Dictionary<string, (CheckBox Check, ComboBox Clearance)> _flagEditors = new(7);
-    private readonly Dictionary<string, StackPanel> _resourcePanels = new(13);
-    private readonly Dictionary<Guid, string> _resourceNameCache = [];
-    private readonly Dictionary<string, List<(Guid Id, string Name)>> _resourcesByType = [];
+    private PermissionEditorBuilder? _permEditor;
 
     // Cached lists for cross-tab use
     private List<ProviderEntry>? _cachedProviders;
@@ -88,6 +32,12 @@ public sealed partial class SettingsPage : Page
     private JsonElement? _callerPermissions;
     private bool _isUserAdmin;
     private Guid? _callerRoleId;
+
+    // Gateway log console state
+    private DispatcherTimer? _gatewayLogTimer;
+    private TextBlock? _gatewayLogBlock;
+    private ScrollViewer? _gatewayLogScroll;
+    private int _gatewayLogSnapshot;
 
     public SettingsPage()
     {
@@ -118,10 +68,14 @@ public sealed partial class SettingsPage : Page
         AddTabButton("Roles", "sharpclaw role list");
         AddTabSection("Audio");
         AddTabButton("Sound Input", "sharpclaw resource audiodevice list");
+        AddTabSection("Gateway");
+        AddTabButton("Gateway", "sharpclaw gateway status");
+        AddTabButton("Bot Integrations", "sharpclaw bot list");
         if (_isUserAdmin)
         {
             AddTabSection("Admin");
             AddTabButton("Users", "sharpclaw user list");
+            AddTabButton("Danger Zone", "sharpclaw reset");
         }
     }
 
@@ -155,6 +109,7 @@ public sealed partial class SettingsPage : Page
     private void SelectTab(string tab)
     {
         _activeTab = tab;
+        StopGatewayLogTimer();
         HighlightTabs();
         ContentPanel.Children.Clear();
         _ = tab switch
@@ -164,7 +119,10 @@ public sealed partial class SettingsPage : Page
             "Agents" => LoadAgentsAsync(),
             "Roles" => LoadRolesListAsync(),
             "Sound Input" => LoadSoundInputAsync(),
+            "Gateway" => LoadGatewayAsync(),
+            "Bot Integrations" => LoadBotIntegrationsAsync(),
             "Users" => LoadUsersAsync(),
+            "Danger Zone" => LoadDangerZoneAsync(),
             _ => Task.CompletedTask,
         };
     }
@@ -193,7 +151,7 @@ public sealed partial class SettingsPage : Page
         var nameBox = MakeInput("Provider name…");
         var typeBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 200 };
-        foreach (var t in _providerTypeNames)
+        foreach (var t in TerminalUI.ProviderTypeNames)
             typeBox.Items.Add(new ComboBoxItem { Content = t, Tag = t });
         typeBox.SelectedIndex = 0;
         var epBox = MakeInput("https://... (Custom only)");
@@ -232,7 +190,7 @@ public sealed partial class SettingsPage : Page
         Lbl($"type: {p.ProviderType}   key: {(p.HasApiKey ? "✓ set" : "✗ not set")}", 0x999999);
         Lbl($"id: {p.Id}", 0x555555);
 
-        var isDeviceCode = DeviceCodeProviderTypes.Contains(p.ProviderType);
+        var isDeviceCode = TerminalUI.DeviceCodeProviderTypes.Contains(p.ProviderType);
 
         if (isDeviceCode)
         {
@@ -528,6 +486,65 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(promptBox);
         ContentPanel.Children.Add(savePromptBtn);
 
+        // Provider parameters
+        Sub("Provider Parameters");
+        Lbl("Optional JSON key-value pairs merged into every API request for this agent's provider "
+            + "(e.g. {\"response_mime_type\":\"application/json\"} for Gemini).", 0x808080);
+        var currentParams = a.ProviderParameters is { Count: > 0 }
+            ? JsonSerializer.Serialize(a.ProviderParameters, new JsonSerializerOptions { WriteIndented = true })
+            : "{}";
+        var paramsBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
+            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Text = currentParams, AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 60 };
+        var saveParamsBtn = GreenButton("Save Parameters");
+        saveParamsBtn.Click += async (_, _) =>
+        {
+            Dictionary<string, JsonElement>? parsed = null;
+            var raw = paramsBox.Text?.Trim();
+            if (!string.IsNullOrEmpty(raw) && raw != "{}")
+            {
+                try
+                {
+                    parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw);
+                }
+                catch (JsonException)
+                {
+                    Status("\u2717 Invalid JSON.", 0xFF4444);
+                    return;
+                }
+            }
+            var body = JsonSerializer.Serialize(new { providerParameters = parsed }, Json);
+            var resp = await Api.PutAsync($"/agents/{a.Id}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Status(resp.IsSuccessStatusCode ? "\u2713 Parameters saved." : "\u2717 Save failed.",
+                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
+        };
+        ContentPanel.Children.Add(paramsBox);
+        ContentPanel.Children.Add(saveParamsBtn);
+
+        // Custom chat header
+        Sub("Custom Chat Header");
+        Lbl("Template override for the metadata header prepended to each message. "
+            + "Use {{tag}} placeholders (e.g. {{time}}, {{user}}, {{agent-role}}, {{Agents:{Name} ({Id})}}).", 0x808080);
+        var headerBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
+            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Text = a.CustomChatHeader ?? "", AcceptsReturn = true,
+            TextWrapping = TextWrapping.Wrap, MinHeight = 80,
+            PlaceholderText = "(uses default header)" };
+        var saveHeaderBtn = GreenButton("Save Header");
+        saveHeaderBtn.Click += async (_, _) =>
+        {
+            var header = string.IsNullOrWhiteSpace(headerBox.Text) ? null : headerBox.Text.Trim();
+            var body = JsonSerializer.Serialize(new { customChatHeader = header }, Json);
+            var resp = await Api.PutAsync($"/agents/{a.Id}",
+                new StringContent(body, Encoding.UTF8, "application/json"));
+            Status(resp.IsSuccessStatusCode ? "\u2713 Header saved." : "\u2717 Save failed.",
+                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
+        };
+        ContentPanel.Children.Add(headerBox);
+        ContentPanel.Children.Add(saveHeaderBtn);
+
         // Assign role
         Sub("Role");
         _cachedRoles ??= [];
@@ -602,7 +619,7 @@ public sealed partial class SettingsPage : Page
         var deviceBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 300 };
         deviceBox.Items.Add(new ComboBoxItem { Content = "(none)", Tag = Guid.Empty });
-        var savedId = LoadLocalSetting(SelectedAudioDeviceKey);
+        var savedId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
         var selIdx = 0;
         for (var i = 0; i < devices.Count; i++)
         {
@@ -617,7 +634,7 @@ public sealed partial class SettingsPage : Page
         {
             if (deviceBox.SelectedItem is ComboBoxItem { Tag: Guid id })
             {
-                SaveLocalSetting(SelectedAudioDeviceKey, id == Guid.Empty ? null : id.ToString());
+                SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, id == Guid.Empty ? null : id.ToString());
                 Status(id == Guid.Empty ? "Input device cleared." : "✓ Input device saved.", id == Guid.Empty ? 0x808080 : 0x00FF00);
             }
         };
@@ -638,18 +655,755 @@ public sealed partial class SettingsPage : Page
     }
 
     private static void SaveLocalSetting(string key, string? value)
-    {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        if (value is null)
-            settings.Values.Remove(key);
-        else
-            settings.Values[key] = value;
-    }
+        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
 
     private static string? LoadLocalSetting(string key)
+        => App.Services?.GetService<ClientSettings>()?.Get(key);
+
+    // ═══════════════════════════════════════════════════════════════
+    // GATEWAY
+    // ═══════════════════════════════════════════════════════════════
+
+    private GatewayProcessManager? Gateway => App.Services?.GetService<GatewayProcessManager>();
+
+    /// <summary>Creates a raw <see cref="HttpClient"/> pointed at the gateway.</summary>
+    private HttpClient CreateGatewayClient()
     {
-        var settings = Windows.Storage.ApplicationData.Current.LocalSettings;
-        return settings.Values.TryGetValue(key, out var val) ? val as string : null;
+        var gw = Gateway ?? throw new InvalidOperationException("GatewayProcessManager not registered.");
+        return new HttpClient { BaseAddress = new Uri(gw.ClientUrl), Timeout = TimeSpan.FromSeconds(10) };
+    }
+
+    private async Task LoadGatewayAsync()
+    {
+        ContentPanel.Children.Clear();
+        H("Gateway");
+        Lbl("Public entry point — handles security, rate-limiting, caching, and bot integrations.", 0x808080);
+
+        var gw = Gateway;
+        if (gw is null)
+        {
+            Status("GatewayProcessManager is not registered.", 0xFF4444);
+            return;
+        }
+
+        // ── Status card ──────────────────────────────────────────
+        var statusCard = new Border
+        {
+            BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            Background = B(0x141414), CornerRadius = new CornerRadius(4),
+            Margin = new Thickness(0, 8, 0, 0), Padding = new Thickness(16, 12),
+        };
+        var statusPanel = new StackPanel { Spacing = 6 };
+
+        var statusRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
+        statusRow.Children.Add(new TextBlock { Text = "🌐", FontSize = 16, VerticalAlignment = VerticalAlignment.Center });
+        statusRow.Children.Add(new TextBlock
+        {
+            Text = "Gateway Process", FontFamily = Mono, FontSize = 13,
+            Foreground = B(0xE0E0E0), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var statusIndicator = new TextBlock
+        {
+            FontFamily = Mono, FontSize = 10, VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 0, 0),
+        };
+        statusRow.Children.Add(statusIndicator);
+        statusPanel.Children.Add(statusRow);
+
+        statusPanel.Children.Add(new TextBlock
+        {
+            Text = $"URL: {gw.ClientUrl}", FontFamily = Mono,
+            FontSize = 10, Foreground = B(0x555555), IsTextSelectionEnabled = true,
+        });
+
+        var gwStatusBlock = new TextBlock
+        {
+            FontFamily = Mono, FontSize = 11,
+            Margin = new Thickness(0, 4, 0, 0), TextWrapping = TextWrapping.Wrap,
+        };
+        statusPanel.Children.Add(gwStatusBlock);
+
+        // Action buttons
+        var btnRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8,
+            Margin = new Thickness(0, 6, 0, 0) };
+
+        var startBtn = GreenButton("▶ Start");
+        var stopBtn = new Button
+        {
+            Content = new TextBlock { Text = "■ Stop", FontFamily = Mono, FontSize = 12, Foreground = B(0xFF8800) },
+            Background = B(0x2A1A0A), BorderBrush = B(0xFF8800), BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 6), Margin = new Thickness(0, 4, 0, 0),
+        };
+        var restartBtn = new Button
+        {
+            Content = new TextBlock { Text = "↻ Restart", FontFamily = Mono, FontSize = 12, Foreground = B(0x00CCFF) },
+            Background = B(0x0A1A2A), BorderBrush = B(0x00CCFF), BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 6), Margin = new Thickness(0, 4, 0, 0),
+        };
+        var refreshBtn = GreenButton("⟳ Refresh");
+
+        btnRow.Children.Add(startBtn);
+        btnRow.Children.Add(stopBtn);
+        btnRow.Children.Add(restartBtn);
+        btnRow.Children.Add(refreshBtn);
+        statusPanel.Children.Add(btnRow);
+        statusCard.Child = statusPanel;
+        ContentPanel.Children.Add(statusCard);
+
+        // ── Helper to apply visual state ─────────────────────────
+        void ApplyState(bool online, bool running, bool external)
+        {
+            if (online)
+            {
+                statusIndicator.Text = external ? "● RUNNING (external)" : running ? "● RUNNING" : "● REACHABLE";
+                statusIndicator.Foreground = B(0x00FF00);
+                gwStatusBlock.Text = "Gateway is online.";
+                gwStatusBlock.Foreground = B(0x00FF00);
+                startBtn.IsEnabled = false;
+                stopBtn.IsEnabled = !external && running;
+            }
+            else if (gw.SkipLaunch && !gw.IsAvailable)
+            {
+                statusIndicator.Text = "○ NOT ENABLED";
+                statusIndicator.Foreground = B(0x666666);
+                gwStatusBlock.Text = "Gateway launch is disabled and no bundled executable was found. "
+                    + "Enable it in the environment settings or start it externally.";
+                gwStatusBlock.Foreground = B(0xFF8800);
+                startBtn.IsEnabled = false;
+                stopBtn.IsEnabled = false;
+                restartBtn.IsEnabled = false;
+            }
+            else
+            {
+                statusIndicator.Text = "○ OFFLINE";
+                statusIndicator.Foreground = B(0xFF4444);
+
+                if (gw.ExitCode is not null)
+                    gwStatusBlock.Text = $"Gateway process exited with code {gw.ExitCode}.";
+                else
+                    gwStatusBlock.Text = gw.IsAvailable
+                        ? "Gateway is not responding. Click Start to launch it."
+                        : "Gateway executable not found. Start it externally or publish with /p:BundleGateway=true.";
+
+                gwStatusBlock.Foreground = B(0xFF4444);
+                stopBtn.IsEnabled = false;
+                startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
+            }
+            restartBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
+        }
+
+        // ── Probe current state ──────────────────────────────────
+        var reachable = await gw.IsGatewayReachableAsync();
+        ApplyState(reachable, gw.IsRunning, gw.IsExternal);
+
+        // ── Log console ──────────────────────────────────────────
+        var logHeader = new StackPanel
+        {
+            Orientation = Orientation.Horizontal, Spacing = 12,
+            Margin = new Thickness(0, 16, 0, 0),
+        };
+        logHeader.Children.Add(new TextBlock
+        {
+            Text = "Process Logs", FontFamily = Mono, FontSize = 12,
+            Foreground = B(0xBBBBBB), VerticalAlignment = VerticalAlignment.Center,
+        });
+
+        var logCountBadge = new TextBlock
+        {
+            FontFamily = Mono, FontSize = 10, Foreground = B(0x555555),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        logHeader.Children.Add(logCountBadge);
+
+        var copyBtn = new Button
+        {
+            Content = new TextBlock { Text = "Copy All", FontFamily = Mono, FontSize = 10, Foreground = B(0x00FF00) },
+            Background = B(0x1A1A1A), BorderBrush = B(0x00FF00), BorderThickness = new Thickness(1),
+            Padding = new Thickness(8, 3), VerticalAlignment = VerticalAlignment.Center,
+        };
+        logHeader.Children.Add(copyBtn);
+
+        var clearBtn = new Button
+        {
+            Content = new TextBlock { Text = "Clear", FontFamily = Mono, FontSize = 10, Foreground = B(0x00FF00) },
+            Background = B(0x1A1A1A), BorderBrush = B(0x00FF00), BorderThickness = new Thickness(1),
+            Padding = new Thickness(8, 3), VerticalAlignment = VerticalAlignment.Center,
+        };
+        logHeader.Children.Add(clearBtn);
+        ContentPanel.Children.Add(logHeader);
+
+        var logScroll = new ScrollViewer
+        {
+            Background = B(0x0A0A0A),
+            BorderBrush = B(0x333333),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(10, 8),
+            MinHeight = 180,
+            MaxHeight = 420,
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+        };
+
+        var logBlock = new TextBlock
+        {
+            FontFamily = Mono, FontSize = 10, Foreground = B(0x888888),
+            TextWrapping = TextWrapping.Wrap, IsTextSelectionEnabled = true,
+        };
+        logScroll.Content = logBlock;
+        ContentPanel.Children.Add(logScroll);
+
+        // Store references for timer-based refresh
+        _gatewayLogBlock = logBlock;
+        _gatewayLogScroll = logScroll;
+        _gatewayLogSnapshot = 0;
+
+        // Populate and schedule live refresh
+        void RefreshLogConsole()
+        {
+            var lines = gw.ProcessOutput;
+            if (lines.Count == _gatewayLogSnapshot)
+                return; // nothing new
+
+            _gatewayLogSnapshot = lines.Count;
+            logBlock.Text = lines.Count > 0 ? string.Join('\n', lines) : "(no output)";
+            logCountBadge.Text = $"{lines.Count} line{(lines.Count == 1 ? "" : "s")}";
+
+            // Auto-scroll to bottom
+            logScroll.UpdateLayout();
+            logScroll.ChangeView(null, logScroll.ScrollableHeight, null, disableAnimation: true);
+        }
+
+        RefreshLogConsole();
+        StartGatewayLogTimer(RefreshLogConsole);
+
+        clearBtn.Click += (_, _) =>
+        {
+            gw.ClearOutput();
+            _gatewayLogSnapshot = 0;
+            logBlock.Text = "(no output)";
+            logCountBadge.Text = "0 lines";
+        };
+
+        copyBtn.Click += async (_, _) =>
+        {
+            var text = logBlock.Text;
+            if (!string.IsNullOrEmpty(text) && text != "(no output)")
+            {
+                var dp = new DataPackage();
+                dp.SetText(text);
+                Clipboard.SetContent(dp);
+                ((TextBlock)copyBtn.Content).Text = "Copied ✓";
+                await Task.Delay(1500);
+                ((TextBlock)copyBtn.Content).Text = "Copy All";
+            }
+        };
+
+        // ── Button handlers ──────────────────────────────────────
+        startBtn.Click += async (_, _) =>
+        {
+            startBtn.IsEnabled = false;
+            gwStatusBlock.Text = "Starting gateway…";
+            gwStatusBlock.Foreground = B(0x808080);
+            statusIndicator.Text = "◌ STARTING";
+            statusIndicator.Foreground = B(0xFFCC00);
+            try
+            {
+                gw.ApiKey = Api.CachedApiKey;
+                await gw.EnsureStartedAsync();
+                var ready = false;
+                for (var i = 0; i < 12; i++)
+                {
+                    await Task.Delay(500);
+                    RefreshLogConsole();
+
+                    if (!gw.IsRunning && !gw.IsExternal)
+                    {
+                        ApplyState(false, false, false);
+                        gwStatusBlock.Text = $"✗ Gateway process exited (code {gw.ExitCode}).";
+                        gwStatusBlock.Foreground = B(0xFF4444);
+                        startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
+                        return;
+                    }
+                    if (await gw.IsGatewayReachableAsync())
+                    {
+                        ready = true;
+                        break;
+                    }
+                }
+
+                if (ready)
+                    ApplyState(true, gw.IsRunning, gw.IsExternal);
+                else
+                {
+                    ApplyState(false, gw.IsRunning, gw.IsExternal);
+                    gwStatusBlock.Text = "✗ Gateway started but is not responding yet.";
+                    gwStatusBlock.Foreground = B(0xFF4444);
+                    startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
+                }
+            }
+            catch (Exception ex)
+            {
+                ApplyState(false, gw.IsRunning, gw.IsExternal);
+                gwStatusBlock.Text = $"✗ {ex.Message}";
+                gwStatusBlock.Foreground = B(0xFF4444);
+                startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
+            }
+        };
+
+        stopBtn.Click += (_, _) =>
+        {
+            gw.Stop();
+            ApplyState(false, false, false);
+            gwStatusBlock.Text = "Gateway stopped.";
+            gwStatusBlock.Foreground = B(0xFF8800);
+        };
+
+        restartBtn.Click += async (_, _) =>
+        {
+            restartBtn.IsEnabled = false;
+            startBtn.IsEnabled = false;
+            stopBtn.IsEnabled = false;
+            gwStatusBlock.Text = "Restarting gateway…";
+            gwStatusBlock.Foreground = B(0x808080);
+            statusIndicator.Text = "◌ RESTARTING";
+            statusIndicator.Foreground = B(0xFFCC00);
+            try
+            {
+                gw.Stop();
+                await Task.Delay(500);
+                gw.ApiKey = Api.CachedApiKey;
+                gw.Start();
+
+                var ready = false;
+                for (var i = 0; i < 12; i++)
+                {
+                    await Task.Delay(500);
+                    RefreshLogConsole();
+
+                    if (!gw.IsRunning && !gw.IsExternal)
+                    {
+                        ApplyState(false, false, false);
+                        gwStatusBlock.Text = $"✗ Gateway process exited on restart (code {gw.ExitCode}).";
+                        gwStatusBlock.Foreground = B(0xFF4444);
+                        return;
+                    }
+                    if (await gw.IsGatewayReachableAsync())
+                    {
+                        ready = true;
+                        break;
+                    }
+                }
+
+                if (ready)
+                    ApplyState(true, gw.IsRunning, gw.IsExternal);
+                else
+                {
+                    ApplyState(false, gw.IsRunning, gw.IsExternal);
+                    gwStatusBlock.Text = "✗ Gateway restarted but is not responding.";
+                    gwStatusBlock.Foreground = B(0xFF4444);
+                }
+            }
+            catch (Exception ex)
+            {
+                ApplyState(false, gw.IsRunning, gw.IsExternal);
+                gwStatusBlock.Text = $"✗ {ex.Message}";
+                gwStatusBlock.Foreground = B(0xFF4444);
+            }
+        };
+
+        refreshBtn.Click += async (_, _) =>
+        {
+            refreshBtn.IsEnabled = false;
+            var online = await gw.IsGatewayReachableAsync();
+            ApplyState(online, gw.IsRunning, gw.IsExternal);
+            RefreshLogConsole();
+            refreshBtn.IsEnabled = true;
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // BOT INTEGRATIONS
+    // ═══════════════════════════════════════════════════════════════
+
+    private async Task LoadBotIntegrationsAsync()
+    {
+        ContentPanel.Children.Clear();
+
+        var gw = Gateway;
+        if (gw is null)
+        {
+            H("Bot Integrations");
+            Status("GatewayProcessManager is not registered.", 0xFF4444);
+            return;
+        }
+
+        var reachable = await gw.IsGatewayReachableAsync();
+        if (!reachable)
+        {
+            H("Bot Integrations");
+            Status("Gateway is not running. Start the gateway from the Gateway tab to manage bot integrations.", 0xFF8800);
+            return;
+        }
+
+        var (form, listPanel) = TabHeader("Bot Integrations", "Search bots…");
+
+        // ── Create form ──
+        var nameBox = MakeInput("Bot name…");
+        var typeBox = new ComboBox
+        {
+            FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
+            BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 200,
+        };
+        foreach (var t in new[] { "Telegram", "Discord", "WhatsApp", "Slack", "Matrix", "Signal", "Email", "Teams" })
+            typeBox.Items.Add(new ComboBoxItem { Content = t, Tag = t });
+        typeBox.SelectedIndex = 0;
+
+        var tokenBox = new PasswordBox
+        {
+            PlaceholderText = "Bot API token…",
+            FontFamily = Mono, FontSize = 12,
+            Foreground = B(0x00FF00), Background = B(0x1A1A1A),
+            BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            MinWidth = 260, Padding = new Thickness(8, 6),
+        };
+
+        // ── Platform-specific config fields (shown dynamically) ──
+        var platformConfigPanel = new StackPanel { Spacing = 4 };
+        var platformInputs = new Dictionary<string, TextBox>();
+
+        void RebuildPlatformFields(string type)
+        {
+            platformConfigPanel.Children.Clear();
+            platformInputs.Clear();
+            var fields = GetPlatformConfigFields(type);
+            if (fields.Length == 0) return;
+            platformConfigPanel.Children.Add(new TextBlock
+            {
+                Text = "platform config:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC),
+            });
+            foreach (var (key, placeholder, hint) in fields)
+            {
+                if (hint is not null)
+                    platformConfigPanel.Children.Add(new TextBlock
+                    {
+                        Text = hint, FontFamily = Mono, FontSize = 10, Foreground = B(0x666666),
+                        TextWrapping = TextWrapping.Wrap,
+                    });
+                var input = MakeInput(placeholder);
+                platformInputs[key] = input;
+                platformConfigPanel.Children.Add(input);
+            }
+        }
+
+        typeBox.SelectionChanged += (_, _) =>
+        {
+            var sel = typeBox.SelectedItem is ComboBoxItem { Tag: string t } ? t : "Telegram";
+            tokenBox.PlaceholderText = GetTokenPlaceholder(sel);
+            RebuildPlatformFields(sel);
+        };
+        RebuildPlatformFields("Telegram");
+
+        var enabledToggle = new ToggleSwitch
+        {
+            IsOn = true,
+            OnContent = new TextBlock { Text = "Enabled", FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00) },
+            OffContent = new TextBlock { Text = "Disabled", FontFamily = Mono, FontSize = 11, Foreground = B(0x666666) },
+        };
+
+        var createBtn = GreenButton("Create");
+        createBtn.Click += async (_, _) =>
+        {
+            var name = nameBox.Text.Trim();
+            var type = typeBox.SelectedItem is ComboBoxItem { Tag: string t } ? t : "Telegram";
+            if (string.IsNullOrEmpty(name)) return;
+            var token = string.IsNullOrEmpty(tokenBox.Password) ? null : tokenBox.Password;
+            var payload = new JsonObject { ["name"] = name, ["botType"] = type, ["enabled"] = enabledToggle.IsOn };
+            if (token is not null) payload["botToken"] = token;
+            var pc = BuildPlatformConfigJson(platformInputs);
+            if (pc is not null) payload["platformConfig"] = pc;
+            try
+            {
+                using var gwHttp = CreateGatewayClient();
+                using var resp = await gwHttp.PostAsync("/api/bots",
+                    new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"));
+                if (!resp.IsSuccessStatusCode)
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    Status($"✗ Create failed: {body}", 0xFF4444);
+                    return;
+                }
+            }
+            catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); return; }
+            await LoadBotIntegrationsAsync();
+        };
+
+        form.Children.Add(nameBox);
+        form.Children.Add(new TextBlock { Text = "type:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC) });
+        form.Children.Add(typeBox);
+        form.Children.Add(new TextBlock { Text = "token:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC) });
+        form.Children.Add(tokenBox);
+        form.Children.Add(platformConfigPanel);
+        form.Children.Add(enabledToggle);
+        form.Children.Add(createBtn);
+
+        // ── Fetch list ──
+        List<BotIntegrationEntry>? bots;
+        try
+        {
+            using var gwHttp = CreateGatewayClient();
+            using var listResp = await gwHttp.GetAsync("/api/bots/list");
+            if (!listResp.IsSuccessStatusCode)
+            {
+                var code = (int)listResp.StatusCode;
+                var detail = code switch
+                {
+                    502 => "Core API is not reachable — the gateway cannot connect to the internal API.",
+                    401 => "Authentication failed — try restarting both the backend and gateway.",
+                    503 => "The bots endpoint is disabled in the gateway configuration.",
+                    _ => $"Gateway returned HTTP {code}.",
+                };
+                Status($"✗ {detail}", 0xFF4444);
+                return;
+            }
+            var json = await listResp.Content.ReadAsStringAsync();
+            bots = JsonSerializer.Deserialize<List<BotIntegrationEntry>>(json, Json);
+        }
+        catch (Exception ex)
+        {
+            Status($"✗ {ex.Message}", 0xFF4444);
+            return;
+        }
+
+        if (bots is { Count: > 0 })
+            foreach (var bot in bots)
+            {
+                var statusText = bot.Enabled ? "● enabled" : "○ disabled";
+                var statusClr = bot.Enabled ? 0x00FF00 : 0x666666;
+                listPanel.Children.Add(MakeListRow(
+                    bot.Name,
+                    bot.BotType + (bot.HasBotToken ? "  🔑" : ""),
+                    () => ShowBotDetail(bot),
+                    async () =>
+                    {
+                        try
+                        {
+                            using var gwHttp = CreateGatewayClient();
+                            await gwHttp.DeleteAsync($"/api/bots/{bot.Id}");
+                        }
+                        catch { /* best-effort */ }
+                        await LoadBotIntegrationsAsync();
+                    },
+                    statusText, statusClr));
+            }
+    }
+
+    private void StartGatewayLogTimer(Action refresh)
+    {
+        StopGatewayLogTimer();
+        _gatewayLogTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(1) };
+        _gatewayLogTimer.Tick += (_, _) => refresh();
+        _gatewayLogTimer.Start();
+    }
+
+    private void StopGatewayLogTimer()
+    {
+        _gatewayLogTimer?.Stop();
+        _gatewayLogTimer = null;
+        _gatewayLogBlock = null;
+        _gatewayLogScroll = null;
+    }
+
+    private void ShowBotDetail(BotIntegrationEntry bot)
+    {
+        ContentPanel.Children.Clear();
+        BackLink(() => _ = LoadBotIntegrationsAsync());
+        H($"Bot: {bot.Name}");
+        Lbl($"type: {bot.BotType}   status: {(bot.Enabled ? "enabled" : "disabled")}   token: {(bot.HasBotToken ? "✓ set" : "✗ not set")}", 0x999999);
+        Lbl($"id: {bot.Id}", 0x555555);
+
+        // ── Edit name ──
+        Sub("Name");
+        var nameBox = MakeInput("Bot name…");
+        nameBox.Text = bot.Name;
+        ContentPanel.Children.Add(nameBox);
+
+        // ── Toggle enabled ──
+        Sub("Enabled");
+        var toggle = new ToggleSwitch
+        {
+            IsOn = bot.Enabled,
+            OnContent = new TextBlock { Text = "Enabled", FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00) },
+            OffContent = new TextBlock { Text = "Disabled", FontFamily = Mono, FontSize = 11, Foreground = B(0x666666) },
+        };
+        ContentPanel.Children.Add(toggle);
+
+        // ── Bot token ──
+        Sub("Bot Token");
+        var tokenHint = GetTokenHint(bot.BotType);
+        Lbl(tokenHint, 0x666666);
+        var tokenBox = new PasswordBox
+        {
+            PlaceholderText = bot.HasBotToken ? "(token set — enter new value to replace)" : GetTokenPlaceholder(bot.BotType),
+            FontFamily = Mono, FontSize = 12,
+            Foreground = B(0x00FF00), Background = B(0x1A1A1A),
+            BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
+            MinWidth = 360, Padding = new Thickness(8, 6),
+        };
+        ContentPanel.Children.Add(tokenBox);
+
+        // ── Platform-specific config fields ──
+        var platformInputs = new Dictionary<string, TextBox>();
+        var fields = GetPlatformConfigFields(bot.BotType);
+        Dictionary<string, string>? existingConfig = null;
+        if (bot.PlatformConfig is not null)
+        {
+            try { existingConfig = JsonSerializer.Deserialize<Dictionary<string, string>>(bot.PlatformConfig, Json); }
+            catch { /* ignore malformed */ }
+        }
+
+        if (fields.Length > 0)
+        {
+            Sub("Platform Configuration");
+            foreach (var (key, placeholder, hint) in fields)
+            {
+                if (hint is not null)
+                    Lbl(hint, 0x666666);
+                var input = MakeInput(placeholder);
+                if (existingConfig is not null && existingConfig.TryGetValue(key, out var val))
+                    input.Text = val;
+                platformInputs[key] = input;
+                ContentPanel.Children.Add(input);
+            }
+        }
+
+        // ── Save ──
+        var saveBtn = GreenButton("Save");
+        saveBtn.Click += async (_, _) =>
+        {
+            saveBtn.IsEnabled = false;
+            try
+            {
+                var payload = new JsonObject
+                {
+                    ["name"] = nameBox.Text.Trim(),
+                    ["enabled"] = toggle.IsOn,
+                };
+                var newToken = tokenBox.Password;
+                if (!string.IsNullOrEmpty(newToken))
+                    payload["botToken"] = newToken;
+                var pc = BuildPlatformConfigJson(platformInputs);
+                if (pc is not null)
+                    payload["platformConfig"] = pc;
+
+                using var gwHttp = CreateGatewayClient();
+                using var resp = await gwHttp.PutAsync($"/api/bots/{bot.Id}",
+                    new StringContent(payload.ToJsonString(), Encoding.UTF8, "application/json"));
+
+                if (resp.IsSuccessStatusCode)
+                {
+                    Status("✓ Saved. Restart the gateway for changes to take effect.", 0x00FF00);
+                }
+                else
+                {
+                    var body = await resp.Content.ReadAsStringAsync();
+                    Status($"✗ Save failed: {body}", 0xFF4444);
+                }
+            }
+            catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); }
+            finally { saveBtn.IsEnabled = true; }
+        };
+        ContentPanel.Children.Add(saveBtn);
+    }
+
+    // ── Bot platform config helpers ─────────────────────────────
+
+    /// <summary>
+    /// Returns the platform-specific config fields needed for each bot type.
+    /// Platforms that only require a bot token return an empty array.
+    /// </summary>
+    private static (string Key, string Placeholder, string? Hint)[] GetPlatformConfigFields(string type) => type switch
+    {
+        "WhatsApp" =>
+        [
+            ("PhoneNumberId", "Phone Number ID…", "WhatsApp Business phone number ID from Meta Cloud API."),
+            ("VerifyToken", "Webhook verify token…", "Arbitrary string used for Meta webhook verification."),
+        ],
+        "Slack" =>
+        [
+            ("SigningSecret", "Slack signing secret…", "App signing secret from the Slack API dashboard, used to verify webhook requests."),
+        ],
+        "Matrix" =>
+        [
+            ("HomeserverUrl", "https://matrix.org", "Matrix homeserver base URL (e.g. https://matrix.org)."),
+        ],
+        "Signal" =>
+        [
+            ("ApiUrl", "http://localhost:8080", "signal-cli REST API base URL."),
+            ("PhoneNumber", "+1234567890", "Registered phone number in E.164 format."),
+        ],
+        "Email" =>
+        [
+            ("ImapHost", "imap.example.com", "IMAP server hostname for receiving email."),
+            ("ImapPort", "993", "IMAP port (default 993 for TLS)."),
+            ("SmtpHost", "smtp.example.com", "SMTP server hostname for sending replies."),
+            ("SmtpPort", "587", "SMTP port (default 587 for STARTTLS)."),
+            ("Username", "bot@example.com", "Email account username / address."),
+            ("PollIntervalSeconds", "30", "IMAP poll interval in seconds."),
+        ],
+        "Teams" =>
+        [
+            ("AppId", "00000000-0000-0000-0000-000000000000", "Microsoft App ID (GUID) from Azure Bot registration."),
+        ],
+        _ => [], // Telegram, Discord — token only
+    };
+
+    private static string GetTokenPlaceholder(string type) => type switch
+    {
+        "Telegram" => "Bot token from @BotFather…",
+        "Discord" => "Bot token from Developer Portal…",
+        "WhatsApp" => "Meta Graph API access token…",
+        "Slack" => "Bot User OAuth Token (xoxb-…)…",
+        "Matrix" => "Matrix access token…",
+        "Signal" => "(unused — signal-cli handles auth)",
+        "Email" => "Email password / app password…",
+        "Teams" => "Azure AD client secret…",
+        _ => "Bot API token…",
+    };
+
+    private static string GetTokenHint(string type) => type switch
+    {
+        "Telegram" => "Bot token from @BotFather on Telegram.",
+        "Discord" => "Bot token from the Discord Developer Portal.",
+        "WhatsApp" => "Meta Graph API access token (permanent system user token recommended).",
+        "Slack" => "Bot User OAuth Token (xoxb-…) from the Slack API dashboard.",
+        "Matrix" => "Matrix access token — obtain via /_matrix/client/v3/login.",
+        "Signal" => "Not used — signal-cli handles authentication via the registered phone number.",
+        "Email" => "Email account password or app-specific password.",
+        "Teams" => "Azure AD client secret from the Azure Bot registration.",
+        _ => "Bot token for this integration.",
+    };
+
+    /// <summary>
+    /// Serialises the platform-specific input fields into a JSON string
+    /// suitable for the <c>platformConfig</c> API field. Returns
+    /// <see langword="null"/> when no fields have values.
+    /// </summary>
+    private static string? BuildPlatformConfigJson(Dictionary<string, TextBox> inputs)
+    {
+        if (inputs.Count == 0) return null;
+        var obj = new JsonObject();
+        var hasValues = false;
+        foreach (var (key, box) in inputs)
+        {
+            var val = box.Text.Trim();
+            if (string.IsNullOrEmpty(val)) continue;
+            obj[key] = val;
+            hasValues = true;
+        }
+        return hasValues ? obj.ToJsonString() : null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -744,104 +1498,20 @@ public sealed partial class SettingsPage : Page
 
     private async Task BuildRoleEditorAsync(Guid roleId, JsonElement root)
     {
+        _permEditor = new PermissionEditorBuilder(Api)
+            .WithCallerFilter(_callerPermissions)
+            .WithExisting(root)
+            .WithFlagClearance(true)
+            .WithGrantClearance(true);
+
         Sub("Global Permissions");
         Lbl("Capabilities the agent can use. Each has its own clearance level.", 0x808080);
-        _flagEditors.Clear();
-        var flagsPanel = new StackPanel { Spacing = 10 };
-        for (var i = 0; i < _globalFlagNames.Length; i++)
-        {
-            var flag = _globalFlagNames[i];
-            var clrN = _globalFlagClearanceNames[i];
-
-            // Only show flags the current user holds
-            var callerHasFlag = _callerPermissions is { } cp
-                && cp.TryGetProperty(flag, out var cfp) && cfp.GetBoolean();
-            if (_callerPermissions is not null && !callerHasFlag)
-                continue;
-
-            var on = root.TryGetProperty(flag, out var fp) && fp.GetBoolean();
-            var cl = root.TryGetProperty(clrN, out var cpp) ? cpp.GetString() ?? "Unset" : "Unset";
-            var row = new StackPanel { Spacing = 4 };
-            var cb = new CheckBox
-            {
-                IsChecked = on, MinWidth = 0, MinHeight = 0,
-                Padding = new Thickness(4, 0, 0, 0),
-                Content = new TextBlock { Text = FormatFlagName(flag), FontFamily = Mono, FontSize = 11, Foreground = B(0xE0E0E0) },
-            };
-            if (_globalFlagTooltips.TryGetValue(flag, out var tip))
-                ToolTipService.SetToolTip(cb, tip);
-            row.Children.Add(cb);
-            var clrLabel = new TextBlock { Text = "Clearance:", FontFamily = Mono, FontSize = 9,
-                Foreground = B(0x808080), Margin = new Thickness(24, 2, 0, 0) };
-            row.Children.Add(clrLabel);
-            var clrBox = ClearanceCombo(cl, true);
-            clrBox.Margin = new Thickness(24, 0, 0, 0);
-            row.Children.Add(clrBox);
-            _flagEditors[flag] = (cb, clrBox);
-            flagsPanel.Children.Add(row);
-        }
-        if (flagsPanel.Children.Count == 0)
+        if (!_permEditor.BuildGlobalFlags(ContentPanel))
             Lbl("You hold no global permissions to grant.", 0x555555);
-        ContentPanel.Children.Add(flagsPanel);
 
         Sub("Resource Accesses");
         Lbl("Per-resource grants with individual clearance levels.", 0x808080);
-        _resourcePanels.Clear();
-        _resourceNameCache.Clear();
-        _resourcesByType.Clear();
-        await PreloadAllResourceNamesAsync();
-
-        var resCont = new StackPanel { Spacing = 16 };
-        foreach (var (apiName, displayName) in _resourceAccessTypes)
-        {
-            // Only show resource types the caller has grants for
-            var callerIds = GetCallerResourceIds(apiName);
-            if (_callerPermissions is not null && callerIds is null)
-                continue;
-
-            var section = new StackPanel { Spacing = 4 };
-            section.Children.Add(new TextBlock { Text = displayName, FontFamily = Mono, FontSize = 12,
-                Foreground = B(0x00CCFF), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            var gp = new StackPanel { Spacing = 6, Margin = new Thickness(12, 0, 0, 0) };
-            _resourcePanels[apiName] = gp;
-            if (root.TryGetProperty(apiName, out var ap) && ap.ValueKind == JsonValueKind.Array)
-                foreach (var g in ap.EnumerateArray())
-                    if (g.TryGetProperty("resourceId", out var rid) && rid.ValueKind == JsonValueKind.String)
-                    {
-                        var cl = g.TryGetProperty("clearance", out var clp) ? clp.GetString() ?? "Unset" : "Unset";
-                        AddGrantRow(gp, rid.GetGuid(), cl);
-                    }
-            section.Children.Add(gp);
-
-            var addRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            addRow.Children.Add(new TextBlock { Text = "Resource:", FontFamily = Mono, FontSize = 10,
-                Foreground = B(0x00CCFF), VerticalAlignment = VerticalAlignment.Center });
-            var resSelector = new ComboBox { FontFamily = Mono, FontSize = 10, Background = B(0x0A1A2A),
-                Foreground = B(0x00CCFF), BorderBrush = B(0x00CCFF), BorderThickness = new Thickness(1), MinWidth = 220 };
-            var capturedApi = apiName;
-            PopulateResourceSelector(resSelector, capturedApi);
-            var addBtn = new Button
-            {
-                Content = new TextBlock { Text = "+ add", FontFamily = Mono, FontSize = 10, Foreground = B(0x00FF00) },
-                Background = Trans, BorderThickness = new Thickness(0),
-                Padding = new Thickness(4, 2), MinWidth = 0, MinHeight = 0,
-            };
-            addBtn.Click += (_, _) =>
-            {
-                if (resSelector.SelectedItem is not ComboBoxItem { Tag: Guid resId } || resId == Guid.Empty) return;
-                if (!_resourcePanels.TryGetValue(capturedApi, out var panel)) return;
-                foreach (var child in panel.Children)
-                    if (child is StackPanel r && r.Children.Count > 0
-                        && r.Children[0] is TextBlock { Tag: Guid existing } && existing == resId)
-                        return;
-                AddGrantRow(panel, resId, "Independent");
-            };
-            addRow.Children.Add(resSelector);
-            addRow.Children.Add(addBtn);
-            section.Children.Add(addRow);
-            resCont.Children.Add(section);
-        }
-        ContentPanel.Children.Add(resCont);
+        await _permEditor.BuildResourceGrantsAsync(ContentPanel);
 
         var saveBtn = new Button
         {
@@ -853,107 +1523,12 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(saveBtn);
     }
 
-    private async Task PreloadAllResourceNamesAsync()
-    {
-        var tasks = _resourceAccessTypes.Select(async r =>
-        {
-            try
-            {
-                using var resp = await Api.GetAsync($"/resources/lookup/{r.ApiName}");
-                if (!resp.IsSuccessStatusCode) return;
-                using var s = await resp.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(s);
-                var items = new List<(Guid Id, string Name)>();
-                foreach (var item in doc.RootElement.EnumerateArray())
-                {
-                    var id = item.GetProperty("id").GetGuid();
-                    var name = item.GetProperty("name").GetString() ?? id.ToString()[..8];
-                    _resourceNameCache[id] = name;
-                    items.Add((id, name));
-                }
-                _resourcesByType[r.ApiName] = items;
-            }
-            catch { /* swallow */ }
-        });
-        await Task.WhenAll(tasks);
-    }
-
-    private void PopulateResourceSelector(ComboBox selector, string accessType)
-    {
-        var callerIds = GetCallerResourceIds(accessType);
-
-        // If caller has no grants for this type, show disabled placeholder
-        if (_callerPermissions is not null && callerIds is null)
-        {
-            selector.Items.Add(new ComboBoxItem { Content = "(no access)", Tag = Guid.Empty, IsEnabled = false });
-            selector.SelectedIndex = 0;
-            return;
-        }
-
-        var hasWildcard = callerIds is not null && callerIds.Contains(AllResourcesId);
-
-        if (callerIds is null || hasWildcard)
-            selector.Items.Add(new ComboBoxItem { Content = "* (all resources)", Tag = AllResourcesId });
-
-        if (_resourcesByType.TryGetValue(accessType, out var items))
-            foreach (var (id, name) in items)
-                if (callerIds is null || hasWildcard || callerIds.Contains(id))
-                    selector.Items.Add(new ComboBoxItem { Content = name, Tag = id });
-
-        if (selector.Items.Count > 0)
-            selector.SelectedIndex = 0;
-    }
-
-    private void AddGrantRow(StackPanel panel, Guid resId, string clearance)
-    {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 10 };
-        string idText;
-        if (resId == AllResourcesId)
-            idText = "* (all)";
-        else if (_resourceNameCache.TryGetValue(resId, out var name))
-            idText = name;
-        else
-            idText = resId.ToString()[..8] + "\u2026";
-        var idBlock = new TextBlock { Text = idText, FontFamily = Mono, FontSize = 11,
-            Foreground = B(0xE0E0E0), VerticalAlignment = VerticalAlignment.Center, MinWidth = 140, Tag = resId };
-        if (resId != AllResourcesId) ToolTipService.SetToolTip(idBlock, resId.ToString());
-        row.Children.Add(idBlock);
-        row.Children.Add(new TextBlock { Text = "Clearance:", FontFamily = Mono, FontSize = 9,
-            Foreground = B(0x808080), VerticalAlignment = VerticalAlignment.Center });
-        row.Children.Add(ClearanceCombo(clearance, true));
-        var rm = new Button
-        {
-            Content = new TextBlock { Text = "✕", FontFamily = Mono, FontSize = 9, Foreground = B(0xFF4444) },
-            Background = Trans, BorderThickness = new Thickness(0),
-            Padding = new Thickness(2), MinWidth = 0, MinHeight = 0,
-        };
-        rm.Click += (_, _) => panel.Children.Remove(row);
-        row.Children.Add(rm);
-        panel.Children.Add(row);
-    }
-
     private async Task SaveRolePermsAsync(Guid roleId)
     {
-        var req = new Dictionary<string, object?>();
-        for (var i = 0; i < _globalFlagNames.Length; i++)
-        {
-            if (!_flagEditors.TryGetValue(_globalFlagNames[i], out var ed)) continue;
-            req[_globalFlagNames[i]] = ed.Check.IsChecked == true;
-            req[_globalFlagClearanceNames[i]] = ed.Clearance.SelectedItem is ComboBoxItem { Tag: string cl } ? cl : "Unset";
-        }
-        foreach (var (apiName, panel) in _resourcePanels)
-        {
-            var grants = new List<object>();
-            foreach (var child in panel.Children)
-                if (child is StackPanel row && row.Children.Count >= 2
-                    && row.Children[0] is TextBlock { Tag: Guid resId }
-                    && row.Children[1] is ComboBox cb && cb.SelectedItem is ComboBoxItem ci)
-                    grants.Add(new { resourceId = resId, clearance = ci.Tag?.ToString() ?? "Unset" });
-            req[apiName] = grants;
-        }
+        if (_permEditor is null) return;
         try
         {
-            var body = JsonSerializer.Serialize(req, Json);
+            var body = JsonSerializer.Serialize(_permEditor.CollectAll(), Json);
             var resp = await Api.PutAsync($"/roles/{roleId}/permissions",
                 new StringContent(body, Encoding.UTF8, "application/json"));
             Status(resp.IsSuccessStatusCode ? "✓ Permissions saved." : "✗ Save failed.", resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
@@ -996,10 +1571,11 @@ public sealed partial class SettingsPage : Page
 
         var search = new TextBox
         {
-            PlaceholderText = searchHint, FontFamily = Mono, FontSize = 11,
+            PlaceholderText = searchHint, FontFamily = Mono, FontSize = 12,
             Foreground = B(0xCCCCCC), Background = B(0x1A1A1A),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
-            Padding = new Thickness(8, 4), Margin = new Thickness(0, 2, 0, 4),
+            Padding = new Thickness(8, 6), Margin = new Thickness(0, 2, 0, 4),
+            VerticalContentAlignment = VerticalAlignment.Center,
         };
         ContentPanel.Children.Add(search);
 
@@ -1017,25 +1593,8 @@ public sealed partial class SettingsPage : Page
         return (form, list);
     }
 
-    private ComboBox ClearanceCombo(string selected, bool includeUnset)
-    {
-        var box = new ComboBox { FontFamily = Mono, FontSize = 10, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
-            BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 280, Padding = new Thickness(4, 2) };
-        var selIdx = 0; var idx = 0;
-        if (includeUnset)
-        {
-            box.Items.Add(new ComboBoxItem { Content = "Unset", Tag = "Unset" });
-            if (string.Equals("Unset", selected, StringComparison.OrdinalIgnoreCase)) selIdx = 0;
-            idx = 1;
-        }
-        for (var i = 0; i < _clearanceOptions.Length; i++, idx++)
-        {
-            box.Items.Add(new ComboBoxItem { Content = _clearanceOptions[i].Label, Tag = _clearanceOptions[i].Tag });
-            if (string.Equals(_clearanceOptions[i].Tag, selected, StringComparison.OrdinalIgnoreCase)) selIdx = idx;
-        }
-        box.SelectedIndex = selIdx;
-        return box;
-    }
+    private static ComboBox ClearanceCombo(string selected, bool includeUnset)
+        => TerminalUI.MakeClearanceCombo(selected, includeUnset);
 
     private void H(string text) => ContentPanel.Children.Add(new TextBlock
     {
@@ -1128,50 +1687,24 @@ public sealed partial class SettingsPage : Page
         return row;
     }
 
-    private async Task<List<T>?> FetchListAsync<T>(string path)
-    {
-        try
-        {
-            using var resp = await Api.GetAsync(path);
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                return await JsonSerializer.DeserializeAsync<List<T>>(s, Json);
-            }
-        }
-        catch { /* swallow */ }
-        return null;
-    }
+    private Task<List<T>?> FetchListAsync<T>(string path) => Api.FetchListAsync<T>(path, Json);
 
-    private static string FormatFlagName(string camelCase)
-    {
-        var s = camelCase.AsSpan();
-        if (s.StartsWith("can")) s = s[3..];
-        var sb = new StringBuilder(s.Length + 4);
-        for (var i = 0; i < s.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(s[i])) sb.Append(' ');
-            sb.Append(i == 0 ? char.ToUpper(s[i]) : s[i]);
-        }
-        return sb.ToString();
-    }
+    private static string FormatFlagName(string camelCase) => TerminalUI.FormatFlagName(camelCase);
 
-    private static SolidColorBrush B(int rgb)
-    {
-        if (!BrushMap.TryGetValue(rgb, out var brush))
-        {
-            brush = new SolidColorBrush(Windows.UI.Color.FromArgb(255,
-                (byte)((rgb >> 16) & 0xFF), (byte)((rgb >> 8) & 0xFF), (byte)(rgb & 0xFF)));
-            BrushMap[rgb] = brush;
-        }
-        return brush;
-    }
+    private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
 
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
         var navigator = services.GetRequiredService<INavigator>();
         _ = navigator.NavigateRouteAsync(this, "Main");
+    }
+
+    private void OnEnvClick(object sender, RoutedEventArgs e)
+    {
+        if (App.Services is not { } services) return;
+        EnvMenuPage.PendingOrigin = "Settings";
+        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1337,7 +1870,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModelEntry(Guid Id, string Name, Guid ProviderId, string ProviderName, string Capabilities);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null);
+    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, Dictionary<string, JsonElement>? ProviderParameters = null, string? CustomChatHeader = null);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record RoleEntry(Guid Id, string Name, Guid? PermissionSetId = null);
     [ImplicitKeys(IsEnabled = false)]
@@ -1346,6 +1879,192 @@ public sealed partial class SettingsPage : Page
     private sealed record AudioDeviceEntry(Guid Id, string Name, string? DeviceIdentifier, string? Description);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record UserListEntry(Guid Id, string Username, string? Bio, Guid? RoleId, string? RoleName, bool IsUserAdmin);
+    [ImplicitKeys(IsEnabled = false)]
+    private sealed record BotIntegrationEntry(Guid Id, string Name, string BotType, bool Enabled, bool HasBotToken, Guid? DefaultChannelId = null, string? PlatformConfig = null);
 
-    private const string SelectedAudioDeviceKey = "SelectedAudioDeviceId";
+    // ═══════════════════════════════════════════════════════════════
+    // DANGER ZONE
+    // ═══════════════════════════════════════════════════════════════
+
+    private Task LoadDangerZoneAsync()
+    {
+        ContentPanel.Children.Clear();
+        H("Danger Zone");
+        Lbl("Irreversible actions that destroy local data.", 0xFF4444);
+
+        ContentPanel.Children.Add(new Border
+        {
+            BorderBrush = B(0x331111), BorderThickness = new Thickness(1),
+            Background = B(0x1A0A0A), CornerRadius = new CornerRadius(4),
+            Margin = new Thickness(0, 12, 0, 0), Padding = new Thickness(16, 12),
+            Child = BuildResetSection(),
+        });
+
+        return Task.CompletedTask;
+    }
+
+    private StackPanel BuildResetSection()
+    {
+        var panel = new StackPanel { Spacing = 8 };
+
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Reset All Data", FontFamily = Mono, FontSize = 13,
+            Foreground = B(0xFF4444), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "Permanently deletes the entire local database, all saved settings, "
+                 + "encryption keys, API keys, chat history, and the first-setup marker. "
+                 + "The application will restart as if freshly installed.",
+            FontFamily = Mono, FontSize = 11, Foreground = B(0xBBBBBB),
+            TextWrapping = TextWrapping.Wrap, MaxWidth = 560,
+        });
+        panel.Children.Add(new TextBlock
+        {
+            Text = "This action cannot be undone.",
+            FontFamily = Mono, FontSize = 11, Foreground = B(0xFF6666),
+            FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+        });
+
+        var confirmPanel = new StackPanel { Visibility = Visibility.Collapsed, Spacing = 8 };
+        confirmPanel.Children.Add(new TextBlock
+        {
+            Text = "Type RESET to confirm:", FontFamily = Mono, FontSize = 11,
+            Foreground = B(0xFF8888),
+        });
+        var confirmBox = MakeInput("RESET");
+        confirmBox.MaxWidth = 200;
+        confirmPanel.Children.Add(confirmBox);
+
+        var executeBtn = new Button
+        {
+            Content = new TextBlock { Text = "[ Confirm Reset ]", FontFamily = Mono, FontSize = 12, Foreground = B(0xFF4444) },
+            Background = B(0x2A1111), BorderBrush = B(0xFF4444), BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 6), IsEnabled = false,
+        };
+        confirmBox.TextChanged += (_, _) =>
+            executeBtn.IsEnabled = string.Equals(confirmBox.Text.Trim(), "RESET", StringComparison.Ordinal);
+        executeBtn.Click += async (_, _) => await ExecuteFullResetAsync();
+        confirmPanel.Children.Add(executeBtn);
+
+        var showBtn = new Button
+        {
+            Content = new TextBlock { Text = "[ Reset All Data ]", FontFamily = Mono, FontSize = 12, Foreground = B(0xFF4444) },
+            Background = B(0x2A1111), BorderBrush = B(0xFF4444), BorderThickness = new Thickness(1),
+            Padding = new Thickness(12, 6), Margin = new Thickness(0, 4, 0, 0),
+        };
+        showBtn.Click += (_, _) =>
+        {
+            showBtn.Visibility = Visibility.Collapsed;
+            confirmPanel.Visibility = Visibility.Visible;
+        };
+
+        panel.Children.Add(showBtn);
+        panel.Children.Add(confirmPanel);
+        return panel;
+    }
+
+    private async Task ExecuteFullResetAsync()
+    {
+        ContentPanel.Children.Clear();
+        H("Resetting…");
+        Lbl("Stopping backend and deleting all local data…", 0xFF8888);
+
+        await Task.Delay(200); // Let UI render
+
+        var errors = new List<string>();
+
+        // 1. Stop the backend and gateway processes so files are not locked.
+        try
+        {
+            var gateway = App.Services?.GetService<GatewayProcessManager>();
+            gateway?.Dispose();
+        }
+        catch { /* best-effort */ }
+
+        try
+        {
+            var backend = App.Services?.GetService<BackendProcessManager>();
+            backend?.Stop();
+        }
+        catch (Exception ex) { errors.Add($"Stop backend: {ex.Message}"); }
+
+        // Wait for processes to fully release file handles.
+        await Task.Delay(2000);
+
+        // 2. Clear frontend-only preferences (client-settings.json) in memory
+        //    so they are not re-flushed to disk before the directory is deleted.
+        try { App.Services?.GetService<ClientSettings>()?.Reset(); }
+        catch (Exception ex) { errors.Add($"Client settings: {ex.Message}"); }
+
+        // 2b. Clear saved account store.
+        try { App.Services?.GetService<AccountStore>()?.Reset(); }
+        catch (Exception ex) { errors.Add($"Account store: {ex.Message}"); }
+
+        // 3. Delete %LOCALAPPDATA%/SharpClaw (api-key, encryption keys, setup marker,
+        //    client-settings.json).
+        var localAppData = Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SharpClaw");
+        await DeleteWithRetryAsync(localAppData, "LocalAppData", errors);
+
+        // 4. Delete the backend's Data directory (JSON persistence).
+        //    It lives next to the backend executable or, in dev mode, next
+        //    to the Infrastructure assembly.  We check both the bundled
+        //    location and the common dev-time location.
+        var baseDir = AppContext.BaseDirectory;
+        await DeleteWithRetryAsync(Path.Combine(baseDir, "backend", "Data"), "Data dir", errors);
+        await DeleteWithRetryAsync(Path.Combine(baseDir, "Data"), "Data dir (dev)", errors);
+
+        // 5. Delete the backend's Environment directory (config files).
+        await DeleteWithRetryAsync(Path.Combine(baseDir, "backend", "Environment"), "Backend env", errors);
+
+        // Show result
+        ContentPanel.Children.Clear();
+        if (errors.Count == 0)
+        {
+            H("Reset Complete");
+            Lbl("All local data has been deleted. The application will now restart.", 0x00FF00);
+        }
+        else
+        {
+            H("Reset Completed with Warnings");
+            foreach (var err in errors)
+                Lbl($"⚠ {err}", 0xFFCC00);
+            Lbl("Some files could not be deleted. They may be locked by another process.", 0xFF8888);
+        }
+
+        await Task.Delay(1500);
+
+        // Navigate back to boot page so the app restarts the connection flow.
+        if (App.Services is { } services)
+        {
+            var navigator = services.GetRequiredService<INavigator>();
+            await navigator.NavigateRouteAsync(this, "Boot", qualifier: Qualifiers.ClearBackStack);
+        }
+    }
+
+    private static async Task DeleteWithRetryAsync(string path, string label, List<string> errors)
+    {
+        if (!Directory.Exists(path)) return;
+
+        const int maxAttempts = 3;
+        for (int i = 1; i <= maxAttempts; i++)
+        {
+            try
+            {
+                Directory.Delete(path, recursive: true);
+                return;
+            }
+            catch when (i < maxAttempts)
+            {
+                await Task.Delay(1000);
+            }
+            catch (Exception ex)
+            {
+                errors.Add($"{label}: {ex.Message}");
+            }
+        }
+    }
 }

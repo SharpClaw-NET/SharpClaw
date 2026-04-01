@@ -15,5 +15,6 @@ public enum ProviderType
     Mistral = 10,
     GitHubCopilot = 11,
     Custom = 12,
-    Local = 13
+    Local = 13,
+    Minimax = 14
 }

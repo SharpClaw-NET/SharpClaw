@@ -11,8 +11,12 @@ public static class AgentJobHandlers
 {
     [MapPost]
     public static async Task<IResult> Submit(
-        Guid channelId, SubmitAgentJobRequest request, AgentJobService svc)
-        => Results.Ok(await svc.SubmitAsync(channelId, request));
+        Guid channelId, SubmitAgentJobRequest request, AgentJobService svc, ChatService chatSvc)
+    {
+        var job = await svc.SubmitAsync(channelId, request);
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
+    }
 
     [MapGet]
     public static async Task<IResult> List(Guid channelId, AgentJobService svc)
@@ -24,50 +28,62 @@ public static class AgentJobHandlers
 
     [MapGet("/{jobId:guid}")]
     public static async Task<IResult> GetById(
-        Guid channelId, Guid jobId, AgentJobService svc)
+        Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.GetAsync(jobId);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPost("/{jobId:guid}/approve")]
     public static async Task<IResult> Approve(
-        Guid channelId, Guid jobId, ApproveAgentJobRequest request, AgentJobService svc)
+        Guid channelId, Guid jobId, ApproveAgentJobRequest request, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.ApproveAsync(jobId, request);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPost("/{jobId:guid}/stop")]
     public static async Task<IResult> Stop(
-        Guid channelId, Guid jobId, AgentJobService svc)
+        Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.StopTranscriptionAsync(jobId);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPost("/{jobId:guid}/cancel")]
     public static async Task<IResult> Cancel(
-        Guid channelId, Guid jobId, AgentJobService svc)
+        Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.CancelAsync(jobId);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPut("/{jobId:guid}/pause")]
     public static async Task<IResult> Pause(
-        Guid channelId, Guid jobId, AgentJobService svc)
+        Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.PauseAsync(jobId);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPut("/{jobId:guid}/resume")]
     public static async Task<IResult> Resume(
-        Guid channelId, Guid jobId, AgentJobService svc)
+        Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
         var job = await svc.ResumeAsync(jobId);
-        return job is not null ? Results.Ok(job) : Results.NotFound();
+        if (job is null) return Results.NotFound();
+        var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
+        return Results.Ok(job with { ChannelCost = cost });
     }
 
     [MapPost("/{jobId:guid}/segments")]

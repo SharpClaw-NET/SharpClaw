@@ -49,7 +49,23 @@ public class PermissionSetDB : BaseEntity
     public bool CanTypeOnDesktop { get; set; }
     public PermissionClearance TypeOnDesktopClearance { get; set; } = PermissionClearance.Unset;
 
-    // ── Per-resource grant collections ────────────────────────────
+    /// <summary>
+    /// Read conversation history from other threads/channels where this
+    /// agent is allowed. The target channel must also opt-in by having
+    /// this flag set in its own (or its context's) permission set.
+    /// </summary>
+    public bool CanReadCrossThreadHistory { get; set; }
+    public PermissionClearance ReadCrossThreadHistoryClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Edit the custom chat header of specific agents.</summary>
+    public bool CanEditAgentHeader { get; set; }
+    public PermissionClearance EditAgentHeaderClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Edit the custom chat header of specific channels.</summary>
+    public bool CanEditChannelHeader { get; set; }
+    public PermissionClearance EditChannelHeaderClearance { get; set; } = PermissionClearance.Unset;
+
+    // ── Per-resource grant collections ────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];
     public ICollection<SafeShellAccessDB> SafeShellAccesses { get; set; } = [];
@@ -64,6 +80,9 @@ public class PermissionSetDB : BaseEntity
     public ICollection<AgentManagementAccessDB> AgentPermissions { get; set; } = [];
     public ICollection<TaskManageAccessDB> TaskPermissions { get; set; } = [];
     public ICollection<SkillManageAccessDB> SkillPermissions { get; set; } = [];
+    public ICollection<AgentHeaderAccessDB> AgentHeaderAccesses { get; set; } = [];
+    public ICollection<ChannelHeaderAccessDB> ChannelHeaderAccesses { get; set; } = [];
+    public ICollection<BotIntegrationAccessDB> BotIntegrationAccesses { get; set; } = [];
 
     // ── Default resource accesses ─────────────────────────────────
     // Optional defaults used when starting a job and no specific
@@ -107,6 +126,9 @@ public class PermissionSetDB : BaseEntity
 
     public Guid? DefaultSkillPermissionId { get; set; }
     public SkillManageAccessDB? DefaultSkillPermission { get; set; }
+
+    public Guid? DefaultBotIntegrationAccessId { get; set; }
+    public BotIntegrationAccessDB? DefaultBotIntegrationAccess { get; set; }
 
     // ── Clearance whitelists ──────────────────────────────────────
 

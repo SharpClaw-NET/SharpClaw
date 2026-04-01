@@ -13,15 +13,30 @@
     <PackageReference Include="NAudio" />
     <PackageReference Include="LLamaSharp" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" />
-    <PackageReference Include="LLamaSharp.Backend.Cuda12" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan" />
     <PackageReference Include="System.Drawing.Common" />
     <PackageReference Include="Whisper.net" />
     <PackageReference Include="Whisper.net.Runtime" />
   </ItemGroup>
 
+  <!--
+    Platform-specific LLamaSharp GPU backends. The cross-platform metapackages
+    (LLamaSharp.Backend.Cuda12 / .Vulkan) unconditionally pull BOTH .Windows
+    and .Linux sub-packages, adding ~530 MB of unused native libs per publish.
+    Using the platform-specific packages directly with RID conditions ensures
+    only the target platform's natives are restored/published.
+    When no RID is set (dev builds / dotnet build), both platforms are included
+    so IntelliSense and local F5 work on any OS.
+  -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('win'))">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Windows" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan.Windows" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('linux'))">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Linux" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan.Linux" />
+  </ItemGroup>
+
   <ItemGroup>
-    <EmbeddedResource Include="Resources\tool-instructions-text.md" LogicalName="SharpClaw.Application.Core.tool-instructions-text.md" />
     <EmbeddedResource Include="Resources\tool-instructions-native-suffix.md" LogicalName="SharpClaw.Application.Core.tool-instructions-native-suffix.md" />
     <EmbeddedResource Include="Resources\tool-description-native.md" LogicalName="SharpClaw.Application.Core.tool-description-native.md" />
     <EmbeddedResource Include="Resources\transcription-language-seeds.json" LogicalName="SharpClaw.Application.Core.transcription-language-seeds.json" />

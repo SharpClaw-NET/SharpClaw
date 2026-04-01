@@ -307,7 +307,8 @@ public sealed class TaskService(SharpClawDbContext db)
                 .ToList(),
             instance.CreatedAt,
             instance.StartedAt,
-            instance.CompletedAt);
+            instance.CompletedAt,
+            instance.ChannelId);
     }
 
     // ═══════════════════════════════════════════════════════════════

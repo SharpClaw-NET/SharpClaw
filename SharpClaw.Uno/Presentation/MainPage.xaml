@@ -77,6 +77,22 @@
                      FontSize="12"
                      Foreground="#808080" />
         </Button>
+        <Button Background="Transparent" BorderThickness="0" Padding="0"
+                Click="OnLegalNoticesClick">
+          <TextBlock Text="› Legal Notices"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12"
+                     Foreground="#808080" />
+        </Button>
+        <Button Background="Transparent" BorderThickness="0" Padding="0"
+                HorizontalAlignment="Stretch"
+                HorizontalContentAlignment="Left"
+                Click="OnReportIssueClick">
+          <TextBlock Text="› Report Issue"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="12"
+                     Foreground="#808080" />
+        </Button>
         <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
           <Button Background="Transparent" BorderThickness="0" Padding="4"
                   Click="OnOfficialWebsiteClick"
@@ -171,6 +187,16 @@
                        FontSize="11"
                        Foreground="#666666" />
           </Button>
+          <Button x:Name="TabBotsButton"
+                  Background="Transparent"
+                  BorderThickness="0"
+                  Padding="0,2,0,2"
+                  Click="OnTabBotsClick">
+            <TextBlock Text="[bots]"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="11"
+                       Foreground="#666666" />
+          </Button>
         </StackPanel>
         <StackPanel x:Name="AgentSelectorPanel"
                     Orientation="Horizontal"
@@ -231,6 +257,23 @@
                    TextWrapping="Wrap"
                    Visibility="Collapsed"
                    Margin="0,6,0,0" />
+        <!-- Token cost bars -->
+        <StackPanel x:Name="CostPanel"
+                    Visibility="Collapsed"
+                    Spacing="2"
+                    Margin="0,6,0,0">
+          <TextBlock x:Name="ChannelCostLabel"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="10"
+                     Foreground="#888888" />
+          <StackPanel x:Name="ChannelCostBreakdown" Spacing="1" />
+          <TextBlock x:Name="ThreadCostLabel"
+                     Style="{StaticResource TerminalText}"
+                     FontSize="10"
+                     Foreground="#888888"
+                     Visibility="Collapsed" />
+          <StackPanel x:Name="ThreadCostBreakdown" Spacing="1" Visibility="Collapsed" />
+        </StackPanel>
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
       </StackPanel>
 
@@ -679,6 +722,20 @@
           </Button>
         </StackPanel>
       </Grid>
+
+      <!-- ── Bot view panel ──────────────────────────────────── -->
+      <Grid x:Name="BotViewPanel"
+            Grid.Row="1"
+            Grid.RowSpan="2"
+            Visibility="Collapsed">
+        <ScrollViewer VerticalScrollBarVisibility="Auto"
+                      Margin="20,8,20,16">
+          <StackPanel x:Name="BotContentPanel"
+                      Spacing="8"
+                      Padding="0,0,0,16" />
+        </ScrollViewer>
+      </Grid>
+
     </Grid>
   </Grid>
 </Page>

@@ -1,0 +1,8 @@
+[Desktop Entry]
+Name=SharpClaw
+Comment=AI Agent Desktop Platform
+Exec=sharpclaw
+Icon=com.mkn8rn.SharpClaw
+Type=Application
+Categories=Development;Utility;
+Terminal=false

@@ -1,0 +1,37 @@
+# Snapcraft manifest for SharpClaw
+# Template used by publish-release.ps1 — __VERSION__ is replaced at build time.
+#
+# Manual build (on Linux):
+#   snapcraft pack --build-for amd64
+#   snapcraft pack --build-for arm64
+#
+# The "publish/" directory must contain the self-contained .NET publish output.
+
+name: sharpclaw
+base: core24
+version: '__VERSION__'
+summary: SharpClaw — AI Agent Desktop Platform
+description: |
+  SharpClaw is a cross-platform AI agent desktop platform powered by
+  Uno Platform. It provides a terminal-themed interface for managing
+  AI agents, chat channels, local model inference, and automated jobs.
+
+grade: devel
+confinement: strict
+
+apps:
+  sharpclaw:
+    command: SharpClaw.Uno
+    extensions: [gnome]
+    desktop: snap/gui/sharpclaw.desktop
+    plugs:
+      - network
+      - network-bind
+      - home
+      - audio-playback
+      - audio-record
+
+parts:
+  sharpclaw:
+    plugin: dump
+    source: publish/

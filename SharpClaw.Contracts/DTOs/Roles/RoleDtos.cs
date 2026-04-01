@@ -32,6 +32,12 @@ public sealed record SetRolePermissionsRequest(
     PermissionClearance ClickDesktopClearance = PermissionClearance.Unset,
     bool CanTypeOnDesktop = false,
     PermissionClearance TypeOnDesktopClearance = PermissionClearance.Unset,
+    bool CanReadCrossThreadHistory = false,
+    PermissionClearance ReadCrossThreadHistoryClearance = PermissionClearance.Unset,
+    bool CanEditAgentHeader = false,
+    PermissionClearance EditAgentHeaderClearance = PermissionClearance.Unset,
+    bool CanEditChannelHeader = false,
+    PermissionClearance EditChannelHeaderClearance = PermissionClearance.Unset,
 
     // Per-resource grants
     IReadOnlyList<ResourceGrant>? DangerousShellAccesses = null,
@@ -46,10 +52,12 @@ public sealed record SetRolePermissionsRequest(
     IReadOnlyList<ResourceGrant>? EditorSessionAccesses = null,
     IReadOnlyList<ResourceGrant>? AgentAccesses = null,
     IReadOnlyList<ResourceGrant>? TaskAccesses = null,
-    IReadOnlyList<ResourceGrant>? SkillAccesses = null);
+    IReadOnlyList<ResourceGrant>? SkillAccesses = null,
+    IReadOnlyList<ResourceGrant>? AgentHeaderAccesses = null,
+    IReadOnlyList<ResourceGrant>? ChannelHeaderAccesses = null);
 
 /// <summary>
-/// A single per-resource grant entry. <see cref="ResourceId"/> is the
+/// A single per-resource grant entry.
 /// target resource GUID (or <see cref="WellKnownIds.AllResources"/>
 /// for wildcard).
 /// </summary>
@@ -83,6 +91,12 @@ public sealed record RolePermissionsResponse(
     PermissionClearance ClickDesktopClearance,
     bool CanTypeOnDesktop,
     PermissionClearance TypeOnDesktopClearance,
+    bool CanReadCrossThreadHistory,
+    PermissionClearance ReadCrossThreadHistoryClearance,
+    bool CanEditAgentHeader,
+    PermissionClearance EditAgentHeaderClearance,
+    bool CanEditChannelHeader,
+    PermissionClearance EditChannelHeaderClearance,
 
     IReadOnlyList<ResourceGrant> DangerousShellAccesses,
     IReadOnlyList<ResourceGrant> SafeShellAccesses,
@@ -96,4 +110,6 @@ public sealed record RolePermissionsResponse(
     IReadOnlyList<ResourceGrant> EditorSessionAccesses,
     IReadOnlyList<ResourceGrant> AgentAccesses,
     IReadOnlyList<ResourceGrant> TaskAccesses,
-    IReadOnlyList<ResourceGrant> SkillAccesses);
+    IReadOnlyList<ResourceGrant> SkillAccesses,
+    IReadOnlyList<ResourceGrant> AgentHeaderAccesses,
+    IReadOnlyList<ResourceGrant> ChannelHeaderAccesses);

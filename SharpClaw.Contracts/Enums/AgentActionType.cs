@@ -44,5 +44,15 @@ public enum AgentActionType
     EditorDeleteFile = 27,
     EditorShowDiff = 28,
     EditorRunBuild = 29,
-    EditorRunTerminal = 30
+    EditorRunTerminal = 30,
+
+    // ── Cross-thread context access (global flag) ─────────────────
+    ReadCrossThreadHistory = 31,
+
+    // ── Header editing (per-resource: target agent / channel) ──────
+    EditAgentHeader = 32,
+    EditChannelHeader = 33,
+
+    // ── Bot messaging (per-resource: bot integration) ──────────────
+    SendBotMessage = 34
 }

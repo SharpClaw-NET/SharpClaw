@@ -1,15 +1,18 @@
 using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 
 namespace SharpClaw.Application.API.Api;
 
-public sealed class ApiKeyMiddleware(RequestDelegate next, ApiKeyProvider keyProvider)
+public sealed class ApiKeyMiddleware(RequestDelegate next, ApiKeyProvider keyProvider, IConfiguration configuration)
 {
     private const string HeaderName = "X-Api-Key";
+    private readonly bool _disabled = configuration.GetValue<bool>("Auth:DisableApiKeyCheck");
+
     public async Task InvokeAsync(HttpContext context)
     {
         // /echo is an unauthenticated liveness check.
-        if (context.Request.Path.Equals("/echo", StringComparison.OrdinalIgnoreCase))
+        if (_disabled || context.Request.Path.Equals("/echo", StringComparison.OrdinalIgnoreCase))
         {
             await next(context);
             return;

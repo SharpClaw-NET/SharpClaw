@@ -9,9 +9,13 @@
     <ApplicationTitle>SharpClaw</ApplicationTitle>
     <!-- App Identifier -->
     <ApplicationId>com.mkn8rn.SharpClaw</ApplicationId>
-    <!-- Versions -->
-    <ApplicationDisplayVersion>1.0</ApplicationDisplayVersion>
-    <ApplicationVersion>1</ApplicationVersion>
+    <!--
+      Versions derived from Directory.Build.props.
+      ApplicationVersion formula: Major*10000 + Minor*100 + Patch (always increasing integer).
+    -->
+    <_VersionClean>$([System.Text.RegularExpressions.Regex]::Replace('$(Version)', '-.*', ''))</_VersionClean>
+    <ApplicationDisplayVersion>$(Version)</ApplicationDisplayVersion>
+    <ApplicationVersion>$([MSBuild]::Add($([MSBuild]::Add($([MSBuild]::Multiply($([System.Version]::Parse('$(_VersionClean)').Major), 10000)), $([MSBuild]::Multiply($([System.Version]::Parse('$(_VersionClean)').Minor), 100)))), $([System.Version]::Parse('$(_VersionClean)').Build)))</ApplicationVersion>
     <!-- Package Publisher -->
     <ApplicationPublisher>marko</ApplicationPublisher>
     <!-- Package Description -->
@@ -22,8 +26,6 @@
       https://aka.platform.uno/singleproject-features
     -->
     <UnoFeatures>
-      Lottie;
-      MediaElement;
       Hosting;
       Toolkit;
       Logging;
@@ -53,59 +55,108 @@
 
   <!--
     Bundle the API backend into the output under a "backend" subfolder.
+    The gateway is bundled into a "gateway" subfolder.
 
     During DEVELOPMENT: both projects run separately (start API project first,
     then the Uno app connects to it). The Uno app detects the running API
     via the /echo endpoint and skips process launch.
 
     For DISTRIBUTION: publish with /p:BundleBackend=true to auto-publish
-    the backend into the output alongside the Uno app:
+    both the backend and gateway into the output alongside the Uno app:
       dotnet publish SharpClaw.Uno.csproj -c Release /p:BundleBackend=true
+
+    To bundle only the gateway (without the backend):
+      dotnet publish SharpClaw.Uno.csproj -c Release /p:BundleGateway=true
 
     Or manually:
       dotnet publish ..\SharpClaw.Application.API -c Release -o publish\backend
+      dotnet publish ..\SharpClaw.Gateway -c Release -o publish\gateway
       dotnet publish SharpClaw.Uno.csproj -c Release
   -->
+  <!--
+    When publishing self-contained (distribution), the backend is also
+    published self-contained with R2R but WITHOUT trimming, because
+    Roslyn (Microsoft.CodeAnalysis) and LLamaSharp use reflection that
+    the trimmer cannot preserve.
+
+    When publishing framework-dependent (dev/CI), the backend is
+    published framework-dependent as before.
+  -->
+  <!--
+    Suppress the SDK auto-detected UnoIcon from Assets/Icons/icon*.svg
+    since we use our own icon from the Environment folder.
+    Values must be non-empty so the SDK Condition="== ''" does not reset them.
+  -->
+  <PropertyGroup>
+    <UnoIconBackgroundFile>DISABLED</UnoIconBackgroundFile>
+    <UnoIconForegroundFile>DISABLED</UnoIconForegroundFile>
+  </PropertyGroup>
+
   <Target Name="PublishWithBackend" BeforeTargets="Publish" Condition="'$(BundleBackend)' == 'true' AND Exists('..\SharpClaw.Application.API\SharpClaw.Application.API.csproj')">
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Application.API\SharpClaw.Application.API.csproj&quot; -c $(Configuration) -o &quot;$(PublishDir)backend&quot; --no-self-contained" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+    <PropertyGroup>
+      <_BackendSelfContained Condition="'$(SelfContained)' == 'true'">--self-contained -r $(RuntimeIdentifier) -p:PublishReadyToRun=true -p:PublishTrimmed=false</_BackendSelfContained>
+      <_BackendSelfContained Condition="'$(SelfContained)' != 'true'">--no-self-contained</_BackendSelfContained>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Application.API\SharpClaw.Application.API.csproj&quot; -c $(Configuration) $(_BackendSelfContained) -o &quot;$(PublishDir)backend&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
   </Target>
+
+  <!--
+    Bundle the public-facing Gateway into the output under a "gateway" subfolder.
+    Opt-in via /p:BundleGateway=true (or /p:BundleBackend=true implies both).
+  -->
+  <Target Name="PublishWithGateway" BeforeTargets="Publish" Condition="('$(BundleGateway)' == 'true' OR '$(BundleBackend)' == 'true') AND Exists('..\SharpClaw.Gateway\SharpClaw.Gateway.csproj')">
+    <PropertyGroup>
+      <_GatewaySelfContained Condition="'$(SelfContained)' == 'true'">--self-contained -r $(RuntimeIdentifier) -p:PublishReadyToRun=true -p:PublishTrimmed=false</_GatewaySelfContained>
+      <_GatewaySelfContained Condition="'$(SelfContained)' != 'true'">--no-self-contained</_GatewaySelfContained>
+    </PropertyGroup>
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Gateway\SharpClaw.Gateway.csproj&quot; -c $(Configuration) $(_GatewaySelfContained) -o &quot;$(PublishDir)gateway&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+  </Target>
+
   <ItemGroup>
     <Page Update="Presentation\BootPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Presentation\TerminalCursor.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Styles\TerminalStyles.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Presentation\TerminalMenuButton.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Presentation\TerminalSectionHeader.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Presentation\DashboardPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-  </ItemGroup>
-  <ItemGroup>
     <Page Update="Presentation\FirstSetupPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
+    <Page Update="Presentation\SettingsPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
   </ItemGroup>
+
+  <!-- Explicit env file includes instead of a wildcard glob to prevent VS restore loops -->
   <ItemGroup>
-    <Content Include="Environment\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Environment\.env" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Environment\.dev.env" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <!--
+    Backend content for MSIX packaging.
+    When publish-msix.ps1 pre-publishes the API backend to BackendStagingDir,
+    these items are included in the MSIX package payload as the backend\ subfolder.
+    The property is only set by the script; normal dev builds are unaffected.
+  -->
+  <ItemGroup Condition="'$(BackendStagingDir)' != '' AND Exists('$(BackendStagingDir)')">
+    <Content Include="$(BackendStagingDir)\**" Link="backend\%(RecursiveDir)%(FileName)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(GatewayStagingDir)' != '' AND Exists('$(GatewayStagingDir)')">
+    <Content Include="$(GatewayStagingDir)\**" Link="gateway\%(RecursiveDir)%(FileName)%(Extension)" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>
@@ -113,16 +164,52 @@
   </ItemGroup>
 
   <ItemGroup>
-    <Page Update="Presentation\FirstSetupPage.xaml">
+    <PackageReference Include="System.Diagnostics.EventLog" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\LegalNoticesPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="System.Diagnostics.EventLog" />
-    <Page Update="Presentation\SettingsPage.xaml">
+    <Page Update="Presentation\EnvMenuPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>
+
+  <ItemGroup>
+    <Page Update="Presentation\EnvEditorPage.xaml">
+      <Generator>MSBuild:Compile</Generator>
+    </Page>
+  </ItemGroup>
+
+  <!-- Auto-stamp Package.appxmanifest Identity/Version from Directory.Build.props at build time -->
+  <UsingTask TaskName="StampManifestVersion" TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <FilePath ParameterType="System.String" Required="true" />
+      <NewVersion ParameterType="System.String" Required="true" />
+    </ParameterGroup>
+    <Task>
+      <Code Type="Fragment" Language="cs"><![CDATA[
+var text = System.IO.File.ReadAllText(FilePath);
+var updated = System.Text.RegularExpressions.Regex.Replace(
+    text,
+    @"(<Identity[^>]*?Version="")([\d.]+)("")",
+    "${1}" + NewVersion + "${3}");
+if (text != updated)
+    System.IO.File.WriteAllText(FilePath, updated);
+]]>
+      </Code>
+    </Task>
+  </UsingTask>
+
+  <Target Name="StampAppxManifestVersion" BeforeTargets="BeforeBuild"
+          Condition="Exists('$(MSBuildProjectDirectory)\Package.appxmanifest')">
+    <StampManifestVersion FilePath="$(MSBuildProjectDirectory)\Package.appxmanifest"
+                          NewVersion="$(AssemblyVersion)" />
+  </Target>
 
 </Project>

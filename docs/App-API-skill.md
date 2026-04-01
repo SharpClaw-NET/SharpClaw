@@ -31,7 +31,7 @@ POST   /providers/{id}/set-key     { apiKey }  → 204
 POST   /providers/{id}/sync-models → synced model list
 POST   /providers/{id}/auth/device-code  → { userCode, verificationUri, expiresInSeconds }
 
-ProviderType values: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom, Local.
+ProviderType values: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Minimax, Custom, Local.
 
 apiEndpoint required for Custom only. sync-models is the preferred way to add models.
 
@@ -60,20 +60,46 @@ DELETE /models/local/{id}
 LocalModelStatus: Pending, Downloading, Ready, Failed.
 
 ────────────────────────────────────────
+BOT INTEGRATIONS
+────────────────────────────────────────
+GET    /bots                       → list all bot integrations
+GET    /bots/{id}                  → get by id
+GET    /bots/type/{type}           → get by type name (telegram, discord, whatsapp)
+PUT    /bots/{id}                  { enabled?, botToken?, defaultChannelId? }
+GET    /bots/config/{type}         → decrypted config for gateway use (enabled, botToken, defaultChannelId)
+
+Rows are pre-seeded on startup for each BotType — no POST/DELETE.
+Bot tokens are AES-GCM encrypted at rest (same as provider API keys).
+PUT fields are all optional (partial update):
+  enabled (bool): enable/disable the bot.
+  botToken (string): set or replace the encrypted token. Empty string clears it.
+  defaultChannelId (guid|null): the SharpClaw channel the bot forwards messages to. Guid.Empty clears it.
+
+BotType values: Telegram, Discord, WhatsApp.
+
+BotIntegrationResponse: id, botType, enabled, hasBotToken, defaultChannelId, createdAt, updatedAt.
+
+CLI: bot list, bot get <id>, bot update <id> [--enabled true|false] [--token <tok>] [--channel <channelId>], bot config <type>.
+
+────────────────────────────────────────
 AGENTS
 ────────────────────────────────────────
-POST   /agents                     { name, modelId, systemPrompt?, maxCompletionTokens? }
+POST   /agents                     { name, modelId, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
 GET    /agents
 GET    /agents/{id}
-PUT    /agents/{id}                { name?, modelId?, systemPrompt?, maxCompletionTokens? }
+PUT    /agents/{id}                { name?, modelId?, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
 DELETE /agents/{id}
 PUT    /agents/{id}/role           { roleId }
 
 maxCompletionTokens (integer|null): caps the number of tokens the model may generate per response. Sent as max_tokens, max_completion_tokens, or max_output_tokens depending on the provider/API version. null (default) = no limit (provider default). Useful for controlling response size and latency — smaller limits yield faster responses.
 
-AgentResponse includes: id, name, systemPrompt, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens.
+customChatHeader (string|null): template that replaces the default chat header for this agent. Uses {{tag}} placeholders expanded at send time. See CUSTOM CHAT HEADER section.
 
-AgentSummary (embedded in channel/context responses): id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens. Same as AgentResponse minus systemPrompt.
+toolAwarenessSetId (guid|null): links a tool awareness set that controls which tool-call schemas are sent in API requests. See TOOL AWARENESS SETS section. Channel's set overrides the agent's; null = all tools enabled. On PUT, pass Guid.Empty to clear.
+
+AgentResponse includes: id, name, systemPrompt, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens, customChatHeader, toolAwarenessSetId.
+
+AgentSummary (embedded in channel/context responses): id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens, toolAwarenessSetId. Same as AgentResponse minus systemPrompt.
 
 ────────────────────────────────────────
 ROLES & PERMISSIONS
@@ -85,9 +111,9 @@ PUT    /roles/{id}/permissions     (full replacement)
 
 SetRolePermissionsRequest fields:
   defaultClearance (PermissionClearance enum)
-  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop
+  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop, canReadCrossThreadHistory, canEditAgentHeader, canEditChannelHeader
   Per-resource arrays (each entry is { resourceId, clearance }):
-    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses
+    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses
 
 Wildcard resourceId: ffffffff-ffff-ffff-ffff-ffffffffffff (all resources of that type).
 
@@ -123,10 +149,10 @@ ContextAllowedAgentsResponse returns: contextId, defaultAgent (AgentSummary), al
 ────────────────────────────────────────
 CHANNELS
 ────────────────────────────────────────
-POST   /channels                   { agentId?, title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader? }
+POST   /channels                   { agentId?, title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader?, toolAwarenessSetId? }
 GET    /channels?agentId={guid}
 GET    /channels/{id}
-PUT    /channels/{id}              { title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader? }
+PUT    /channels/{id}              { title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader?, toolAwarenessSetId? }
 DELETE /channels/{id}
 
 Set default agent:
@@ -150,7 +176,9 @@ Valid default resource keys: dangshell, safeshell, container, website, search, l
 Either agentId or contextId (with agent) required on create.
 allowedAgentIds on PUT replaces the set. permissionSetId=00000000-... removes the override; null leaves unchanged.
 
-ChannelResponse returns: id, title, agent (AgentSummary?), contextId, contextName, permissionSetId, effectivePermissionSetId, allowedAgents (AgentSummary[]), disableChatHeader, createdAt, updatedAt.
+toolAwarenessSetId (guid|null): links a tool awareness set. Overrides the agent's set. See TOOL AWARENESS SETS section. On PUT, pass Guid.Empty to clear; null leaves unchanged.
+
+ChannelResponse returns: id, title, agent (AgentSummary?), contextId, contextName, permissionSetId, effectivePermissionSetId, allowedAgents (AgentSummary[]), disableChatHeader, customChatHeader, toolAwarenessSetId, createdAt, updatedAt.
 ChannelAllowedAgentsResponse returns: channelId, defaultAgent (AgentSummary?), allowedAgents (AgentSummary[]).
 
 All responses embed full AgentSummary objects (id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens) instead of bare GUIDs — no follow-up requests needed to resolve agent details.
@@ -274,10 +302,15 @@ Dedup pipeline (non-timestamped API responses):
 Audio is automatically normalised to mono 16 kHz 16-bit PCM (Whisper-optimal).
 
 AgentActionType categories:
-  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop
+  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop, ReadCrossThreadHistory
   Per-resource: UnsafeExecuteAsDangerousShell, ExecuteAsSafeShell, AccessLocalInfoStore, AccessExternalInfoStore, AccessWebsite, QuerySearchEngine, AccessContainer, ManageAgent, EditTask, AccessSkill, CaptureDisplay
   Transcription: TranscribeFromAudioDevice, TranscribeFromAudioStream, TranscribeFromAudioFile
   Editor: EditorReadFile, EditorGetOpenFiles, EditorGetSelection, EditorGetDiagnostics, EditorApplyEdit, EditorCreateFile, EditorDeleteFile, EditorShowDiff, EditorRunBuild, EditorRunTerminal
+
+Inline tools (no job created, handled in the chat inference loop):
+  wait — pause 1–300 seconds. No permissions required.
+  list_accessible_threads — list threads from other channels the agent can read. Requires ReadCrossThreadHistory permission.
+  read_thread_history — read conversation history from a cross-channel thread. Params: threadId (required), maxMessages (optional, 1–200). Requires ReadCrossThreadHistory + channel opt-in.
 
 DangerousShellType: Bash, PowerShell, CommandPrompt, Git.
 SafeShellType: Mk8Shell.
@@ -315,6 +348,13 @@ Stage 1 — Agent capability: role's PermissionSetDB checked. Independent → ap
 Stage 2 — Channel/context pre-auth: channel PS checked first; if it addresses the action, that result is final (context not consulted). If channel doesn't address it, context PS checked. Independent → pre-approved. Otherwise → AwaitingApproval.
 
 Channel PS checked → context PS → fallback AwaitingApproval.
+
+Cross-thread history access (double-gate):
+  Agent role PS must have CanReadCrossThreadHistory=true AND target channel effective PS must also have CanReadCrossThreadHistory=true (opt-in).
+  Channels without opt-in are private even if the agent holds the permission.
+  Independent clearance on the agent overrides the channel opt-in requirement.
+  Agent must be primary or in AllowedAgents on the target channel.
+  Accessible threads listed in chat header (accessible-threads section) and via list_accessible_threads / read_thread_history inline tools.
 
 ────────────────────────────────────────────────────────────────────
 ADVANCED EXAMPLE: Transcription Channel Setup
@@ -366,6 +406,7 @@ Step 3 — Set up a role with Independent transcription permission for all audio
       "canAccessLocalhostCli": false,
       "canClickDesktop": false,
       "canTypeOnDesktop": false,
+      "canReadCrossThreadHistory": false,
       "audioDeviceAccesses": [
         { "resourceId": "ffffffff-ffff-ffff-ffff-ffffffffffff", "clearance": "Independent" }
       ]
@@ -583,3 +624,116 @@ Step 4 — Chat without a thread on the same channel is one-shot (no history).
     { "message": "Unrelated question" }
 
   This sees no prior messages.
+
+────────────────────────────────────────
+ENV FILE MANAGEMENT
+────────────────────────────────────────
+Two .env files (JSON-with-comments, loaded into IConfiguration):
+  Core — server-side (Infrastructure/Environment/.env). Managed exclusively via API.
+  Interface — client-side (SharpClaw.Uno/Environment/.env). Direct file I/O by client.
+
+All /env/core/* endpoints require JWT auth. Caller must be admin OR EnvEditor:AllowNonAdmin=true in Core .env.
+
+GET  /env/core/auth  → { authorised: bool }  (pre-check — is caller allowed to edit Core .env?)
+GET  /env/core       → { content: "raw JSON string" }  (403 if not authorised, 404 if file missing)
+PUT  /env/core       { content }  → { saved: true }  (403 if not authorised)
+
+Core .env keys: Encryption:Key, Jwt:Secret, Jwt:AccessTokenLifetime, Jwt:RefreshTokenLifetime, ConnectionStrings:Postgres, Api:ListenUrl, Admin:Username, Admin:Password, Admin:ReconcilePermissions, Browser:Executable, Browser:Arguments, Local:GpuLayerCount, Local:ContextSize, Local:KeepLoaded, Local:IdleCooldownMinutes, EnvEditor:AllowNonAdmin, Backend:Enabled, Auth:DisableApiKeyCheck, Auth:DisableAccessTokenCheck, Agent:DisableCustomProviderParameters.
+Interface .env keys: Api:Url (default http://127.0.0.1:48923), Backend:Enabled (default true).
+
+Changes to Core .env require a backend restart to take effect.
+
+────────────────────────────────────────
+CUSTOM CHAT HEADER
+────────────────────────────────────────
+Agents and channels have an optional customChatHeader field (string|null) that replaces the default metadata header prepended to each user message.
+
+Override chain: channel.customChatHeader > agent.customChatHeader > built-in default. disableChatHeader=true suppresses all headers.
+
+Template syntax: {{tagName}} placeholders, case-insensitive.
+
+Context tags (single value):
+  {{time}}               → 2025-07-14 09:30:00 UTC
+  {{user}}               → marko
+  {{via}}                → CLI | API | Telegram | Discord | WhatsApp | VisualStudio | VisualStudioCode | Uno* | Other
+  {{role}}               → Admin (CreateSubAgents, SafeShell)
+  {{bio}}                → Backend developer, likes Rust
+  {{agent-name}}         → CodeReview Agent
+  {{agent-role}}         → DevOps clearance=Independent (SafeShell[guid,...], ManageAgent[guid,...])
+  {{clearance}}          → Independent
+  {{grants}}             → CreateSubAgents, SafeShell, ManageAgent  (user grants, name-only)
+  {{agent-grants}}       → SafeShell[guid,...], EditTask[guid,...]  (agent grants with resource IDs)
+  {{editor}}             → VisualStudio2026 18.4 file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"
+  {{accessible-threads}} → Debug Session [Ops Channel] (guid), Planning [Strategy] (guid)
+
+Wildcard grants (ffffffff-...) resolve to all concrete resource IDs of that type.
+
+Resource tags (enumerate entities):
+  {{Agents}}             → comma-separated GUIDs (no template)
+  {{Agents:{Name} ({Id})}}  → per-item formatted: CodeReview Agent (3fa8...), DevOps Agent (7c9e...)
+
+Supported resource tag names: Agents, Models, Providers, Channels, Threads, Roles, Users, Containers, Websites, SearchEngines, AudioDevices, DisplayDevices, EditorSessions, Skills, SystemUsers, LocalInfoStores, ExternalInfoStores, ScheduledTasks, Tasks.
+
+Fields with [HeaderSensitive] (PasswordHash, PasswordSalt, EncryptedApiKey) → [redacted]. Unknown fields → [FieldName?].
+
+Permissions: canEditAgentHeader / canEditChannelHeader (global flags) + agentHeaderAccesses / channelHeaderAccesses (per-resource arrays in role permissions).
+
+Examples:
+
+  Template: [{{time}} | {{user}} via {{via}}]
+  Output:   [2025-07-14 09:30:00 UTC | marko via CLI]
+
+  Template: [time: {{time}} | user: {{user}} | agent: {{agent-name}} | role: {{agent-role}}]
+  Output:   [time: 2025-07-14 09:30:00 UTC | user: marko | agent: CodeReview Agent | role: DevOps clearance=Independent (SafeShell[3fa85f64-...], ManageAgent[7c9e6679-...])]
+
+  Template: Agents: {{Agents:{Name} (model={ModelName})}}
+  Output:   Agents: CodeReview Agent (model=gpt-4o), DevOps Agent (model=claude-sonnet-4-20250514)
+
+  Template: Users: {{Users:{Username} hash={PasswordHash}}}
+  Output:   Users: marko hash=[redacted], admin hash=[redacted]
+
+  Template: [{{time}} | {{editor}}]
+  Output:   [2025-07-14 09:30:00 UTC | VisualStudio2026 18.4.2 workspace=E:\source\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
+
+────────────────────────────────────────
+TOOL AWARENESS SETS
+────────────────────────────────────────
+A reusable named configuration controlling which tool-call schemas are sent in API requests. Reduces prompt-token overhead by excluding tools the agent will never use (~2,500–3,000 tokens for the full 34-tool schema set).
+
+POST   /tool-awareness-sets                   { name, tools? }
+GET    /tool-awareness-sets
+GET    /tool-awareness-sets/{id}
+PUT    /tool-awareness-sets/{id}               { name?, tools? }
+DELETE /tool-awareness-sets/{id}
+
+tools: Dictionary<string, bool>. Keys are tool names (e.g. "execute_mk8_shell", "capture_display"). Tools whose key is true or absent are included; only tools explicitly set to false are excluded. Empty dict {} = all tools enabled.
+
+Override chain: channel.toolAwarenessSetId > agent.toolAwarenessSetId > null (all tools). Assign via toolAwarenessSetId field on POST/PUT agents and channels.
+
+On DELETE, agents/channels referencing the set have their toolAwarenessSetId set to null (SetNull cascade).
+
+ToolAwarenessSetResponse: id, name, tools (Dictionary<string,bool>), createdAt, updatedAt.
+
+CLI:
+  tools add <name> [json]            Create a tool awareness set
+  tools list                         List all sets
+  tools get <id>                     Show set details
+  tools update <id> [--name <n>] [json]  Update a set
+  tools delete <id>                  Delete a set
+  agent add <name> <modelId> --tools <setId>    Assign on creation
+  agent update <id> <name> --tools <setId>      Assign on update
+  channel add --agent <id> --tools <setId>      Assign on creation
+
+Available tool names (34):
+  wait, list_accessible_threads, read_thread_history,
+  execute_mk8_shell, execute_dangerous_shell,
+  transcribe_from_audio_device, transcribe_from_audio_stream, transcribe_from_audio_file,
+  create_sub_agent, create_container, register_info_store,
+  access_localhost_in_browser, access_localhost_cli,
+  access_local_info_store, access_external_info_store,
+  access_website, query_search_engine, access_container,
+  manage_agent, edit_task, access_skill,
+  capture_display, click_desktop, type_on_desktop,
+  editor_read_file, editor_get_open_files, editor_get_selection, editor_get_diagnostics,
+  editor_apply_edit, editor_create_file, editor_delete_file,
+  editor_show_diff, editor_run_build, editor_run_terminal

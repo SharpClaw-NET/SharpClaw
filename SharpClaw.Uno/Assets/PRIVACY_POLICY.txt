@@ -1,0 +1,196 @@
+PRIVACY POLICY — SharpClaw
+Last updated: 2025-07-12
+
+1.  INTRODUCTION
+
+    SharpClaw ("the Application", "we", "us", "our") is a locally-
+    installed desktop and mobile application distributed through the
+    Microsoft Store and other channels. This Privacy Policy explains
+    how the Application handles personal data and applies to all users,
+    including those residing in the European Union / European Economic
+    Area ("EU/EEA") and the Republic of Croatia.
+
+    By installing or using the Application you acknowledge that you have
+    read and understood this Privacy Policy.
+
+2.  DATA CONTROLLER
+
+    The Application is developed and published by:
+
+        Marko Kopričanec
+        Ulica Ivana Gundulića 98, Prizemlje
+        48260 Križevci
+        Koprivničko-križevačka županija
+        Republika Hrvatska
+
+    For any privacy-related enquiries, contact: mkn8rn@hotmail.com
+
+    For the purposes of applicable data protection law, we act as a data
+    controller only with respect to limited processing activities
+    performed locally by the Application on your device (such as storing
+    settings and application data). We do not have access to this data.
+
+3.  DATA WE COLLECT AND PROCESS
+
+    SharpClaw does NOT operate any remote backend server, cloud
+    service, or remote database. The Application runs a local-only
+    service process on your device (bound to localhost) to manage its
+    data; this process does not accept connections from the network
+    and is not accessible to other devices.
+
+    ALL data generated or entered while using the Application —
+    including but not limited to:
+
+        •  user credentials and authentication tokens,
+        •  chat history and conversation threads,
+        •  agent configurations and system prompts,
+        •  API keys for third-party AI providers,
+        •  local application settings and preferences,
+
+    — is stored EXCLUSIVELY on YOUR device, in local storage (on-device
+    files and/or an in-memory database with local JSON persistence).
+
+    We do not collect, transmit, receive, or store any personal data on
+    our own servers. We have no access to your data.
+
+4.  THIRD-PARTY AI PROVIDERS
+
+    SharpClaw allows you to connect to third-party Artificial
+    Intelligence ("AI") service providers of your choosing (e.g.
+    OpenAI, Anthropic, Google, Mistral, Groq, and others).
+
+    When you configure a provider and send chat messages, the content of
+    those messages — which may include personal data — is transmitted
+    directly from your device to the provider's servers using the API
+    key you supply.
+
+    SharpClaw acts solely as a local client interface in this context.
+    We do not receive, store, or otherwise process this data on our own
+    systems. Each third-party provider acts as an independent data
+    controller for the data it receives.
+
+    You are responsible for reviewing and accepting each provider's
+    Privacy Policy and Terms of Service before use, and for
+    understanding how that provider processes your data.
+
+5.  DATA PROCESSING — LEGAL BASIS (GDPR Art. 6)
+
+    To the limited extent that personal data is processed locally by the
+    Application on your device:
+
+        •  Performance of a contract (Art. 6(1)(b) GDPR) — processing is
+           necessary to provide the Application's core functionality,
+           including storing and displaying user data locally.
+
+        •  Legitimate interest (Art. 6(1)(f) GDPR) — processing is
+           necessary to ensure the Application functions correctly,
+           including maintaining settings and preferences between
+           sessions. These interests do not override your fundamental
+           rights, as all data remains under your control on your device.
+
+    We do not process personal data on our own servers.
+
+6.  DATA TRANSFERS
+
+    SharpClaw itself does NOT transfer any personal data to us or to any
+    server we control.
+
+    When you choose to connect to a third-party AI provider, data may be
+    transferred to servers located outside the EU/EEA (for example, in
+    the United States). Such transfers are governed entirely by the
+    third-party provider's own privacy policy and applicable safeguards
+    (e.g. Standard Contractual Clauses or adequacy decisions).
+
+7.  DATA RETENTION
+
+    All data is stored locally on your device for as long as you choose
+    to keep it.
+
+    You may delete any or all Application data at any time by:
+        •  using the Application's built-in settings/reset functions;
+        •  deleting the Application's local data folder; or
+        •  uninstalling the Application.
+
+    We retain no data, as we do not operate server-side storage.
+
+8.  YOUR RIGHTS UNDER THE GDPR AND CROATIAN LAW
+
+    Under the General Data Protection Regulation (EU) 2016/679 ("GDPR")
+    and applicable Croatian law, you have the following rights:
+
+        •  Right of access (Art. 15 GDPR)
+        •  Right to rectification (Art. 16 GDPR)
+        •  Right to erasure (Art. 17 GDPR)
+        •  Right to restriction of processing (Art. 18 GDPR)
+        •  Right to data portability (Art. 20 GDPR)
+        •  Right to object (Art. 21 GDPR)
+        •  Right not to be subject to automated decision-making (Art. 22)
+
+    Because we do not have access to or store your personal data, we are
+    generally not in a position to fulfill such requests directly.
+    However, you can exercise full control over your data locally on your
+    device as described in Section 7.
+
+    If you believe your rights have been violated, you have the right to
+    lodge a complaint with:
+
+        Agencija za zaštitu osobnih podataka (AZOP)
+        Selska cesta 136, 10 000 Zagreb, Croatia
+        https://azop.hr
+        azop@azop.hr
+
+    or with any other supervisory authority in the EU/EEA.
+
+9.  CHILDREN'S PRIVACY
+
+    The Application is not directed at children under the age of 16.
+    We do not knowingly collect personal data from children. Since all
+    data remains on the user's device, no age verification is performed.
+
+10. COOKIES AND TRACKING
+
+    SharpClaw does NOT use cookies, analytics tools, advertising
+    identifiers, or any tracking technologies. No telemetry or usage
+    data is collected or transmitted by us.
+
+11. SECURITY
+
+    Your data is stored locally on your device. Sensitive data such as
+    API keys is encrypted at rest using industry-standard encryption
+    methods (including AES-GCM).
+
+    The security of your device — including disk encryption, operating
+    system protections, and physical access — remains your
+    responsibility.
+
+12. MICROSOFT STORE
+
+    SharpClaw may be distributed through the Microsoft Store.
+    Microsoft may collect data related to downloads, installation, and
+    usage of the Store platform under its own Privacy Statement.
+
+    We are not responsible for Microsoft's data processing activities.
+    Please refer to:
+        https://privacy.microsoft.com/privacystatement
+
+13. CHANGES TO THIS POLICY
+
+    We may update this Privacy Policy from time to time. Changes will be
+    reflected by the updated "Last updated" date and included in updated
+    versions of the Application.
+
+14. GOVERNING LAW
+
+    This Privacy Policy is governed by the laws of the Republic of
+    Croatia and applicable European Union law.
+
+15. CONTACT
+
+    If you have any questions about this Privacy Policy, please contact:
+
+        Marko Kopričanec
+        E-mail: mkn8rn@hotmail.com
+        GitHub: https://github.com/mkn8rn/SharpClaw
+
+---
+© 2025 Marko Kopričanec. All rights reserved.

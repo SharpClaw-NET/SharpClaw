@@ -1,0 +1,40 @@
+# Flatpak manifest for SharpClaw
+# Template used by publish-release.ps1.
+#
+# Manual build (on Linux):
+#   flatpak-builder --force-clean --repo=repo build com.mkn8rn.SharpClaw.yml
+#   flatpak build-bundle repo SharpClaw.flatpak com.mkn8rn.SharpClaw
+#
+# The "publish/" directory must contain the self-contained .NET publish output.
+
+app-id: com.mkn8rn.SharpClaw
+runtime: org.freedesktop.Platform
+runtime-version: '24.08'
+sdk: org.freedesktop.Sdk
+command: sharpclaw
+
+finish-args:
+  - --share=network
+  - --share=ipc
+  - --socket=x11
+  - --socket=wayland
+  - --socket=pulseaudio
+  - --filesystem=home
+  - --device=dri
+
+modules:
+  - name: sharpclaw
+    buildsystem: simple
+    build-commands:
+      - mkdir -p /app/opt/sharpclaw
+      - cp -r publish/* /app/opt/sharpclaw/
+      - chmod +x /app/opt/sharpclaw/SharpClaw.Uno
+      - chmod +x /app/opt/sharpclaw/backend/SharpClaw.Application.API
+      - test -f /app/opt/sharpclaw/gateway/SharpClaw.Gateway && chmod +x /app/opt/sharpclaw/gateway/SharpClaw.Gateway || true
+      - ln -sf /app/opt/sharpclaw/SharpClaw.Uno /app/bin/sharpclaw
+      - install -Dm644 com.mkn8rn.SharpClaw.desktop /app/share/applications/com.mkn8rn.SharpClaw.desktop
+      - install -Dm644 com.mkn8rn.SharpClaw.metainfo.xml /app/share/metainfo/com.mkn8rn.SharpClaw.metainfo.xml
+      - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.mkn8rn.SharpClaw.png
+    sources:
+      - type: dir
+        path: .

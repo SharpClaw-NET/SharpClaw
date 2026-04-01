@@ -1,8 +1,12 @@
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.IdentityModel.JsonWebTokens;
+using Microsoft.IdentityModel.Tokens;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
+using SharpClaw.Contracts.Exceptions;
 
 namespace SharpClaw.Application.API.Api;
 
@@ -12,8 +16,24 @@ namespace SharpClaw.Application.API.Api;
 /// authenticated user's ID.  Runs <b>after</b> the API-key gate so that
 /// only key-authenticated requests are processed.
 /// Non-exempt endpoints return <c>401</c> when no valid JWT is present.
+/// <para>
+/// The gateway may authenticate with a dedicated <c>X-Gateway-Token</c>
+/// header instead of a user JWT. This proves the request originates from
+/// the trusted gateway process and allows service-level calls (e.g. bot
+/// config) that have no user context.
+/// </para>
+/// <para>
+/// When a structurally valid JWT has <b>expired</b>, the response includes
+/// a JSON body with <c>"error": "access_token_expired"</c> and a
+/// <c>WWW-Authenticate: Bearer error="invalid_token"</c> header so that
+/// third-party clients can detect expiry programmatically and refresh the
+/// access token via <c>POST /auth/refresh</c>.
+/// </para>
 /// </summary>
-public sealed class JwtSessionMiddleware(RequestDelegate next)
+public sealed class JwtSessionMiddleware(
+    RequestDelegate next,
+    IConfiguration configuration,
+    ApiKeyProvider apiKeyProvider)
 {
     private static readonly HashSet<string> ExemptPaths = new(StringComparer.OrdinalIgnoreCase)
     {
@@ -24,8 +44,12 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
         "/auth/refresh",
     };
 
+    private readonly bool _disabled = configuration.GetValue<bool>("Auth:DisableAccessTokenCheck");
+
     public async Task InvokeAsync(HttpContext context)
     {
+        var tokenExpired = false;
+
         var authHeader = context.Request.Headers.Authorization.ToString();
         if (authHeader.StartsWith("Bearer ", StringComparison.OrdinalIgnoreCase))
         {
@@ -39,26 +63,70 @@ public sealed class JwtSessionMiddleware(RequestDelegate next)
                     && result.Claims.TryGetValue(JwtRegisteredClaimNames.Sub, out var sub)
                     && Guid.TryParse(sub?.ToString(), out var userId))
                 {
-                    var session = context.RequestServices.GetRequiredService<SessionService>();
-                    session.UserId = userId;
+                    // Check server-side invalidation (password change, admin action, etc.)
+                    var authService = context.RequestServices.GetRequiredService<AuthService>();
+                    var issuedAt = TokenService.GetIssuedAt(result);
+
+                    if (issuedAt is not null
+                        && !await authService.IsAccessTokenValidForUserAsync(userId, issuedAt.Value))
+                    {
+                        // Token was server-side invalidated — treat as expired
+                        tokenExpired = true;
+                    }
+                    else
+                    {
+                        var session = context.RequestServices.GetRequiredService<SessionService>();
+                        session.UserId = userId;
+                    }
+                }
+                else if (result.Exception is SecurityTokenExpiredException)
+                {
+                    tokenExpired = true;
                 }
             }
         }
 
-        // TODO: Temporarily commented out – re-enable when auth flow is ready.
-        // // Enforce authentication on non-exempt paths.
-        // if (!IsExemptPath(context.Request.Path))
-        // {
-        //     var session = context.RequestServices.GetRequiredService<SessionService>();
-        //     if (session.UserId is null)
-        //     {
-        //         context.Response.StatusCode = StatusCodes.Status401Unauthorized;
-        //         await context.Response.WriteAsync("Authentication required.");
-        //         return;
-        //     }
-        // }
+        // Enforce authentication on non-exempt paths (skipped when disabled via .env).
+        if (!_disabled && !IsExemptPath(context.Request.Path))
+        {
+            var session = context.RequestServices.GetRequiredService<SessionService>();
+            if (session.UserId is null && !IsGatewayAuthenticated(context))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+
+                if (tokenExpired)
+                {
+                    // Machine-readable expiry signal for third-party clients
+                    context.Response.Headers["WWW-Authenticate"] = """Bearer error="invalid_token", error_description="The access token has expired" """.Trim();
+                    context.Response.ContentType = "application/json";
+                    await context.Response.WriteAsync(
+                        $$"""{"error":"{{AccessTokenExpiredException.ErrorCode}}","message":"The access token has expired. Use your refresh token to obtain a new one via POST /auth/refresh."}""");
+                }
+                else
+                {
+                    await context.Response.WriteAsync("Authentication required.");
+                }
+                return;
+            }
+        }
 
         await next(context);
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> when the request carries a valid
+    /// <c>X-Gateway-Token</c> header, proving it originates from
+    /// the trusted gateway process.
+    /// </summary>
+    private bool IsGatewayAuthenticated(HttpContext context)
+    {
+        if (!context.Request.Headers.TryGetValue("X-Gateway-Token", out var provided)
+            || string.IsNullOrEmpty(provided.ToString()))
+            return false;
+
+        return CryptographicOperations.FixedTimeEquals(
+            System.Text.Encoding.UTF8.GetBytes(provided.ToString()),
+            System.Text.Encoding.UTF8.GetBytes(apiKeyProvider.GatewayToken));
     }
 
     private static bool IsExemptPath(PathString path)

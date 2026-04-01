@@ -3,19 +3,15 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.UI.Xaml.Media;
+using SharpClaw.Helpers;
 using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
 public sealed partial class FirstSetupPage : Page
 {
-    private static readonly JsonSerializerOptions Json = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        PropertyNameCaseInsensitive = true,
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
-        Converters = { new JsonStringEnumConverter() },
-    };
+    private static JsonSerializerOptions Json => TerminalUI.Json;
+    private static FontFamily Mono => TerminalUI.Mono;
 
     private SharpClawApiClient Api => App.Services!.GetRequiredService<SharpClawApiClient>();
 
@@ -25,8 +21,12 @@ public sealed partial class FirstSetupPage : Page
     private TaskCompletionSource<Guid?>? _agentTcs;
     private TaskCompletionSource<bool>? _localModelTcs;
     private TaskCompletionSource<bool>? _roleTcs;
+    private TaskCompletionSource<bool>? _upgradePromptTcs;
     private bool _localOnly;
+    private bool _switchToCloud;
     private List<ProviderDto>? _providers;
+
+    private PermissionEditorBuilder? _permEditor;
 
     public FirstSetupPage()
     {
@@ -36,37 +36,103 @@ public sealed partial class FirstSetupPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
+        if (FirstSetupMarker.NeedsUpgradeRerun)
+        {
+            // Major version advanced since last setup — ask whether to redo
+            var oldVer = FirstSetupMarker.CompletedMajorVersion;
+            var newVer = FirstSetupMarker.CurrentMajorVersion;
+            var label = oldVer.HasValue
+                ? $"v{oldVer} → v{newVer}"
+                : $"v{newVer}";
+
+            UpgradeVersionLabel.Text = label;
+            UpgradePromptPanel.Visibility = Visibility.Visible;
+            SkipSetupPanel.Visibility = Visibility.Collapsed;
+
+            _upgradePromptTcs = new TaskCompletionSource<bool>();
+            var redo = await _upgradePromptTcs.Task;
+            UpgradePromptPanel.Visibility = Visibility.Collapsed;
+
+            if (!redo)
+            {
+                // User chose to skip — stamp current version and go to Main
+                FirstSetupMarker.MarkCompleted();
+                var navigator = App.Services!.GetRequiredService<INavigator>();
+                await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+                return;
+            }
+
+            // User chose redo — fall through to normal setup
+            SkipSetupPanel.Visibility = Visibility.Visible;
+        }
+
         Cursor.SetCommand("sharpclaw setup ");
         await RunSetupAsync();
     }
 
     // ── Step rendering ──────────────────────────────────────────
 
-    private void AppendStep(string text, bool done = false, bool error = false)
+    private void AppendStep(string text, bool done = false, bool error = false, string? copyText = null)
     {
         var icon = done ? "✓" : error ? "✗" : "›";
-        var color = done ? 0x00FF00 : error ? 0xFF4444 : 0x808080;
+        var iconColor = done ? 0x00FF00 : error ? 0xFF6666 : 0xFFCC00;
+        var textColor = done ? 0xE0E0E0 : error ? 0xFF6666 : 0xE0E0E0;
 
-        var panel = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-        panel.Children.Add(new TextBlock
+        var grid = new Grid { ColumnSpacing = 8 };
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var iconBlock = new TextBlock
         {
             Text = icon,
-            FontFamily = new FontFamily("Consolas, Courier New, monospace"),
-            FontSize = 13,
-            Foreground = new SolidColorBrush(ColorFrom(color)),
-        });
-        panel.Children.Add(new TextBlock
+            FontFamily = Mono,
+            FontSize = 15,
+            Foreground = TerminalUI.Brush(iconColor),
+        };
+        Grid.SetColumn(iconBlock, 0);
+        grid.Children.Add(iconBlock);
+
+        var textBlock = new TextBlock
         {
             Text = text,
-            FontFamily = new FontFamily("Consolas, Courier New, monospace"),
-            FontSize = 13,
-            Foreground = new SolidColorBrush(ColorFrom(done ? 0xCCCCCC : error ? 0xFF4444 : 0x808080)),
+            FontFamily = Mono,
+            FontSize = 15,
+            Foreground = TerminalUI.Brush(textColor),
             TextWrapping = TextWrapping.Wrap,
-        });
+        };
+        Grid.SetColumn(textBlock, 1);
+        grid.Children.Add(textBlock);
+
+        if (copyText is not null)
+        {
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+
+            var copyBtn = new Button
+            {
+                Content = "Copy",
+                FontFamily = Mono,
+                FontSize = 11,
+                Padding = new Thickness(6, 2),
+                MinHeight = 0, MinWidth = 0,
+                VerticalAlignment = VerticalAlignment.Top,
+                Background = TerminalUI.Brush(0x1A1A1A),
+                Foreground = TerminalUI.Brush(0xCCCCCC),
+                BorderBrush = TerminalUI.Brush(0x444444),
+                BorderThickness = new Thickness(1),
+            };
+            var captured = copyText;
+            copyBtn.Click += (_, _) =>
+            {
+                TerminalUI.CopyToClipboard(captured);
+                copyBtn.Content = "Copied";
+            };
+            Grid.SetColumn(copyBtn, 2);
+            grid.Children.Add(copyBtn);
+        }
 
         // Insert before the Cursor (always last child)
         var idx = StepsPanel.Children.Count - 1;
-        StepsPanel.Children.Insert(idx < 0 ? 0 : idx, panel);
+        StepsPanel.Children.Insert(idx < 0 ? 0 : idx, grid);
     }
 
     // ── Main setup flow ─────────────────────────────────────────
@@ -123,59 +189,71 @@ public sealed partial class FirstSetupPage : Page
             ReplaceLastStep("Provider created.", done: true);
         }
 
-        // ── Step 2: Logged-in providers (has API key) ──
-        AppendStep("Checking provider API keys...");
-        var loggedIn = (_providers ?? []).Where(p => p.HasApiKey && !p.IsLocal).ToList();
-        if (loggedIn.Count > 0)
+        // ── Steps 2–3: API keys & models (loop to allow switching back from local-only) ──
+        List<ModelDto>? models = null;
+        while (true)
         {
-            ReplaceLastStep($"{loggedIn.Count} provider(s) have API keys.", done: true);
-        }
-        else
-        {
-            var remote = (_providers ?? []).Where(p => !p.IsLocal).ToList();
-            if (remote.Count == 0)
+            _localOnly = false;
+            _switchToCloud = false;
+
+            // ── Step 2: Logged-in providers (has API key) ──
+            AppendStep("Checking provider API keys...");
+            var loggedIn = (_providers ?? []).Where(p => p.HasApiKey && !p.IsLocal).ToList();
+            if (loggedIn.Count > 0)
             {
-                ReplaceLastStep("No remote providers available. Continuing with local models only.", done: true);
-                _localOnly = true;
+                ReplaceLastStep($"{loggedIn.Count} provider(s) have API keys.", done: true);
             }
             else
             {
-                ReplaceLastStep("No provider has an API key set. Please provide one.");
-                PopulateApiKeyProviderSelector(remote);
-                ApiKeyInputPanel.Visibility = Visibility.Visible;
-                _apiKeyTcs = new TaskCompletionSource<bool>();
-                var keySet = await _apiKeyTcs.Task;
-                ApiKeyInputPanel.Visibility = Visibility.Collapsed;
-                if (!keySet)
+                var remote = (_providers ?? []).Where(p => !p.IsLocal).ToList();
+                if (remote.Count == 0)
                 {
+                    ReplaceLastStep("No remote providers available. Continuing with local models only.", done: true);
                     _localOnly = true;
-                    ReplaceLastStep("Continuing with local models only.", done: true);
                 }
                 else
                 {
-                    _providers = await FetchListAsync<ProviderDto>("/providers");
-                    ReplaceLastStep("API key configured.", done: true);
+                    ReplaceLastStep("No provider has an API key set. Please provide one.");
+                    PopulateApiKeyProviderSelector(remote);
+                    ApiKeyInputPanel.Visibility = Visibility.Visible;
+                    _apiKeyTcs = new TaskCompletionSource<bool>();
+                    var keySet = await _apiKeyTcs.Task;
+                    ApiKeyInputPanel.Visibility = Visibility.Collapsed;
+                    if (!keySet)
+                    {
+                        _localOnly = true;
+                        ReplaceLastStep("Continuing with local models only.", done: true);
+                    }
+                    else
+                    {
+                        _providers = await FetchListAsync<ProviderDto>("/providers");
+                        ReplaceLastStep("API key configured.", done: true);
+                    }
                 }
             }
-        }
 
-        // ── Step 3: Models ──
-        AppendStep("Checking models...");
-        var models = await FetchListAsync<ModelDto>("/models");
-        if (models is { Count: > 0 })
-        {
-            ReplaceLastStep($"Found {models.Count} model(s).", done: true);
-        }
-        else
-        {
+            // ── Step 3: Models ──
+            AppendStep("Checking models...");
+            models = await FetchListAsync<ModelDto>("/models");
+            if (models is { Count: > 0 })
+            {
+                ReplaceLastStep($"Found {models.Count} model(s).", done: true);
+                break;
+            }
+
             if (_localOnly)
             {
-                // Guide the user through downloading a local model from HuggingFace.
                 ReplaceLastStep("No models found. Download a local model to continue.");
                 LocalModelDownloadPanel.Visibility = Visibility.Visible;
                 _localModelTcs = new TaskCompletionSource<bool>();
                 var downloaded = await _localModelTcs.Task;
                 LocalModelDownloadPanel.Visibility = Visibility.Collapsed;
+
+                if (!downloaded && _switchToCloud)
+                {
+                    ReplaceLastStep("Switching to cloud provider setup...", done: true);
+                    continue;
+                }
 
                 if (!downloaded)
                 {
@@ -185,6 +263,7 @@ public sealed partial class FirstSetupPage : Page
 
                 models = await FetchListAsync<ModelDto>("/models");
                 ReplaceLastStep($"Downloaded and registered {models?.Count ?? 0} model(s).", done: true);
+                break;
             }
             else
             {
@@ -203,7 +282,6 @@ public sealed partial class FirstSetupPage : Page
                 if (!synced)
                 {
                     ReplaceLastStep("Model sync failed. Check your API key and try setup again.", error: true);
-                    // Wipe API keys on failed sync
                     foreach (var p in _providers!.Where(p => p.HasApiKey))
                     {
                         try { await Api.PostAsync($"/providers/{p.Id}/set-key", new StringContent(JsonSerializer.Serialize(new { apiKey = "" }, Json), Encoding.UTF8, "application/json")); }
@@ -214,6 +292,7 @@ public sealed partial class FirstSetupPage : Page
 
                 models = await FetchListAsync<ModelDto>("/models");
                 ReplaceLastStep($"Synced {models?.Count ?? 0} model(s).", done: true);
+                break;
             }
         }
 
@@ -374,28 +453,32 @@ public sealed partial class FirstSetupPage : Page
 
             if (needsRole)
             {
-                ReplaceLastStep("Agent has no role. Set up permissions so it can use tools.");
-                PopulateClearanceSelector();
-                RolePermissionsPanel.Visibility = Visibility.Visible;
-                _roleTcs = new TaskCompletionSource<bool>();
-                var roleCreated = await _roleTcs.Task;
-                RolePermissionsPanel.Visibility = Visibility.Collapsed;
-
-                if (roleCreated)
+                while (true)
                 {
+                    ReplaceLastStep("Agent has no role. Set up permissions so it can use tools.");
+                    await BuildPermissionsEditorAsync();
+                    RolePermissionsPanel.Visibility = Visibility.Visible;
+                    _roleTcs = new TaskCompletionSource<bool>();
+                    var roleCreated = await _roleTcs.Task;
+                    RolePermissionsPanel.Visibility = Visibility.Collapsed;
+
+                    if (!roleCreated)
+                    {
+                        ReplaceLastStep("Role setup skipped. Agent has no permissions.", done: true);
+                        break;
+                    }
+
                     try
                     {
                         await CreateRoleAndAssignAsync(selectedAgentId.Value);
                         ReplaceLastStep("Role created and permissions applied.", done: true);
+                        break;
                     }
                     catch (Exception ex)
                     {
-                        ReplaceLastStep($"Failed to create role: {ex.Message}", error: true);
+                        ReplaceLastStep(ex.Message, error: true, copyText: ex.Message);
+                        AppendStep("Retrying permissions setup...");
                     }
-                }
-                else
-                {
-                    ReplaceLastStep("Role setup skipped. Agent has no permissions.", done: true);
                 }
             }
         }
@@ -504,6 +587,12 @@ public sealed partial class FirstSetupPage : Page
     private void OnLocalOnlyClick(object sender, RoutedEventArgs e)
     {
         _apiKeyTcs?.TrySetResult(false);
+    }
+
+    private void OnSwitchToCloudClick(object sender, RoutedEventArgs e)
+    {
+        _switchToCloud = true;
+        _localModelTcs?.TrySetResult(false);
     }
 
     private async void OnListFilesClick(object sender, RoutedEventArgs e)
@@ -678,6 +767,7 @@ public sealed partial class FirstSetupPage : Page
         _agentTcs?.TrySetResult(null);
         _localModelTcs?.TrySetResult(false);
         _roleTcs?.TrySetResult(false);
+        _upgradePromptTcs?.TrySetResult(false);
 
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
@@ -692,17 +782,9 @@ public sealed partial class FirstSetupPage : Page
     private void OnRoleSkipClick(object sender, RoutedEventArgs e)
         => _roleTcs?.TrySetResult(false);
 
-    private void PopulateClearanceSelector()
+    private async Task BuildPermissionsEditorAsync()
     {
-        ClearanceSelector.Items.Clear();
-        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Can act without approval", Tag = "Independent" });
-        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Only with approval from a user that can grant the permission", Tag = "ApprovedBySameLevelUser" });
-        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Only with approval from a user", Tag = "ApprovedByWhitelistedUser" });
-        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Only with approval from an agent that has clearance to act", Tag = "ApprovedByPermittedAgent" });
-        ClearanceSelector.Items.Add(new ComboBoxItem { Content = "Only with approval from a managing agent", Tag = "ApprovedByWhitelistedAgent" });
-        ClearanceSelector.SelectedIndex = 0; // Default to Independent for first-time setup
-
-        // Populate per-flag and per-resource clearance selectors
+        // Populate per-flag clearance selectors (XAML-defined)
         PopulateClearanceCombo(ClrLocalhostBrowser);
         PopulateClearanceCombo(ClrLocalhostCli);
         PopulateClearanceCombo(ClrClickDesktop);
@@ -710,30 +792,24 @@ public sealed partial class FirstSetupPage : Page
         PopulateClearanceCombo(ClrCreateSubAgents);
         PopulateClearanceCombo(ClrCreateContainers);
         PopulateClearanceCombo(ClrRegisterInfoStores);
-        PopulateClearanceCombo(ClrSafeShell);
-        PopulateClearanceCombo(ClrDangerousShell);
-        PopulateClearanceCombo(ClrContainerAccess);
-        PopulateClearanceCombo(ClrWebsiteAccess);
-        PopulateClearanceCombo(ClrSearchEngineAccess);
-        PopulateClearanceCombo(ClrLocalInfoStore);
-        PopulateClearanceCombo(ClrExternalInfoStore);
-        PopulateClearanceCombo(ClrAudioDevice);
-        PopulateClearanceCombo(ClrDisplayDevice);
-        PopulateClearanceCombo(ClrEditorSession);
-        PopulateClearanceCombo(ClrAgentManagement);
-        PopulateClearanceCombo(ClrTaskManagement);
-        PopulateClearanceCombo(ClrSkillManagement);
+
+        // Build resource grants UI via shared builder
+        _permEditor = new PermissionEditorBuilder(Api)
+            .WithGrantClearance(true);
+        ResourceGrantsContainer.Children.Clear();
+        await _permEditor.BuildResourceGrantsAsync(ResourceGrantsContainer);
     }
 
     private static void PopulateClearanceCombo(ComboBox box)
     {
         box.Items.Clear();
+        box.Items.Add(new ComboBoxItem { Content = "Unset", Tag = "Unset" });
         box.Items.Add(new ComboBoxItem { Content = "Can act without approval", Tag = "Independent" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user that can grant the permission", Tag = "ApprovedBySameLevelUser" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user", Tag = "ApprovedByWhitelistedUser" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from an agent that has clearance to act", Tag = "ApprovedByPermittedAgent" });
         box.Items.Add(new ComboBoxItem { Content = "Only with approval from a managing agent", Tag = "ApprovedByWhitelistedAgent" });
-        box.SelectedIndex = 0;
+        box.Items.Add(new ComboBoxItem { Content = "Only with approval from an agent that has clearance to act", Tag = "ApprovedByPermittedAgent" });
+        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user", Tag = "ApprovedByWhitelistedUser" });
+        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user that can grant the permission", Tag = "ApprovedBySameLevelUser" });
+        box.SelectedIndex = 1; // Default to Independent for first-time setup
     }
 
     private static string GetClearanceTag(ComboBox box)
@@ -747,10 +823,8 @@ public sealed partial class FirstSetupPage : Page
             new StringContent(roleBody, Encoding.UTF8, "application/json"));
 
         if (!roleResp.IsSuccessStatusCode)
-        {
-            var err = await roleResp.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Failed to create role: {(int)roleResp.StatusCode} {err}");
-        }
+            throw new InvalidOperationException(
+                $"Failed to create role ({(int)roleResp.StatusCode}). {await ExtractErrorAsync(roleResp)}");
 
         Guid roleId;
         using (var roleDoc = JsonDocument.Parse(await roleResp.Content.ReadAsStringAsync()))
@@ -762,75 +836,65 @@ public sealed partial class FirstSetupPage : Page
             new StringContent(assignBody, Encoding.UTF8, "application/json"));
 
         if (!assignResp.IsSuccessStatusCode)
+            throw new InvalidOperationException(
+                $"Failed to assign role ({(int)assignResp.StatusCode}). {await ExtractErrorAsync(assignResp)}");
+
+        // 3. Build the permission set from the UI
+        var req = new Dictionary<string, object?>
         {
-            var err = await assignResp.Content.ReadAsStringAsync();
-            throw new InvalidOperationException($"Failed to assign role: {(int)assignResp.StatusCode} {err}");
-        }
-
-        // 3. Build the permission set from the UI checkboxes
-        var clearance = ClearanceSelector.SelectedItem is ComboBoxItem { Tag: string cl } ? cl : "Independent";
-
-        // AllResources wildcard for per-resource grants
-        var allResources = "ffffffff-ffff-ffff-ffff-ffffffffffff";
-
-        var permBody = JsonSerializer.Serialize(new
-        {
-            defaultClearance = clearance,
-
             // Global flags with per-flag clearance
-            canCreateSubAgents = ChkCreateSubAgents.IsChecked == true,
-            createSubAgentsClearance = GetClearanceTag(ClrCreateSubAgents),
-            canCreateContainers = ChkCreateContainers.IsChecked == true,
-            createContainersClearance = GetClearanceTag(ClrCreateContainers),
-            canRegisterInfoStores = ChkRegisterInfoStores.IsChecked == true,
-            registerInfoStoresClearance = GetClearanceTag(ClrRegisterInfoStores),
-            canAccessLocalhostInBrowser = ChkLocalhostBrowser.IsChecked == true,
-            accessLocalhostInBrowserClearance = GetClearanceTag(ClrLocalhostBrowser),
-            canAccessLocalhostCli = ChkLocalhostCli.IsChecked == true,
-            accessLocalhostCliClearance = GetClearanceTag(ClrLocalhostCli),
-            canClickDesktop = ChkClickDesktop.IsChecked == true,
-            clickDesktopClearance = GetClearanceTag(ClrClickDesktop),
-            canTypeOnDesktop = ChkTypeOnDesktop.IsChecked == true,
-            typeOnDesktopClearance = GetClearanceTag(ClrTypeOnDesktop),
+            ["canCreateSubAgents"] = ChkCreateSubAgents.IsChecked == true,
+            ["createSubAgentsClearance"] = GetClearanceTag(ClrCreateSubAgents),
+            ["canCreateContainers"] = ChkCreateContainers.IsChecked == true,
+            ["createContainersClearance"] = GetClearanceTag(ClrCreateContainers),
+            ["canRegisterInfoStores"] = ChkRegisterInfoStores.IsChecked == true,
+            ["registerInfoStoresClearance"] = GetClearanceTag(ClrRegisterInfoStores),
+            ["canAccessLocalhostInBrowser"] = ChkLocalhostBrowser.IsChecked == true,
+            ["accessLocalhostInBrowserClearance"] = GetClearanceTag(ClrLocalhostBrowser),
+            ["canAccessLocalhostCli"] = ChkLocalhostCli.IsChecked == true,
+            ["accessLocalhostCliClearance"] = GetClearanceTag(ClrLocalhostCli),
+            ["canClickDesktop"] = ChkClickDesktop.IsChecked == true,
+            ["clickDesktopClearance"] = GetClearanceTag(ClrClickDesktop),
+            ["canTypeOnDesktop"] = ChkTypeOnDesktop.IsChecked == true,
+            ["typeOnDesktopClearance"] = GetClearanceTag(ClrTypeOnDesktop),
+        };
 
-            // Per-resource grants (wildcard) with per-resource clearance
-            safeShellAccesses = ChkSafeShell.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrSafeShell) } } : null,
-            dangerousShellAccesses = ChkDangerousShell.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrDangerousShell) } } : null,
-            containerAccesses = ChkContainerAccess.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrContainerAccess) } } : null,
-            websiteAccesses = ChkWebsiteAccess.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrWebsiteAccess) } } : null,
-            searchEngineAccesses = ChkSearchEngineAccess.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrSearchEngineAccess) } } : null,
-            localInfoStoreAccesses = ChkLocalInfoStore.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrLocalInfoStore) } } : null,
-            externalInfoStoreAccesses = ChkExternalInfoStore.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrExternalInfoStore) } } : null,
-            audioDeviceAccesses = ChkAudioDevice.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrAudioDevice) } } : null,
-            displayDeviceAccesses = ChkDisplayDevice.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrDisplayDevice) } } : null,
-            editorSessionAccesses = ChkEditorSession.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrEditorSession) } } : null,
-            agentAccesses = ChkAgentManagement.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrAgentManagement) } } : null,
-            taskAccesses = ChkTaskManagement.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrTaskManagement) } } : null,
-            skillAccesses = ChkSkillManagement.IsChecked == true
-                ? new[] { new { resourceId = allResources, clearance = GetClearanceTag(ClrSkillManagement) } } : null,
-        }, Json);
+        // Per-resource grants from shared builder
+        if (_permEditor is not null)
+            foreach (var (k, v) in _permEditor.CollectGrants())
+                req[k] = v;
+
+        var permBody = JsonSerializer.Serialize(req, Json);
 
         var permResp = await Api.PutAsync($"/roles/{roleId}/permissions",
             new StringContent(permBody, Encoding.UTF8, "application/json"));
 
         if (!permResp.IsSuccessStatusCode)
-        {
-            var errorText = await permResp.Content.ReadAsStringAsync();
             throw new InvalidOperationException(
-                $"Failed to set permissions: {(int)permResp.StatusCode} {errorText}");
+                $"Failed to set permissions ({(int)permResp.StatusCode}). {await ExtractErrorAsync(permResp)}");
+    }
+
+    private static async Task<string> ExtractErrorAsync(HttpResponseMessage resp)
+    {
+        var raw = await resp.Content.ReadAsStringAsync();
+        if (string.IsNullOrWhiteSpace(raw))
+            return resp.ReasonPhrase ?? "Unknown error";
+
+        try
+        {
+            using var doc = JsonDocument.Parse(raw);
+            // RFC 7807 problem detail
+            if (doc.RootElement.TryGetProperty("detail", out var detail))
+                return detail.GetString() ?? raw;
+            if (doc.RootElement.TryGetProperty("title", out var title))
+                return title.GetString() ?? raw;
+            if (doc.RootElement.TryGetProperty("message", out var msg))
+                return msg.GetString() ?? raw;
         }
+        catch { /* not JSON — use raw text */ }
+
+        // Truncate overly long responses
+        return raw.Length > 200 ? raw[..200] + "..." : raw;
     }
 
     // ── Populate helpers ────────────────────────────────────────
@@ -838,7 +902,7 @@ public sealed partial class FirstSetupPage : Page
     private void PopulateProviderTypeSelector()
     {
         string[] types = ["OpenAI", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
-            "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot", "Custom"];
+            "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot", "Minimax", "Custom"];
         foreach (var t in types)
         {
             var item = new ComboBoxItem { Content = t, Tag = t };
@@ -888,29 +952,26 @@ public sealed partial class FirstSetupPage : Page
 
     // ── Utilities ────────────────────────────────────────────────
 
-    private void ReplaceLastStep(string text, bool done = false, bool error = false)
+    private void ReplaceLastStep(string text, bool done = false, bool error = false, string? copyText = null)
     {
         // Remove the last step line (the one before the Cursor)
         var idx = StepsPanel.Children.Count - 2; // -1 is Cursor, -2 is last step
         if (idx >= 0)
             StepsPanel.Children.RemoveAt(idx);
-        AppendStep(text, done, error);
+        AppendStep(text, done, error, copyText);
     }
 
-    private async Task<List<T>?> FetchListAsync<T>(string path)
-    {
-        try
-        {
-            var resp = await Api.GetAsync(path);
-            if (!resp.IsSuccessStatusCode) return null;
-            return JsonSerializer.Deserialize<List<T>>(
-                await resp.Content.ReadAsStringAsync(), Json);
-        }
-        catch { return null; }
-    }
+    private Task<List<T>?> FetchListAsync<T>(string path) => Api.FetchListAsync<T>(path, Json);
 
-    private static Windows.UI.Color ColorFrom(int rgb)
-        => Windows.UI.Color.FromArgb(255, (byte)((rgb >> 16) & 0xFF), (byte)((rgb >> 8) & 0xFF), (byte)(rgb & 0xFF));
+    private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
+
+    // ── Upgrade-prompt callbacks ────────────────────────────────
+
+    private void OnUpgradeRedoClick(object sender, RoutedEventArgs e)
+        => _upgradePromptTcs?.TrySetResult(true);
+
+    private void OnUpgradeSkipClick(object sender, RoutedEventArgs e)
+        => _upgradePromptTcs?.TrySetResult(false);
 
     // ── DTOs ────────────────────────────────────────────────────
     // ProviderType may arrive as a string ("OpenAI") or an integer (0)

@@ -36,6 +36,7 @@ AgentActionService actions,
 LiveTranscriptionOrchestrator orchestrator,
 EditorBridgeService editorBridge,
 SessionService session,
+BotMessageSenderService botMessageSender,
 IConfiguration configuration)
 {
     /// <summary>
@@ -755,6 +756,10 @@ IConfiguration configuration)
             AgentActionType.EditorRunBuild or
             AgentActionType.EditorRunTerminal
                 => await ExecuteEditorActionAsync(job, ct),
+
+            // Bot messaging
+            AgentActionType.SendBotMessage
+                => await ExecuteSendBotMessageAsync(job, ct),
 
             _ => $"Action '{job.ActionType}' executed successfully " +
                  $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
@@ -1502,8 +1507,8 @@ IConfiguration configuration)
     /// <summary>
     /// Captures a single monitor on Windows using GDI+ via
     /// <c>System.Drawing</c> interop (available on .NET 10 Windows).
-    /// The image is downscaled to a max dimension of 1280px and
-    /// encoded as JPEG to keep the base64 payload under API limits.
+    /// The image is encoded as lossless PNG at native resolution to
+    /// preserve full detail on high-DPI (4K/8K) displays.
     /// </summary>
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
     private static byte[] CaptureWindowsDisplay(int displayIndex)
@@ -1516,40 +1521,100 @@ IConfiguration configuration)
             g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
         }
 
-        // Downscale to max 1280px on the longest side to reduce payload.
-        const int maxDimension = 1280;
-        var scale = Math.Min(1.0, (double)maxDimension / Math.Max(bounds.Width, bounds.Height));
+        return EncodePng(bitmap);
+    }
 
-        System.Drawing.Bitmap toEncode;
-        if (scale < 1.0)
+    /// <summary>
+    /// Captures a display and draws a high-contrast crosshair annotation
+    /// at the given display-relative click coordinates so the agent can
+    /// see exactly where it clicked.  Two full-span ruler lines
+    /// (horizontal + vertical) intersect at the click point, with a
+    /// concentric circle marker at the centre.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static byte[] CaptureWindowsDisplayWithClickMarker(
+        int displayIndex, int clickX, int clickY)
+    {
+        var bounds = GetDisplayBounds(displayIndex);
+
+        using var bitmap = new System.Drawing.Bitmap(bounds.Width, bounds.Height);
+        using (var g = System.Drawing.Graphics.FromImage(bitmap))
         {
-            var newW = (int)(bounds.Width * scale);
-            var newH = (int)(bounds.Height * scale);
-            toEncode = new System.Drawing.Bitmap(bitmap, newW, newH);
-        }
-        else
-        {
-            toEncode = bitmap;
+            g.CopyFromScreen(bounds.X, bounds.Y, 0, 0, bounds.Size);
         }
 
-        try
-        {
-            using var ms = new System.IO.MemoryStream();
-            var jpegEncoder = System.Drawing.Imaging.ImageCodecInfo.GetImageEncoders()
-                .First(e => e.FormatID == System.Drawing.Imaging.ImageFormat.Jpeg.Guid);
-            var encoderParams = new System.Drawing.Imaging.EncoderParameters(1)
-            {
-                Param = [new System.Drawing.Imaging.EncoderParameter(
-                    System.Drawing.Imaging.Encoder.Quality, 80L)]
-            };
-            toEncode.Save(ms, jpegEncoder, encoderParams);
-            return ms.ToArray();
-        }
-        finally
-        {
-            if (!ReferenceEquals(toEncode, bitmap))
-                toEncode.Dispose();
-        }
+        DrawClickMarker(bitmap, clickX, clickY);
+        return EncodePng(bitmap);
+    }
+
+    /// <summary>
+    /// Draws a high-contrast click indicator on the bitmap:
+    /// <list type="bullet">
+    ///   <item>Full-width horizontal ruler line through <paramref name="y"/>.</item>
+    ///   <item>Full-height vertical ruler line through <paramref name="x"/>.</item>
+    ///   <item>Concentric circle marker at (<paramref name="x"/>, <paramref name="y"/>).</item>
+    /// </list>
+    /// Each element has a dark outline underneath for contrast on any background.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static void DrawClickMarker(System.Drawing.Bitmap bitmap, int x, int y)
+    {
+        // Clamp to bitmap bounds to avoid GDI+ errors on edge clicks.
+        x = Math.Clamp(x, 0, bitmap.Width - 1);
+        y = Math.Clamp(y, 0, bitmap.Height - 1);
+
+        using var g = System.Drawing.Graphics.FromImage(bitmap);
+        g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
+
+        var w = bitmap.Width;
+        var h = bitmap.Height;
+
+        // ── Ruler lines: dark outline + bright red ────────────────
+        using var outlinePen = new System.Drawing.Pen(
+            System.Drawing.Color.FromArgb(180, 0, 0, 0), 3f);
+        using var rulerPen = new System.Drawing.Pen(
+            System.Drawing.Color.FromArgb(210, 255, 0, 0), 1.5f);
+
+        // Horizontal ruler
+        g.DrawLine(outlinePen, 0, y, w, y);
+        g.DrawLine(rulerPen, 0, y, w, y);
+
+        // Vertical ruler
+        g.DrawLine(outlinePen, x, 0, x, h);
+        g.DrawLine(rulerPen, x, 0, x, h);
+
+        // ── Centre marker: outer ring + filled inner + white dot ──
+        const int outerR = 20;
+        const int innerR = 8;
+
+        using var ringOutline = new System.Drawing.Pen(
+            System.Drawing.Color.FromArgb(200, 0, 0, 0), 3f);
+        using var ringBright = new System.Drawing.Pen(
+            System.Drawing.Color.FromArgb(230, 255, 0, 0), 2f);
+        using var fillBrush = new System.Drawing.SolidBrush(
+            System.Drawing.Color.FromArgb(160, 255, 50, 50));
+        using var dotBrush = new System.Drawing.SolidBrush(
+            System.Drawing.Color.White);
+
+        g.DrawEllipse(ringOutline,
+            x - outerR, y - outerR, outerR * 2, outerR * 2);
+        g.DrawEllipse(ringBright,
+            x - outerR, y - outerR, outerR * 2, outerR * 2);
+        g.FillEllipse(fillBrush,
+            x - innerR, y - innerR, innerR * 2, innerR * 2);
+        g.FillEllipse(dotBrush, x - 3, y - 3, 6, 6);
+    }
+
+    /// <summary>
+    /// Encodes a bitmap as lossless PNG at native resolution.
+    /// Preserves full detail on high-DPI (4K/8K) displays.
+    /// </summary>
+    [System.Runtime.Versioning.SupportedOSPlatform("windows")]
+    private static byte[] EncodePng(System.Drawing.Bitmap bitmap)
+    {
+        using var ms = new System.IO.MemoryStream();
+        bitmap.Save(ms, System.Drawing.Imaging.ImageFormat.Png);
+        return ms.ToArray();
     }
 
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -1650,19 +1715,25 @@ IConfiguration configuration)
         var button = (payload.Button ?? "left").ToLowerInvariant();
         var clickType = (payload.ClickType ?? "single").ToLowerInvariant();
 
-        // Translate display-relative → absolute virtual screen coords
+        // Coordinates are in native display-relative space (no scaling).
         var bounds = GetDisplayBounds(device.DisplayIndex);
-        var absX = bounds.X + payload.X;
-        var absY = bounds.Y + payload.Y;
+        var displayX = payload.X;
+        var displayY = payload.Y;
 
-        AddLog(job, $"Click {button} {clickType} at ({payload.X},{payload.Y}) on '{device.Name}' → abs ({absX},{absY})");
+        // Translate display-relative → absolute virtual screen coords
+        var absX = bounds.X + displayX;
+        var absY = bounds.Y + displayY;
+
+        AddLog(job, $"Click {button} {clickType} at ({displayX},{displayY}) on '{device.Name}' → abs ({absX},{absY})");
         await db.SaveChangesAsync(ct);
 
         PerformClick(absX, absY, button, clickType);
 
-        // Capture a follow-up screenshot so the model can see the result
-        var imageBytes = CaptureWindowsDisplay(device.DisplayIndex);
-        return $"Clicked {button} ({clickType}) at ({payload.X},{payload.Y}) on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(imageBytes)}";
+        // Capture a follow-up screenshot with a crosshair overlay so
+        // the agent can see exactly where it clicked.
+        var imageBytes = CaptureWindowsDisplayWithClickMarker(
+            device.DisplayIndex, displayX, displayY);
+        return $"Clicked {button} ({clickType}) at ({displayX},{displayY}) on '{device.Name}'\n[SCREENSHOT_BASE64]{Convert.ToBase64String(imageBytes)}";
     }
 
     /// <summary>
@@ -1690,19 +1761,25 @@ IConfiguration configuration)
         if (string.IsNullOrEmpty(payload.Text))
             throw new InvalidOperationException("TypeOnDesktop requires a 'text' field.");
 
-        // If coordinates given, click to focus first
+        // If coordinates given, click to focus first.
+        // Coordinates are in native display-relative space (no scaling).
         if (payload.X.HasValue && payload.Y.HasValue)
         {
             var bounds = GetDisplayBounds(device.DisplayIndex);
-            var absX = bounds.X + payload.X.Value;
-            var absY = bounds.Y + payload.Y.Value;
+            var displayX = payload.X.Value;
+            var displayY = payload.Y.Value;
+            var absX = bounds.X + displayX;
+            var absY = bounds.Y + displayY;
 
-            AddLog(job, $"Click to focus at ({payload.X},{payload.Y}) on '{device.Name}' → abs ({absX},{absY})");
+            AddLog(job, $"Click to focus at ({displayX},{displayY}) on '{device.Name}' → abs ({absX},{absY})");
             PerformClick(absX, absY, "left", "single");
             await Task.Delay(100, ct); // Brief pause for focus
         }
 
-        AddLog(job, $"Typing {payload.Text.Length} characters on '{device.Name}'");
+        var preview = payload.Text.Length <= 200
+            ? payload.Text
+            : string.Concat(payload.Text.AsSpan(0, 200), "… (truncated)");
+        AddLog(job, $"Typing {payload.Text.Length} characters on '{device.Name}': {preview}");
         await db.SaveChangesAsync(ct);
 
         PerformType(payload.Text);
@@ -1754,15 +1831,44 @@ IConfiguration configuration)
     {
         // Use KEYEVENTF_UNICODE so we don't need to map individual
         // keycodes — SendInput accepts raw UTF-16 characters.
-        var inputs = new INPUT[text.Length * 2];
+        // Newlines (\r\n, \n, \r) are sent as VK_RETURN virtual-key
+        // events because control characters are ignored by UNICODE mode.
+        var inputs = new List<INPUT>(text.Length * 2);
         for (var i = 0; i < text.Length; i++)
         {
             var c = text[i];
-            inputs[i * 2] = CreateKeyboardInput(c, KEYEVENTF_UNICODE);
-            inputs[i * 2 + 1] = CreateKeyboardInput(c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP);
+
+            if (c == '\r')
+            {
+                // Skip \r when followed by \n — the \n will send Enter
+                if (i + 1 < text.Length && text[i + 1] == '\n')
+                    continue;
+                // Standalone \r → Enter
+                inputs.Add(CreateVirtualKeyInput(VK_RETURN, 0));
+                inputs.Add(CreateVirtualKeyInput(VK_RETURN, KEYEVENTF_KEYUP));
+                continue;
+            }
+
+            if (c == '\n')
+            {
+                inputs.Add(CreateVirtualKeyInput(VK_RETURN, 0));
+                inputs.Add(CreateVirtualKeyInput(VK_RETURN, KEYEVENTF_KEYUP));
+                continue;
+            }
+
+            if (c == '\t')
+            {
+                inputs.Add(CreateVirtualKeyInput(VK_TAB, 0));
+                inputs.Add(CreateVirtualKeyInput(VK_TAB, KEYEVENTF_KEYUP));
+                continue;
+            }
+
+            inputs.Add(CreateKeyboardInput(c, KEYEVENTF_UNICODE));
+            inputs.Add(CreateKeyboardInput(c, KEYEVENTF_UNICODE | KEYEVENTF_KEYUP));
         }
 
-        SendInput((uint)inputs.Length, inputs, System.Runtime.InteropServices.Marshal.SizeOf<INPUT>());
+        if (inputs.Count > 0)
+            SendInput((uint)inputs.Count, inputs.ToArray(), System.Runtime.InteropServices.Marshal.SizeOf<INPUT>());
     }
 
     private static INPUT CreateMouseInput(uint flags) => new()
@@ -1777,6 +1883,12 @@ IConfiguration configuration)
         u = new InputUnion { ki = new KEYBDINPUT { wScan = c, dwFlags = flags } }
     };
 
+    private static INPUT CreateVirtualKeyInput(ushort vk, uint flags) => new()
+    {
+        type = INPUT_KEYBOARD,
+        u = new InputUnion { ki = new KEYBDINPUT { wVk = vk, dwFlags = flags } }
+    };
+
     // ── Win32 SendInput P/Invoke types ────────────────────────────
 
     private const uint INPUT_MOUSE = 0;
@@ -1789,6 +1901,8 @@ IConfiguration configuration)
     private const uint MOUSEEVENTF_MIDDLEUP = 0x0040;
     private const uint KEYEVENTF_UNICODE = 0x0004;
     private const uint KEYEVENTF_KEYUP = 0x0002;
+    private const ushort VK_RETURN = 0x0D;
+    private const ushort VK_TAB = 0x09;
 
     [System.Runtime.InteropServices.DllImport("user32.dll")]
     [System.Runtime.Versioning.SupportedOSPlatform("windows")]
@@ -1894,6 +2008,52 @@ IConfiguration configuration)
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // BOT MESSAGING
+    // ═══════════════════════════════════════════════════════════════
+
+    private sealed class SendBotMessagePayload
+    {
+        public string? ResourceId { get; set; }
+        public string? RecipientId { get; set; }
+        public string? Message { get; set; }
+        public string? Subject { get; set; }
+    }
+
+    private async Task<string?> ExecuteSendBotMessageAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(job.ScriptJson))
+            throw new InvalidOperationException(
+                "SendBotMessage requires a JSON payload in ScriptJson.");
+
+        var payload = JsonSerializer.Deserialize<SendBotMessagePayload>(
+            job.ScriptJson, _payloadJsonOptions)
+            ?? throw new InvalidOperationException(
+                "Failed to deserialise SendBotMessage payload.");
+
+        if (string.IsNullOrWhiteSpace(payload.RecipientId))
+            throw new InvalidOperationException(
+                "SendBotMessage payload requires a 'recipientId' field.");
+
+        if (string.IsNullOrWhiteSpace(payload.Message))
+            throw new InvalidOperationException(
+                "SendBotMessage payload requires a 'message' field.");
+
+        if (!job.ResourceId.HasValue)
+            throw new InvalidOperationException(
+                "SendBotMessage requires a ResourceId (bot integration ID).");
+
+        AddLog(job, $"Sending bot message via integration {job.ResourceId}");
+        await db.SaveChangesAsync(ct);
+
+        await botMessageSender.SendMessageAsync(
+            job.ResourceId.Value, payload.RecipientId, payload.Message,
+            payload.Subject, ct);
+
+        return $"Message sent successfully via bot integration {job.ResourceId} to recipient '{payload.RecipientId}'.";
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Permission dispatch
     // ═══════════════════════════════════════════════════════════════
 
@@ -1956,6 +2116,8 @@ IConfiguration configuration)
             AgentActionType.EditorRunBuild or
             AgentActionType.EditorRunTerminal when resourceId.HasValue
                 => actions.AccessEditorSessionAsync(agentId, resourceId.Value, caller, ct: ct),
+            AgentActionType.SendBotMessage when resourceId.HasValue
+                => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
             _ when IsPerResourceAction(actionType) && !resourceId.HasValue
                 => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
             _ => Task.FromResult(AgentActionResult.Denied($"Unknown action type: {actionType}."))
@@ -1986,7 +2148,8 @@ IConfiguration configuration)
             or AgentActionType.EditorDeleteFile
             or AgentActionType.EditorShowDiff
             or AgentActionType.EditorRunBuild
-            or AgentActionType.EditorRunTerminal;
+            or AgentActionType.EditorRunTerminal
+            or AgentActionType.SendBotMessage;
 
     // ═══════════════════════════════════════════════════════════════
     // Default resource resolution
@@ -2056,6 +2219,7 @@ IConfiguration configuration)
             .Include(p => p.DefaultAgentPermission)
             .Include(p => p.DefaultTaskPermission)
             .Include(p => p.DefaultSkillPermission)
+            .Include(p => p.DefaultBotIntegrationAccess)
             .ToListAsync(ct);
 
         foreach (var psId in permissionSetIds)
@@ -2121,6 +2285,7 @@ IConfiguration configuration)
         AgentActionType.EditorShowDiff or
         AgentActionType.EditorRunBuild or
         AgentActionType.EditorRunTerminal => drs.EditorSessionResourceId,
+        AgentActionType.SendBotMessage => drs.BotIntegrationResourceId,
         _ => null,
     };
 
@@ -2170,6 +2335,8 @@ IConfiguration configuration)
         AgentActionType.EditorRunBuild or
         AgentActionType.EditorRunTerminal
             => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
+        AgentActionType.SendBotMessage
+            => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
         _ => null,
     };
 
@@ -2342,6 +2509,10 @@ IConfiguration configuration)
         AgentActionType.EditorRunTerminal when resourceId.HasValue
             => ps.EditorSessionAccesses.Any(a =>
                 a.EditorSessionId == resourceId || a.EditorSessionId == WellKnownIds.AllResources),
+
+        AgentActionType.SendBotMessage when resourceId.HasValue
+            => ps.BotIntegrationAccesses.Any(a =>
+                a.BotIntegrationId == resourceId || a.BotIntegrationId == WellKnownIds.AllResources),
 
         _ => false,
     };

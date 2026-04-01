@@ -49,4 +49,20 @@ public class ChatMessageDB : BaseEntity
     /// Which client interface originated this message.
     /// </summary>
     public ChatClientType? ClientType { get; set; }
+
+    // ── Token usage (assistant messages only) ─────────────────────
+
+    /// <summary>
+    /// Number of prompt tokens consumed when generating this
+    /// assistant response. Null for user messages or when the provider
+    /// did not report usage.
+    /// </summary>
+    public int? PromptTokens { get; set; }
+
+    /// <summary>
+    /// Number of completion tokens generated for this assistant
+    /// response. Null for user messages or when the provider did not
+    /// report usage.
+    /// </summary>
+    public int? CompletionTokens { get; set; }
 }

@@ -18,5 +18,10 @@ public enum ChatClientType
     UnoMacOS = 9,
     UnoLinux = 10,
     UnoBrowser = 11,
-    Other = 12
+    Other = 12,
+    Slack = 13,
+    Matrix = 14,
+    Signal = 15,
+    Email = 16,
+    Teams = 17,
 }

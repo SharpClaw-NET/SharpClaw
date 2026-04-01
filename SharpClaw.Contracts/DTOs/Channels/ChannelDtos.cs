@@ -9,7 +9,10 @@ public sealed record CreateChannelRequest(
     Guid? PermissionSetId = null,
     IReadOnlyList<Guid>? AllowedAgentIds = null,
     bool? DisableChatHeader = null,
-    string? CustomId = null);
+    string? CustomId = null,
+    string? CustomChatHeader = null,
+    Guid? ToolAwarenessSetId = null,
+    bool? DisableToolSchemas = null);
 
 public sealed record UpdateChannelRequest(
     string? Title = null,
@@ -17,7 +20,10 @@ public sealed record UpdateChannelRequest(
     Guid? PermissionSetId = null,
     IReadOnlyList<Guid>? AllowedAgentIds = null,
     bool? DisableChatHeader = null,
-    string? CustomId = null);
+    string? CustomId = null,
+    string? CustomChatHeader = null,
+    Guid? ToolAwarenessSetId = null,
+    bool? DisableToolSchemas = null);
 
 public sealed record ChannelResponse(
     Guid Id,
@@ -31,9 +37,12 @@ public sealed record ChannelResponse(
     bool DisableChatHeader,
     DateTimeOffset CreatedAt,
     DateTimeOffset UpdatedAt,
-    string? CustomId = null);
+    string? CustomId = null,
+    string? CustomChatHeader = null,
+    Guid? ToolAwarenessSetId = null,
+    bool DisableToolSchemas = false);
 
-// ── Granular operation DTOs ──────────────────────────────────────
+// ── Granular operation DTOs
 
 public sealed record SetChannelAgentRequest(Guid AgentId);
 

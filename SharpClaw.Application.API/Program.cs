@@ -19,8 +19,13 @@ using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
 using SharpClaw.Utils.Security;
 
+var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
+var baseDir = !string.IsNullOrEmpty(dataDir)
+    ? dataDir
+    : Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)!;
+
 var logsPath = Path.Combine(
-    Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)!,
+    !string.IsNullOrEmpty(dataDir) ? Path.GetDirectoryName(dataDir)! : baseDir,
     "Logs", "sharpclaw-.log");
 
 var consoleLevelSwitch = new Serilog.Core.LoggingLevelSwitch(Serilog.Events.LogEventLevel.Information);
@@ -48,7 +53,11 @@ try
     builder.Host.UseSerilog();
 
     // Infrastructure
-    builder.Services.AddInfrastructure(StorageMode.JsonFile);
+    builder.Services.AddInfrastructure(StorageMode.JsonFile, configureJsonFile: opts =>
+    {
+        if (!string.IsNullOrEmpty(dataDir))
+            opts.DataDirectory = dataDir;
+    });
 
     // CORS
     builder.Services.AddCors(options =>
@@ -96,6 +105,7 @@ try
     builder.Services.AddSingleton<IProviderApiClient, CerebrasApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, MistralApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, GitHubCopilotApiClient>();
+    builder.Services.AddSingleton<IProviderApiClient, MinimaxApiClient>();
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
     // Transcription clients
@@ -110,6 +120,7 @@ try
     builder.Services.AddSingleton<SharedAudioCaptureManager>();
 
     builder.Services.AddScoped<ProviderService>();
+    builder.Services.AddScoped<ProviderCostService>();
     builder.Services.AddScoped<ModelService>();
     builder.Services.AddScoped<AgentService>();
     builder.Services.AddScoped<ChannelService>();
@@ -117,17 +128,23 @@ try
     builder.Services.AddScoped<ContextService>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
+    builder.Services.AddScoped<HeaderTagProcessor>();
     builder.Services.AddScoped<ChatService>();
+    builder.Services.AddSingleton<ThreadActivitySignal>();
     builder.Services.AddScoped<RoleService>();
     builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();
     builder.Services.AddScoped<TranscriptionService>();
     builder.Services.AddScoped<ContainerService>();
     builder.Services.AddScoped<DisplayDeviceService>();
     builder.Services.AddScoped<DefaultResourceSetService>();
+    builder.Services.AddScoped<ToolAwarenessSetService>();
     builder.Services.AddScoped<EditorSessionService>();
     builder.Services.AddSingleton<EditorBridgeService>();
     builder.Services.AddScoped<TaskService>();
+    builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
+    builder.Services.AddScoped<BotIntegrationService>();
+    builder.Services.AddScoped<BotMessageSenderService>();
 
     // Local inference (in-process via LLamaSharp)
     // Configure native library: prefer CUDA > Vulkan > CPU; suppress verbose logs.
@@ -184,8 +201,17 @@ try
     Mk8GlobalEnv.Load();
 
     // CLI mode: handle command and exit
-    if (await CliDispatcher.TryHandleAsync(args, app.Services))
+    try
+    {
+        if (await CliDispatcher.TryHandleAsync(args, app.Services))
+            return;
+    }
+    catch (Exception ex)
+    {
+        Console.Error.WriteLine($"Error: {ex.Message}");
+        Log.Error(ex, "CLI command failed");
         return;
+    }
 
     // API mode
     app.UseMiddleware<ExceptionHandlingMiddleware>();

@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Text.Json;
 
 namespace SharpClaw.Services;
 
@@ -81,6 +82,24 @@ public sealed class SharpClawApiClient : IDisposable
         return await _http.SendAsync(request, ct);
     }
 
+    /// <summary>
+    /// GET + deserialize a JSON list, swallowing errors and returning <c>null</c> on failure.
+    /// </summary>
+    public async Task<List<T>?> FetchListAsync<T>(string path, JsonSerializerOptions json, CancellationToken ct = default)
+    {
+        try
+        {
+            using var resp = await GetAsync(path, ct);
+            if (resp.IsSuccessStatusCode)
+            {
+                using var s = await resp.Content.ReadAsStreamAsync(ct);
+                return await JsonSerializer.DeserializeAsync<List<T>>(s, json, ct);
+            }
+        }
+        catch { /* swallow */ }
+        return null;
+    }
+
     public async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct = default)
     {
@@ -161,6 +180,13 @@ public sealed class SharpClawApiClient : IDisposable
         _cachedApiKey = File.ReadAllText(keyFilePath).Trim();
         return _cachedApiKey;
     }
+
+    /// <summary>
+    /// The currently cached API key, or <c>null</c> if not yet resolved.
+    /// Used to forward the verified key to child processes (e.g. gateway)
+    /// without file I/O that may break under MSIX VFS virtualisation.
+    /// </summary>
+    public string? CachedApiKey => _cachedApiKey;
 
     /// <summary>
     /// Clears the cached API key so the next request re-reads from disk.

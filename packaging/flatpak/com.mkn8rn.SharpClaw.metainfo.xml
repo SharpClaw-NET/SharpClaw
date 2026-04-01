@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- AppStream metadata for SharpClaw -->
+<!-- __VERSION__ and __DATE__ are replaced by publish-release.ps1 at build time. -->
+<component type="desktop-application">
+  <id>com.mkn8rn.SharpClaw</id>
+  <name>SharpClaw</name>
+  <summary>AI Agent Desktop Platform</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>LicenseRef-proprietary</project_license>
+  <description>
+    <p>
+      SharpClaw is a cross-platform AI agent desktop platform powered by
+      Uno Platform. It provides a terminal-themed interface for managing
+      AI agents, chat channels, local model inference, and automated jobs.
+    </p>
+  </description>
+  <url type="homepage">https://github.com/mkn8rn/SharpClaw</url>
+  <url type="bugtracker">https://github.com/mkn8rn/SharpClaw/issues</url>
+  <releases>
+    <release version="__VERSION__" date="__DATE__" />
+  </releases>
+  <content_rating type="oars-1.1" />
+</component>

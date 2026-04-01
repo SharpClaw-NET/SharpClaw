@@ -21,12 +21,13 @@ internal static class ProviderHttpExtensions
             return;
 
         string? detail = null;
+        string? rawBody = null;
         try
         {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            if (!string.IsNullOrWhiteSpace(body))
+            rawBody = await response.Content.ReadAsStringAsync(ct);
+            if (!string.IsNullOrWhiteSpace(rawBody))
             {
-                using var doc = JsonDocument.Parse(body);
+                using var doc = JsonDocument.Parse(rawBody);
 
                 // OpenAI-compatible: { "error": { "message": "..." } }
                 if (doc.RootElement.TryGetProperty("error", out var err))
@@ -44,11 +45,14 @@ internal static class ProviderHttpExtensions
                 {
                     detail = topMsg.GetString();
                 }
-
-                detail ??= body.Length > 500 ? body[..500] : body;
             }
         }
-        catch { /* best-effort */ }
+        catch { /* JSON parse or read failure — fall back to raw body below */ }
+
+        // Fallback: use the raw response body when structured extraction found nothing.
+        detail ??= rawBody is { Length: > 0 }
+            ? (rawBody.Length > 500 ? rawBody[..500] : rawBody)
+            : null;
 
         var status = (int)response.StatusCode;
         var reason = response.ReasonPhrase;

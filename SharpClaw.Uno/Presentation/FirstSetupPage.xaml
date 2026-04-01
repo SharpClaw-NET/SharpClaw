@@ -13,168 +13,267 @@
                   VerticalAlignment="Center"
                   MaxWidth="620"
                   Padding="20">
-      <StackPanel x:Name="StepsPanel"
-                  Spacing="6"
-                  MinWidth="500">
+      <StackPanel MinWidth="500" Spacing="0">
 
-        <!-- Title -->
-        <TextBlock Text="SharpClaw — First-time Setup"
-                   Style="{StaticResource TerminalText}"
-                   FontSize="20"
-                   FontWeight="Bold"
-                   Foreground="#00FF00"
-                   Margin="0,0,0,12" />
+        <!-- ═══════════════════════════════════════════════════
+             TOP: Title + progress steps + cursor
+             ═══════════════════════════════════════════════════ -->
+        <StackPanel x:Name="StepsPanel"
+                    Spacing="6">
 
-        <!-- Steps are appended dynamically from code-behind -->
-
-        <!-- Provider input panel (hidden until needed) -->
-        <StackPanel x:Name="ProviderInputPanel"
-                    Visibility="Collapsed"
-                    Spacing="6"
-                    Margin="16,8,0,8">
-          <TextBlock Text="provider name:"
+          <!-- Title -->
+          <TextBlock Text="SharpClaw — First-time Setup"
                      Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC" />
-          <TextBox x:Name="ProviderNameBox"
-                   Style="{StaticResource TerminalInput}"
-                   FontSize="12"
-                   PlaceholderText="e.g. My OpenAI" />
-          <TextBlock Text="provider type:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC" />
-          <ComboBox x:Name="ProviderTypeSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="12"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="260"
-                    SelectionChanged="OnApiKeyProviderSelectionChanged" />
-          <StackPanel x:Name="EndpointPanel" Visibility="Collapsed" Spacing="6">
-            <TextBlock Text="API endpoint:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#CCCCCC" />
-            <TextBox x:Name="EndpointBox"
-                     Style="{StaticResource TerminalInput}"
-                     FontSize="12"
-                     PlaceholderText="https://..." />
-          </StackPanel>
-          <Button x:Name="ProviderSubmitBtn"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnProviderSubmitClick"
-                  Margin="0,4,0,0">
-            <TextBlock Text="[ Create Provider ]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#00FF00"
-                       HorizontalAlignment="Center" />
-          </Button>
+                     FontSize="20"
+                     FontWeight="Bold"
+                     Foreground="#00FF00"
+                     Margin="0,0,0,12" />
+
+          <!-- Steps are appended dynamically from code-behind -->
+
+          <!-- Terminal cursor -->
+          <local:TerminalCursor x:Name="Cursor" Margin="0,8,0,0" />
+
         </StackPanel>
 
-        <!-- API key input panel (hidden until needed) -->
-        <StackPanel x:Name="ApiKeyInputPanel"
-                    Visibility="Collapsed"
-                    Spacing="6"
-                    Margin="16,8,0,8">
-          <TextBlock x:Name="ApiKeyProviderLabel"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#808080" />
-          <ComboBox x:Name="ApiKeyProviderSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="12"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="260"
-                    SelectionChanged="OnApiKeyProviderSelectionChanged" />
+        <!-- ═══════════════════════════════════════════════════
+             BOTTOM: Current input / action area
+             All panels are collapsed by default; the code-behind
+             shows the one that corresponds to the active step.
+             ═══════════════════════════════════════════════════ -->
+        <StackPanel x:Name="InputArea"
+                    Spacing="0"
+                    Margin="0,16,0,0">
 
-          <!-- API key input (for key-based providers) -->
-          <StackPanel x:Name="ApiKeyFieldsPanel" Spacing="6">
-            <TextBlock Text="API key:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#CCCCCC" />
-            <PasswordBox x:Name="ApiKeyBox"
-                         Style="{StaticResource TerminalPasswordInput}"
-                         FontSize="12"
-                         PlaceholderText="sk-..." />
-            <Button x:Name="ApiKeySubmitBtn"
-                    Style="{StaticResource TerminalButton}"
-                    Click="OnApiKeySubmitClick">
-              <TextBlock Text="[ Set Key &amp; Continue ]"
+          <!-- Version-upgrade prompt (shown when major version advanced) -->
+          <StackPanel x:Name="UpgradePromptPanel"
+                      Visibility="Collapsed"
+                      Spacing="8"
+                      Margin="0,0,0,12">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+              <TextBlock Text="&#x27F3;"
                          Style="{StaticResource TerminalText}"
-                         FontSize="12" Foreground="#00FF00"
-                         HorizontalAlignment="Center" />
-            </Button>
-          </StackPanel>
-
-          <!-- Device code flow (for OAuth-based providers like GitHub Copilot) -->
-          <StackPanel x:Name="DeviceCodePanel" Visibility="Collapsed" Spacing="6">
-            <Button x:Name="DeviceCodeStartBtn"
-                    Style="{StaticResource TerminalButton}"
-                    Click="OnDeviceCodeStartClick">
-              <TextBlock Text="[ Start Login ]"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="12" Foreground="#00FF00"
-                         HorizontalAlignment="Center" />
-            </Button>
-            <StackPanel x:Name="DeviceCodeInfoPanel" Visibility="Collapsed" Spacing="4">
+                         FontSize="16" Foreground="#FFAA33" />
               <TextBlock Style="{StaticResource TerminalText}"
-                         FontSize="12" Foreground="#CCCCCC"
-                         Text="Enter this code in your browser:" />
-              <TextBlock x:Name="DeviceCodeValueBlock"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="18" FontWeight="Bold"
-                         Foreground="#00FF00"
-                         IsTextSelectionEnabled="True"
-                         Margin="0,4,0,4" />
-              <TextBlock x:Name="DeviceCodeStatusBlock"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="11" Foreground="#808080" />
+                         FontSize="14" Foreground="#E0E0E0"
+                         VerticalAlignment="Center">
+                <Run Text="New major version detected " />
+                <Run Text="(" /><Run x:Name="UpgradeVersionLabel" /><Run Text=")." />
+              </TextBlock>
+            </StackPanel>
+            <TextBlock Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#AA8844"
+                       TextWrapping="Wrap"
+                       Text="Setup was already completed for an older version. You can redo it to reconfigure providers, models, and agents, or skip to keep your current config." />
+            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
+              <Button Style="{StaticResource TerminalButton}"
+                      Click="OnUpgradeRedoClick">
+                <TextBlock Text="[ Redo Setup ]"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="13" Foreground="#00FF00" />
+              </Button>
+              <Button Style="{StaticResource TerminalLink}"
+                      Click="OnUpgradeSkipClick">
+                <TextBlock Text="> Skip, keep current config"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="13" Foreground="#808080" />
+              </Button>
             </StackPanel>
           </StackPanel>
 
-          <Button x:Name="LocalOnlyBtn"
-                  Style="{StaticResource TerminalLink}"
-                  Click="OnLocalOnlyClick">
-            <TextBlock Text="> Continue with local models only"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#808080" />
-          </Button>
-        </StackPanel>
-
-        <!-- Agent selector panel (hidden until needed) -->
-        <StackPanel x:Name="AgentSelectorPanel"
-                    Visibility="Collapsed"
-                    Spacing="6"
-                    Margin="16,8,0,8">
-
-        <!-- Local model download panel (hidden until needed) -->
-        <StackPanel x:Name="LocalModelDownloadPanel"
-                    Visibility="Collapsed"
-                    Spacing="6"
-                    Margin="16,8,0,8">
-          <TextBlock Text="Enter a HuggingFace model URL:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC" />
-          <TextBox x:Name="HfUrlBox"
-                   Style="{StaticResource TerminalInput}"
-                   FontSize="12"
-                   PlaceholderText="https://huggingface.co/org/repo" />
-          <Button x:Name="HfListFilesBtn"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnListFilesClick">
-            <TextBlock Text="[ List Files ]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#00FF00"
-                       HorizontalAlignment="Center" />
-          </Button>
-
-          <StackPanel x:Name="HfFileSelectionPanel" Visibility="Collapsed" Spacing="6">
-            <TextBlock Text="Select a GGUF file:"
+          <!-- Provider input panel (hidden until needed) -->
+          <StackPanel x:Name="ProviderInputPanel"
+                      Visibility="Collapsed"
+                      Spacing="6"
+                      Margin="16,8,0,8">
+            <TextBlock Text="provider name:"
                        Style="{StaticResource TerminalText}"
                        FontSize="12" Foreground="#CCCCCC" />
-            <ComboBox x:Name="HfFileSelector"
+            <TextBox x:Name="ProviderNameBox"
+                     Style="{StaticResource TerminalInput}"
+                     FontSize="12"
+                     PlaceholderText="e.g. My OpenAI" />
+            <TextBlock Text="provider type:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC" />
+            <ComboBox x:Name="ProviderTypeSelector"
+                      FontFamily="Consolas, Courier New, monospace"
+                      FontSize="12"
+                      Background="#1A1A1A"
+                      Foreground="#CCCCCC"
+                      BorderBrush="#333333"
+                      BorderThickness="1"
+                      MinWidth="260"
+                      SelectionChanged="OnApiKeyProviderSelectionChanged" />
+            <StackPanel x:Name="EndpointPanel" Visibility="Collapsed" Spacing="6">
+              <TextBlock Text="API endpoint:"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#CCCCCC" />
+              <TextBox x:Name="EndpointBox"
+                       Style="{StaticResource TerminalInput}"
+                       FontSize="12"
+                       PlaceholderText="https://..." />
+            </StackPanel>
+            <Button x:Name="ProviderSubmitBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnProviderSubmitClick"
+                    Margin="0,4,0,0">
+              <TextBlock Text="[ Create Provider ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+          </StackPanel>
+
+          <!-- API key input panel (hidden until needed) -->
+          <StackPanel x:Name="ApiKeyInputPanel"
+                      Visibility="Collapsed"
+                      Spacing="6"
+                      Margin="16,8,0,8">
+            <TextBlock x:Name="ApiKeyProviderLabel"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#808080" />
+            <ComboBox x:Name="ApiKeyProviderSelector"
+                      FontFamily="Consolas, Courier New, monospace"
+                      FontSize="12"
+                      Background="#1A1A1A"
+                      Foreground="#CCCCCC"
+                      BorderBrush="#333333"
+                      BorderThickness="1"
+                      MinWidth="260"
+                      SelectionChanged="OnApiKeyProviderSelectionChanged" />
+
+            <!-- API key input (for key-based providers) -->
+            <StackPanel x:Name="ApiKeyFieldsPanel" Spacing="6">
+              <TextBlock Text="API key:"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#CCCCCC" />
+              <PasswordBox x:Name="ApiKeyBox"
+                           Style="{StaticResource TerminalPasswordInput}"
+                           FontSize="12"
+                           PlaceholderText="sk-..." />
+              <Button x:Name="ApiKeySubmitBtn"
+                      Style="{StaticResource TerminalButton}"
+                      Click="OnApiKeySubmitClick">
+                <TextBlock Text="[ Set Key &amp; Continue ]"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="12" Foreground="#00FF00"
+                           HorizontalAlignment="Center" />
+              </Button>
+            </StackPanel>
+
+            <!-- Device code flow (for OAuth-based providers like GitHub Copilot) -->
+            <StackPanel x:Name="DeviceCodePanel" Visibility="Collapsed" Spacing="6">
+              <Button x:Name="DeviceCodeStartBtn"
+                      Style="{StaticResource TerminalButton}"
+                      Click="OnDeviceCodeStartClick">
+                <TextBlock Text="[ Start Login ]"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="12" Foreground="#00FF00"
+                           HorizontalAlignment="Center" />
+              </Button>
+              <StackPanel x:Name="DeviceCodeInfoPanel" Visibility="Collapsed" Spacing="4">
+                <TextBlock Style="{StaticResource TerminalText}"
+                           FontSize="12" Foreground="#CCCCCC"
+                           Text="Enter this code in your browser:" />
+                <TextBlock x:Name="DeviceCodeValueBlock"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="18" FontWeight="Bold"
+                           Foreground="#00FF00"
+                           IsTextSelectionEnabled="True"
+                           Margin="0,4,0,4" />
+                <TextBlock x:Name="DeviceCodeStatusBlock"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="11" Foreground="#808080" />
+              </StackPanel>
+            </StackPanel>
+
+            <Button x:Name="LocalOnlyBtn"
+                    Style="{StaticResource TerminalLink}"
+                    Click="OnLocalOnlyClick">
+              <TextBlock Text="> Continue with local models only"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#808080" />
+            </Button>
+          </StackPanel>
+
+          <!-- Local model download panel (hidden until needed) -->
+          <StackPanel x:Name="LocalModelDownloadPanel"
+                      Visibility="Collapsed"
+                      Spacing="6"
+                      Margin="16,8,0,8">
+            <TextBlock Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC"
+                       TextWrapping="Wrap"
+                       Text="You chose local models only. To chat you need at least one GGUF model." />
+            <TextBlock Style="{StaticResource TerminalText}"
+                       FontSize="11" Foreground="#808080"
+                       TextWrapping="Wrap"
+                       Text="Browse https://huggingface.co and find a GGUF model repository (e.g. TheBloke, bartowski, unsloth). Paste the repo URL below and pick a quantization." />
+            <TextBlock Text="HuggingFace repository URL:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC"
+                       Margin="0,4,0,0" />
+            <TextBox x:Name="HfUrlBox"
+                     Style="{StaticResource TerminalInput}"
+                     FontSize="12"
+                     PlaceholderText="https://huggingface.co/org/repo" />
+            <Button x:Name="HfListFilesBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnListFilesClick">
+              <TextBlock Text="[ List Files ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+
+            <StackPanel x:Name="HfFileSelectionPanel" Visibility="Collapsed" Spacing="6">
+              <TextBlock Text="Select a GGUF file:"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#CCCCCC" />
+              <ComboBox x:Name="HfFileSelector"
+                        FontFamily="Consolas, Courier New, monospace"
+                        FontSize="12"
+                        Background="#1A1A1A"
+                        Foreground="#CCCCCC"
+                        BorderBrush="#333333"
+                        BorderThickness="1"
+                        MinWidth="300" />
+              <Button x:Name="HfDownloadBtn"
+                      Style="{StaticResource TerminalButton}"
+                      Click="OnDownloadModelClick">
+                <TextBlock Text="[ Download ]"
+                           Style="{StaticResource TerminalText}"
+                           FontSize="12" Foreground="#00FF00"
+                           HorizontalAlignment="Center" />
+              </Button>
+            </StackPanel>
+
+            <TextBlock x:Name="HfStatusBlock"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="11" Foreground="#808080"
+                       Visibility="Collapsed"
+                       TextWrapping="Wrap" />
+
+            <Button x:Name="SwitchToCloudBtn"
+                    Style="{StaticResource TerminalLink}"
+                    Click="OnSwitchToCloudClick"
+                    Margin="0,8,0,0">
+              <TextBlock Text="> Go back and set up a cloud provider instead"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#808080" />
+            </Button>
+          </StackPanel>
+
+          <!-- Agent selector panel (hidden until needed) -->
+          <StackPanel x:Name="AgentSelectorPanel"
+                      Visibility="Collapsed"
+                      Spacing="6"
+                      Margin="16,8,0,8">
+            <TextBlock Text="Select a default agent:"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12" Foreground="#CCCCCC" />
+            <ComboBox x:Name="DefaultAgentSelector"
                       FontFamily="Consolas, Courier New, monospace"
                       FontSize="12"
                       Background="#1A1A1A"
@@ -182,332 +281,164 @@
                       BorderBrush="#333333"
                       BorderThickness="1"
                       MinWidth="300" />
-            <Button x:Name="HfDownloadBtn"
+            <Button x:Name="AgentSubmitBtn"
                     Style="{StaticResource TerminalButton}"
-                    Click="OnDownloadModelClick">
-              <TextBlock Text="[ Download ]"
+                    Click="OnAgentSubmitClick"
+                    Margin="0,4,0,0">
+              <TextBlock Text="[ Continue ]"
                          Style="{StaticResource TerminalText}"
                          FontSize="12" Foreground="#00FF00"
                          HorizontalAlignment="Center" />
             </Button>
           </StackPanel>
 
-          <TextBlock x:Name="HfStatusBlock"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="11" Foreground="#808080"
-                     Visibility="Collapsed"
-                     TextWrapping="Wrap" />
-        </StackPanel>
-
-        <!-- Agent selector panel (original, below local model panel) -->
-          <TextBlock Text="Select a default agent:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC" />
-          <ComboBox x:Name="DefaultAgentSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="12"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="300" />
-          <Button x:Name="AgentSubmitBtn"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnAgentSubmitClick"
-                  Margin="0,4,0,0">
-            <TextBlock Text="[ Continue ]"
+          <!-- Role permissions panel (hidden until needed) -->
+          <StackPanel x:Name="RolePermissionsPanel"
+                      Visibility="Collapsed"
+                      Spacing="6"
+                      Margin="16,8,0,8">
+            <TextBlock Text="Configure permissions for this agent's role:"
                        Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#00FF00"
-                       HorizontalAlignment="Center" />
-          </Button>
-        </StackPanel>
-
-        <!-- Role permissions panel (hidden until needed) -->
-        <StackPanel x:Name="RolePermissionsPanel"
-                    Visibility="Collapsed"
-                    Spacing="6"
-                    Margin="16,8,0,8">
-          <TextBlock Text="Configure permissions for this agent's role:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC"
-                     TextWrapping="Wrap" />
-          <TextBlock Text="The agent needs permissions to use tools (shell, display capture, etc)."
-                     Style="{StaticResource TerminalText}"
-                     FontSize="11" Foreground="#808080"
-                     TextWrapping="Wrap" />
-
-          <TextBlock Text="default clearance level:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#CCCCCC"
-                     Margin="0,6,0,0" />
-          <TextBlock Text="Fallback used when a specific permission doesn't set its own clearance."
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10" Foreground="#808080"
-                     TextWrapping="Wrap" />
-          <ComboBox x:Name="ClearanceSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="11"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="340" />
-
-          <TextBlock Text="global permissions:"
-                      Style="{StaticResource TerminalText}"
-                      FontSize="12" Foreground="#CCCCCC"
-                      Margin="0,6,0,0" />
-          <TextBlock Text="Each flag has its own clearance level controlling the approval flow."
-                      Style="{StaticResource TerminalText}"
-                      FontSize="10" Foreground="#808080"
-                      TextWrapping="Wrap" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkLocalhostBrowser" Content="Localhost Browser"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrLocalhostBrowser"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkLocalhostCli" Content="Localhost CLI"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrLocalhostCli"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkClickDesktop" Content="Click Desktop"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrClickDesktop"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkTypeOnDesktop" Content="Type on Desktop"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrTypeOnDesktop"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkCreateSubAgents" Content="Create Sub-Agents"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrCreateSubAgents"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkCreateContainers" Content="Create Containers"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrCreateContainers"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkRegisterInfoStores" Content="Register Info Stores"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrRegisterInfoStores"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-
-          <TextBlock Text="per-resource permissions (wildcard):"
-                      Style="{StaticResource TerminalText}"
-                      FontSize="12" Foreground="#CCCCCC"
-                      Margin="0,6,0,0" />
-          <TextBlock Text="Grants access to all resources of each type. Each has its own clearance level."
-                      Style="{StaticResource TerminalText}"
-                      FontSize="11" Foreground="#808080"
-                      TextWrapping="Wrap" />
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkSafeShell" Content="Safe Shell (mk8.shell)"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrSafeShell"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkDangerousShell" Content="Dangerous Shell"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrDangerousShell"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkContainerAccess" Content="Container Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrContainerAccess"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkWebsiteAccess" Content="Website Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrWebsiteAccess"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkSearchEngineAccess" Content="Search Engine Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrSearchEngineAccess"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkLocalInfoStore" Content="Local Info Store Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrLocalInfoStore"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkExternalInfoStore" Content="External Info Store Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrExternalInfoStore"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkAudioDevice" Content="Audio Device Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrAudioDevice"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkDisplayDevice" Content="Display Device (Capture)"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrDisplayDevice"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkEditorSession" Content="Editor Session Access"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrEditorSession"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkAgentManagement" Content="Agent Management"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrAgentManagement"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkTaskManagement" Content="Task Management"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrTaskManagement"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <CheckBox x:Name="ChkSkillManagement" Content="Skill Management"
-                       FontFamily="Consolas, Courier New, monospace" FontSize="12"
-                       Foreground="#CCCCCC" MinWidth="220" />
-            <ComboBox x:Name="ClrSkillManagement"
-                      FontFamily="Consolas, Courier New, monospace" FontSize="10"
-                      Background="#1A1A1A" Foreground="#CCCCCC"
-                      BorderBrush="#333333" BorderThickness="1"
-                      MinWidth="180" />
-          </StackPanel>
-
-          <Button x:Name="RoleSubmitBtn"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnRoleSubmitClick"
-                  Margin="0,6,0,0">
-            <TextBlock Text="[ Save Permissions &amp; Continue ]"
+                       FontSize="12" Foreground="#CCCCCC"
+                       TextWrapping="Wrap" />
+            <TextBlock Text="The agent needs permissions to use tools (shell, display capture, etc)."
                        Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#00FF00"
-                       HorizontalAlignment="Center" />
-          </Button>
-          <Button x:Name="RoleSkipBtn"
-                  Style="{StaticResource TerminalLink}"
-                  Click="OnRoleSkipClick">
-            <TextBlock Text="> Skip (configure later)"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#808080" />
-          </Button>
-        </StackPanel>
+                       FontSize="11" Foreground="#808080"
+                       TextWrapping="Wrap" />
 
-        <!-- Skip setup -->
-        <StackPanel Orientation="Horizontal"
-                    Spacing="8"
-                    Margin="0,16,0,0">
-          <Button x:Name="SkipSetupBtn"
-                  Style="{StaticResource TerminalLink}"
-                  Click="OnSkipSetupClick">
-            <TextBlock Text="> Skip setup entirely"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#FF8800" />
-          </Button>
-          <TextBlock Style="{StaticResource TerminalText}"
-                     FontSize="11" Foreground="#665500"
-                     VerticalAlignment="Center"
-                     Text="(you will need to configure providers, models, and channels manually)" />
-        </StackPanel>
+            <TextBlock Text="global permissions:"
+                        Style="{StaticResource TerminalText}"
+                        FontSize="12" Foreground="#CCCCCC"
+                        Margin="0,6,0,0" />
+            <TextBlock Text="Each flag has its own clearance level controlling the approval flow."
+                        Style="{StaticResource TerminalText}"
+                        FontSize="10" Foreground="#808080"
+                        TextWrapping="Wrap" />
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkLocalhostBrowser" Content="Localhost Browser"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to open localhost URLs in a headless browser" />
+              <ComboBox x:Name="ClrLocalhostBrowser"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkLocalhostCli" Content="Localhost CLI"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to make direct HTTP requests to localhost" />
+              <ComboBox x:Name="ClrLocalhostCli"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkClickDesktop" Content="Click Desktop"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to simulate mouse clicks on the desktop" />
+              <ComboBox x:Name="ClrClickDesktop"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkTypeOnDesktop" Content="Type on Desktop"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to simulate keyboard input on the desktop" />
+              <ComboBox x:Name="ClrTypeOnDesktop"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkCreateSubAgents" Content="Create Sub-Agents"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to spawn child agents on its own" />
+              <ComboBox x:Name="ClrCreateSubAgents"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkCreateContainers" Content="Create Containers"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to create sandboxed execution containers" />
+              <ComboBox x:Name="ClrCreateContainers"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
+            <StackPanel Orientation="Horizontal" Spacing="8">
+              <CheckBox x:Name="ChkRegisterInfoStores" Content="Register Info Stores"
+                         FontFamily="Consolas, Courier New, monospace" FontSize="12"
+                         Foreground="#CCCCCC" MinWidth="220"
+                         ToolTipService.ToolTip="Allow the agent to register local or external information stores" />
+              <ComboBox x:Name="ClrRegisterInfoStores"
+                        FontFamily="Consolas, Courier New, monospace" FontSize="10"
+                        Background="#1A1A1A" Foreground="#CCCCCC"
+                        BorderBrush="#333333" BorderThickness="1"
+                        MinWidth="180" />
+            </StackPanel>
 
-        <!-- Terminal cursor -->
-        <local:TerminalCursor x:Name="Cursor" Margin="0,8,0,0" />
+            <TextBlock Text="per-resource permissions:"
+                        Style="{StaticResource TerminalText}"
+                        FontSize="12" Foreground="#CCCCCC"
+                        Margin="0,6,0,0" />
+            <TextBlock Text="Grant access to resources with individual clearance levels. Use the wildcard to grant all resources of a type."
+                        Style="{StaticResource TerminalText}"
+                        FontSize="11" Foreground="#808080"
+                        TextWrapping="Wrap" />
+            <StackPanel x:Name="ResourceGrantsContainer" Spacing="12" />
+
+            <Button x:Name="RoleSubmitBtn"
+                    Style="{StaticResource TerminalButton}"
+                    Click="OnRoleSubmitClick"
+                    Margin="0,6,0,0">
+              <TextBlock Text="[ Save Permissions &amp; Continue ]"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#00FF00"
+                         HorizontalAlignment="Center" />
+            </Button>
+            <Button x:Name="RoleSkipBtn"
+                    Style="{StaticResource TerminalLink}"
+                    Click="OnRoleSkipClick">
+              <TextBlock Text="> Skip (configure later)"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="12" Foreground="#808080" />
+            </Button>
+          </StackPanel>
+
+          <!-- Skip setup -->
+          <StackPanel x:Name="SkipSetupPanel"
+                      Orientation="Horizontal"
+                      Spacing="8"
+                      Margin="0,16,0,0">
+            <Button x:Name="SkipSetupBtn"
+                    Style="{StaticResource TerminalLink}"
+                    Click="OnSkipSetupClick">
+              <TextBlock Text="> Skip setup entirely"
+                         Style="{StaticResource TerminalText}"
+                         FontSize="13" Foreground="#FFAA33" />
+            </Button>
+            <TextBlock Style="{StaticResource TerminalText}"
+                       FontSize="13" Foreground="#AA8844"
+                       VerticalAlignment="Center"
+                       Text="(you will need to configure providers, models, and channels manually)" />
+          </StackPanel>
+
+        </StackPanel>
 
       </StackPanel>
     </ScrollViewer>
