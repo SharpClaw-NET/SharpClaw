@@ -1,12 +1,18 @@
 using Mk8.Shell.Engine;
+using Mk8.Shell.Isolation;
 using Mk8.Shell.Safety;
 
 namespace Mk8.Shell.Models;
 
 /// <summary>
-/// An isolated, disposable execution envelope for a single mk8.shell
-/// command. Created fresh for every command, disposed immediately after
-/// — no data transfers between commands.
+/// Per-command execution envelope for a single mk8.shell script.
+/// Created fresh for every command — env vars, vocabularies, and
+/// blacklists are rebuilt each time so sandbox-level overrides are
+/// never stale. The underlying OS-level sandbox container (cgroup,
+/// iptables chains, resource limits) is persistent and managed by
+/// <see cref="Mk8ContainerManager"/> — it was started when the
+/// sandbox was registered and runs continuously until the sandbox
+/// is deleted or the mk8.shell process shuts down.
 /// <para>
 /// Lifecycle for every command execution:
 /// <list type="number">
@@ -18,13 +24,15 @@ namespace Mk8.Shell.Models;
 ///   <item>Extract env vars from the verified signed content.</item>
 ///   <item>Merge vocabularies + FreeText config from global + sandbox.</item>
 ///   <item>Build gigablacklist from compile-time + global + sandbox patterns.</item>
+///   <item>Build container isolation config (global tightened by sandbox).</item>
 ///   <item>Build <see cref="Mk8WorkspaceContext"/> with merged env.</item>
+///   <item>Get the already-running sandbox container from <see cref="Mk8ContainerManager"/>.</item>
 ///   <item>Execute the command.</item>
-///   <item>Dispose — all state is discarded.</item>
+///   <item>Dispose — per-command state is discarded. The container continues running.</item>
 /// </list>
 /// </para>
 /// </summary>
-public sealed class Mk8TaskContainer : IDisposable
+public sealed class Mk8TaskContainer : IAsyncDisposable, IDisposable
 {
     /// <summary>Sandbox identity for this task.</summary>
     public Mk8Sandbox Sandbox { get; }
@@ -59,6 +67,23 @@ public sealed class Mk8TaskContainer : IDisposable
     /// </summary>
     public Mk8GigaBlacklist GigaBlacklist { get; }
 
+    /// <summary>
+    /// OS-level container isolation configuration. Controls process
+    /// isolation, resource limits, and network iron curtain for sandbox
+    /// processes. May be disabled (default).
+    /// </summary>
+    public Mk8ContainerConfig ContainerConfig { get; }
+
+    /// <summary>
+    /// Active sandbox container providing OS-level process containment,
+    /// resource limits, network filtering, and filesystem isolation.
+    /// Owned by <see cref="Mk8ContainerManager"/> — the task container
+    /// holds a reference, not ownership. The container was started when
+    /// the sandbox was registered and runs continuously. Always present
+    /// — container isolation is mandatory.
+    /// </summary>
+    public Mk8SandboxContainer SandboxContainer { get; }
+
     private bool _disposed;
 
     private Mk8TaskContainer(
@@ -67,7 +92,9 @@ public sealed class Mk8TaskContainer : IDisposable
         Mk8RuntimeConfig runtimeConfig,
         Mk8FreeTextConfig freeTextConfig,
         Dictionary<string, string[]> envVocabularies,
-        Mk8GigaBlacklist gigaBlacklist)
+        Mk8GigaBlacklist gigaBlacklist,
+        Mk8ContainerConfig containerConfig,
+        Mk8SandboxContainer sandboxContainer)
     {
         Sandbox = sandbox;
         Workspace = workspace;
@@ -75,16 +102,21 @@ public sealed class Mk8TaskContainer : IDisposable
         FreeTextConfig = freeTextConfig;
         EnvVocabularies = envVocabularies;
         GigaBlacklist = gigaBlacklist;
+        ContainerConfig = containerConfig;
+        SandboxContainer = sandboxContainer;
     }
 
     /// <summary>
-    /// Creates an isolated task container for the given sandbox ID.
+    /// Creates a per-command execution envelope for the given sandbox.
     /// Performs the full initialization sequence: global env → registry
     /// lookup → signature verification → env loading → vocabulary merge.
+    /// The sandbox container must already be running (started at
+    /// sandbox registration by <see cref="Mk8ContainerManager"/>).
     /// </summary>
-    public static Mk8TaskContainer Create(
+    public static async Task<Mk8TaskContainer> CreateAsync(
         string sandboxId,
-        Mk8SandboxRegistry? registry = null)
+        Mk8SandboxRegistry? registry = null,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sandboxId);
 
@@ -137,7 +169,19 @@ public sealed class Mk8TaskContainer : IDisposable
             disableHardcoded: globalEnv.DisableHardcodedGigablacklist,
             disableMk8shellEnvs: globalEnv.DisableMk8shellEnvsGigablacklist);
 
-        // Step 8: Build sandbox model.
+        // Step 8: Build container isolation config.
+        // Global config from base.env; sandbox env can tighten but not loosen.
+        var globalContainerConfig = globalEnv.ToContainerConfig();
+        var sandboxNetworkWhitelist = sandboxVars.GetValueOrDefault("MK8_NETWORK_WHITELIST");
+        var sandboxContainerConfig = sandboxNetworkWhitelist is not null
+            ? new Mk8ContainerConfig
+              {
+                  NetworkWhitelist = Mk8NetworkWhitelist.Parse(sandboxNetworkWhitelist),
+              }
+            : null;
+        var containerConfig = globalContainerConfig.TightenWith(sandboxContainerConfig);
+
+        // Step 9: Build sandbox model.
         var sandbox = new Mk8Sandbox
         {
             Id = sandboxId,
@@ -145,7 +189,7 @@ public sealed class Mk8TaskContainer : IDisposable
             RegisteredAtUtc = entry.RegisteredAtUtc,
         };
 
-        // Step 9: Build workspace context.
+        // Step 10: Build workspace context.
         var workspace = new Mk8WorkspaceContext(
             SandboxId: sandboxId,
             SandboxRoot: sandboxRoot,
@@ -153,9 +197,16 @@ public sealed class Mk8TaskContainer : IDisposable
             RunAsUser: Environment.UserName,
             Variables: sandboxVars);
 
+        // Step 11: Get the already-running sandbox container.
+        // The container was started when the sandbox was registered and
+        // runs continuously. If the container is not active, the sandbox
+        // is not usable — Mk8ContainerManager.GetContainer throws.
+        var sandboxContainer = Mk8ContainerManager.Instance.GetContainer(sandboxId);
+
         return new Mk8TaskContainer(
             sandbox, workspace, runtimeConfig,
-            mergedFreeTextConfig, mergedVocabs, gigaBlacklist);
+            mergedFreeTextConfig, mergedVocabs, gigaBlacklist,
+            containerConfig, sandboxContainer);
     }
 
     /// <summary>
@@ -229,9 +280,16 @@ public sealed class Mk8TaskContainer : IDisposable
         return Mk8GigaBlacklist.ValidateCustomPatterns([.. all]);
     }
 
+    public ValueTask DisposeAsync()
+    {
+        // Per-command state only — the sandbox container is NOT ours
+        // to stop. It runs continuously under Mk8ContainerManager.
+        _disposed = true;
+        return ValueTask.CompletedTask;
+    }
+
     public void Dispose()
     {
-        if (_disposed) return;
         _disposed = true;
     }
 }

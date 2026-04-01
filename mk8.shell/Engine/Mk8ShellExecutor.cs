@@ -7,6 +7,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.RegularExpressions;
+using Mk8.Shell.Isolation;
 using Mk8.Shell.Safety;
 
 namespace Mk8.Shell.Engine;
@@ -22,18 +23,29 @@ namespace Mk8.Shell.Engine;
 /// sandboxing, and argument sanitisation before being dispatched via
 /// <see cref="ProcessStartInfo"/> with <c>UseShellExecute = false</c>.
 /// <para>
+/// External processes are launched inside an OS-level container
+/// (cgroups v2 + namespaces on Linux, WSL2-backed cgroups on Windows)
+/// providing process isolation, resource limits, filesystem isolation,
+/// and a network iron curtain.
+/// </para>
+/// <para>
 /// <b>Dangerous shells (Bash, PowerShell, CommandPrompt, Git) are
 /// never routed through this executor.</b>  They have their own
 /// unrestricted execution path in <c>AgentJobService</c>.
 /// </para>
-/// <para>Cross-platform: runs identically on Windows, Linux, and macOS.</para>
+/// <para>Runs on Windows and Linux. macOS is not supported —
+/// mk8.shell execution requires mandatory container isolation.</para>
 /// </summary>
 public sealed class Mk8ShellExecutor
 {
     private readonly HttpClient _httpClient;
+    private readonly Mk8SandboxContainer _sandboxContainer;
 
-    public Mk8ShellExecutor(HttpClient? httpClient = null)
+    public Mk8ShellExecutor(
+        Mk8SandboxContainer sandboxContainer,
+        HttpClient? httpClient = null)
     {
+        _sandboxContainer = sandboxContainer ?? throw new ArgumentNullException(nameof(sandboxContainer));
         _httpClient = httpClient ?? new HttpClient();
     }
 
@@ -201,17 +213,16 @@ public sealed class Mk8ShellExecutor
         return cmd.Kind switch
         {
             Mk8CommandKind.InMemory => await ExecuteInMemoryAsync(cmd, workspace, variables, ct),
-            Mk8CommandKind.Process
-                => await ExecuteProcessAsync(cmd, workspace, ct),
+            Mk8CommandKind.Process  => await ExecuteContainedProcessAsync(cmd, workspace, ct),
             _ => throw new InvalidOperationException($"Unknown command kind: {cmd.Kind}")
         };
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Process execution (ProcRun only — git removed)
+    // Contained process execution (OS-level isolation)
     // ═══════════════════════════════════════════════════════════════
 
-    private static async Task<(string? Output, string? Error)> ExecuteProcessAsync(
+    private async Task<(string? Output, string? Error)> ExecuteContainedProcessAsync(
         Mk8CompiledCommand cmd,
         Mk8WorkspaceContext workspace,
         CancellationToken ct)
@@ -229,11 +240,10 @@ public sealed class Mk8ShellExecutor
         foreach (var arg in cmd.Arguments)
             psi.ArgumentList.Add(arg);
 
-        using var process = new Process { StartInfo = psi };
+        await using var contained = await _sandboxContainer.LaunchAsync(psi, ct);
 
-        process.Start();
+        var process = contained.Process;
 
-        // Read stdout and stderr concurrently to avoid deadlocks.
         var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
         var stderrTask = process.StandardError.ReadToEndAsync(ct);
 
@@ -243,11 +253,7 @@ public sealed class Mk8ShellExecutor
         }
         catch (OperationCanceledException)
         {
-            // Kill the entire process tree on cancellation/timeout.
-            // Process.Dispose() does NOT kill the process — without this,
-            // the spawned process continues running as an orphan outside
-            // any monitoring or audit trail.
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
+            // Container cleanup happens in DisposeAsync
             throw;
         }
 
@@ -256,13 +262,15 @@ public sealed class Mk8ShellExecutor
 
         if (process.ExitCode != 0)
             throw new InvalidOperationException(
-                $"Process '{cmd.Executable}' exited with code {process.ExitCode}.\n" +
+                $"Process '{cmd.Executable}' exited with code {process.ExitCode} " +
+                $"(containerized: {contained.ContainerId}).\n" +
                 $"stderr: {stderr}\n" +
-                "This means the external process ran but reported failure. " +
+                "This means the external process ran inside a container but reported failure. " +
                 "Check the stderr output above for details. Common causes:\n" +
                 "  • Build errors (dotnet build): fix the code and retry\n" +
                 "  • Missing files: verify paths with DirList/FileExists first\n" +
                 "  • Test failures (dotnet test): check test output\n" +
+                "  • Container resource limit hit (OOM, PID limit)\n" +
                 "You can retry the step (maxRetries in script options) or " +
                 "use captureAs to inspect output from earlier steps.");
 

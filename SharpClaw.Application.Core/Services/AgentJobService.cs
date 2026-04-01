@@ -7,6 +7,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Mk8.Shell;
 using Mk8.Shell.Engine;
+using Mk8.Shell.Isolation;
 using Mk8.Shell.Models;
 using Mk8.Shell.Safety;
 using Mk8.Shell.Startup;
@@ -823,7 +824,7 @@ IConfiguration configuration)
 
         // mk8.shell is self-contained: pass the sandbox name and it
         // resolves everything from its own local registry.
-        using var taskContainer = Mk8TaskContainer.Create(container.SandboxName);
+        await using var taskContainer = await Mk8TaskContainer.CreateAsync(container.SandboxName, ct: ct);
 
         var effectiveOptions = script.Options ?? Mk8ExecutionOptions.Default;
 
@@ -844,7 +845,12 @@ IConfiguration configuration)
         await db.SaveChangesAsync(ct);
 
         // Execute all compiled commands (safe — never spawns a real shell).
-        var executor = new Mk8ShellExecutor();
+        // The sandbox container provides OS-level process containment,
+        // resource limits, network iron curtain, and filesystem isolation.
+        // The container is persistent — managed by Mk8ContainerManager,
+        // not created/destroyed per command.
+        var executor = new Mk8ShellExecutor(
+            sandboxContainer: taskContainer.SandboxContainer);
         var result = await executor.ExecuteAsync(compiled, ct);
 
         // Build a human-readable summary for ResultData.
@@ -1086,7 +1092,7 @@ IConfiguration configuration)
             throw new InvalidOperationException(
                 $"An mk8shell container with sandbox name '{sandboxName}' already exists.");
 
-        Mk8SandboxRegistrar.Register(sandboxName, sandboxDir);
+        await Mk8SandboxRegistrar.RegisterAsync(sandboxName, sandboxDir, ct: ct);
 
         var container = new ContainerDB
         {

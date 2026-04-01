@@ -1,3 +1,4 @@
+using Mk8.Shell.Isolation;
 using Mk8.Shell.Models;
 
 namespace Mk8.Shell.Startup;
@@ -39,11 +40,12 @@ public static class Mk8SandboxRegistrar
     /// <c>%APPDATA%/mk8.shell</c> location.
     /// </param>
     /// <returns>The created <see cref="Mk8Sandbox"/>.</returns>
-    public static Mk8Sandbox Register(
+    public static async Task<Mk8Sandbox> RegisterAsync(
         string sandboxId,
         string directoryPath,
         IReadOnlyDictionary<string, string>? initialEnvVars = null,
-        Mk8SandboxRegistry? registry = null)
+        Mk8SandboxRegistry? registry = null,
+        CancellationToken ct = default)
     {
         // ── Validate sandbox ID ───────────────────────────────────
         ArgumentException.ThrowIfNullOrWhiteSpace(sandboxId);
@@ -111,6 +113,14 @@ public static class Mk8SandboxRegistrar
             RegisteredAtUtc = now,
         };
         registry.SaveSandboxes(sandboxes);
+
+        // Start OS-level container isolation IMMEDIATELY. The sandbox
+        // is containerized from this point forward — there is no gap
+        // between registration and first command execution.
+        var globalEnv = Mk8GlobalEnv.Load();
+        var containerConfig = globalEnv.ToContainerConfig();
+        await Mk8ContainerManager.Instance.StartContainerAsync(
+            sandboxId, rootPath, containerConfig, ct);
 
         return new Mk8Sandbox
         {
@@ -293,10 +303,11 @@ public static class Mk8SandboxRegistrar
     /// </param>
     /// <param name="registry">Optional custom registry.</param>
     /// <returns><c>true</c> if the sandbox was found and removed.</returns>
-    public static bool Unregister(
+    public static async Task<bool> UnregisterAsync(
         string sandboxId,
         bool deleteFiles = false,
-        Mk8SandboxRegistry? registry = null)
+        Mk8SandboxRegistry? registry = null,
+        CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(sandboxId);
 
@@ -305,6 +316,10 @@ public static class Mk8SandboxRegistrar
 
         if (!sandboxes.TryGetValue(sandboxId, out var entry))
             return false;
+
+        // Stop the OS-level container FIRST — kills all contained
+        // processes, removes cgroup, flushes iptables chains.
+        await Mk8ContainerManager.Instance.StopContainerAsync(sandboxId, ct);
 
         sandboxes.Remove(sandboxId);
         registry.SaveSandboxes(sandboxes);

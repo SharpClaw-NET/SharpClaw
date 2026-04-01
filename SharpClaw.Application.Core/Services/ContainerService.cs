@@ -62,9 +62,11 @@ public sealed class ContainerService(SharpClawDbContext db, SessionService sessi
 
         // Provision sandbox via mk8.shell.startup.
         // This validates the name (English letters + digits only),
-        // creates the directory, writes .env + .signed.env, and
-        // registers in local %APPDATA%/mk8.shell.
-        Mk8SandboxRegistrar.Register(sandboxName, sandboxDir);
+        // creates the directory, writes .env + .signed.env, registers
+        // in local %APPDATA%/mk8.shell, and starts the OS-level
+        // container immediately — the sandbox is containerized from
+        // this point forward.
+        await Mk8SandboxRegistrar.RegisterAsync(sandboxName, sandboxDir, ct: ct);
 
         // Save to SharpClaw database.
         var container = new ContainerDB

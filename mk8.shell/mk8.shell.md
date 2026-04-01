@@ -52,7 +52,7 @@ parses them.
 2. **Structured arguments** — `string[]`, never interpolated into a shell string
 3. **No shell involved** — compilation targets `ProcessStartInfo.ArgumentList`
 4. **Per-verb sanitization** — each verb handler validates its own argument types
-5. **Platform-agnostic input** — one script runs on Linux, Windows, or macOS
+5. **Platform-agnostic input** — one script runs on Linux or Windows (macOS is not supported)
 6. **Scoped paths** — paths can only descend into workspace subdirectories
 7. **Compile-time expansion** — ForEach/If are unrolled before execution
 
@@ -211,7 +211,7 @@ system for sandbox resolution, path validation, or environment loading.
 
 Every mk8.shell invocation targets a named **sandbox** — an isolated
 directory registered via `mk8.shell.startup`. mk8.shell performs the full
-lifecycle internally via `Mk8TaskContainer.Create(sandboxId)`:
+lifecycle internally via `Mk8TaskContainer.CreateAsync(sandboxId)`:
 
 1. **Load global env** from `mk8.shell.base.env` (ships with the assembly).
 2. **Resolve sandbox ID** → local path from mk8.shell's own
@@ -221,8 +221,11 @@ lifecycle internally via `Mk8TaskContainer.Create(sandboxId)`:
 4. **Extract env vars** from the verified signed content (never from the
    unsigned `.env` — that file exists only for user convenience).
 5. **Build `Mk8WorkspaceContext`** with merged environment.
-6. **Compile and execute** the script inside an isolated task container.
-7. **Dispose** — all state is discarded. Nothing transfers between invocations.
+6. **Start sandbox container** (mandatory) — creates persistent
+    OS resources and starts the process capture event listener.
+7. **Compile and execute** the script inside an isolated task container.
+8. **Dispose** — sandbox container is torn down, all state is discarded.
+    Nothing transfers between invocations.
 
 ### Sandbox Registration
 
@@ -1844,6 +1847,211 @@ This enables:
   operations.
 - **Compliance:** full traceability from agent request → compiled command →
   execution result.
+
+## OS-Level Container Isolation
+
+mk8.shell includes a **mandatory** OS-level container isolation layer that
+adds **defense in depth** beneath the existing safety layers (path
+sandboxing, binary allowlist, gigablacklist, etc.). All sandbox processes
+run inside native OS isolation primitives — they cannot escape even if
+every application-level guard fails.
+
+Container isolation is **per-sandbox, persistent, and always on**: one
+container per sandbox, active for the duration of the job execution.
+Kernel-level event monitoring instantly captures any process whose
+executable resides within the sandbox directory — including processes
+started externally (e.g. a user double-clicking an .exe in the sandbox
+folder).
+
+Container isolation requires OS privileges (root on Linux, admin for WFP
+on Windows). **macOS is not supported** — `Mk8SandboxContainer.Create()`
+throws `PlatformNotSupportedException` on macOS, meaning mk8.shell
+cannot execute on macOS at all.
+
+### Isolation Primitives
+
+| Capability | Linux | Windows |
+|---|---|---|
+| **Process containment** | Persistent cgroup v2 — all launched and auto-captured processes share the cgroup | Persistent Job Object with `KILL_ON_JOB_CLOSE` — all processes tracked, no breakaway |
+| **Instant capture** | `fanotify` with `FAN_OPEN_EXEC` — kernel event on any executable open in the sandbox directory. Zero-delay. Falls back to `/proc/*/exe` polling (100 ms) if fanotify is unavailable | `Process.GetProcesses()` polling at 50 ms. Processes launched via `LaunchAsync` are assigned immediately — polling only applies to externally-started processes |
+| **PID/mount isolation** | PID + mount namespaces via `unshare(2)` for mk8-launched processes | Job Object captures all descendants |
+| **Resource limits** | cgroups v2: `memory.max`, `cpu.max`, `pids.max` | Job Object: memory limit, CPU rate control (hard cap), active process limit |
+| **Write byte limits** | cgroup `io.stat` polling (100 ms) + `io.max` BPS throttle to prevent burst writes between polling intervals | Job Object `IO_COUNTERS` via `QueryInformationJobObject` — `WriteTransferCount`, checked every 50 ms |
+| **Network iron curtain** | `xt_cgroup` iptables module: per-cgroup traffic filtering via custom chain. Applies to ALL processes in the cgroup (including auto-captured) | Windows Filtering Platform (WFP): default BLOCK on ALE_AUTH_CONNECT_V4/V6, PERMIT filters for whitelist |
+| **Filesystem isolation** | Mount namespace with `remount,ro /` + `bind,rw` sandbox directory + isolated `/tmp` (tmpfs). Auto-captured processes do not get filesystem isolation | Job Object UI restrictions (desktop, clipboard, display, system parameters, global atoms, window handles). Full filesystem isolation via token restriction is impractical for CLI tools (dotnet, git) that need access to system directories |
+
+### Network Iron Curtain
+
+When container isolation is enabled, **ALL outbound network traffic is
+blocked by default**. This is the iron curtain — sandbox processes have
+zero network access unless explicitly whitelisted.
+
+**Linux:** `xt_cgroup` iptables module matches traffic by cgroup path. A
+custom iptables chain is created per sandbox with ACCEPT rules for
+whitelisted destinations and a final DROP rule. The jump rule in the
+OUTPUT chain matches all processes in the sandbox cgroup. This applies to
+both mk8-launched and auto-captured processes (unlike per-process network
+namespaces, which cannot capture already-running processes).
+
+**Windows:** WFP BLOCK filters on `ALE_AUTH_CONNECT_V4` and
+`ALE_AUTH_CONNECT_V6` layers block all outbound by default. PERMIT
+filters with higher weight allow traffic to whitelisted destinations.
+
+### Network Whitelist
+
+Whitelisted destinations are configured as comma-separated rules:
+
+```
+host:port/protocol
+```
+
+| Component | Format | Default |
+|---|---|---|
+| `host` | Hostname or IP. Wildcard prefix: `*.example.com` | Required |
+| `port` | Port number. `0` or `*` = any port | `0` (any) |
+| `protocol` | `tcp`, `udp`, or `any` | `tcp` |
+
+**Examples:**
+
+```
+nuget.org:443/tcp
+api.github.com:443
+*.npm.org:443
+registry.npmjs.org:443/tcp, api.github.com:443/tcp
+```
+
+The special value `*` (alone) means allow all traffic — effectively
+disabling the iron curtain. Intended only for debugging.
+
+### Configuration
+
+Container isolation is configured in `mk8.shell.base.env` under the
+`ContainerIsolation` JSON object and the `NetworkWhitelist` string:
+
+```json
+{
+  "ContainerIsolation": {
+    "MemoryLimitBytes": 536870912,
+    "CpuPercentLimit": 100,
+    "MaxProcesses": 32,
+    "MaxWriteBytes": 0,
+    "IsolateProcessTree": true,
+    "IsolateFilesystem": true
+  },
+  "NetworkWhitelist": "nuget.org:443/tcp, api.github.com:443/tcp"
+}
+```
+
+| Field | Type | Default | Description |
+|---|---|---|---|
+| `MemoryLimitBytes` | long | `0` | Max memory. `0` = unlimited. Example: `536870912` (512 MB). |
+| `CpuPercentLimit` | int | `0` | CPU quota as % of one core. `100` = 1 core. `0` = unlimited. |
+| `MaxProcesses` | int | `32` | Max process count (including root). `0` = unlimited. |
+| `MaxWriteBytes` | long | `0` | Max file write bytes. `0` = unlimited. OS-level enforcement via cgroup `io.stat` (Linux) or Job Object `IO_COUNTERS` (Windows). Breach kills all sandbox processes. |
+| `IsolateProcessTree` | bool | `true` | PID namespace (Linux) / Job Object no-breakaway (Windows). |
+| `IsolateFilesystem` | bool | `true` | Mount namespace with read-only root (Linux) / restricted token (Windows). |
+
+There is no `Enabled` toggle — containerization is always on.
+
+### Per-Sandbox Overrides
+
+Sandbox signed env can override container config via `MK8_NETWORK_WHITELIST`:
+
+```
+MK8_NETWORK_WHITELIST=registry.npmjs.org:443/tcp
+```
+
+**Merge rules:**
+
+- **Resource limits:** "more restrictive wins" — sandbox can tighten but
+  never loosen global limits (lower memory, lower CPU, fewer processes).
+- **Network whitelist:** additive — sandbox rules are merged with global
+  rules. Sandbox can only add permitted destinations, not remove global ones.
+- **Feature gates:** sandbox cannot disable isolation features that global
+  config enables (`IsolateProcessTree`, `IsolateFilesystem`).
+
+### Platform Requirements
+
+| Platform | Requirements | Fallback |
+|---|---|---|
+| Linux | Root or `CAP_SYS_ADMIN` for namespaces, fanotify, and `xt_cgroup`; cgroups v2 mounted at `/sys/fs/cgroup`; `unshare`, `iptables` binaries; `xt_cgroup` kernel module | Cgroups-only if namespaces/xt_cgroup unavailable; `/proc` polling if fanotify unavailable |
+| Windows | Vista+ for WFP; no special privileges for Job Objects | Job Objects only if WFP unavailable; process polling if ETW unavailable |
+| macOS | **Not supported** | `PlatformNotSupportedException` — mk8.shell cannot execute on macOS |
+
+### Lifecycle
+
+Container isolation is per-sandbox: one persistent container per sandbox,
+active for the duration of a job execution. `Mk8SandboxContainer`
+implements `IAsyncDisposable`:
+
+1. **Start (`StartAsync`):** Creates persistent OS resources (cgroup/Job
+    Object), configures resource limits, sets up network filtering
+    (xt_cgroup iptables chain / WFP filters), initializes kernel event
+    listener (fanotify/ETW), and starts the background monitor task.
+2. **Launch (`LaunchAsync`):** mk8-launched processes are assigned to the
+    existing container immediately. On Linux, `unshare` provides
+    PID/mount/filesystem namespace isolation per-process.
+3. **Instant capture:** Kernel event monitoring detects executable opens
+    within the sandbox directory and assigns new processes to the container
+    immediately. Linux: fanotify `FAN_OPEN_EXEC`. Windows: ETW (falls
+    back to 100 ms polling).
+4. **Write byte tracking:** Combined monitor loop (100 ms) reads cumulative
+    write bytes from cgroup `io.stat` (Linux) or Job Object `IO_COUNTERS`
+    (Windows). Breach kills all sandbox processes.
+5. **Stop (`StopAsync` / disposal):** Stops the monitor, kills all
+    contained processes, tears down iptables chains / WFP filters,
+    removes cgroup / closes Job Object handle.
+
+All cleanup is best-effort — OS resources are released even if the
+process crashes.
+
+### Relationship to Existing Safety Layers
+
+Container isolation does **NOT** replace mk8.shell's application-level
+safety. It adds an OS-enforced boundary beneath them:
+
+```
+┌─────────────────────────────────────────┐
+│  mk8.shell safety layers                │
+│  ├── Gigablacklist                      │
+│  ├── Binary allowlist                   │
+│  ├── Command-template whitelist         │
+│  ├── Path sandboxing (Mk8PathSanitizer) │
+│  ├── Write protection (Tier 1/2/3)      │
+│  ├── URL sanitizer (SSRF prevention)    │
+│  └── Variable safety ($PREV blocking)   │
+├─────────────────────────────────────────┤
+│  OS container isolation (mandatory)     │
+│  ├── Process isolation (PID/Job Object) │
+│  ├── Resource limits (cgroups/Job)      │
+│  ├── Write byte limits (io.stat/IO_COUNTERS) │
+│  ├── Network iron curtain (xt_cgroup/WFP)│
+│  ├── Filesystem isolation (mount ns)    │
+│  └── Hyper-V VM isolation (optional)    │
+└─────────────────────────────────────────┘
+```
+
+If an agent somehow bypasses every application-level guard, the OS
+container still prevents:
+- Seeing or signalling host processes
+- Consuming unbounded memory/CPU
+- Making any network connection not on the whitelist
+- Accessing files outside the sandbox mount
+
+### Known Boundaries
+
+The following are inherent design limitations of the container isolation
+system. They are understood trade-offs, not bugs.
+
+| Boundary | Severity | Description |
+|---|---|---|
+| **Auto-captured processes have no filesystem isolation** | Low | Processes already running when captured (via fanotify/polling) cannot be moved into a new mount or PID namespace. They receive resource limits and network filtering via cgroup/Job Object membership, but not filesystem isolation. This is inherent to Linux namespaces — namespaces are set at process creation time. Mitigation: mk8-launched processes (via `LaunchAsync`) always get full isolation. Externally-launched processes in the sandbox are rare edge cases. |
+| **DNS traffic is not filtered** | Low | The network iron curtain filters TCP/UDP connections but does not intercept DNS resolution. A malicious process could theoretically use DNS tunneling to exfiltrate small amounts of data through whitelisted DNS servers. Mitigation: DNS tunneling bandwidth is extremely low (~100 bytes/query), mk8.shell agents don't have a DNS tunneling client, and the application-level safety layers prevent agents from writing or executing such tools. |
+| **No container-level wall-clock kill** | Informational | CPU rate limits (cgroup `cpu.max` / Job Object CPU rate control) throttle CPU time but don't impose a wall-clock deadline on the container itself. A process that sleeps indefinitely would not be killed by resource limits. Mitigation: mk8.shell's script-level `scriptTimeout` kills the entire execution after the configured wall-clock limit (default 5 minutes). |
+| **fanotify only monitors sandbox executables** | Informational | fanotify `FAN_OPEN_EXEC` monitors executable opens within the sandbox directory. System binaries (e.g. `/usr/bin/cat`) that operate on sandbox files are NOT captured — they run outside the cgroup. Mitigation: mk8.shell's binary allowlist and command-template whitelist prevent agents from invoking arbitrary system binaries. Only whitelisted commands can be used, and those are assigned to the cgroup via `LaunchAsync`. |
+| **Windows instant capture requires elevation** | Low | Windows process capture uses WMI `Win32_ProcessStartTrace` for system-wide event-driven capture combined with Job Object I/O completion port `JOB_OBJECT_MSG_NEW_PROCESS` for child process tracking. WMI events require administrator elevation. When running without elevation, falls back to 100ms `Process.GetProcesses()` polling. The completion port always works (no elevation needed) and covers all child processes of contained processes. Mitigation: processes launched via `LaunchAsync` are assigned to the Job Object immediately regardless of capture mode. |
+| **Windows Job Object filesystem isolation is UI-restriction only** | Medium | The default Windows container (Job Object) cannot achieve full filesystem isolation for CLI tools (dotnet, git) that require write access to system directories (NuGet cache, temp dirs, SDK paths). Job Object UI restrictions prevent clipboard access, desktop manipulation, and system parameter changes. For full VM-level filesystem isolation, enable Hyper-V containers via `PreferHyperV=true` in base.env `ContainerIsolation`. |
+| **Hyper-V containers require prerequisites** | Informational | Hyper-V containers (`Mk8HyperVSandboxContainer`) require the Hyper-V and Containers Windows features to be enabled, plus a valid base image layer (e.g., Nano Server). When prerequisites are not met, the factory automatically falls back to Job Object containers. Hyper-V containers do not expose IO_COUNTERS, so write byte limits are not enforced at the VM level. |
 
 ## Future Considerations
 

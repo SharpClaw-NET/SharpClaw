@@ -392,4 +392,107 @@ Mk8Docs
 
 Use these to discover runtime constraints, vocabularies, and template availability.
 
+=====================================================================
+CONTAINER ISOLATION (OS-LEVEL, MANDATORY)
+=====================================================================
+
+Per-sandbox persistent container. Containerization is mandatory for all
+mk8.shell sandboxes — always on, no Enabled toggle. One container per
+sandbox is created for the duration of job execution. All mk8-launched
+processes and any process whose executable resides within the sandbox
+directory are automatically captured — including user-launched processes
+(e.g. double-clicking an .exe). Defense in depth beneath mk8.shell's
+application-level safety.
+
+macOS is NOT SUPPORTED. mk8.shell cannot execute on macOS at all
+(PlatformNotSupportedException).
+
+Requires OS privileges (root on Linux, admin for WFP on Windows).
+
+Process containment:
+  Linux:   persistent cgroup v2. Instant capture via fanotify
+           (FAN_OPEN_EXEC) — kernel-level exec event monitoring on the
+           sandbox directory. Falls back to /proc/*/exe polling (100 ms)
+           if fanotify is unavailable. mk8-launched processes also get
+           PID/mount/filesystem namespace isolation via unshare(2).
+  Windows: persistent Job Object (KILL_ON_JOB_CLOSE). Instant capture via
+           WMI Win32_ProcessStartTrace (system-wide process creation events)
+           combined with Job Object I/O completion port
+           (JOB_OBJECT_MSG_NEW_PROCESS for child process notifications).
+           WMI requires admin elevation — falls back to 100 ms
+           Process.GetProcesses() polling when unavailable. The completion
+           port always works without elevation. Processes launched via
+           LaunchAsync are assigned immediately regardless of capture mode.
+
+Resource limits:
+  Linux:   cgroups v2 (memory.max, cpu.max, pids.max)
+  Windows: Job Object (memory limit, CPU rate hard cap, active process limit)
+  Defaults: 512 MB memory, 1 core CPU, 32 processes
+
+Write byte limits:
+  OS-level enforcement. Breach kills all sandbox processes immediately.
+  Linux:   cumulative wbytes from cgroup io.stat (io controller enabled)
+           + io.max BPS throttle to prevent burst writes between polls.
+  Windows: WriteTransferCount from Job Object IO_COUNTERS via
+           QueryInformationJobObject(JobObjectBasicAndIoAccountingInformation)
+  Linux monitored every 100 ms. Windows monitored every 100 ms
+  (500 ms when WMI instant capture is active — only write tracking needed).
+
+Filesystem isolation:
+  Linux:   mount namespace with remount,ro / + bind,rw sandbox directory
+           + isolated /tmp (tmpfs). mk8-launched processes only.
+           Auto-captured processes get resource limits and network
+           filtering but not filesystem isolation (inherent to Linux
+           namespaces — set at process creation time).
+  Windows (Job Object): Job Object UI restrictions (desktop, clipboard,
+           display settings, system parameters, global atoms, window handles).
+           Full filesystem isolation via restricted tokens is impractical
+           for CLI tools (dotnet, git) that need system directory access.
+  Windows (Hyper-V):  Full VM-level filesystem isolation when PreferHyperV
+           is enabled. Sandbox runs inside a Hyper-V utility VM via the
+           Host Compute Service (HCS) API. Only mapped directories are
+           visible: sandbox directory (read-write) plus host tool
+           directories (dotnet, git — read-only). Requires Hyper-V and
+           Containers features enabled plus a base image layer (e.g.,
+           nanoserver:ltsc2022). Falls back to Job Object when unavailable.
+
+Network iron curtain:
+  ALL outbound traffic blocked by default.
+  Linux:   xt_cgroup iptables module — per-cgroup traffic filtering via
+           custom iptables chain. Applies to ALL processes in the cgroup
+           (including auto-captured). No per-process network namespaces.
+  Windows: WFP BLOCK on ALE_AUTH_CONNECT_V4/V6
+           PERMIT filters for whitelisted destinations
+
+Network whitelist format:
+  host:port/protocol (comma-separated)
+  host:     hostname or *.example.com wildcard
+  port:     number, 0 or * = any (default: any)
+  protocol: tcp | udp | any (default: tcp)
+  Special:  * alone = allow all (debug only)
+
+  Examples:
+    nuget.org:443/tcp
+    api.github.com:443
+    *.npm.org:443
+    registry.npmjs.org:443/tcp, api.github.com:443/tcp
+
+Lifecycle:
+  StartAsync  → create OS resources, start event listener + monitor
+  LaunchAsync → assign mk8-launched process to existing container
+  StopAsync   → stop monitor, kill all processes, tear down OS resources
+  DisposeAsync calls StopAsync if still active.
+
+Configuration in base.env:
+  ContainerIsolation: { MemoryLimitBytes, CpuPercentLimit,
+                        MaxProcesses, MaxWriteBytes, IsolateProcessTree,
+                        IsolateFilesystem }
+  NetworkWhitelist: "host:port/proto, ..."
+  No Enabled toggle — containerization is always on.
+
+Per-sandbox override via signed env:
+  MK8_NETWORK_WHITELIST=host:port/proto, ...
+  Merge: resource limits = more restrictive wins.
+         Network rules = additive (sandbox adds, never removes).
+
 End of reference.

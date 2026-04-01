@@ -1,5 +1,6 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using Mk8.Shell.Isolation;
 using Mk8.Shell.Safety;
 
 namespace Mk8.Shell.Models;
@@ -126,7 +127,34 @@ public sealed class Mk8GlobalEnv
     [JsonPropertyName("DisableMk8shellEnvsGigablacklist")]
     public bool DisableMk8shellEnvsGigablacklist { get; set; }
 
-    // ── Startup cache ─────────────────────────────────────────────
+    // ── Container isolation ───────────────────────────────────────
+
+    /// <summary>
+    /// OS-level container isolation configuration. Controls resource
+    /// limits, network filtering, and process isolation boundaries for
+    /// sandbox processes. Container isolation is mandatory for all
+    /// mk8.shell sandboxes — macOS is denied.
+    /// <para>
+    /// Requires root/admin privileges on the host for full isolation.
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("ContainerIsolation")]
+    public Mk8ContainerConfigJson ContainerIsolation { get; set; } = new();
+
+    /// <summary>
+    /// Network whitelist for sandbox processes. When container isolation
+    /// is enabled, ALL outbound network traffic is blocked by default
+    /// (iron curtain). Only destinations listed here are permitted.
+    /// <para>
+    /// Format: comma-separated <c>host:port/protocol</c> entries.
+    /// Example: <c>"nuget.org:443/tcp, api.github.com:443/tcp"</c>
+    /// Use <c>"*"</c> to allow all (disables iron curtain).
+    /// </para>
+    /// </summary>
+    [JsonPropertyName("NetworkWhitelist")]
+    public string NetworkWhitelist { get; set; } = "";
+
+    // ── Startup cache
     // Base env is loaded ONCE at startup and cached. Changes require
     // a process restart. Sandbox env is loaded fresh on every script
     // execution via Mk8TaskContainer.Create().
@@ -200,6 +228,21 @@ public sealed class Mk8GlobalEnv
     };
 
     /// <summary>
+    /// Builds an <see cref="Mk8ContainerConfig"/> from the loaded global env.
+    /// </summary>
+    public Mk8ContainerConfig ToContainerConfig() => new()
+    {
+        MemoryLimitBytes = ContainerIsolation.MemoryLimitBytes,
+        CpuPercentLimit = ContainerIsolation.CpuPercentLimit,
+        MaxProcesses = ContainerIsolation.MaxProcesses,
+        MaxWriteBytes = ContainerIsolation.MaxWriteBytes,
+        NetworkWhitelist = Mk8NetworkWhitelist.Parse(NetworkWhitelist),
+        MappedDirectories = ContainerIsolation.MappedDirectories
+            .Select(d => new MappedDirectory(d.HostPath, d.ContainerPath, d.ReadOnly))
+            .ToList(),
+    };
+
+    /// <summary>
     /// Creates a default global env with all hardcoded vocabularies
     /// from the compile-time <c>Commands/</c> files. Used to seed
     /// the base.env file on first startup.
@@ -241,6 +284,8 @@ public sealed class Mk8GlobalEnv
             CustomBlacklist = [],
             DisableHardcodedGigablacklist = false,
             DisableMk8shellEnvsGigablacklist = false,
+            ContainerIsolation = new Mk8ContainerConfigJson(),
+            NetworkWhitelist = "",
         };
     }
 
@@ -251,4 +296,48 @@ public sealed class Mk8GlobalEnv
         foreach (var (name, words) in wordLists)
             target[name] = words;
     }
+}
+
+/// <summary>
+/// JSON-serializable container isolation settings for base.env.
+/// Maps to <see cref="Mk8ContainerConfig"/> at runtime.
+/// Container isolation is mandatory — this controls resource limits
+/// and mapped directories, not whether isolation is active.
+/// </summary>
+public sealed class Mk8ContainerConfigJson
+{
+    [JsonPropertyName("MemoryLimitBytes")]
+    public long MemoryLimitBytes { get; set; }
+
+    [JsonPropertyName("CpuPercentLimit")]
+    public int CpuPercentLimit { get; set; }
+
+    [JsonPropertyName("MaxProcesses")]
+    public int MaxProcesses { get; set; } = 32;
+
+    [JsonPropertyName("MaxWriteBytes")]
+    public long MaxWriteBytes { get; set; }
+
+    /// <summary>
+    /// Host directories mapped into the container (tool directories).
+    /// The sandbox directory is always mapped implicitly — do not
+    /// include it here.
+    /// </summary>
+    [JsonPropertyName("MappedDirectories")]
+    public List<MappedDirectoryJson> MappedDirectories { get; set; } = [];
+}
+
+/// <summary>
+/// JSON-serializable directory mapping for base.env.
+/// </summary>
+public sealed class MappedDirectoryJson
+{
+    [JsonPropertyName("HostPath")]
+    public string HostPath { get; set; } = "";
+
+    [JsonPropertyName("ContainerPath")]
+    public string ContainerPath { get; set; } = "";
+
+    [JsonPropertyName("ReadOnly")]
+    public bool ReadOnly { get; set; } = true;
 }
