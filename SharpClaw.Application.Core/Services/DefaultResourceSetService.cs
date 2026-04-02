@@ -228,6 +228,8 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db)
             case "skill": drs.SkillResourceId = value; break;
             case "transcriptionmodel": drs.TranscriptionModelId = value; break;
             case "editor": drs.EditorSessionResourceId = value; break;
+            case "document": drs.DocumentSessionResourceId = value; break;
+            case "nativeapp": drs.NativeApplicationResourceId = value; break;
             default: throw new ArgumentException($"Unknown default resource key: {key}");
         }
     }
@@ -250,6 +252,8 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db)
         drs.SkillResourceId = r.SkillResourceId;
         drs.TranscriptionModelId = r.TranscriptionModelId;
         drs.EditorSessionResourceId = r.EditorSessionResourceId;
+        drs.DocumentSessionResourceId = r.DocumentSessionResourceId;
+        drs.NativeApplicationResourceId = r.NativeApplicationResourceId;
     }
 
     private static DefaultResourcesResponse ToResponse(DefaultResourceSetDB drs) =>
@@ -267,10 +271,12 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db)
             drs.TaskResourceId,
             drs.SkillResourceId,
             drs.TranscriptionModelId,
-            drs.EditorSessionResourceId);
+            drs.EditorSessionResourceId,
+            drs.DocumentSessionResourceId,
+            drs.NativeApplicationResourceId);
 
     private static DefaultResourcesResponse EmptyResponse(Guid id) =>
-        new(id, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
+        new(id, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null, null);
 
     /// <summary>
     /// Merges channel and context default resource sets.  Channel values
@@ -299,6 +305,8 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db)
             ch.TaskResourceId ?? ctx.TaskResourceId,
             ch.SkillResourceId ?? ctx.SkillResourceId,
             ch.TranscriptionModelId ?? ctx.TranscriptionModelId,
-            ch.EditorSessionResourceId ?? ctx.EditorSessionResourceId);
+            ch.EditorSessionResourceId ?? ctx.EditorSessionResourceId,
+            ch.DocumentSessionResourceId ?? ctx.DocumentSessionResourceId,
+            ch.NativeApplicationResourceId ?? ctx.NativeApplicationResourceId);
     }
 }

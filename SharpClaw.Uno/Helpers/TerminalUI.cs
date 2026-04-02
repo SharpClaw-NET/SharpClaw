@@ -70,19 +70,27 @@ internal static class TerminalUI
         ("skillAccesses", "Skill Management"),
         ("agentHeaderAccesses", "Agent Header Editing"),
         ("channelHeaderAccesses", "Channel Header Editing"),
+        ("documentSessionAccesses", "Document Sessions"),
+        ("nativeApplicationAccesses", "Native Applications"),
     ];
 
     public static readonly string[] GlobalFlagNames =
         ["canCreateSubAgents", "canCreateContainers", "canRegisterInfoStores",
          "canAccessLocalhostInBrowser", "canAccessLocalhostCli",
          "canClickDesktop", "canTypeOnDesktop", "canReadCrossThreadHistory",
-         "canEditAgentHeader", "canEditChannelHeader"];
+         "canEditAgentHeader", "canEditChannelHeader",
+         "canCreateDocumentSessions", "canEnumerateWindows",
+         "canFocusWindow", "canCloseWindow", "canResizeWindow",
+         "canSendHotkey", "canReadClipboard", "canWriteClipboard"];
 
     public static readonly string[] GlobalFlagClearanceNames =
         ["createSubAgentsClearance", "createContainersClearance", "registerInfoStoresClearance",
          "accessLocalhostInBrowserClearance", "accessLocalhostCliClearance",
          "clickDesktopClearance", "typeOnDesktopClearance", "readCrossThreadHistoryClearance",
-         "editAgentHeaderClearance", "editChannelHeaderClearance"];
+         "editAgentHeaderClearance", "editChannelHeaderClearance",
+         "createDocumentSessionsClearance", "enumerateWindowsClearance",
+         "focusWindowClearance", "closeWindowClearance", "resizeWindowClearance",
+         "sendHotkeyClearance", "readClipboardClearance", "writeClipboardClearance"];
 
     public static readonly Dictionary<string, string> GlobalFlagTooltips = new()
     {
@@ -96,6 +104,14 @@ internal static class TerminalUI
         ["canReadCrossThreadHistory"] = "Allow the agent to read conversation history from other threads and channels",
         ["canEditAgentHeader"] = "Allow editing the custom chat header of specific agents",
         ["canEditChannelHeader"] = "Allow editing the custom chat header of specific channels",
+        ["canCreateDocumentSessions"] = "Allow the agent to register document files (spreadsheets, CSV) as sessions",
+        ["canEnumerateWindows"] = "Allow the agent to list visible desktop windows (title, process, path)",
+        ["canFocusWindow"] = "Allow the agent to bring windows to the foreground",
+        ["canCloseWindow"] = "Allow the agent to send close signals to windows (graceful)",
+        ["canResizeWindow"] = "Allow the agent to move, resize, minimize, or maximize windows",
+        ["canSendHotkey"] = "Allow the agent to send keyboard shortcuts (Ctrl+S, Alt+Tab, etc.)",
+        ["canReadClipboard"] = "Allow the agent to read clipboard contents (text, files, images)",
+        ["canWriteClipboard"] = "Allow the agent to set clipboard contents (text or file paths)",
     };
 
     public static readonly Dictionary<string, string> ResourceAccessTooltips = new()
@@ -115,6 +131,8 @@ internal static class TerminalUI
         ["skillAccesses"] = "Access registered skills and their definitions",
         ["agentHeaderAccesses"] = "Edit the custom chat header of specific agents",
         ["channelHeaderAccesses"] = "Edit the custom chat header of specific channels",
+        ["documentSessionAccesses"] = "Access to registered document files for spreadsheet operations",
+        ["nativeApplicationAccesses"] = "Access to registered desktop applications for launch and process control",
     };
 
     public static readonly (string Tag, string Label)[] ClearanceOptions =

@@ -38,6 +38,11 @@ LiveTranscriptionOrchestrator orchestrator,
 EditorBridgeService editorBridge,
 SessionService session,
 BotMessageSenderService botMessageSender,
+SpreadsheetService spreadsheetService,
+ExcelComInteropService excelComInteropService,
+DocumentSessionService documentSessionService,
+DesktopAwarenessService desktopAwarenessService,
+NativeApplicationService nativeApplicationService,
 IConfiguration configuration)
 {
     /// <summary>
@@ -761,6 +766,59 @@ IConfiguration configuration)
             // Bot messaging
             AgentActionType.SendBotMessage
                 => await ExecuteSendBotMessageAsync(job, ct),
+
+            // Document session registration
+            AgentActionType.CreateDocumentSession
+                => await ExecuteCreateDocumentSessionAsync(job, ct),
+
+            // File-based spreadsheet operations (ClosedXML / CsvHelper)
+            AgentActionType.SpreadsheetReadRange or
+            AgentActionType.SpreadsheetWriteRange or
+            AgentActionType.SpreadsheetListSheets or
+            AgentActionType.SpreadsheetCreateSheet or
+            AgentActionType.SpreadsheetDeleteSheet or
+            AgentActionType.SpreadsheetGetInfo
+                => await ExecuteSpreadsheetActionAsync(job, ct),
+
+            AgentActionType.SpreadsheetCreateWorkbook
+                => await ExecuteSpreadsheetCreateWorkbookAsync(job, ct),
+
+            // Live Excel COM Interop operations
+            AgentActionType.SpreadsheetLiveReadRange or
+            AgentActionType.SpreadsheetLiveWriteRange
+                => await ExecuteSpreadsheetLiveActionAsync(job, ct),
+
+            // Desktop awareness
+            AgentActionType.EnumerateWindows
+                => await ExecuteEnumerateWindowsAsync(job, ct),
+            AgentActionType.LaunchNativeApplication
+                => await ExecuteLaunchNativeApplicationAsync(job, ct),
+
+            // Window management
+            AgentActionType.FocusWindow
+                => await ExecuteFocusWindowAsync(job, ct),
+            AgentActionType.CloseWindow
+                => await ExecuteCloseWindowAsync(job, ct),
+            AgentActionType.ResizeWindow
+                => await ExecuteResizeWindowAsync(job, ct),
+
+            // Hotkey
+            AgentActionType.SendHotkey
+                => await ExecuteSendHotkeyAsync(job, ct),
+
+            // Window capture
+            AgentActionType.CaptureWindow
+                => await ExecuteCaptureWindowAsync(job, ct),
+
+            // Clipboard
+            AgentActionType.ReadClipboard
+                => await ExecuteReadClipboardAsync(job, ct),
+            AgentActionType.WriteClipboard
+                => await ExecuteWriteClipboardAsync(job, ct),
+
+            // Process control
+            AgentActionType.StopProcess
+                => await ExecuteStopProcessAsync(job, ct),
 
             _ => $"Action '{job.ActionType}' executed successfully " +
                  $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
@@ -2060,6 +2118,447 @@ IConfiguration configuration)
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // DOCUMENT SESSION — register a file as a document session
+    // ═══════════════════════════════════════════════════════════════
+
+    private sealed class RegisterDocumentPayload
+    {
+        public string? FilePath { get; set; }
+        public string? Name { get; set; }
+        public string? Description { get; set; }
+    }
+
+    private async Task<string?> ExecuteCreateDocumentSessionAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        var payload = DeserializePayload<RegisterDocumentPayload>(job, "CreateDocumentSession");
+
+        if (string.IsNullOrWhiteSpace(payload.FilePath))
+            throw new InvalidOperationException(
+                "CreateDocumentSession requires a 'filePath' field.");
+
+        var fullPath = Path.GetFullPath(payload.FilePath);
+        if (!File.Exists(fullPath))
+            throw new InvalidOperationException(
+                $"File not found: {fullPath}");
+
+        var docSession = await documentSessionService.CreateAsync(
+            new Contracts.DTOs.Documents.CreateDocumentSessionRequest(
+                fullPath,
+                payload.Name ?? Path.GetFileNameWithoutExtension(fullPath),
+                payload.Description),
+            ct);
+
+        AddLog(job, $"Registered document session '{docSession.Name}' (id={docSession.Id}).");
+        return JsonSerializer.Serialize(new
+        {
+            sessionId = docSession.Id,
+            name = docSession.Name,
+            filePath = docSession.FilePath,
+            documentType = docSession.DocumentType.ToString(),
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SPREADSHEET — file-based (ClosedXML / CsvHelper)
+    // ═══════════════════════════════════════════════════════════════
+
+    private async Task<string?> ExecuteSpreadsheetActionAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        if (!job.ResourceId.HasValue)
+            throw new InvalidOperationException(
+                $"{job.ActionType} requires a ResourceId (DocumentSession).");
+
+        var docSession = await db.DocumentSessions.FirstOrDefaultAsync(
+            d => d.Id == job.ResourceId, ct)
+            ?? throw new InvalidOperationException(
+                $"Document session {job.ResourceId} not found.");
+
+        Dictionary<string, object?>? parameters = null;
+        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
+        {
+            parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                job.ScriptJson, _payloadJsonOptions);
+            parameters?.Remove("targetId");
+        }
+
+        var sheetName = parameters?.GetValueOrDefault("sheetName")?.ToString();
+        var range = parameters?.GetValueOrDefault("range")?.ToString();
+
+        AddLog(job, $"{job.ActionType} on '{docSession.Name}' ({docSession.FilePath})");
+        await db.SaveChangesAsync(ct);
+
+        return job.ActionType switch
+        {
+            AgentActionType.SpreadsheetReadRange
+                => spreadsheetService.ReadRange(docSession.FilePath, sheetName, range),
+            AgentActionType.SpreadsheetWriteRange
+                => spreadsheetService.WriteRange(
+                    docSession.FilePath, sheetName, range,
+                    ExtractJsonData(parameters)),
+            AgentActionType.SpreadsheetListSheets
+                => spreadsheetService.ListSheets(docSession.FilePath),
+            AgentActionType.SpreadsheetCreateSheet
+                => spreadsheetService.CreateSheet(
+                    docSession.FilePath,
+                    sheetName ?? throw new InvalidOperationException(
+                        "spreadsheet_create_sheet requires a 'sheetName' parameter.")),
+            AgentActionType.SpreadsheetDeleteSheet
+                => spreadsheetService.DeleteSheet(
+                    docSession.FilePath,
+                    sheetName ?? throw new InvalidOperationException(
+                        "spreadsheet_delete_sheet requires a 'sheetName' parameter.")),
+            AgentActionType.SpreadsheetGetInfo
+                => spreadsheetService.GetInfo(docSession.FilePath),
+            _ => throw new InvalidOperationException(
+                $"Unexpected spreadsheet action: {job.ActionType}"),
+        };
+    }
+
+    private async Task<string?> ExecuteSpreadsheetCreateWorkbookAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        Dictionary<string, object?>? parameters = null;
+        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
+        {
+            parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                job.ScriptJson, _payloadJsonOptions);
+        }
+
+        var filePath = parameters?.GetValueOrDefault("filePath")?.ToString()
+            ?? throw new InvalidOperationException(
+                "spreadsheet_create_workbook requires a 'filePath' parameter.");
+
+        var fullPath = Path.GetFullPath(filePath);
+        var sheetName = parameters?.GetValueOrDefault("sheetName")?.ToString();
+
+        AddLog(job, $"Creating workbook at '{fullPath}'");
+        await db.SaveChangesAsync(ct);
+
+        var result = spreadsheetService.CreateWorkbook(
+            fullPath, sheetName, ExtractJsonDataOrNull(parameters));
+
+        // Auto-register a DocumentSession for the new workbook
+        var docSession = await documentSessionService.CreateAsync(
+            new Contracts.DTOs.Documents.CreateDocumentSessionRequest(
+                fullPath,
+                Path.GetFileNameWithoutExtension(fullPath)),
+            ct);
+
+        AddLog(job, $"Auto-registered document session '{docSession.Name}' (id={docSession.Id}).");
+
+        return JsonSerializer.Serialize(new
+        {
+            sessionId = docSession.Id,
+            name = docSession.Name,
+            filePath = docSession.FilePath,
+            documentType = docSession.DocumentType.ToString(),
+            createResult = result,
+        });
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // SPREADSHEET — live Excel COM Interop (Windows only)
+    // ═══════════════════════════════════════════════════════════════
+
+    private async Task<string?> ExecuteSpreadsheetLiveActionAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        if (!job.ResourceId.HasValue)
+            throw new InvalidOperationException(
+                $"{job.ActionType} requires a ResourceId (DocumentSession).");
+
+        var docSession = await db.DocumentSessions.FirstOrDefaultAsync(
+            d => d.Id == job.ResourceId, ct)
+            ?? throw new InvalidOperationException(
+                $"Document session {job.ResourceId} not found.");
+
+        Dictionary<string, object?>? parameters = null;
+        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
+        {
+            parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                job.ScriptJson, _payloadJsonOptions);
+            parameters?.Remove("targetId");
+        }
+
+        var sheetName = parameters?.GetValueOrDefault("sheetName")?.ToString();
+        var range = parameters?.GetValueOrDefault("range")?.ToString();
+
+        AddLog(job, $"{job.ActionType} (live COM) on '{docSession.Name}' ({docSession.FilePath})");
+        await db.SaveChangesAsync(ct);
+
+        return job.ActionType switch
+        {
+            AgentActionType.SpreadsheetLiveReadRange
+                => excelComInteropService.ReadRange(docSession.FilePath, sheetName, range),
+            AgentActionType.SpreadsheetLiveWriteRange
+                => excelComInteropService.WriteRange(
+                    docSession.FilePath, sheetName, range,
+                    ExtractJsonData(parameters)),
+            _ => throw new InvalidOperationException(
+                $"Unexpected live spreadsheet action: {job.ActionType}"),
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // DESKTOP AWARENESS — enumerate windows / launch app
+    // ═══════════════════════════════════════════════════════════════
+
+    private Task<string?> ExecuteEnumerateWindowsAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        AddLog(job, "Enumerating desktop windows");
+        return Task.FromResult<string?>(desktopAwarenessService.EnumerateWindows());
+    }
+
+    private sealed class LaunchApplicationPayload
+    {
+        public string? TargetId { get; set; }
+        public string? Alias { get; set; }
+        public string? Arguments { get; set; }
+        public string? FilePath { get; set; }
+    }
+
+    private async Task<string?> ExecuteLaunchNativeApplicationAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        Dictionary<string, object?>? parameters = null;
+        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
+        {
+            parameters = JsonSerializer.Deserialize<Dictionary<string, object?>>(
+                job.ScriptJson, _payloadJsonOptions);
+            parameters?.Remove("targetId");
+            parameters?.Remove("alias");
+        }
+
+        // Resolve the native application by ResourceId (GUID) or alias.
+        NativeApplicationDB? app = null;
+
+        if (job.ResourceId.HasValue)
+        {
+            app = await db.NativeApplications.FirstOrDefaultAsync(
+                n => n.Id == job.ResourceId, ct);
+        }
+
+        if (app is null)
+        {
+            var alias = parameters?.GetValueOrDefault("alias")?.ToString();
+            if (!string.IsNullOrWhiteSpace(alias))
+                app = await nativeApplicationService.ResolveAsync(alias, ct);
+        }
+
+        if (app is null)
+            throw new InvalidOperationException(
+                job.ResourceId.HasValue
+                    ? $"Native application {job.ResourceId} not found."
+                    : "LaunchNativeApplication requires a targetId or alias.");
+
+        var arguments = parameters?.GetValueOrDefault("arguments")?.ToString();
+        var filePath = parameters?.GetValueOrDefault("filePath")?.ToString();
+
+        AddLog(job, $"Launching '{app.Name}' ({app.ExecutablePath})");
+        await db.SaveChangesAsync(ct);
+
+        return await desktopAwarenessService.LaunchApplicationAsync(
+            app, arguments, filePath, ct);
+    }
+
+    // ── Window management execution ───────────────────────────────
+
+    private sealed class WindowTargetPayload
+    {
+        public int? ProcessId { get; set; }
+        public string? ProcessName { get; set; }
+        public string? TitleContains { get; set; }
+    }
+
+    private Task<string?> ExecuteFocusWindowAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var p = ParseWindowTarget(job);
+        AddLog(job, "Focusing window");
+        return Task.FromResult<string?>(
+            desktopAwarenessService.FocusWindow(p.ProcessId, p.ProcessName, p.TitleContains));
+    }
+
+    private Task<string?> ExecuteCloseWindowAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var p = ParseWindowTarget(job);
+        AddLog(job, "Closing window");
+        return Task.FromResult<string?>(
+            desktopAwarenessService.CloseWindow(p.ProcessId, p.ProcessName, p.TitleContains));
+    }
+
+    private Task<string?> ExecuteResizeWindowAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var parameters = ParsePayload(job);
+        var processId = GetInt(parameters, "processId");
+        var titleContains = GetString(parameters, "titleContains");
+        var x = GetInt(parameters, "x");
+        var y = GetInt(parameters, "y");
+        var width = GetInt(parameters, "width");
+        var height = GetInt(parameters, "height");
+        var state = GetString(parameters, "state");
+
+        AddLog(job, "Resizing window");
+        return Task.FromResult<string?>(
+            desktopAwarenessService.ResizeWindow(processId, titleContains, x, y, width, height, state));
+    }
+
+    // ── Hotkey execution ──────────────────────────────────────────
+
+    private Task<string?> ExecuteSendHotkeyAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var parameters = ParsePayload(job);
+        var keys = GetString(parameters, "keys")
+            ?? throw new InvalidOperationException("send_hotkey requires a 'keys' parameter.");
+        var processId = GetInt(parameters, "processId");
+        var titleContains = GetString(parameters, "titleContains");
+
+        AddLog(job, $"Sending hotkey: {keys}");
+        return Task.FromResult<string?>(
+            desktopAwarenessService.SendHotkey(keys, processId, titleContains));
+    }
+
+    // ── Window capture execution ──────────────────────────────────
+
+    private Task<string?> ExecuteCaptureWindowAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var p = ParseWindowTarget(job);
+        AddLog(job, "Capturing window");
+        return Task.FromResult<string?>(
+            desktopAwarenessService.CaptureWindow(p.ProcessId, p.ProcessName, p.TitleContains));
+    }
+
+    // ── Clipboard execution ───────────────────────────────────────
+
+    private async Task<string?> ExecuteReadClipboardAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var parameters = ParsePayload(job);
+        var format = GetString(parameters, "format");
+        AddLog(job, "Reading clipboard");
+        return await desktopAwarenessService.ReadClipboardAsync(format);
+    }
+
+    private async Task<string?> ExecuteWriteClipboardAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var parameters = ParsePayload(job);
+        var text = GetString(parameters, "text");
+        string[]? filePaths = null;
+        if (parameters?.GetValueOrDefault("filePaths") is JsonElement je && je.ValueKind == JsonValueKind.Array)
+            filePaths = je.EnumerateArray().Select(e => e.GetString()!).ToArray();
+
+        AddLog(job, "Writing clipboard");
+        return await desktopAwarenessService.WriteClipboardAsync(text, filePaths);
+    }
+
+    // ── Process control execution ─────────────────────────────────
+
+    private async Task<string?> ExecuteStopProcessAsync(AgentJobDB job, CancellationToken ct)
+    {
+        var parameters = ParsePayload(job);
+        var processId = GetInt(parameters, "processId")
+            ?? throw new InvalidOperationException("stop_process requires a 'processId' parameter.");
+        var force = GetBool(parameters, "force") ?? false;
+
+        // Resolve native application from ResourceId
+        NativeApplicationDB? app = null;
+        if (job.ResourceId.HasValue)
+            app = await db.NativeApplications.FirstOrDefaultAsync(n => n.Id == job.ResourceId, ct);
+
+        app ??= await ResolveNativeAppByAlias(parameters, ct);
+
+        if (app is null)
+            throw new InvalidOperationException(
+                "stop_process requires a registered native application (resourceId or alias).");
+
+        AddLog(job, $"Stopping process {processId} (app: {app.Name})");
+        await db.SaveChangesAsync(ct);
+        return await desktopAwarenessService.StopProcessAsync(processId, force, app, ct);
+    }
+
+    private async Task<NativeApplicationDB?> ResolveNativeAppByAlias(
+        Dictionary<string, object?>? parameters, CancellationToken ct)
+    {
+        var alias = GetString(parameters, "alias");
+        if (!string.IsNullOrWhiteSpace(alias))
+            return await nativeApplicationService.ResolveAsync(alias, ct);
+        return null;
+    }
+
+    private WindowTargetPayload ParseWindowTarget(AgentJobDB job)
+    {
+        var parameters = ParsePayload(job);
+        return new WindowTargetPayload
+        {
+            ProcessId = GetInt(parameters, "processId"),
+            ProcessName = GetString(parameters, "processName"),
+            TitleContains = GetString(parameters, "titleContains"),
+        };
+    }
+
+    private Dictionary<string, object?>? ParsePayload(AgentJobDB job)
+    {
+        if (string.IsNullOrWhiteSpace(job.ScriptJson))
+            return null;
+        return JsonSerializer.Deserialize<Dictionary<string, object?>>(
+            job.ScriptJson, _payloadJsonOptions);
+    }
+
+    private static string? GetString(Dictionary<string, object?>? p, string key) =>
+        p?.GetValueOrDefault(key)?.ToString();
+
+    private static int? GetInt(Dictionary<string, object?>? p, string key)
+    {
+        var val = p?.GetValueOrDefault(key);
+        return val switch
+        {
+            JsonElement je when je.ValueKind == JsonValueKind.Number => je.GetInt32(),
+            _ when val is not null && int.TryParse(val.ToString(), out var i) => i,
+            _ => null,
+        };
+    }
+
+    private static bool? GetBool(Dictionary<string, object?>? p, string key)
+    {
+        var val = p?.GetValueOrDefault(key);
+        return val switch
+        {
+            JsonElement je when je.ValueKind == JsonValueKind.True => true,
+            JsonElement je when je.ValueKind == JsonValueKind.False => false,
+            _ when val is not null && bool.TryParse(val.ToString(), out var b) => b,
+            _ => null,
+        };
+    }
+
+    // ── Spreadsheet data extraction helpers ───────────────────────
+
+    private static JsonElement ExtractJsonData(Dictionary<string, object?>? parameters)
+    {
+        if (parameters?.GetValueOrDefault("data") is JsonElement je)
+            return je;
+
+        var dataStr = parameters?.GetValueOrDefault("data")?.ToString();
+        if (dataStr is not null)
+            return JsonDocument.Parse(dataStr).RootElement;
+
+        throw new InvalidOperationException(
+            "Spreadsheet write requires a 'data' parameter.");
+    }
+
+    private static JsonElement? ExtractJsonDataOrNull(Dictionary<string, object?>? parameters)
+    {
+        if (parameters?.GetValueOrDefault("data") is JsonElement je)
+            return je;
+
+        var dataStr = parameters?.GetValueOrDefault("data")?.ToString();
+        if (dataStr is not null)
+            return JsonDocument.Parse(dataStr).RootElement;
+
+        return null;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Permission dispatch
     // ═══════════════════════════════════════════════════════════════
 
@@ -2124,6 +2623,23 @@ IConfiguration configuration)
                 => actions.AccessEditorSessionAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.SendBotMessage when resourceId.HasValue
                 => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
+            AgentActionType.CreateDocumentSession
+                => actions.CreateDocumentSessionAsync(agentId, caller, ct: ct),
+            AgentActionType.SpreadsheetReadRange or
+            AgentActionType.SpreadsheetWriteRange or
+            AgentActionType.SpreadsheetListSheets or
+            AgentActionType.SpreadsheetCreateSheet or
+            AgentActionType.SpreadsheetDeleteSheet or
+            AgentActionType.SpreadsheetGetInfo or
+            AgentActionType.SpreadsheetLiveReadRange or
+            AgentActionType.SpreadsheetLiveWriteRange when resourceId.HasValue
+                => actions.AccessDocumentSessionAsync(agentId, resourceId.Value, caller, ct: ct),
+            AgentActionType.SpreadsheetCreateWorkbook
+                => actions.CreateDocumentSessionAsync(agentId, caller, ct: ct),
+            AgentActionType.EnumerateWindows
+                => actions.EnumerateWindowsAsync(agentId, caller, ct: ct),
+            AgentActionType.LaunchNativeApplication when resourceId.HasValue
+                => actions.LaunchNativeApplicationAsync(agentId, resourceId.Value, caller, ct: ct),
             _ when IsPerResourceAction(actionType) && !resourceId.HasValue
                 => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
             _ => Task.FromResult(AgentActionResult.Denied($"Unknown action type: {actionType}."))
@@ -2155,7 +2671,16 @@ IConfiguration configuration)
             or AgentActionType.EditorShowDiff
             or AgentActionType.EditorRunBuild
             or AgentActionType.EditorRunTerminal
-            or AgentActionType.SendBotMessage;
+            or AgentActionType.SendBotMessage
+            or AgentActionType.SpreadsheetReadRange
+            or AgentActionType.SpreadsheetWriteRange
+            or AgentActionType.SpreadsheetListSheets
+            or AgentActionType.SpreadsheetCreateSheet
+            or AgentActionType.SpreadsheetDeleteSheet
+            or AgentActionType.SpreadsheetGetInfo
+            or AgentActionType.SpreadsheetLiveReadRange
+            or AgentActionType.SpreadsheetLiveWriteRange
+            or AgentActionType.LaunchNativeApplication;
 
     // ═══════════════════════════════════════════════════════════════
     // Default resource resolution
@@ -2226,6 +2751,8 @@ IConfiguration configuration)
             .Include(p => p.DefaultTaskPermission)
             .Include(p => p.DefaultSkillPermission)
             .Include(p => p.DefaultBotIntegrationAccess)
+            .Include(p => p.DefaultDocumentSessionAccess)
+            .Include(p => p.DefaultNativeApplicationAccess)
             .ToListAsync(ct);
 
         foreach (var psId in permissionSetIds)
@@ -2292,6 +2819,15 @@ IConfiguration configuration)
         AgentActionType.EditorRunBuild or
         AgentActionType.EditorRunTerminal => drs.EditorSessionResourceId,
         AgentActionType.SendBotMessage => drs.BotIntegrationResourceId,
+        AgentActionType.SpreadsheetReadRange or
+        AgentActionType.SpreadsheetWriteRange or
+        AgentActionType.SpreadsheetListSheets or
+        AgentActionType.SpreadsheetCreateSheet or
+        AgentActionType.SpreadsheetDeleteSheet or
+        AgentActionType.SpreadsheetGetInfo or
+        AgentActionType.SpreadsheetLiveReadRange or
+        AgentActionType.SpreadsheetLiveWriteRange => drs.DocumentSessionResourceId,
+        AgentActionType.LaunchNativeApplication => drs.NativeApplicationResourceId,
         _ => null,
     };
 
@@ -2343,6 +2879,17 @@ IConfiguration configuration)
             => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
         AgentActionType.SendBotMessage
             => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
+        AgentActionType.SpreadsheetReadRange or
+        AgentActionType.SpreadsheetWriteRange or
+        AgentActionType.SpreadsheetListSheets or
+        AgentActionType.SpreadsheetCreateSheet or
+        AgentActionType.SpreadsheetDeleteSheet or
+        AgentActionType.SpreadsheetGetInfo or
+        AgentActionType.SpreadsheetLiveReadRange or
+        AgentActionType.SpreadsheetLiveWriteRange
+            => permissionSet.DefaultDocumentSessionAccess?.DocumentSessionId,
+        AgentActionType.LaunchNativeApplication
+            => permissionSet.DefaultNativeApplicationAccess?.NativeApplicationId,
         _ => null,
     };
 

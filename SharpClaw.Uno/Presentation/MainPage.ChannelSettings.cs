@@ -129,6 +129,24 @@ public sealed partial class MainPage
     {
         SettingsPanel.Children.Clear();
 
+        // ── Load channel defaults from API ──
+        Guid? defaultDocSessionId = null, defaultNativeAppId = null;
+        try
+        {
+            using var defResp = await api.GetAsync($"/channels/{channelId}/defaults");
+            if (defResp.IsSuccessStatusCode)
+            {
+                using var defStream = await defResp.Content.ReadAsStreamAsync();
+                using var defDoc = await JsonDocument.ParseAsync(defStream);
+                var defRoot = defDoc.RootElement;
+                if (defRoot.TryGetProperty("documentSessionResourceId", out var dsId) && dsId.ValueKind == JsonValueKind.String)
+                    defaultDocSessionId = dsId.GetGuid();
+                if (defRoot.TryGetProperty("nativeApplicationResourceId", out var naId) && naId.ValueKind == JsonValueKind.String)
+                    defaultNativeAppId = naId.GetGuid();
+            }
+        }
+        catch { /* non-critical */ }
+
         // ── General ──
         AddSettingsSection("General", "Basic channel configuration");
         var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
@@ -212,6 +230,16 @@ public sealed partial class MainPage
 
         // ── Audio Device ──
         BuildAudioDeviceSection();
+
+        // ── Default Document Session ──
+        BuildDefaultResourceSection(api, channelId, "Default Document",
+            "Document session used when spreadsheet tools omit resourceId",
+            "documentSessionAccesses", "document", defaultDocSessionId);
+
+        // ── Default Native Application ──
+        BuildDefaultResourceSection(api, channelId, "Default Application",
+            "Native application used when launch_application or stop_process omit resourceId",
+            "nativeApplicationAccesses", "nativeapp", defaultNativeAppId);
 
         // ── Channel Permissions ──
         AddSettingsSection("Channel Permissions", "Pre-authorization overrides that let the agent act without requiring user approval");
@@ -323,6 +351,94 @@ public sealed partial class MainPage
             UpdateMicState();
         };
         SettingsPanel.Children.Add(adSearch);
+    }
+
+    private void BuildDefaultResourceSection(
+        SharpClawApiClient api, Guid channelId,
+        string header, string tooltip,
+        string lookupKey, string defaultKey, Guid? currentDefaultId)
+    {
+        AddSettingsSection(header, tooltip);
+        var resources = _resourceLookupCache.TryGetValue(lookupKey, out var items) ? items : [];
+        var displayMap = new Dictionary<string, Guid>(resources.Count);
+        foreach (var r in resources) displayMap.TryAdd($"{r.Name}  ({r.Id.ToString()[..8]}…)", r.Id);
+
+        ResourceItemDto? currentItem = null;
+        if (currentDefaultId is not null)
+            currentItem = resources.FirstOrDefault(r => r.Id == currentDefaultId.Value);
+
+        var currentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+        currentRow.Children.Add(new TextBlock { Text = "current:", FontFamily = _monoFont, FontSize = 11, Foreground = Brush(0xCCCCCC), VerticalAlignment = VerticalAlignment.Center });
+        var currentLabel = new TextBlock
+        {
+            Text = currentItem is not null ? $"{currentItem.Name}  ({currentItem.Id.ToString()[..8]}…)" : "(none)",
+            FontFamily = _monoFont, FontSize = 11,
+            Foreground = Brush(currentItem is not null ? 0xE0E0E0 : 0x777777),
+            FontStyle = currentItem is null ? Windows.UI.Text.FontStyle.Italic : Windows.UI.Text.FontStyle.Normal,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        currentRow.Children.Add(currentLabel);
+
+        if (currentItem is not null)
+        {
+            var clearBtn = new Button { Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) }, Background = _brushTransparent, BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0 };
+            clearBtn.Click += async (_, _) =>
+            {
+                try { await api.DeleteAsync($"/channels/{channelId}/defaults/{defaultKey}"); }
+                catch { /* swallow */ }
+                currentLabel.Text = "(none)";
+                currentLabel.Foreground = Brush(0x777777);
+                currentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                if (currentRow.Children.Count > 2) currentRow.Children.RemoveAt(2);
+            };
+            currentRow.Children.Add(clearBtn);
+        }
+        SettingsPanel.Children.Add(currentRow);
+
+        var search = new AutoSuggestBox
+        {
+            PlaceholderText = resources.Count > 0 ? $"Search {header.ToLowerInvariant()}..." : "No resources available",
+            FontFamily = _monoFont, FontSize = 11, MinWidth = 300,
+            Margin = new Thickness(0, 4, 0, 0), IsEnabled = resources.Count > 0,
+        };
+        ToolTipService.SetToolTip(search, $"Type to filter, then click a suggestion to set the default {header.ToLowerInvariant()}");
+        search.TextChanged += (sender, args) =>
+        {
+            if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return;
+            var q = sender.Text.Trim();
+            sender.ItemsSource = string.IsNullOrEmpty(q) ? displayMap.Keys.ToList() : displayMap.Keys.Where(k => k.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList();
+        };
+        search.QuerySubmitted += async (sender, args) =>
+        {
+            var chosen = args.ChosenSuggestion?.ToString();
+            if (chosen is null || !displayMap.TryGetValue(chosen, out var rid)) return;
+            sender.Text = string.Empty;
+            try
+            {
+                var body = JsonSerializer.Serialize(new { resourceId = rid }, Json);
+                await api.PutAsync($"/channels/{channelId}/defaults/{defaultKey}",
+                    new StringContent(body, Encoding.UTF8, "application/json"));
+            }
+            catch { /* swallow */ }
+            currentLabel.Text = chosen;
+            currentLabel.Foreground = Brush(0xE0E0E0);
+            currentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
+            if (currentRow.Children.Count <= 2)
+            {
+                var clearBtn = new Button { Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) }, Background = _brushTransparent, BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0 };
+                clearBtn.Click += async (_, _) =>
+                {
+                    try { await api.DeleteAsync($"/channels/{channelId}/defaults/{defaultKey}"); }
+                    catch { /* swallow */ }
+                    currentLabel.Text = "(none)";
+                    currentLabel.Foreground = Brush(0x777777);
+                    currentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic;
+                    if (currentRow.Children.Count > 2) currentRow.Children.RemoveAt(2);
+                };
+                currentRow.Children.Add(clearBtn);
+            }
+        };
+        SettingsPanel.Children.Add(search);
     }
 
     private async Task SavePermissionsAsync(Guid? roleId, Guid channelId)

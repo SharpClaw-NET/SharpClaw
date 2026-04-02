@@ -146,6 +146,13 @@ try
     builder.Services.AddScoped<BotIntegrationService>();
     builder.Services.AddScoped<BotMessageSenderService>();
 
+    // Document, spreadsheet & desktop awareness services
+    builder.Services.AddScoped<DocumentSessionService>();
+    builder.Services.AddScoped<NativeApplicationService>();
+    builder.Services.AddScoped<SpreadsheetService>();
+    builder.Services.AddScoped<ExcelComInteropService>();
+    builder.Services.AddScoped<DesktopAwarenessService>();
+
     // Local inference (in-process via LLamaSharp)
     // Configure native library: prefer CUDA > Vulkan > CPU; suppress verbose logs.
     NativeLibraryConfig.All

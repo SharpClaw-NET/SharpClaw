@@ -111,9 +111,10 @@ PUT    /roles/{id}/permissions     (full replacement)
 
 SetRolePermissionsRequest fields:
   defaultClearance (PermissionClearance enum)
-  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop, canReadCrossThreadHistory, canEditAgentHeader, canEditChannelHeader
+  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop, canReadCrossThreadHistory, canEditAgentHeader, canEditChannelHeader, canCreateDocumentSessions, canEnumerateWindows, canFocusWindow, canCloseWindow, canResizeWindow, canSendHotkey, canReadClipboard, canWriteClipboard
+  Clearance overrides for specialized globals: createDocumentSessionsClearance, enumerateWindowsClearance, focusWindowClearance, closeWindowClearance, resizeWindowClearance, sendHotkeyClearance, readClipboardClearance, writeClipboardClearance (PermissionClearance enum, default Unset = use defaultClearance)
   Per-resource arrays (each entry is { resourceId, clearance }):
-    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses
+    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses, documentSessionAccesses, nativeApplicationAccesses
 
 Wildcard resourceId: ffffffff-ffff-ffff-ffff-ffffffffffff (all resources of that type).
 
@@ -171,7 +172,7 @@ Default resources (per-key):
   PUT    /channels/{id}/defaults/{key}          { resourceId }
   DELETE /channels/{id}/defaults/{key}
 
-Valid default resource keys: dangshell, safeshell, container, website, search, localinfo, externalinfo, audiodevice, displaydevice, agent, task, skill, transcriptionmodel, editor.
+Valid default resource keys: dangshell, safeshell, container, website, search, localinfo, externalinfo, audiodevice, displaydevice, agent, task, skill, transcriptionmodel, editor, document, nativeapp.
 
 Either agentId or contextId (with agent) required on create.
 allowedAgentIds on PUT replaces the set. permissionSetId=00000000-... removes the override; null leaves unchanged.
@@ -187,7 +188,7 @@ All responses embed full AgentSummary objects (id, name, modelId, modelName, pro
 DEFAULT RESOURCES
 ────────────────────────────────────────
 SetDefaultResourcesRequest fields (all Guid?):
-  dangerousShellResourceId, safeShellResourceId, containerResourceId, websiteResourceId, searchEngineResourceId, localInfoStoreResourceId, externalInfoStoreResourceId, audioDeviceResourceId, displayDeviceResourceId, agentResourceId, taskResourceId, skillResourceId, transcriptionModelId, editorSessionResourceId
+  dangerousShellResourceId, safeShellResourceId, containerResourceId, websiteResourceId, searchEngineResourceId, localInfoStoreResourceId, externalInfoStoreResourceId, audioDeviceResourceId, displayDeviceResourceId, agentResourceId, taskResourceId, skillResourceId, transcriptionModelId, editorSessionResourceId, documentSessionResourceId, nativeApplicationResourceId
 
 Resolution order for jobs: channel DefaultResourceSet → context DefaultResourceSet → channel/context/role PermissionSet defaults.
 
@@ -301,10 +302,12 @@ Dedup pipeline (non-timestamped API responses):
 Audio is automatically normalised to mono 16 kHz 16-bit PCM (Whisper-optimal).
 
 AgentActionType categories:
-  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop, ReadCrossThreadHistory
-  Per-resource: UnsafeExecuteAsDangerousShell, ExecuteAsSafeShell, AccessLocalInfoStore, AccessExternalInfoStore, AccessWebsite, QuerySearchEngine, AccessContainer, ManageAgent, EditTask, AccessSkill, CaptureDisplay
+  Global: CreateSubAgent, CreateContainer, RegisterInfoStore, AccessLocalhostInBrowser, AccessLocalhostCli, ClickDesktop, TypeOnDesktop, ReadCrossThreadHistory, CreateDocumentSession, EnumerateWindows, FocusWindow, CloseWindow, ResizeWindow, SendHotkey, ReadClipboard, WriteClipboard
+  Per-resource: UnsafeExecuteAsDangerousShell, ExecuteAsSafeShell, AccessLocalInfoStore, AccessExternalInfoStore, AccessWebsite, QuerySearchEngine, AccessContainer, ManageAgent, EditTask, AccessSkill, CaptureDisplay, CaptureWindow, StopProcess
   Transcription: TranscribeFromAudioDevice, TranscribeFromAudioStream, TranscribeFromAudioFile
   Editor: EditorReadFile, EditorGetOpenFiles, EditorGetSelection, EditorGetDiagnostics, EditorApplyEdit, EditorCreateFile, EditorDeleteFile, EditorShowDiff, EditorRunBuild, EditorRunTerminal
+  Document: SpreadsheetReadRange, SpreadsheetWriteRange, SpreadsheetListSheets, SpreadsheetCreateSheet, SpreadsheetDeleteSheet, SpreadsheetGetInfo, SpreadsheetCreateWorkbook, SpreadsheetLiveReadRange, SpreadsheetLiveWriteRange
+  Desktop awareness: LaunchNativeApplication
 
 Inline tools (no job created, handled in the chat inference loop):
   wait — pause 1–300 seconds. No permissions required.
@@ -325,12 +328,21 @@ RESOURCES
 ────────────────────────────────────────
 All resource types follow the same CRUD + sync pattern under /resources/{type}.
 
-Containers:       /resources/containers        (+ /sync)
-Audio devices:    /resources/audiodevices       (+ /sync)
-Display devices:  /resources/displaydevices     (+ /sync)
-Editor sessions:  /resources/editorsessions     (no sync)
+Containers:           /resources/containers        (+ /sync)
+Audio devices:        /resources/audiodevices       (+ /sync)
+Display devices:      /resources/displaydevices     (+ /sync)
+Editor sessions:      /resources/editorsessions     (no sync)
+Document sessions:    /resources/documentsessions   (no sync)
+Native applications:  /resources/nativeapplications (no sync)
 
 Each type: POST (create), GET (list), GET /{id}, PUT /{id}, DELETE /{id}, POST /sync (where applicable).
+
+DocumentType: Spreadsheet=0, Csv=1, Document=2, Presentation=3. Inferred from file extension on create.
+CreateDocumentSessionRequest: { filePath, name?, description? }. DocumentSessionResponse: { id, name, filePath, documentType, description, createdAt, updatedAt }.
+CreateNativeApplicationRequest: { name, executablePath, alias?, description? }. NativeApplicationResponse: { id, name, executablePath, alias, description, createdAt, updatedAt }.
+
+Resource lookup: GET /resources/lookup/{type} → [{id, name}]
+  Valid types: dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, displayDeviceAccesses, editorSessionAccesses, agentAccesses, taskAccesses, skillAccesses, documentSessionAccesses, nativeApplicationAccesses.
 
 ────────────────────────────────────────
 EDITOR BRIDGE
@@ -697,7 +709,7 @@ Examples:
 ────────────────────────────────────────
 TOOL AWARENESS SETS
 ────────────────────────────────────────
-A reusable named configuration controlling which tool-call schemas are sent in API requests. Reduces prompt-token overhead by excluding tools the agent will never use (~2,500–3,000 tokens for the full 34-tool schema set).
+A reusable named configuration controlling which tool-call schemas are sent in API requests. Reduces prompt-token overhead by excluding tools the agent will never use (~3,500–4,500 tokens for the full 46-tool schema set).
 
 POST   /tool-awareness-sets                   { name, tools? }
 GET    /tool-awareness-sets
@@ -723,7 +735,7 @@ CLI:
   agent update <id> <name> --tools <setId>      Assign on update
   channel add --agent <id> --tools <setId>      Assign on creation
 
-Available tool names (34):
+Available tool names (46):
   wait, list_accessible_threads, read_thread_history,
   execute_mk8_shell, execute_dangerous_shell,
   transcribe_from_audio_device, transcribe_from_audio_stream, transcribe_from_audio_file,
@@ -735,4 +747,11 @@ Available tool names (34):
   capture_display, click_desktop, type_on_desktop,
   editor_read_file, editor_get_open_files, editor_get_selection, editor_get_diagnostics,
   editor_apply_edit, editor_create_file, editor_delete_file,
-  editor_show_diff, editor_run_build, editor_run_terminal
+  editor_show_diff, editor_run_build, editor_run_terminal,
+  register_document, spreadsheet_read_range, spreadsheet_write_range,
+  spreadsheet_list_sheets, spreadsheet_create_sheet, spreadsheet_delete_sheet,
+  spreadsheet_get_info, spreadsheet_create_workbook,
+  spreadsheet_live_read_range, spreadsheet_live_write_range,
+  enumerate_windows, launch_application,
+  focus_window, close_window, resize_window, send_hotkey,
+  capture_window, read_clipboard, write_clipboard, stop_process

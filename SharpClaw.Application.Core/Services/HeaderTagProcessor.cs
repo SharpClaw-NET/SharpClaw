@@ -252,6 +252,14 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
         if (ps.CanEditAgentHeader) grants.Add("EditAgentHeader");
         if (ps.CanEditChannelHeader) grants.Add("EditChannelHeader");
+        if (ps.CanCreateDocumentSessions) grants.Add("CreateDocumentSessions");
+        if (ps.CanEnumerateWindows) grants.Add("EnumerateWindows");
+        if (ps.CanFocusWindow) grants.Add("FocusWindow");
+        if (ps.CanCloseWindow) grants.Add("CloseWindow");
+        if (ps.CanResizeWindow) grants.Add("ResizeWindow");
+        if (ps.CanSendHotkey) grants.Add("SendHotkey");
+        if (ps.CanReadClipboard) grants.Add("ReadClipboard");
+        if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
         if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
         if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
         if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
@@ -267,6 +275,8 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.SkillPermissions.Count > 0) grants.Add("AccessSkill");
         if (ps.AgentHeaderAccesses.Count > 0) grants.Add("EditAgentHeader[res]");
         if (ps.ChannelHeaderAccesses.Count > 0) grants.Add("EditChannelHeader[res]");
+        if (ps.DocumentSessionAccesses.Count > 0) grants.Add("DocumentSession");
+        if (ps.NativeApplicationAccesses.Count > 0) grants.Add("NativeApplication");
         return grants;
     }
 
@@ -290,6 +300,14 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
         if (ps.CanEditAgentHeader) grants.Add("EditAgentHeader");
         if (ps.CanEditChannelHeader) grants.Add("EditChannelHeader");
+        if (ps.CanCreateDocumentSessions) grants.Add("CreateDocumentSessions");
+        if (ps.CanEnumerateWindows) grants.Add("EnumerateWindows");
+        if (ps.CanFocusWindow) grants.Add("FocusWindow");
+        if (ps.CanCloseWindow) grants.Add("CloseWindow");
+        if (ps.CanResizeWindow) grants.Add("ResizeWindow");
+        if (ps.CanSendHotkey) grants.Add("SendHotkey");
+        if (ps.CanReadClipboard) grants.Add("ReadClipboard");
+        if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
 
         await AppendResourceGrantAsync(grants, "DangerousShell",
             ps.DangerousShellAccesses.Select(a => a.SystemUserId),
@@ -354,6 +372,14 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         await AppendResourceGrantAsync(grants, "BotIntegration",
             ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
             () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct));
+
+        await AppendResourceGrantAsync(grants, "DocumentSession",
+            ps.DocumentSessionAccesses.Select(a => a.DocumentSessionId),
+            () => db.DocumentSessions.Select(d => d.Id).ToListAsync(ct));
+
+        await AppendResourceGrantAsync(grants, "NativeApplication",
+            ps.NativeApplicationAccesses.Select(a => a.NativeApplicationId),
+            () => db.NativeApplications.Select(n => n.Id).ToListAsync(ct));
 
         return grants;
     }

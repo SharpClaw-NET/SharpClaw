@@ -83,6 +83,62 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, caller, p => p.CanReadCrossThreadHistory, p => p.ReadCrossThreadHistoryClearance,
             "read cross-thread history", onApproved, ct);
 
+    public Task<AgentActionResult> CreateDocumentSessionAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanCreateDocumentSessions, p => p.CreateDocumentSessionsClearance,
+            "create document sessions", onApproved, ct);
+
+    public Task<AgentActionResult> EnumerateWindowsAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanEnumerateWindows, p => p.EnumerateWindowsClearance,
+            "enumerate windows", onApproved, ct);
+
+    public Task<AgentActionResult> FocusWindowAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanFocusWindow, p => p.FocusWindowClearance,
+            "focus window", onApproved, ct);
+
+    public Task<AgentActionResult> CloseWindowAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanCloseWindow, p => p.CloseWindowClearance,
+            "close window", onApproved, ct);
+
+    public Task<AgentActionResult> ResizeWindowAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanResizeWindow, p => p.ResizeWindowClearance,
+            "resize window", onApproved, ct);
+
+    public Task<AgentActionResult> SendHotkeyAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanSendHotkey, p => p.SendHotkeyClearance,
+            "send hotkey", onApproved, ct);
+
+    public Task<AgentActionResult> ReadClipboardAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanReadClipboard, p => p.ReadClipboardClearance,
+            "read clipboard", onApproved, ct);
+
+    public Task<AgentActionResult> WriteClipboardAsync(
+        Guid agentId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateGlobalFlagAsync(
+            agentId, caller, p => p.CanWriteClipboard, p => p.WriteClipboardClearance,
+            "write clipboard", onApproved, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Per-resource actions
     // ═══════════════════════════════════════════════════════════════
@@ -198,6 +254,22 @@ public sealed class AgentActionService(SharpClawDbContext db)
             agentId, botIntegrationId, caller,
             p => p.BotIntegrationAccesses, a => a.BotIntegrationId, a => a.Clearance,
             "bot integration access", onApproved, ct);
+
+    public Task<AgentActionResult> AccessDocumentSessionAsync(
+        Guid agentId, Guid documentSessionId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateResourceAccessAsync(
+            agentId, documentSessionId, caller,
+            p => p.DocumentSessionAccesses, a => a.DocumentSessionId, a => a.Clearance,
+            "document session access", onApproved, ct);
+
+    public Task<AgentActionResult> LaunchNativeApplicationAsync(
+        Guid agentId, Guid nativeApplicationId, ActionCaller caller,
+        Func<Task>? onApproved = null, CancellationToken ct = default)
+        => EvaluateResourceAccessAsync(
+            agentId, nativeApplicationId, caller,
+            p => p.NativeApplicationAccesses, a => a.NativeApplicationId, a => a.Clearance,
+            "native application launch", onApproved, ct);
 
     // ═══════════════════════════════════════════════════════════════
     // Core evaluation engine

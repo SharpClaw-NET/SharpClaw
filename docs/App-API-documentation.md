@@ -110,10 +110,12 @@ Minimax, Custom, Local
 
 | Category | Values |
 |----------|--------|
-| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop`, `ReadCrossThreadHistory` |
-| Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill`, `CaptureDisplay` |
+| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ClickDesktop`, `TypeOnDesktop`, `ReadCrossThreadHistory`, `CreateDocumentSession`, `EnumerateWindows`, `FocusWindow`, `CloseWindow`, `ResizeWindow`, `SendHotkey`, `ReadClipboard`, `WriteClipboard` |
+| Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill`, `CaptureDisplay`, `CaptureWindow`, `StopProcess` |
 | Transcription | `TranscribeFromAudioDevice`, `TranscribeFromAudioStream`, `TranscribeFromAudioFile` |
 | Editor | `EditorReadFile`, `EditorGetOpenFiles`, `EditorGetSelection`, `EditorGetDiagnostics`, `EditorApplyEdit`, `EditorCreateFile`, `EditorDeleteFile`, `EditorShowDiff`, `EditorRunBuild`, `EditorRunTerminal` |
+| Document | `SpreadsheetReadRange`, `SpreadsheetWriteRange`, `SpreadsheetListSheets`, `SpreadsheetCreateSheet`, `SpreadsheetDeleteSheet`, `SpreadsheetGetInfo`, `SpreadsheetCreateWorkbook`, `SpreadsheetLiveReadRange`, `SpreadsheetLiveWriteRange` |
+| Desktop awareness | `LaunchNativeApplication` |
 
 ### PermissionClearance
 
@@ -187,6 +189,16 @@ VisualStudio2026, VisualStudioCode, Other
 ```
 Pending, Downloading, Ready, Failed
 ```
+
+### DocumentType
+
+```
+Spreadsheet = 0, Csv = 1, Document = 2, Presentation = 3
+```
+
+Inferred from the file extension when a document session is created.
+`.xlsx`/`.xlsm` → `Spreadsheet`, `.csv` → `Csv`, `.docx` → `Document`,
+`.pptx` → `Presentation`.
 
 ### ChatStreamEventType
 
@@ -1224,7 +1236,7 @@ Clear a single default resource by key.
 
 Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
 `localinfo`, `externalinfo`, `audiodevice`, `displaydevice`, `agent`,
-`task`, `skill`, `transcriptionmodel`, `editor`.
+`task`, `skill`, `transcriptionmodel`, `editor`, `document`, `nativeapp`.
 
 ### ContextResponse
 
@@ -1411,7 +1423,7 @@ Clear a single default resource by key.
 
 Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
 `localinfo`, `externalinfo`, `audiodevice`, `displaydevice`, `agent`,
-`task`, `skill`, `transcriptionmodel`, `editor`.
+`task`, `skill`, `transcriptionmodel`, `editor`, `document`, `nativeapp`.
 
 ### ChannelResponse
 
@@ -2290,6 +2302,105 @@ DELETE /resources/editorsessions/{id}
 }
 ```
 
+### Document sessions
+
+Document sessions register a file path for spreadsheet / CSV / document
+manipulation by agents. The `documentType` is inferred from the file
+extension.
+
+```
+POST   /resources/documentsessions
+GET    /resources/documentsessions
+GET    /resources/documentsessions/{id}
+PUT    /resources/documentsessions/{id}
+DELETE /resources/documentsessions/{id}
+```
+
+**CreateDocumentSessionRequest:**
+
+```json
+{
+  "filePath": "string",
+  "name": "string | null",
+  "description": "string | null"
+}
+```
+
+`filePath` is required and must point to an existing file. The
+`documentType` is inferred automatically from the extension.
+
+**UpdateDocumentSessionRequest:**
+
+```json
+{
+  "name": "string | null",
+  "description": "string | null"
+}
+```
+
+**DocumentSessionResponse:**
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "filePath": "string",
+  "documentType": "Spreadsheet | Csv | Document | Presentation",
+  "description": "string | null",
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+### Native applications
+
+Native applications register executables that agents can launch. An
+optional `alias` provides a short friendly name for CLI use.
+
+```
+POST   /resources/nativeapplications
+GET    /resources/nativeapplications
+GET    /resources/nativeapplications/{id}
+PUT    /resources/nativeapplications/{id}
+DELETE /resources/nativeapplications/{id}
+```
+
+**CreateNativeApplicationRequest:**
+
+```json
+{
+  "name": "string",
+  "executablePath": "string",
+  "alias": "string | null",
+  "description": "string | null"
+}
+```
+
+**UpdateNativeApplicationRequest:**
+
+```json
+{
+  "name": "string | null",
+  "executablePath": "string | null",
+  "alias": "string | null",
+  "description": "string | null"
+}
+```
+
+**NativeApplicationResponse:**
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "executablePath": "string",
+  "alias": "string | null",
+  "description": "string | null",
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
 ### Resource lookup
 
 #### GET /resources/lookup/{type}
@@ -2315,6 +2426,8 @@ matches the JSON property names used in the permissions API.
 | `agentAccesses` | Agents |
 | `taskAccesses` | ScheduledTasks |
 | `skillAccesses` | Skills |
+| `documentSessionAccesses` | DocumentSessions |
+| `nativeApplicationAccesses` | NativeApplications |
 
 **Response `200`:**
 
@@ -2375,6 +2488,22 @@ don't have.
   "canReadCrossThreadHistory": false,
   "canEditAgentHeader": false,
   "canEditChannelHeader": false,
+  "canCreateDocumentSessions": false,
+  "createDocumentSessionsClearance": "Unset",
+  "canEnumerateWindows": false,
+  "enumerateWindowsClearance": "Unset",
+  "canFocusWindow": false,
+  "focusWindowClearance": "Unset",
+  "canCloseWindow": false,
+  "closeWindowClearance": "Unset",
+  "canResizeWindow": false,
+  "resizeWindowClearance": "Unset",
+  "canSendHotkey": false,
+  "sendHotkeyClearance": "Unset",
+  "canReadClipboard": false,
+  "readClipboardClearance": "Unset",
+  "canWriteClipboard": false,
+  "writeClipboardClearance": "Unset",
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "containerAccesses": null,
@@ -2387,7 +2516,9 @@ don't have.
   "taskAccesses": null,
   "skillAccesses": null,
   "agentHeaderAccesses": null,
-  "channelHeaderAccesses": null
+  "channelHeaderAccesses": null,
+  "documentSessionAccesses": null,
+  "nativeApplicationAccesses": null
 }
 ```
 
@@ -2431,6 +2562,22 @@ wildcard grant that covers all resources of that type.
   "canReadCrossThreadHistory": false,
   "canEditAgentHeader": false,
   "canEditChannelHeader": false,
+  "canCreateDocumentSessions": false,
+  "createDocumentSessionsClearance": "Unset",
+  "canEnumerateWindows": false,
+  "enumerateWindowsClearance": "Unset",
+  "canFocusWindow": false,
+  "focusWindowClearance": "Unset",
+  "canCloseWindow": false,
+  "closeWindowClearance": "Unset",
+  "canResizeWindow": false,
+  "resizeWindowClearance": "Unset",
+  "canSendHotkey": false,
+  "sendHotkeyClearance": "Unset",
+  "canReadClipboard": false,
+  "readClipboardClearance": "Unset",
+  "canWriteClipboard": false,
+  "writeClipboardClearance": "Unset",
   "dangerousShellAccesses": [{ "resourceId": "guid", "clearance": "Independent" }],
   "safeShellAccesses": [],
   "containerAccesses": [],
@@ -2443,7 +2590,9 @@ wildcard grant that covers all resources of that type.
   "taskAccesses": [],
   "skillAccesses": [],
   "agentHeaderAccesses": [],
-  "channelHeaderAccesses": []
+  "channelHeaderAccesses": [],
+  "documentSessionAccesses": [],
+  "nativeApplicationAccesses": []
 }
 ```
 
@@ -2492,7 +2641,9 @@ channel and context level. Resolution order: channel → context.
   "taskResourceId": "guid | null",
   "skillResourceId": "guid | null",
   "transcriptionModelId": "guid | null",
-  "editorSessionResourceId": "guid | null"
+  "editorSessionResourceId": "guid | null",
+  "documentSessionResourceId": "guid | null",
+  "nativeApplicationResourceId": "guid | null"
 }
 ```
 

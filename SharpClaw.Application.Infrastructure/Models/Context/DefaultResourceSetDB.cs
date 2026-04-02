@@ -58,6 +58,12 @@ public class DefaultResourceSetDB : BaseEntity
     /// <summary>Default BotIntegration for SendBotMessage.</summary>
     public Guid? BotIntegrationResourceId { get; set; }
 
+    /// <summary>Default DocumentSession for spreadsheet actions.</summary>
+    public Guid? DocumentSessionResourceId { get; set; }
+
+    /// <summary>Default NativeApplication for LaunchNativeApplication.</summary>
+    public Guid? NativeApplicationResourceId { get; set; }
+
     // ── Non-resource defaults ─────────────────────────────────────
 
     /// <summary>

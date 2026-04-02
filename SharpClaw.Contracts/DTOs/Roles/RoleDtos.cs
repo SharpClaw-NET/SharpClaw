@@ -38,6 +38,22 @@ public sealed record SetRolePermissionsRequest(
     PermissionClearance EditAgentHeaderClearance = PermissionClearance.Unset,
     bool CanEditChannelHeader = false,
     PermissionClearance EditChannelHeaderClearance = PermissionClearance.Unset,
+    bool CanCreateDocumentSessions = false,
+    PermissionClearance CreateDocumentSessionsClearance = PermissionClearance.Unset,
+    bool CanEnumerateWindows = false,
+    PermissionClearance EnumerateWindowsClearance = PermissionClearance.Unset,
+    bool CanFocusWindow = false,
+    PermissionClearance FocusWindowClearance = PermissionClearance.Unset,
+    bool CanCloseWindow = false,
+    PermissionClearance CloseWindowClearance = PermissionClearance.Unset,
+    bool CanResizeWindow = false,
+    PermissionClearance ResizeWindowClearance = PermissionClearance.Unset,
+    bool CanSendHotkey = false,
+    PermissionClearance SendHotkeyClearance = PermissionClearance.Unset,
+    bool CanReadClipboard = false,
+    PermissionClearance ReadClipboardClearance = PermissionClearance.Unset,
+    bool CanWriteClipboard = false,
+    PermissionClearance WriteClipboardClearance = PermissionClearance.Unset,
 
     // Per-resource grants
     IReadOnlyList<ResourceGrant>? DangerousShellAccesses = null,
@@ -54,7 +70,9 @@ public sealed record SetRolePermissionsRequest(
     IReadOnlyList<ResourceGrant>? TaskAccesses = null,
     IReadOnlyList<ResourceGrant>? SkillAccesses = null,
     IReadOnlyList<ResourceGrant>? AgentHeaderAccesses = null,
-    IReadOnlyList<ResourceGrant>? ChannelHeaderAccesses = null);
+    IReadOnlyList<ResourceGrant>? ChannelHeaderAccesses = null,
+    IReadOnlyList<ResourceGrant>? DocumentSessionAccesses = null,
+    IReadOnlyList<ResourceGrant>? NativeApplicationAccesses = null);
 
 /// <summary>
 /// A single per-resource grant entry.
@@ -97,6 +115,22 @@ public sealed record RolePermissionsResponse(
     PermissionClearance EditAgentHeaderClearance,
     bool CanEditChannelHeader,
     PermissionClearance EditChannelHeaderClearance,
+    bool CanCreateDocumentSessions,
+    PermissionClearance CreateDocumentSessionsClearance,
+    bool CanEnumerateWindows,
+    PermissionClearance EnumerateWindowsClearance,
+    bool CanFocusWindow,
+    PermissionClearance FocusWindowClearance,
+    bool CanCloseWindow,
+    PermissionClearance CloseWindowClearance,
+    bool CanResizeWindow,
+    PermissionClearance ResizeWindowClearance,
+    bool CanSendHotkey,
+    PermissionClearance SendHotkeyClearance,
+    bool CanReadClipboard,
+    PermissionClearance ReadClipboardClearance,
+    bool CanWriteClipboard,
+    PermissionClearance WriteClipboardClearance,
 
     IReadOnlyList<ResourceGrant> DangerousShellAccesses,
     IReadOnlyList<ResourceGrant> SafeShellAccesses,
@@ -112,4 +146,6 @@ public sealed record RolePermissionsResponse(
     IReadOnlyList<ResourceGrant> TaskAccesses,
     IReadOnlyList<ResourceGrant> SkillAccesses,
     IReadOnlyList<ResourceGrant> AgentHeaderAccesses,
-    IReadOnlyList<ResourceGrant> ChannelHeaderAccesses);
+    IReadOnlyList<ResourceGrant> ChannelHeaderAccesses,
+    IReadOnlyList<ResourceGrant> DocumentSessionAccesses,
+    IReadOnlyList<ResourceGrant> NativeApplicationAccesses);

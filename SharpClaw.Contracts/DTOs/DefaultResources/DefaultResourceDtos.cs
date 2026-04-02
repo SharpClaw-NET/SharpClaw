@@ -19,7 +19,9 @@ public sealed record SetDefaultResourcesRequest(
     Guid? TaskResourceId = null,
     Guid? SkillResourceId = null,
     Guid? TranscriptionModelId = null,
-    Guid? EditorSessionResourceId = null);
+    Guid? EditorSessionResourceId = null,
+    Guid? DocumentSessionResourceId = null,
+    Guid? NativeApplicationResourceId = null);
 
 public sealed record DefaultResourcesResponse(
     Guid Id,
@@ -36,7 +38,9 @@ public sealed record DefaultResourcesResponse(
     Guid? TaskResourceId,
     Guid? SkillResourceId,
     Guid? TranscriptionModelId,
-    Guid? EditorSessionResourceId);
+    Guid? EditorSessionResourceId,
+    Guid? DocumentSessionResourceId,
+    Guid? NativeApplicationResourceId);
 
 /// <summary>
 /// Sets a single default resource by key.

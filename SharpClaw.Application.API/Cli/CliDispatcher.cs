@@ -20,7 +20,9 @@ using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.Containers;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Contracts.DTOs.DisplayDevices;
+using SharpClaw.Contracts.DTOs.Documents;
 using SharpClaw.Contracts.DTOs.LocalModels;
+using SharpClaw.Contracts.DTOs.NativeApplications;
 using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.DTOs.Tools;
@@ -1711,6 +1713,16 @@ public static class CliDispatcher
                 "  --click-desktop                         Grant CanClickDesktop",
                 "  --type-on-desktop                       Grant CanTypeOnDesktop",
                 "  --read-cross-thread-history             Grant CanReadCrossThreadHistory",
+                "  --edit-agent-header                     Grant CanEditAgentHeader",
+                "  --edit-channel-header                   Grant CanEditChannelHeader",
+                "  --create-document-sessions              Grant CanCreateDocumentSessions",
+                "  --enumerate-windows                     Grant CanEnumerateWindows",
+                "  --focus-window                          Grant CanFocusWindow",
+                "  --close-window                          Grant CanCloseWindow",
+                "  --resize-window                         Grant CanResizeWindow",
+                "  --send-hotkey                           Grant CanSendHotkey",
+                "  --read-clipboard                        Grant CanReadClipboard",
+                "  --write-clipboard                       Grant CanWriteClipboard",
                 "  --dangerous-shell <id>[:<clearance>]    Add DangerousShell grant",
                 "  --safe-shell <id>[:<clearance>]         Add SafeShell grant",
                 "  --container <id>[:<clearance>]          Add Container grant",
@@ -1781,6 +1793,16 @@ public static class CliDispatcher
         var clickDesktop = false;
         var typeOnDesktop = false;
         var readCrossThreadHistory = false;
+        var editAgentHeader = false;
+        var editChannelHeader = false;
+        var createDocumentSessions = false;
+        var enumerateWindows = false;
+        var focusWindow = false;
+        var closeWindow = false;
+        var resizeWindow = false;
+        var sendHotkey = false;
+        var readClipboard = false;
+        var writeClipboard = false;
 
         var dangerousShell = new List<ResourceGrant>();
         var safeShell = new List<ResourceGrant>();
@@ -1810,6 +1832,16 @@ public static class CliDispatcher
                 case "--click-desktop": clickDesktop = true; break;
                 case "--type-on-desktop": typeOnDesktop = true; break;
                 case "--read-cross-thread-history": readCrossThreadHistory = true; break;
+                case "--edit-agent-header": editAgentHeader = true; break;
+                case "--edit-channel-header": editChannelHeader = true; break;
+                case "--create-document-sessions": createDocumentSessions = true; break;
+                case "--enumerate-windows": enumerateWindows = true; break;
+                case "--focus-window": focusWindow = true; break;
+                case "--close-window": closeWindow = true; break;
+                case "--resize-window": resizeWindow = true; break;
+                case "--send-hotkey": sendHotkey = true; break;
+                case "--read-clipboard": readClipboard = true; break;
+                case "--write-clipboard": writeClipboard = true; break;
                 case "--dangerous-shell" when i + 1 < args.Length:
                     dangerousShell.Add(ParseResourceGrant(args[++i])); break;
                 case "--safe-shell" when i + 1 < args.Length:
@@ -1845,6 +1877,16 @@ public static class CliDispatcher
             CanClickDesktop: clickDesktop,
             CanTypeOnDesktop: typeOnDesktop,
             CanReadCrossThreadHistory: readCrossThreadHistory,
+            CanEditAgentHeader: editAgentHeader,
+            CanEditChannelHeader: editChannelHeader,
+            CanCreateDocumentSessions: createDocumentSessions,
+            CanEnumerateWindows: enumerateWindows,
+            CanFocusWindow: focusWindow,
+            CanCloseWindow: closeWindow,
+            CanResizeWindow: resizeWindow,
+            CanSendHotkey: sendHotkey,
+            CanReadClipboard: readClipboard,
+            CanWriteClipboard: writeClipboard,
             DangerousShellAccesses: dangerousShell.Count > 0 ? dangerousShell : null,
             SafeShellAccesses: safeShell.Count > 0 ? safeShell : null,
             ContainerAccesses: container.Count > 0 ? container : null,
@@ -2622,7 +2664,8 @@ public static class CliDispatcher
             PrintUsage(
                 "resource <type> <command> [args...]",
                 "",
-                "Types: container, audiodevice, displaydevice",
+                "Types: container, audiodevice, displaydevice, editorsession,",
+                "       document, nativeapplication",
                 "",
                 "Commands (all types):",
                 "  add      Create a new resource",
@@ -2641,8 +2684,10 @@ public static class CliDispatcher
             "audiodevice" => await HandleResourceAudioDeviceCommand(args, sp),
             "displaydevice" or "display" or "dd" => await HandleResourceDisplayDeviceCommand(args, sp),
             "editorsession" or "editor" or "es" => await HandleResourceEditorSessionCommand(args, sp),
+            "document" or "doc" => await HandleResourceDocumentCommand(args, sp),
+            "nativeapplication" or "nativeapp" or "app" => await HandleResourceNativeApplicationCommand(args, sp),
             _ => UsageResult($"Unknown resource type: {type}. " +
-                "Available: container, audiodevice, displaydevice, editorsession")
+                "Available: container, audiodevice, displaydevice, editorsession, document, nativeapplication")
         };
     }
 
@@ -2809,6 +2854,111 @@ public static class CliDispatcher
             "sync" => await ResourceHandlers.SyncDisplayDevices(svc),
 
             _ => UsageResult($"Unknown command: resource displaydevice {sub}")
+        };
+    }
+
+    private static async Task<IResult?> HandleResourceDocumentCommand(
+        string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 3)
+        {
+            PrintUsage(
+                "resource document add <filePath> [name] [description]",
+                "resource document get <id>                  Show a document session",
+                "resource document list                      List all document sessions",
+                "resource document update <id> [name] [desc] Update a document session",
+                "resource document delete <id>               Delete a document session");
+            return Results.Ok();
+        }
+
+        var sub = args[2].ToLowerInvariant();
+        var svc = sp.GetRequiredService<DocumentSessionService>();
+
+        return sub switch
+        {
+            "add" when args.Length >= 4
+                => await ResourceHandlers.CreateDocumentSession(
+                    new CreateDocumentSessionRequest(
+                        args[3],
+                        args.Length >= 5 ? args[4] : null,
+                        args.Length >= 6 ? string.Join(' ', args[5..]) : null),
+                    svc),
+            "add" => UsageResult("resource document add <filePath> [name] [description]"),
+
+            "get" when args.Length >= 4
+                => await ResourceHandlers.GetDocumentSession(CliIdMap.Resolve(args[3]), svc),
+            "get" => UsageResult("resource document get <id>"),
+
+            "list" => await ResourceHandlers.ListDocumentSessions(svc),
+
+            "update" when args.Length >= 5
+                => await ResourceHandlers.UpdateDocumentSession(
+                    CliIdMap.Resolve(args[3]),
+                    new UpdateDocumentSessionRequest(
+                        args.Length >= 5 ? args[4] : null,
+                        args.Length >= 6 ? string.Join(' ', args[5..]) : null),
+                    svc),
+            "update" => UsageResult("resource document update <id> [name] [description]"),
+
+            "delete" when args.Length >= 4
+                => await ResourceHandlers.DeleteDocumentSession(CliIdMap.Resolve(args[3]), svc),
+            "delete" => UsageResult("resource document delete <id>"),
+
+            _ => UsageResult($"Unknown command: resource document {sub}")
+        };
+    }
+
+    private static async Task<IResult?> HandleResourceNativeApplicationCommand(
+        string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 3)
+        {
+            PrintUsage(
+                "resource nativeapp add <name> <exePath> [alias] [description]",
+                "resource nativeapp get <id>                  Show a native application",
+                "resource nativeapp list                      List all native applications",
+                "resource nativeapp update <id> [name] [exe] [alias] [desc]",
+                "resource nativeapp delete <id>               Delete a native application");
+            return Results.Ok();
+        }
+
+        var sub = args[2].ToLowerInvariant();
+        var svc = sp.GetRequiredService<NativeApplicationService>();
+
+        return sub switch
+        {
+            "add" when args.Length >= 5
+                => await ResourceHandlers.CreateNativeApplication(
+                    new CreateNativeApplicationRequest(
+                        args[3],
+                        args[4],
+                        args.Length >= 6 ? args[5] : null,
+                        args.Length >= 7 ? string.Join(' ', args[6..]) : null),
+                    svc),
+            "add" => UsageResult("resource nativeapp add <name> <executablePath> [alias] [description]"),
+
+            "get" when args.Length >= 4
+                => await ResourceHandlers.GetNativeApplication(CliIdMap.Resolve(args[3]), svc),
+            "get" => UsageResult("resource nativeapp get <id>"),
+
+            "list" => await ResourceHandlers.ListNativeApplications(svc),
+
+            "update" when args.Length >= 5
+                => await ResourceHandlers.UpdateNativeApplication(
+                    CliIdMap.Resolve(args[3]),
+                    new UpdateNativeApplicationRequest(
+                        args.Length >= 5 ? args[4] : null,
+                        args.Length >= 6 ? args[5] : null,
+                        args.Length >= 7 ? args[6] : null,
+                        args.Length >= 8 ? string.Join(' ', args[7..]) : null),
+                    svc),
+            "update" => UsageResult("resource nativeapp update <id> [name] [exePath] [alias] [description]"),
+
+            "delete" when args.Length >= 4
+                => await ResourceHandlers.DeleteNativeApplication(CliIdMap.Resolve(args[3]), svc),
+            "delete" => UsageResult("resource nativeapp delete <id>"),
+
+            _ => UsageResult($"Unknown command: resource nativeapplication {sub}")
         };
     }
 

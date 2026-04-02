@@ -65,6 +65,42 @@ public class PermissionSetDB : BaseEntity
     public bool CanEditChannelHeader { get; set; }
     public PermissionClearance EditChannelHeaderClearance { get; set; } = PermissionClearance.Unset;
 
+    /// <summary>
+    /// Allow agent to register new document sessions (via register_document tool
+    /// or spreadsheet_create_workbook auto-registration).
+    /// When false, agent can only use pre-registered documents.
+    /// </summary>
+    public bool CanCreateDocumentSessions { get; set; }
+    public PermissionClearance CreateDocumentSessionsClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Enumerate visible desktop windows (title, process, handle).</summary>
+    public bool CanEnumerateWindows { get; set; }
+    public PermissionClearance EnumerateWindowsClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Bring a window to the foreground.</summary>
+    public bool CanFocusWindow { get; set; }
+    public PermissionClearance FocusWindowClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Send WM_CLOSE to a window (graceful close).</summary>
+    public bool CanCloseWindow { get; set; }
+    public PermissionClearance CloseWindowClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Move, resize, minimize, or maximize a window.</summary>
+    public bool CanResizeWindow { get; set; }
+    public PermissionClearance ResizeWindowClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Send keyboard shortcuts (Ctrl+S, Alt+Tab, etc.).</summary>
+    public bool CanSendHotkey { get; set; }
+    public PermissionClearance SendHotkeyClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Read clipboard contents (text, files, images).</summary>
+    public bool CanReadClipboard { get; set; }
+    public PermissionClearance ReadClipboardClearance { get; set; } = PermissionClearance.Unset;
+
+    /// <summary>Set clipboard contents (text or file paths).</summary>
+    public bool CanWriteClipboard { get; set; }
+    public PermissionClearance WriteClipboardClearance { get; set; } = PermissionClearance.Unset;
+
     // ── Per-resource grant collections ────────────────────
 
     public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];
@@ -83,6 +119,8 @@ public class PermissionSetDB : BaseEntity
     public ICollection<AgentHeaderAccessDB> AgentHeaderAccesses { get; set; } = [];
     public ICollection<ChannelHeaderAccessDB> ChannelHeaderAccesses { get; set; } = [];
     public ICollection<BotIntegrationAccessDB> BotIntegrationAccesses { get; set; } = [];
+    public ICollection<DocumentSessionAccessDB> DocumentSessionAccesses { get; set; } = [];
+    public ICollection<NativeApplicationAccessDB> NativeApplicationAccesses { get; set; } = [];
 
     // ── Default resource accesses ─────────────────────────────────
     // Optional defaults used when starting a job and no specific
@@ -129,6 +167,12 @@ public class PermissionSetDB : BaseEntity
 
     public Guid? DefaultBotIntegrationAccessId { get; set; }
     public BotIntegrationAccessDB? DefaultBotIntegrationAccess { get; set; }
+
+    public Guid? DefaultDocumentSessionAccessId { get; set; }
+    public DocumentSessionAccessDB? DefaultDocumentSessionAccess { get; set; }
+
+    public Guid? DefaultNativeApplicationAccessId { get; set; }
+    public NativeApplicationAccessDB? DefaultNativeApplicationAccess { get; set; }
 
     // ── Clearance whitelists ──────────────────────────────────────
 

@@ -4,7 +4,9 @@ using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Containers;
 using SharpClaw.Contracts.DTOs.DisplayDevices;
+using SharpClaw.Contracts.DTOs.Documents;
 using SharpClaw.Contracts.DTOs.Editor;
+using SharpClaw.Contracts.DTOs.NativeApplications;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -189,6 +191,10 @@ public static class ResourceHandlers
                 .Select(e => new ResourceItem(e.Id, e.Name)),
             "skillAccesses" => db.Skills
                 .Select(e => new ResourceItem(e.Id, e.Name)),
+            "documentSessionAccesses" => db.DocumentSessions
+                .Select(e => new ResourceItem(e.Id, e.Name)),
+            "nativeApplicationAccesses" => db.NativeApplications
+                .Select(e => new ResourceItem(e.Id, e.Name)),
             _ => null,
         };
 
@@ -199,4 +205,56 @@ public static class ResourceHandlers
     }
 
     private sealed record ResourceItem(Guid Id, string Name);
+
+    // ═══════════════════════════════════════════════════════════════
+    // Document Sessions
+    // ═══════════════════════════════════════════════════════════════
+
+    [MapPost("/documents")]
+    public static async Task<IResult> CreateDocumentSession(
+        CreateDocumentSessionRequest request, DocumentSessionService svc)
+        => Results.Ok(await svc.CreateAsync(request));
+
+    [MapGet("/documents")]
+    public static async Task<IResult> ListDocumentSessions(DocumentSessionService svc)
+        => Results.Ok(await svc.ListAsync());
+
+    [MapGet("/documents/{id}")]
+    public static async Task<IResult> GetDocumentSession(Guid id, DocumentSessionService svc)
+        => await svc.GetByIdAsync(id) is { } r ? Results.Ok(r) : Results.NotFound();
+
+    [MapPut("/documents/{id}")]
+    public static async Task<IResult> UpdateDocumentSession(
+        Guid id, UpdateDocumentSessionRequest request, DocumentSessionService svc)
+        => await svc.UpdateAsync(id, request) is { } r ? Results.Ok(r) : Results.NotFound();
+
+    [MapDelete("/documents/{id}")]
+    public static async Task<IResult> DeleteDocumentSession(Guid id, DocumentSessionService svc)
+        => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    // ═══════════════════════════════════════════════════════════════
+    // Native Applications
+    // ═══════════════════════════════════════════════════════════════
+
+    [MapPost("/nativeapplications")]
+    public static async Task<IResult> CreateNativeApplication(
+        CreateNativeApplicationRequest request, NativeApplicationService svc)
+        => Results.Ok(await svc.CreateAsync(request));
+
+    [MapGet("/nativeapplications")]
+    public static async Task<IResult> ListNativeApplications(NativeApplicationService svc)
+        => Results.Ok(await svc.ListAsync());
+
+    [MapGet("/nativeapplications/{id}")]
+    public static async Task<IResult> GetNativeApplication(Guid id, NativeApplicationService svc)
+        => await svc.GetByIdAsync(id) is { } r ? Results.Ok(r) : Results.NotFound();
+
+    [MapPut("/nativeapplications/{id}")]
+    public static async Task<IResult> UpdateNativeApplication(
+        Guid id, UpdateNativeApplicationRequest request, NativeApplicationService svc)
+        => await svc.UpdateAsync(id, request) is { } r ? Results.Ok(r) : Results.NotFound();
+
+    [MapDelete("/nativeapplications/{id}")]
+    public static async Task<IResult> DeleteNativeApplication(Guid id, NativeApplicationService svc)
+        => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
 }

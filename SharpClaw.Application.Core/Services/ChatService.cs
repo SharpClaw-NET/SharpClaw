@@ -496,6 +496,8 @@ public sealed class ChatService(
                 .Include(p => p.AgentHeaderAccesses)
                 .Include(p => p.ChannelHeaderAccesses)
                 .Include(p => p.BotIntegrationAccesses)
+                .Include(p => p.DocumentSessionAccesses)
+                .Include(p => p.NativeApplicationAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == psId, ct);
         }
@@ -558,6 +560,8 @@ public sealed class ChatService(
                     .Include(p => p.AgentHeaderAccesses)
                     .Include(p => p.ChannelHeaderAccesses)
                     .Include(p => p.BotIntegrationAccesses)
+                    .Include(p => p.DocumentSessionAccesses)
+                    .Include(p => p.NativeApplicationAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
@@ -625,6 +629,16 @@ public sealed class ChatService(
         if (ps.CanClickDesktop) grants.Add("ClickDesktop");
         if (ps.CanTypeOnDesktop) grants.Add("TypeOnDesktop");
         if (ps.CanReadCrossThreadHistory) grants.Add("ReadCrossThreadHistory");
+        if (ps.CanEditAgentHeader) grants.Add("EditAgentHeader");
+        if (ps.CanEditChannelHeader) grants.Add("EditChannelHeader");
+        if (ps.CanCreateDocumentSessions) grants.Add("CreateDocumentSessions");
+        if (ps.CanEnumerateWindows) grants.Add("EnumerateWindows");
+        if (ps.CanFocusWindow) grants.Add("FocusWindow");
+        if (ps.CanCloseWindow) grants.Add("CloseWindow");
+        if (ps.CanResizeWindow) grants.Add("ResizeWindow");
+        if (ps.CanSendHotkey) grants.Add("SendHotkey");
+        if (ps.CanReadClipboard) grants.Add("ReadClipboard");
+        if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
 
         await AppendResourceGrantAsync(grants, "DangerousShell",
             ps.DangerousShellAccesses.Select(a => a.SystemUserId),
@@ -681,6 +695,22 @@ public sealed class ChatService(
         await AppendResourceGrantAsync(grants, "BotIntegration",
             ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
             () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "EditAgentHeader",
+            ps.AgentHeaderAccesses.Select(a => a.AgentId),
+            () => db.Agents.Select(a => a.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "EditChannelHeader",
+            ps.ChannelHeaderAccesses.Select(a => a.ChannelId),
+            () => db.Channels.Select(c => c.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "DocumentSession",
+            ps.DocumentSessionAccesses.Select(a => a.DocumentSessionId),
+            () => db.DocumentSessions.Select(d => d.Id).ToListAsync(ct), ct);
+
+        await AppendResourceGrantAsync(grants, "NativeApplication",
+            ps.NativeApplicationAccesses.Select(a => a.NativeApplicationId),
+            () => db.NativeApplications.Select(n => n.Id).ToListAsync(ct), ct);
 
         return grants;
     }
@@ -1929,6 +1959,42 @@ public sealed class ChatService(
         ["editor_run_build"]               = AgentActionType.EditorRunBuild,
         ["editor_run_terminal"]            = AgentActionType.EditorRunTerminal,
         ["send_bot_message"]               = AgentActionType.SendBotMessage,
+
+        // Document session & spreadsheet tools
+        ["register_document"]              = AgentActionType.CreateDocumentSession,
+        ["spreadsheet_read_range"]         = AgentActionType.SpreadsheetReadRange,
+        ["spreadsheet_write_range"]        = AgentActionType.SpreadsheetWriteRange,
+        ["spreadsheet_list_sheets"]        = AgentActionType.SpreadsheetListSheets,
+        ["spreadsheet_create_sheet"]       = AgentActionType.SpreadsheetCreateSheet,
+        ["spreadsheet_delete_sheet"]       = AgentActionType.SpreadsheetDeleteSheet,
+        ["spreadsheet_get_info"]           = AgentActionType.SpreadsheetGetInfo,
+        ["spreadsheet_create_workbook"]    = AgentActionType.SpreadsheetCreateWorkbook,
+
+        // Live Excel COM Interop tools
+        ["spreadsheet_live_read_range"]    = AgentActionType.SpreadsheetLiveReadRange,
+        ["spreadsheet_live_write_range"]   = AgentActionType.SpreadsheetLiveWriteRange,
+
+        // Desktop awareness tools
+        ["enumerate_windows"]              = AgentActionType.EnumerateWindows,
+        ["launch_application"]             = AgentActionType.LaunchNativeApplication,
+
+        // Window management tools
+        ["focus_window"]                   = AgentActionType.FocusWindow,
+        ["close_window"]                   = AgentActionType.CloseWindow,
+        ["resize_window"]                  = AgentActionType.ResizeWindow,
+
+        // Hotkey
+        ["send_hotkey"]                    = AgentActionType.SendHotkey,
+
+        // Window capture
+        ["capture_window"]                 = AgentActionType.CaptureWindow,
+
+        // Clipboard
+        ["read_clipboard"]                 = AgentActionType.ReadClipboard,
+        ["write_clipboard"]                = AgentActionType.WriteClipboard,
+
+        // Process control
+        ["stop_process"]                   = AgentActionType.StopProcess,
     };
 
     // ═══════════════════════════════════════════════════════════════
@@ -2035,6 +2101,19 @@ public sealed class ChatService(
         var waitSchema = BuildWaitSchema();
         var readThreadHistorySchema = BuildReadThreadHistorySchema();
         var sendBotMessageSchema = BuildSendBotMessageSchema();
+        var registerDocumentSchema = BuildRegisterDocumentSchema();
+        var spreadsheetReadRangeSchema = BuildSpreadsheetReadRangeSchema();
+        var spreadsheetWriteRangeSchema = BuildSpreadsheetWriteRangeSchema();
+        var spreadsheetSheetNameSchema = BuildSpreadsheetSheetNameSchema();
+        var spreadsheetCreateWorkbookSchema = BuildSpreadsheetCreateWorkbookSchema();
+        var launchApplicationSchema = BuildLaunchApplicationSchema();
+        var windowTargetSchema = BuildWindowTargetSchema();
+        var resizeWindowSchema = BuildResizeWindowSchema();
+        var sendHotkeySchema = BuildSendHotkeySchema();
+        var captureWindowSchema = BuildWindowTargetSchema(); // same as windowTarget
+        var readClipboardSchema = BuildReadClipboardSchema();
+        var writeClipboardSchema = BuildWriteClipboardSchema();
+        var stopProcessSchema = BuildStopProcessSchema();
 
         return
         [
@@ -2114,6 +2193,82 @@ public sealed class ChatService(
             new("send_bot_message",
                 "Send DM via bot (Telegram/Discord/WhatsApp/Slack/Matrix/Signal/Email/Teams). recipientId is platform-specific; subject for email only.",
                 sendBotMessageSchema),
+
+            // ── Document session & spreadsheet tools ──────────────────
+            new("register_document",
+                "Register a file as a document session. Auto-detects type from extension (.xlsx/.xlsm → Spreadsheet, .csv → Csv). Returns session ID for use with spreadsheet tools.",
+                registerDocumentSchema),
+            new("spreadsheet_read_range",
+                "Read cells from a registered document as JSON grid. Supports A1:C10 notation, whole column (A:A), or omit range for entire sheet. Works on .xlsx, .xlsm, .csv.",
+                spreadsheetReadRangeSchema),
+            new("spreadsheet_write_range",
+                "Write JSON grid or single value to a range in a registered document. Supports formulas (strings starting with '='). CSV files are rewritten atomically.",
+                spreadsheetWriteRangeSchema),
+            new("spreadsheet_list_sheets",
+                "List all sheets with row/column counts. CSV returns single sheet.",
+                resourceOnly),
+            new("spreadsheet_create_sheet",
+                "Add a new sheet to an .xlsx/.xlsm workbook. Not supported for CSV.",
+                spreadsheetSheetNameSchema),
+            new("spreadsheet_delete_sheet",
+                "Remove a sheet from an .xlsx/.xlsm workbook. Not supported for CSV.",
+                spreadsheetSheetNameSchema),
+            new("spreadsheet_get_info",
+                "Workbook metadata: sheets, named ranges, file size, last modified.",
+                resourceOnly),
+            new("spreadsheet_create_workbook",
+                "Create a new .xlsx or .csv file with optional initial data. Auto-registers a document session.",
+                spreadsheetCreateWorkbookSchema),
+
+            // ── Live Excel COM Interop tools (Windows only) ───────────
+            new("spreadsheet_live_read_range",
+                "Read cells from a workbook currently open in Excel (COM Interop, Windows only). Use when the file is open in Excel and you want to read live data.",
+                spreadsheetReadRangeSchema),
+            new("spreadsheet_live_write_range",
+                "Write to a workbook currently open in Excel (COM Interop, Windows only). Use when you need changes to appear immediately in the running Excel instance.",
+                spreadsheetWriteRangeSchema),
+
+            // ── Desktop awareness tools ───────────────────────────────
+            new("enumerate_windows",
+                "List visible desktop windows across all displays. Returns JSON array with title, processName, processId, executablePath. Windows only.",
+                globalSchema),
+            new("launch_application",
+                "Start a registered native application. Optionally open a file with it. Returns PID and window title.",
+                launchApplicationSchema),
+
+            // ── Window management tools ────────────────────────────────
+            new("focus_window",
+                "Bring window to foreground by PID, process name, or title substring. Windows only.",
+                windowTargetSchema),
+            new("close_window",
+                "Send graceful close (WM_CLOSE) to a window. App may prompt to save. Windows only.",
+                windowTargetSchema),
+            new("resize_window",
+                "Move/resize/minimize/maximize a window. Windows only.",
+                resizeWindowSchema),
+
+            // ── Hotkey ────────────────────────────────────────────────
+            new("send_hotkey",
+                "Send keyboard shortcut (e.g. 'ctrl+s', 'alt+tab'). Optional focus-first by PID/title. Windows only.",
+                sendHotkeySchema),
+
+            // ── Window capture ────────────────────────────────────────
+            new("capture_window",
+                "Screenshot a single window by PID/title. Smaller than capture_display. Returns base64 PNG (vision) or dims.",
+                captureWindowSchema),
+
+            // ── Clipboard ─────────────────────────────────────────────
+            new("read_clipboard",
+                "Read clipboard: text, file list, or image. Auto-detect or specify format.",
+                readClipboardSchema),
+            new("write_clipboard",
+                "Set clipboard to text or file paths. Pair with send_hotkey('ctrl+v') for paste.",
+                writeClipboardSchema),
+
+            // ── Process control ───────────────────────────────────────
+            new("stop_process",
+                "Stop a process launched via launch_application. Must match a registered native app.",
+                stopProcessSchema),
         ];
     }
 
@@ -2179,6 +2334,295 @@ public sealed class ChatService(
                     }
                 },
                 "required": ["resourceId", "recipientId", "message"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildRegisterDocumentSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "filePath": {
+                        "type": "string",
+                        "description": "Absolute path to the document file."
+                    },
+                    "name": {
+                        "type": "string",
+                        "description": "Display name (optional, defaults to file name)."
+                    },
+                    "description": {
+                        "type": "string",
+                        "description": "Optional description."
+                    }
+                },
+                "required": ["filePath"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSpreadsheetReadRangeSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "Document session GUID."
+                    },
+                    "sheetName": {
+                        "type": "string",
+                        "description": "Sheet name (optional, defaults to first/active sheet)."
+                    },
+                    "range": {
+                        "type": "string",
+                        "description": "Cell range (A1:C10, A:A, or omit for entire sheet)."
+                    }
+                },
+                "required": ["targetId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSpreadsheetWriteRangeSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "Document session GUID."
+                    },
+                    "sheetName": {
+                        "type": "string",
+                        "description": "Sheet name (optional, defaults to first/active sheet)."
+                    },
+                    "range": {
+                        "type": "string",
+                        "description": "Starting cell or range (e.g. A1, B2:C10)."
+                    },
+                    "data": {
+                        "description": "JSON grid (array of arrays) or single value. Strings starting with '=' are formulas."
+                    }
+                },
+                "required": ["targetId", "range", "data"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSpreadsheetSheetNameSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "Document session GUID."
+                    },
+                    "sheetName": {
+                        "type": "string",
+                        "description": "Name of the sheet."
+                    }
+                },
+                "required": ["targetId", "sheetName"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSpreadsheetCreateWorkbookSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "filePath": {
+                        "type": "string",
+                        "description": "Absolute path for the new file (.xlsx or .csv)."
+                    },
+                    "sheetName": {
+                        "type": "string",
+                        "description": "Initial sheet name (optional, defaults to Sheet1)."
+                    },
+                    "data": {
+                        "description": "Optional initial data as JSON grid."
+                    }
+                },
+                "required": ["filePath"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildLaunchApplicationSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "targetId": {
+                        "type": "string",
+                        "description": "Native application GUID."
+                    },
+                    "alias": {
+                        "type": "string",
+                        "description": "Short alias (e.g. 'excel'). Use targetId or alias."
+                    },
+                    "arguments": {
+                        "type": "string",
+                        "description": "Optional command-line arguments."
+                    },
+                    "filePath": {
+                        "type": "string",
+                        "description": "Optional file to open with the application."
+                    }
+                },
+                "required": []
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildWindowTargetSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "processId": {
+                        "type": "integer",
+                        "description": "Window's process ID."
+                    },
+                    "processName": {
+                        "type": "string",
+                        "description": "Process name (case-insensitive)."
+                    },
+                    "titleContains": {
+                        "type": "string",
+                        "description": "Title substring match (case-insensitive)."
+                    }
+                }
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildResizeWindowSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "processId": {
+                        "type": "integer",
+                        "description": "Window's process ID."
+                    },
+                    "titleContains": {
+                        "type": "string",
+                        "description": "Title substring match."
+                    },
+                    "x": { "type": "integer", "description": "New X position." },
+                    "y": { "type": "integer", "description": "New Y position." },
+                    "width": { "type": "integer", "description": "New width." },
+                    "height": { "type": "integer", "description": "New height." },
+                    "state": {
+                        "type": "string",
+                        "enum": ["normal", "minimized", "maximized"],
+                        "description": "Window state."
+                    }
+                }
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildSendHotkeySchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "keys": {
+                        "type": "string",
+                        "description": "Shortcut, e.g. 'ctrl+s', 'alt+tab', 'ctrl+shift+p'."
+                    },
+                    "processId": {
+                        "type": "integer",
+                        "description": "Optional: focus window by PID first."
+                    },
+                    "titleContains": {
+                        "type": "string",
+                        "description": "Optional: focus window by title first."
+                    }
+                },
+                "required": ["keys"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildReadClipboardSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "format": {
+                        "type": "string",
+                        "enum": ["text", "files", "image"],
+                        "description": "Clipboard format. Omit for auto-detect."
+                    }
+                }
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildWriteClipboardSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "text": {
+                        "type": "string",
+                        "description": "Text to write to clipboard."
+                    },
+                    "filePaths": {
+                        "type": "array",
+                        "items": { "type": "string" },
+                        "description": "File paths to put on clipboard."
+                    }
+                }
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildStopProcessSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "processId": {
+                        "type": "integer",
+                        "description": "PID of the process to stop."
+                    },
+                    "force": {
+                        "type": "boolean",
+                        "description": "Skip graceful close; kill immediately."
+                    }
+                },
+                "required": ["processId"]
             }
             """);
         return doc.RootElement.Clone();

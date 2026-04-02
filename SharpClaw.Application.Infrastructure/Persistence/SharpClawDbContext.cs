@@ -75,6 +75,14 @@ public class SharpClawDbContext(
     public DbSet<BotIntegrationDB> BotIntegrations => Set<BotIntegrationDB>();
     public DbSet<BotIntegrationAccessDB> BotIntegrationAccesses => Set<BotIntegrationAccessDB>();
 
+    // ── Document sessions ─────────────────────────────────────────
+    public DbSet<DocumentSessionDB> DocumentSessions => Set<DocumentSessionDB>();
+    public DbSet<DocumentSessionAccessDB> DocumentSessionAccesses => Set<DocumentSessionAccessDB>();
+
+    // ── Native applications ───────────────────────────────────────
+    public DbSet<NativeApplicationDB> NativeApplications => Set<NativeApplicationDB>();
+    public DbSet<NativeApplicationAccessDB> NativeApplicationAccesses => Set<NativeApplicationAccessDB>();
+
     // ── Task scripts ──────────────────────────────────────────────
     public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
     public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
@@ -750,6 +758,37 @@ public class SharpClawDbContext(
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
+        // ── Document sessions ─────────────────────────────────────
+        modelBuilder.Entity<DocumentSessionDB>(e =>
+        {
+            e.Property(d => d.DocumentType).HasConversion<string>();
+            e.HasMany(d => d.Accesses)
+                .WithOne(a => a.DocumentSession)
+                .HasForeignKey(a => a.DocumentSessionId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<DocumentSessionAccessDB>(e =>
+        {
+            e.HasIndex(a => new { a.PermissionSetId, a.DocumentSessionId }).IsUnique();
+            e.Property(a => a.Clearance).HasConversion<string>();
+        });
+
+        // ── Native applications ───────────────────────────────────
+        modelBuilder.Entity<NativeApplicationDB>(e =>
+        {
+            e.HasMany(n => n.Accesses)
+                .WithOne(a => a.NativeApplication)
+                .HasForeignKey(a => a.NativeApplicationId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        modelBuilder.Entity<NativeApplicationAccessDB>(e =>
+        {
+            e.HasIndex(a => new { a.PermissionSetId, a.NativeApplicationId }).IsUnique();
+            e.Property(a => a.Clearance).HasConversion<string>();
+        });
+
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);
     }
 
@@ -836,6 +875,8 @@ public class SharpClawDbContext(
         AgentManagementAccessDB           e => e.AgentId                   == WellKnownIds.AllResources,
         TaskManageAccessDB            e => e.ScheduledTaskId           == WellKnownIds.AllResources,
         SkillManageAccessDB           e => e.SkillId                   == WellKnownIds.AllResources,
+        DocumentSessionAccessDB       e => e.DocumentSessionId           == WellKnownIds.AllResources,
+        NativeApplicationAccessDB     e => e.NativeApplicationId         == WellKnownIds.AllResources,
         _ => false,
     };
 }
