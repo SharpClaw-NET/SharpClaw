@@ -52,7 +52,7 @@ public static class LocalEnvironment
     private static void EnsureEnvironmentFile(string envDir)
     {
         var envFile = Path.Combine(envDir, ".env");
-        if (File.Exists(envFile))
+        if (File.Exists(envFile) && new FileInfo(envFile).Length > 0)
             return;
 
         try
