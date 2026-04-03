@@ -1,2 +1,22 @@
-﻿<Project>
+<Project>
+
+  <!--
+    Auto-generate missing .env files from committed .env.template defaults.
+    Runs before build so CopyToOutputDirectory can pick them up.
+    Templates are NOT gitignored (*.env patterns don't match *.env.template).
+  -->
+  <Target Name="_EnsureEnvironmentFiles" BeforeTargets="BeforeBuild"
+          Condition="Exists('Environment')">
+    <ItemGroup>
+      <_EnvTemplate Include="Environment\*.env.template" />
+      <_MissingEnvFile Include="@(_EnvTemplate)" Condition="!Exists('%(RootDir)%(Directory)%(Filename)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_MissingEnvFile)"
+          DestinationFiles="@(_MissingEnvFile->'%(RootDir)%(Directory)%(Filename)')"
+          Condition="'@(_MissingEnvFile)' != ''" />
+    <Message Importance="high"
+             Text="Created missing %(Filename) from template"
+             Condition="'@(_MissingEnvFile)' != ''" />
+  </Target>
+
 </Project>

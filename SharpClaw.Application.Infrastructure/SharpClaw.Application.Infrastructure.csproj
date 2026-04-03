@@ -30,7 +30,7 @@
 
   <ItemGroup>
     <Content Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Environment\**" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="Environment\**" CopyToOutputDirectory="PreserveNewest" Exclude="Environment\*.template" />
   </ItemGroup>
 
 </Project>
