@@ -15,9 +15,4 @@
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="Environment\.env" CopyToOutputDirectory="PreserveNewest" />
-    <None Include="Environment\.dev.env" CopyToOutputDirectory="PreserveNewest" Condition="Exists('Environment\.dev.env')" />
-  </ItemGroup>
-
 </Project>

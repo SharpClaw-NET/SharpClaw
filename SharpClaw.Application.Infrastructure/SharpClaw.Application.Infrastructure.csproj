@@ -30,7 +30,7 @@
 
   <ItemGroup>
     <Content Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Environment\**" CopyToOutputDirectory="PreserveNewest" Exclude="Environment\*.template" />
+    <!-- .env files are now copied by Directory.Build.targets -->
   </ItemGroup>
 
 </Project>

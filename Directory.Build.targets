@@ -19,4 +19,39 @@
              Condition="'@(_MissingEnvFile)' != ''" />
   </Target>
 
+  <!--
+    Force-copy .env files to output directory on every build, even when
+    source isn't newer (user edits in source tree must always propagate).
+    Also register generated .env files for Clean to delete.
+  -->
+  <Target Name="_CopyEnvironmentFiles" AfterTargets="Build"
+          Condition="Exists('Environment')">
+    <ItemGroup>
+      <_SourceEnvFile Include="Environment\*.env" Exclude="Environment\*.template" />
+      <_OutputEnvFile Include="@(_SourceEnvFile->'$(OutputPath)Environment\%(Filename)%(Extension)')" />
+    </ItemGroup>
+    <Copy SourceFiles="@(_SourceEnvFile)"
+          DestinationFiles="@(_OutputEnvFile)"
+          SkipUnchangedFiles="false"
+          Condition="'@(_SourceEnvFile)' != ''" />
+    <ItemGroup>
+      <FileWrites Include="@(_SourceEnvFile)" />
+      <FileWrites Include="@(_OutputEnvFile)" />
+    </ItemGroup>
+  </Target>
+
+  <!--
+    Delete generated .env files from the source tree during Clean.
+  -->
+  <Target Name="_CleanEnvironmentFiles" AfterTargets="Clean"
+          Condition="Exists('Environment')">
+    <ItemGroup>
+      <_GeneratedEnvFile Include="Environment\*.env" Exclude="Environment\*.template" />
+    </ItemGroup>
+    <Delete Files="@(_GeneratedEnvFile)" Condition="'@(_GeneratedEnvFile)' != ''" />
+    <Message Importance="high"
+             Text="Deleted generated .env files from source tree"
+             Condition="'@(_GeneratedEnvFile)' != ''" />
+  </Target>
+
 </Project>

@@ -139,12 +139,6 @@
     </Page>
   </ItemGroup>
 
-  <!-- Explicit env file includes instead of a wildcard glob to prevent VS restore loops -->
-  <ItemGroup>
-    <Content Include="Environment\.env" CopyToOutputDirectory="PreserveNewest" />
-    <Content Include="Environment\.dev.env" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <!--
     Backend content for MSIX packaging.
     When publish-msix.ps1 pre-publishes the API backend to BackendStagingDir,
