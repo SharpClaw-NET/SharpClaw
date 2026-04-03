@@ -349,6 +349,16 @@ public class SharpClawDbContext(
                 .HasForeignKey(b => b.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
+            e.HasMany(p => p.DocumentSessionAccesses)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
+            e.HasMany(p => p.NativeApplicationAccesses)
+                .WithOne(a => a.PermissionSet)
+                .HasForeignKey(a => a.PermissionSetId)
+                .OnDelete(DeleteBehavior.Cascade);
+
             e.HasMany(p => p.ClearanceUserWhitelist)
                 .WithOne(w => w.PermissionSet)
                 .HasForeignKey(w => w.PermissionSetId)
@@ -428,6 +438,16 @@ public class SharpClawDbContext(
             e.HasOne(p => p.DefaultBotIntegrationAccess)
                 .WithMany()
                 .HasForeignKey(p => p.DefaultBotIntegrationAccessId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(p => p.DefaultDocumentSessionAccess)
+                .WithMany()
+                .HasForeignKey(p => p.DefaultDocumentSessionAccessId)
+                .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(p => p.DefaultNativeApplicationAccess)
+                .WithMany()
+                .HasForeignKey(p => p.DefaultNativeApplicationAccessId)
                 .OnDelete(DeleteBehavior.SetNull);
         });
 
