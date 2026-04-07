@@ -97,4 +97,16 @@ public enum AgentActionType
 
     // ── Process control (per-resource: native application) ───────
     StopProcess = 54,
+
+    // ── Module system ─────────────────────────────────────────────
+    // Values 55–99 are reserved for future built-in actions.
+
+    /// <summary>
+    /// Category tag for all module-provided tool calls.
+    /// The specific tool is identified by <c>AgentJobDB.ActionKey</c>,
+    /// which holds the prefixed tool name (e.g. "cu_enumerate_windows").
+    /// <c>ScriptJson</c> carries the module envelope for parameter extraction:
+    /// <c>{ "module": "computer_use", "tool": "enumerate_windows", "params": { ... } }</c>
+    /// </summary>
+    ModuleAction = 100,
 }

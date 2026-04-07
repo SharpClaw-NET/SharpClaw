@@ -2,6 +2,9 @@
 ## Except I may add or remove lines for my own convenience.
 ## My additions will be here at the top:
 
+# Module System Design (internal spec — not for distribution)
+docs/Module-System-Design.md
+
 # Copilot
 .github/upgrades
 .github/copilot-instructions.md

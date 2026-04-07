@@ -22,6 +22,16 @@ public class AgentJobDB : BaseEntity
 
     // ── Action definition ─────────────────────────────────────────
     public AgentActionType ActionType { get; set; }
+
+    /// <summary>
+    /// Canonical dispatch key for ActionKey-based routing (e.g. "execute_as_safe_shell",
+    /// "cu_enumerate_windows").  For built-in tools this mirrors the tool name;
+    /// for module tools it is the prefixed name.  <c>null</c> on legacy jobs
+    /// created before ActionKey was introduced — the pipeline falls back to
+    /// <see cref="ActionType"/> enum dispatch for those.
+    /// </summary>
+    public string? ActionKey { get; set; }
+
     public Guid? ResourceId { get; set; }
 
     // ── Shell type (for shell execution actions) ──────────────────

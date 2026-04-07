@@ -2076,7 +2076,7 @@ public static class CliDispatcher
             channelId,
             new SubmitAgentJobRequest(
                 actionType,
-                resourceId,
+                ResourceId: resourceId,
                 AgentId: agentId,
                 TranscriptionModelId: modelId,
                 Language: language,

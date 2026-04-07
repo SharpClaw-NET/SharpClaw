@@ -12,6 +12,7 @@ using SharpClaw.Application.API.Handlers;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Persistence;
@@ -146,6 +147,9 @@ try
     builder.Services.AddScoped<BotIntegrationService>();
     builder.Services.AddScoped<BotMessageSenderService>();
 
+    // Module system
+    builder.Services.AddSingleton<ModuleRegistry>();
+
     // Document, spreadsheet & desktop awareness services
     builder.Services.AddScoped<DocumentSessionService>();
     builder.Services.AddScoped<NativeApplicationService>();
@@ -205,6 +209,61 @@ try
     // Initialize infrastructure (loads persisted data into InMemory DB)
     await app.Services.InitializeInfrastructureAsync();
 
+    // Initialize loaded modules in dependency order (providers before consumers).
+    var registry = app.Services.GetRequiredService<ModuleRegistry>();
+    var initOrder = registry.GetInitializationOrder(out var excludedModules);
+
+    // Unregister modules excluded during dependency resolution (missing deps, cycles).
+    foreach (var (moduleId, reason) in excludedModules)
+    {
+        Log.Warning("Module '{ModuleId}' excluded from initialization: {Reason}", moduleId, reason);
+        registry.Unregister(moduleId);
+    }
+
+    // Track contracts that became unavailable due to runtime init failures
+    // so that downstream dependents can be cascade-skipped.
+    var failedContracts = new HashSet<string>(StringComparer.Ordinal);
+
+    foreach (var moduleId in initOrder)
+    {
+        var module = registry.GetModule(moduleId);
+        if (module is null) continue;
+
+        // Check if any required (non-optional) contract's provider failed at runtime.
+        var cascadeMiss = module.RequiredContracts
+            .Where(r => !r.Optional && failedContracts.Contains(r.ContractName))
+            .Select(r => r.ContractName)
+            .ToList();
+
+        if (cascadeMiss.Count > 0)
+        {
+            Log.Warning(
+                "Module '{ModuleId}' skipped — depends on contract(s) whose provider failed: {Contracts}",
+                moduleId, string.Join(", ", cascadeMiss));
+
+            // Poison this module's own exports so dependents cascade too.
+            foreach (var export in module.ExportedContracts)
+                failedContracts.Add(export.ContractName);
+
+            registry.Unregister(moduleId);
+            continue;
+        }
+
+        try
+        {
+            await module.InitializeAsync(app.Services, CancellationToken.None);
+        }
+        catch (Exception ex)
+        {
+            Log.Error(ex, "Module '{ModuleId}' failed to initialize — unregistering", moduleId);
+
+            foreach (var export in module.ExportedContracts)
+                failedContracts.Add(export.ContractName);
+
+            registry.Unregister(moduleId);
+        }
+    }
+
     // Seed mk8.shell base env on first startup
     Mk8GlobalEnv.Load();
 
@@ -240,6 +299,19 @@ try
     app.MapTranscriptionStreaming();
 
     app.Lifetime.ApplicationStopping.Register(apiKeyProvider.Cleanup);
+
+    // Module lifecycle: graceful shutdown
+    app.Lifetime.ApplicationStopping.Register(() =>
+    {
+        foreach (var module in registry.GetAllModules())
+        {
+            try { module.ShutdownAsync().GetAwaiter().GetResult(); }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Module '{ModuleId}' shutdown error", module.Id);
+            }
+        }
+    });
 
     var urls = string.Join(", ", app.Urls);
     Log.Information("SharpClaw API listening on {Urls}", urls);

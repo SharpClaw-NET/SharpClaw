@@ -8,6 +8,7 @@ namespace SharpClaw.Contracts.DTOs.AgentActions;
 
 public sealed record SubmitAgentJobRequest(
 AgentActionType ActionType,
+string? ActionKey = null,
 Guid? ResourceId = null,
 Guid? AgentId = null,
 Guid? CallerAgentId = null,
@@ -33,6 +34,7 @@ Guid Id,
 Guid ChannelId,
 Guid AgentId,
 AgentActionType ActionType,
+string? ActionKey,
 Guid? ResourceId,
 AgentJobStatus Status,
 PermissionClearance EffectiveClearance,
@@ -71,6 +73,7 @@ public sealed record AgentJobSummaryResponse(
     Guid ChannelId,
     Guid AgentId,
     AgentActionType ActionType,
+    string? ActionKey,
     Guid? ResourceId,
     AgentJobStatus Status,
     DateTimeOffset CreatedAt,

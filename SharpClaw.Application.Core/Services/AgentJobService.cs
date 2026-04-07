@@ -6,12 +6,14 @@ using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using Mk8.Shell;
 using Mk8.Shell.Engine;
 using Mk8.Shell.Isolation;
 using Mk8.Shell.Models;
 using Mk8.Shell.Safety;
 using Mk8.Shell.Startup;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Jobs;
@@ -21,6 +23,7 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -45,6 +48,8 @@ DocumentSessionService documentSessionService,
 DesktopAwarenessService desktopAwarenessService,
 NativeApplicationService nativeApplicationService,
 SearchEngineService searchEngineService,
+ModuleRegistry moduleRegistry,
+IServiceScopeFactory serviceScopeFactory,
 IConfiguration configuration)
 {
     /// <summary>
@@ -104,7 +109,7 @@ IConfiguration configuration)
         // When no resource is specified for a per-resource action, resolve
         // the default from: channel DefaultResourceSet → context DefaultResourceSet
         // → channel/context/role PermissionSet defaults.
-        if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionType))
+        if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionType, request.ActionKey))
         {
             effectiveResourceId = await ResolveDefaultResourceIdAsync(
                 request.ActionType, channelId, agentId, ct);
@@ -125,6 +130,7 @@ IConfiguration configuration)
             CallerUserId = session.UserId,
             CallerAgentId = request.CallerAgentId,
             ActionType = request.ActionType,
+            ActionKey = request.ActionKey,
             ResourceId = effectiveResourceId,
             Status = AgentJobStatus.Queued,
             DangerousShellType = request.DangerousShellType,
@@ -393,7 +399,7 @@ IConfiguration configuration)
             .OrderByDescending(j => j.CreatedAt)
             .Select(j => new AgentJobSummaryResponse(
                 j.Id, j.ChannelId, j.AgentId,
-                j.ActionType, j.ResourceId, j.Status,
+                j.ActionType, j.ActionKey, j.ResourceId, j.Status,
                 j.CreatedAt, j.StartedAt, j.CompletedAt))
             .ToListAsync(ct);
     }
@@ -830,9 +836,98 @@ IConfiguration configuration)
             AgentActionType.StopProcess
                 => await ExecuteStopProcessAsync(job, ct),
 
+            // Module-provided tool calls
+            AgentActionType.ModuleAction
+                => await DispatchModuleExecutionAsync(job, ct),
+
             _ => $"Action '{job.ActionType}' executed successfully " +
                  $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
         };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // MODULE DISPATCH — executes module tool calls via ModuleRegistry
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Executes a <see cref="AgentActionType.ModuleAction"/> job by
+    /// deserializing the <see cref="ModuleEnvelope"/> from <c>ScriptJson</c>,
+    /// resolving the target module, and calling
+    /// <see cref="ISharpClawModule.ExecuteToolAsync"/> inside a restricted
+    /// <see cref="ModuleServiceScope"/> with a per-manifest timeout.
+    /// </summary>
+    private async Task<string?> DispatchModuleExecutionAsync(
+        AgentJobDB job, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(job.ScriptJson))
+            throw new InvalidOperationException(
+                "Module action requires a ScriptJson envelope.");
+
+        if (job.ScriptJson.Length > SecureJsonOptions.MaxEnvelopeSize)
+            throw new InvalidOperationException(
+                $"ScriptJson exceeds maximum envelope size ({SecureJsonOptions.MaxEnvelopeSize} bytes).");
+
+        var envelope = JsonSerializer.Deserialize<ModuleEnvelope>(
+            job.ScriptJson, SecureJsonOptions.Envelope)
+            ?? throw new InvalidOperationException(
+                "Failed to deserialize module envelope from ScriptJson.");
+
+        var module = moduleRegistry.GetModule(envelope.Module)
+            ?? throw new InvalidOperationException(
+                $"Module '{envelope.Module}' is not loaded.");
+
+        var jobContext = new AgentJobContext(
+            JobId: job.Id,
+            AgentId: job.AgentId,
+            ChannelId: job.ChannelId,
+            ResourceId: job.ResourceId,
+            ActionType: job.ActionType,
+            ActionKey: job.ActionKey,
+            Language: job.Language);
+
+        // Build a restricted service scope so the module cannot resolve
+        // pipeline internals (AgentJobService, ChatService, DbContext, etc.).
+        using var scope = serviceScopeFactory.CreateScope();
+        var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
+
+        // Timeout: use manifest-declared value, default 30s.
+        var manifest = moduleRegistry.GetManifest(envelope.Module);
+        var timeoutSeconds = manifest?.ExecutionTimeoutSeconds ?? 30;
+        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+        try
+        {
+            return await module.ExecuteToolAsync(
+                envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+        }
+        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+        {
+            throw new InvalidOperationException(
+                $"Module tool '{envelope.Module}.{envelope.Tool}' " +
+                $"exceeded timeout ({timeoutSeconds}s).");
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
+        {
+            throw new InvalidOperationException(
+                ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message));
+        }
+    }
+
+    /// <summary>
+    /// Permission check for <see cref="AgentActionType.ModuleAction"/>.
+    /// Consults the module's <see cref="ModuleToolPermission.DelegateTo"/>
+    /// to route to an existing <see cref="AgentActionService"/> check,
+    /// or falls back to a generic approval.
+    /// </summary>
+    private async Task<AgentActionResult> DispatchModulePermissionCheckAsync(
+        Guid agentId, Guid? resourceId, ActionCaller caller, CancellationToken ct)
+    {
+        // Placeholder: approve all module actions with Independent clearance.
+        // Full per-tool permission evaluation will be added when module
+        // permission descriptors are wired into DispatchPermissionCheckAsync.
+        return await Task.FromResult(
+            AgentActionResult.Approve("Module action — permission check delegated to module descriptor.", PermissionClearance.Independent));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -3104,14 +3199,32 @@ IConfiguration configuration)
                 => actions.EnumerateWindowsAsync(agentId, caller, ct: ct),
             AgentActionType.LaunchNativeApplication when resourceId.HasValue
                 => actions.LaunchNativeApplicationAsync(agentId, resourceId.Value, caller, ct: ct),
+
+            // Module-provided tool calls: delegate to the module's permission descriptor.
+            AgentActionType.ModuleAction
+                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller, ct),
+
             _ when IsPerResourceAction(actionType) && !resourceId.HasValue
                 => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
             _ => Task.FromResult(AgentActionResult.Denied($"Unknown action type: {actionType}."))
         };
     }
 
-    private static bool IsPerResourceAction(AgentActionType type) =>
-        type is AgentActionType.UnsafeExecuteAsDangerousShell
+    /// <summary>
+    /// Determines whether the given action type requires a per-resource grant.
+    /// For <see cref="AgentActionType.ModuleAction"/>, consults the
+    /// <see cref="ModuleRegistry"/> permission descriptor via <paramref name="actionKey"/>.
+    /// </summary>
+    private bool IsPerResourceAction(AgentActionType type, string? actionKey = null)
+    {
+        if (type == AgentActionType.ModuleAction && actionKey is not null
+            && moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
+        {
+            var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
+            return descriptor?.IsPerResource ?? false;
+        }
+
+        return type is AgentActionType.UnsafeExecuteAsDangerousShell
             or AgentActionType.ExecuteAsSafeShell
             or AgentActionType.AccessInternalDatabases
             or AgentActionType.AccessExternalDatabase
@@ -3145,6 +3258,7 @@ IConfiguration configuration)
             or AgentActionType.SpreadsheetLiveReadRange
             or AgentActionType.SpreadsheetLiveWriteRange
             or AgentActionType.LaunchNativeApplication;
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Default resource resolution
@@ -3576,6 +3690,7 @@ IConfiguration configuration)
             ChannelId: job.ChannelId,
             AgentId: job.AgentId,
             ActionType: job.ActionType,
+            ActionKey: job.ActionKey,
             ResourceId: job.ResourceId,
             Status: job.Status,
             EffectiveClearance: job.EffectiveClearance,

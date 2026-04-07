@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Infrastructure.Models.Messages;
@@ -29,6 +30,7 @@ public sealed class ChatService(
     LocalModelService localModelService,
     HeaderTagProcessor headerTagProcessor,
     ThreadActivitySignal threadActivity,
+    ModuleRegistry moduleRegistry,
     IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
@@ -1079,40 +1081,45 @@ public sealed class ChatService(
     /// Returns the effective tool list for a chat call.  When a task
     /// context is present, task-specific tools (shared data, output,
     /// introspection, custom hooks) are appended to the standard set.
+    /// Module tools from <see cref="ModuleRegistry"/> are always appended.
     /// When a <paramref name="toolAwareness"/> filter is provided, only
     /// tools whose key is <see langword="true"/> or absent are kept.
     /// </summary>
-    private static IReadOnlyList<ChatToolDefinition> GetEffectiveTools(
+    private IReadOnlyList<ChatToolDefinition> GetEffectiveTools(
         TaskChatContext? taskContext, Dictionary<string, bool>? toolAwareness = null)
     {
-        IReadOnlyList<ChatToolDefinition> baseTools;
+        List<ChatToolDefinition> baseTools;
 
         if (taskContext is null)
         {
-            baseTools = AllTools;
+            baseTools = new List<ChatToolDefinition>(AllTools);
         }
         else
         {
             var store = TaskSharedData.Get(taskContext.InstanceId);
             if (store is null)
             {
-                baseTools = AllTools;
+                baseTools = new List<ChatToolDefinition>(AllTools);
             }
             else
             {
-                var tools = new List<ChatToolDefinition>(AllTools);
-                tools.AddRange(BuiltInTaskTools);
+                baseTools = new List<ChatToolDefinition>(AllTools);
+                baseTools.AddRange(BuiltInTaskTools);
 
                 // task_output only available when the task declares [AgentOutput]
                 if (store.AllowedOutputFormat is not null)
-                    tools.Add(TaskOutputToolDef);
+                    baseTools.Add(TaskOutputToolDef);
 
                 // Custom [ToolCall] hooks
-                tools.AddRange(store.CustomToolDefinitions);
-
-                baseTools = tools;
+                baseTools.AddRange(store.CustomToolDefinitions);
             }
         }
+
+        // Append module-provided tools so they participate in
+        // tool-awareness filtering and LLM tool schemas.
+        var moduleTools = moduleRegistry.GetAllToolDefinitions();
+        if (moduleTools.Count > 0)
+            baseTools.AddRange(moduleTools);
 
         if (toolAwareness is null or { Count: 0 })
             return baseTools;
@@ -1679,6 +1686,7 @@ public sealed class ChatService(
 
         return new SubmitAgentJobRequest(
             ActionType: parsed.ActionType,
+            ActionKey: parsed.ActionKey,
             ResourceId: resourceId,
             CallerAgentId: agentId,
             DangerousShellType: parsed.DangerousShellType,
@@ -1864,62 +1872,98 @@ public sealed class ChatService(
     /// Parses a native <see cref="ChatToolCall"/> into the internal
     /// <see cref="ParsedToolCall"/> representation. Returns <see langword="null"/>
     /// if the tool name is unrecognized or the arguments are malformed.
+    /// Falls back to <see cref="ModuleRegistry"/> for module-provided tools.
     /// </summary>
-    private static ParsedToolCall? ParseNativeToolCall(ChatToolCall toolCall)
+    private ParsedToolCall? ParseNativeToolCall(ChatToolCall toolCall)
     {
-        if (!ToolNameToActionType.TryGetValue(toolCall.Name, out var actionType))
-            return null;
+        if (ToolNameToActionType.TryGetValue(toolCall.Name, out var actionType))
+        {
+            try
+            {
+                Debug.WriteLine(
+                    $"[ParseToolCall] {toolCall.Name} (id={toolCall.Id}) args: {toolCall.ArgumentsJson}",
+                    "SharpClaw.CLI");
 
-        try
+                var payload = JsonSerializer.Deserialize<ToolCallPayload>(toolCall.ArgumentsJson, JsonOptions);
+                if (payload is null) return null;
+
+                Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
+                // TargetId is the generic "resourceId" alias for non-shell tools
+                resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
+
+                Debug.WriteLine(
+                    $"[ParseToolCall] {toolCall.Name} → resourceId={resourceId}, targetId={payload.TargetId}",
+                    "SharpClaw.CLI");
+
+                Guid? transcriptionModelId = Guid.TryParse(payload.TranscriptionModelId, out var tmid) ? tmid : null;
+
+                DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
+                    payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
+
+                // For non-shell/non-transcription actions, pass the full
+                // arguments JSON as ScriptJson so DispatchExecutionAsync
+                // can deserialize action-specific fields from it.
+                var scriptJson = actionType switch
+                {
+                    AgentActionType.ExecuteAsSafeShell
+                        => payload.Script is { } script ? script.GetRawText() : null,
+                    AgentActionType.UnsafeExecuteAsDangerousShell
+                        => payload.Command,
+                    _ => toolCall.ArgumentsJson,
+                };
+
+                return new ParsedToolCall(
+                    toolCall.Id,
+                    actionType,
+                    resourceId,
+                    payload.SandboxId,
+                    scriptJson,
+                    dangerousShell,
+                    actionType == AgentActionType.ExecuteAsSafeShell ? SafeShellType.Mk8Shell : null,
+                    transcriptionModelId,
+                    payload.Language,
+                    payload.WorkingDirectory);
+            }
+            catch (JsonException)
+            {
+                return null;
+            }
+        }
+
+        // ── Module tool fallback ────────────────────────────────
+        if (moduleRegistry.TryResolve(toolCall.Name, out var moduleId, out var toolName))
         {
             Debug.WriteLine(
-                $"[ParseToolCall] {toolCall.Name} (id={toolCall.Id}) args: {toolCall.ArgumentsJson}",
+                $"[ParseToolCall] Module tool: {toolCall.Name} → {moduleId}.{toolName}",
                 "SharpClaw.CLI");
 
-            var payload = JsonSerializer.Deserialize<ToolCallPayload>(toolCall.ArgumentsJson, JsonOptions);
-            if (payload is null) return null;
+            // Build the module envelope as ScriptJson so DispatchModuleExecutionAsync
+            // can deserialize it on the job pipeline side.
+            var envelope = JsonSerializer.Serialize(
+                new { module = moduleId, tool = toolName, @params = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}").RootElement },
+                SecureJsonOptions.Envelope);
 
-            Guid? resourceId = Guid.TryParse(payload.ResourceId, out var rid) ? rid : null;
-            // TargetId is the generic "resourceId" alias for non-shell tools
-            resourceId ??= Guid.TryParse(payload.TargetId, out var tid) ? tid : null;
-
-            Debug.WriteLine(
-                $"[ParseToolCall] {toolCall.Name} → resourceId={resourceId}, targetId={payload.TargetId}",
-                "SharpClaw.CLI");
-
-            Guid? transcriptionModelId = Guid.TryParse(payload.TranscriptionModelId, out var tmid) ? tmid : null;
-
-            DangerousShellType? dangerousShell = Enum.TryParse<DangerousShellType>(
-                payload.ShellType, ignoreCase: true, out var ds) ? ds : null;
-
-            // For non-shell/non-transcription actions, pass the full
-            // arguments JSON as ScriptJson so DispatchExecutionAsync
-            // can deserialize action-specific fields from it.
-            var scriptJson = actionType switch
+            // Attempt to extract resourceId from the arguments (same convention).
+            Guid? modResourceId = null;
+            try
             {
-                AgentActionType.ExecuteAsSafeShell
-                    => payload.Script is { } script ? script.GetRawText() : null,
-                AgentActionType.UnsafeExecuteAsDangerousShell
-                    => payload.Command,
-                _ => toolCall.ArgumentsJson,
-            };
+                using var doc = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}");
+                if (doc.RootElement.TryGetProperty("resource_id", out var rp)
+                    && Guid.TryParse(rp.GetString(), out var mrid))
+                    modResourceId = mrid;
+            }
+            catch (JsonException) { /* non-critical */ }
 
             return new ParsedToolCall(
                 toolCall.Id,
-                actionType,
-                resourceId,
-                payload.SandboxId,
-                scriptJson,
-                dangerousShell,
-                actionType == AgentActionType.ExecuteAsSafeShell ? SafeShellType.Mk8Shell : null,
-                transcriptionModelId,
-                payload.Language,
-                payload.WorkingDirectory);
+                AgentActionType.ModuleAction,
+                modResourceId,
+                SandboxId: null,
+                ScriptJson: envelope,
+                ActionKey: toolCall.Name);
         }
-        catch (JsonException)
-        {
-            return null;
-        }
+
+        return null;
     }
 
     /// <summary>
@@ -3277,7 +3321,8 @@ public sealed class ChatService(
         Guid? TranscriptionModelId = null,
         string? Language = null,
         string? WorkingDirectory = null,
-        string? RawJson = null);
+        string? RawJson = null,
+        string? ActionKey = null);
 
     private sealed class ToolCallPayload
     {
