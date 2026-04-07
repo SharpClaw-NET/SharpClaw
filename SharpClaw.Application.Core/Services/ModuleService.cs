@@ -1,0 +1,301 @@
+using System.Text.Json;
+using System.Text.Json.Nodes;
+
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+
+using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Infrastructure.Models;
+using SharpClaw.Contracts.Modules;
+using SharpClaw.Infrastructure.Persistence;
+
+namespace SharpClaw.Application.Services;
+
+/// <summary>
+/// Manages module lifecycle: listing, enabling, and disabling bundled modules.
+/// Updates both the database and the <c>.modules.env</c> configuration file.
+/// </summary>
+public sealed class ModuleService(
+    SharpClawDbContext db,
+    ModuleLoader loader,
+    ModuleRegistry registry,
+    ILogger<ModuleService> logger)
+{
+    // ═══════════════════════════════════════════════════════════════
+    // Queries
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>List all bundled modules with their current state.</summary>
+    public async Task<IReadOnlyList<ModuleStateResponse>> ListAsync(CancellationToken ct = default)
+    {
+        var states = await db.ModuleStates
+            .ToDictionaryAsync(s => s.ModuleId, StringComparer.Ordinal, ct);
+
+        var result = new List<ModuleStateResponse>();
+        foreach (var module in loader.GetAllBundled())
+        {
+            states.TryGetValue(module.Id, out var state);
+            var manifest = loader.GetManifest(module.Id);
+            result.Add(ToResponse(module, state, manifest));
+        }
+
+        return result.OrderBy(r => r.DisplayName).ToList();
+    }
+
+    /// <summary>Get state for a single module.</summary>
+    public async Task<ModuleStateResponse?> GetStateAsync(string moduleId, CancellationToken ct = default)
+    {
+        var module = loader.GetBundledModule(moduleId);
+        if (module is null) return null;
+
+        var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
+        var manifest = loader.GetManifest(moduleId);
+        return ToResponse(module, state, manifest);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Enable / Disable
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Enable a module. Registers it with the <see cref="ModuleRegistry"/>,
+    /// runs initialization, updates DB, and writes <c>.modules.env</c>.
+    /// </summary>
+    public async Task<ModuleStateResponse> EnableAsync(
+        string moduleId, IServiceProvider rootServices, CancellationToken ct = default)
+    {
+        var module = loader.GetBundledModule(moduleId)
+            ?? throw new ArgumentException($"Unknown module: {moduleId}");
+
+        // Update DB
+        var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
+        var manifest = loader.GetManifest(moduleId);
+
+        if (state is null)
+        {
+            state = new ModuleStateDB
+            {
+                ModuleId = moduleId,
+                Enabled = true,
+                Version = manifest?.Version
+            };
+            db.ModuleStates.Add(state);
+        }
+        else
+        {
+            state.Enabled = true;
+            state.Version = manifest?.Version;
+        }
+        await db.SaveChangesAsync(ct);
+
+        // Write .modules.env
+        await WriteModulesEnvAsync(ct);
+
+        // Register + initialize if not already active
+        if (registry.GetModule(moduleId) is null)
+        {
+            try
+            {
+                registry.Register(module);
+
+                if (manifest is not null)
+                    registry.CacheManifest(moduleId, manifest);
+
+                // Check unsatisfied dependencies before init
+                var unsatisfied = registry.GetUnsatisfiedRequirements(moduleId);
+                if (unsatisfied.Count > 0)
+                {
+                    var names = string.Join(", ", unsatisfied.Select(r => r.ContractName));
+                    registry.Unregister(moduleId);
+                    throw new InvalidOperationException(
+                        $"Module '{moduleId}' has unsatisfied contract dependencies: {names}");
+                }
+
+                await module.InitializeAsync(rootServices, ct);
+            }
+            catch
+            {
+                // Rollback: unregister if init failed
+                registry.Unregister(moduleId);
+                throw;
+            }
+        }
+
+        return ToResponse(module, state, manifest);
+    }
+
+    /// <summary>
+    /// Disable a module. Shuts it down, unregisters from <see cref="ModuleRegistry"/>,
+    /// updates DB, and writes <c>.modules.env</c>.
+    /// </summary>
+    public async Task<ModuleStateResponse> DisableAsync(string moduleId, CancellationToken ct = default)
+    {
+        var module = loader.GetBundledModule(moduleId)
+            ?? throw new ArgumentException($"Unknown module: {moduleId}");
+
+        // Check that no other enabled module depends on this module's contracts
+        var exportedNames = module.ExportedContracts.Select(e => e.ContractName).ToHashSet(StringComparer.Ordinal);
+        if (exportedNames.Count > 0)
+        {
+            foreach (var other in registry.GetAllModules())
+            {
+                if (other.Id == moduleId) continue;
+                var deps = other.RequiredContracts
+                    .Where(r => !r.Optional && exportedNames.Contains(r.ContractName))
+                    .Select(r => r.ContractName)
+                    .ToList();
+                if (deps.Count > 0)
+                    throw new InvalidOperationException(
+                        $"Cannot disable '{moduleId}': module '{other.Id}' depends on contract(s) {string.Join(", ", deps)}.");
+            }
+        }
+
+        // Shutdown + unregister
+        if (registry.GetModule(moduleId) is not null)
+        {
+            try { await module.ShutdownAsync(); }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Module '{ModuleId}' shutdown error during disable", moduleId);
+            }
+            registry.Unregister(moduleId);
+        }
+
+        // Update DB
+        var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
+        var manifest = loader.GetManifest(moduleId);
+
+        if (state is null)
+        {
+            state = new ModuleStateDB
+            {
+                ModuleId = moduleId,
+                Enabled = false,
+                Version = manifest?.Version
+            };
+            db.ModuleStates.Add(state);
+        }
+        else
+        {
+            state.Enabled = false;
+        }
+        await db.SaveChangesAsync(ct);
+
+        // Write .modules.env
+        await WriteModulesEnvAsync(ct);
+
+        return ToResponse(module, state, manifest);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Startup helpers (called from Program.cs via a scope)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Synchronise DB state from the current <see cref="Microsoft.Extensions.Configuration.IConfiguration"/>.
+    /// Called once at startup. The <c>.modules.env</c> file is the authoritative
+    /// source; DB records are created or updated to match.
+    /// Returns the set of module IDs that should be enabled.
+    /// </summary>
+    public async Task<HashSet<string>> SyncStateFromConfigAsync(
+        Microsoft.Extensions.Configuration.IConfiguration config, CancellationToken ct = default)
+    {
+        var enabledSet = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var module in loader.GetAllBundled())
+        {
+            var enabled = ModuleLoader.IsEnabledInConfig(module.Id, config);
+            var manifest = loader.GetManifest(module.Id);
+
+            var state = await db.ModuleStates.FirstOrDefaultAsync(
+                s => s.ModuleId == module.Id, ct);
+
+            if (state is null)
+            {
+                state = new ModuleStateDB
+                {
+                    ModuleId = module.Id,
+                    Enabled = enabled,
+                    Version = manifest?.Version
+                };
+                db.ModuleStates.Add(state);
+            }
+            else
+            {
+                state.Enabled = enabled;
+                state.Version = manifest?.Version;
+            }
+
+            if (enabled)
+                enabledSet.Add(module.Id);
+        }
+
+        await db.SaveChangesAsync(ct);
+        return enabledSet;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // .modules.env persistence
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Rewrite the <c>.modules.env</c> file to reflect the current DB state
+    /// of all bundled modules.
+    /// </summary>
+    private async Task WriteModulesEnvAsync(CancellationToken ct)
+    {
+        var states = await db.ModuleStates.ToDictionaryAsync(
+            s => s.ModuleId, StringComparer.Ordinal, ct);
+
+        var modulesObj = new JsonObject();
+        foreach (var module in loader.GetAllBundled().OrderBy(m => m.Id))
+        {
+            states.TryGetValue(module.Id, out var state);
+            modulesObj[module.Id] = state?.Enabled ?? false;
+        }
+
+        var root = new JsonObject { ["Modules"] = modulesObj };
+        var json = root.ToJsonString(new JsonSerializerOptions { WriteIndented = true });
+
+        var path = ResolveModulesEnvPath();
+        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
+        await File.WriteAllTextAsync(path, json, ct);
+    }
+
+    internal static string ResolveModulesEnvPath()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,
+            "Environment", ".modules.env");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Mapping
+    // ═══════════════════════════════════════════════════════════════
+
+    private static ModuleStateResponse ToResponse(
+        ISharpClawModule module, ModuleStateDB? state, ModuleManifest? manifest)
+    {
+        return new ModuleStateResponse(
+            ModuleId: module.Id,
+            DisplayName: module.DisplayName,
+            ToolPrefix: module.ToolPrefix,
+            Enabled: state?.Enabled ?? false,
+            Version: manifest?.Version ?? state?.Version,
+            Registered: state is not null,
+            CreatedAt: state?.CreatedAt,
+            UpdatedAt: state?.UpdatedAt);
+    }
+}
+
+/// <summary>Module state as returned by the API.</summary>
+public sealed record ModuleStateResponse(
+    string ModuleId,
+    string DisplayName,
+    string ToolPrefix,
+    bool Enabled,
+    string? Version,
+    bool Registered,
+    DateTimeOffset? CreatedAt,
+    DateTimeOffset? UpdatedAt);

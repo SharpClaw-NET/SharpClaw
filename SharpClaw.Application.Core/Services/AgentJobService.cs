@@ -140,7 +140,7 @@ IConfiguration configuration)
 
         var caller = new ActionCaller(session.UserId, request.CallerAgentId);
         var result = await DispatchPermissionCheckAsync(
-            agentId, job.ActionType, job.ResourceId, caller, ct);
+            agentId, job.ActionType, job.ResourceId, caller, ct, job.ActionKey);
 
         job.EffectiveClearance = result.EffectiveClearance;
 
@@ -160,7 +160,7 @@ IConfiguration configuration)
                 if (await HasChannelAuthorizationAsync(
                         channelId, job.ActionType,
                         job.ResourceId, result.EffectiveClearance,
-                        session.UserId, ct))
+                        session.UserId, ct, job.ActionKey))
                 {
                     AddLog(job, "Pre-authorized by channel/context permission set.");
                     await ExecuteJobAsync(job, ct);
@@ -422,8 +422,9 @@ IConfiguration configuration)
     /// </summary>
     public Task<AgentActionResult> CheckPermissionAsync(
         Guid agentId, AgentActionType actionType, Guid? resourceId,
-        ActionCaller caller, CancellationToken ct = default)
-        => DispatchPermissionCheckAsync(agentId, actionType, resourceId, caller, ct);
+        ActionCaller caller, CancellationToken ct = default,
+        string? actionKey = null)
+        => DispatchPermissionCheckAsync(agentId, actionType, resourceId, caller, ct, actionKey);
 
     // ═══════════════════════════════════════════════════════════════
     // Transcription: segments & streaming
@@ -819,19 +820,50 @@ IConfiguration configuration)
     }
 
     /// <summary>
-    /// Permission check for <see cref="AgentActionType.ModuleAction"/>.
-    /// Consults the module's <see cref="ModuleToolPermission.DelegateTo"/>
-    /// to route to an existing <see cref="AgentActionService"/> check,
-    /// or falls back to a generic approval.
+    /// Permission check for module-provided tool calls.
+    /// Resolves the module tool's <see cref="ModuleToolPermission"/> descriptor
+    /// and evaluates it:
+    /// <list type="bullet">
+    ///   <item>If <see cref="ModuleToolPermission.Check"/> is set, calls it directly.</item>
+    ///   <item>If <see cref="ModuleToolPermission.DelegateTo"/> is set, routes to the
+    ///         named <see cref="AgentActionService"/> method via the delegation map.</item>
+    ///   <item>Otherwise, the action is denied (no permission descriptor = no access).</item>
+    /// </list>
     /// </summary>
     private async Task<AgentActionResult> DispatchModulePermissionCheckAsync(
-        Guid agentId, Guid? resourceId, ActionCaller caller, CancellationToken ct)
+        Guid agentId, Guid? resourceId, ActionCaller caller,
+        string? actionKey, CancellationToken ct)
     {
-        // Placeholder: approve all module actions with Independent clearance.
-        // Full per-tool permission evaluation will be added when module
-        // permission descriptors are wired into DispatchPermissionCheckAsync.
-        return await Task.FromResult(
-            AgentActionResult.Approve("Module action — permission check delegated to module descriptor.", PermissionClearance.Independent));
+        if (string.IsNullOrWhiteSpace(actionKey))
+            return AgentActionResult.Denied("Module action requires an ActionKey to resolve permissions.");
+
+        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
+            return AgentActionResult.Denied($"No module registered for tool '{actionKey}'.");
+
+        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
+        if (descriptor is null)
+            return AgentActionResult.Denied($"Module tool '{actionKey}' has no permission descriptor.");
+
+        if (descriptor.IsPerResource && !resourceId.HasValue)
+            return AgentActionResult.Denied($"ResourceId is required for module tool '{actionKey}'.");
+
+        // Direct callback takes priority.
+        if (descriptor.Check is not null)
+            return await descriptor.Check(agentId, resourceId, caller, ct);
+
+        // Delegate to a named AgentActionService method.
+        if (!string.IsNullOrWhiteSpace(descriptor.DelegateTo))
+        {
+            var result = actions.TryEvaluateByDelegateNameAsync(
+                descriptor.DelegateTo, agentId, resourceId, caller, ct);
+            if (result is not null) return await result;
+
+            return AgentActionResult.Denied(
+                $"Module tool '{actionKey}' delegates to '{descriptor.DelegateTo}' "
+                + "which is not a recognised permission check method.");
+        }
+
+        return AgentActionResult.Denied($"Module tool '{actionKey}' has no permission check configured.");
     }
 
     /// <summary>
@@ -1920,7 +1952,8 @@ IConfiguration configuration)
 
     private Task<AgentActionResult> DispatchPermissionCheckAsync(
         Guid agentId, AgentActionType actionType, Guid? resourceId,
-        ActionCaller caller, CancellationToken ct)
+        ActionCaller caller, CancellationToken ct,
+        string? actionKey = null)
     {
         return actionType switch
         {
@@ -1969,12 +2002,13 @@ IConfiguration configuration)
                 => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
             // Module-provided tool calls: delegate to the module's permission descriptor.
             AgentActionType.ModuleAction
-                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller, ct),
+                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller, actionKey, ct),
 
             // Module fallback: legacy enum values whose core handler was removed
             // route to the owning module's permission check via enum-name derivation.
             _ when TryResolveModuleByActionType(actionType)
-                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller, ct),
+                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller,
+                    actionKey ?? PascalToSnakeCase(actionType.ToString()), ct),
 
             _ when IsPerResourceAction(actionType) && !resourceId.HasValue
                 => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
@@ -2085,8 +2119,6 @@ IConfiguration configuration)
 
         var permissionSets = await db.PermissionSets
             .Where(p => permissionSetIds.Contains(p.Id))
-            .Include(p => p.DefaultDangerousShellAccess)
-            .Include(p => p.DefaultSafeShellAccess)
             .Include(p => p.DefaultInternalDatabaseAccess)
             .Include(p => p.DefaultExternalDatabaseAccess)
             .Include(p => p.DefaultWebsiteAccess)
@@ -2140,8 +2172,6 @@ IConfiguration configuration)
     private static Guid? ExtractFromDefaultResourceSet(
         DefaultResourceSetDB drs, AgentActionType actionType) => actionType switch
     {
-        AgentActionType.UnsafeExecuteAsDangerousShell => drs.DangerousShellResourceId,
-        AgentActionType.ExecuteAsSafeShell => drs.SafeShellResourceId,
         AgentActionType.AccessInternalDatabases => drs.InternalDatabaseResourceId,
         AgentActionType.AccessExternalDatabase => drs.ExternalDatabaseResourceId,
         AgentActionType.AccessWebsite => drs.WebsiteResourceId,
@@ -2178,10 +2208,6 @@ IConfiguration configuration)
     private static Guid? ExtractDefaultResourceId(
         PermissionSetDB permissionSet, AgentActionType actionType) => actionType switch
     {
-        AgentActionType.UnsafeExecuteAsDangerousShell
-            => permissionSet.DefaultDangerousShellAccess?.SystemUserId,
-        AgentActionType.ExecuteAsSafeShell
-            => permissionSet.DefaultSafeShellAccess?.ContainerId,
         AgentActionType.AccessInternalDatabases
             => permissionSet.DefaultInternalDatabaseAccess?.InternalDatabaseId,
         AgentActionType.AccessExternalDatabase
@@ -2260,7 +2286,8 @@ IConfiguration configuration)
         Guid? resourceId,
         PermissionClearance agentClearance,
         Guid? callerUserId,
-        CancellationToken ct)
+        CancellationToken ct,
+        string? actionKey = null)
     {
         // Level 3 is agent-only — no user/channel pre-auth applies.
         if (agentClearance is not (PermissionClearance.ApprovedBySameLevelUser
@@ -2283,7 +2310,7 @@ IConfiguration configuration)
                 return false;
 
             var userPs = await actions.LoadPermissionSetAsync(userPsId, ct);
-            if (userPs is null || !HasMatchingGrant(userPs, actionType, resourceId))
+            if (userPs is null || !HasMatchingGrant(userPs, actionType, resourceId, actionKey))
                 return false;
         }
 
@@ -2296,7 +2323,7 @@ IConfiguration configuration)
         if (ch.PermissionSetId is { } chPsId)
         {
             var chPs = await actions.LoadPermissionSetAsync(chPsId, ct);
-            if (chPs is not null && HasMatchingGrant(chPs, actionType, resourceId))
+            if (chPs is not null && HasMatchingGrant(chPs, actionType, resourceId, actionKey))
                 return true;
         }
 
@@ -2304,7 +2331,7 @@ IConfiguration configuration)
         if (ch.AgentContext?.PermissionSetId is { } ctxPsId)
         {
             var ctxPs = await actions.LoadPermissionSetAsync(ctxPsId, ct);
-            if (ctxPs is not null && HasMatchingGrant(ctxPs, actionType, resourceId))
+            if (ctxPs is not null && HasMatchingGrant(ctxPs, actionType, resourceId, actionKey))
                 return true;
         }
 
@@ -2317,26 +2344,20 @@ IConfiguration configuration)
     /// actions).  Wildcard grants (<see cref="WellKnownIds.AllResources"/>)
     /// match any resource.  The clearance value on the grant is
     /// irrelevant — only existence matters.
+    /// For module actions, resolves the tool's <see cref="ModuleToolPermission.DelegateTo"/>
+    /// and checks the corresponding grant collection.
     /// </summary>
-    private static bool HasMatchingGrant(
-        PermissionSetDB ps, AgentActionType actionType, Guid? resourceId) => actionType switch
+    private bool HasMatchingGrant(
+        PermissionSetDB ps, AgentActionType actionType, Guid? resourceId,
+        string? actionKey = null) => actionType switch
     {
         // ── Global flags ──────────────────────────────────────────
         AgentActionType.CreateSubAgent    => ps.CanCreateSubAgents,
-        AgentActionType.CreateContainer   => ps.CanCreateContainers,
         AgentActionType.RegisterDatabase => ps.CanRegisterDatabases,
         AgentActionType.AccessLocalhostInBrowser => ps.CanAccessLocalhostInBrowser,
         AgentActionType.AccessLocalhostCli       => ps.CanAccessLocalhostCli,
 
         // ── Per-resource grants ───────────────────────────────────
-        AgentActionType.UnsafeExecuteAsDangerousShell when resourceId.HasValue
-            => ps.DangerousShellAccesses.Any(a =>
-                a.SystemUserId == resourceId || a.SystemUserId == WellKnownIds.AllResources),
-
-        AgentActionType.ExecuteAsSafeShell when resourceId.HasValue
-            => ps.SafeShellAccesses.Any(a =>
-                a.ContainerId == resourceId || a.ContainerId == WellKnownIds.AllResources),
-
         AgentActionType.AccessInternalDatabases when resourceId.HasValue
             => ps.InternalDatabaseAccesses.Any(a =>
                 a.InternalDatabaseId == resourceId || a.InternalDatabaseId == WellKnownIds.AllResources),
@@ -2398,8 +2419,31 @@ IConfiguration configuration)
             => ps.BotIntegrationAccesses.Any(a =>
                 a.BotIntegrationId == resourceId || a.BotIntegrationId == WellKnownIds.AllResources),
 
+        // Module-provided tool calls: resolve the tool's DelegateTo and
+        // check the corresponding grant collection.
+        AgentActionType.ModuleAction when !string.IsNullOrWhiteSpace(actionKey)
+            => ResolveModuleGrantCheck(ps, actionKey, resourceId),
+        _ when !string.IsNullOrWhiteSpace(actionKey) && TryResolveModuleByActionType(actionType)
+            => ResolveModuleGrantCheck(ps, PascalToSnakeCase(actionType.ToString()), resourceId),
+
         _ => false,
     };
+
+    /// <summary>
+    /// Resolves a module tool's <see cref="ModuleToolPermission.DelegateTo"/>
+    /// and checks whether the permission set contains the corresponding grant.
+    /// </summary>
+    private bool ResolveModuleGrantCheck(PermissionSetDB ps, string actionKey, Guid? resourceId)
+    {
+        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
+            return false;
+
+        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
+        if (descriptor is null || string.IsNullOrWhiteSpace(descriptor.DelegateTo))
+            return false;
+
+        return AgentActionService.HasGrantByDelegateName(ps, descriptor.DelegateTo, resourceId);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Helpers

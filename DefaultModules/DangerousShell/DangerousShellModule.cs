@@ -16,7 +16,7 @@ namespace SharpClaw.Modules.DangerousShell;
 /// </summary>
 public sealed class DangerousShellModule : ISharpClawModule
 {
-    public string Id => "sharpclaw.dangerous-shell";
+    public string Id => "sharpclaw_dangerous_shell";
     public string DisplayName => "Dangerous Shell";
     public string ToolPrefix => "ds";
 
@@ -46,7 +46,7 @@ public sealed class DangerousShellModule : ISharpClawModule
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions()
     {
         var permission = new ModuleToolPermission(
-            IsPerResource: true, Check: null, DelegateTo: "AccessDangerousShellAsync");
+            IsPerResource: true, Check: null, DelegateTo: "UnsafeExecuteAsDangerousShellAsync");
 
         return
         [

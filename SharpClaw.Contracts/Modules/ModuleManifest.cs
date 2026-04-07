@@ -3,6 +3,16 @@ using System.Text.Json.Serialization;
 namespace SharpClaw.Contracts.Modules;
 
 /// <summary>
+/// JSON-compatible reference to a contract in a <c>module.json</c> manifest.
+/// Maps to the <c>exports</c>/<c>requires</c> array entries.
+/// </summary>
+public sealed record ModuleManifestContractRef(
+    [property: JsonPropertyName("contractName")] string ContractName,
+    [property: JsonPropertyName("serviceType")] string? ServiceType = null,
+    [property: JsonPropertyName("optional")] bool Optional = false
+);
+
+/// <summary>
 /// Strongly-typed representation of a module's <c>module.json</c> manifest.
 /// Deserialized with hardened <c>JsonSerializerOptions</c> (MaxDepth=8).
 /// </summary>
@@ -20,6 +30,6 @@ public sealed record ModuleManifest(
     [property: JsonPropertyName("enabled")] bool Enabled = true,
     [property: JsonPropertyName("defaultEnabled")] bool DefaultEnabled = true,
     [property: JsonPropertyName("executionTimeoutSeconds")] int ExecutionTimeoutSeconds = 60,
-    [property: JsonPropertyName("exports")] string[]? Exports = null,
-    [property: JsonPropertyName("requires")] string[]? Requires = null
+    [property: JsonPropertyName("exports")] ModuleManifestContractRef[]? Exports = null,
+    [property: JsonPropertyName("requires")] ModuleManifestContractRef[]? Requires = null
 );

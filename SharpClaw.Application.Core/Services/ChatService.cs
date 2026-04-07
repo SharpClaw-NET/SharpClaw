@@ -967,7 +967,8 @@ public sealed class ChatService(
                 {
                     // Check if the session user CAN approve
                     var canApprove = await CanSessionUserApproveAsync(
-                        agent.Id, jobRequest.ActionType, jobRequest.ResourceId, ct);
+                        agent.Id, jobRequest.ActionType, jobRequest.ResourceId, ct,
+                        jobRequest.ActionKey);
 
                     if (canApprove)
                     {
@@ -1061,14 +1062,14 @@ public sealed class ChatService(
     /// </summary>
     private async Task<bool> CanSessionUserApproveAsync(
         Guid agentId, AgentActionType actionType, Guid? resourceId,
-        CancellationToken ct)
+        CancellationToken ct, string? actionKey = null)
     {
         var userId = jobService.GetSessionUserId();
         if (userId is null) return false;
 
         var caller = new ActionCaller(UserId: userId);
         var result = await jobService.CheckPermissionAsync(
-            agentId, actionType, resourceId, caller, ct);
+            agentId, actionType, resourceId, caller, ct, actionKey);
 
         return result.Verdict == ClearanceVerdict.Approved;
     }
@@ -1771,7 +1772,8 @@ public sealed class ChatService(
                     && approvalCallback is not null)
                 {
                     var canApprove = await CanSessionUserApproveAsync(
-                        agentId, jobRequest.ActionType, jobRequest.ResourceId, ct);
+                        agentId, jobRequest.ActionType, jobRequest.ResourceId, ct,
+                        jobRequest.ActionKey);
 
                     if (canApprove)
                     {

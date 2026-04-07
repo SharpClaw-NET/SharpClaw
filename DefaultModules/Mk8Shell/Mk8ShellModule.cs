@@ -22,7 +22,7 @@ namespace SharpClaw.Modules.Mk8Shell;
 /// </summary>
 public sealed class Mk8ShellModule : ISharpClawModule
 {
-    public string Id => "sharpclaw.mk8shell";
+    public string Id => "sharpclaw_mk8shell";
     public string DisplayName => "mk8.shell";
     public string ToolPrefix => "mk8";
 

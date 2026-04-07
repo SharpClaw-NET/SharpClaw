@@ -493,6 +493,127 @@ public sealed class AgentActionService(SharpClawDbContext db)
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Module delegation (DelegateTo resolution)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Maps <see cref="Contracts.Modules.ModuleToolPermission.DelegateTo"/>
+    /// method-name strings to the corresponding permission evaluation.
+    /// Modules declare which existing permission check to reuse (e.g. a
+    /// shell module tool reuses <c>AccessContainerAsync</c>).
+    /// </summary>
+    private static readonly Dictionary<string, Func<AgentActionService, Guid, Guid?, ActionCaller, CancellationToken, Task<AgentActionResult>>>
+        DelegationMap = new(StringComparer.Ordinal)
+    {
+        // Global flags
+        ["CreateSubAgentAsync"] = (svc, agentId, _, caller, ct) => svc.CreateSubAgentAsync(agentId, caller, ct: ct),
+        ["CreateContainerAsync"] = (svc, agentId, _, caller, ct) => svc.CreateContainerAsync(agentId, caller, ct: ct),
+        ["RegisterDatabaseAsync"] = (svc, agentId, _, caller, ct) => svc.RegisterDatabaseAsync(agentId, caller, ct: ct),
+        ["AccessLocalhostInBrowserAsync"] = (svc, agentId, _, caller, ct) => svc.AccessLocalhostInBrowserAsync(agentId, caller, ct: ct),
+        ["AccessLocalhostCliAsync"] = (svc, agentId, _, caller, ct) => svc.AccessLocalhostCliAsync(agentId, caller, ct: ct),
+        ["ClickDesktopAsync"] = (svc, agentId, _, caller, ct) => svc.ClickDesktopAsync(agentId, caller, ct: ct),
+        ["TypeOnDesktopAsync"] = (svc, agentId, _, caller, ct) => svc.TypeOnDesktopAsync(agentId, caller, ct: ct),
+        ["ReadCrossThreadHistoryAsync"] = (svc, agentId, _, caller, ct) => svc.ReadCrossThreadHistoryAsync(agentId, caller, ct: ct),
+        ["CreateDocumentSessionAsync"] = (svc, agentId, _, caller, ct) => svc.CreateDocumentSessionAsync(agentId, caller, ct: ct),
+        ["EnumerateWindowsAsync"] = (svc, agentId, _, caller, ct) => svc.EnumerateWindowsAsync(agentId, caller, ct: ct),
+        ["FocusWindowAsync"] = (svc, agentId, _, caller, ct) => svc.FocusWindowAsync(agentId, caller, ct: ct),
+        ["CloseWindowAsync"] = (svc, agentId, _, caller, ct) => svc.CloseWindowAsync(agentId, caller, ct: ct),
+        ["ResizeWindowAsync"] = (svc, agentId, _, caller, ct) => svc.ResizeWindowAsync(agentId, caller, ct: ct),
+        ["SendHotkeyAsync"] = (svc, agentId, _, caller, ct) => svc.SendHotkeyAsync(agentId, caller, ct: ct),
+        ["ReadClipboardAsync"] = (svc, agentId, _, caller, ct) => svc.ReadClipboardAsync(agentId, caller, ct: ct),
+        ["WriteClipboardAsync"] = (svc, agentId, _, caller, ct) => svc.WriteClipboardAsync(agentId, caller, ct: ct),
+
+        // Per-resource
+        ["UnsafeExecuteAsDangerousShellAsync"] = (svc, agentId, resId, caller, ct) => svc.UnsafeExecuteAsDangerousShellAsync(agentId, resId!.Value, caller, ct: ct),
+        ["ExecuteAsSafeShellAsync"] = (svc, agentId, resId, caller, ct) => svc.ExecuteAsSafeShellAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessInternalDatabaseAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessInternalDatabaseAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessExternalDatabaseAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessExternalDatabaseAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessWebsiteAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessWebsiteAsync(agentId, resId!.Value, caller, ct: ct),
+        ["QuerySearchEngineAsync"] = (svc, agentId, resId, caller, ct) => svc.QuerySearchEngineAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessContainerAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessContainerAsync(agentId, resId!.Value, caller, ct: ct),
+        ["ManageAgentAsync"] = (svc, agentId, resId, caller, ct) => svc.ManageAgentAsync(agentId, resId!.Value, caller, ct: ct),
+        ["EditTaskAsync"] = (svc, agentId, resId, caller, ct) => svc.EditTaskAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessSkillAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessSkillAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessAudioDeviceAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessAudioDeviceAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessDisplayDeviceAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessDisplayDeviceAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessEditorSessionAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessEditorSessionAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessBotIntegrationAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessBotIntegrationAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessDocumentSessionAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessDocumentSessionAsync(agentId, resId!.Value, caller, ct: ct),
+        ["LaunchNativeApplicationAsync"] = (svc, agentId, resId, caller, ct) => svc.LaunchNativeApplicationAsync(agentId, resId!.Value, caller, ct: ct),
+    };
+
+    /// <summary>
+    /// Maps <see cref="Contracts.Modules.ModuleToolPermission.DelegateTo"/>
+    /// method-name strings to grant-existence checks against a
+    /// <see cref="PermissionSetDB"/>. Used by channel pre-authorization.
+    /// </summary>
+    private static readonly Dictionary<string, Func<PermissionSetDB, Guid?, bool>>
+        GrantCheckMap = new(StringComparer.Ordinal)
+    {
+        // Global flags (resourceId ignored)
+        ["CreateSubAgentAsync"] = (ps, _) => ps.CanCreateSubAgents,
+        ["CreateContainerAsync"] = (ps, _) => ps.CanCreateContainers,
+        ["RegisterDatabaseAsync"] = (ps, _) => ps.CanRegisterDatabases,
+        ["AccessLocalhostInBrowserAsync"] = (ps, _) => ps.CanAccessLocalhostInBrowser,
+        ["AccessLocalhostCliAsync"] = (ps, _) => ps.CanAccessLocalhostCli,
+        ["ClickDesktopAsync"] = (ps, _) => ps.CanClickDesktop,
+        ["TypeOnDesktopAsync"] = (ps, _) => ps.CanTypeOnDesktop,
+        ["ReadCrossThreadHistoryAsync"] = (ps, _) => ps.CanReadCrossThreadHistory,
+        ["CreateDocumentSessionAsync"] = (ps, _) => ps.CanCreateDocumentSessions,
+        ["EnumerateWindowsAsync"] = (ps, _) => ps.CanEnumerateWindows,
+        ["FocusWindowAsync"] = (ps, _) => ps.CanFocusWindow,
+        ["CloseWindowAsync"] = (ps, _) => ps.CanCloseWindow,
+        ["ResizeWindowAsync"] = (ps, _) => ps.CanResizeWindow,
+        ["SendHotkeyAsync"] = (ps, _) => ps.CanSendHotkey,
+        ["ReadClipboardAsync"] = (ps, _) => ps.CanReadClipboard,
+        ["WriteClipboardAsync"] = (ps, _) => ps.CanWriteClipboard,
+
+        // Per-resource
+        ["UnsafeExecuteAsDangerousShellAsync"] = (ps, rid) => ps.DangerousShellAccesses.Any(a => a.SystemUserId == rid || a.SystemUserId == WellKnownIds.AllResources),
+        ["ExecuteAsSafeShellAsync"] = (ps, rid) => ps.SafeShellAccesses.Any(a => a.ContainerId == rid || a.ContainerId == WellKnownIds.AllResources),
+        ["AccessInternalDatabaseAsync"] = (ps, rid) => ps.InternalDatabaseAccesses.Any(a => a.InternalDatabaseId == rid || a.InternalDatabaseId == WellKnownIds.AllResources),
+        ["AccessExternalDatabaseAsync"] = (ps, rid) => ps.ExternalDatabaseAccesses.Any(a => a.ExternalDatabaseId == rid || a.ExternalDatabaseId == WellKnownIds.AllResources),
+        ["AccessWebsiteAsync"] = (ps, rid) => ps.WebsiteAccesses.Any(a => a.WebsiteId == rid || a.WebsiteId == WellKnownIds.AllResources),
+        ["QuerySearchEngineAsync"] = (ps, rid) => ps.SearchEngineAccesses.Any(a => a.SearchEngineId == rid || a.SearchEngineId == WellKnownIds.AllResources),
+        ["AccessContainerAsync"] = (ps, rid) => ps.ContainerAccesses.Any(a => a.ContainerId == rid || a.ContainerId == WellKnownIds.AllResources),
+        ["ManageAgentAsync"] = (ps, rid) => ps.AgentPermissions.Any(a => a.AgentId == rid || a.AgentId == WellKnownIds.AllResources),
+        ["EditTaskAsync"] = (ps, rid) => ps.TaskPermissions.Any(a => a.ScheduledTaskId == rid || a.ScheduledTaskId == WellKnownIds.AllResources),
+        ["AccessSkillAsync"] = (ps, rid) => ps.SkillPermissions.Any(a => a.SkillId == rid || a.SkillId == WellKnownIds.AllResources),
+        ["AccessAudioDeviceAsync"] = (ps, rid) => ps.AudioDeviceAccesses.Any(a => a.AudioDeviceId == rid || a.AudioDeviceId == WellKnownIds.AllResources),
+        ["AccessDisplayDeviceAsync"] = (ps, rid) => ps.DisplayDeviceAccesses.Any(a => a.DisplayDeviceId == rid || a.DisplayDeviceId == WellKnownIds.AllResources),
+        ["AccessEditorSessionAsync"] = (ps, rid) => ps.EditorSessionAccesses.Any(a => a.EditorSessionId == rid || a.EditorSessionId == WellKnownIds.AllResources),
+        ["AccessBotIntegrationAsync"] = (ps, rid) => ps.BotIntegrationAccesses.Any(a => a.BotIntegrationId == rid || a.BotIntegrationId == WellKnownIds.AllResources),
+        ["AccessDocumentSessionAsync"] = (ps, rid) => ps.DocumentSessionAccesses.Any(a => a.DocumentSessionId == rid || a.DocumentSessionId == WellKnownIds.AllResources),
+        ["LaunchNativeApplicationAsync"] = (ps, rid) => ps.NativeApplicationAccesses.Any(a => a.NativeApplicationId == rid || a.NativeApplicationId == WellKnownIds.AllResources),
+    };
+
+    /// <summary>
+    /// Evaluates a permission check by delegate-method name. Returns
+    /// <c>null</c> if <paramref name="delegateName"/> is not a recognised
+    /// method name.
+    /// </summary>
+    public Task<AgentActionResult>? TryEvaluateByDelegateNameAsync(
+        string delegateName, Guid agentId, Guid? resourceId,
+        ActionCaller caller, CancellationToken ct = default)
+    {
+        return DelegationMap.TryGetValue(delegateName, out var factory)
+            ? factory(this, agentId, resourceId, caller, ct)
+            : null;
+    }
+
+    /// <summary>
+    /// Checks whether a <see cref="PermissionSetDB"/> contains a grant
+    /// that matches the given delegate-method name and optional resource ID.
+    /// Used by channel pre-authorization for module actions.
+    /// </summary>
+    public static bool HasGrantByDelegateName(
+        PermissionSetDB ps, string delegateName, Guid? resourceId)
+    {
+        return GrantCheckMap.TryGetValue(delegateName, out var check)
+            && check(ps, resourceId);
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
 

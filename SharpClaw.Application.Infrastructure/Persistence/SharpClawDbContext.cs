@@ -83,6 +83,9 @@ public class SharpClawDbContext(
     public DbSet<NativeApplicationDB> NativeApplications => Set<NativeApplicationDB>();
     public DbSet<NativeApplicationAccessDB> NativeApplicationAccesses => Set<NativeApplicationAccessDB>();
 
+    // ── Module state ──────────────────────────────────────────────
+    public DbSet<ModuleStateDB> ModuleStates => Set<ModuleStateDB>();
+
     // ── Task scripts ──────────────────────────────────────────────
     public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
     public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
@@ -831,6 +834,12 @@ public class SharpClawDbContext(
         {
             e.HasIndex(a => new { a.PermissionSetId, a.NativeApplicationId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
+        });
+
+        // ── Module state ──────────────────────────────────────────
+        modelBuilder.Entity<ModuleStateDB>(e =>
+        {
+            e.HasIndex(s => s.ModuleId).IsUnique();
         });
 
         modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);

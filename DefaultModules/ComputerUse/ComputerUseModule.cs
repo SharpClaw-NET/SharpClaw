@@ -16,7 +16,7 @@ namespace SharpClaw.Modules.ComputerUse;
 /// </summary>
 public sealed class ComputerUseModule : ISharpClawModule
 {
-    public string Id => "sharpclaw.computer-use";
+    public string Id => "sharpclaw_computer_use";
     public string DisplayName => "Computer Use";
     public string ToolPrefix => "cu";
 

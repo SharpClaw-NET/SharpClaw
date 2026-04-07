@@ -154,18 +154,19 @@ try
     // Module system
     builder.Services.AddSingleton<ModuleRegistry>();
 
-    // Default modules — register DI services before Build
-    var computerUseModule = new ComputerUseModule();
-    computerUseModule.ConfigureServices(builder.Services);
+    // Default modules — all bundled, but only enabled ones get registered.
+    // DI services must be registered for ALL modules before Build (container is immutable after).
+    var moduleLoader = new ModuleLoader(
+        new ComputerUseModule(),
+        new OfficeAppsModule(),
+        new Mk8ShellModule(),
+        new DangerousShellModule());
 
-    var officeAppsModule = new OfficeAppsModule();
-    officeAppsModule.ConfigureServices(builder.Services);
+    foreach (var bundledModule in moduleLoader.GetAllBundled())
+        bundledModule.ConfigureServices(builder.Services);
 
-    var mk8ShellModule = new Mk8ShellModule();
-    mk8ShellModule.ConfigureServices(builder.Services);
-
-    var dangerousShellModule = new DangerousShellModule();
-    dangerousShellModule.ConfigureServices(builder.Services);
+    builder.Services.AddSingleton(moduleLoader);
+    builder.Services.AddScoped<ModuleService>();
 
     // Document & desktop awareness services
     builder.Services.AddScoped<DocumentSessionService>();
@@ -223,14 +224,36 @@ try
     // Initialize infrastructure (loads persisted data into InMemory DB)
     await app.Services.InitializeInfrastructureAsync();
 
-    // Register default modules with the registry.
-    var registry = app.Services.GetRequiredService<ModuleRegistry>();
-    registry.Register(computerUseModule);
-    registry.Register(officeAppsModule);
-    registry.Register(mk8ShellModule);
-    registry.Register(dangerousShellModule);
+    // Wire up module loader with built service provider
+    moduleLoader.SetRootServices(app.Services);
+    moduleLoader.LoadAllManifests();
 
-    // Initialize loaded modules in dependency order (providers before consumers).
+    // Sync module state from .modules.env → DB, determine which modules to enable.
+    HashSet<string> enabledModuleIds;
+    using (var scope = app.Services.CreateScope())
+    {
+        var moduleSvc = scope.ServiceProvider.GetRequiredService<ModuleService>();
+        enabledModuleIds = await moduleSvc.SyncStateFromConfigAsync(app.Configuration);
+    }
+
+    // Register only enabled modules with the registry.
+    var registry = app.Services.GetRequiredService<ModuleRegistry>();
+    foreach (var bundledModule in moduleLoader.GetAllBundled())
+    {
+        if (!enabledModuleIds.Contains(bundledModule.Id))
+        {
+            Log.Information("Module '{ModuleId}' is disabled — skipping registration", bundledModule.Id);
+            continue;
+        }
+
+        registry.Register(bundledModule);
+
+        var manifest = moduleLoader.GetManifest(bundledModule.Id);
+        if (manifest is not null)
+            registry.CacheManifest(bundledModule.Id, manifest);
+    }
+
+    // Initialize enabled modules in dependency order (providers before consumers).
     var initOrder = registry.GetInitializationOrder(out var excludedModules);
 
     // Unregister modules excluded during dependency resolution (missing deps, cycles).

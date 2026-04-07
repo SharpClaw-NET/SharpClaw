@@ -1,9 +1,10 @@
 {
-  "id": "sharpclaw.computer-use",
+  "id": "sharpclaw_computer_use",
   "displayName": "Computer Use",
   "version": "1.0.0",
   "toolPrefix": "cu",
   "entryAssembly": "SharpClaw.Modules.ComputerUse",
+  "minHostVersion": "1.0.0",
   "platforms": [ "windows" ],
   "exports": [
     {

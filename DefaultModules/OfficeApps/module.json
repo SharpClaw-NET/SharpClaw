@@ -1,9 +1,10 @@
 {
-  "id": "sharpclaw.office-apps",
+  "id": "sharpclaw_office_apps",
   "displayName": "Office Apps",
   "version": "1.0.0",
   "toolPrefix": "oa",
   "entryAssembly": "SharpClaw.Modules.OfficeApps",
+  "minHostVersion": "1.0.0",
   "platforms": [ "windows", "linux", "macos" ],
   "exports": [],
   "requires": []

@@ -17,7 +17,7 @@ namespace SharpClaw.Modules.OfficeApps;
 /// </summary>
 public sealed class OfficeAppsModule : ISharpClawModule
 {
-    public string Id => "sharpclaw.office-apps";
+    public string Id => "sharpclaw_office_apps";
     public string DisplayName => "Office Apps";
     public string ToolPrefix => "oa";
 

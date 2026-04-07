@@ -19,4 +19,8 @@
     <EmbeddedResource Include="Resources\tool-description.md" />
   </ItemGroup>
 
+  <ItemGroup>
+    <Content Include="module.json" Link="modules\mk8shell\module.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
 </Project>
