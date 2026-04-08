@@ -32,7 +32,9 @@ public static class LocalEnvironment
             "sharpclaw_computer_use": false,
             "sharpclaw_dangerous_shell": false,
             "sharpclaw_mk8shell": false,
-            "sharpclaw_office_apps": false
+            "sharpclaw_office_apps": false,
+            "sharpclaw_vs2026_editor": false,
+            "sharpclaw_vscode_editor": false
           }
         }
         """;

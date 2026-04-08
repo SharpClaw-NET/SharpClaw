@@ -50,14 +50,13 @@ public sealed class DangerousShellModule : ISharpClawModule
 
         return
         [
-            new("execute",
+            new("execute_dangerous_shell",
                 "Execute a raw command in an unsandboxed shell interpreter "
                 + "(Bash, PowerShell, CommandPrompt, or Git). Inherently dangerous — "
                 + "bypasses all sandbox restrictions. Requires clearance.",
                 BuildDangerousShellSchema(),
                 permission,
-                TimeoutSeconds: 300,
-                Aliases: ["execute_dangerous_shell"]),
+                TimeoutSeconds: 300),
         ];
     }
 
@@ -71,7 +70,7 @@ public sealed class DangerousShellModule : ISharpClawModule
     {
         return toolName switch
         {
-            "execute" or "execute_dangerous_shell"
+            "execute_dangerous_shell"
                 => await ExecuteDangerousShellAsync(parameters, ct),
             _ => throw new InvalidOperationException($"Unknown DangerousShell tool: {toolName}"),
         };

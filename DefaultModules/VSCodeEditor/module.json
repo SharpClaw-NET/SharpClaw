@@ -1,0 +1,11 @@
+{
+  "id": "sharpclaw_vscode_editor",
+  "displayName": "VS Code Editor",
+  "version": "1.0.0",
+  "toolPrefix": "vsc",
+  "entryAssembly": "SharpClaw.Modules.VSCodeEditor",
+  "minHostVersion": "1.0.0",
+  "platforms": null,
+  "exports": [],
+  "requires": []
+}

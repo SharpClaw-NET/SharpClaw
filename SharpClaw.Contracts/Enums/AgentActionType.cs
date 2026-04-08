@@ -41,15 +41,25 @@ public enum AgentActionType
     CaptureDisplay = 20,
 
     // ── Editor actions (per-resource: editor session) ─────────────
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorReadFile = 21,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorGetOpenFiles = 22,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorGetSelection = 23,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorGetDiagnostics = 24,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorApplyEdit = 25,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorCreateFile = 26,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorDeleteFile = 27,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorShowDiff = 28,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorRunBuild = 29,
+    [Obsolete("Dispatched to VS 2026 Editor / VS Code Editor module.")]
     EditorRunTerminal = 30,
 
     // ── Cross-thread context access (global flag) ─────────────────

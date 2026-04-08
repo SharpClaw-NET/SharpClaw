@@ -33,7 +33,6 @@ public sealed class AgentJobService(
 SharpClawDbContext db,
 AgentActionService actions,
 LiveTranscriptionOrchestrator orchestrator,
-EditorBridgeService editorBridge,
 SessionService session,
 BotMessageSenderService botMessageSender,
 DocumentSessionService documentSessionService,
@@ -718,19 +717,6 @@ IConfiguration configuration)
             // Search engine query (per-resource: registered search engine)
             AgentActionType.QuerySearchEngine
                 => await ExecuteQuerySearchEngineAsync(job, ct),
-
-            // Editor actions — delegated to the connected IDE extension
-            AgentActionType.EditorReadFile or
-            AgentActionType.EditorGetOpenFiles or
-            AgentActionType.EditorGetSelection or
-            AgentActionType.EditorGetDiagnostics or
-            AgentActionType.EditorApplyEdit or
-            AgentActionType.EditorCreateFile or
-            AgentActionType.EditorDeleteFile or
-            AgentActionType.EditorShowDiff or
-            AgentActionType.EditorRunBuild or
-            AgentActionType.EditorRunTerminal
-                => await ExecuteEditorActionAsync(job, ct),
 
             // Bot messaging
             AgentActionType.SendBotMessage
@@ -1810,63 +1796,6 @@ IConfiguration configuration)
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // EDITOR ACTIONS — delegated to connected IDE extension
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Maps the <see cref="AgentActionType"/> to the WebSocket action
-    /// name, extracts parameters from the job's <see cref="AgentJobDB.ScriptJson"/>,
-    /// and routes the request to the connected editor via the
-    /// <see cref="EditorBridgeService"/>.
-    /// </summary>
-    private async Task<string?> ExecuteEditorActionAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        if (!job.ResourceId.HasValue)
-            throw new InvalidOperationException(
-                $"{job.ActionType} requires a ResourceId (EditorSession).");
-
-        var actionName = job.ActionType switch
-        {
-            AgentActionType.EditorReadFile => "read_file",
-            AgentActionType.EditorGetOpenFiles => "get_open_files",
-            AgentActionType.EditorGetSelection => "get_selection",
-            AgentActionType.EditorGetDiagnostics => "get_diagnostics",
-            AgentActionType.EditorApplyEdit => "apply_edit",
-            AgentActionType.EditorCreateFile => "create_file",
-            AgentActionType.EditorDeleteFile => "delete_file",
-            AgentActionType.EditorShowDiff => "show_diff",
-            AgentActionType.EditorRunBuild => "run_build",
-            AgentActionType.EditorRunTerminal => "run_terminal",
-            _ => throw new InvalidOperationException(
-                $"Unknown editor action: {job.ActionType}")
-        };
-
-        // Parse parameters from the tool call JSON
-        Dictionary<string, object?>? parameters = null;
-        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
-        {
-            parameters = System.Text.Json.JsonSerializer
-                .Deserialize<Dictionary<string, object?>>(
-                    job.ScriptJson, _payloadJsonOptions);
-            // Remove targetId — it's the resource ID, not a parameter
-            parameters?.Remove("targetId");
-        }
-
-        AddLog(job, $"Editor action '{actionName}' → session {job.ResourceId}");
-        await db.SaveChangesAsync(ct);
-
-        var response = await editorBridge.SendRequestAsync(
-            job.ResourceId.Value, actionName, parameters, ct);
-
-        if (!response.Success)
-            throw new InvalidOperationException(
-                $"Editor action '{actionName}' failed: {response.Error}");
-
-        return response.Data ?? $"Editor action '{actionName}' completed.";
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     // BOT MESSAGING
     // ═══════════════════════════════════════════════════════════════
 
@@ -1987,17 +1916,6 @@ IConfiguration configuration)
                 => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.TranscribeFromAudioFile when resourceId.HasValue
                 => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.EditorReadFile or
-            AgentActionType.EditorGetOpenFiles or
-            AgentActionType.EditorGetSelection or
-            AgentActionType.EditorGetDiagnostics or
-            AgentActionType.EditorApplyEdit or
-            AgentActionType.EditorCreateFile or
-            AgentActionType.EditorDeleteFile or
-            AgentActionType.EditorShowDiff or
-            AgentActionType.EditorRunBuild or
-            AgentActionType.EditorRunTerminal when resourceId.HasValue
-                => actions.AccessEditorSessionAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.SendBotMessage when resourceId.HasValue
                 => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
             // Module-provided tool calls: delegate to the module's permission descriptor.
@@ -2036,16 +1954,6 @@ IConfiguration configuration)
             or AgentActionType.TranscribeFromAudioDevice
             or AgentActionType.TranscribeFromAudioStream
             or AgentActionType.TranscribeFromAudioFile
-            or AgentActionType.EditorReadFile
-            or AgentActionType.EditorGetOpenFiles
-            or AgentActionType.EditorGetSelection
-            or AgentActionType.EditorGetDiagnostics
-            or AgentActionType.EditorApplyEdit
-            or AgentActionType.EditorCreateFile
-            or AgentActionType.EditorDeleteFile
-            or AgentActionType.EditorShowDiff
-            or AgentActionType.EditorRunBuild
-            or AgentActionType.EditorRunTerminal
             or AgentActionType.SendBotMessage)
             return true;
 
@@ -2186,16 +2094,6 @@ IConfiguration configuration)
         AgentActionType.CaptureDisplay or
         AgentActionType.ClickDesktop or
         AgentActionType.TypeOnDesktop => drs.DisplayDeviceResourceId,
-        AgentActionType.EditorReadFile or
-        AgentActionType.EditorGetOpenFiles or
-        AgentActionType.EditorGetSelection or
-        AgentActionType.EditorGetDiagnostics or
-        AgentActionType.EditorApplyEdit or
-        AgentActionType.EditorCreateFile or
-        AgentActionType.EditorDeleteFile or
-        AgentActionType.EditorShowDiff or
-        AgentActionType.EditorRunBuild or
-        AgentActionType.EditorRunTerminal => drs.EditorSessionResourceId,
         AgentActionType.SendBotMessage => drs.BotIntegrationResourceId,
         AgentActionType.LaunchNativeApplication => drs.NativeApplicationResourceId,
         _ => null,
@@ -2232,17 +2130,6 @@ IConfiguration configuration)
         AgentActionType.ClickDesktop or
         AgentActionType.TypeOnDesktop
             => permissionSet.DefaultDisplayDeviceAccess?.DisplayDeviceId,
-        AgentActionType.EditorReadFile or
-        AgentActionType.EditorGetOpenFiles or
-        AgentActionType.EditorGetSelection or
-        AgentActionType.EditorGetDiagnostics or
-        AgentActionType.EditorApplyEdit or
-        AgentActionType.EditorCreateFile or
-        AgentActionType.EditorDeleteFile or
-        AgentActionType.EditorShowDiff or
-        AgentActionType.EditorRunBuild or
-        AgentActionType.EditorRunTerminal
-            => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
         AgentActionType.SendBotMessage
             => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
         AgentActionType.LaunchNativeApplication
@@ -2401,19 +2288,6 @@ IConfiguration configuration)
         AgentActionType.TypeOnDesktop when resourceId.HasValue
             => ps.DisplayDeviceAccesses.Any(a =>
                 a.DisplayDeviceId == resourceId || a.DisplayDeviceId == WellKnownIds.AllResources),
-
-        AgentActionType.EditorReadFile or
-        AgentActionType.EditorGetOpenFiles or
-        AgentActionType.EditorGetSelection or
-        AgentActionType.EditorGetDiagnostics or
-        AgentActionType.EditorApplyEdit or
-        AgentActionType.EditorCreateFile or
-        AgentActionType.EditorDeleteFile or
-        AgentActionType.EditorShowDiff or
-        AgentActionType.EditorRunBuild or
-        AgentActionType.EditorRunTerminal when resourceId.HasValue
-            => ps.EditorSessionAccesses.Any(a =>
-                a.EditorSessionId == resourceId || a.EditorSessionId == WellKnownIds.AllResources),
 
         AgentActionType.SendBotMessage when resourceId.HasValue
             => ps.BotIntegrationAccesses.Any(a =>

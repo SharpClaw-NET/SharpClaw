@@ -78,11 +78,9 @@ public sealed class ModuleRegistry
             // Validate tool names and aliases.
             foreach (var tool in toolDefs)
             {
-                var prefixed = $"{module.ToolPrefix}_{tool.Name}";
-
-                if (_toolIndex.ContainsKey(prefixed))
+                if (_toolIndex.ContainsKey(tool.Name))
                     throw new InvalidOperationException(
-                        $"Tool name '{prefixed}' from module '{module.Id}' " +
+                        $"Tool name '{tool.Name}' from module '{module.Id}' " +
                         "collides with an existing module tool.");
 
                 if (tool.Aliases is { Count: > 0 } aliases)
@@ -130,7 +128,7 @@ public sealed class ModuleRegistry
 
             foreach (var tool in toolDefs)
             {
-                _toolIndex[$"{module.ToolPrefix}_{tool.Name}"] = (module.Id, tool.Name);
+                _toolIndex[tool.Name] = (module.Id, tool.Name);
 
                 if (tool.Aliases is { Count: > 0 } aliases)
                 {
@@ -168,7 +166,7 @@ public sealed class ModuleRegistry
 
             foreach (var tool in module.GetToolDefinitions())
             {
-                _toolIndex.Remove($"{module.ToolPrefix}_{tool.Name}");
+                _toolIndex.Remove(tool.Name);
 
                 if (tool.Aliases is { Count: > 0 } aliases)
                 {
@@ -215,19 +213,19 @@ public sealed class ModuleRegistry
         finally { _lock.ExitReadLock(); }
     }
 
-    /// <summary>Try to resolve a prefixed tool name to its module and local tool name.</summary>
-    public bool TryResolve(string prefixedToolName, out string moduleId, out string toolName)
+    /// <summary>Try to resolve a tool name (or alias) to its module and canonical tool name.</summary>
+    public bool TryResolve(string toolName, out string moduleId, out string canonicalToolName)
     {
         _lock.EnterReadLock();
         try
         {
-            if (_toolIndex.TryGetValue(prefixedToolName, out var entry))
+            if (_toolIndex.TryGetValue(toolName, out var entry))
             {
                 moduleId = entry.ModuleId;
-                toolName = entry.ToolName;
+                canonicalToolName = entry.ToolName;
                 return true;
             }
-            moduleId = toolName = "";
+            moduleId = canonicalToolName = "";
             return false;
         }
         finally
@@ -253,7 +251,7 @@ public sealed class ModuleRegistry
     }
 
     /// <summary>
-    /// Get all <see cref="ChatToolDefinition"/>s from all modules (prefixed names).
+    /// Get all <see cref="ChatToolDefinition"/>s from all modules.
     /// Results are cached and only rebuilt when modules are registered/unregistered.
     /// </summary>
     public IReadOnlyList<ChatToolDefinition> GetAllToolDefinitions()
@@ -280,7 +278,7 @@ public sealed class ModuleRegistry
                         }
 
                         return [new ChatToolDefinition(
-                            Name: $"{m.ToolPrefix}_{t.Name}",
+                            Name: t.Name,
                             Description: t.Description,
                             ParametersSchema: t.ParametersSchema)];
                     }))

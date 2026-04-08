@@ -1954,16 +1954,6 @@ public sealed class ChatService(
         ["transcribe_from_audio_device"]   = AgentActionType.TranscribeFromAudioDevice,
         ["transcribe_from_audio_stream"]   = AgentActionType.TranscribeFromAudioStream,
         ["transcribe_from_audio_file"]     = AgentActionType.TranscribeFromAudioFile,
-        ["editor_read_file"]               = AgentActionType.EditorReadFile,
-        ["editor_get_open_files"]          = AgentActionType.EditorGetOpenFiles,
-        ["editor_get_selection"]            = AgentActionType.EditorGetSelection,
-        ["editor_get_diagnostics"]         = AgentActionType.EditorGetDiagnostics,
-        ["editor_apply_edit"]              = AgentActionType.EditorApplyEdit,
-        ["editor_create_file"]             = AgentActionType.EditorCreateFile,
-        ["editor_delete_file"]             = AgentActionType.EditorDeleteFile,
-        ["editor_show_diff"]               = AgentActionType.EditorShowDiff,
-        ["editor_run_build"]               = AgentActionType.EditorRunBuild,
-        ["editor_run_terminal"]            = AgentActionType.EditorRunTerminal,
         ["send_bot_message"]               = AgentActionType.SendBotMessage,
 
         };
@@ -2057,13 +2047,6 @@ public sealed class ChatService(
         var querySearchEngineSchema = BuildQuerySearchEngineSchema();
         var localhostBrowserSchema = BuildLocalhostBrowserSchema();
         var localhostCliSchema = BuildLocalhostCliSchema();
-        var editorReadFileSchema = BuildEditorReadFileSchema();
-        var editorFileOptionalSchema = BuildEditorFileOptionalSchema();
-        var editorFileRequiredSchema = BuildEditorFileRequiredSchema();
-        var editorApplyEditSchema = BuildEditorApplyEditSchema();
-        var editorCreateFileSchema = BuildEditorCreateFileSchema();
-        var editorShowDiffSchema = BuildEditorShowDiffSchema();
-        var editorRunTerminalSchema = BuildEditorRunTerminalSchema();
         var waitSchema = BuildWaitSchema();
         var readThreadHistorySchema = BuildReadThreadHistorySchema();
         var sendBotMessageSchema = BuildSendBotMessageSchema();
@@ -2131,17 +2114,6 @@ public sealed class ChatService(
             new("manage_agent", "Update agent name, systemPrompt, or modelId.", manageAgentSchema),
             new("edit_task", "Edit task name, interval, or retries.", editTaskSchema),
             new("access_skill", "Retrieve a skill's instruction text.", resourceOnly),
-            // ── Editor actions ────────────────────────────────────
-            new("editor_read_file", "Read file; optional line range.", editorReadFileSchema),
-            new("editor_get_open_files", "List open files/tabs.", resourceOnly),
-            new("editor_get_selection", "Active file, cursor, and selection.", resourceOnly),
-            new("editor_get_diagnostics", "Errors/warnings; optional filePath scope.", editorFileOptionalSchema),
-            new("editor_apply_edit", "Replace line range with newText.", editorApplyEditSchema),
-            new("editor_create_file", "Create file in workspace.", editorCreateFileSchema),
-            new("editor_delete_file", "Delete file from workspace.", editorFileRequiredSchema),
-            new("editor_show_diff", "Show diff; user accepts/rejects.", editorShowDiffSchema),
-            new("editor_run_build", "Trigger build; return output/errors.", resourceOnly),
-            new("editor_run_terminal", "Run command in IDE terminal.", editorRunTerminalSchema),
 
             // ── Bot messaging ─────────────────────────────────────────
             new("send_bot_message",
@@ -2517,122 +2489,6 @@ public sealed class ChatService(
                     }
                 },
                 "required": ["targetId", "query"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    // ── Editor action schemas ───────────────────────────────────
-
-    private static JsonElement BuildEditorReadFileSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "startLine": { "type": "integer", "description": "Optional start line (1-based)." },
-                    "endLine": { "type": "integer", "description": "Optional end line (1-based, inclusive)." }
-                },
-                "required": ["targetId", "filePath"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorFileOptionalSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "Optional file path to scope results." }
-                },
-                "required": ["targetId"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorFileRequiredSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "File path relative to workspace root." }
-                },
-                "required": ["targetId", "filePath"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorApplyEditSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "startLine": { "type": "integer", "description": "Start line (1-based)." },
-                    "endLine": { "type": "integer", "description": "End line (1-based, inclusive)." },
-                    "newText": { "type": "string", "description": "Replacement text." }
-                },
-                "required": ["targetId", "filePath", "startLine", "endLine", "newText"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorCreateFileSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "content": { "type": "string", "description": "Initial file content." }
-                },
-                "required": ["targetId", "filePath"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorShowDiffSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "filePath": { "type": "string", "description": "File path relative to workspace root." },
-                    "proposedContent": { "type": "string", "description": "Proposed file content." },
-                    "diffTitle": { "type": "string", "description": "Diff view title." }
-                },
-                "required": ["targetId", "filePath", "proposedContent"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildEditorRunTerminalSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": { "type": "string", "description": "EditorSession GUID." },
-                    "command": { "type": "string", "description": "Command to run." },
-                    "workingDirectory": { "type": "string", "description": "Working directory." }
-                },
-                "required": ["targetId", "command"]
             }
             """);
         return doc.RootElement.Clone();

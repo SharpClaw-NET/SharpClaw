@@ -1,0 +1,11 @@
+{
+  "id": "sharpclaw_vs2026_editor",
+  "displayName": "VS 2026 Editor",
+  "version": "1.0.0",
+  "toolPrefix": "vs26",
+  "entryAssembly": "SharpClaw.Modules.VS2026Editor",
+  "minHostVersion": "1.0.0",
+  "platforms": [ "windows" ],
+  "exports": [],
+  "requires": []
+}

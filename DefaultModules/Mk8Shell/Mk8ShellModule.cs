@@ -37,20 +37,18 @@ public sealed class Mk8ShellModule : ISharpClawModule
 
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
     [
-        new("execute",
+        new("execute_mk8_shell",
             LoadEmbeddedResource("tool-description.md"),
             BuildMk8ShellToolSchema(),
             new ModuleToolPermission(
                 IsPerResource: true, Check: null, DelegateTo: "AccessContainerAsync"),
-            TimeoutSeconds: 300,
-            Aliases: ["execute_mk8_shell"]),
+            TimeoutSeconds: 300),
 
-        new("create_sandbox",
+        new("create_mk8_sandbox",
             "Create an mk8.shell sandbox container. Name must be alphanumeric.",
             BuildCreateSandboxSchema(),
             new ModuleToolPermission(
-                IsPerResource: false, Check: null, DelegateTo: "CreateContainerAsync"),
-            Aliases: ["create_mk8_sandbox"])
+                IsPerResource: false, Check: null, DelegateTo: "CreateContainerAsync"))
     ];
 
     public async Task<string> ExecuteToolAsync(
@@ -62,8 +60,8 @@ public sealed class Mk8ShellModule : ISharpClawModule
     {
         return toolName switch
         {
-            "execute" or "execute_mk8_shell" => await ExecuteMk8ShellAsync(parameters, context, scopedServices, ct),
-            "create_sandbox" or "create_mk8_sandbox" => await CreateSandboxAsync(parameters, context, scopedServices, ct),
+            "execute_mk8_shell" => await ExecuteMk8ShellAsync(parameters, context, scopedServices, ct),
+            "create_mk8_sandbox" => await CreateSandboxAsync(parameters, context, scopedServices, ct),
             _ => throw new NotSupportedException($"Unknown tool: {toolName}")
         };
     }

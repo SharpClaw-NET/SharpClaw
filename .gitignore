@@ -6,6 +6,8 @@
 docs/Module-System-Design.md
 docs/Module-Migration-Plan.md
 docs/Module-Migration-Plan-Mk8Shell.md
+docs/Module-Migration-Plan-VS2026Editor.md
+docs/Module-Migration-Plan-VSCodeEditor.md
 
 # Copilot
 .github/upgrades

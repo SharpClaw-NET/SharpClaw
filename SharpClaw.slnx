@@ -10,6 +10,12 @@
       <Deploy />
     </Project>
   </Folder>
+  <Folder Name="/DefaultModules/VS2026Editor/">
+    <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
+  </Folder>
+  <Folder Name="/DefaultModules/VSCodeEditor/">
+    <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
+  </Folder>
   <Folder Name="/Gateway/">
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
