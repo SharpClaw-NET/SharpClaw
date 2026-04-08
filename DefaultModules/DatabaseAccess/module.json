@@ -1,0 +1,11 @@
+{
+  "id": "sharpclaw_database_access",
+  "displayName": "Database Access",
+  "version": "1.0.0",
+  "toolPrefix": "db",
+  "entryAssembly": "SharpClaw.Modules.DatabaseAccess",
+  "minHostVersion": "1.0.0",
+  "platforms": [ "windows", "linux", "macos" ],
+  "exports": [],
+  "requires": []
+}

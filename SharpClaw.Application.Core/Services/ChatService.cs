@@ -1940,11 +1940,8 @@ public sealed class ChatService(
     private static readonly Dictionary<string, AgentActionType> ToolNameToActionType = new(StringComparer.OrdinalIgnoreCase)
     {
         ["create_sub_agent"]               = AgentActionType.CreateSubAgent,
-        ["register_database"]               = AgentActionType.RegisterDatabase,
         ["access_localhost_in_browser"]    = AgentActionType.AccessLocalhostInBrowser,
         ["access_localhost_cli"]           = AgentActionType.AccessLocalhostCli,
-        ["access_internal_databases"]      = AgentActionType.AccessInternalDatabases,
-        ["access_external_database"]        = AgentActionType.AccessExternalDatabase,
         ["access_website"]                 = AgentActionType.AccessWebsite,
         ["query_search_engine"]            = AgentActionType.QuerySearchEngine,
         ["access_container"]               = AgentActionType.AccessContainer,
@@ -2043,7 +2040,6 @@ public sealed class ChatService(
         var manageAgentSchema = BuildManageAgentSchema();
         var editTaskSchema = BuildEditTaskSchema();
         var accessWebsiteSchema = BuildAccessWebsiteSchema();
-        var accessExternalDatabaseSchema = BuildAccessExternalDatabaseSchema();
         var querySearchEngineSchema = BuildQuerySearchEngineSchema();
         var localhostBrowserSchema = BuildLocalhostBrowserSchema();
         var localhostCliSchema = BuildLocalhostCliSchema();
@@ -2081,9 +2077,6 @@ public sealed class ChatService(
             new("create_sub_agent",
                 "Create a sub-agent (name, modelId, optional systemPrompt).",
                 createSubAgentSchema),
-            new("register_database",
-                "Register a new database resource. [Stub.]",
-                globalSchema),
             new("access_localhost_in_browser",
                 "Headless GET localhost. html=DOM (default), screenshot=PNG (vision). localhost/127.0.0.1 only.",
                 localhostBrowserSchema),
@@ -2092,13 +2085,6 @@ public sealed class ChatService(
                 localhostCliSchema),
 
             // ── Per-resource ─────────────────────────────────────
-            new("access_internal_databases", "Query an internal (SharpClaw-managed) database. [Stub.]", resourceOnly),
-            new("access_external_database",
-                "Execute a query against a registered external database. " +
-                "The query language must match the database type (e.g. SQL for MySQL/PostgreSQL/MSSQL, " +
-                "MongoDB query JSON for MongoDB, Redis commands for Redis). " +
-                "Provide the targetId of the registered database and the raw query string.",
-                accessExternalDatabaseSchema),
             new("access_website",
                 "Fetch a registered external website. cli=HTTP GET (default), html=headless DOM, screenshot=PNG. " +
                 "Optional path appends to the registered base URL. " +
@@ -2239,31 +2225,6 @@ public sealed class ChatService(
                     }
                 },
                 "required": ["targetId", "transcriptionModelId"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildAccessExternalDatabaseSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": {
-                        "type": "string",
-                        "description": "External database GUID."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Raw query in the database's native language. Must match the database type: SQL for MySQL/PostgreSQL/MSSQL/SQLite/MariaDB/CockroachDB/Oracle/Firebird, MongoDB query JSON for MongoDB, Redis commands for Redis, SQL for CosmosDB."
-                    },
-                    "timeout": {
-                        "type": "integer",
-                        "description": "Query timeout in seconds (default 30, max 120)."
-                    }
-                },
-                "required": ["targetId", "query"]
             }
             """);
         return doc.RootElement.Clone();

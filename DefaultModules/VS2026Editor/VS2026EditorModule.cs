@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Enums;
@@ -25,8 +26,8 @@ public sealed class VS2026EditorModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
-        // No module-specific services — relies entirely on host services
-        // (EditorBridgeService, EditorSessionService).
+        services.TryAddSingleton<EditorBridgeService>();
+        services.TryAddScoped<EditorSessionService>();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -37,8 +38,7 @@ public sealed class VS2026EditorModule : ISharpClawModule
     {
         var editorSession = new ModuleToolPermission(
             IsPerResource: true, Check: null,
-            DelegateTo: "AccessEditorSessionAsync",
-            ResourceType: "EditorSession");
+            DelegateTo: "AccessEditorSessionAsync");
 
         return
         [

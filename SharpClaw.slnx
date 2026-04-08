@@ -10,12 +10,6 @@
       <Deploy />
     </Project>
   </Folder>
-  <Folder Name="/DefaultModules/VS2026Editor/">
-    <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
-  </Folder>
-  <Folder Name="/DefaultModules/VSCodeEditor/">
-    <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
-  </Folder>
   <Folder Name="/Gateway/">
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
@@ -45,6 +39,8 @@
     <Project Path="DefaultModules/DangerousShell/SharpClaw.Modules.DangerousShell.csproj" />
     <Project Path="DefaultModules/Mk8Shell/SharpClaw.Modules.Mk8Shell.csproj" />
     <Project Path="DefaultModules/OfficeApps/SharpClaw.Modules.OfficeApps.csproj" />
+    <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
+    <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="SharpClaw.Tests/SharpClaw.Tests.csproj">

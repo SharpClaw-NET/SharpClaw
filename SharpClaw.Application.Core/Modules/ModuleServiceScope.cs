@@ -19,7 +19,9 @@ internal sealed class ModuleServiceScope(
         typeof(Services.AgentJobService),
         typeof(Services.AgentActionService),
         typeof(Services.ChatService),
+        typeof(Services.ModuleService),
         typeof(ModuleRegistry),
+        typeof(ModuleLoader),
         typeof(SharpClawDbContext),         // Modules use their own DbContext (§3.8)
         typeof(IServiceScopeFactory),       // Prevents unrestricted child scope creation
     ];

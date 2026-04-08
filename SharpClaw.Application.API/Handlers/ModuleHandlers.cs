@@ -64,4 +64,46 @@ public static class ModuleHandlers
             return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status409Conflict);
         }
     }
+
+    /// <summary>Scan the external-modules directory and load any new modules.</summary>
+    [MapPost("/scan")]
+    public static async Task<IResult> Scan(ModuleService svc, ModuleLoader moduleLoader)
+    {
+        var loaded = await svc.ScanExternalModulesAsync(moduleLoader.RootServices);
+        return Results.Ok(loaded);
+    }
+
+    /// <summary>Reload an external module from its source directory.</summary>
+    [MapPost("/{moduleId}/reload")]
+    public static async Task<IResult> Reload(string moduleId, ModuleService svc, ModuleLoader moduleLoader)
+    {
+        try
+        {
+            var result = await svc.ReloadExternalAsync(moduleId, moduleLoader.RootServices);
+            return Results.Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
+    /// <summary>Unload an external module.</summary>
+    [MapPost("/{moduleId}/unload")]
+    public static async Task<IResult> Unload(string moduleId, ModuleService svc)
+    {
+        try
+        {
+            await svc.UnloadExternalAsync(moduleId);
+            return Results.Ok(new { moduleId, unloaded = true });
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+    }
 }

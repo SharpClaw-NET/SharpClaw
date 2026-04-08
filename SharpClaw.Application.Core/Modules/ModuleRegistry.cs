@@ -26,6 +26,9 @@ public sealed class ModuleRegistry
     private readonly Dictionary<string, (string ModuleId, ModuleCliCommand Command)> _cliTopLevel = new(StringComparer.OrdinalIgnoreCase);
     private readonly Dictionary<string, (string ModuleId, ModuleCliCommand Command)> _cliResourceTypes = new(StringComparer.OrdinalIgnoreCase);
 
+    // External (hot-loaded) module hosts keyed by module ID.
+    private readonly Dictionary<string, ExternalModuleHost> _externalHosts = new(StringComparer.Ordinal);
+
     private readonly ReaderWriterLockSlim _lock = new();
 
     // Cached aggregated tool definitions — rebuilt on registration changes.
@@ -44,7 +47,7 @@ public sealed class ModuleRegistry
     /// step fails, all mutations are rolled back so the registry is never
     /// left in a partially-registered state.
     /// </summary>
-    public void Register(ISharpClawModule module)
+    public void Register(ISharpClawModule module, ExternalModuleHost? externalHost = null)
     {
         ArgumentNullException.ThrowIfNull(module);
 
@@ -148,6 +151,9 @@ public sealed class ModuleRegistry
                     target[alias] = (module.Id, cmd);
             }
 
+            if (externalHost is not null)
+                _externalHosts[module.Id] = externalHost;
+
             _toolDefsCache = null; // Invalidate
         }
         finally
@@ -189,6 +195,7 @@ public sealed class ModuleRegistry
             }
 
             _manifestCache.Remove(moduleId);
+            _externalHosts.Remove(moduleId);
             _toolDefsCache = null;
         }
         finally
@@ -401,6 +408,37 @@ public sealed class ModuleRegistry
             return _contractProviders.TryGetValue(contractName, out var entry)
                 ? entry
                 : null;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
+    /// <summary>
+    /// Get the <see cref="ExternalModuleHost"/> for a hot-loaded module,
+    /// or <c>null</c> if the module is bundled or not registered.
+    /// </summary>
+    public ExternalModuleHost? GetExternalHost(string moduleId)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _externalHosts.GetValueOrDefault(moduleId);
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
+    /// <summary>Whether the given module was loaded externally (hot-loaded).</summary>
+    public bool IsExternal(string moduleId)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _externalHosts.ContainsKey(moduleId);
         }
         finally
         {

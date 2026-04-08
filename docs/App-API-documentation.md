@@ -3841,19 +3841,78 @@ that are registered at startup and dispatched via
 
 ### Default modules
 
-SharpClaw ships with two default modules:
+SharpClaw ships with five bundled default modules:
 
 | Module | ID | Prefix | Tools | Platforms | Description |
 |--------|----|--------|-------|-----------|-------------|
-| [Computer Use](Module-ComputerUse.md) | `sharpclaw.computer-use` | `cu` | 13 | Windows | Desktop awareness, window management, input simulation, clipboard, display capture, process control |
-| [Office Apps](Module-OfficeApps.md) | `sharpclaw.office-apps` | `oa` | 10 | Windows, Linux, macOS | Document sessions, spreadsheet CRUD (ClosedXML / CsvHelper), live Excel COM Interop |
+| [Computer Use](Module-ComputerUse.md) | `sharpclaw_computer_use` | `cu` | 13 | Windows | Desktop awareness, window management, input simulation, clipboard, display capture, process control |
+| [Office Apps](Module-OfficeApps.md) | `sharpclaw_office_apps` | `oa` | 10 | Windows, Linux, macOS | Document sessions, spreadsheet CRUD (ClosedXML / CsvHelper), live Excel COM Interop |
+| mk8.shell | `sharpclaw_mk8shell` | `mk8` | 2 | All | Sandboxed mk8.shell script execution and sandbox container lifecycle |
+| Dangerous Shell | `sharpclaw_dangerous_shell` | `ds` | 1 | All | Unsandboxed real shell execution (Bash, PowerShell, Cmd, Git) — clearance-gated |
+| Database Access | `sharpclaw_database_access` | `db` | 3 | All | Register and query internal/external databases (PostgreSQL, MySQL, SQLite, MSSQL, MongoDB, Redis) |
+
+### Runtime enable / disable
+
+Bundled modules can be enabled or disabled at runtime without
+restarting the server. All modules have their DI services pre-registered
+before `builder.Build()`, so toggling only affects the `ModuleRegistry`
+registration and tool availability.
+
+**Enable flow** (`POST /modules/{moduleId}/enable`):
+1. Update DB state → write `.modules.env`.
+2. `ModuleRegistry.Register` — validates prefix/tool uniqueness.
+3. `ModuleRegistry.CacheManifest` — loads the module manifest.
+4. Check `GetUnsatisfiedRequirements` — if any required contract is
+   missing, roll back (unregister) and throw.
+5. `ISharpClawModule.InitializeAsync` — run module startup logic.
+6. On failure at any step, the registration is rolled back.
+
+**Disable flow** (`POST /modules/{moduleId}/disable`):
+1. **Safety check** — if any other enabled module has a
+   `RequiredContract` matching this module's `ExportedContracts`,
+   disable is rejected (`409 Conflict`).
+2. `ISharpClawModule.ShutdownAsync` — run module teardown.
+3. `ModuleRegistry.Unregister` — remove tools, commands, contracts.
+4. Update DB state → write `.modules.env`.
+
+State is persisted in the `ModuleStates` DB table and the
+`.modules.env` file, so the setting survives restarts.
+
+### Module REST endpoints
+
+| Method | Path | Description |
+|--------|------|-------------|
+| `GET` | `/modules` | List all modules and their current state |
+| `GET` | `/modules/{moduleId}` | Get a single module's state |
+| `POST` | `/modules/{moduleId}/enable` | Enable a disabled module at runtime |
+| `POST` | `/modules/{moduleId}/disable` | Disable an enabled module at runtime |
+
+**Response schema** (`ModuleStateResponse`):
+
+```json
+{
+  "moduleId": "string",
+  "displayName": "string",
+  "toolPrefix": "string",
+  "enabled": true,
+  "version": "string | null",
+  "registered": true,
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+**Error responses:**
+- `404 Not Found` — unknown module ID.
+- `409 Conflict` — enable failed (unsatisfied dependencies) or disable
+  failed (other modules depend on this module's exports).
 
 ### Tool name resolution
 
 When the model returns a tool call, the name is resolved in order:
 
-1. **Core tools** — built-in tool names (e.g. `execute_mk8_shell`,
-   `editor_read_file`) are matched first.
+1. **Core tools** — built-in tool names (e.g. `wait`,
+   `list_accessible_threads`) are matched first.
 2. **Module tools** — prefixed names (e.g. `cu_capture_display`,
    `oa_read_range`) are resolved via the `ModuleRegistry`. The prefix
    identifies the module; the suffix identifies the local tool name.
@@ -3876,14 +3935,35 @@ tool name list. The complete set of module tool names:
 `oa_get_info`, `oa_create_workbook`, `oa_live_read_range`,
 `oa_live_write_range`
 
+**mk8.shell (`mk8_` prefix, 2 tools):**
+`mk8_execute_mk8_shell`, `mk8_create_mk8_sandbox`
+
+**Dangerous Shell (`ds_` prefix, 1 tool):**
+`ds_execute_dangerous_shell`
+
+**Database Access (`db_` prefix, 3 tools):**
+`db_register_database`, `db_access_internal_databases`,
+`db_access_external_database`
+
 ### Module CLI commands
 
-Modules can register their own CLI commands:
+Modules can register top-level and resource-type CLI commands.
+These are discoverable at runtime via `help`.
 
 | Command | Aliases | Module | Description |
 |---------|---------|--------|-------------|
 | `cu` | `computer-use` | Computer Use | `cu windows`, `cu displays`, `cu apps` |
 | `docs` | `office`, `oa` | Office Apps | `docs list` |
+| `db` | `database-access` | Database Access | `db list-internal`, `db list-external` |
+
+**Module management CLI commands** (built-in, not module-provided):
+
+| Command | Description |
+|---------|-------------|
+| `module list` | List all modules and their enabled/registered state |
+| `module get <id>` | Show a module's details |
+| `module enable <id>` | Enable a module at runtime |
+| `module disable <id>` | Disable a module at runtime |
 
 ### Module contracts (exports / requires)
 
@@ -3896,7 +3976,9 @@ modules can depend on. The Computer Use module exports:
 | `desktop_input` | `IDesktopInput` | Mouse click, keyboard input, hotkey simulation |
 
 The dependency graph is resolved via topological sort at startup to
-ensure exports are registered before consumers.
+ensure exports are registered before consumers. Disabling a module
+that exports a contract required by another enabled module is
+rejected with `409 Conflict`.
 
 ---
 

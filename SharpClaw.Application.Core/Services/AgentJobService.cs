@@ -775,33 +775,47 @@ IConfiguration configuration)
             ActionKey: job.ActionKey,
             Language: job.Language);
 
-        // Build a restricted service scope so the module cannot resolve
-        // pipeline internals (AgentJobService, ChatService, DbContext, etc.).
-        using var scope = serviceScopeFactory.CreateScope();
-        var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
-
-        // Timeout: per-tool override → manifest default → 30s.
-        var manifest = moduleRegistry.GetManifest(envelope.Module);
-        var toolTimeout = moduleRegistry.GetToolTimeout(envelope.Module, envelope.Tool);
-        var timeoutSeconds = toolTimeout ?? manifest?.ExecutionTimeoutSeconds ?? 30;
-        using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+        // External modules use their own per-module DI container;
+        // bundled modules use the host's scope.
+        var externalHost = moduleRegistry.GetExternalHost(envelope.Module);
+        if (externalHost is not null && !externalHost.TryAcquireExecution())
+            throw new InvalidOperationException(
+                $"Module '{envelope.Module}' is unloading — cannot execute tools.");
 
         try
         {
-            return await module.ExecuteToolAsync(
-                envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+            using var scope = externalHost is not null
+                ? externalHost.CreateScope()
+                : serviceScopeFactory.CreateScope();
+            var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
+
+            // Timeout: per-tool override → manifest default → 30s.
+            var manifest = moduleRegistry.GetManifest(envelope.Module);
+            var toolTimeout = moduleRegistry.GetToolTimeout(envelope.Module, envelope.Tool);
+            var timeoutSeconds = toolTimeout ?? manifest?.ExecutionTimeoutSeconds ?? 30;
+            using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
+
+            try
+            {
+                return await module.ExecuteToolAsync(
+                    envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+            }
+            catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+            {
+                throw new InvalidOperationException(
+                    $"Module tool '{envelope.Module}.{envelope.Tool}' " +
+                    $"exceeded timeout ({timeoutSeconds}s).");
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
+            {
+                throw new InvalidOperationException(
+                    ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message));
+            }
         }
-        catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
+        finally
         {
-            throw new InvalidOperationException(
-                $"Module tool '{envelope.Module}.{envelope.Tool}' " +
-                $"exceeded timeout ({timeoutSeconds}s).");
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
-        {
-            throw new InvalidOperationException(
-                ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message));
+            externalHost?.ReleaseExecution();
         }
     }
 

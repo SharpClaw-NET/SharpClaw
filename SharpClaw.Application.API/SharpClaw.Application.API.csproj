@@ -31,6 +31,7 @@
     <ProjectReference Include="..\DefaultModules\DangerousShell\SharpClaw.Modules.DangerousShell.csproj" />
     <ProjectReference Include="..\DefaultModules\Mk8Shell\SharpClaw.Modules.Mk8Shell.csproj" />
     <ProjectReference Include="..\DefaultModules\OfficeApps\SharpClaw.Modules.OfficeApps.csproj" />
+    <ProjectReference Include="..\DefaultModules\DatabaseAccess\SharpClaw.Modules.DatabaseAccess.csproj" />
   </ItemGroup>
 
 </Project>

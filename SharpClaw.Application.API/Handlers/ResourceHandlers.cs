@@ -4,6 +4,7 @@ using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Containers;
 using SharpClaw.Contracts.DTOs.DisplayDevices;
+using SharpClaw.Contracts.DTOs.Databases;
 using SharpClaw.Contracts.DTOs.Documents;
 using SharpClaw.Contracts.DTOs.Editor;
 using SharpClaw.Contracts.DTOs.NativeApplications;
@@ -152,6 +153,70 @@ public static class ResourceHandlers
     [MapDelete("/editorsessions/{id}")]
     public static async Task<IResult> DeleteEditorSession(Guid id, EditorSessionService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    // ═══════════════════════════════════════════════════════════════
+    // Internal Databases
+    // ═══════════════════════════════════════════════════════════════
+
+    [MapPost("/internaldatabases")]
+    public static async Task<IResult> CreateInternalDatabase(
+        CreateInternalDatabaseRequest request, DatabaseResourceService svc)
+        => Results.Ok(await svc.CreateInternalAsync(request));
+
+    [MapGet("/internaldatabases")]
+    public static async Task<IResult> ListInternalDatabases(DatabaseResourceService svc)
+        => Results.Ok(await svc.ListInternalAsync());
+
+    [MapGet("/internaldatabases/{id:guid}")]
+    public static async Task<IResult> GetInternalDatabase(Guid id, DatabaseResourceService svc)
+    {
+        var item = await svc.GetInternalByIdAsync(id);
+        return item is not null ? Results.Ok(item) : Results.NotFound();
+    }
+
+    [MapPut("/internaldatabases/{id:guid}")]
+    public static async Task<IResult> UpdateInternalDatabase(
+        Guid id, UpdateInternalDatabaseRequest request, DatabaseResourceService svc)
+    {
+        var item = await svc.UpdateInternalAsync(id, request);
+        return item is not null ? Results.Ok(item) : Results.NotFound();
+    }
+
+    [MapDelete("/internaldatabases/{id:guid}")]
+    public static async Task<IResult> DeleteInternalDatabase(Guid id, DatabaseResourceService svc)
+        => await svc.DeleteInternalAsync(id) ? Results.NoContent() : Results.NotFound();
+
+    // ═══════════════════════════════════════════════════════════════
+    // External Databases
+    // ═══════════════════════════════════════════════════════════════
+
+    [MapPost("/externaldatabases")]
+    public static async Task<IResult> CreateExternalDatabase(
+        CreateExternalDatabaseRequest request, DatabaseResourceService svc)
+        => Results.Ok(await svc.CreateExternalAsync(request));
+
+    [MapGet("/externaldatabases")]
+    public static async Task<IResult> ListExternalDatabases(DatabaseResourceService svc)
+        => Results.Ok(await svc.ListExternalAsync());
+
+    [MapGet("/externaldatabases/{id:guid}")]
+    public static async Task<IResult> GetExternalDatabase(Guid id, DatabaseResourceService svc)
+    {
+        var item = await svc.GetExternalByIdAsync(id);
+        return item is not null ? Results.Ok(item) : Results.NotFound();
+    }
+
+    [MapPut("/externaldatabases/{id:guid}")]
+    public static async Task<IResult> UpdateExternalDatabase(
+        Guid id, UpdateExternalDatabaseRequest request, DatabaseResourceService svc)
+    {
+        var item = await svc.UpdateExternalAsync(id, request);
+        return item is not null ? Results.Ok(item) : Results.NotFound();
+    }
+
+    [MapDelete("/externaldatabases/{id:guid}")]
+    public static async Task<IResult> DeleteExternalDatabase(Guid id, DatabaseResourceService svc)
+        => await svc.DeleteExternalAsync(id) ? Results.NoContent() : Results.NotFound();
 
     // ═══════════════════════════════════════════════════════════════
     // Universal resource lookup

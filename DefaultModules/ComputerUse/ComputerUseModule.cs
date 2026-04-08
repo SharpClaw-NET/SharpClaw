@@ -1,6 +1,7 @@
 using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using SharpClaw.Application.Infrastructure.Models.Resources;
 using SharpClaw.Application.Services;
@@ -26,6 +27,10 @@ public sealed class ComputerUseModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
+        services.AddScoped<DisplayDeviceService>();
+        services.AddScoped<NativeApplicationService>();
+        services.TryAddScoped<DefaultResourceSetService>();
+        services.TryAddScoped<ToolAwarenessSetService>();
         services.AddSingleton<DesktopAwarenessService>();
         services.AddSingleton<DisplayCaptureService>();
         services.AddSingleton<DesktopInputService>();

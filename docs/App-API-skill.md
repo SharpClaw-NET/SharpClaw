@@ -365,7 +365,7 @@ Module manifests stored at modules/{dir}/module.json in published output.
 Tool names are prefixed: {prefix}_{toolName} (e.g. cu_capture_display, oa_read_range).
 
 Default modules:
-  Computer Use  id=sharpclaw.computer-use  prefix=cu  13 tools  Windows only
+  Computer Use  id=sharpclaw_computer_use  prefix=cu  13 tools  Windows only
     Desktop awareness, window management, input simulation, clipboard, display capture, process control.
     Exports: window_management (IWindowManager), desktop_input (IDesktopInput).
     Tools: cu_capture_display, cu_click_desktop, cu_type_on_desktop, cu_enumerate_windows,
@@ -373,12 +373,33 @@ Default modules:
            cu_send_hotkey, cu_capture_window, cu_read_clipboard, cu_write_clipboard, cu_stop_process.
     CLI: cu windows | cu displays | cu apps (aliases: computer-use)
 
-  Office Apps  id=sharpclaw.office-apps  prefix=oa  10 tools  Windows/Linux/macOS
+  Office Apps  id=sharpclaw_office_apps  prefix=oa  10 tools  Windows/Linux/macOS
     Document sessions, spreadsheet CRUD (ClosedXML/CsvHelper), live Excel COM Interop (Windows only).
     Tools: oa_register_document, oa_read_range, oa_write_range, oa_list_sheets,
            oa_create_sheet, oa_delete_sheet, oa_get_info, oa_create_workbook,
            oa_live_read_range, oa_live_write_range.
     CLI: docs list (aliases: office, oa)
+
+  mk8.shell  id=sharpclaw_mk8shell  prefix=mk8  2 tools  All platforms
+    Sandboxed mk8.shell script execution and sandbox container lifecycle.
+    Tools: mk8_execute_mk8_shell, mk8_create_mk8_sandbox.
+
+  Dangerous Shell  id=sharpclaw_dangerous_shell  prefix=ds  1 tool  All platforms
+    Unsandboxed real shell execution (Bash, PowerShell, Cmd, Git) — clearance-gated.
+    Tools: ds_execute_dangerous_shell.
+
+  Database Access  id=sharpclaw_database_access  prefix=db  3 tools  All platforms
+    Register and query internal/external databases (PostgreSQL, MySQL, SQLite, MSSQL, MongoDB, Redis).
+    Tools: db_register_database, db_access_internal_databases, db_access_external_database.
+    CLI: db list-internal | db list-external (aliases: database-access)
+
+Runtime enable/disable:
+  Modules can be toggled at runtime without restart. DI services are pre-registered for all modules.
+  Enable: Register + CacheManifest + check unsatisfied deps + InitializeAsync (rollback on failure).
+  Disable: safety check (reject if other modules depend on exports) + ShutdownAsync + Unregister.
+  State persisted in DB + .modules.env.
+  REST: GET /modules, GET /modules/{moduleId}, POST /modules/{moduleId}/enable, POST /modules/{moduleId}/disable.
+  CLI: module list | module get <id> | module enable <id> | module disable <id>.
 
 ModuleManifest fields: id, displayName, version, toolPrefix, entryAssembly, minHostVersion?,
   author?, description?, license?, platforms[], enabled, defaultEnabled, executionTimeoutSeconds?,
@@ -386,6 +407,7 @@ ModuleManifest fields: id, displayName, version, toolPrefix, entryAssembly, minH
 
 Tool resolution order: core tools first, then module tools (prefix lookup via ModuleRegistry).
 Modules can export/require named contracts; dependency graph resolved via topological sort at startup.
+Disabling a module that exports a required contract is rejected (409 Conflict).
 
 ────────────────────────────────────────
 PERMISSION RESOLUTION

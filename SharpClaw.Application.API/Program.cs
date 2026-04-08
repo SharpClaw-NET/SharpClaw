@@ -15,6 +15,7 @@ using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Services;
 using SharpClaw.Modules.ComputerUse;
+using SharpClaw.Modules.DatabaseAccess;
 using SharpClaw.Modules.DangerousShell;
 using SharpClaw.Modules.Mk8Shell;
 using SharpClaw.Modules.OfficeApps;
@@ -139,12 +140,6 @@ try
     builder.Services.AddScoped<RoleService>();
     builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();
     builder.Services.AddScoped<TranscriptionService>();
-    builder.Services.AddScoped<ContainerService>();
-    builder.Services.AddScoped<DisplayDeviceService>();
-    builder.Services.AddScoped<DefaultResourceSetService>();
-    builder.Services.AddScoped<ToolAwarenessSetService>();
-    builder.Services.AddScoped<EditorSessionService>();
-    builder.Services.AddSingleton<EditorBridgeService>();
     builder.Services.AddScoped<TaskService>();
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
@@ -160,7 +155,8 @@ try
         new ComputerUseModule(),
         new OfficeAppsModule(),
         new Mk8ShellModule(),
-        new DangerousShellModule());
+        new DangerousShellModule(),
+        new DatabaseAccessModule());
 
     foreach (var bundledModule in moduleLoader.GetAllBundled())
         bundledModule.ConfigureServices(builder.Services);
@@ -168,9 +164,6 @@ try
     builder.Services.AddSingleton(moduleLoader);
     builder.Services.AddScoped<ModuleService>();
 
-    // Document & desktop awareness services
-    builder.Services.AddScoped<DocumentSessionService>();
-    builder.Services.AddScoped<NativeApplicationService>();
     builder.Services.AddScoped<SearchEngineService>();
 
     // Local inference (in-process via LLamaSharp)
@@ -305,6 +298,19 @@ try
 
             registry.Unregister(moduleId);
         }
+    }
+
+    // Scan external-modules directory and hot-load any found modules
+    try
+    {
+        var moduleSvc = app.Services.GetRequiredService<ModuleService>();
+        var externalModules = await moduleSvc.ScanExternalModulesAsync(app.Services);
+        foreach (var ext in externalModules)
+            Log.Information("External module '{ModuleId}' loaded ({Version})", ext.ModuleId, ext.Version);
+    }
+    catch (Exception ex)
+    {
+        Log.Warning(ex, "External module scan failed — continuing without external modules");
     }
 
     // Seed mk8.shell base env on first startup

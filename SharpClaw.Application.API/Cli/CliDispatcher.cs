@@ -19,6 +19,7 @@ using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.Containers;
+using SharpClaw.Contracts.DTOs.Databases;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Contracts.DTOs.DisplayDevices;
 using SharpClaw.Contracts.DTOs.Documents;
@@ -222,6 +223,7 @@ public static class CliDispatcher
             "user" => await HandleUserCommand(args, sp),
             "resource" => await HandleResourceCommand(args, sp),
             "task" => await HandleTaskCommand(args, sp),
+            "module" => await HandleModuleCommand(args, sp),
             "tools" => await HandleToolAwarenessSetCommand(args, sp),
             "bot" => await HandleBotCommand(args, sp),
             "bio" => await HandleBioCommand(args, sp),
@@ -2666,6 +2668,58 @@ public static class CliDispatcher
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Module (list, get, enable, disable)
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<IResult?> HandleModuleCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "module list                              List all modules",
+                "module get <id>                          Show module details",
+                "module enable <id>                       Enable a module at runtime",
+                "module disable <id>                      Disable a module at runtime",
+                "module scan                              Scan & load external modules",
+                "module reload <id>                       Reload an external module",
+                "module unload <id>                       Unload an external module");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<ModuleService>();
+
+        return sub switch
+        {
+            "list" => await ModuleHandlers.List(svc),
+
+            "get" when args.Length >= 3
+                => await ModuleHandlers.Get(args[2], svc),
+            "get" => UsageResult("module get <id>"),
+
+            "enable" when args.Length >= 3
+                => await ModuleHandlers.Enable(args[2], svc, sp.GetRequiredService<ModuleLoader>()),
+            "enable" => UsageResult("module enable <id>"),
+
+            "disable" when args.Length >= 3
+                => await ModuleHandlers.Disable(args[2], svc),
+            "disable" => UsageResult("module disable <id>"),
+
+            "scan" => await ModuleHandlers.Scan(svc, sp.GetRequiredService<ModuleLoader>()),
+
+            "reload" when args.Length >= 3
+                => await ModuleHandlers.Reload(args[2], svc, sp.GetRequiredService<ModuleLoader>()),
+            "reload" => UsageResult("module reload <id>"),
+
+            "unload" when args.Length >= 3
+                => await ModuleHandlers.Unload(args[2], svc),
+            "unload" => UsageResult("module unload <id>"),
+
+            _ => UsageResult($"Unknown sub-command: module {sub}. Try 'help' for usage.")
+        };
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Resource (unified: container, audiodevice, ...)
     // ═══════════════════════════════════════════════════════════════
 
@@ -2677,7 +2731,7 @@ public static class CliDispatcher
                 "resource <type> <command> [args...]",
                 "",
                 "Types: container, audiodevice, displaydevice, editorsession,",
-                "       document, nativeapplication",
+                "       document, nativeapplication, internaldb, externaldb",
                 "",
                 "Commands (all types):",
                 "  add      Create a new resource",
@@ -2698,9 +2752,11 @@ public static class CliDispatcher
             "editorsession" or "editor" or "es" => await HandleResourceEditorSessionCommand(args, sp),
             "document" or "doc" => await HandleResourceDocumentCommand(args, sp),
             "nativeapplication" or "nativeapp" or "app" => await HandleResourceNativeApplicationCommand(args, sp),
+            "internaldb" or "internaldb" => await HandleResourceInternalDatabaseCommand(args, sp),
+            "externaldb" or "externaldb" => await HandleResourceExternalDatabaseCommand(args, sp),
             _ => await TryModuleResourceCommandAsync(type, args, sp)
                 ?? UsageResult($"Unknown resource type: {type}. " +
-                    "Available: container, audiodevice, displaydevice, editorsession, document, nativeapplication")
+                    "Available: container, audiodevice, displaydevice, editorsession, document, nativeapplication, internaldb, externaldb")
         };
     }
 
@@ -3006,6 +3062,122 @@ public static class CliDispatcher
             "delete" => UsageResult("resource editorsession delete <id>"),
 
             _ => UsageResult($"Unknown command: resource editorsession {sub}")
+        };
+    }
+
+    private static async Task<IResult?> HandleResourceInternalDatabaseCommand(
+        string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 3)
+        {
+            PrintUsage(
+                "resource internaldb add <name> <dbType> <path> [description]",
+                "resource internaldb get <id>                  Show an internal database",
+                "resource internaldb list                      List all internal databases",
+                "resource internaldb update <id> [name] [dbType] [path] [desc]",
+                "resource internaldb delete <id>               Delete an internal database",
+                "",
+                "Database types: MySQL, PostgreSQL, SQLite, MSSQL, MongoDB, Redis,",
+                "  CosmosDB, MariaDB, Oracle, CockroachDB, Firebird, Custom");
+            return Results.Ok();
+        }
+
+        var sub = args[2].ToLowerInvariant();
+        var svc = sp.GetRequiredService<DatabaseResourceService>();
+
+        return sub switch
+        {
+            "add" when args.Length >= 6
+                => await ResourceHandlers.CreateInternalDatabase(
+                    new CreateInternalDatabaseRequest(
+                        args[3],
+                        Enum.Parse<DatabaseType>(args[4], ignoreCase: true),
+                        args[5],
+                        args.Length >= 7 ? string.Join(' ', args[6..]) : null),
+                    svc),
+            "add" => UsageResult("resource internaldb add <name> <dbType> <path> [description]"),
+
+            "get" when args.Length >= 4
+                => await ResourceHandlers.GetInternalDatabase(CliIdMap.Resolve(args[3]), svc),
+            "get" => UsageResult("resource internaldb get <id>"),
+
+            "list" => await ResourceHandlers.ListInternalDatabases(svc),
+
+            "update" when args.Length >= 5
+                => await ResourceHandlers.UpdateInternalDatabase(
+                    CliIdMap.Resolve(args[3]),
+                    new UpdateInternalDatabaseRequest(
+                        args.Length >= 5 ? args[4] : null,
+                        args.Length >= 6 ? Enum.Parse<DatabaseType>(args[5], ignoreCase: true) : null,
+                        args.Length >= 7 ? args[6] : null,
+                        args.Length >= 8 ? string.Join(' ', args[7..]) : null),
+                    svc),
+            "update" => UsageResult("resource internaldb update <id> [name] [dbType] [path] [description]"),
+
+            "delete" when args.Length >= 4
+                => await ResourceHandlers.DeleteInternalDatabase(CliIdMap.Resolve(args[3]), svc),
+            "delete" => UsageResult("resource internaldb delete <id>"),
+
+            _ => UsageResult($"Unknown command: resource internaldb {sub}")
+        };
+    }
+
+    private static async Task<IResult?> HandleResourceExternalDatabaseCommand(
+        string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 3)
+        {
+            PrintUsage(
+                "resource externaldb add <name> <dbType> <connectionString> [description]",
+                "resource externaldb get <id>                  Show an external database",
+                "resource externaldb list                      List all external databases",
+                "resource externaldb update <id> [name] [dbType] [connStr] [desc]",
+                "resource externaldb delete <id>               Delete an external database",
+                "",
+                "Database types: MySQL, PostgreSQL, SQLite, MSSQL, MongoDB, Redis,",
+                "  CosmosDB, MariaDB, Oracle, CockroachDB, Firebird, Custom",
+                "",
+                "The connection string is encrypted before storage.");
+            return Results.Ok();
+        }
+
+        var sub = args[2].ToLowerInvariant();
+        var svc = sp.GetRequiredService<DatabaseResourceService>();
+
+        return sub switch
+        {
+            "add" when args.Length >= 6
+                => await ResourceHandlers.CreateExternalDatabase(
+                    new CreateExternalDatabaseRequest(
+                        args[3],
+                        Enum.Parse<DatabaseType>(args[4], ignoreCase: true),
+                        args[5],
+                        args.Length >= 7 ? string.Join(' ', args[6..]) : null),
+                    svc),
+            "add" => UsageResult("resource externaldb add <name> <dbType> <connectionString> [description]"),
+
+            "get" when args.Length >= 4
+                => await ResourceHandlers.GetExternalDatabase(CliIdMap.Resolve(args[3]), svc),
+            "get" => UsageResult("resource externaldb get <id>"),
+
+            "list" => await ResourceHandlers.ListExternalDatabases(svc),
+
+            "update" when args.Length >= 5
+                => await ResourceHandlers.UpdateExternalDatabase(
+                    CliIdMap.Resolve(args[3]),
+                    new UpdateExternalDatabaseRequest(
+                        args.Length >= 5 ? args[4] : null,
+                        args.Length >= 6 ? Enum.Parse<DatabaseType>(args[5], ignoreCase: true) : null,
+                        args.Length >= 7 ? args[6] : null,
+                        args.Length >= 8 ? string.Join(' ', args[7..]) : null),
+                    svc),
+            "update" => UsageResult("resource externaldb update <id> [name] [dbType] [connectionString] [description]"),
+
+            "delete" when args.Length >= 4
+                => await ResourceHandlers.DeleteExternalDatabase(CliIdMap.Resolve(args[3]), svc),
+            "delete" => UsageResult("resource externaldb delete <id>"),
+
+            _ => UsageResult($"Unknown command: resource externaldb {sub}")
         };
     }
 
@@ -3424,6 +3596,12 @@ public static class CliDispatcher
               json: '{"tool_name": true, ...}' — omitted tools default to enabled.
               Assign to agents/channels via --tools <setId>.
               Override chain: channel → agent → null (all enabled).
+
+            Module:    module <sub>              (list, get, enable, disable)
+              module list                        List all bundled modules
+              module get <id>                    Show module details
+              module enable <id>                 Enable a module at runtime
+              module disable <id>                Disable a module at runtime
 
             Bot:       bot <sub> [args]
               bot list                           List all bot integrations

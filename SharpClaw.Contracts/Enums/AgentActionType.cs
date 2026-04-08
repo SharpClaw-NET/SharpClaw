@@ -9,6 +9,7 @@ public enum AgentActionType
     CreateSubAgent = 0,
     [Obsolete("Dispatched to mk8.shell module.")]
     CreateContainer = 1,
+    [Obsolete("Dispatched to Database Access module.")]
     RegisterDatabase = 2,
     AccessLocalhostInBrowser = 3,
     AccessLocalhostCli = 4,
@@ -22,7 +23,9 @@ public enum AgentActionType
     UnsafeExecuteAsDangerousShell = 7,
     [Obsolete("Dispatched to mk8.shell module.")]
     ExecuteAsSafeShell = 8,
+    [Obsolete("Dispatched to Database Access module.")]
     AccessInternalDatabases = 9,
+    [Obsolete("Dispatched to Database Access module.")]
     AccessExternalDatabase = 10,
     AccessWebsite = 11,
     QuerySearchEngine = 12,

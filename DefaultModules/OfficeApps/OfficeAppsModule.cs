@@ -27,6 +27,7 @@ public sealed class OfficeAppsModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
+        services.AddScoped<DocumentSessionService>();
         services.AddSingleton<SpreadsheetService>();
         services.AddSingleton<ExcelComInteropService>();
     }

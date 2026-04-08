@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Nodes;
 
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -13,20 +14,22 @@ using SharpClaw.Infrastructure.Persistence;
 namespace SharpClaw.Application.Services;
 
 /// <summary>
-/// Manages module lifecycle: listing, enabling, and disabling bundled modules.
+/// Manages module lifecycle: listing, enabling, and disabling bundled modules,
+/// and loading / unloading / reloading external (hot-loaded) modules.
 /// Updates both the database and the <c>.modules.env</c> configuration file.
 /// </summary>
 public sealed class ModuleService(
     SharpClawDbContext db,
     ModuleLoader loader,
     ModuleRegistry registry,
+    ILoggerFactory loggerFactory,
     ILogger<ModuleService> logger)
 {
     // ═══════════════════════════════════════════════════════════════
     // Queries
     // ═══════════════════════════════════════════════════════════════
 
-    /// <summary>List all bundled modules with their current state.</summary>
+    /// <summary>List all modules (bundled + external) with their current state.</summary>
     public async Task<IReadOnlyList<ModuleStateResponse>> ListAsync(CancellationToken ct = default)
     {
         var states = await db.ModuleStates
@@ -40,18 +43,37 @@ public sealed class ModuleService(
             result.Add(ToResponse(module, state, manifest));
         }
 
+        // External (hot-loaded) modules — always enabled while loaded.
+        foreach (var module in registry.GetAllModules())
+        {
+            if (result.Any(r => r.ModuleId == module.Id)) continue;
+            var manifest = registry.GetManifest(module.Id);
+            result.Add(ToResponse(module, state: null, manifest, isExternal: true));
+        }
+
         return result.OrderBy(r => r.DisplayName).ToList();
     }
 
-    /// <summary>Get state for a single module.</summary>
+    /// <summary>Get state for a single module (bundled or external).</summary>
     public async Task<ModuleStateResponse?> GetStateAsync(string moduleId, CancellationToken ct = default)
     {
         var module = loader.GetBundledModule(moduleId);
-        if (module is null) return null;
+        if (module is not null)
+        {
+            var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
+            var manifest = loader.GetManifest(moduleId);
+            return ToResponse(module, state, manifest);
+        }
 
-        var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
-        var manifest = loader.GetManifest(moduleId);
-        return ToResponse(module, state, manifest);
+        // External (hot-loaded) module — not in DB, always "enabled" while loaded.
+        var ext = registry.GetModule(moduleId);
+        if (ext is not null)
+        {
+            var manifest = registry.GetManifest(moduleId);
+            return ToResponse(ext, state: null, manifest, isExternal: true);
+        }
+
+        return null;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -189,6 +211,118 @@ public sealed class ModuleService(
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // External module lifecycle (hot-load / unload / reload)
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Load an external module from a directory containing <c>module.json</c>
+    /// and its entry assembly. Registers it with the <see cref="ModuleRegistry"/>.
+    /// </summary>
+    public async Task<ModuleStateResponse> LoadExternalAsync(
+        string moduleDir, IServiceProvider hostServices, CancellationToken ct = default)
+    {
+        var manifestPath = Path.Combine(moduleDir, "module.json");
+        if (!File.Exists(manifestPath))
+            throw new FileNotFoundException($"No module.json found in '{moduleDir}'.", manifestPath);
+
+        var json = await File.ReadAllTextAsync(manifestPath, ct);
+        var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
+            ?? throw new InvalidOperationException($"Failed to parse manifest in '{moduleDir}'.");
+
+        if (registry.GetModule(manifest.Id) is not null)
+            throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
+
+        var host = ExternalModuleHost.Load(moduleDir, manifest, hostServices, loggerFactory);
+        try
+        {
+            registry.Register(host.Module, host);
+            registry.CacheManifest(manifest.Id, manifest);
+            await host.Module.InitializeAsync(host.Services, ct);
+
+            logger.LogInformation("External module '{ModuleId}' loaded from {Dir}", manifest.Id, moduleDir);
+            return ToResponse(host.Module, state: null, manifest, isExternal: true);
+        }
+        catch
+        {
+            registry.Unregister(manifest.Id);
+            await host.DisposeAsync();
+            throw;
+        }
+    }
+
+    /// <summary>
+    /// Drain in-flight executions, shut down, unregister, and unload an external module.
+    /// </summary>
+    public async Task UnloadExternalAsync(string moduleId, CancellationToken ct = default)
+    {
+        var host = registry.GetExternalHost(moduleId)
+            ?? throw new ArgumentException($"Module '{moduleId}' is not an external module.");
+
+        await host.DrainAsync(TimeSpan.FromSeconds(30), ct);
+        await host.Module.ShutdownAsync();
+        registry.Unregister(moduleId);
+        await host.DisposeAsync();
+
+        var unloaded = host.VerifyUnloaded();
+        logger.LogInformation(
+            "External module '{ModuleId}' unloaded (GC verified: {Verified})", moduleId, unloaded);
+    }
+
+    /// <summary>Unload then re-load an external module from its original directory.</summary>
+    public async Task<ModuleStateResponse> ReloadExternalAsync(
+        string moduleId, IServiceProvider hostServices, CancellationToken ct = default)
+    {
+        var host = registry.GetExternalHost(moduleId)
+            ?? throw new ArgumentException($"Module '{moduleId}' is not an external module.");
+
+        var dir = host.SourceDirectory;
+        await UnloadExternalAsync(moduleId, ct);
+        return await LoadExternalAsync(dir, hostServices, ct);
+    }
+
+    /// <summary>
+    /// Scan the <c>external-modules/</c> directory for new module directories
+    /// and load any that are not already registered.
+    /// </summary>
+    public async Task<IReadOnlyList<ModuleStateResponse>> ScanExternalModulesAsync(
+        IServiceProvider hostServices, CancellationToken ct = default)
+    {
+        var dir = ResolveExternalModulesDir();
+        if (!Directory.Exists(dir)) return [];
+
+        var loaded = new List<ModuleStateResponse>();
+        foreach (var subDir in Directory.EnumerateDirectories(dir))
+        {
+            var manifestPath = Path.Combine(subDir, "module.json");
+            if (!File.Exists(manifestPath)) continue;
+
+            try
+            {
+                var json = await File.ReadAllTextAsync(manifestPath, ct);
+                var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest);
+                if (manifest is null || registry.GetModule(manifest.Id) is not null)
+                    continue;
+
+                var result = await LoadExternalAsync(subDir, hostServices, ct);
+                loaded.Add(result);
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(ex, "Failed to load external module from {Dir}", subDir);
+            }
+        }
+
+        return loaded;
+    }
+
+    internal static string ResolveExternalModulesDir()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,
+            "external-modules");
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // Startup helpers (called from Program.cs via a scope)
     // ═══════════════════════════════════════════════════════════════
 
@@ -275,15 +409,17 @@ public sealed class ModuleService(
     // ═══════════════════════════════════════════════════════════════
 
     private static ModuleStateResponse ToResponse(
-        ISharpClawModule module, ModuleStateDB? state, ModuleManifest? manifest)
+        ISharpClawModule module, ModuleStateDB? state, ModuleManifest? manifest,
+        bool isExternal = false)
     {
         return new ModuleStateResponse(
             ModuleId: module.Id,
             DisplayName: module.DisplayName,
             ToolPrefix: module.ToolPrefix,
-            Enabled: state?.Enabled ?? false,
+            Enabled: isExternal || (state?.Enabled ?? false),
             Version: manifest?.Version ?? state?.Version,
-            Registered: state is not null,
+            Registered: isExternal || state is not null,
+            IsExternal: isExternal,
             CreatedAt: state?.CreatedAt,
             UpdatedAt: state?.UpdatedAt);
     }
@@ -297,5 +433,6 @@ public sealed record ModuleStateResponse(
     bool Enabled,
     string? Version,
     bool Registered,
+    bool IsExternal,
     DateTimeOffset? CreatedAt,
     DateTimeOffset? UpdatedAt);

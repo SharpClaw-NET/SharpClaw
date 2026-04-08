@@ -28,7 +28,7 @@ public sealed class Mk8ShellModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
-        // No DI registrations needed — mk8.shell is self-contained.
+        services.AddScoped<ContainerService>();
     }
 
     public IReadOnlyList<ModuleContractExport> ExportedContracts => [];
