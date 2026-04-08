@@ -114,7 +114,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
                     .Include(p => p.SearchEngineAccesses)
                     .Include(p => p.InternalDatabaseAccesses)
                     .Include(p => p.ExternalDatabaseAccesses)
-                    .Include(p => p.AudioDeviceAccesses)
+                    .Include(p => p.InputAudioAccesses)
                     .Include(p => p.DisplayDeviceAccesses)
                     .Include(p => p.EditorSessionAccesses)
                     .Include(p => p.AgentPermissions)
@@ -142,7 +142,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
                 .Include(p => p.SearchEngineAccesses)
                 .Include(p => p.InternalDatabaseAccesses)
                 .Include(p => p.ExternalDatabaseAccesses)
-                .Include(p => p.AudioDeviceAccesses)
+                .Include(p => p.InputAudioAccesses)
                 .Include(p => p.DisplayDeviceAccesses)
                 .Include(p => p.EditorSessionAccesses)
                 .Include(p => p.AgentPermissions)
@@ -267,7 +267,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.SearchEngineAccesses.Count > 0) grants.Add("SearchEngineAccess");
         if (ps.InternalDatabaseAccesses.Count > 0) grants.Add("InternalDatabase");
         if (ps.ExternalDatabaseAccesses.Count > 0) grants.Add("ExternalDatabase");
-        if (ps.AudioDeviceAccesses.Count > 0) grants.Add("AudioDevice");
+        if (ps.InputAudioAccesses.Count > 0) grants.Add("InputAudio");
         if (ps.DisplayDeviceAccesses.Count > 0) grants.Add("DisplayDevice");
         if (ps.EditorSessionAccesses.Count > 0) grants.Add("EditorSession");
         if (ps.AgentPermissions.Count > 0) grants.Add("ManageAgent");
@@ -337,9 +337,9 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             ps.ExternalDatabaseAccesses.Select(a => a.ExternalDatabaseId),
             () => db.ExternalDatabases.Select(e => e.Id).ToListAsync(ct));
 
-        await AppendResourceGrantAsync(grants, "AudioDevice",
-            ps.AudioDeviceAccesses.Select(a => a.AudioDeviceId),
-            () => db.AudioDevices.Select(a => a.Id).ToListAsync(ct));
+        await AppendResourceGrantAsync(grants, "InputAudio",
+            ps.InputAudioAccesses.Select(a => a.InputAudioId),
+            () => db.InputAudios.Select(a => a.Id).ToListAsync(ct));
 
         await AppendResourceGrantAsync(grants, "DisplayDevice",
             ps.DisplayDeviceAccesses.Select(a => a.DisplayDeviceId),
@@ -520,7 +520,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             "containers" => Cast(await db.Containers.ToListAsync(ct)),
             "websites" => Cast(await db.Websites.ToListAsync(ct)),
             "searchengines" => Cast(await db.SearchEngines.ToListAsync(ct)),
-            "audiodevices" => Cast(await db.AudioDevices.ToListAsync(ct)),
+            "inputaudios" => Cast(await db.InputAudios.ToListAsync(ct)),
             "displaydevices" => Cast(await db.DisplayDevices.ToListAsync(ct)),
             "editorsessions" => Cast(await db.EditorSessions.ToListAsync(ct)),
             "skills" => Cast(await db.Skills.ToListAsync(ct)),

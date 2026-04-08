@@ -2,7 +2,7 @@ using System.Threading.Channels;
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Captures audio from a WASAPI input device using NAudio.

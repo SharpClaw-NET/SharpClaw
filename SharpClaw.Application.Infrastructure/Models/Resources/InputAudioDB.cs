@@ -4,10 +4,10 @@ using SharpClaw.Contracts.Entities;
 namespace SharpClaw.Application.Infrastructure.Models.Resources;
 
 /// <summary>
-/// A registered audio input device that agents can use for live
+/// A registered audio input source that agents can use for live
 /// transcription.
 /// </summary>
-public class AudioDeviceDB : BaseEntity
+public class InputAudioDB : BaseEntity
 {
     public required string Name { get; set; }
 
@@ -19,5 +19,5 @@ public class AudioDeviceDB : BaseEntity
     public Guid? SkillId { get; set; }
     public SkillDB? Skill { get; set; }
 
-    public ICollection<AudioDeviceAccessDB> Accesses { get; set; } = [];
+    public ICollection<InputAudioAccessDB> Accesses { get; set; } = [];
 }

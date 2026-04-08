@@ -11,7 +11,9 @@ public enum AgentActionType
     CreateContainer = 1,
     [Obsolete("Dispatched to Database Access module.")]
     RegisterDatabase = 2,
+    [Obsolete("Dispatched to Web Access module.")]
     AccessLocalhostInBrowser = 3,
+    [Obsolete("Dispatched to Web Access module.")]
     AccessLocalhostCli = 4,
     [Obsolete("Dispatched to Computer Use module.")]
     ClickDesktop = 5,
@@ -27,16 +29,21 @@ public enum AgentActionType
     AccessInternalDatabases = 9,
     [Obsolete("Dispatched to Database Access module.")]
     AccessExternalDatabase = 10,
+    [Obsolete("Dispatched to Web Access module.")]
     AccessWebsite = 11,
+    [Obsolete("Dispatched to Web Access module.")]
     QuerySearchEngine = 12,
     AccessContainer = 13,
     ManageAgent = 14,
     EditTask = 15,
     AccessSkill = 16,
 
-    // ── Transcription actions (per-resource: audio device) ────────
+    // ── Transcription actions (per-resource: input audio) ────────
+    [Obsolete("Dispatched to Transcription module.")]
     TranscribeFromAudioDevice = 17,
+    [Obsolete("Dispatched to Transcription module.")]
     TranscribeFromAudioStream = 18,
+    [Obsolete("Dispatched to Transcription module.")]
     TranscribeFromAudioFile = 19,
 
     // ── Display capture (per-resource: display device) ────────────

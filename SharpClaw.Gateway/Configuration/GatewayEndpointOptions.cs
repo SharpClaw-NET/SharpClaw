@@ -32,7 +32,7 @@ public sealed class GatewayEndpointOptions
     public bool Providers { get; set; }
     public bool Roles { get; set; }
     public bool Users { get; set; }
-    public bool AudioDevices { get; set; }
+    public bool InputAudios { get; set; }
     public bool Transcription { get; set; }
     public bool TranscriptionStreaming { get; set; }
     public bool Cost { get; set; }
@@ -62,7 +62,7 @@ public sealed class GatewayEndpointOptions
             nameof(Providers) => Providers,
             nameof(Roles) => Roles,
             nameof(Users) => Users,
-            nameof(AudioDevices) => AudioDevices,
+            nameof(InputAudios) => InputAudios,
             nameof(Transcription) => Transcription,
             nameof(TranscriptionStreaming) => TranscriptionStreaming,
             nameof(Cost) => Cost,

@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
 using Whisper.net;
 
-namespace SharpClaw.Application.Core.LocalInference;
+namespace SharpClaw.Modules.Transcription.LocalInference;
 
 /// <summary>
 /// Manages loaded Whisper.net model instances (GGML/GGUF weights).

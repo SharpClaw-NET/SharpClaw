@@ -223,13 +223,13 @@ public sealed class AgentActionService(SharpClawDbContext db)
             p => p.SkillPermissions, a => a.SkillId, a => a.Clearance,
             "skill access", onApproved, ct);
 
-    public Task<AgentActionResult> AccessAudioDeviceAsync(
-        Guid agentId, Guid audioDeviceId, ActionCaller caller,
+    public Task<AgentActionResult> AccessInputAudioAsync(
+        Guid agentId, Guid inputAudioId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, audioDeviceId, caller,
-            p => p.AudioDeviceAccesses, a => a.AudioDeviceId, a => a.Clearance,
-            "audio device access", onApproved, ct);
+            agentId, inputAudioId, caller,
+            p => p.InputAudioAccesses, a => a.InputAudioId, a => a.Clearance,
+            "input audio access", onApproved, ct);
 
     public Task<AgentActionResult> AccessDisplayDeviceAsync(
         Guid agentId, Guid displayDeviceId, ActionCaller caller,
@@ -478,7 +478,7 @@ public sealed class AgentActionService(SharpClawDbContext db)
             .Include(p => p.WebsiteAccesses)
             .Include(p => p.SearchEngineAccesses)
             .Include(p => p.ContainerAccesses)
-            .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.InputAudioAccesses)
             .Include(p => p.DisplayDeviceAccesses)
             .Include(p => p.EditorSessionAccesses)
             .Include(p => p.AgentPermissions)
@@ -534,7 +534,7 @@ public sealed class AgentActionService(SharpClawDbContext db)
         ["ManageAgentAsync"] = (svc, agentId, resId, caller, ct) => svc.ManageAgentAsync(agentId, resId!.Value, caller, ct: ct),
         ["EditTaskAsync"] = (svc, agentId, resId, caller, ct) => svc.EditTaskAsync(agentId, resId!.Value, caller, ct: ct),
         ["AccessSkillAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessSkillAsync(agentId, resId!.Value, caller, ct: ct),
-        ["AccessAudioDeviceAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessAudioDeviceAsync(agentId, resId!.Value, caller, ct: ct),
+        ["AccessInputAudioAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessInputAudioAsync(agentId, resId!.Value, caller, ct: ct),
         ["AccessDisplayDeviceAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessDisplayDeviceAsync(agentId, resId!.Value, caller, ct: ct),
         ["AccessEditorSessionAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessEditorSessionAsync(agentId, resId!.Value, caller, ct: ct),
         ["AccessBotIntegrationAsync"] = (svc, agentId, resId, caller, ct) => svc.AccessBotIntegrationAsync(agentId, resId!.Value, caller, ct: ct),
@@ -579,7 +579,7 @@ public sealed class AgentActionService(SharpClawDbContext db)
         ["ManageAgentAsync"] = (ps, rid) => ps.AgentPermissions.Any(a => a.AgentId == rid || a.AgentId == WellKnownIds.AllResources),
         ["EditTaskAsync"] = (ps, rid) => ps.TaskPermissions.Any(a => a.ScheduledTaskId == rid || a.ScheduledTaskId == WellKnownIds.AllResources),
         ["AccessSkillAsync"] = (ps, rid) => ps.SkillPermissions.Any(a => a.SkillId == rid || a.SkillId == WellKnownIds.AllResources),
-        ["AccessAudioDeviceAsync"] = (ps, rid) => ps.AudioDeviceAccesses.Any(a => a.AudioDeviceId == rid || a.AudioDeviceId == WellKnownIds.AllResources),
+        ["AccessInputAudioAsync"] = (ps, rid) => ps.InputAudioAccesses.Any(a => a.InputAudioId == rid || a.InputAudioId == WellKnownIds.AllResources),
         ["AccessDisplayDeviceAsync"] = (ps, rid) => ps.DisplayDeviceAccesses.Any(a => a.DisplayDeviceId == rid || a.DisplayDeviceId == WellKnownIds.AllResources),
         ["AccessEditorSessionAsync"] = (ps, rid) => ps.EditorSessionAccesses.Any(a => a.EditorSessionId == rid || a.EditorSessionId == WellKnownIds.AllResources),
         ["AccessBotIntegrationAsync"] = (ps, rid) => ps.BotIntegrationAccesses.Any(a => a.BotIntegrationId == rid || a.BotIntegrationId == WellKnownIds.AllResources),

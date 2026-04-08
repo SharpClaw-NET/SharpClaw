@@ -1,0 +1,21 @@
+{
+  "id": "sharpclaw_transcription",
+  "displayName": "Transcription",
+  "version": "1.0.0",
+  "toolPrefix": "tr",
+  "entryAssembly": "SharpClaw.Modules.Transcription",
+  "minHostVersion": "1.0.0",
+  "platforms": [ "windows" ],
+  "executionTimeoutSeconds": 120,
+  "exports": [
+    {
+      "contractName": "transcription_stt",
+      "serviceType": "SharpClaw.Modules.Transcription.Clients.ITranscriptionApiClient"
+    },
+    {
+      "contractName": "transcription_audio_capture",
+      "serviceType": "SharpClaw.Modules.Transcription.Clients.IAudioCaptureProvider"
+    }
+  ],
+  "requires": []
+}

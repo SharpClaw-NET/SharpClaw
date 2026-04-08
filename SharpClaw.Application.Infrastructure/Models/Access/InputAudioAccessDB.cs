@@ -6,10 +6,10 @@ using SharpClaw.Contracts.Enums;
 namespace SharpClaw.Application.Infrastructure.Models.Access;
 
 /// <summary>
-/// Grants a role access to a specific audio device for live
+/// Grants a role access to a specific audio input source for live
 /// transcription.
 /// </summary>
-public class AudioDeviceAccessDB : BaseEntity
+public class InputAudioAccessDB : BaseEntity
 {
     /// <summary>
     /// Per-permission clearance override.
@@ -20,6 +20,6 @@ public class AudioDeviceAccessDB : BaseEntity
     public Guid PermissionSetId { get; set; }
     public PermissionSetDB PermissionSet { get; set; } = null!;
 
-    public Guid AudioDeviceId { get; set; }
-    public AudioDeviceDB AudioDevice { get; set; } = null!;
+    public Guid InputAudioId { get; set; }
+    public InputAudioDB InputAudio { get; set; } = null!;
 }

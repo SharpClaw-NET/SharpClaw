@@ -19,7 +19,12 @@ using SharpClaw.Modules.DatabaseAccess;
 using SharpClaw.Modules.DangerousShell;
 using SharpClaw.Modules.Mk8Shell;
 using SharpClaw.Modules.OfficeApps;
+using SharpClaw.Modules.Transcription;
+using SharpClaw.Modules.Transcription.Handlers;
+using SharpClaw.Modules.WebAccess;
+using SharpClaw.Modules.WebAccess.Handlers;
 using SharpClaw.Application.Services.Auth;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
@@ -114,17 +119,6 @@ try
     builder.Services.AddSingleton<IProviderApiClient, MinimaxApiClient>();
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
-    // Transcription clients
-    builder.Services.AddSingleton<ITranscriptionApiClient, OpenAiTranscriptionApiClient>();
-    builder.Services.AddSingleton<ITranscriptionApiClient, GroqTranscriptionApiClient>();
-    builder.Services.AddSingleton<WhisperModelManager>();
-    builder.Services.AddSingleton<ITranscriptionApiClient, LocalTranscriptionClient>();
-    builder.Services.AddSingleton<TranscriptionApiClientFactory>();
-
-    // Audio capture
-    builder.Services.AddSingleton<IAudioCaptureProvider, WasapiAudioCaptureProvider>();
-    builder.Services.AddSingleton<SharedAudioCaptureManager>();
-
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();
     builder.Services.AddScoped<ModelService>();
@@ -138,8 +132,6 @@ try
     builder.Services.AddScoped<ChatService>();
     builder.Services.AddSingleton<ThreadActivitySignal>();
     builder.Services.AddScoped<RoleService>();
-    builder.Services.AddSingleton<LiveTranscriptionOrchestrator>();
-    builder.Services.AddScoped<TranscriptionService>();
     builder.Services.AddScoped<TaskService>();
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
@@ -156,7 +148,9 @@ try
         new OfficeAppsModule(),
         new Mk8ShellModule(),
         new DangerousShellModule(),
-        new DatabaseAccessModule());
+        new DatabaseAccessModule(),
+        new TranscriptionModule(),
+        new WebAccessModule());
 
     foreach (var bundledModule in moduleLoader.GetAllBundled())
         bundledModule.ConfigureServices(builder.Services);
@@ -164,9 +158,7 @@ try
     builder.Services.AddSingleton(moduleLoader);
     builder.Services.AddScoped<ModuleService>();
 
-    builder.Services.AddScoped<SearchEngineService>();
-
-    // Local inference (in-process via LLamaSharp)
+    // Local inference
     // Configure native library: prefer CUDA > Vulkan > CPU; suppress verbose logs.
     NativeLibraryConfig.All
         .WithCuda(true)
@@ -206,6 +198,9 @@ try
     // API key
     var apiKeyProvider = new ApiKeyProvider();
     builder.Services.AddSingleton(apiKeyProvider);
+
+    // CLI short-ID resolver (used by module CLI handlers)
+    builder.Services.AddSingleton<ICliIdResolver, CliIdResolver>();
 
     var app = builder.Build();
 
@@ -346,6 +341,9 @@ try
     app.MapHandlers();
     app.MapEditorEndpoints();
     app.MapTranscriptionStreaming();
+    app.MapInputAudioEndpoints();
+    app.MapWebsiteEndpoints();
+    app.MapSearchEngineEndpoints();
 
     app.Lifetime.ApplicationStopping.Register(apiKeyProvider.Cleanup);
 

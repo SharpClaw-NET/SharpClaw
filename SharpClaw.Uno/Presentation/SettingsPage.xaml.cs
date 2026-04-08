@@ -67,7 +67,7 @@ public sealed partial class SettingsPage : Page
         AddTabButton("Agents", "sharpclaw agent list");
         AddTabButton("Roles", "sharpclaw role list");
         AddTabSection("Audio");
-        AddTabButton("Sound Input", "sharpclaw resource audiodevice list");
+        AddTabButton("Sound Input", "sharpclaw resource inputaudio list");
         AddTabSection("Gateway");
         AddTabButton("Gateway", "sharpclaw gateway status");
         AddTabButton("Bot Integrations", "sharpclaw bot list");
@@ -591,7 +591,7 @@ public sealed partial class SettingsPage : Page
             syncBtn.IsEnabled = false;
             try
             {
-                var resp = await Api.PostAsync("/resources/audiodevices/sync", null);
+                var resp = await Api.PostAsync("/resources/inputaudios/sync", null);
                 if (resp.IsSuccessStatusCode)
                 {
                     using var s = await resp.Content.ReadAsStreamAsync();
@@ -608,7 +608,7 @@ public sealed partial class SettingsPage : Page
         };
         ContentPanel.Children.Add(syncBtn);
 
-        var devices = await FetchListAsync<AudioDeviceEntry>("/resources/audiodevices");
+        var devices = await FetchListAsync<InputAudioEntry>("/resources/inputaudios");
         if (devices is not { Count: > 0 })
         {
             Lbl("No audio devices found. Click sync to detect system devices.", 0x808080);
@@ -619,7 +619,7 @@ public sealed partial class SettingsPage : Page
         var deviceBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
             BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 300 };
         deviceBox.Items.Add(new ComboBoxItem { Content = "(none)", Tag = Guid.Empty });
-        var savedId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
+        var savedId = LoadLocalSetting(ClientSettings.SelectedInputAudioId);
         var selIdx = 0;
         for (var i = 0; i < devices.Count; i++)
         {
@@ -634,7 +634,7 @@ public sealed partial class SettingsPage : Page
         {
             if (deviceBox.SelectedItem is ComboBoxItem { Tag: Guid id })
             {
-                SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, id == Guid.Empty ? null : id.ToString());
+                SaveLocalSetting(ClientSettings.SelectedInputAudioId, id == Guid.Empty ? null : id.ToString());
                 Status(id == Guid.Empty ? "Input device cleared." : "✓ Input device saved.", id == Guid.Empty ? 0x808080 : 0x00FF00);
             }
         };
@@ -1988,7 +1988,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ResolvedFile(string DownloadUrl, string Filename, string? Quantization);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record AudioDeviceEntry(Guid Id, string Name, string? DeviceIdentifier, string? Description);
+    private sealed record InputAudioEntry(Guid Id, string Name, string? DeviceIdentifier, string? Description);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record UserListEntry(Guid Id, string Username, string? Bio, Guid? RoleId, string? RoleName, bool IsUserAdmin);
     [ImplicitKeys(IsEnabled = false)]

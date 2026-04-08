@@ -1,18 +1,18 @@
 namespace SharpClaw.Contracts.DTOs.Transcription;
 
-// ── Audio Device DTOs ─────────────────────────────────────────────
+// ── Input Audio DTOs ─────────────────────────────────────────────
 
-public sealed record CreateAudioDeviceRequest(
+public sealed record CreateInputAudioRequest(
     string Name,
     string? DeviceIdentifier = null,
     string? Description = null);
 
-public sealed record UpdateAudioDeviceRequest(
+public sealed record UpdateInputAudioRequest(
     string? Name = null,
     string? DeviceIdentifier = null,
     string? Description = null);
 
-public sealed record AudioDeviceResponse(
+public sealed record InputAudioResponse(
     Guid Id,
     string Name,
     string? DeviceIdentifier,
@@ -20,7 +20,7 @@ public sealed record AudioDeviceResponse(
     Guid? SkillId,
     DateTimeOffset CreatedAt);
 
-public sealed record AudioDeviceSyncResult(
+public sealed record InputAudioSyncResult(
     int Imported,
     int Skipped,
     IReadOnlyList<string> ImportedNames,

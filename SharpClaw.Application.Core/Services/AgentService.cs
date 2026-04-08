@@ -248,9 +248,9 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
         ValidateResourceCoverage(roleName, "ExternalDatabaseAccesses",
             targetPs.ExternalDatabaseAccesses, callerPs.ExternalDatabaseAccesses,
             a => a.ExternalDatabaseId, a => a.Clearance, targetPs.DefaultClearance, callerPs.DefaultClearance);
-        ValidateResourceCoverage(roleName, "AudioDeviceAccesses",
-            targetPs.AudioDeviceAccesses, callerPs.AudioDeviceAccesses,
-            a => a.AudioDeviceId, a => a.Clearance, targetPs.DefaultClearance, callerPs.DefaultClearance);
+        ValidateResourceCoverage(roleName, "InputAudioAccesses",
+            targetPs.InputAudioAccesses, callerPs.InputAudioAccesses,
+            a => a.InputAudioId, a => a.Clearance, targetPs.DefaultClearance, callerPs.DefaultClearance);
         ValidateResourceCoverage(roleName, "DisplayDeviceAccesses",
             targetPs.DisplayDeviceAccesses, callerPs.DisplayDeviceAccesses,
             a => a.DisplayDeviceId, a => a.Clearance, targetPs.DefaultClearance, callerPs.DefaultClearance);
@@ -339,7 +339,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session)
             .Include(p => p.SearchEngineAccesses)
             .Include(p => p.InternalDatabaseAccesses)
             .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.InputAudioAccesses)
             .Include(p => p.DisplayDeviceAccesses)
             .Include(p => p.EditorSessionAccesses)
             .Include(p => p.AgentPermissions)

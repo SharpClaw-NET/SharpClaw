@@ -92,8 +92,8 @@ public sealed class EndpointGateMiddleware(
         if (lower.StartsWith("/api/users"))
             return nameof(GatewayEndpointOptions.Users);
 
-        if (lower.StartsWith("/api/audio-devices"))
-            return nameof(GatewayEndpointOptions.AudioDevices);
+        if (lower.StartsWith("/api/input-audios"))
+            return nameof(GatewayEndpointOptions.InputAudios);
 
         // Transcription streaming (WS/SSE proxy)
         if (lower.Contains("/ws") || lower.Contains("/stream"))

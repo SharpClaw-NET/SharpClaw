@@ -32,6 +32,8 @@
     <ProjectReference Include="..\DefaultModules\Mk8Shell\SharpClaw.Modules.Mk8Shell.csproj" />
     <ProjectReference Include="..\DefaultModules\OfficeApps\SharpClaw.Modules.OfficeApps.csproj" />
     <ProjectReference Include="..\DefaultModules\DatabaseAccess\SharpClaw.Modules.DatabaseAccess.csproj" />
+    <ProjectReference Include="..\DefaultModules\Transcription\SharpClaw.Modules.Transcription.csproj" />
+    <ProjectReference Include="..\DefaultModules\WebAccess\SharpClaw.Modules.WebAccess.csproj" />
   </ItemGroup>
 
 </Project>

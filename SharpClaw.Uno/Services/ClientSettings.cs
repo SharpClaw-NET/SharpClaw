@@ -44,7 +44,7 @@ public sealed class ClientSettings
     public const string TranscriptionAgentId = "TranscriptionAgentId";
 
     /// <summary>Selected audio input device (microphone).</summary>
-    public const string SelectedAudioDeviceId = "SelectedAudioDeviceId";
+    public const string SelectedInputAudioId = "SelectedInputAudioId";
 
     public ClientSettings()
     {

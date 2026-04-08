@@ -41,10 +41,8 @@ public sealed class SeedingService(
         var adminRole = await SeedAdminRoleAsync(db, ct);
         await SeedAdminUserAsync(db, adminRole, ct);
         await SeedWellKnownProvidersAsync(db, ct);
-        await SeedDefaultAudioDeviceAsync(db, ct);
         await SeedDefaultDisplayDeviceAsync(db, ct);
         await SeedWellKnownSearchEnginesAsync(db, ct);
-        await ReconcileStaleTranscriptionJobsAsync(db, ct);
     }
 
     private async Task<RoleDB> SeedAdminRoleAsync(SharpClawDbContext db, CancellationToken ct)
@@ -110,7 +108,7 @@ public sealed class SeedingService(
         WebsiteAccesses              = [new() { WebsiteId                  = WellKnownIds.AllResources }],
         SearchEngineAccesses         = [new() { SearchEngineId             = WellKnownIds.AllResources }],
         ContainerAccesses            = [new() { ContainerId                = WellKnownIds.AllResources }],
-        AudioDeviceAccesses          = [new() { AudioDeviceId              = WellKnownIds.AllResources }],
+        InputAudioAccesses           = [new() { InputAudioId               = WellKnownIds.AllResources }],
         DisplayDeviceAccesses        = [new() { DisplayDeviceId            = WellKnownIds.AllResources }],
         EditorSessionAccesses        = [new() { EditorSessionId            = WellKnownIds.AllResources }],
         AgentPermissions             = [new() { AgentId                    = WellKnownIds.AllResources }],
@@ -136,7 +134,7 @@ public sealed class SeedingService(
             .Include(p => p.SearchEngineAccesses)
             .Include(p => p.InternalDatabaseAccesses)
             .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.InputAudioAccesses)
             .Include(p => p.DisplayDeviceAccesses)
             .Include(p => p.EditorSessionAccesses)
             .Include(p => p.AgentPermissions)
@@ -184,8 +182,8 @@ public sealed class SeedingService(
             () => new InternalDatabaseAccessDB { PermissionSetId = psId, InternalDatabaseId = WellKnownIds.AllResources });
         changed |= EnsureWildcard(ps.ExternalDatabaseAccesses, a => a.ExternalDatabaseId,
             () => new ExternalDatabaseAccessDB { PermissionSetId = psId, ExternalDatabaseId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.AudioDeviceAccesses, a => a.AudioDeviceId,
-            () => new AudioDeviceAccessDB { PermissionSetId = psId, AudioDeviceId = WellKnownIds.AllResources });
+        changed |= EnsureWildcard(ps.InputAudioAccesses, a => a.InputAudioId,
+            () => new InputAudioAccessDB { PermissionSetId = psId, InputAudioId = WellKnownIds.AllResources });
         changed |= EnsureWildcard(ps.DisplayDeviceAccesses, a => a.DisplayDeviceId,
             () => new DisplayDeviceAccessDB { PermissionSetId = psId, DisplayDeviceId = WellKnownIds.AllResources });
         changed |= EnsureWildcard(ps.EditorSessionAccesses, a => a.EditorSessionId,
@@ -289,25 +287,6 @@ public sealed class SeedingService(
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task SeedDefaultAudioDeviceAsync(SharpClawDbContext db, CancellationToken ct)
-    {
-        var exists = await db.AudioDevices
-            .AnyAsync(d => d.DeviceIdentifier == "default", ct);
-        if (exists)
-            return;
-
-        logger.LogInformation("Seeding default audio device.");
-
-        db.AudioDevices.Add(new AudioDeviceDB
-        {
-            Name = "Default",
-            DeviceIdentifier = "default",
-            Description = "System default audio input device"
-        });
-
-        await db.SaveChangesAsync(ct);
-    }
-
     private async Task SeedDefaultDisplayDeviceAsync(SharpClawDbContext db, CancellationToken ct)
     {
         var exists = await db.DisplayDevices
@@ -378,32 +357,4 @@ public sealed class SeedingService(
         await db.SaveChangesAsync(ct);
     }
 
-    /// <summary>
-    /// Marks transcription jobs left in <see cref="AgentJobStatus.Executing"/> from a previous
-    /// session as <see cref="AgentJobStatus.Cancelled"/>. No orchestrator loops survive a restart,
-    /// so these are guaranteed stale.
-    /// </summary>
-    private async Task ReconcileStaleTranscriptionJobsAsync(SharpClawDbContext db, CancellationToken ct)
-    {
-        var staleJobs = await db.AgentJobs
-            .Where(j => (j.ActionType == AgentActionType.TranscribeFromAudioDevice
-                      || j.ActionType == AgentActionType.TranscribeFromAudioStream
-                      || j.ActionType == AgentActionType.TranscribeFromAudioFile)
-                && (j.Status == AgentJobStatus.Executing || j.Status == AgentJobStatus.Queued))
-            .ToListAsync(ct);
-
-        if (staleJobs.Count == 0)
-            return;
-
-        logger.LogInformation("Reconciling {Count} stale transcription job(s) from previous session.", staleJobs.Count);
-
-        var now = DateTimeOffset.UtcNow;
-        foreach (var job in staleJobs)
-        {
-            job.Status = AgentJobStatus.Cancelled;
-            job.CompletedAt = now;
-        }
-
-        await db.SaveChangesAsync(ct);
     }
-}

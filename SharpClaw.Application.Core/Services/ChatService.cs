@@ -489,7 +489,7 @@ public sealed class ChatService(
                 .Include(p => p.SearchEngineAccesses)
                 .Include(p => p.InternalDatabaseAccesses)
                 .Include(p => p.ExternalDatabaseAccesses)
-                .Include(p => p.AudioDeviceAccesses)
+                .Include(p => p.InputAudioAccesses)
                 .Include(p => p.DisplayDeviceAccesses)
                 .Include(p => p.EditorSessionAccesses)
                 .Include(p => p.AgentPermissions)
@@ -553,7 +553,7 @@ public sealed class ChatService(
                     .Include(p => p.SearchEngineAccesses)
                     .Include(p => p.InternalDatabaseAccesses)
                     .Include(p => p.ExternalDatabaseAccesses)
-                    .Include(p => p.AudioDeviceAccesses)
+                    .Include(p => p.InputAudioAccesses)
                     .Include(p => p.DisplayDeviceAccesses)
                     .Include(p => p.EditorSessionAccesses)
                     .Include(p => p.AgentPermissions)
@@ -670,9 +670,9 @@ public sealed class ChatService(
             ps.ExternalDatabaseAccesses.Select(a => a.ExternalDatabaseId),
             () => db.ExternalDatabases.Select(e => e.Id).ToListAsync(ct), ct);
 
-        await AppendResourceGrantAsync(grants, "AudioDevice",
-            ps.AudioDeviceAccesses.Select(a => a.AudioDeviceId),
-            () => db.AudioDevices.Select(a => a.Id).ToListAsync(ct), ct);
+        await AppendResourceGrantAsync(grants, "InputAudio",
+            ps.InputAudioAccesses.Select(a => a.InputAudioId),
+            () => db.InputAudios.Select(a => a.Id).ToListAsync(ct), ct);
 
         await AppendResourceGrantAsync(grants, "DisplayDevice",
             ps.DisplayDeviceAccesses.Select(a => a.DisplayDeviceId),
@@ -1940,10 +1940,6 @@ public sealed class ChatService(
     private static readonly Dictionary<string, AgentActionType> ToolNameToActionType = new(StringComparer.OrdinalIgnoreCase)
     {
         ["create_sub_agent"]               = AgentActionType.CreateSubAgent,
-        ["access_localhost_in_browser"]    = AgentActionType.AccessLocalhostInBrowser,
-        ["access_localhost_cli"]           = AgentActionType.AccessLocalhostCli,
-        ["access_website"]                 = AgentActionType.AccessWebsite,
-        ["query_search_engine"]            = AgentActionType.QuerySearchEngine,
         ["access_container"]               = AgentActionType.AccessContainer,
         ["manage_agent"]                   = AgentActionType.ManageAgent,
         ["edit_task"]                       = AgentActionType.EditTask,
@@ -2039,10 +2035,6 @@ public sealed class ChatService(
         var createSubAgentSchema = BuildCreateSubAgentSchema();
         var manageAgentSchema = BuildManageAgentSchema();
         var editTaskSchema = BuildEditTaskSchema();
-        var accessWebsiteSchema = BuildAccessWebsiteSchema();
-        var querySearchEngineSchema = BuildQuerySearchEngineSchema();
-        var localhostBrowserSchema = BuildLocalhostBrowserSchema();
-        var localhostCliSchema = BuildLocalhostCliSchema();
         var waitSchema = BuildWaitSchema();
         var readThreadHistorySchema = BuildReadThreadHistorySchema();
         var sendBotMessageSchema = BuildSendBotMessageSchema();
@@ -2077,25 +2069,8 @@ public sealed class ChatService(
             new("create_sub_agent",
                 "Create a sub-agent (name, modelId, optional systemPrompt).",
                 createSubAgentSchema),
-            new("access_localhost_in_browser",
-                "Headless GET localhost. html=DOM (default), screenshot=PNG (vision). localhost/127.0.0.1 only.",
-                localhostBrowserSchema),
-            new("access_localhost_cli",
-                "HTTP GET localhost; returns status+headers+body. localhost/127.0.0.1 only.",
-                localhostCliSchema),
 
             // ── Per-resource ─────────────────────────────────────
-            new("access_website",
-                "Fetch a registered external website. cli=HTTP GET (default), html=headless DOM, screenshot=PNG. " +
-                "Optional path appends to the registered base URL. " +
-                "Downloads are blocked; binary content types are rejected; redirects are pinned to the registered origin.",
-                accessWebsiteSchema),
-            new("query_search_engine",
-                "Query a registered search engine. Parameters vary by engine type — " +
-                "Google supports dateRestrict/siteRestrict/fileType/exactTerms/excludeTerms/searchType/sortBy; " +
-                "Bing supports siteRestrict; SearXNG supports category; Tavily supports topic/searchType(basic|advanced); " +
-                "all support query, count, offset, language, region, safeSearch.",
-                querySearchEngineSchema),
             new("access_container", "Access container resource. [Stub.]", resourceOnly),
             new("manage_agent", "Update agent name, systemPrompt, or modelId.", manageAgentSchema),
             new("edit_task", "Edit task name, interval, or retries.", editTaskSchema),
@@ -2308,148 +2283,6 @@ public sealed class ChatService(
                     }
                 },
                 "required": ["targetId"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildLocalhostBrowserSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Localhost URL."
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": ["html", "screenshot"],
-                        "description": "'html' (default)=DOM, 'screenshot'=PNG."
-                    }
-                },
-                "required": ["url"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildLocalhostCliSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "url": {
-                        "type": "string",
-                        "description": "Localhost URL."
-                    }
-                },
-                "required": ["url"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildAccessWebsiteSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": {
-                        "type": "string",
-                        "description": "Website resource GUID."
-                    },
-                    "mode": {
-                        "type": "string",
-                        "enum": ["cli", "html", "screenshot"],
-                        "description": "'cli' (default)=HTTP GET with headers+body, 'html'=headless browser DOM, 'screenshot'=headless browser PNG."
-                    },
-                    "path": {
-                        "type": "string",
-                        "description": "Optional path appended to the registered base URL (e.g. '/api/v1/status')."
-                    }
-                },
-                "required": ["targetId"]
-            }
-            """);
-        return doc.RootElement.Clone();
-    }
-
-    private static JsonElement BuildQuerySearchEngineSchema()
-    {
-        using var doc = JsonDocument.Parse("""
-            {
-                "type": "object",
-                "properties": {
-                    "targetId": {
-                        "type": "string",
-                        "description": "Search engine resource GUID."
-                    },
-                    "query": {
-                        "type": "string",
-                        "description": "Search query text."
-                    },
-                    "count": {
-                        "type": "integer",
-                        "description": "Max results to return (default 10)."
-                    },
-                    "offset": {
-                        "type": "integer",
-                        "description": "Result offset for pagination (default 0)."
-                    },
-                    "language": {
-                        "type": "string",
-                        "description": "Language code (e.g. 'en', 'lang_en' for Google, BCP-47 for others)."
-                    },
-                    "region": {
-                        "type": "string",
-                        "description": "Region/market code (e.g. 'us', 'en-US' for Bing)."
-                    },
-                    "safeSearch": {
-                        "type": "string",
-                        "description": "Safe search level. Google: off/medium/high. Bing: Off/Moderate/Strict. Brave: off/moderate/strict. SearXNG: 0/1/2."
-                    },
-                    "dateRestrict": {
-                        "type": "string",
-                        "description": "Google only. Restrict by date: d[N], w[N], m[N], y[N]."
-                    },
-                    "siteRestrict": {
-                        "type": "string",
-                        "description": "Google/Bing: restrict to a specific site domain."
-                    },
-                    "fileType": {
-                        "type": "string",
-                        "description": "Google only. Filter by file type (e.g. 'pdf', 'doc')."
-                    },
-                    "exactTerms": {
-                        "type": "string",
-                        "description": "Google only. Phrase that must appear in results."
-                    },
-                    "excludeTerms": {
-                        "type": "string",
-                        "description": "Google only. Terms to exclude from results."
-                    },
-                    "searchType": {
-                        "type": "string",
-                        "description": "Google: 'image' for image search. Tavily: 'basic' or 'advanced'."
-                    },
-                    "sortBy": {
-                        "type": "string",
-                        "description": "Google only. Sort order (e.g. 'date')."
-                    },
-                    "topic": {
-                        "type": "string",
-                        "description": "Tavily only. Topic filter: 'general' or 'news'."
-                    },
-                    "category": {
-                        "type": "string",
-                        "description": "SearXNG only. Category: general, images, news, etc."
-                    }
-                },
-                "required": ["targetId", "query"]
             }
             """);
         return doc.RootElement.Clone();

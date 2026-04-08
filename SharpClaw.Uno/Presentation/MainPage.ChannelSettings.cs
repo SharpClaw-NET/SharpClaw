@@ -228,8 +228,8 @@ public sealed partial class MainPage
         // ── Transcription Agent ──
         BuildTranscriptionAgentSection(channelId, channelDefaultAgentId, allowedAgents, transcriptionModelIds);
 
-        // ── Audio Device ──
-        BuildAudioDeviceSection();
+        // ── Input Audio ──
+        BuildInputAudioSection();
 
         // ── Default Document Session ──
         BuildDefaultResourceSection(api, channelId, "Default Document",
@@ -308,16 +308,16 @@ public sealed partial class MainPage
         SettingsPanel.Children.Add(txSearch);
     }
 
-    private void BuildAudioDeviceSection()
+    private void BuildInputAudioSection()
     {
-        AddSettingsSection("Audio Device", "Audio capture device used for voice-to-text transcription (saved locally per device)");
-        var audioDevices = _resourceLookupCache.TryGetValue("audioDeviceAccesses", out var adItems) ? adItems : [];
-        var adDisplayMap = new Dictionary<string, Guid>(audioDevices.Count);
-        foreach (var d in audioDevices) adDisplayMap.TryAdd($"{d.Name}  ({d.Id.ToString()[..8]}…)", d.Id);
+        AddSettingsSection("Input Audio", "Audio capture device used for voice-to-text transcription (saved locally per device)");
+        var inputAudios = _resourceLookupCache.TryGetValue("inputAudioAccesses", out var adItems) ? adItems : [];
+        var adDisplayMap = new Dictionary<string, Guid>(inputAudios.Count);
+        foreach (var d in inputAudios) adDisplayMap.TryAdd($"{d.Name}  ({d.Id.ToString()[..8]}…)", d.Id);
 
-        var savedAdId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
+        var savedAdId = LoadLocalSetting(ClientSettings.SelectedInputAudioId);
         ResourceItemDto? currentAd = null;
-        if (savedAdId is not null && Guid.TryParse(savedAdId, out var savedAdGuid)) currentAd = audioDevices.FirstOrDefault(d => d.Id == savedAdGuid);
+        if (savedAdId is not null && Guid.TryParse(savedAdId, out var savedAdGuid)) currentAd = inputAudios.FirstOrDefault(d => d.Id == savedAdGuid);
 
         var adCurrentRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
         adCurrentRow.Children.Add(new TextBlock { Text = "current:", FontFamily = _monoFont, FontSize = 11, Foreground = Brush(0xCCCCCC), VerticalAlignment = VerticalAlignment.Center });
@@ -327,25 +327,25 @@ public sealed partial class MainPage
         if (currentAd is not null)
         {
             var adClearBtn = new Button { Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) }, Background = _brushTransparent, BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0 };
-            adClearBtn.Click += (_, _) => { SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, null); adCurrentLabel.Text = "(none)"; adCurrentLabel.Foreground = Brush(0x777777); adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic; if (adCurrentRow.Children.Count > 2) adCurrentRow.Children.RemoveAt(2); UpdateMicState(); };
+            adClearBtn.Click += (_, _) => { SaveLocalSetting(ClientSettings.SelectedInputAudioId, null); adCurrentLabel.Text = "(none)"; adCurrentLabel.Foreground = Brush(0x777777); adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic; if (adCurrentRow.Children.Count > 2) adCurrentRow.Children.RemoveAt(2); UpdateMicState(); };
             adCurrentRow.Children.Add(adClearBtn);
         }
         SettingsPanel.Children.Add(adCurrentRow);
 
-        var adSearch = new AutoSuggestBox { PlaceholderText = audioDevices.Count > 0 ? "Search audio devices..." : "No audio devices available", FontFamily = _monoFont, FontSize = 11, MinWidth = 300, Margin = new Thickness(0, 4, 0, 0), IsEnabled = audioDevices.Count > 0 };
-        ToolTipService.SetToolTip(adSearch, "Type to filter, then click a suggestion to select the audio device");
+        var adSearch = new AutoSuggestBox { PlaceholderText = inputAudios.Count > 0 ? "Search input audios..." : "No input audios available", FontFamily = _monoFont, FontSize = 11, MinWidth = 300, Margin = new Thickness(0, 4, 0, 0), IsEnabled = inputAudios.Count > 0 };
+        ToolTipService.SetToolTip(adSearch, "Type to filter, then click a suggestion to select the input audio");
         adSearch.TextChanged += (sender, args) => { if (args.Reason != AutoSuggestionBoxTextChangeReason.UserInput) return; var q = sender.Text.Trim(); sender.ItemsSource = string.IsNullOrEmpty(q) ? adDisplayMap.Keys.ToList() : adDisplayMap.Keys.Where(k => k.Contains(q, StringComparison.OrdinalIgnoreCase)).ToList(); };
         adSearch.QuerySubmitted += (sender, args) =>
         {
             var chosen = args.ChosenSuggestion?.ToString();
             if (chosen is null || !adDisplayMap.TryGetValue(chosen, out var did)) return;
             sender.Text = string.Empty;
-            SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, did.ToString());
+            SaveLocalSetting(ClientSettings.SelectedInputAudioId, did.ToString());
             adCurrentLabel.Text = chosen; adCurrentLabel.Foreground = Brush(0xE0E0E0); adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Normal;
             if (adCurrentRow.Children.Count <= 2)
             {
                 var clearBtn = new Button { Content = new TextBlock { Text = "\u2715", FontFamily = _monoFont, FontSize = 10, Foreground = Brush(0xFF4444) }, Background = _brushTransparent, BorderThickness = new Thickness(0), Padding = new Thickness(4, 2, 4, 2), MinWidth = 0, MinHeight = 0 };
-                clearBtn.Click += (_, _) => { SaveLocalSetting(ClientSettings.SelectedAudioDeviceId, null); adCurrentLabel.Text = "(none)"; adCurrentLabel.Foreground = Brush(0x777777); adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic; if (adCurrentRow.Children.Count > 2) adCurrentRow.Children.RemoveAt(2); UpdateMicState(); };
+                clearBtn.Click += (_, _) => { SaveLocalSetting(ClientSettings.SelectedInputAudioId, null); adCurrentLabel.Text = "(none)"; adCurrentLabel.Foreground = Brush(0x777777); adCurrentLabel.FontStyle = Windows.UI.Text.FontStyle.Italic; if (adCurrentRow.Children.Count > 2) adCurrentRow.Children.RemoveAt(2); UpdateMicState(); };
                 adCurrentRow.Children.Add(clearBtn);
             }
             UpdateMicState();

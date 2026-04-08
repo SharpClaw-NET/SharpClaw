@@ -70,7 +70,7 @@ public static class GatewayEnvironment
               "Providers": "false",
               "Roles": "false",
               "Users": "false",
-              "AudioDevices": "false",
+              "InputAudios": "false",
               "Transcription": "false",
               "TranscriptionStreaming": "false",
               "Cost": "false",

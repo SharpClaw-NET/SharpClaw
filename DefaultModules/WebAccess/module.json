@@ -1,0 +1,12 @@
+{
+  "id": "sharpclaw_web_access",
+  "displayName": "Web Access",
+  "version": "1.0.0",
+  "toolPrefix": "wa",
+  "entryAssembly": "SharpClaw.Modules.WebAccess",
+  "minHostVersion": "1.0.0",
+  "platforms": null,
+  "executionTimeoutSeconds": 60,
+  "exports": [],
+  "requires": []
+}

@@ -8,7 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Transcription;
 
-namespace SharpClaw.Application.API.Handlers;
+namespace SharpClaw.Modules.Transcription.Handlers;
 
 /// <summary>
 /// Registers WebSocket and SSE endpoints for live transcription streaming.

@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 public sealed class TranscriptionApiClientFactory
 {

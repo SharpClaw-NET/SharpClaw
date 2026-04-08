@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Provider-specific client for speech-to-text transcription.

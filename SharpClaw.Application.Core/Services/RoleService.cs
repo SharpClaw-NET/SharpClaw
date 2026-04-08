@@ -117,7 +117,7 @@ public sealed class RoleService(SharpClawDbContext db)
             ps.SearchEngineAccesses.Clear();
             ps.InternalDatabaseAccesses.Clear();
             ps.ExternalDatabaseAccesses.Clear();
-            ps.AudioDeviceAccesses.Clear();
+            ps.InputAudioAccesses.Clear();
             ps.DisplayDeviceAccesses.Clear();
             ps.EditorSessionAccesses.Clear();
             ps.AgentPermissions.Clear();
@@ -204,9 +204,9 @@ public sealed class RoleService(SharpClawDbContext db)
             (g, psId) => new ExternalDatabaseAccessDB
             { PermissionSetId = psId, ExternalDatabaseId = g.ResourceId, Clearance = g.Clearance });
 
-        AddGrants(ps.AudioDeviceAccesses, request.AudioDeviceAccesses,
-            (g, psId) => new AudioDeviceAccessDB
-            { PermissionSetId = psId, AudioDeviceId = g.ResourceId, Clearance = g.Clearance });
+        AddGrants(ps.InputAudioAccesses, request.InputAudioAccesses,
+            (g, psId) => new InputAudioAccessDB
+            { PermissionSetId = psId, InputAudioId = g.ResourceId, Clearance = g.Clearance });
 
         AddGrants(ps.DisplayDeviceAccesses, request.DisplayDeviceAccesses,
             (g, psId) => new DisplayDeviceAccessDB
@@ -375,8 +375,8 @@ public sealed class RoleService(SharpClawDbContext db)
             callerPs?.InternalDatabaseAccesses, a => a.InternalDatabaseId);
         ValidateCollection("ExternalDatabaseAccesses", request.ExternalDatabaseAccesses,
             callerPs?.ExternalDatabaseAccesses, a => a.ExternalDatabaseId);
-        ValidateCollection("AudioDeviceAccesses", request.AudioDeviceAccesses,
-            callerPs?.AudioDeviceAccesses, a => a.AudioDeviceId);
+        ValidateCollection("InputAudioAccesses", request.InputAudioAccesses,
+            callerPs?.InputAudioAccesses, a => a.InputAudioId);
         ValidateCollection("DisplayDeviceAccesses", request.DisplayDeviceAccesses,
             callerPs?.DisplayDeviceAccesses, a => a.DisplayDeviceId);
         ValidateCollection("EditorSessionAccesses", request.EditorSessionAccesses,
@@ -469,7 +469,7 @@ public sealed class RoleService(SharpClawDbContext db)
             .Include(p => p.SearchEngineAccesses)
             .Include(p => p.InternalDatabaseAccesses)
             .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.AudioDeviceAccesses)
+            .Include(p => p.InputAudioAccesses)
             .Include(p => p.DisplayDeviceAccesses)
             .Include(p => p.EditorSessionAccesses)
             .Include(p => p.AgentPermissions)
@@ -531,7 +531,7 @@ public sealed class RoleService(SharpClawDbContext db)
             SearchEngineAccesses: MapGrants(ps?.SearchEngineAccesses, a => a.SearchEngineId, a => a.Clearance),
             InternalDatabaseAccesses: MapGrants(ps?.InternalDatabaseAccesses, a => a.InternalDatabaseId, a => a.Clearance),
             ExternalDatabaseAccesses: MapGrants(ps?.ExternalDatabaseAccesses, a => a.ExternalDatabaseId, a => a.Clearance),
-            AudioDeviceAccesses: MapGrants(ps?.AudioDeviceAccesses, a => a.AudioDeviceId, a => a.Clearance),
+            InputAudioAccesses: MapGrants(ps?.InputAudioAccesses, a => a.InputAudioId, a => a.Clearance),
             DisplayDeviceAccesses: MapGrants(ps?.DisplayDeviceAccesses, a => a.DisplayDeviceId, a => a.Clearance),
             EditorSessionAccesses: MapGrants(ps?.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance),
             AgentAccesses: MapGrants(ps?.AgentPermissions, a => a.AgentId, a => a.Clearance),

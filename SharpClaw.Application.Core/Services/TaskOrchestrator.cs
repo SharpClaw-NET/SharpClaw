@@ -381,9 +381,9 @@ public sealed class TaskOrchestrator(
                 break;
             }
 
-            case TaskStepKind.GetDefaultAudioDevice:
+            case TaskStepKind.GetDefaultInputAudio:
             {
-                var device = await db.AudioDevices.FirstOrDefaultAsync(context.CancellationToken);
+                var device = await db.InputAudios.FirstOrDefaultAsync(context.CancellationToken);
                 var deviceId = device?.Id ?? Guid.Empty;
 
                 if (step.ResultVariable is not null)

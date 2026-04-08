@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Provides prompt seeds and reinforcement text for Whisper language
@@ -92,7 +92,7 @@ internal static class LanguageScriptValidator
 
     private static Dictionary<string, LanguageEntry> LoadEntries()
     {
-        const string resourceName = "SharpClaw.Application.Core.transcription-language-seeds.json";
+        const string resourceName = "SharpClaw.Modules.Transcription.transcription-language-seeds.json";
 
         using var stream = typeof(LanguageScriptValidator).Assembly
             .GetManifestResourceStream(resourceName);

@@ -1,6 +1,8 @@
 using Microsoft.Extensions.Logging;
 
-namespace SharpClaw.Application.Core.Clients;
+using SharpClaw.Application.Core.Clients;
+
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Manages shared audio capture sessions per device. Multiple

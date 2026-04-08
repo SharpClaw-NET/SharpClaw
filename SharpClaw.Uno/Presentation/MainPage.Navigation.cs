@@ -14,7 +14,7 @@ public sealed partial class MainPage
     private void UpdateMicState()
     {
         var agentId = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
-        var deviceId = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
+        var deviceId = LoadLocalSetting(ClientSettings.SelectedInputAudioId);
         var configured = agentId is not null && Guid.TryParse(agentId, out _)
                       && deviceId is not null && Guid.TryParse(deviceId, out _)
                       && _selectedChannelId is not null;
@@ -32,7 +32,7 @@ public sealed partial class MainPage
         else if (configured)
             ToolTipService.SetToolTip(MicButton, "Start voice input");
         else
-            ToolTipService.SetToolTip(MicButton, "Set a transcription agent and audio device in channel settings to enable voice input");
+            ToolTipService.SetToolTip(MicButton, "Set a transcription agent and input audio in channel settings to enable voice input");
     }
 
     private async void OnMicClick(object sender, RoutedEventArgs e)
@@ -46,7 +46,7 @@ public sealed partial class MainPage
         }
 
         var agentIdStr = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
-        var deviceIdStr = LoadLocalSetting(ClientSettings.SelectedAudioDeviceId);
+        var deviceIdStr = LoadLocalSetting(ClientSettings.SelectedInputAudioId);
         if (agentIdStr is null || !Guid.TryParse(agentIdStr, out var agentId)
             || deviceIdStr is null || !Guid.TryParse(deviceIdStr, out var deviceId))
             return;

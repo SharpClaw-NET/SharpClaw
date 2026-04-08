@@ -345,7 +345,7 @@ CreateDocumentSessionRequest: { filePath, name?, description? }. DocumentSession
 CreateNativeApplicationRequest: { name, executablePath, alias?, description? }. NativeApplicationResponse: { id, name, executablePath, alias, description, createdAt, updatedAt }.
 
 Resource lookup: GET /resources/lookup/{type} → [{id, name}]
-  Valid types: dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, displayDeviceAccesses, editorSessionAccesses, agentAccesses, taskAccesses, skillAccesses, documentSessionAccesses, nativeApplicationAccesses.
+  Valid types: dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, inputAudioAccesses, displayDeviceAccesses, editorSessionAccesses, agentAccesses, taskAccesses, skillAccesses, documentSessionAccesses, nativeApplicationAccesses.
 
 ────────────────────────────────────────
 EDITOR BRIDGE
@@ -392,6 +392,16 @@ Default modules:
     Register and query internal/external databases (PostgreSQL, MySQL, SQLite, MSSQL, MongoDB, Redis).
     Tools: db_register_database, db_access_internal_databases, db_access_external_database.
     CLI: db list-internal | db list-external (aliases: database-access)
+
+  Transcription  id=transcription  prefix=(none — uses core AgentActionType 17-19)  3 tools  Windows (audio capture)
+    Live audio transcription, input audio device management, and STT provider integration.
+    Owns: TranscriptionService, LiveTranscriptionOrchestrator, STT clients (OpenAI Whisper, Groq, Local), WASAPI audio capture, WhisperModelManager, LanguageScriptValidator.
+    Core interface: ILiveTranscriptionOrchestrator decouples AgentJobService from module.
+    Permission delegation: DelegateTo:"AccessInputAudioAsync" routes through AgentActionService.
+    Execution: IsTranscriptionAction → StartTranscriptionAsync (long-running, stays Executing).
+    Tools: transcribe_from_audio_device, transcribe_from_audio_stream, transcribe_from_audio_file.
+    CLI: resource inputaudio (alias ia) with list/get/add/update/delete/default sub-commands.
+    Seeds default input audio device on startup via SeedDataAsync.
 
 Runtime enable/disable:
   Modules can be toggled at runtime without restart. DI services are pre-registered for all modules.

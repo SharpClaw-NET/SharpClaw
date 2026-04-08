@@ -22,8 +22,8 @@ public enum TaskStepKind
     /// <summary>Stop a running transcription job.</summary>
     StopTranscription,
 
-    /// <summary>Resolve the system default audio device.</summary>
-    GetDefaultAudioDevice,
+    /// <summary>Resolve the system default audio input source.</summary>
+    GetDefaultInputAudio,
 
     // ── Output ────────────────────────────────────────────────────
 

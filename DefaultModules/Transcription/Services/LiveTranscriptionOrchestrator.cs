@@ -4,14 +4,20 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NAudio.Wave;
+
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 
-namespace SharpClaw.Application.Services;
+using LanguageValidator = SharpClaw.Modules.Transcription.Clients.LanguageScriptValidator;
+using TranscriptionChunkResult = SharpClaw.Modules.Transcription.Clients.TranscriptionChunkResult;
+using TranscriptionChunkSegment = SharpClaw.Modules.Transcription.Clients.TranscriptionChunkSegment;
+
+namespace SharpClaw.Modules.Transcription.Services;
 
 /// <summary>
 /// Singleton service that manages active audio-capture→STT→push loops.
@@ -21,11 +27,11 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class LiveTranscriptionOrchestrator(
     IServiceScopeFactory scopeFactory,
-    SharedAudioCaptureManager sharedCapture,
-    TranscriptionApiClientFactory transcriptionClientFactory,
+    Clients.SharedAudioCaptureManager sharedCapture,
+    Clients.TranscriptionApiClientFactory transcriptionClientFactory,
     IHttpClientFactory httpClientFactory,
     EncryptionOptions encryptionOptions,
-    ILogger<LiveTranscriptionOrchestrator> logger)
+    ILogger<LiveTranscriptionOrchestrator> logger) : ILiveTranscriptionOrchestrator
 {
     private const int WindowSeconds = 10;
     private const int InferenceIntervalSeconds = 2;
@@ -81,6 +87,21 @@ public sealed class LiveTranscriptionOrchestrator(
     }
 
     public bool IsRunning(Guid jobId) => _activeSessions.ContainsKey(jobId);
+
+    /// <inheritdoc/>
+    public Task StopAllAsync()
+    {
+        foreach (var (jobId, cts) in _activeSessions)
+        {
+            if (_activeSessions.TryRemove(jobId, out _))
+            {
+                cts.Cancel();
+                cts.Dispose();
+            }
+        }
+
+        return Task.CompletedTask;
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Sliding-window capture → inference → deduplicated push loop
@@ -155,7 +176,7 @@ public sealed class LiveTranscriptionOrchestrator(
             : effectiveWindow;
         var isTwoPass = mode == TranscriptionMode.SlidingWindow;
         var promptBuffer = isTwoPass && language is not null
-            ? LanguageScriptValidator.GetPromptSeed(language)
+            ? LanguageValidator.GetPromptSeed(language)
             : "";
 
         // Poll cadence is always short (2 s) so the loop reacts

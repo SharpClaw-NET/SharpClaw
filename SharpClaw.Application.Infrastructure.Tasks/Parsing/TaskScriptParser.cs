@@ -961,7 +961,7 @@ public sealed class TaskScriptParser
         "ChatStream"            => TaskStepKind.ChatStream,
         "StartTranscription"    => TaskStepKind.StartTranscription,
         "StopTranscription"     => TaskStepKind.StopTranscription,
-        "GetDefaultAudioDevice" => TaskStepKind.GetDefaultAudioDevice,
+        "GetDefaultInputAudio" => TaskStepKind.GetDefaultInputAudio,
         "Emit"                  => TaskStepKind.Emit,
         "ParseResponse"         => TaskStepKind.ParseResponse,
         "WaitUntilStopped"      => TaskStepKind.WaitUntilStopped,

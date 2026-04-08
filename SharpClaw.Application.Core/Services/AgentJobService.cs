@@ -32,11 +32,10 @@ namespace SharpClaw.Application.Services;
 public sealed class AgentJobService(
 SharpClawDbContext db,
 AgentActionService actions,
-LiveTranscriptionOrchestrator orchestrator,
+ILiveTranscriptionOrchestrator orchestrator,
 SessionService session,
 BotMessageSenderService botMessageSender,
 DocumentSessionService documentSessionService,
-SearchEngineService searchEngineService,
 ModuleRegistry moduleRegistry,
 IServiceScopeFactory serviceScopeFactory,
 IConfiguration configuration)
@@ -393,19 +392,21 @@ IConfiguration configuration)
             .ToListAsync(ct);
     }
 
-    /// <summary>List transcription jobs, optionally filtered by audio device.</summary>
+    /// <summary>List transcription jobs, optionally filtered by input audio.</summary>
     public async Task<IReadOnlyList<AgentJobResponse>> ListTranscriptionJobsAsync(
-        Guid? audioDeviceId = null, CancellationToken ct = default)
+        Guid? inputAudioId = null, CancellationToken ct = default)
     {
         var query = db.AgentJobs
             .Include(j => j.LogEntries)
             .Include(j => j.TranscriptionSegments.OrderBy(s => s.StartTime))
+#pragma warning disable CS0612 // Transcription actions dispatched to module but kept here for job queries
             .Where(j => j.ActionType == AgentActionType.TranscribeFromAudioDevice
                       || j.ActionType == AgentActionType.TranscribeFromAudioStream
                       || j.ActionType == AgentActionType.TranscribeFromAudioFile);
+#pragma warning restore CS0612
 
-        if (audioDeviceId is not null)
-            query = query.Where(j => j.ResourceId == audioDeviceId);
+        if (inputAudioId is not null)
+            query = query.Where(j => j.ResourceId == inputAudioId);
 
         var jobs = await query.OrderByDescending(j => j.CreatedAt).ToListAsync(ct);
         return jobs.Select(ToResponse).ToList();
@@ -654,7 +655,7 @@ IConfiguration configuration)
 
         job.TranscriptionModelId = model.Id;
 
-        var device = await db.AudioDevices.FirstOrDefaultAsync(d => d.Id == job.ResourceId, ct)
+        var device = await db.InputAudios.FirstOrDefaultAsync(d => d.Id == job.ResourceId, ct)
             ?? throw new InvalidOperationException("Audio device not found.");
 
         _channels.TryAdd(job.Id, Channel.CreateUnbounded<TranscriptionSegmentResponse>());
@@ -676,7 +677,7 @@ IConfiguration configuration)
         var modelId = job.TranscriptionModelId
             ?? throw new InvalidOperationException("Paused transcription job has no model.");
 
-        var device = await db.AudioDevices.FirstOrDefaultAsync(d => d.Id == job.ResourceId, ct)
+        var device = await db.InputAudios.FirstOrDefaultAsync(d => d.Id == job.ResourceId, ct)
             ?? throw new InvalidOperationException("Audio device not found.");
 
         _channels.TryAdd(job.Id, Channel.CreateUnbounded<TranscriptionSegmentResponse>());
@@ -703,20 +704,6 @@ IConfiguration configuration)
             // Knowledge / skills
             AgentActionType.AccessSkill
                 => await ExecuteAccessSkillAsync(job, ct),
-
-            // Localhost access
-            AgentActionType.AccessLocalhostInBrowser
-                => await ExecuteAccessLocalhostInBrowserAsync(job, ct),
-            AgentActionType.AccessLocalhostCli
-                => await ExecuteAccessLocalhostCliAsync(job, ct),
-
-            // External website access (per-resource: registered website)
-            AgentActionType.AccessWebsite
-                => await ExecuteAccessWebsiteAsync(job, ct),
-
-            // Search engine query (per-resource: registered search engine)
-            AgentActionType.QuerySearchEngine
-                => await ExecuteQuerySearchEngineAsync(job, ct),
 
             // Bot messaging
             AgentActionType.SendBotMessage
@@ -1144,670 +1131,15 @@ IConfiguration configuration)
         return $"Skill: {skill.Name}\n\n{skill.SkillText}";
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // ACCESS LOCALHOST IN BROWSER
-    // ═══════════════════════════════════════════════════════════════
-
-    private sealed class AccessLocalhostPayload
-    {
-        public string? Url { get; set; }
-        public string? Mode { get; set; }
-    }
-
-    /// <summary>
-    /// Launches a headless browser (configured via <c>Browser:Executable</c>
-    /// and <c>Browser:Arguments</c> in the SharpClaw .env — defaults to
-    /// auto-detected Chrome/Edge on Windows) against a <b>localhost</b> URL
-    /// and returns either a screenshot path or the page HTML.
-    /// </summary>
-    private async Task<string?> ExecuteAccessLocalhostInBrowserAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        var payload = DeserializePayload<AccessLocalhostPayload>(job,
-            "AccessLocalhostInBrowser");
-
-        var url = ValidateLocalhostUrl(payload.Url);
-        var mode = (payload.Mode ?? "html").ToLowerInvariant();
-
-        var executable = configuration["Browser:Executable"] ?? ResolveChromiumExecutable();
-        var extraArgs = configuration["Browser:Arguments"] ?? "--incognito";
-
-        // Build headless Chrome/Edge arguments.
-        // --dump-dom returns the serialised DOM as text.
-        // --screenshot returns a PNG screenshot to a temp file.
-        // --ignore-certificate-errors allows self-signed localhost HTTPS.
-        // --virtual-time-budget gives the page simulated time (ms) for JS
-        //   execution and async fetches before the DOM/screenshot is captured.
-        //   Without this, SPA pages (e.g. Swagger UI) render empty because
-        //   --dump-dom snapshots before JS has finished loading content.
-        var tempFile = mode == "screenshot"
-            ? Path.Combine(Path.GetTempPath(), $"sc_{job.Id:N}.png")
-            : null;
-
-        var headlessArgs = mode switch
-        {
-            "screenshot" => $"--headless --disable-gpu --no-sandbox --ignore-certificate-errors --virtual-time-budget=10000 {extraArgs} --screenshot=\"{tempFile}\" \"{url}\"",
-            _ => $"--headless --disable-gpu --no-sandbox --ignore-certificate-errors --virtual-time-budget=10000 {extraArgs} --dump-dom \"{url}\"",
-        };
-
-        AddLog(job, $"Browser ({mode}): {executable} → {url}");
-        await db.SaveChangesAsync(ct);
-
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = executable,
-            Arguments = headlessArgs,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-
-        using var process = new System.Diagnostics.Process { StartInfo = psi };
-        process.Start();
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-
-        // 30-second timeout to prevent hanging on unresponsive pages.
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
-
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-            throw new InvalidOperationException(
-                $"Browser timed out after 30 seconds for URL: {url}");
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"Browser exited with code {process.ExitCode}.\nstderr: {stderr}");
-
-        if (mode == "screenshot" && tempFile is not null && File.Exists(tempFile))
-        {
-            var bytes = await File.ReadAllBytesAsync(tempFile, ct);
-            File.Delete(tempFile);
-            // Structured marker: ChatService splits on [SCREENSHOT_BASE64] to
-            // extract the raw base64 data and send it as a vision content block.
-            return $"Screenshot captured ({bytes.Length} bytes) of {url}\n[SCREENSHOT_BASE64]{Convert.ToBase64String(bytes)}";
-        }
-
-        return string.IsNullOrWhiteSpace(stdout) ? "(empty page)" : stdout;
-    }
-
-    /// <summary>
-    /// Probes well-known installation paths for Chromium-based browsers
-    /// on Windows (Chrome, Edge) and returns the first existing path.
-    /// Falls back to <c>"chrome"</c> on non-Windows or if nothing is found.
-    /// </summary>
-    private static string ResolveChromiumExecutable()
-    {
-        if (!OperatingSystem.IsWindows())
-            return "google-chrome";
-
-        ReadOnlySpan<string> candidates =
-        [
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "Google", "Chrome", "Application", "chrome.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                "Google", "Chrome", "Application", "chrome.exe"),
-            // Microsoft Edge is always present on Windows 10/11.
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFilesX86),
-                "Microsoft", "Edge", "Application", "msedge.exe"),
-            Path.Combine(Environment.GetFolderPath(Environment.SpecialFolder.ProgramFiles),
-                "Microsoft", "Edge", "Application", "msedge.exe"),
-        ];
-
-        foreach (var path in candidates)
-        {
-            if (File.Exists(path))
-                return path;
-        }
-
-        return "chrome";
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // ACCESS LOCALHOST CLI
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Makes a direct HTTP request to a <b>localhost</b> URL and returns
-    /// the status code, headers, and response body. No browser involved.
-    /// </summary>
-    private async Task<string?> ExecuteAccessLocalhostCliAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        var payload = DeserializePayload<AccessLocalhostPayload>(job,
-            "AccessLocalhostCli");
-
-        var url = ValidateLocalhostUrl(payload.Url);
-
-        AddLog(job, $"HTTP GET → {url}");
-        await db.SaveChangesAsync(ct);
-
-        using var handler = new HttpClientHandler
-        {
-            // Localhost URLs may use self-signed development certificates.
-            ServerCertificateCustomValidationCallback =
-                HttpClientHandler.DangerousAcceptAnyServerCertificateValidator
-        };
-        using var httpClient = new HttpClient(handler) { Timeout = TimeSpan.FromSeconds(30) };
-        var response = await httpClient.GetAsync(url, ct);
-        var body = await response.Content.ReadAsStringAsync(ct);
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-        foreach (var header in response.Headers)
-            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
-        foreach (var header in response.Content.Headers)
-            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
-        sb.AppendLine();
-        sb.Append(body);
-
-        return sb.ToString();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Localhost helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    private static T DeserializePayload<T>(AgentJobDB job, string actionName) where T : class
-    {
-        if (string.IsNullOrWhiteSpace(job.ScriptJson))
-            throw new InvalidOperationException(
-                $"{actionName} requires a JSON payload in ScriptJson.");
-
-        return JsonSerializer.Deserialize<T>(job.ScriptJson, _payloadJsonOptions)
-            ?? throw new InvalidOperationException(
-                $"Failed to deserialise {actionName} payload.");
-    }
-
-    private static string ValidateLocalhostUrl(string? url)
-    {
-        if (string.IsNullOrWhiteSpace(url))
-            throw new InvalidOperationException(
-                "Localhost access requires a 'url' field.");
-
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            throw new InvalidOperationException(
-                $"Invalid URL: '{url}'.");
-
-        if (uri.Host is not ("localhost" or "127.0.0.1" or "[::1]"))
-            throw new InvalidOperationException(
-                $"URL host must be localhost, 127.0.0.1, or [::1]. Got: '{uri.Host}'.");
-
-        return url;
-    }
+    // Removed: ACCESS LOCALHOST IN BROWSER — now in WebAccess module
+    // Removed: ACCESS LOCALHOST CLI — now in WebAccess module
+    // Removed: QUERY SEARCH ENGINE — now in WebAccess module
+    // Removed: ACCESS WEBSITE — now in WebAccess module
 
     private static readonly JsonSerializerOptions _payloadJsonOptions = new()
     {
         PropertyNameCaseInsensitive = true
     };
-
-    // ═══════════════════════════════════════════════════════════════
-    // QUERY SEARCH ENGINE
-    // ═══════════════════════════════════════════════════════════════
-
-    private sealed class QuerySearchEnginePayload
-    {
-        public string? ResourceId { get; set; }
-        public string? TargetId { get; set; }
-        public string? Query { get; set; }
-        public int? Count { get; set; }
-        public int? Offset { get; set; }
-        public string? Language { get; set; }
-        public string? Region { get; set; }
-        public string? SafeSearch { get; set; }
-        public string? DateRestrict { get; set; }
-        public string? SiteRestrict { get; set; }
-        public string? FileType { get; set; }
-        public string? ExactTerms { get; set; }
-        public string? ExcludeTerms { get; set; }
-        public string? SearchType { get; set; }
-        public string? SortBy { get; set; }
-        public string? Topic { get; set; }
-        public string? Category { get; set; }
-    }
-
-    /// <summary>
-    /// Executes a search query against a registered <see cref="SearchEngineDB"/>.
-    /// The engine's <see cref="SearchEngineType"/> determines which API-specific
-    /// parameters are forwarded by <see cref="SearchEngineService.QueryAsync"/>.
-    /// </summary>
-    private async Task<string?> ExecuteQuerySearchEngineAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        if (!job.ResourceId.HasValue)
-            throw new InvalidOperationException(
-                "QuerySearchEngine requires a ResourceId (search engine).");
-
-        var engine = await db.SearchEngines
-            .Include(e => e.Skill)
-            .FirstOrDefaultAsync(e => e.Id == job.ResourceId.Value, ct)
-            ?? throw new InvalidOperationException(
-                $"Search engine {job.ResourceId} not found.");
-
-        var payload = DeserializePayload<QuerySearchEnginePayload>(job,
-            "QuerySearchEngine");
-
-        if (string.IsNullOrWhiteSpace(payload.Query))
-            throw new InvalidOperationException(
-                "QuerySearchEngine requires a 'query' field.");
-
-        AddLog(job, $"Search engine '{engine.Name}' ({engine.Type}): {payload.Query}");
-        await db.SaveChangesAsync(ct);
-
-        var result = await searchEngineService.QueryAsync(
-            engine,
-            payload.Query,
-            count: payload.Count ?? 10,
-            offset: payload.Offset ?? 0,
-            language: payload.Language,
-            region: payload.Region,
-            safeSearch: payload.SafeSearch,
-            dateRestrict: payload.DateRestrict,
-            siteRestrict: payload.SiteRestrict,
-            fileType: payload.FileType,
-            exactTerms: payload.ExactTerms,
-            excludeTerms: payload.ExcludeTerms,
-            searchType: payload.SearchType,
-            sortBy: payload.SortBy,
-            topic: payload.Topic,
-            category: payload.Category,
-            ct: ct);
-
-        if (engine.Skill is { SkillText.Length: > 0 } skill)
-            result = $"[Search Engine Skill: {skill.Name}]\n{skill.SkillText}\n\n---\n\n{result}";
-
-        return result;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // ACCESS WEBSITE — external sites, hardened
-    // ═══════════════════════════════════════════════════════════════
-
-    private sealed class AccessWebsitePayload
-    {
-        public string? ResourceId { get; set; }
-        public string? TargetId { get; set; }
-        public string? Mode { get; set; }
-        public string? Path { get; set; }
-    }
-
-    /// <summary>
-    /// Maximum response body size (2 MB) to prevent memory exhaustion from
-    /// malicious or very large external pages.
-    /// </summary>
-    private const int MaxWebsiteResponseBytes = 2 * 1024 * 1024;
-
-    /// <summary>
-    /// Content-Type prefixes that are considered safe to return as text.
-    /// Binary types (images, executables, archives, etc.) are blocked.
-    /// </summary>
-    private static readonly string[] SafeContentTypePrefixes =
-    [
-        "text/",
-        "application/json",
-        "application/xml",
-        "application/xhtml+xml",
-        "application/javascript",
-        "application/x-javascript",
-    ];
-
-    /// <summary>
-    /// Fetches an external website registered in <see cref="WebsiteDB"/>
-    /// using either a headless browser (<c>mode=html|screenshot</c>) or
-    /// a direct HTTP GET (<c>mode=cli</c>, the default).
-    /// <para>
-    /// Unlike localhost access, external websites are untrusted.
-    /// The following precautions are enforced:
-    /// <list type="bullet">
-    ///   <item>Only the registered base URL (plus optional <c>path</c>
-    ///         suffix) is allowed — agents cannot browse arbitrary
-    ///         external sites.</item>
-    ///   <item>Responses are capped at <see cref="MaxWebsiteResponseBytes"/>
-    ///         to prevent memory exhaustion.</item>
-    ///   <item>Binary content types are rejected — only text-based
-    ///         responses are returned to the agent.</item>
-    ///   <item>Browser mode uses <c>--disable-downloads</c> to prevent
-    ///         the headless browser from saving files to disk.</item>
-    ///   <item>Redirect chains are limited to 10 hops and must stay
-    ///         within the registered origin (scheme + host + port).</item>
-    ///   <item>Private/loopback IPs are blocked to prevent SSRF.</item>
-    ///   <item>30-second hard timeout kills runaway requests.</item>
-    /// </list>
-    /// </para>
-    /// </summary>
-    private async Task<string?> ExecuteAccessWebsiteAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        if (!job.ResourceId.HasValue)
-            throw new InvalidOperationException(
-                "AccessWebsite requires a ResourceId (Website).");
-
-        var website = await db.Websites
-            .Include(w => w.Skill)
-            .FirstOrDefaultAsync(w => w.Id == job.ResourceId.Value, ct)
-            ?? throw new InvalidOperationException(
-                $"Website {job.ResourceId} not found.");
-
-        var payload = DeserializePayload<AccessWebsitePayload>(job, "AccessWebsite");
-        var mode = (payload.Mode ?? "cli").ToLowerInvariant();
-
-        // Build the final URL: registered base + optional path suffix.
-        var url = BuildWebsiteUrl(website.Url, payload.Path);
-
-        // Validate the resolved URL is safe for external access.
-        ValidateExternalUrl(url, website.Url);
-
-        AddLog(job, $"Website '{website.Name}' ({mode}): {url}");
-        await db.SaveChangesAsync(ct);
-
-        string? result = mode switch
-        {
-            "html" or "screenshot"
-                => await ExecuteAccessWebsiteBrowserAsync(job, url, mode, ct),
-            _ => await ExecuteAccessWebsiteCliAsync(url, ct),
-        };
-
-        // Prepend skill instructions when available so the agent knows
-        // how to interpret the website's structure and navigation.
-        if (website.Skill is { SkillText.Length: > 0 } skill)
-            result = $"[Website Skill: {skill.Name}]\n{skill.SkillText}\n\n---\n\n{result}";
-
-        return result;
-    }
-
-    /// <summary>
-    /// Browser-based external website access.  Identical to the localhost
-    /// browser implementation but with hardened flags for untrusted sites.
-    /// </summary>
-    private async Task<string?> ExecuteAccessWebsiteBrowserAsync(
-        AgentJobDB job, string url, string mode, CancellationToken ct)
-    {
-        var executable = configuration["Browser:Executable"] ?? ResolveChromiumExecutable();
-        var extraArgs = configuration["Browser:Arguments"] ?? "--incognito";
-
-        var tempFile = mode == "screenshot"
-            ? System.IO.Path.Combine(System.IO.Path.GetTempPath(), $"sc_web_{job.Id:N}.png")
-            : null;
-
-        // Security: external sites get stricter flags than localhost.
-        //   --disable-downloads           — block all file downloads
-        //   --disable-extensions          — no extension side-effects
-        //   --disable-plugins             — no NPAPI/PPAPI plugins
-        //   --disable-popup-blocking      — *off* so popups don't spawn
-        //   --no-first-run               — skip Chrome first-run experience
-        //   --disable-background-networking — reduce background traffic
-        //   --disable-default-apps        — no default app installs
-        //   --disable-sync               — no account sync
-        //
-        // NOTE: --ignore-certificate-errors is intentionally OMITTED for
-        // external sites — a bad cert is a genuine red flag.
-        var securityFlags = "--disable-downloads --disable-extensions --disable-plugins " +
-                            "--no-first-run --disable-background-networking " +
-                            "--disable-default-apps --disable-sync";
-
-        var headlessArgs = mode switch
-        {
-            "screenshot" =>
-                $"--headless --disable-gpu --no-sandbox --virtual-time-budget=10000 " +
-                $"{securityFlags} {extraArgs} --screenshot=\"{tempFile}\" \"{url}\"",
-            _ =>
-                $"--headless --disable-gpu --no-sandbox --virtual-time-budget=10000 " +
-                $"{securityFlags} {extraArgs} --dump-dom \"{url}\"",
-        };
-
-        var psi = new System.Diagnostics.ProcessStartInfo
-        {
-            FileName = executable,
-            Arguments = headlessArgs,
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-
-        using var process = new System.Diagnostics.Process { StartInfo = psi };
-        process.Start();
-
-        var stdoutTask = process.StandardOutput.ReadToEndAsync(ct);
-        var stderrTask = process.StandardError.ReadToEndAsync(ct);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(30));
-
-        try
-        {
-            await process.WaitForExitAsync(timeoutCts.Token);
-        }
-        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
-        {
-            try { process.Kill(entireProcessTree: true); } catch { /* best effort */ }
-            throw new InvalidOperationException(
-                $"Browser timed out after 30 seconds for URL: {url}");
-        }
-
-        var stdout = await stdoutTask;
-        var stderr = await stderrTask;
-
-        if (process.ExitCode != 0)
-            throw new InvalidOperationException(
-                $"Browser exited with code {process.ExitCode}.\nstderr: {stderr}");
-
-        if (mode == "screenshot" && tempFile is not null && File.Exists(tempFile))
-        {
-            var bytes = await File.ReadAllBytesAsync(tempFile, ct);
-            File.Delete(tempFile);
-            return $"Screenshot captured ({bytes.Length} bytes) of {url}\n[SCREENSHOT_BASE64]{Convert.ToBase64String(bytes)}";
-        }
-
-        return string.IsNullOrWhiteSpace(stdout) ? "(empty page)" : stdout;
-    }
-
-    /// <summary>
-    /// Direct HTTP GET for an external website. Enforces size limits,
-    /// content-type allow-listing, redirect origin pinning, and SSRF
-    /// protection.
-    /// </summary>
-    private async Task<string?> ExecuteAccessWebsiteCliAsync(
-        string url, CancellationToken ct)
-    {
-        // ── Handler: redirect pinning + SSRF protection ──────────
-        var allowedOrigin = new Uri(url).GetLeftPart(UriPartial.Authority);
-
-        using var handler = new HttpClientHandler
-        {
-            MaxAutomaticRedirections = 10,
-            AllowAutoRedirect = false, // we follow redirects manually
-        };
-
-        using var httpClient = new HttpClient(handler)
-        {
-            Timeout = TimeSpan.FromSeconds(30),
-            MaxResponseContentBufferSize = MaxWebsiteResponseBytes,
-        };
-
-        // Set a realistic user-agent so sites don't block us outright.
-        httpClient.DefaultRequestHeaders.UserAgent.ParseAdd(
-            "Mozilla/5.0 (compatible; SharpClaw/1.0; +https://github.com/mkn8rn/SharpClaw)");
-
-        // ── Manual redirect loop with origin pinning ─────────────
-        var currentUrl = url;
-        HttpResponseMessage response;
-        var redirectCount = 0;
-        const int maxRedirects = 10;
-
-        do
-        {
-            var requestUri = new Uri(currentUrl);
-            RejectPrivateAddress(requestUri);
-
-            response = await httpClient.GetAsync(
-                requestUri, HttpCompletionOption.ResponseHeadersRead, ct);
-
-            if ((int)response.StatusCode is >= 300 and < 400
-                && response.Headers.Location is { } location)
-            {
-                var redirectUri = location.IsAbsoluteUri
-                    ? location
-                    : new Uri(requestUri, location);
-
-                // Pin redirects to the original origin to prevent open-redirect SSRF.
-                if (!string.Equals(
-                        redirectUri.GetLeftPart(UriPartial.Authority),
-                        allowedOrigin, StringComparison.OrdinalIgnoreCase))
-                    throw new InvalidOperationException(
-                        $"Redirect to a different origin is blocked: {redirectUri}");
-
-                currentUrl = redirectUri.AbsoluteUri;
-                response.Dispose();
-                redirectCount++;
-            }
-            else
-            {
-                break;
-            }
-        } while (redirectCount < maxRedirects);
-
-        if (redirectCount >= maxRedirects)
-            throw new InvalidOperationException(
-                $"Too many redirects ({maxRedirects}) for URL: {url}");
-
-        // ── Content-type guard: reject binary payloads ────────────
-        var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
-        var isSafeContent = SafeContentTypePrefixes.Any(
-            prefix => contentType.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
-
-        if (!isSafeContent)
-        {
-            response.Dispose();
-            throw new InvalidOperationException(
-                $"Blocked: content type '{contentType}' is not text-based. " +
-                "Binary downloads are not permitted.");
-        }
-
-        // ── Read body with size cap ──────────────────────────────
-        await using var stream = await response.Content.ReadAsStreamAsync(ct);
-        using var reader = new StreamReader(stream);
-        var buffer = new char[MaxWebsiteResponseBytes / sizeof(char)];
-        var charsRead = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
-        var body = new string(buffer, 0, charsRead);
-
-        var sb = new System.Text.StringBuilder();
-        sb.AppendLine($"HTTP {(int)response.StatusCode} {response.ReasonPhrase}");
-        foreach (var header in response.Headers)
-            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
-        foreach (var header in response.Content.Headers)
-            sb.AppendLine($"{header.Key}: {string.Join(", ", header.Value)}");
-        sb.AppendLine();
-        sb.Append(body);
-
-        if (!reader.EndOfStream)
-            sb.AppendLine("\n\n[TRUNCATED — response exceeded 2 MB limit]");
-
-        return sb.ToString();
-    }
-
-    // ── Website helpers ──────────────────────────────────────────
-
-    /// <summary>
-    /// Builds the final URL by combining the website's registered base URL
-    /// with an optional agent-specified path suffix.
-    /// </summary>
-    private static string BuildWebsiteUrl(string baseUrl, string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            return baseUrl;
-
-        // Prevent path traversal and injection.
-        if (path.Contains("..", StringComparison.Ordinal))
-            throw new InvalidOperationException(
-                "Path traversal ('..') is not permitted.");
-
-        // Strip leading slash to avoid double-slash.
-        var trimmedBase = baseUrl.TrimEnd('/');
-        var trimmedPath = path.TrimStart('/');
-
-        return $"{trimmedBase}/{trimmedPath}";
-    }
-
-    /// <summary>
-    /// Validates that the resolved URL is safe for external access:
-    /// must be http/https, must share the same origin as the registered
-    /// website, and must not target private/loopback addresses.
-    /// </summary>
-    private static void ValidateExternalUrl(string url, string registeredBaseUrl)
-    {
-        if (!Uri.TryCreate(url, UriKind.Absolute, out var uri))
-            throw new InvalidOperationException($"Invalid URL: '{url}'.");
-
-        if (uri.Scheme is not ("http" or "https"))
-            throw new InvalidOperationException(
-                $"Only http/https schemes are allowed. Got: '{uri.Scheme}'.");
-
-        // The resolved URL must stay within the registered website's origin.
-        if (!Uri.TryCreate(registeredBaseUrl, UriKind.Absolute, out var baseUri))
-            throw new InvalidOperationException(
-                $"Registered website has an invalid base URL: '{registeredBaseUrl}'.");
-
-        if (!string.Equals(
-                uri.GetLeftPart(UriPartial.Authority),
-                baseUri.GetLeftPart(UriPartial.Authority),
-                StringComparison.OrdinalIgnoreCase))
-            throw new InvalidOperationException(
-                $"URL origin does not match the registered website. " +
-                $"Expected: {baseUri.GetLeftPart(UriPartial.Authority)}, " +
-                $"got: {uri.GetLeftPart(UriPartial.Authority)}.");
-
-        RejectPrivateAddress(uri);
-    }
-
-    /// <summary>
-    /// Blocks requests to loopback and private IP ranges to prevent SSRF.
-    /// External website access must never target internal infrastructure.
-    /// </summary>
-    private static void RejectPrivateAddress(Uri uri)
-    {
-        if (uri.Host is "localhost" or "127.0.0.1" or "[::1]")
-            throw new InvalidOperationException(
-                "External website access cannot target localhost. " +
-                "Use the localhost tools instead.");
-
-        if (System.Net.IPAddress.TryParse(uri.Host, out var ip))
-        {
-            if (System.Net.IPAddress.IsLoopback(ip))
-                throw new InvalidOperationException(
-                    $"Blocked: loopback address '{uri.Host}'.");
-
-            // RFC 1918 / RFC 4193 private ranges
-            var bytes = ip.GetAddressBytes();
-            var isPrivate = bytes switch
-            {
-                [10, ..] => true,                                      // 10.0.0.0/8
-                [172, >= 16 and <= 31, ..] => true,                    // 172.16.0.0/12
-                [192, 168, ..] => true,                                // 192.168.0.0/16
-                [169, 254, ..] => true,                                // 169.254.0.0/16 (link-local)
-                [0, ..] => true,                                       // 0.0.0.0/8
-                _ => false,
-            };
-
-            if (isPrivate)
-                throw new InvalidOperationException(
-                    $"Blocked: private/reserved IP address '{uri.Host}'.");
-        }
-    }
 
     // ═══════════════════════════════════════════════════════════════
     // BOT MESSAGING
@@ -1904,18 +1236,10 @@ IConfiguration configuration)
                 => actions.CreateSubAgentAsync(agentId, caller, ct: ct),
             AgentActionType.RegisterDatabase
                 => actions.RegisterDatabaseAsync(agentId, caller, ct: ct),
-            AgentActionType.AccessLocalhostInBrowser
-                => actions.AccessLocalhostInBrowserAsync(agentId, caller, ct: ct),
-            AgentActionType.AccessLocalhostCli
-                => actions.AccessLocalhostCliAsync(agentId, caller, ct: ct),
             AgentActionType.AccessInternalDatabases when resourceId.HasValue
                 => actions.AccessInternalDatabaseAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.AccessExternalDatabase when resourceId.HasValue
                 => actions.AccessExternalDatabaseAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.AccessWebsite when resourceId.HasValue
-                => actions.AccessWebsiteAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.QuerySearchEngine when resourceId.HasValue
-                => actions.QuerySearchEngineAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.AccessContainer when resourceId.HasValue
                 => actions.AccessContainerAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.ManageAgent when resourceId.HasValue
@@ -1924,12 +1248,6 @@ IConfiguration configuration)
                 => actions.EditTaskAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.AccessSkill when resourceId.HasValue
                 => actions.AccessSkillAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.TranscribeFromAudioDevice when resourceId.HasValue
-                => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.TranscribeFromAudioStream when resourceId.HasValue
-                => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
-            AgentActionType.TranscribeFromAudioFile when resourceId.HasValue
-                => actions.AccessAudioDeviceAsync(agentId, resourceId.Value, caller, ct: ct),
             AgentActionType.SendBotMessage when resourceId.HasValue
                 => actions.AccessBotIntegrationAsync(agentId, resourceId.Value, caller, ct: ct),
             // Module-provided tool calls: delegate to the module's permission descriptor.
@@ -1957,19 +1275,21 @@ IConfiguration configuration)
     {
         // Core per-resource actions — checked first so module resolution
         // cannot override behaviour for actions that still have core handlers.
-        if (type is AgentActionType.AccessInternalDatabases
-            or AgentActionType.AccessExternalDatabase
-            or AgentActionType.AccessWebsite
-            or AgentActionType.QuerySearchEngine
-            or AgentActionType.AccessContainer
-            or AgentActionType.ManageAgent
-            or AgentActionType.EditTask
-            or AgentActionType.AccessSkill
-            or AgentActionType.TranscribeFromAudioDevice
-            or AgentActionType.TranscribeFromAudioStream
-            or AgentActionType.TranscribeFromAudioFile
-            or AgentActionType.SendBotMessage)
-            return true;
+        #pragma warning disable CS0612 // Module-dispatched actions kept for resource resolution
+                if (type is AgentActionType.AccessInternalDatabases
+                    or AgentActionType.AccessExternalDatabase
+                    or AgentActionType.AccessWebsite
+                    or AgentActionType.QuerySearchEngine
+                    or AgentActionType.AccessContainer
+                    or AgentActionType.ManageAgent
+                    or AgentActionType.EditTask
+                    or AgentActionType.AccessSkill
+                    or AgentActionType.TranscribeFromAudioDevice
+                    or AgentActionType.TranscribeFromAudioStream
+                    or AgentActionType.TranscribeFromAudioFile
+                    or AgentActionType.SendBotMessage)
+        #pragma warning restore CS0612
+                    return true;
 
         // Module fallback: explicit ActionKey or enum-name derivation.
         var key = actionKey;
@@ -2046,7 +1366,7 @@ IConfiguration configuration)
             .Include(p => p.DefaultWebsiteAccess)
             .Include(p => p.DefaultSearchEngineAccess)
             .Include(p => p.DefaultContainerAccess)
-            .Include(p => p.DefaultAudioDeviceAccess)
+            .Include(p => p.DefaultInputAudioAccess)
             .Include(p => p.DefaultDisplayDeviceAccess)
             .Include(p => p.DefaultEditorSessionAccess)
             .Include(p => p.DefaultAgentPermission)
@@ -2094,17 +1414,21 @@ IConfiguration configuration)
     private static Guid? ExtractFromDefaultResourceSet(
         DefaultResourceSetDB drs, AgentActionType actionType) => actionType switch
     {
+#pragma warning disable CS0612 // Module-dispatched actions kept for resource resolution
         AgentActionType.AccessInternalDatabases => drs.InternalDatabaseResourceId,
         AgentActionType.AccessExternalDatabase => drs.ExternalDatabaseResourceId,
         AgentActionType.AccessWebsite => drs.WebsiteResourceId,
         AgentActionType.QuerySearchEngine => drs.SearchEngineResourceId,
+#pragma warning restore CS0612
         AgentActionType.AccessContainer => drs.ContainerResourceId,
         AgentActionType.ManageAgent => drs.AgentResourceId,
         AgentActionType.EditTask => drs.TaskResourceId,
         AgentActionType.AccessSkill => drs.SkillResourceId,
+#pragma warning disable CS0612 // Transcription actions dispatched to module but kept for resource resolution
         AgentActionType.TranscribeFromAudioDevice or
         AgentActionType.TranscribeFromAudioStream or
-        AgentActionType.TranscribeFromAudioFile => drs.AudioDeviceResourceId,
+        AgentActionType.TranscribeFromAudioFile => drs.InputAudioResourceId,
+#pragma warning restore CS0612
         AgentActionType.CaptureDisplay or
         AgentActionType.ClickDesktop or
         AgentActionType.TypeOnDesktop => drs.DisplayDeviceResourceId,
@@ -2120,6 +1444,7 @@ IConfiguration configuration)
     private static Guid? ExtractDefaultResourceId(
         PermissionSetDB permissionSet, AgentActionType actionType) => actionType switch
     {
+#pragma warning disable CS0612 // Module-dispatched actions kept for resource resolution
         AgentActionType.AccessInternalDatabases
             => permissionSet.DefaultInternalDatabaseAccess?.InternalDatabaseId,
         AgentActionType.AccessExternalDatabase
@@ -2128,6 +1453,7 @@ IConfiguration configuration)
             => permissionSet.DefaultWebsiteAccess?.WebsiteId,
         AgentActionType.QuerySearchEngine
             => permissionSet.DefaultSearchEngineAccess?.SearchEngineId,
+#pragma warning restore CS0612
         AgentActionType.AccessContainer
             => permissionSet.DefaultContainerAccess?.ContainerId,
         AgentActionType.ManageAgent
@@ -2136,10 +1462,12 @@ IConfiguration configuration)
             => permissionSet.DefaultTaskPermission?.ScheduledTaskId,
         AgentActionType.AccessSkill
             => permissionSet.DefaultSkillPermission?.SkillId,
+#pragma warning disable CS0612 // Transcription actions dispatched to module but kept for resource resolution
         AgentActionType.TranscribeFromAudioDevice or
         AgentActionType.TranscribeFromAudioStream or
         AgentActionType.TranscribeFromAudioFile
-            => permissionSet.DefaultAudioDeviceAccess?.AudioDeviceId,
+            => permissionSet.DefaultInputAudioAccess?.InputAudioId,
+#pragma warning restore CS0612
         AgentActionType.CaptureDisplay or
         AgentActionType.ClickDesktop or
         AgentActionType.TypeOnDesktop
@@ -2255,8 +1583,6 @@ IConfiguration configuration)
         // ── Global flags ──────────────────────────────────────────
         AgentActionType.CreateSubAgent    => ps.CanCreateSubAgents,
         AgentActionType.RegisterDatabase => ps.CanRegisterDatabases,
-        AgentActionType.AccessLocalhostInBrowser => ps.CanAccessLocalhostInBrowser,
-        AgentActionType.AccessLocalhostCli       => ps.CanAccessLocalhostCli,
 
         // ── Per-resource grants ───────────────────────────────────
         AgentActionType.AccessInternalDatabases when resourceId.HasValue
@@ -2266,14 +1592,6 @@ IConfiguration configuration)
         AgentActionType.AccessExternalDatabase when resourceId.HasValue
             => ps.ExternalDatabaseAccesses.Any(a =>
                 a.ExternalDatabaseId == resourceId || a.ExternalDatabaseId == WellKnownIds.AllResources),
-
-        AgentActionType.AccessWebsite when resourceId.HasValue
-            => ps.WebsiteAccesses.Any(a =>
-                a.WebsiteId == resourceId || a.WebsiteId == WellKnownIds.AllResources),
-
-        AgentActionType.QuerySearchEngine when resourceId.HasValue
-            => ps.SearchEngineAccesses.Any(a =>
-                a.SearchEngineId == resourceId || a.SearchEngineId == WellKnownIds.AllResources),
 
         AgentActionType.AccessContainer when resourceId.HasValue
             => ps.ContainerAccesses.Any(a =>
@@ -2294,8 +1612,8 @@ IConfiguration configuration)
         AgentActionType.TranscribeFromAudioDevice or
         AgentActionType.TranscribeFromAudioStream or
         AgentActionType.TranscribeFromAudioFile when resourceId.HasValue
-            => ps.AudioDeviceAccesses.Any(a =>
-                a.AudioDeviceId == resourceId || a.AudioDeviceId == WellKnownIds.AllResources),
+            => ps.InputAudioAccesses.Any(a =>
+                a.InputAudioId == resourceId || a.InputAudioId == WellKnownIds.AllResources),
 
         AgentActionType.CaptureDisplay or
         AgentActionType.ClickDesktop or
@@ -2364,10 +1682,12 @@ IConfiguration configuration)
             channel.Writer.TryComplete();
     }
 
-    private static bool IsTranscriptionAction(AgentActionType type) =>
-        type is AgentActionType.TranscribeFromAudioDevice
-            or AgentActionType.TranscribeFromAudioStream
-            or AgentActionType.TranscribeFromAudioFile;
+    #pragma warning disable CS0612 // Transcription actions dispatched to module but kept for job lifecycle
+        private static bool IsTranscriptionAction(AgentActionType type) =>
+            type is AgentActionType.TranscribeFromAudioDevice
+                or AgentActionType.TranscribeFromAudioStream
+                or AgentActionType.TranscribeFromAudioFile;
+    #pragma warning restore CS0612
 
     private static AgentJobResponse ToResponse(AgentJobDB job) =>
         new(

@@ -37,8 +37,8 @@ public class DefaultResourceSetDB : BaseEntity
     /// <summary>Default ExternalDatabase for AccessExternalDatabase.</summary>
     public Guid? ExternalDatabaseResourceId { get; set; }
 
-    /// <summary>Default AudioDevice for transcription jobs.</summary>
-    public Guid? AudioDeviceResourceId { get; set; }
+    /// <summary>Default InputAudio for transcription jobs.</summary>
+    public Guid? InputAudioResourceId { get; set; }
 
     /// <summary>Default DisplayDevice for CaptureDisplay.</summary>
     public Guid? DisplayDeviceResourceId { get; set; }

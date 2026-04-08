@@ -51,8 +51,8 @@ public class SharpClawDbContext(
     public DbSet<SearchEngineAccessDB> SearchEngineAccesses => Set<SearchEngineAccessDB>();
     public DbSet<ContainerDB> Containers => Set<ContainerDB>();
     public DbSet<ContainerAccessDB> ContainerAccesses => Set<ContainerAccessDB>();
-    public DbSet<AudioDeviceDB> AudioDevices => Set<AudioDeviceDB>();
-    public DbSet<AudioDeviceAccessDB> AudioDeviceAccesses => Set<AudioDeviceAccessDB>();
+    public DbSet<InputAudioDB> InputAudios => Set<InputAudioDB>();
+    public DbSet<InputAudioAccessDB> InputAudioAccesses => Set<InputAudioAccessDB>();
     public DbSet<DisplayDeviceDB> DisplayDevices => Set<DisplayDeviceDB>();
     public DbSet<DisplayDeviceAccessDB> DisplayDeviceAccesses => Set<DisplayDeviceAccessDB>();
     public DbSet<EditorSessionDB> EditorSessions => Set<EditorSessionDB>();
@@ -307,7 +307,7 @@ public class SharpClawDbContext(
                 .HasForeignKey(c => c.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
 
-            e.HasMany(p => p.AudioDeviceAccesses)
+            e.HasMany(p => p.InputAudioAccesses)
                 .WithOne(a => a.PermissionSet)
                 .HasForeignKey(a => a.PermissionSetId)
                 .OnDelete(DeleteBehavior.Cascade);
@@ -408,9 +408,9 @@ public class SharpClawDbContext(
                 .HasForeignKey(p => p.DefaultContainerAccessId)
                 .OnDelete(DeleteBehavior.SetNull);
 
-            e.HasOne(p => p.DefaultAudioDeviceAccess)
+            e.HasOne(p => p.DefaultInputAudioAccess)
                 .WithMany()
-                .HasForeignKey(p => p.DefaultAudioDeviceAccessId)
+                .HasForeignKey(p => p.DefaultInputAudioAccessId)
                 .OnDelete(DeleteBehavior.SetNull);
 
             e.HasOne(p => p.DefaultDisplayDeviceAccess)
@@ -597,8 +597,8 @@ public class SharpClawDbContext(
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
-        // ── Audio devices ────────────────────────────────────────
-        modelBuilder.Entity<AudioDeviceDB>(e =>
+        // ── Input audios ─────────────────────────────────────────
+        modelBuilder.Entity<InputAudioDB>(e =>
         {
             e.HasIndex(d => d.Name).IsUnique();
             e.HasOne(d => d.Skill)
@@ -606,14 +606,14 @@ public class SharpClawDbContext(
                 .HasForeignKey(d => d.SkillId)
                 .OnDelete(DeleteBehavior.SetNull);
             e.HasMany(d => d.Accesses)
-                .WithOne(a => a.AudioDevice)
-                .HasForeignKey(a => a.AudioDeviceId)
+                .WithOne(a => a.InputAudio)
+                .HasForeignKey(a => a.InputAudioId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<AudioDeviceAccessDB>(e =>
+        modelBuilder.Entity<InputAudioAccessDB>(e =>
         {
-            e.HasIndex(a => new { a.PermissionSetId, a.AudioDeviceId }).IsUnique();
+            e.HasIndex(a => new { a.PermissionSetId, a.InputAudioId }).IsUnique();
             e.Property(a => a.Clearance).HasConversion<string>();
         });
 
@@ -922,7 +922,7 @@ public class SharpClawDbContext(
         WebsiteAccessDB             e => e.WebsiteId                 == WellKnownIds.AllResources,
         SearchEngineAccessDB        e => e.SearchEngineId            == WellKnownIds.AllResources,
         ContainerAccessDB           e => e.ContainerId               == WellKnownIds.AllResources,
-        AudioDeviceAccessDB         e => e.AudioDeviceId             == WellKnownIds.AllResources,
+        InputAudioAccessDB          e => e.InputAudioId              == WellKnownIds.AllResources,
         DisplayDeviceAccessDB       e => e.DisplayDeviceId           == WellKnownIds.AllResources,
         EditorSessionAccessDB       e => e.EditorSessionId           == WellKnownIds.AllResources,
         AgentManagementAccessDB           e => e.AgentId                   == WellKnownIds.AllResources,

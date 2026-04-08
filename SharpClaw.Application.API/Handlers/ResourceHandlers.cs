@@ -8,8 +8,6 @@ using SharpClaw.Contracts.DTOs.Databases;
 using SharpClaw.Contracts.DTOs.Documents;
 using SharpClaw.Contracts.DTOs.Editor;
 using SharpClaw.Contracts.DTOs.NativeApplications;
-using SharpClaw.Contracts.DTOs.SearchEngines;
-using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.API.Handlers;
@@ -57,42 +55,6 @@ public static class ResourceHandlers
     [MapPost("/containers/sync")]
     public static async Task<IResult> SyncContainers(ContainerService svc)
         => Results.Ok(await svc.SyncLocalMk8ShellAsync());
-
-    // ═══════════════════════════════════════════════════════════════
-    // Audio Devices
-    // ═══════════════════════════════════════════════════════════════
-
-    [MapPost("/audiodevices")]
-    public static async Task<IResult> CreateAudioDevice(
-        CreateAudioDeviceRequest request, TranscriptionService svc)
-        => Results.Ok(await svc.CreateDeviceAsync(request));
-
-    [MapGet("/audiodevices")]
-    public static async Task<IResult> ListAudioDevices(TranscriptionService svc)
-        => Results.Ok(await svc.ListDevicesAsync());
-
-    [MapGet("/audiodevices/{id:guid}")]
-    public static async Task<IResult> GetAudioDevice(Guid id, TranscriptionService svc)
-    {
-        var device = await svc.GetDeviceByIdAsync(id);
-        return device is not null ? Results.Ok(device) : Results.NotFound();
-    }
-
-    [MapPut("/audiodevices/{id:guid}")]
-    public static async Task<IResult> UpdateAudioDevice(
-        Guid id, UpdateAudioDeviceRequest request, TranscriptionService svc)
-    {
-        var device = await svc.UpdateDeviceAsync(id, request);
-        return device is not null ? Results.Ok(device) : Results.NotFound();
-    }
-
-    [MapDelete("/audiodevices/{id:guid}")]
-    public static async Task<IResult> DeleteAudioDevice(Guid id, TranscriptionService svc)
-        => await svc.DeleteDeviceAsync(id) ? Results.NoContent() : Results.NotFound();
-
-    [MapPost("/audiodevices/sync")]
-    public static async Task<IResult> SyncAudioDevices(TranscriptionService svc)
-        => Results.Ok(await svc.SyncDevicesAsync());
 
     // ═══════════════════════════════════════════════════════════════
     // Display Devices
@@ -226,7 +188,7 @@ public static class ResourceHandlers
     /// Returns lightweight <c>[{id, name}]</c> items for the resource type
     /// that backs a given permission access category.  The <paramref name="type"/>
     /// value matches the JSON property names used in the permissions API
-    /// (e.g. <c>audioDeviceAccesses</c>, <c>containerAccesses</c>).
+    /// (e.g. <c>inputAudioAccesses</c>, <c>containerAccesses</c>).
     /// </summary>
     [MapGet("/lookup/{type}")]
     public static async Task<IResult> LookupByAccessType(string type, SharpClawDbContext db)
@@ -245,7 +207,7 @@ public static class ResourceHandlers
                 .Select(e => new ResourceItem(e.Id, e.Name)),
             "externalDatabaseAccesses" => db.ExternalDatabases
                 .Select(e => new ResourceItem(e.Id, e.Name)),
-            "audioDeviceAccesses" => db.AudioDevices
+            "inputAudioAccesses" => db.InputAudios
                 .Select(e => new ResourceItem(e.Id, e.Name)),
             "displayDeviceAccesses" => db.DisplayDevices
                 .Select(e => new ResourceItem(e.Id, e.Name)),
@@ -322,31 +284,5 @@ public static class ResourceHandlers
 
     [MapDelete("/nativeapplications/{id}")]
     public static async Task<IResult> DeleteNativeApplication(Guid id, NativeApplicationService svc)
-        => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
-
-    // ═══════════════════════════════════════════════════════════════
-    // Search Engines
-    // ═══════════════════════════════════════════════════════════════
-
-    [MapPost("/searchengines")]
-    public static async Task<IResult> CreateSearchEngine(
-        CreateSearchEngineRequest request, SearchEngineService svc)
-        => Results.Ok(await svc.CreateAsync(request));
-
-    [MapGet("/searchengines")]
-    public static async Task<IResult> ListSearchEngines(SearchEngineService svc)
-        => Results.Ok(await svc.ListAsync());
-
-    [MapGet("/searchengines/{id:guid}")]
-    public static async Task<IResult> GetSearchEngine(Guid id, SearchEngineService svc)
-        => await svc.GetByIdAsync(id) is { } r ? Results.Ok(r) : Results.NotFound();
-
-    [MapPut("/searchengines/{id:guid}")]
-    public static async Task<IResult> UpdateSearchEngine(
-        Guid id, UpdateSearchEngineRequest request, SearchEngineService svc)
-        => await svc.UpdateAsync(id, request) is { } r ? Results.Ok(r) : Results.NotFound();
-
-    [MapDelete("/searchengines/{id:guid}")]
-    public static async Task<IResult> DeleteSearchEngine(Guid id, SearchEngineService svc)
         => await svc.DeleteAsync(id) ? Results.NoContent() : Results.NotFound();
 }

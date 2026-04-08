@@ -2,9 +2,11 @@ using System.Net;
 using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Sends audio to the OpenAI <c>/v1/audio/transcriptions</c> endpoint

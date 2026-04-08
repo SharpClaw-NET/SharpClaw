@@ -26,7 +26,6 @@ using SharpClaw.Contracts.DTOs.Documents;
 using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.DTOs.NativeApplications;
 using SharpClaw.Contracts.DTOs.Roles;
-using SharpClaw.Contracts.DTOs.Transcription;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
 using SharpClaw.Contracts.DTOs.Bots;
@@ -1005,7 +1004,7 @@ public static class CliDispatcher
     ///   <item><c>defaults &lt;id&gt; clear &lt;key&gt;</c> — clear one field.</item>
     /// </list>
     /// Keys: safeshell, dangshell, container, website, search, localinfo,
-    /// externalinfo, audiodevice, agent, task, skill, transcriptionmodel, editor.
+    /// externalinfo, inputaudio, agent, task, skill, transcriptionmodel, editor.
     /// </summary>
     private static async Task<IResult> HandleDefaults(
         string scope, Guid entityId, string[] extra, IServiceProvider sp)
@@ -1040,7 +1039,7 @@ public static class CliDispatcher
 
             var req = MergeDefaultResourceKey(current, key, value);
             if (req is null)
-                return UsageResult($"Unknown key '{extra[1]}'. Valid keys: safeshell, dangshell, container, website, search, localinfo, externalinfo, audiodevice, displaydevice, agent, task, skill, transcriptionmodel, editor");
+                return UsageResult($"Unknown key '{extra[1]}'. Valid keys: safeshell, dangshell, container, website, search, localinfo, externalinfo, inputaudio, displaydevice, agent, task, skill, transcriptionmodel, editor");
 
             var result = scope == "channel"
                 ? await svc.SetForChannelAsync(entityId, req)
@@ -1088,20 +1087,20 @@ public static class CliDispatcher
         var d = current;
         return key switch
         {
-            "safeshell" => new(d.DangerousShellResourceId, value, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "dangshell" or "dangerousshell" => new(value, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "container" => new(d.DangerousShellResourceId, d.SafeShellResourceId, value, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "website" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, value, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "search" or "searchengine" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, value, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "internaldb" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, value, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "externaldb" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, value, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "audiodevice" or "audio" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, value, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "displaydevice" or "display" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, value, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "agent" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, value, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "task" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, value, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "skill" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, value, d.TranscriptionModelId, d.EditorSessionResourceId),
-            "transcriptionmodel" or "model" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, value, d.EditorSessionResourceId),
-            "editorsession" or "editor" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.AudioDeviceResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, value),
+            "safeshell" => new(d.DangerousShellResourceId, value, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "dangshell" or "dangerousshell" => new(value, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "container" => new(d.DangerousShellResourceId, d.SafeShellResourceId, value, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "website" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, value, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "search" or "searchengine" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, value, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "internaldb" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, value, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "externaldb" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, value, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "inputaudio" or "audio" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, value, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "displaydevice" or "display" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, value, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "agent" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, value, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "task" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, value, d.SkillResourceId, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "skill" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, value, d.TranscriptionModelId, d.EditorSessionResourceId),
+            "transcriptionmodel" or "model" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, value, d.EditorSessionResourceId),
+            "editorsession" or "editor" => new(d.DangerousShellResourceId, d.SafeShellResourceId, d.ContainerResourceId, d.WebsiteResourceId, d.SearchEngineResourceId, d.InternalDatabaseResourceId, d.ExternalDatabaseResourceId, d.InputAudioResourceId, d.DisplayDeviceResourceId, d.AgentResourceId, d.TaskResourceId, d.SkillResourceId, d.TranscriptionModelId, value),
             _ => null,
         };
     }
@@ -1744,7 +1743,7 @@ public static class CliDispatcher
                 "  --search-engine <id>[:<clearance>]      Add SearchEngine grant",
                 "  --internal-db <id>[:<clearance>]        Add InternalDatabase grant",
                 "  --external-db <id>[:<clearance>]        Add ExternalDatabase grant",
-                "  --audio-device <id>[:<clearance>]       Add AudioDevice grant",
+                "  --input-audio <id>[:<clearance>]        Add InputAudio grant",
                 "  --agent <id>[:<clearance>]              Add Agent grant",
                 "  --task <id>[:<clearance>]               Add Task grant",
                 "  --skill <id>[:<clearance>]              Add Skill grant",
@@ -1825,7 +1824,7 @@ public static class CliDispatcher
         var searchEngine = new List<ResourceGrant>();
         var internalDb = new List<ResourceGrant>();
         var externalDb = new List<ResourceGrant>();
-        var audioDevice = new List<ResourceGrant>();
+        var inputAudio = new List<ResourceGrant>();
         var agent = new List<ResourceGrant>();
         var task = new List<ResourceGrant>();
         var skill = new List<ResourceGrant>();
@@ -1870,8 +1869,8 @@ public static class CliDispatcher
                     internalDb.Add(ParseResourceGrant(args[++i])); break;
                 case "--external-db" when i + 1 < args.Length:
                     externalDb.Add(ParseResourceGrant(args[++i])); break;
-                case "--audio-device" when i + 1 < args.Length:
-                    audioDevice.Add(ParseResourceGrant(args[++i])); break;
+                case "--input-audio" when i + 1 < args.Length:
+                    inputAudio.Add(ParseResourceGrant(args[++i])); break;
                 case "--agent" when i + 1 < args.Length:
                     agent.Add(ParseResourceGrant(args[++i])); break;
                 case "--task" when i + 1 < args.Length:
@@ -1908,7 +1907,7 @@ public static class CliDispatcher
             SearchEngineAccesses: searchEngine.Count > 0 ? searchEngine : null,
             InternalDatabaseAccesses: internalDb.Count > 0 ? internalDb : null,
             ExternalDatabaseAccesses: externalDb.Count > 0 ? externalDb : null,
-            AudioDeviceAccesses: audioDevice.Count > 0 ? audioDevice : null,
+            InputAudioAccesses: inputAudio.Count > 0 ? inputAudio : null,
             AgentAccesses: agent.Count > 0 ? agent : null,
             TaskAccesses: task.Count > 0 ? task : null,
             SkillAccesses: skill.Count > 0 ? skill : null);
@@ -1972,7 +1971,7 @@ public static class CliDispatcher
                 "Transcription types: TranscribeFromAudioDevice,",
                 "  TranscribeFromAudioStream (API only), TranscribeFromAudioFile (API only)",
                 "",
-                "Transcription: submit with TranscribeFromAudioDevice and audio device",
+                "Transcription: submit with TranscribeFromAudioDevice and input audio",
                 "  as resourceId.",
                 "  Optional flags: --model <id>, --lang <code>,",
                 "    --mode <sliding|step|window>, --window <seconds>, --step <seconds>");
@@ -2278,7 +2277,7 @@ public static class CliDispatcher
     /// Serializes a value to JSON, injecting a <c>#</c> short-ID field before each
     /// <c>Id</c> GUID property so the user can reference entities by number.
     /// </summary>
-    private static void PrintJsonWithShortIds(object value)
+    internal static void PrintJsonWithShortIds(object value)
     {
         var doc = JsonSerializer.SerializeToNode(value, JsonPrint);
         if (doc is null) return;
@@ -2720,7 +2719,7 @@ public static class CliDispatcher
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Resource (unified: container, audiodevice, ...)
+    // Resource (unified: container, displaydevice, ...)
     // ═══════════════════════════════════════════════════════════════
 
     private static async Task<IResult?> HandleResourceCommand(string[] args, IServiceProvider sp)
@@ -2730,8 +2729,9 @@ public static class CliDispatcher
             PrintUsage(
                 "resource <type> <command> [args...]",
                 "",
-                "Types: container, audiodevice, displaydevice, editorsession,",
+                "Types: container, displaydevice, editorsession,",
                 "       document, nativeapplication, internaldb, externaldb",
+                "       (+ module-provided types: inputaudio, ...)",
                 "",
                 "Commands (all types):",
                 "  add      Create a new resource",
@@ -2747,7 +2747,6 @@ public static class CliDispatcher
         return type switch
         {
             "container" => await HandleResourceContainerCommand(args, sp),
-            "audiodevice" => await HandleResourceAudioDeviceCommand(args, sp),
             "displaydevice" or "display" or "dd" => await HandleResourceDisplayDeviceCommand(args, sp),
             "editorsession" or "editor" or "es" => await HandleResourceEditorSessionCommand(args, sp),
             "document" or "doc" => await HandleResourceDocumentCommand(args, sp),
@@ -2756,7 +2755,7 @@ public static class CliDispatcher
             "externaldb" or "externaldb" => await HandleResourceExternalDatabaseCommand(args, sp),
             _ => await TryModuleResourceCommandAsync(type, args, sp)
                 ?? UsageResult($"Unknown resource type: {type}. " +
-                    "Available: container, audiodevice, displaydevice, editorsession, document, nativeapplication, internaldb, externaldb")
+                    "Available: container, displaydevice, editorsession, document, nativeapplication, internaldb, externaldb")
         };
     }
 
@@ -2814,60 +2813,6 @@ public static class CliDispatcher
             "sync" => await ResourceHandlers.SyncContainers(svc),
 
             _ => UsageResult($"Unknown command: resource container {sub}")
-        };
-    }
-
-    private static async Task<IResult?> HandleResourceAudioDeviceCommand(
-        string[] args, IServiceProvider sp)
-    {
-        if (args.Length < 3)
-        {
-            PrintUsage(
-                "resource audiodevice add <name> [identifier] [description]",
-                "resource audiodevice get <id>                  Show an audio device",
-                "resource audiodevice list                      List all audio devices",
-                "resource audiodevice update <id> [name] [id]   Update an audio device",
-                "resource audiodevice delete <id>               Delete an audio device",
-                "resource audiodevice sync                      Import system audio devices");
-            return Results.Ok();
-        }
-
-        var sub = args[2].ToLowerInvariant();
-        var svc = sp.GetRequiredService<TranscriptionService>();
-
-        return sub switch
-        {
-            "add" when args.Length >= 4
-                => await ResourceHandlers.CreateAudioDevice(
-                    new CreateAudioDeviceRequest(
-                        args[3],
-                        args.Length >= 5 ? args[4] : null,
-                        args.Length >= 6 ? string.Join(' ', args[5..]) : null),
-                    svc),
-            "add" => UsageResult("resource audiodevice add <name> [deviceIdentifier] [description]"),
-
-            "get" when args.Length >= 4
-                => await ResourceHandlers.GetAudioDevice(CliIdMap.Resolve(args[3]), svc),
-            "get" => UsageResult("resource audiodevice get <id>"),
-
-            "list" => await ResourceHandlers.ListAudioDevices(svc),
-
-            "update" when args.Length >= 5
-                => await ResourceHandlers.UpdateAudioDevice(
-                    CliIdMap.Resolve(args[3]),
-                    new UpdateAudioDeviceRequest(
-                        args.Length >= 5 ? args[4] : null,
-                        args.Length >= 6 ? args[5] : null),
-                    svc),
-            "update" => UsageResult("resource audiodevice update <id> [name] [deviceIdentifier]"),
-
-            "delete" when args.Length >= 4
-                => await ResourceHandlers.DeleteAudioDevice(CliIdMap.Resolve(args[3]), svc),
-            "delete" => UsageResult("resource audiodevice delete <id>"),
-
-            "sync" => await ResourceHandlers.SyncAudioDevices(svc),
-
-            _ => UsageResult($"Unknown command: resource audiodevice {sub}")
         };
     }
 
@@ -3535,7 +3480,7 @@ public static class CliDispatcher
               Fields cascade from context when not set: agent, permissions,
                 DisableChatHeader, AllowedAgents, DefaultResourceSet.
               Default-resource keys: safeshell, dangshell, container, website,
-                search, localinfo, externalinfo, audiodevice, agent, task,
+                search, localinfo, externalinfo, inputaudio, agent, task,
                 skill, transcriptionmodel
 
             Chat:
@@ -3583,9 +3528,10 @@ public static class CliDispatcher
               task listen <instanceId>           Stream live task output
 
             Resource:  resource <type> <sub>    (add, get, list, update, delete, sync)
-              Types: container, audiodevice
+              Types: container, displaydevice, editorsession, document,
+                nativeapplication, internaldb, externaldb
+              (+ module types: inputaudio, ...)
               resource container add mk8shell <name> <path>
-              resource audiodevice add <name> [identifier]
 
             Tools:     tools <sub> [args]       (add, get, list, update, delete)
               tools add <name> [json]            Create a tool awareness set

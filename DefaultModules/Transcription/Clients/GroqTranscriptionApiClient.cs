@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
 /// Groq exposes an OpenAI-compatible <c>/audio/transcriptions</c> endpoint.

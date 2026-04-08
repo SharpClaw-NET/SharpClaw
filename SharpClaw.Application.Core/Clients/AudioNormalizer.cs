@@ -20,11 +20,11 @@ namespace SharpClaw.Application.Core.Clients;
 /// unchanged (fast path).
 /// </para>
 /// </summary>
-internal static class AudioNormalizer
+public static class AudioNormalizer
 {
-    internal const int TargetSampleRate = 16_000;
-    internal const int TargetBitsPerSample = 16;
-    internal const int TargetChannels = 1;
+    public const int TargetSampleRate = 16_000;
+    public const int TargetBitsPerSample = 16;
+    public const int TargetChannels = 1;
 
     private static readonly WaveFormat TargetFormat =
         new(TargetSampleRate, TargetBitsPerSample, TargetChannels);
@@ -33,7 +33,7 @@ internal static class AudioNormalizer
     /// Ensures the WAV audio is mono, 16 kHz, 16-bit PCM.
     /// Returns the original bytes when they already match.
     /// </summary>
-    internal static byte[] Normalize(byte[] wavData)
+    public static byte[] Normalize(byte[] wavData)
     {
         using var input = new MemoryStream(wavData);
         using var reader = new WaveFileReader(input);
@@ -59,7 +59,7 @@ internal static class AudioNormalizer
     /// and writes a Whisper-ready 16 kHz mono 16-bit PCM WAV into
     /// <paramref name="output"/>. No temp files are created.
     /// </summary>
-    internal static void Normalize(WaveFileReader input, Stream output)
+    public static void Normalize(WaveFileReader input, Stream output)
     {
         ISampleProvider pipeline = input.ToSampleProvider();
 

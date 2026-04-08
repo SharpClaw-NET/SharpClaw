@@ -110,7 +110,7 @@ public class PermissionSetDB : BaseEntity
     public ICollection<WebsiteAccessDB> WebsiteAccesses { get; set; } = [];
     public ICollection<SearchEngineAccessDB> SearchEngineAccesses { get; set; } = [];
     public ICollection<ContainerAccessDB> ContainerAccesses { get; set; } = [];
-    public ICollection<AudioDeviceAccessDB> AudioDeviceAccesses { get; set; } = [];
+    public ICollection<InputAudioAccessDB> InputAudioAccesses { get; set; } = [];
     public ICollection<DisplayDeviceAccessDB> DisplayDeviceAccesses { get; set; } = [];
     public ICollection<EditorSessionAccessDB> EditorSessionAccesses { get; set; } = [];
     public ICollection<AgentManagementAccessDB> AgentPermissions { get; set; } = [];
@@ -147,8 +147,8 @@ public class PermissionSetDB : BaseEntity
     public Guid? DefaultContainerAccessId { get; set; }
     public ContainerAccessDB? DefaultContainerAccess { get; set; }
 
-    public Guid? DefaultAudioDeviceAccessId { get; set; }
-    public AudioDeviceAccessDB? DefaultAudioDeviceAccess { get; set; }
+    public Guid? DefaultInputAudioAccessId { get; set; }
+    public InputAudioAccessDB? DefaultInputAudioAccess { get; set; }
 
     public Guid? DefaultDisplayDeviceAccessId { get; set; }
     public DisplayDeviceAccessDB? DefaultDisplayDeviceAccess { get; set; }

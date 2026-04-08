@@ -6,16 +6,16 @@ using SharpClaw.Gateway.Infrastructure;
 namespace SharpClaw.Gateway.Controllers;
 
 [ApiController]
-[Route("api/audio-devices")]
+[Route("api/input-audios")]
 [EnableRateLimiting(Security.RateLimiterConfiguration.GlobalPolicy)]
-public class AudioDevicesController(InternalApiClient api) : ControllerBase
+public class InputAudiosController(InternalApiClient api) : ControllerBase
 {
     [HttpGet]
     public async Task<IActionResult> List(CancellationToken ct)
     {
         try
         {
-            var result = await api.GetAsync<IReadOnlyList<AudioDeviceResponse>>("/audio-devices", ct);
+            var result = await api.GetAsync<IReadOnlyList<InputAudioResponse>>("/input-audios", ct);
             return Ok(result);
         }
         catch (HttpRequestException)
@@ -29,12 +29,12 @@ public class AudioDevicesController(InternalApiClient api) : ControllerBase
     {
         try
         {
-            var result = await api.GetAsync<AudioDeviceResponse>($"/audio-devices/{id}", ct);
+            var result = await api.GetAsync<InputAudioResponse>($"/input-audios/{id}", ct);
             return result is not null ? Ok(result) : NotFound();
         }
         catch (HttpRequestException ex) when (ex.StatusCode == System.Net.HttpStatusCode.NotFound)
         {
-            return NotFound(new { error = "Audio device not found." });
+            return NotFound(new { error = "Input audio not found." });
         }
         catch (HttpRequestException)
         {

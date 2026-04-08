@@ -8,10 +8,12 @@ using Microsoft.Extensions.Options;
 using SharpClaw.Application.Infrastructure.Models.Resources;
 using SharpClaw.Contracts.DTOs.SearchEngines;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Application.Services;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 
-namespace SharpClaw.Application.Services;
+namespace SharpClaw.Modules.WebAccess.Services;
 
 /// <summary>
 /// Manages search engine CRUD and dispatches search queries to
@@ -98,6 +100,61 @@ public sealed class SearchEngineService(
         db.SearchEngines.Remove(engine);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Module entry point — called from WebAccessModule.ExecuteToolAsync
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Bridge called by <see cref="WebAccessModule.ExecuteToolAsync"/>:
+    /// deserializes tool parameters, resolves the <see cref="SearchEngineDB"/>
+    /// resource, and delegates to <see cref="QueryAsync"/>.
+    /// </summary>
+    public async Task<string> ExecuteQueryAsync(
+        JsonElement parameters, AgentJobContext job, CancellationToken ct)
+    {
+        var resourceId = job.ResourceId
+            ?? (parameters.TryGetProperty("targetId", out var tid) && Guid.TryParse(tid.GetString(), out var parsed)
+                ? parsed
+                : (parameters.TryGetProperty("resourceId", out var rid) && Guid.TryParse(rid.GetString(), out var rparsed)
+                    ? rparsed
+                    : throw new InvalidOperationException(
+                        "query_search_engine requires a targetId (search engine resource GUID).")));
+
+        var engine = await db.SearchEngines
+            .Include(e => e.Skill)
+            .FirstOrDefaultAsync(e => e.Id == resourceId, ct)
+            ?? throw new InvalidOperationException(
+                $"Search engine {resourceId} not found.");
+
+        var query = parameters.TryGetProperty("query", out var q) ? q.GetString() : null;
+        if (string.IsNullOrWhiteSpace(query))
+            throw new InvalidOperationException(
+                "query_search_engine requires a 'query' field.");
+
+        var result = await QueryAsync(
+            engine, query,
+            count: parameters.TryGetProperty("count", out var c) && c.TryGetInt32(out var cv) ? cv : 10,
+            offset: parameters.TryGetProperty("offset", out var o) && o.TryGetInt32(out var ov) ? ov : 0,
+            language: parameters.TryGetProperty("language", out var l) ? l.GetString() : null,
+            region: parameters.TryGetProperty("region", out var r) ? r.GetString() : null,
+            safeSearch: parameters.TryGetProperty("safeSearch", out var ss) ? ss.GetString() : null,
+            dateRestrict: parameters.TryGetProperty("dateRestrict", out var dr) ? dr.GetString() : null,
+            siteRestrict: parameters.TryGetProperty("siteRestrict", out var sr) ? sr.GetString() : null,
+            fileType: parameters.TryGetProperty("fileType", out var ft) ? ft.GetString() : null,
+            exactTerms: parameters.TryGetProperty("exactTerms", out var et) ? et.GetString() : null,
+            excludeTerms: parameters.TryGetProperty("excludeTerms", out var ex) ? ex.GetString() : null,
+            searchType: parameters.TryGetProperty("searchType", out var st) ? st.GetString() : null,
+            sortBy: parameters.TryGetProperty("sortBy", out var sb) ? sb.GetString() : null,
+            topic: parameters.TryGetProperty("topic", out var tp) ? tp.GetString() : null,
+            category: parameters.TryGetProperty("category", out var cat) ? cat.GetString() : null,
+            ct: ct);
+
+        if (engine.Skill is { SkillText.Length: > 0 } skill)
+            result = $"[Search Engine Skill: {skill.Name}]\n{skill.SkillText}\n\n---\n\n{result}";
+
+        return result;
     }
 
     // ═══════════════════════════════════════════════════════════════
