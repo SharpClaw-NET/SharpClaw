@@ -1,5 +1,3 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Contracts.Modules;
 
 /// <summary>
@@ -13,7 +11,6 @@ public sealed record AgentJobContext(
     Guid AgentId,
     Guid ChannelId,
     Guid? ResourceId,
-    AgentActionType ActionType,
     string? ActionKey,
     string? Language
 );

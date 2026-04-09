@@ -96,10 +96,10 @@ IConfiguration configuration)
         // When no resource is specified for a per-resource action, resolve
         // the default from: channel DefaultResourceSet → context DefaultResourceSet
         // → channel/context/role PermissionSet defaults.
-        if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionType, request.ActionKey))
+        if (!effectiveResourceId.HasValue && IsPerResourceAction(request.ActionKey))
         {
             effectiveResourceId = await ResolveDefaultResourceIdAsync(
-                request.ActionType, channelId, agentId, ct);
+                request.ActionKey, channelId, agentId, ct);
         }
 
         // Resolve default transcription model when not specified.
@@ -116,7 +116,6 @@ IConfiguration configuration)
             ChannelId = channelId,
             CallerUserId = session.UserId,
             CallerAgentId = request.CallerAgentId,
-            ActionType = request.ActionType,
             ActionKey = request.ActionKey,
             ResourceId = effectiveResourceId,
             Status = AgentJobStatus.Queued,
@@ -132,12 +131,12 @@ IConfiguration configuration)
         };
 
         db.AgentJobs.Add(job);
-        AddLog(job, $"Job queued: {request.ActionType}.");
+        AddLog(job, $"Job queued: {request.ActionKey ?? "unknown"}.");
         await db.SaveChangesAsync(ct);
 
         var caller = new ActionCaller(session.UserId, request.CallerAgentId);
         var result = await DispatchPermissionCheckAsync(
-            agentId, job.ActionType, job.ResourceId, caller, ct, job.ActionKey);
+            agentId, job.ResourceId, caller, ct, job.ActionKey);
 
         job.EffectiveClearance = result.EffectiveClearance;
 
@@ -155,7 +154,7 @@ IConfiguration configuration)
                 // personally hold the same permission via their own role.
                 // Level 3 (agent-only) is never pre-authorised.
                 if (await HasChannelAuthorizationAsync(
-                        channelId, job.ActionType,
+                        channelId,
                         job.ResourceId, result.EffectiveClearance,
                         session.UserId, ct, job.ActionKey))
                 {
@@ -201,7 +200,7 @@ IConfiguration configuration)
 
         var approver = new ActionCaller(session.UserId, request.ApproverAgentId);
         var result = await DispatchPermissionCheckAsync(
-            job.AgentId, job.ActionType, job.ResourceId, approver, ct);
+            job.AgentId, job.ResourceId, approver, ct, job.ActionKey);
 
         switch (result.Verdict)
         {
@@ -386,7 +385,7 @@ IConfiguration configuration)
             .OrderByDescending(j => j.CreatedAt)
             .Select(j => new AgentJobSummaryResponse(
                 j.Id, j.ChannelId, j.AgentId,
-                j.ActionType, j.ActionKey, j.ResourceId, j.Status,
+                j.ActionKey, j.ResourceId, j.Status,
                 j.CreatedAt, j.StartedAt, j.CompletedAt))
             .ToListAsync(ct);
     }
@@ -416,10 +415,10 @@ IConfiguration configuration)
     /// user has authority to approve an awaiting job inline.
     /// </summary>
     public Task<AgentActionResult> CheckPermissionAsync(
-        Guid agentId, AgentActionType actionType, Guid? resourceId,
+        Guid agentId, Guid? resourceId,
         ActionCaller caller, CancellationToken ct = default,
         string? actionKey = null)
-        => DispatchPermissionCheckAsync(agentId, actionType, resourceId, caller, ct, actionKey);
+        => DispatchPermissionCheckAsync(agentId, resourceId, caller, ct, actionKey);
 
     // ═══════════════════════════════════════════════════════════════
     // Transcription: segments & streaming
@@ -684,19 +683,10 @@ IConfiguration configuration)
 
     private async Task<string?> DispatchExecutionAsync(AgentJobDB job, CancellationToken ct)
     {
-        return job.ActionType switch
-        {
-            // Module-provided tool calls — try ActionKey first,
-            // fall back to full envelope deserialization.
-            AgentActionType.ModuleAction
-                => await TryDispatchByActionKeyAsync(job, ct)
-                   ?? await DispatchModuleExecutionAsync(job, ct),
-
-            // Default: try module resolution via ActionKey or enum-name derivation.
-            _ => await TryDispatchByActionKeyAsync(job, ct)
-                 ?? $"Action '{job.ActionType}' executed successfully " +
-                    $"(resource: {job.ResourceId?.ToString() ?? "n/a"})."
-        };
+        // Try ActionKey-based dispatch first (synthesizes envelope from raw params).
+        // Falls back to full envelope deserialization.
+        return await TryDispatchByActionKeyAsync(job, ct)
+               ?? await DispatchModuleExecutionAsync(job, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -735,7 +725,6 @@ IConfiguration configuration)
             AgentId: job.AgentId,
             ChannelId: job.ChannelId,
             ResourceId: job.ResourceId,
-            ActionType: job.ActionType,
             ActionKey: job.ActionKey,
             Language: job.Language);
 
@@ -831,22 +820,14 @@ IConfiguration configuration)
     }
 
     /// <summary>
-    /// Attempts to dispatch a job to a module-provided tool. Uses the explicit
-    /// <see cref="AgentJobDB.ActionKey"/> when available; otherwise derives a
-    /// candidate key from the <see cref="AgentActionType"/> enum name
-    /// (PascalCase → snake_case), so legacy API calls using old enum values
-    /// transparently route to modules that register the matching alias.
+    /// Attempts to dispatch a job to a module-provided tool using the
+    /// explicit <see cref="AgentJobDB.ActionKey"/>.
     /// Returns <c>null</c> if no module owns the resolved tool name.
     /// </summary>
     private async Task<string?> TryDispatchByActionKeyAsync(
         AgentJobDB job, CancellationToken ct)
     {
         var actionKey = job.ActionKey;
-
-        // Derive a candidate key from the enum name when no explicit key is
-        // set. Excludes ModuleAction itself — that enum name is not a tool.
-        if (string.IsNullOrWhiteSpace(actionKey) && job.ActionType != AgentActionType.ModuleAction)
-            actionKey = PascalToSnakeCase(job.ActionType.ToString());
 
         if (string.IsNullOrWhiteSpace(actionKey))
             return null;
@@ -876,84 +857,31 @@ IConfiguration configuration)
         }
     }
 
-    /// <summary>
-    /// Converts a PascalCase name to snake_case
-    /// (e.g. <c>ClickDesktop</c> → <c>click_desktop</c>).
-    /// Used to derive module tool candidates from legacy
-    /// <see cref="AgentActionType"/> enum names.
-    /// </summary>
-    private static string PascalToSnakeCase(string name)
-    {
-        Span<char> buffer = stackalloc char[name.Length * 2];
-        var pos = 0;
-        for (var i = 0; i < name.Length; i++)
-        {
-            if (i > 0 && char.IsUpper(name[i])
-                       && (char.IsLower(name[i - 1]) || char.IsDigit(name[i - 1])))
-                buffer[pos++] = '_';
-            buffer[pos++] = char.ToLowerInvariant(name[i]);
-        }
-        return new string(buffer[..pos]);
-    }
-
-    /// <summary>
-    /// Returns <c>true</c> when the <paramref name="type"/> enum name
-    /// resolves to a module tool via PascalCase → snake_case derivation.
-    /// </summary>
-    private bool TryResolveModuleByActionType(AgentActionType type)
-    {
-        if (type == AgentActionType.ModuleAction) return false;
-        var derived = PascalToSnakeCase(type.ToString());
-        return moduleRegistry.TryResolve(derived, out _, out _);
-    }
-
     // ═══════════════════════════════════════════════════════════════
     // Permission dispatch
     // ═══════════════════════════════════════════════════════════════
 
     private Task<AgentActionResult> DispatchPermissionCheckAsync(
-        Guid agentId, AgentActionType actionType, Guid? resourceId,
+        Guid agentId, Guid? resourceId,
         ActionCaller caller, CancellationToken ct,
         string? actionKey = null)
     {
-        return actionType switch
-        {
-            // Module-provided tool calls: delegate to the module's permission descriptor.
-            AgentActionType.ModuleAction
-                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller, actionKey, ct),
-
-            // All other action types: try module resolution via explicit ActionKey
-            // or enum-name derivation (PascalCase → snake_case).
-            _ when TryResolveModuleByActionType(actionType)
-                => DispatchModulePermissionCheckAsync(agentId, resourceId, caller,
-                    actionKey ?? PascalToSnakeCase(actionType.ToString()), ct),
-
-            _ when IsPerResourceAction(actionType) && !resourceId.HasValue
-                => Task.FromResult(AgentActionResult.Denied($"ResourceId is required for {actionType}.")),
-            _ => Task.FromResult(AgentActionResult.Denied($"Unknown action type: {actionType}."))
-        };
+        return DispatchModulePermissionCheckAsync(agentId, resourceId, caller, actionKey, ct);
     }
 
     /// <summary>
-    /// Determines whether the given action type requires a per-resource grant.
-    /// Checks the hardcoded core list first, then falls back to module registry
-    /// resolution via explicit <paramref name="actionKey"/> or enum-name derivation.
+    /// Determines whether the given action key requires a per-resource grant.
+    /// Resolves via the module registry's permission descriptor.
     /// </summary>
-    private bool IsPerResourceAction(AgentActionType type, string? actionKey = null)
+    private bool IsPerResourceAction(string? actionKey)
     {
-        // Module fallback: explicit ActionKey or enum-name derivation.
-        var key = actionKey;
-        if (string.IsNullOrWhiteSpace(key) && type != AgentActionType.ModuleAction)
-            key = PascalToSnakeCase(type.ToString());
+        if (string.IsNullOrWhiteSpace(actionKey)) return false;
 
-        if (!string.IsNullOrWhiteSpace(key)
-            && moduleRegistry.TryResolve(key, out var moduleId, out var toolName))
-        {
-            var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
-            return descriptor?.IsPerResource ?? false;
-        }
+        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
+            return false;
 
-        return false;
+        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
+        return descriptor?.IsPerResource ?? false;
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -967,9 +895,11 @@ IConfiguration configuration)
     /// PermissionSet.
     /// </summary>
     private async Task<Guid?> ResolveDefaultResourceIdAsync(
-        AgentActionType actionType, Guid channelId, Guid agentId,
+        string? actionKey, Guid channelId, Guid agentId,
         CancellationToken ct)
     {
+        var delegateTo = ResolveDelegateTo(actionKey);
+
         var ch = await db.Channels
             .Include(c => c.DefaultResourceSet)
             .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.DefaultResourceSet)
@@ -979,14 +909,14 @@ IConfiguration configuration)
         // 1. Channel's DefaultResourceSet
         if (ch?.DefaultResourceSet is { } chDrs)
         {
-            var id = ExtractFromDefaultResourceSet(chDrs, actionType);
+            var id = ExtractFromDefaultResourceSet(chDrs, delegateTo);
             if (id.HasValue) return id;
         }
 
         // 2. Context's DefaultResourceSet
         if (ch?.AgentContext?.DefaultResourceSet is { } ctxDrs)
         {
-            var id = ExtractFromDefaultResourceSet(ctxDrs, actionType);
+            var id = ExtractFromDefaultResourceSet(ctxDrs, delegateTo);
             if (id.HasValue) return id;
         }
 
@@ -1032,7 +962,7 @@ IConfiguration configuration)
             var ps = permissionSets.FirstOrDefault(p => p.Id == psId);
             if (ps is null) continue;
 
-            var resourceId = ExtractDefaultResourceId(ps, actionType);
+            var resourceId = ExtractDefaultResourceId(ps, delegateTo);
             if (resourceId.HasValue)
                 return resourceId;
         }
@@ -1062,11 +992,24 @@ IConfiguration configuration)
     }
 
     private static Guid? ExtractFromDefaultResourceSet(
-        DefaultResourceSetDB drs, AgentActionType actionType) => actionType switch
+        DefaultResourceSetDB drs, string? delegateTo) => delegateTo switch
     {
-        AgentActionType.ManageAgent => drs.AgentResourceId,
-        AgentActionType.EditTask => drs.TaskResourceId,
-        AgentActionType.AccessSkill => drs.SkillResourceId,
+        "UnsafeExecuteAsDangerousShellAsync" => drs.DangerousShellResourceId,
+        "ExecuteAsSafeShellAsync" => drs.SafeShellResourceId,
+        "AccessContainerAsync" => drs.ContainerResourceId,
+        "AccessWebsiteAsync" => drs.WebsiteResourceId,
+        "QuerySearchEngineAsync" => drs.SearchEngineResourceId,
+        "AccessInternalDatabaseAsync" => drs.InternalDatabaseResourceId,
+        "AccessExternalDatabaseAsync" => drs.ExternalDatabaseResourceId,
+        "AccessInputAudioAsync" => drs.InputAudioResourceId,
+        "AccessDisplayDeviceAsync" => drs.DisplayDeviceResourceId,
+        "AccessEditorSessionAsync" => drs.EditorSessionResourceId,
+        "ManageAgentAsync" => drs.AgentResourceId,
+        "EditTaskAsync" => drs.TaskResourceId,
+        "AccessSkillAsync" => drs.SkillResourceId,
+        "AccessBotIntegrationAsync" => drs.BotIntegrationResourceId,
+        "AccessDocumentSessionAsync" => drs.DocumentSessionResourceId,
+        "LaunchNativeApplicationAsync" => drs.NativeApplicationResourceId,
         _ => null,
     };
 
@@ -1075,14 +1018,22 @@ IConfiguration configuration)
     /// a permission set, or <c>null</c> if no default is configured.
     /// </summary>
     private static Guid? ExtractDefaultResourceId(
-        PermissionSetDB permissionSet, AgentActionType actionType) => actionType switch
+        PermissionSetDB permissionSet, string? delegateTo) => delegateTo switch
     {
-        AgentActionType.ManageAgent
-            => permissionSet.DefaultAgentPermission?.AgentId,
-        AgentActionType.EditTask
-            => permissionSet.DefaultTaskPermission?.ScheduledTaskId,
-        AgentActionType.AccessSkill
-            => permissionSet.DefaultSkillPermission?.SkillId,
+        "AccessInternalDatabaseAsync" => permissionSet.DefaultInternalDatabaseAccess?.InternalDatabaseId,
+        "AccessExternalDatabaseAsync" => permissionSet.DefaultExternalDatabaseAccess?.ExternalDatabaseId,
+        "AccessWebsiteAsync" => permissionSet.DefaultWebsiteAccess?.WebsiteId,
+        "QuerySearchEngineAsync" => permissionSet.DefaultSearchEngineAccess?.SearchEngineId,
+        "AccessContainerAsync" => permissionSet.DefaultContainerAccess?.ContainerId,
+        "AccessInputAudioAsync" => permissionSet.DefaultInputAudioAccess?.InputAudioId,
+        "AccessDisplayDeviceAsync" => permissionSet.DefaultDisplayDeviceAccess?.DisplayDeviceId,
+        "AccessEditorSessionAsync" => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
+        "ManageAgentAsync" => permissionSet.DefaultAgentPermission?.AgentId,
+        "EditTaskAsync" => permissionSet.DefaultTaskPermission?.ScheduledTaskId,
+        "AccessSkillAsync" => permissionSet.DefaultSkillPermission?.SkillId,
+        "AccessBotIntegrationAsync" => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
+        "AccessDocumentSessionAsync" => permissionSet.DefaultDocumentSessionAccess?.DocumentSessionId,
+        "LaunchNativeApplicationAsync" => permissionSet.DefaultNativeApplicationAccess?.NativeApplicationId,
         _ => null,
     };
 
@@ -1118,7 +1069,6 @@ IConfiguration configuration)
     /// </summary>
     private async Task<bool> HasChannelAuthorizationAsync(
         Guid channelId,
-        AgentActionType actionType,
         Guid? resourceId,
         PermissionClearance agentClearance,
         Guid? callerUserId,
@@ -1146,7 +1096,7 @@ IConfiguration configuration)
                 return false;
 
             var userPs = await actions.LoadPermissionSetAsync(userPsId, ct);
-            if (userPs is null || !HasMatchingGrant(userPs, actionType, resourceId, actionKey))
+            if (userPs is null || !HasMatchingGrant(userPs, resourceId, actionKey))
                 return false;
         }
 
@@ -1159,7 +1109,7 @@ IConfiguration configuration)
         if (ch.PermissionSetId is { } chPsId)
         {
             var chPs = await actions.LoadPermissionSetAsync(chPsId, ct);
-            if (chPs is not null && HasMatchingGrant(chPs, actionType, resourceId, actionKey))
+            if (chPs is not null && HasMatchingGrant(chPs, resourceId, actionKey))
                 return true;
         }
 
@@ -1167,7 +1117,7 @@ IConfiguration configuration)
         if (ch.AgentContext?.PermissionSetId is { } ctxPsId)
         {
             var ctxPs = await actions.LoadPermissionSetAsync(ctxPsId, ct);
-            if (ctxPs is not null && HasMatchingGrant(ctxPs, actionType, resourceId, actionKey))
+            if (ctxPs is not null && HasMatchingGrant(ctxPs, resourceId, actionKey))
                 return true;
         }
 
@@ -1176,42 +1126,19 @@ IConfiguration configuration)
 
     /// <summary>
     /// Returns <c>true</c> when the permission set contains a grant
-    /// that covers the given action type (and resource, for per-resource
-    /// actions).  Wildcard grants (<see cref="WellKnownIds.AllResources"/>)
-    /// match any resource.  The clearance value on the grant is
-    /// irrelevant — only existence matters.
-    /// For module actions, resolves the tool's <see cref="ModuleToolPermission.DelegateTo"/>
-    /// and checks the corresponding grant collection.
+    /// that covers the given action key (and resource, for per-resource
+    /// actions).  Resolves the tool's <see cref="ModuleToolPermission.DelegateTo"/>
+    /// and checks the corresponding grant collection via
+    /// <see cref="AgentActionService.HasGrantByDelegateName"/>.
     /// </summary>
     private bool HasMatchingGrant(
-        PermissionSetDB ps, AgentActionType actionType, Guid? resourceId,
-        string? actionKey = null) => actionType switch
+        PermissionSetDB ps, Guid? resourceId,
+        string? actionKey = null)
     {
-        // ── Global flags ──────────────────────────────────────────
-        AgentActionType.CreateSubAgent    => ps.CanCreateSubAgents,
-
-        // ── Per-resource grants ───────────────────────────────────
-        AgentActionType.ManageAgent when resourceId.HasValue
-            => ps.AgentPermissions.Any(a =>
-                a.AgentId == resourceId || a.AgentId == WellKnownIds.AllResources),
-
-        AgentActionType.EditTask when resourceId.HasValue
-            => ps.TaskPermissions.Any(a =>
-                a.ScheduledTaskId == resourceId || a.ScheduledTaskId == WellKnownIds.AllResources),
-
-        AgentActionType.AccessSkill when resourceId.HasValue
-            => ps.SkillPermissions.Any(a =>
-                a.SkillId == resourceId || a.SkillId == WellKnownIds.AllResources),
-
-        // Module-provided tool calls: resolve the tool's DelegateTo and
-        // check the corresponding grant collection.
-        AgentActionType.ModuleAction when !string.IsNullOrWhiteSpace(actionKey)
-            => ResolveModuleGrantCheck(ps, actionKey, resourceId),
-        _ when !string.IsNullOrWhiteSpace(actionKey) && TryResolveModuleByActionType(actionType)
-            => ResolveModuleGrantCheck(ps, PascalToSnakeCase(actionType.ToString()), resourceId),
-
-        _ => false,
-    };
+        if (string.IsNullOrWhiteSpace(actionKey))
+            return false;
+        return ResolveModuleGrantCheck(ps, actionKey, resourceId);
+    }
 
     /// <summary>
     /// Resolves a module tool's <see cref="ModuleToolPermission.DelegateTo"/>
@@ -1232,6 +1159,18 @@ IConfiguration configuration)
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Resolves the <see cref="ModuleToolPermission.DelegateTo"/> string
+    /// for the given action key via the module registry.
+    /// </summary>
+    private string? ResolveDelegateTo(string? actionKey)
+    {
+        if (string.IsNullOrWhiteSpace(actionKey)) return null;
+        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName)) return null;
+        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
+        return descriptor?.DelegateTo;
+    }
 
     private async Task<AgentJobDB?> LoadJobAsync(Guid jobId, CancellationToken ct) =>
         await db.AgentJobs
@@ -1272,7 +1211,6 @@ IConfiguration configuration)
             Id: job.Id,
             ChannelId: job.ChannelId,
             AgentId: job.AgentId,
-            ActionType: job.ActionType,
             ActionKey: job.ActionKey,
             ResourceId: job.ResourceId,
             Status: job.Status,

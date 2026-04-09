@@ -1026,7 +1026,7 @@ public sealed class ChatService(
                 {
                     // Check if the session user CAN approve
                     var canApprove = await CanSessionUserApproveAsync(
-                        agent.Id, jobRequest.ActionType, jobRequest.ResourceId, ct,
+                        agent.Id, jobRequest.ResourceId, ct,
                         jobRequest.ActionKey);
 
                     if (canApprove)
@@ -1120,7 +1120,7 @@ public sealed class ChatService(
     /// would return <see cref="ClearanceVerdict.Approved"/>.
     /// </summary>
     private async Task<bool> CanSessionUserApproveAsync(
-        Guid agentId, AgentActionType actionType, Guid? resourceId,
+        Guid agentId, Guid? resourceId,
         CancellationToken ct, string? actionKey = null)
     {
         var userId = jobService.GetSessionUserId();
@@ -1128,7 +1128,7 @@ public sealed class ChatService(
 
         var caller = new ActionCaller(UserId: userId);
         var result = await jobService.CheckPermissionAsync(
-            agentId, actionType, resourceId, caller, ct, actionKey);
+            agentId, resourceId, caller, ct, actionKey);
 
         return result.Verdict == ClearanceVerdict.Approved;
     }
@@ -1524,7 +1524,6 @@ public sealed class ChatService(
         ParsedToolCall parsed, Guid agentId, CancellationToken ct)
     {
         return new SubmitAgentJobRequest(
-            ActionType: parsed.ActionType,
             ActionKey: parsed.ActionKey,
             ResourceId: parsed.ResourceId,
             CallerAgentId: agentId,
@@ -1639,7 +1638,7 @@ public sealed class ChatService(
                     && approvalCallback is not null)
                 {
                     var canApprove = await CanSessionUserApproveAsync(
-                        agentId, jobRequest.ActionType, jobRequest.ResourceId, ct,
+                        agentId, jobRequest.ResourceId, ct,
                         jobRequest.ActionKey);
 
                     if (canApprove)
@@ -1743,7 +1742,6 @@ public sealed class ChatService(
 
             return new ParsedToolCall(
                 toolCall.Id,
-                AgentActionType.ModuleAction,
                 modResourceId,
                 SandboxId: null,
                 ScriptJson: envelope,
@@ -1846,7 +1844,6 @@ public sealed class ChatService(
 
     private sealed record ParsedToolCall(
         string CallId,
-        AgentActionType ActionType,
         Guid? ResourceId,
         string? SandboxId,
         string? ScriptJson,
@@ -1871,18 +1868,18 @@ public sealed class ChatService(
     /// <summary>
     /// Formats a standardized tool call notation line for a job that
     /// was submitted and executed (no approval flow).
-    /// Format: <c>\n⚙ [ActionType] → Status</c>
+    /// Format: <c>\n⚙ [ActionKey] → Status</c>
     /// </summary>
     private static string FormatToolNotation(AgentJobResponse job)
-        => $"\n⚙ [{job.ActionType}] → {job.Status}";
+        => $"\n⚙ [{job.ActionKey ?? "unknown"}] → {job.Status}";
 
     /// <summary>
     /// Formats a tool call notation line for a job that required
     /// approval, showing the final outcome.
-    /// Format: <c>\n⏳ [ActionType] awaiting approval → Status</c>
+    /// Format: <c>\n⏳ [ActionKey] awaiting approval → Status</c>
     /// </summary>
     private static string FormatApprovalNotation(AgentJobResponse job)
-        => $"\n⏳ [{job.ActionType}] awaiting approval → {job.Status}";
+        => $"\n⏳ [{job.ActionKey ?? "unknown"}] awaiting approval → {job.Status}";
 
     /// <summary>
     /// Formats a tool call notation line for an inline tool (wait,

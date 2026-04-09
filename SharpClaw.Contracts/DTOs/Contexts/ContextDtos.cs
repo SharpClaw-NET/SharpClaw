@@ -44,7 +44,7 @@ public sealed record ContextAllowedAgentsResponse(
 /// context → channel / task override chain.
 /// </summary>
 public sealed record EffectivePermissionResponse(
-    AgentActionType ActionType,
+    string ActionKey,
     PermissionClearance GrantedClearance,
     Guid? ResourceId,
     string Source);

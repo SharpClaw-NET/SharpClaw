@@ -21,14 +21,13 @@ public class AgentJobDB : BaseEntity
     public Guid? CallerAgentId { get; set; }
 
     // ── Action definition ─────────────────────────────────────────
-    public AgentActionType ActionType { get; set; }
 
     /// <summary>
-    /// Canonical dispatch key for ActionKey-based routing (e.g. "execute_as_safe_shell",
-    /// "cu_enumerate_windows").  For built-in tools this mirrors the tool name;
-    /// for module tools it is the prefixed name.  <c>null</c> on legacy jobs
-    /// created before ActionKey was introduced — the pipeline falls back to
-    /// <see cref="ActionType"/> enum dispatch for those.
+    /// Canonical dispatch key identifying the module tool to execute
+    /// (e.g. "execute_as_safe_shell", "cu_enumerate_windows").
+    /// Every job must have an ActionKey — it is the sole routing mechanism.
+    /// Historical jobs created before ActionKey was introduced may have a
+    /// <c>null</c> value; those jobs are inert and cannot be re-executed.
     /// </summary>
     public string? ActionKey { get; set; }
 

@@ -733,7 +733,6 @@ public class SharpClawDbContext(
         // ── Agent jobs ────────────────────────────────────────────
         modelBuilder.Entity<AgentJobDB>(e =>
         {
-            e.Property(j => j.ActionType).HasConversion<string>();
             e.Property(j => j.Status).HasConversion<string>();
             e.Property(j => j.EffectiveClearance).HasConversion<string>();
             e.Property(j => j.DangerousShellType).HasConversion<string>();

@@ -348,7 +348,6 @@ public sealed class TaskOrchestrator(
                     throw new InvalidOperationException($"Invalid audio device ID: {deviceIdStr}");
 
                 var jobRequest = new SubmitAgentJobRequest(
-                    AgentActionType.ModuleAction,
                     ActionKey: "transcribe_from_audio_device",
                     ResourceId: deviceId);
 

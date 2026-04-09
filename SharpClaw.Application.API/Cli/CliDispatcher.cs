@@ -1256,7 +1256,7 @@ public static class CliDispatcher
 
                     case ChatStreamEventType.ToolCallStart:
                         if (wroteText) { Console.WriteLine(); wroteText = false; }
-                        Console.WriteLine($"  [tool] #{CliIdMap.GetOrAssign(evt.Job!.Id)} {evt.Job.ActionType} → {evt.Job.Status}");
+                        Console.WriteLine($"  [tool] #{CliIdMap.GetOrAssign(evt.Job!.Id)} {evt.Job.ActionKey ?? "unknown"} → {evt.Job.Status}");
                         break;
 
                     case ChatStreamEventType.ToolCallResult:
@@ -1265,7 +1265,7 @@ public static class CliDispatcher
 
                     case ChatStreamEventType.ApprovalRequired:
                         if (wroteText) { Console.WriteLine(); wroteText = false; }
-                        Console.Write($"  [approval] Job #{CliIdMap.GetOrAssign(evt.PendingJob!.Id)} ({evt.PendingJob.ActionType}) requires approval. ");
+                        Console.Write($"  [approval] Job #{CliIdMap.GetOrAssign(evt.PendingJob!.Id)} ({evt.PendingJob.ActionKey ?? "unknown"}) requires approval. ");
                         break;
 
                     case ChatStreamEventType.ApprovalResult:
@@ -1949,7 +1949,7 @@ public static class CliDispatcher
         if (args.Length < 2)
         {
             PrintUsage(
-                "job submit <channelId> <actionType> [resourceId] [--agent <id>] [--model <id>] [--lang <code>]",
+                "job submit <channelId> <actionKey> [resourceId] [--agent <id>] [--model <id>] [--lang <code>]",
                 "  --agent overrides the channel's default agent.",
                 "job list [channelId]                       List jobs (current channel if omitted)",
                 "job status <jobId>",
@@ -1960,13 +1960,10 @@ public static class CliDispatcher
                 "job cancel <jobId>",
                 "job listen <jobId>                         Stream live transcription segments",
                 "",
-                "Action types (global): CreateSubAgent",
-                "Action types (resource): AccessContainer, ManageAgent, EditTask, AccessSkill",
-                "Bot: SendBotMessage",
-                "Module tools: use ModuleAction with --action-key <tool_name>",
+                "Action keys are module tool names (e.g. execute_as_safe_shell, manage_agent,",
+                "  cu_click_desktop, transcribe_from_audio_device).",
                 "",
-                "Transcription: submit ModuleAction --action-key transcribe_from_audio_device",
-                "  with input audio as resourceId.",
+                "Transcription: submit transcribe_from_audio_device <channelId> <deviceId>",
                 "  Optional flags: --model <id>, --lang <code>,",
                 "    --mode <sliding|step|window>, --window <seconds>, --step <seconds>");
             return Results.Ok();
@@ -1978,16 +1975,13 @@ public static class CliDispatcher
 
         return sub switch
         {
-            // job submit <channelId> <actionType> [resourceId] [flags...]
-            "submit" when args.Length >= 4 && Enum.TryParse<AgentActionType>(args[3], true, out var at)
-                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), at, 4, svc, chatSvc),
+            // job submit <channelId> <actionKey> [resourceId] [flags...]
+            "submit" when args.Length >= 4
+                => await HandleJobSubmit(args, CliIdMap.Resolve(args[2]), args[3], 4, svc, chatSvc),
 
-            "submit" when args.Length < 3
+            "submit" when args.Length < 4
                 => UsageResult(
-                    "job submit <channelId> <actionType> [resourceId] [--agent <id>] [--model <id>] [--lang <code>]",
-                    "  --agent overrides the channel's default agent."),
-            "submit"
-                => UsageResult($"Unknown or missing action type. Valid types: {string.Join(", ", Enum.GetNames<AgentActionType>())}"),
+                    "job submit <channelId> <actionKey> [resourceId] [--agent <id>] [--model <id>] [--lang <code>]"),
 
             "list" when args.Length >= 3
                 => await AgentJobHandlers.List(CliIdMap.Resolve(args[2]), svc),
@@ -2031,7 +2025,7 @@ public static class CliDispatcher
     }
 
     private static async Task<IResult> HandleJobSubmit(
-        string[] args, Guid channelId, AgentActionType actionType, int nextArg, AgentJobService svc, ChatService chatSvc)
+        string[] args, Guid channelId, string actionKey, int nextArg, AgentJobService svc, ChatService chatSvc)
     {
         // Resource ID is the next positional arg, unless it looks like a flag
         Guid? resourceId = args.Length > nextArg && !args[nextArg].StartsWith("--")
@@ -2082,7 +2076,7 @@ public static class CliDispatcher
         return await AgentJobHandlers.Submit(
             channelId,
             new SubmitAgentJobRequest(
-                actionType,
+                ActionKey: actionKey,
                 ResourceId: resourceId,
                 AgentId: agentId,
                 TranscriptionModelId: modelId,
