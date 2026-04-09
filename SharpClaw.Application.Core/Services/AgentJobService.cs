@@ -694,9 +694,9 @@ IConfiguration configuration)
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Executes a <see cref="AgentActionType.ModuleAction"/> job by
-    /// deserializing the <see cref="ModuleEnvelope"/> from <c>ScriptJson</c>,
-    /// resolving the target module, and calling
+    /// Executes a module job by resolving the <c>ActionKey</c> through
+    /// <see cref="ModuleRegistry"/>, deserializing the <see cref="ModuleEnvelope"/>
+    /// from <c>ScriptJson</c>, and calling
     /// <see cref="ISharpClawModule.ExecuteToolAsync"/> inside a restricted
     /// <see cref="ModuleServiceScope"/> with a per-manifest timeout.
     /// </summary>

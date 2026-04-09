@@ -84,7 +84,7 @@ public interface ISharpClawModule
 
     /// <summary>
     /// Execute a job-pipeline tool by name. Called from <c>DispatchExecutionAsync</c>
-    /// when <c>ActionType</c> is <c>ModuleAction</c> and the envelope targets this module.
+    /// when the <c>ActionKey</c> resolves to this module via <c>ModuleRegistry</c>.
     /// </summary>
     Task<string> ExecuteToolAsync(
         string toolName,

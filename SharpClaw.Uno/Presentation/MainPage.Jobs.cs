@@ -30,7 +30,7 @@ public sealed partial class MainPage
                 _jobItemPoolUsed = 0;
                 foreach (var job in _channelJobs)
                 {
-                    var label = $"[{job.Status}] {job.ActionType}";
+                    var label = $"[{job.Status}] {job.ActionKey}";
                     if (job.CreatedAt != default)
                         label += $"  {job.CreatedAt.LocalDateTime:MM/dd HH:mm}";
                     ComboBoxItem item;
@@ -140,7 +140,7 @@ public sealed partial class MainPage
                 "Cancelled" => 0x888888,
                 _ => 0xCCCCCC,
             });
-            JobActionBlock.Text = $"action: {job.ActionType}";
+            JobActionBlock.Text = $"action: {job.ActionKey}";
             _jobTimestampParts.Clear();
             if (job.CreatedAt != default) _jobTimestampParts.Add($"created: {job.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
             if (job.StartedAt.HasValue) _jobTimestampParts.Add($"started: {job.StartedAt.Value.LocalDateTime:HH:mm:ss}");
@@ -605,7 +605,7 @@ public sealed partial class MainPage
         var sb = new StringBuilder();
 
         sb.AppendLine($"Job: {job.Id}");
-        sb.AppendLine($"Action: {job.ActionType}  |  Status: {job.Status}");
+        sb.AppendLine($"Action: {job.ActionKey}  |  Status: {job.Status}");
         if (job.CreatedAt != default) sb.AppendLine($"Created: {job.CreatedAt.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
         if (job.StartedAt.HasValue) sb.AppendLine($"Started: {job.StartedAt.Value.LocalDateTime:yyyy-MM-dd HH:mm:ss}");
         if (job.CompletedAt.HasValue) sb.AppendLine($"Completed: {job.CompletedAt.Value.LocalDateTime:yyyy-MM-dd HH:mm:ss}");

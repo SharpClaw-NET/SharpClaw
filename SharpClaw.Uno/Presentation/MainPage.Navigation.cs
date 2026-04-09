@@ -56,7 +56,7 @@ public sealed partial class MainPage
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
         try
         {
-            var body = JsonSerializer.Serialize(new { actionType = "ModuleAction", actionKey = "transcribe_from_audio_device", resourceId = deviceId, agentId }, Json);
+            var body = JsonSerializer.Serialize(new { actionKey = "transcribe_from_audio_device", resourceId = deviceId, agentId }, Json);
             var resp = await api.PostAsync($"/channels/{channelId}/jobs", new System.Net.Http.StringContent(body, Encoding.UTF8, "application/json"));
             if (!resp.IsSuccessStatusCode)
             {

@@ -976,7 +976,7 @@ public sealed partial class MainPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record RoleDto(Guid Id, string Name, Guid? PermissionSetId = null);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record JobDto(Guid Id, Guid ChannelId, string ActionType, string Status, DateTimeOffset CreatedAt);
+    private sealed partial record JobDto(Guid Id, Guid ChannelId, string ActionKey, string Status, DateTimeOffset CreatedAt);
     private sealed record JobLogDto(string Message, string Level, DateTimeOffset Timestamp);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ResourceItemDto(Guid Id, string Name);
@@ -988,7 +988,7 @@ public sealed partial class MainPage : Page
 
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record JobDetailDto(
-        Guid Id, Guid ChannelId, Guid AgentId, string ActionType, Guid? ResourceId,
+        Guid Id, Guid ChannelId, Guid AgentId, string ActionKey, Guid? ResourceId,
         string Status, string? ResultData, string? ErrorLog,
         IReadOnlyList<JobLogDto>? Logs,
         DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt,

@@ -107,45 +107,26 @@ Minimax, Custom, Local
 `Local` is used for in-process LLamaSharp / Whisper.net models.
 `Minimax` is the Minimax AI provider.
 
-### AgentActionType
+### ActionKey
 
-| Category | Values |
-|----------|--------|
-| Global flags | `CreateSubAgent`, `CreateContainer`, `RegisterInfoStore`, `AccessLocalhostInBrowser`, `AccessLocalhostCli`, `ReadCrossThreadHistory` |
-| Per-resource | `UnsafeExecuteAsDangerousShell`, `ExecuteAsSafeShell`, `AccessLocalInfoStore`, `AccessExternalInfoStore`, `AccessWebsite`, `QuerySearchEngine`, `AccessContainer`, `ManageAgent`, `EditTask`, `AccessSkill` |
-| Transcription | `TranscribeFromAudioDevice`, `TranscribeFromAudioStream`, `TranscribeFromAudioFile` |
-| Editor | `EditorReadFile`, `EditorGetOpenFiles`, `EditorGetSelection`, `EditorGetDiagnostics`, `EditorApplyEdit`, `EditorCreateFile`, `EditorDeleteFile`, `EditorShowDiff`, `EditorRunBuild`, `EditorRunTerminal` |
-| Module dispatch | `ModuleAction` (= 100) — dispatches to a loaded module by tool name. See [Modules](#modules). |
+Jobs use a string-based `ActionKey` that routes through the `ModuleRegistry`
+to the owning module. Each module registers its tools with a prefixed naming
+convention:
 
-The following action types are **deprecated** (`[Obsolete]`) — they are
-still accepted for backward compatibility but new code should use the
-module-dispatched equivalents:
+| Module | Prefix | Example keys |
+|--------|--------|--------------|
+| Mk8 Shell | `mk8_` | `mk8_safe_shell`, `mk8_dangerous_shell` |
+| Computer Use | `cu_` | `cu_click_desktop`, `cu_capture_display`, `cu_enumerate_windows` |
+| Office Apps | `oa_` | `oa_read_range`, `oa_write_range`, `oa_register_document` |
+| Transcription | *(none)* | `transcribe_from_audio_device`, `transcribe_from_audio_stream`, `transcribe_from_audio_file` |
+| VS 2026 Editor | `vs_` | `vs_read_file`, `vs_apply_edit`, `vs_run_build` |
+| VS Code Editor | `vsc_` | `vsc_read_file`, `vsc_apply_edit`, `vsc_run_terminal` |
 
-| Legacy action type | Module equivalent |
-|--------------------|-------------------|
-| `ClickDesktop` | `cu_click_desktop` (Computer Use) |
-| `TypeOnDesktop` | `cu_type_on_desktop` (Computer Use) |
-| `CreateDocumentSession` | `oa_register_document` (Office Apps) |
-| `EnumerateWindows` | `cu_enumerate_windows` (Computer Use) |
-| `FocusWindow` | `cu_focus_window` (Computer Use) |
-| `CloseWindow` | `cu_close_window` (Computer Use) |
-| `ResizeWindow` | `cu_resize_window` (Computer Use) |
-| `SendHotkey` | `cu_send_hotkey` (Computer Use) |
-| `ReadClipboard` | `cu_read_clipboard` (Computer Use) |
-| `WriteClipboard` | `cu_write_clipboard` (Computer Use) |
-| `CaptureDisplay` | `cu_capture_display` (Computer Use) |
-| `CaptureWindow` | `cu_capture_window` (Computer Use) |
-| `StopProcess` | `cu_stop_process` (Computer Use) |
-| `LaunchNativeApplication` | `cu_launch_application` (Computer Use) |
-| `SpreadsheetReadRange` | `oa_read_range` (Office Apps) |
-| `SpreadsheetWriteRange` | `oa_write_range` (Office Apps) |
-| `SpreadsheetListSheets` | `oa_list_sheets` (Office Apps) |
-| `SpreadsheetCreateSheet` | `oa_create_sheet` (Office Apps) |
-| `SpreadsheetDeleteSheet` | `oa_delete_sheet` (Office Apps) |
-| `SpreadsheetGetInfo` | `oa_get_info` (Office Apps) |
-| `SpreadsheetCreateWorkbook` | `oa_create_workbook` (Office Apps) |
-| `SpreadsheetLiveReadRange` | `oa_live_read_range` (Office Apps) |
-| `SpreadsheetLiveWriteRange` | `oa_live_write_range` (Office Apps) |
+The full list of registered tools is available at runtime via
+`GET /modules` → each module's `Tools` array.
+
+Permission checks, job submission (`POST /channels/{id}/jobs`), and the CLI
+`job submit` command all use `ActionKey` exclusively.
 
 ### PermissionClearance
 

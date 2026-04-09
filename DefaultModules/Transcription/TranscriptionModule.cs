@@ -227,11 +227,10 @@ public sealed class TranscriptionModule : ISharpClawModule
     {
         // Transcription jobs use the core IsTranscriptionAction path in
         // AgentJobService.ExecuteJobAsync, which calls StartTranscriptionAsync
-        // directly via ILiveTranscriptionOrchestrator. Legacy enum-based
-        // submissions (ActionType 17/18/19) are intercepted before dispatch
-        // reaches the module. New ModuleAction-based submissions also route
-        // through the same mechanism. Return a confirmation string for any
-        // edge case that does reach here.
+        // directly via ILiveTranscriptionOrchestrator. ActionKey-based
+        // transcription submissions are intercepted before dispatch reaches
+        // the module. Return a confirmation string for any edge case that
+        // does reach here.
         return Task.FromResult(toolName switch
         {
             "transcribe_audio_device" or "transcribe_from_audio_device"

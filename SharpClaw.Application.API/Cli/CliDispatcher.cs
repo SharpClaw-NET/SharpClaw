@@ -3425,7 +3425,7 @@ public static class CliDispatcher
               user role <userId> <roleId|none>   Assign or remove a user's role
 
             Job:       job <sub> [args]
-              job submit <channelId> <actionType> [resourceId] [--agent <id>]
+              job submit <channelId> <actionKey> [resourceId] [--agent <id>]
                   [--model <id>] [--lang <code>]
               job list [channelId]   status <id>   approve <id>   cancel <id>
               job stop <id>          listen <id>   (transcription jobs)
