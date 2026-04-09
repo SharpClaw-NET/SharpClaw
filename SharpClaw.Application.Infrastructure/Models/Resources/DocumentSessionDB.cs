@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
@@ -25,5 +24,4 @@ public class DocumentSessionDB : BaseEntity
     /// <summary>Optional description for the agent.</summary>
     public string? Description { get; set; }
 
-    public ICollection<DocumentSessionAccessDB> Accesses { get; set; } = [];
-}
+    }

@@ -121,4 +121,44 @@ public interface ISharpClawModule
     /// <see cref="ModuleCliScope"/> (top-level verb or resource type).
     /// </summary>
     IReadOnlyList<ModuleCliCommand>? GetCliCommands() => null;
+
+    /// <summary>
+    /// Optional periodic health check. Called by the host on a configurable
+    /// interval (default: every 60 seconds). Return a healthy status if the
+    /// module's dependencies (external APIs, COM objects, file handles,
+    /// database connections) are operational.
+    /// <para>
+    /// The default implementation always returns healthy. Modules that depend
+    /// on external resources should override this to verify connectivity.
+    /// </para>
+    /// <para>
+    /// Modules that fail consecutive checks (default threshold: 3) are
+    /// automatically disabled. The admin is notified via structured logging
+    /// and the <c>/modules/{id}/health</c> endpoint.
+    /// </para>
+    /// </summary>
+    Task<ModuleHealthStatus> HealthCheckAsync(CancellationToken ct) =>
+        Task.FromResult(new ModuleHealthStatus(IsHealthy: true));
+
+    /// <summary>
+    /// Optional streaming variant of <see cref="ExecuteToolAsync"/>. When a module
+    /// implements this for a given tool name, the pipeline prefers it over the
+    /// non-streaming variant and forwards each yielded string to the client as a
+    /// partial result via SSE <c>tool_output.delta</c> events.
+    /// <para>
+    /// The final concatenated result of all yielded strings is stored in
+    /// <c>job.ResultData</c> for audit and history, identical to the
+    /// non-streaming path.
+    /// </para>
+    /// <para>
+    /// Return <c>null</c> for tool names that do not support streaming —
+    /// the pipeline falls back to <see cref="ExecuteToolAsync"/>.
+    /// </para>
+    /// </summary>
+    IAsyncEnumerable<string>? ExecuteToolStreamingAsync(
+        string toolName,
+        JsonElement parameters,
+        AgentJobContext job,
+        IServiceProvider scopedServices,
+        CancellationToken ct) => null;
 }

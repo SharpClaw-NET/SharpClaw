@@ -110,23 +110,7 @@ public sealed class RoleService(SharpClawDbContext db)
                     $"Permission set {existingPsId} not found.");
 
             // Clear existing grant collections.
-            ps.DangerousShellAccesses.Clear();
-            ps.SafeShellAccesses.Clear();
-            ps.ContainerAccesses.Clear();
-            ps.WebsiteAccesses.Clear();
-            ps.SearchEngineAccesses.Clear();
-            ps.InternalDatabaseAccesses.Clear();
-            ps.ExternalDatabaseAccesses.Clear();
-            ps.InputAudioAccesses.Clear();
-            ps.DisplayDeviceAccesses.Clear();
-            ps.EditorSessionAccesses.Clear();
-            ps.AgentPermissions.Clear();
-            ps.TaskPermissions.Clear();
-            ps.SkillPermissions.Clear();
-            ps.AgentHeaderAccesses.Clear();
-            ps.ChannelHeaderAccesses.Clear();
-            ps.DocumentSessionAccesses.Clear();
-            ps.NativeApplicationAccesses.Clear();
+            ps.ResourceAccesses.Clear();
         }
         else
         {
@@ -176,73 +160,23 @@ public sealed class RoleService(SharpClawDbContext db)
         ps.WriteClipboardClearance = request.WriteClipboardClearance;
 
         // Apply per-resource grants.
-        AddGrants(ps.DangerousShellAccesses, request.DangerousShellAccesses,
-            (g, psId) => new DangerousShellAccessDB
-            { PermissionSetId = psId, SystemUserId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.SafeShellAccesses, request.SafeShellAccesses,
-            (g, psId) => new SafeShellAccessDB
-            { PermissionSetId = psId, ContainerId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.ContainerAccesses, request.ContainerAccesses,
-            (g, psId) => new ContainerAccessDB
-            { PermissionSetId = psId, ContainerId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.WebsiteAccesses, request.WebsiteAccesses,
-            (g, psId) => new WebsiteAccessDB
-            { PermissionSetId = psId, WebsiteId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.SearchEngineAccesses, request.SearchEngineAccesses,
-            (g, psId) => new SearchEngineAccessDB
-            { PermissionSetId = psId, SearchEngineId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.InternalDatabaseAccesses, request.InternalDatabaseAccesses,
-            (g, psId) => new InternalDatabaseAccessDB
-            { PermissionSetId = psId, InternalDatabaseId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.ExternalDatabaseAccesses, request.ExternalDatabaseAccesses,
-            (g, psId) => new ExternalDatabaseAccessDB
-            { PermissionSetId = psId, ExternalDatabaseId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.InputAudioAccesses, request.InputAudioAccesses,
-            (g, psId) => new InputAudioAccessDB
-            { PermissionSetId = psId, InputAudioId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.DisplayDeviceAccesses, request.DisplayDeviceAccesses,
-            (g, psId) => new DisplayDeviceAccessDB
-            { PermissionSetId = psId, DisplayDeviceId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.EditorSessionAccesses, request.EditorSessionAccesses,
-            (g, psId) => new EditorSessionAccessDB
-            { PermissionSetId = psId, EditorSessionId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.AgentPermissions, request.AgentAccesses,
-            (g, psId) => new AgentManagementAccessDB
-            { PermissionSetId = psId, AgentId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.TaskPermissions, request.TaskAccesses,
-            (g, psId) => new TaskManageAccessDB
-            { PermissionSetId = psId, ScheduledTaskId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.SkillPermissions, request.SkillAccesses,
-            (g, psId) => new SkillManageAccessDB
-            { PermissionSetId = psId, SkillId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.AgentHeaderAccesses, request.AgentHeaderAccesses,
-            (g, psId) => new AgentHeaderAccessDB
-            { PermissionSetId = psId, AgentId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.ChannelHeaderAccesses, request.ChannelHeaderAccesses,
-            (g, psId) => new ChannelHeaderAccessDB
-            { PermissionSetId = psId, ChannelId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.DocumentSessionAccesses, request.DocumentSessionAccesses,
-            (g, psId) => new DocumentSessionAccessDB
-            { PermissionSetId = psId, DocumentSessionId = g.ResourceId, Clearance = g.Clearance });
-
-        AddGrants(ps.NativeApplicationAccesses, request.NativeApplicationAccesses,
-            (g, psId) => new NativeApplicationAccessDB
-            { PermissionSetId = psId, NativeApplicationId = g.ResourceId, Clearance = g.Clearance });
+        AddResourceGrants(ps, ResourceTypes.DsShell, request.DangerousShellAccesses);
+        AddResourceGrants(ps, ResourceTypes.Mk8Shell, request.SafeShellAccesses);
+        AddResourceGrants(ps, ResourceTypes.Container, request.ContainerAccesses);
+        AddResourceGrants(ps, ResourceTypes.WaWebsite, request.WebsiteAccesses);
+        AddResourceGrants(ps, ResourceTypes.WaSearch, request.SearchEngineAccesses);
+        AddResourceGrants(ps, ResourceTypes.DbInternal, request.InternalDatabaseAccesses);
+        AddResourceGrants(ps, ResourceTypes.DbExternal, request.ExternalDatabaseAccesses);
+        AddResourceGrants(ps, ResourceTypes.TrAudio, request.InputAudioAccesses);
+        AddResourceGrants(ps, ResourceTypes.CuDisplay, request.DisplayDeviceAccesses);
+        AddResourceGrants(ps, ResourceTypes.EditorSession, request.EditorSessionAccesses);
+        AddResourceGrants(ps, ResourceTypes.AoAgent, request.AgentAccesses);
+        AddResourceGrants(ps, ResourceTypes.AoTask, request.TaskAccesses);
+        AddResourceGrants(ps, ResourceTypes.AoSkill, request.SkillAccesses);
+        AddResourceGrants(ps, ResourceTypes.AoAgentHeader, request.AgentHeaderAccesses);
+        AddResourceGrants(ps, ResourceTypes.AoChannelHeader, request.ChannelHeaderAccesses);
+        AddResourceGrants(ps, ResourceTypes.OaDocument, request.DocumentSessionAccesses);
+        AddResourceGrants(ps, ResourceTypes.CuNativeApp, request.NativeApplicationAccesses);
 
         await db.SaveChangesAsync(ct);
 
@@ -361,68 +295,55 @@ public sealed class RoleService(SharpClawDbContext db)
     private static void ValidateResourceGrants(
         SetRolePermissionsRequest request, PermissionSetDB? callerPs)
     {
-        ValidateCollection("DangerousShellAccesses", request.DangerousShellAccesses,
-            callerPs?.DangerousShellAccesses, a => a.SystemUserId);
-        ValidateCollection("SafeShellAccesses", request.SafeShellAccesses,
-            callerPs?.SafeShellAccesses, a => a.ContainerId);
-        ValidateCollection("ContainerAccesses", request.ContainerAccesses,
-            callerPs?.ContainerAccesses, a => a.ContainerId);
-        ValidateCollection("WebsiteAccesses", request.WebsiteAccesses,
-            callerPs?.WebsiteAccesses, a => a.WebsiteId);
-        ValidateCollection("SearchEngineAccesses", request.SearchEngineAccesses,
-            callerPs?.SearchEngineAccesses, a => a.SearchEngineId);
-        ValidateCollection("InternalDatabaseAccesses", request.InternalDatabaseAccesses,
-            callerPs?.InternalDatabaseAccesses, a => a.InternalDatabaseId);
-        ValidateCollection("ExternalDatabaseAccesses", request.ExternalDatabaseAccesses,
-            callerPs?.ExternalDatabaseAccesses, a => a.ExternalDatabaseId);
-        ValidateCollection("InputAudioAccesses", request.InputAudioAccesses,
-            callerPs?.InputAudioAccesses, a => a.InputAudioId);
-        ValidateCollection("DisplayDeviceAccesses", request.DisplayDeviceAccesses,
-            callerPs?.DisplayDeviceAccesses, a => a.DisplayDeviceId);
-        ValidateCollection("EditorSessionAccesses", request.EditorSessionAccesses,
-            callerPs?.EditorSessionAccesses, a => a.EditorSessionId);
-        ValidateCollection("AgentAccesses", request.AgentAccesses,
-            callerPs?.AgentPermissions, a => a.AgentId);
-        ValidateCollection("TaskAccesses", request.TaskAccesses,
-            callerPs?.TaskPermissions, a => a.ScheduledTaskId);
-        ValidateCollection("SkillAccesses", request.SkillAccesses,
-            callerPs?.SkillPermissions, a => a.SkillId);
-        ValidateCollection("AgentHeaderAccesses", request.AgentHeaderAccesses,
-            callerPs?.AgentHeaderAccesses, a => a.AgentId);
-        ValidateCollection("ChannelHeaderAccesses", request.ChannelHeaderAccesses,
-            callerPs?.ChannelHeaderAccesses, a => a.ChannelId);
-        ValidateCollection("DocumentSessionAccesses", request.DocumentSessionAccesses,
-            callerPs?.DocumentSessionAccesses, a => a.DocumentSessionId);
-        ValidateCollection("NativeApplicationAccesses", request.NativeApplicationAccesses,
-            callerPs?.NativeApplicationAccesses, a => a.NativeApplicationId);
+        ValidateGrants("DangerousShellAccesses", ResourceTypes.DsShell, request.DangerousShellAccesses, callerPs);
+        ValidateGrants("SafeShellAccesses", ResourceTypes.Mk8Shell, request.SafeShellAccesses, callerPs);
+        ValidateGrants("ContainerAccesses", ResourceTypes.Container, request.ContainerAccesses, callerPs);
+        ValidateGrants("WebsiteAccesses", ResourceTypes.WaWebsite, request.WebsiteAccesses, callerPs);
+        ValidateGrants("SearchEngineAccesses", ResourceTypes.WaSearch, request.SearchEngineAccesses, callerPs);
+        ValidateGrants("InternalDatabaseAccesses", ResourceTypes.DbInternal, request.InternalDatabaseAccesses, callerPs);
+        ValidateGrants("ExternalDatabaseAccesses", ResourceTypes.DbExternal, request.ExternalDatabaseAccesses, callerPs);
+        ValidateGrants("InputAudioAccesses", ResourceTypes.TrAudio, request.InputAudioAccesses, callerPs);
+        ValidateGrants("DisplayDeviceAccesses", ResourceTypes.CuDisplay, request.DisplayDeviceAccesses, callerPs);
+        ValidateGrants("EditorSessionAccesses", ResourceTypes.EditorSession, request.EditorSessionAccesses, callerPs);
+        ValidateGrants("AgentAccesses", ResourceTypes.AoAgent, request.AgentAccesses, callerPs);
+        ValidateGrants("TaskAccesses", ResourceTypes.AoTask, request.TaskAccesses, callerPs);
+        ValidateGrants("SkillAccesses", ResourceTypes.AoSkill, request.SkillAccesses, callerPs);
+        ValidateGrants("AgentHeaderAccesses", ResourceTypes.AoAgentHeader, request.AgentHeaderAccesses, callerPs);
+        ValidateGrants("ChannelHeaderAccesses", ResourceTypes.AoChannelHeader, request.ChannelHeaderAccesses, callerPs);
+        ValidateGrants("DocumentSessionAccesses", ResourceTypes.OaDocument, request.DocumentSessionAccesses, callerPs);
+        ValidateGrants("NativeApplicationAccesses", ResourceTypes.CuNativeApp, request.NativeApplicationAccesses, callerPs);
     }
 
     /// <summary>
     /// For each requested grant, the caller must hold either the exact
     /// resource ID or the <see cref="WellKnownIds.AllResources"/> wildcard.
     /// </summary>
-    private static void ValidateCollection<TAccess>(
+    private static void ValidateGrants(
         string name,
+        string resourceType,
         IReadOnlyList<ResourceGrant>? requested,
-        ICollection<TAccess>? callerGrants,
-        Func<TAccess, Guid> resourceSelector)
+        PermissionSetDB? callerPs)
     {
         if (requested is null or { Count: 0 })
             return;
+
+        var callerGrants = callerPs?.ResourceAccesses
+            .Where(a => a.ResourceType == resourceType)
+            .Select(a => a.ResourceId)
+            .ToHashSet();
 
         if (callerGrants is null or { Count: 0 })
             throw new UnauthorizedAccessException(
                 $"Cannot grant {name} — you hold no grants of this type.");
 
-        var callerIds = new HashSet<Guid>(callerGrants.Select(resourceSelector));
-        var hasWildcard = callerIds.Contains(WellKnownIds.AllResources);
+        var hasWildcard = callerGrants.Contains(WellKnownIds.AllResources);
 
         foreach (var grant in requested)
         {
             if (hasWildcard)
                 continue;
 
-            if (!callerIds.Contains(grant.ResourceId))
+            if (!callerGrants.Contains(grant.ResourceId))
                 throw new UnauthorizedAccessException(
                     $"Cannot grant {name} for resource {grant.ResourceId} " +
                     "— you do not hold this permission.");
@@ -433,16 +354,23 @@ public sealed class RoleService(SharpClawDbContext db)
     // Helpers
     // ═══════════════════════════════════════════════════════════════
 
-    private static void AddGrants<TAccess>(
-        ICollection<TAccess> collection,
-        IReadOnlyList<ResourceGrant>? grants,
-        Func<ResourceGrant, Guid, TAccess> factory)
+    private static void AddResourceGrants(
+        PermissionSetDB ps,
+        string resourceType,
+        IReadOnlyList<ResourceGrant>? grants)
     {
         if (grants is null)
             return;
 
         foreach (var g in grants)
-            collection.Add(factory(g, Guid.Empty)); // psId set by EF navigation
+        {
+            ps.ResourceAccesses.Add(new ResourceAccessDB
+            {
+                ResourceType = resourceType,
+                ResourceId = g.ResourceId,
+                Clearance = g.Clearance,
+            });
+        }
     }
 
     private async Task<PermissionSetDB?> LoadCallerPermissionSetAsync(
@@ -462,23 +390,7 @@ public sealed class RoleService(SharpClawDbContext db)
         Guid psId, CancellationToken ct)
     {
         return await db.PermissionSets
-            .Include(p => p.DangerousShellAccesses)
-            .Include(p => p.SafeShellAccesses)
-            .Include(p => p.ContainerAccesses)
-            .Include(p => p.WebsiteAccesses)
-            .Include(p => p.SearchEngineAccesses)
-            .Include(p => p.InternalDatabaseAccesses)
-            .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.InputAudioAccesses)
-            .Include(p => p.DisplayDeviceAccesses)
-            .Include(p => p.EditorSessionAccesses)
-            .Include(p => p.AgentPermissions)
-            .Include(p => p.TaskPermissions)
-            .Include(p => p.SkillPermissions)
-            .Include(p => p.AgentHeaderAccesses)
-            .Include(p => p.ChannelHeaderAccesses)
-            .Include(p => p.DocumentSessionAccesses)
-            .Include(p => p.NativeApplicationAccesses)
+            .Include(p => p.ResourceAccesses)
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == psId, ct);
     }
@@ -524,34 +436,33 @@ public sealed class RoleService(SharpClawDbContext db)
             ReadClipboardClearance: ps?.ReadClipboardClearance ?? PermissionClearance.Unset,
             CanWriteClipboard: ps?.CanWriteClipboard ?? false,
             WriteClipboardClearance: ps?.WriteClipboardClearance ?? PermissionClearance.Unset,
-            DangerousShellAccesses: MapGrants(ps?.DangerousShellAccesses, a => a.SystemUserId, a => a.Clearance),
-            SafeShellAccesses: MapGrants(ps?.SafeShellAccesses, a => a.ContainerId, a => a.Clearance),
-            ContainerAccesses: MapGrants(ps?.ContainerAccesses, a => a.ContainerId, a => a.Clearance),
-            WebsiteAccesses: MapGrants(ps?.WebsiteAccesses, a => a.WebsiteId, a => a.Clearance),
-            SearchEngineAccesses: MapGrants(ps?.SearchEngineAccesses, a => a.SearchEngineId, a => a.Clearance),
-            InternalDatabaseAccesses: MapGrants(ps?.InternalDatabaseAccesses, a => a.InternalDatabaseId, a => a.Clearance),
-            ExternalDatabaseAccesses: MapGrants(ps?.ExternalDatabaseAccesses, a => a.ExternalDatabaseId, a => a.Clearance),
-            InputAudioAccesses: MapGrants(ps?.InputAudioAccesses, a => a.InputAudioId, a => a.Clearance),
-            DisplayDeviceAccesses: MapGrants(ps?.DisplayDeviceAccesses, a => a.DisplayDeviceId, a => a.Clearance),
-            EditorSessionAccesses: MapGrants(ps?.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance),
-            AgentAccesses: MapGrants(ps?.AgentPermissions, a => a.AgentId, a => a.Clearance),
-            TaskAccesses: MapGrants(ps?.TaskPermissions, a => a.ScheduledTaskId, a => a.Clearance),
-            SkillAccesses: MapGrants(ps?.SkillPermissions, a => a.SkillId, a => a.Clearance),
-            AgentHeaderAccesses: MapGrants(ps?.AgentHeaderAccesses, a => a.AgentId, a => a.Clearance),
-            ChannelHeaderAccesses: MapGrants(ps?.ChannelHeaderAccesses, a => a.ChannelId, a => a.Clearance),
-            DocumentSessionAccesses: MapGrants(ps?.DocumentSessionAccesses, a => a.DocumentSessionId, a => a.Clearance),
-            NativeApplicationAccesses: MapGrants(ps?.NativeApplicationAccesses, a => a.NativeApplicationId, a => a.Clearance));
+            DangerousShellAccesses: MapResourceGrants(ps, ResourceTypes.DsShell),
+            SafeShellAccesses: MapResourceGrants(ps, ResourceTypes.Mk8Shell),
+            ContainerAccesses: MapResourceGrants(ps, ResourceTypes.Container),
+            WebsiteAccesses: MapResourceGrants(ps, ResourceTypes.WaWebsite),
+            SearchEngineAccesses: MapResourceGrants(ps, ResourceTypes.WaSearch),
+            InternalDatabaseAccesses: MapResourceGrants(ps, ResourceTypes.DbInternal),
+            ExternalDatabaseAccesses: MapResourceGrants(ps, ResourceTypes.DbExternal),
+            InputAudioAccesses: MapResourceGrants(ps, ResourceTypes.TrAudio),
+            DisplayDeviceAccesses: MapResourceGrants(ps, ResourceTypes.CuDisplay),
+            EditorSessionAccesses: MapResourceGrants(ps, ResourceTypes.EditorSession),
+            AgentAccesses: MapResourceGrants(ps, ResourceTypes.AoAgent),
+            TaskAccesses: MapResourceGrants(ps, ResourceTypes.AoTask),
+            SkillAccesses: MapResourceGrants(ps, ResourceTypes.AoSkill),
+            AgentHeaderAccesses: MapResourceGrants(ps, ResourceTypes.AoAgentHeader),
+            ChannelHeaderAccesses: MapResourceGrants(ps, ResourceTypes.AoChannelHeader),
+            DocumentSessionAccesses: MapResourceGrants(ps, ResourceTypes.OaDocument),
+            NativeApplicationAccesses: MapResourceGrants(ps, ResourceTypes.CuNativeApp));
 
-    private static IReadOnlyList<ResourceGrant> MapGrants<T>(
-        ICollection<T>? accesses,
-        Func<T, Guid> resourceSelector,
-        Func<T, PermissionClearance> clearanceSelector)
+    private static IReadOnlyList<ResourceGrant> MapResourceGrants(
+        PermissionSetDB? ps, string resourceType)
     {
-        if (accesses is null or { Count: 0 })
+        if (ps?.ResourceAccesses is null or { Count: 0 })
             return [];
 
-        return accesses
-            .Select(a => new ResourceGrant(resourceSelector(a), clearanceSelector(a)))
+        return ps.ResourceAccesses
+            .Where(a => a.ResourceType == resourceType)
+            .Select(a => new ResourceGrant(a.ResourceId, a.Clearance))
             .ToList();
     }
 }

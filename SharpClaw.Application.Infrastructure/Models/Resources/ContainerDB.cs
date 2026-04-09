@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
@@ -37,6 +36,4 @@ public class ContainerDB : BaseEntity
     public Guid? SkillId { get; set; }
     public SkillDB? Skill { get; set; }
 
-    public ICollection<ContainerAccessDB> Accesses { get; set; } = [];
-    public ICollection<SafeShellAccessDB> SafeShellAccesses { get; set; } = [];
-}
+    }

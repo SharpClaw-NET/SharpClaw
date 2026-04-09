@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
@@ -36,5 +35,4 @@ public class SearchEngineDB : BaseEntity
     public Guid? SkillId { get; set; }
     public SkillDB? Skill { get; set; }
 
-    public ICollection<SearchEngineAccessDB> Accesses { get; set; } = [];
-}
+    }

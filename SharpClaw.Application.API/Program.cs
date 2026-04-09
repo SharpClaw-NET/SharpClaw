@@ -27,6 +27,7 @@ using SharpClaw.Modules.BotIntegration;
 using SharpClaw.Modules.BotIntegration.Handlers;
 using SharpClaw.Modules.AgentOrchestration;
 using SharpClaw.Modules.ContextTools;
+using SharpClaw.Application.Infrastructure.Logging;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
@@ -66,6 +67,12 @@ try
     builder.Configuration.AddLocalEnvironment(builder.Environment.IsDevelopment());
 
     builder.Host.UseSerilog();
+
+    // Module log capture — feeds per-module ring buffers for the /modules/{id}/logs API.
+    var moduleLogService = new ModuleLogService();
+    builder.Services.AddSingleton(moduleLogService);
+    builder.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(
+        new ModuleLogSinkProvider(moduleLogService));
 
     // Infrastructure
     builder.Services.AddInfrastructure(StorageMode.JsonFile, configureJsonFile: opts =>
@@ -141,6 +148,17 @@ try
     builder.Services.AddScoped<TaskOrchestrator>();
     // Module system
     builder.Services.AddSingleton<ModuleRegistry>();
+    builder.Services.AddSingleton<ModuleMetricsCollector>();
+    builder.Services.AddSingleton<ModuleEventDispatcher>();
+    builder.Services.AddScoped<ModuleExecutionContext>();
+    builder.Services.AddScoped<IModuleConfigStore>(sp =>
+    {
+        var ctx = sp.GetRequiredService<ModuleExecutionContext>();
+        var dbCtx = sp.GetRequiredService<SharpClaw.Infrastructure.Persistence.SharpClawDbContext>();
+        return new ModuleConfigStore(dbCtx, ctx.ModuleId ?? "");
+    });
+    builder.Services.AddSingleton<ModuleHealthCheckService>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<ModuleHealthCheckService>());
 
     // Default modules — all bundled, but only enabled ones get registered.
     // DI services must be registered for ALL modules before Build (container is immutable after).

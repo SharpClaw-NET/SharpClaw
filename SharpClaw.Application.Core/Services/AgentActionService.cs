@@ -140,151 +140,133 @@ public sealed class AgentActionService(SharpClawDbContext db)
             "write clipboard", onApproved, ct);
 
     // ═══════════════════════════════════════════════════════════════
-    // Per-resource actions
+    // Per-resource actions (generic ResourceAccessDB §3.10)
     // ═══════════════════════════════════════════════════════════════
 
     public Task<AgentActionResult> UnsafeExecuteAsDangerousShellAsync(
         Guid agentId, Guid systemUserId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, systemUserId, caller,
-            p => p.DangerousShellAccesses, a => a.SystemUserId, a => a.Clearance,
+            agentId, systemUserId, ResourceTypes.DsShell, caller,
             "dangerous shell access", onApproved, ct);
 
     public Task<AgentActionResult> ExecuteAsSafeShellAsync(
         Guid agentId, Guid containerId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, containerId, caller,
-            p => p.SafeShellAccesses, a => a.ContainerId, a => a.Clearance,
+            agentId, containerId, ResourceTypes.Mk8Shell, caller,
             "safe shell access", onApproved, ct);
 
     public Task<AgentActionResult> AccessInternalDatabaseAsync(
         Guid agentId, Guid databaseId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, databaseId, caller,
-            p => p.InternalDatabaseAccesses, a => a.InternalDatabaseId, a => a.Clearance,
+            agentId, databaseId, ResourceTypes.DbInternal, caller,
             "internal database access", onApproved, ct);
 
     public Task<AgentActionResult> AccessExternalDatabaseAsync(
         Guid agentId, Guid databaseId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, databaseId, caller,
-            p => p.ExternalDatabaseAccesses, a => a.ExternalDatabaseId, a => a.Clearance,
+            agentId, databaseId, ResourceTypes.DbExternal, caller,
             "external database access", onApproved, ct);
 
     public Task<AgentActionResult> AccessWebsiteAsync(
         Guid agentId, Guid websiteId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, websiteId, caller,
-            p => p.WebsiteAccesses, a => a.WebsiteId, a => a.Clearance,
+            agentId, websiteId, ResourceTypes.WaWebsite, caller,
             "website access", onApproved, ct);
 
     public Task<AgentActionResult> QuerySearchEngineAsync(
         Guid agentId, Guid searchEngineId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, searchEngineId, caller,
-            p => p.SearchEngineAccesses, a => a.SearchEngineId, a => a.Clearance,
+            agentId, searchEngineId, ResourceTypes.WaSearch, caller,
             "search engine access", onApproved, ct);
 
     public Task<AgentActionResult> AccessContainerAsync(
         Guid agentId, Guid containerId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, containerId, caller,
-            p => p.ContainerAccesses, a => a.ContainerId, a => a.Clearance,
+            agentId, containerId, ResourceTypes.Container, caller,
             "container access", onApproved, ct);
 
     public Task<AgentActionResult> ManageAgentAsync(
         Guid agentId, Guid targetAgentId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, targetAgentId, caller,
-            p => p.AgentPermissions, a => a.AgentId, a => a.Clearance,
+            agentId, targetAgentId, ResourceTypes.AoAgent, caller,
             "agent management", onApproved, ct);
 
     public Task<AgentActionResult> EditTaskAsync(
         Guid agentId, Guid taskId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, taskId, caller,
-            p => p.TaskPermissions, a => a.ScheduledTaskId, a => a.Clearance,
+            agentId, taskId, ResourceTypes.AoTask, caller,
             "task edit", onApproved, ct);
 
     public Task<AgentActionResult> AccessSkillAsync(
         Guid agentId, Guid skillId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, skillId, caller,
-            p => p.SkillPermissions, a => a.SkillId, a => a.Clearance,
+            agentId, skillId, ResourceTypes.AoSkill, caller,
             "skill access", onApproved, ct);
 
     public Task<AgentActionResult> AccessInputAudioAsync(
         Guid agentId, Guid inputAudioId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, inputAudioId, caller,
-            p => p.InputAudioAccesses, a => a.InputAudioId, a => a.Clearance,
+            agentId, inputAudioId, ResourceTypes.TrAudio, caller,
             "input audio access", onApproved, ct);
 
     public Task<AgentActionResult> AccessDisplayDeviceAsync(
         Guid agentId, Guid displayDeviceId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, displayDeviceId, caller,
-            p => p.DisplayDeviceAccesses, a => a.DisplayDeviceId, a => a.Clearance,
+            agentId, displayDeviceId, ResourceTypes.CuDisplay, caller,
             "display device access", onApproved, ct);
 
     public Task<AgentActionResult> AccessEditorSessionAsync(
         Guid agentId, Guid editorSessionId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, editorSessionId, caller,
-            p => p.EditorSessionAccesses, a => a.EditorSessionId, a => a.Clearance,
+            agentId, editorSessionId, ResourceTypes.EditorSession, caller,
             "editor session access", onApproved, ct);
 
     public Task<AgentActionResult> AccessBotIntegrationAsync(
         Guid agentId, Guid botIntegrationId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, botIntegrationId, caller,
-            p => p.BotIntegrationAccesses, a => a.BotIntegrationId, a => a.Clearance,
+            agentId, botIntegrationId, ResourceTypes.BiChannel, caller,
             "bot integration access", onApproved, ct);
 
     public Task<AgentActionResult> AccessDocumentSessionAsync(
         Guid agentId, Guid documentSessionId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, documentSessionId, caller,
-            p => p.DocumentSessionAccesses, a => a.DocumentSessionId, a => a.Clearance,
+            agentId, documentSessionId, ResourceTypes.OaDocument, caller,
             "document session access", onApproved, ct);
 
     public Task<AgentActionResult> LaunchNativeApplicationAsync(
         Guid agentId, Guid nativeApplicationId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, nativeApplicationId, caller,
-            p => p.NativeApplicationAccesses, a => a.NativeApplicationId, a => a.Clearance,
+            agentId, nativeApplicationId, ResourceTypes.CuNativeApp, caller,
             "native application launch", onApproved, ct);
 
     public Task<AgentActionResult> EditAgentHeaderAsync(
         Guid agentId, Guid targetAgentId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, targetAgentId, caller,
-            p => p.AgentHeaderAccesses, a => a.AgentId, a => a.Clearance,
+            agentId, targetAgentId, ResourceTypes.AoAgentHeader, caller,
             "agent header edit", onApproved, ct);
 
     public Task<AgentActionResult> EditChannelHeaderAsync(
         Guid agentId, Guid targetChannelId, ActionCaller caller,
         Func<Task>? onApproved = null, CancellationToken ct = default)
         => EvaluateResourceAccessAsync(
-            agentId, targetChannelId, caller,
-            p => p.ChannelHeaderAccesses, a => a.ChannelId, a => a.Clearance,
+            agentId, targetChannelId, ResourceTypes.AoChannelHeader, caller,
             "channel header edit", onApproved, ct);
 
     // ═══════════════════════════════════════════════════════════════
@@ -326,37 +308,48 @@ public sealed class AgentActionService(SharpClawDbContext db)
     }
 
     /// <summary>
-    /// Evaluate a per-resource grant (one of the typed access collections).
+    /// Check whether a permission set has a grant for a specific resource
+    /// in the unified <see cref="Infrastructure.Models.Access.ResourceAccessDB"/> collection.
+    /// Replaces 18 typed GrantCheckMap lambdas with a single method.
+    /// See Module-System-Design §3.10.5.
     /// </summary>
-    private async Task<AgentActionResult> EvaluateResourceAccessAsync<TAccess>(
+    private static bool HasResourceGrant(
+        PermissionSetDB ps, string resourceType, Guid? resourceId)
+        => ps.ResourceAccesses.Any(a =>
+            a.ResourceType == resourceType
+            && (a.ResourceId == resourceId || a.ResourceId == WellKnownIds.AllResources));
+
+    /// <summary>
+    /// Evaluate a per-resource grant using the unified
+    /// <see cref="Infrastructure.Models.Access.ResourceAccessDB"/> collection.
+    /// See Module-System-Design §3.10.5.
+    /// </summary>
+    private async Task<AgentActionResult> EvaluateResourceAccessAsync(
         Guid agentId,
         Guid resourceId,
+        string resourceType,
         ActionCaller caller,
-        Func<PermissionSetDB, IEnumerable<TAccess>> getAccessCollection,
-        Func<TAccess, Guid> getResourceId,
-        Func<TAccess, PermissionClearance> getClearance,
         string resourceDescription,
-        Func<Task>? onApproved,
-        CancellationToken ct)
+        Func<Task>? onApproved = null,
+        CancellationToken ct = default)
     {
         var agentPerms = await LoadAgentPermissionsAsync(agentId, ct);
         if (agentPerms is null)
             return AgentActionResult.Denied("Agent has no role or permissions assigned.");
 
-        var access = getAccessCollection(agentPerms)
-            .FirstOrDefault(a => getResourceId(a) == resourceId
-                              || getResourceId(a) == WellKnownIds.AllResources);
+        var access = agentPerms.ResourceAccesses
+            .FirstOrDefault(a => a.ResourceType == resourceType
+                              && (a.ResourceId == resourceId
+                               || a.ResourceId == WellKnownIds.AllResources));
 
         if (access is null)
             return AgentActionResult.Denied($"Agent does not have {resourceDescription}.");
 
-        var effective = ResolveClearance(getClearance(access), agentPerms.DefaultClearance);
+        var effective = ResolveClearance(access.Clearance, agentPerms.DefaultClearance);
 
         var result = await EvaluateCallerClearanceAsync(
             agentPerms, effective, caller,
-            callerPerms => getAccessCollection(callerPerms)
-                .Any(a => getResourceId(a) == resourceId
-                       || getResourceId(a) == WellKnownIds.AllResources),
+            callerPerms => HasResourceGrant(callerPerms, resourceType, resourceId),
             ct);
 
         if (result.Verdict == ClearanceVerdict.Approved && onApproved is not null)
@@ -481,28 +474,13 @@ public sealed class AgentActionService(SharpClawDbContext db)
 
     /// <summary>
     /// Loads a full <see cref="PermissionSetDB"/> by its primary key,
-    /// including all typed access collections and whitelists.
+    /// including the unified resource access collection and whitelists.
     /// </summary>
     public async Task<PermissionSetDB?> LoadPermissionSetAsync(
         Guid permissionSetId, CancellationToken ct)
     {
         return await db.PermissionSets
-            .Include(p => p.DangerousShellAccesses)
-            .Include(p => p.SafeShellAccesses)
-            .Include(p => p.InternalDatabaseAccesses)
-            .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.WebsiteAccesses)
-            .Include(p => p.SearchEngineAccesses)
-            .Include(p => p.ContainerAccesses)
-            .Include(p => p.InputAudioAccesses)
-            .Include(p => p.DisplayDeviceAccesses)
-            .Include(p => p.EditorSessionAccesses)
-            .Include(p => p.AgentPermissions)
-            .Include(p => p.TaskPermissions)
-            .Include(p => p.SkillPermissions)
-            .Include(p => p.AgentHeaderAccesses)
-            .Include(p => p.ChannelHeaderAccesses)
-            .Include(p => p.BotIntegrationAccesses)
+            .Include(p => p.ResourceAccesses)
             .Include(p => p.ClearanceUserWhitelist)
             .Include(p => p.ClearanceAgentWhitelist)
             .FirstOrDefaultAsync(p => p.Id == permissionSetId, ct);
@@ -586,25 +564,25 @@ public sealed class AgentActionService(SharpClawDbContext db)
         ["ReadClipboardAsync"] = (ps, _) => ps.CanReadClipboard,
         ["WriteClipboardAsync"] = (ps, _) => ps.CanWriteClipboard,
 
-        // Per-resource
-        ["UnsafeExecuteAsDangerousShellAsync"] = (ps, rid) => ps.DangerousShellAccesses.Any(a => a.SystemUserId == rid || a.SystemUserId == WellKnownIds.AllResources),
-        ["ExecuteAsSafeShellAsync"] = (ps, rid) => ps.SafeShellAccesses.Any(a => a.ContainerId == rid || a.ContainerId == WellKnownIds.AllResources),
-        ["AccessInternalDatabaseAsync"] = (ps, rid) => ps.InternalDatabaseAccesses.Any(a => a.InternalDatabaseId == rid || a.InternalDatabaseId == WellKnownIds.AllResources),
-        ["AccessExternalDatabaseAsync"] = (ps, rid) => ps.ExternalDatabaseAccesses.Any(a => a.ExternalDatabaseId == rid || a.ExternalDatabaseId == WellKnownIds.AllResources),
-        ["AccessWebsiteAsync"] = (ps, rid) => ps.WebsiteAccesses.Any(a => a.WebsiteId == rid || a.WebsiteId == WellKnownIds.AllResources),
-        ["QuerySearchEngineAsync"] = (ps, rid) => ps.SearchEngineAccesses.Any(a => a.SearchEngineId == rid || a.SearchEngineId == WellKnownIds.AllResources),
-        ["AccessContainerAsync"] = (ps, rid) => ps.ContainerAccesses.Any(a => a.ContainerId == rid || a.ContainerId == WellKnownIds.AllResources),
-        ["ManageAgentAsync"] = (ps, rid) => ps.AgentPermissions.Any(a => a.AgentId == rid || a.AgentId == WellKnownIds.AllResources),
-        ["EditTaskAsync"] = (ps, rid) => ps.TaskPermissions.Any(a => a.ScheduledTaskId == rid || a.ScheduledTaskId == WellKnownIds.AllResources),
-        ["AccessSkillAsync"] = (ps, rid) => ps.SkillPermissions.Any(a => a.SkillId == rid || a.SkillId == WellKnownIds.AllResources),
-        ["AccessInputAudioAsync"] = (ps, rid) => ps.InputAudioAccesses.Any(a => a.InputAudioId == rid || a.InputAudioId == WellKnownIds.AllResources),
-        ["AccessDisplayDeviceAsync"] = (ps, rid) => ps.DisplayDeviceAccesses.Any(a => a.DisplayDeviceId == rid || a.DisplayDeviceId == WellKnownIds.AllResources),
-        ["AccessEditorSessionAsync"] = (ps, rid) => ps.EditorSessionAccesses.Any(a => a.EditorSessionId == rid || a.EditorSessionId == WellKnownIds.AllResources),
-        ["AccessBotIntegrationAsync"] = (ps, rid) => ps.BotIntegrationAccesses.Any(a => a.BotIntegrationId == rid || a.BotIntegrationId == WellKnownIds.AllResources),
-        ["AccessDocumentSessionAsync"] = (ps, rid) => ps.DocumentSessionAccesses.Any(a => a.DocumentSessionId == rid || a.DocumentSessionId == WellKnownIds.AllResources),
-        ["LaunchNativeApplicationAsync"] = (ps, rid) => ps.NativeApplicationAccesses.Any(a => a.NativeApplicationId == rid || a.NativeApplicationId == WellKnownIds.AllResources),
-        ["EditAgentHeaderAsync"] = (ps, rid) => ps.AgentHeaderAccesses.Any(a => a.AgentId == rid || a.AgentId == WellKnownIds.AllResources),
-        ["EditChannelHeaderAsync"] = (ps, rid) => ps.ChannelHeaderAccesses.Any(a => a.ChannelId == rid || a.ChannelId == WellKnownIds.AllResources),
+        // Per-resource (generic ResourceAccessDB §3.10)
+        ["UnsafeExecuteAsDangerousShellAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.DsShell, rid),
+        ["ExecuteAsSafeShellAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.Mk8Shell, rid),
+        ["AccessInternalDatabaseAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.DbInternal, rid),
+        ["AccessExternalDatabaseAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.DbExternal, rid),
+        ["AccessWebsiteAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.WaWebsite, rid),
+        ["QuerySearchEngineAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.WaSearch, rid),
+        ["AccessContainerAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.Container, rid),
+        ["ManageAgentAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.AoAgent, rid),
+        ["EditTaskAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.AoTask, rid),
+        ["AccessSkillAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.AoSkill, rid),
+        ["AccessInputAudioAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.TrAudio, rid),
+        ["AccessDisplayDeviceAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.CuDisplay, rid),
+        ["AccessEditorSessionAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.EditorSession, rid),
+        ["AccessBotIntegrationAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.BiChannel, rid),
+        ["AccessDocumentSessionAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.OaDocument, rid),
+        ["LaunchNativeApplicationAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.CuNativeApp, rid),
+        ["EditAgentHeaderAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.AoAgentHeader, rid),
+        ["EditChannelHeaderAsync"] = (ps, rid) => HasResourceGrant(ps, ResourceTypes.AoChannelHeader, rid),
     };
 
     /// <summary>

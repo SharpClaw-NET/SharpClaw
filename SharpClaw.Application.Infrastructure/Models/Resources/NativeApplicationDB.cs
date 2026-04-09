@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Entities;
 
 namespace SharpClaw.Application.Infrastructure.Models.Resources;
@@ -24,5 +23,4 @@ public class NativeApplicationDB : BaseEntity
     /// <summary>Optional description for the agent.</summary>
     public string? Description { get; set; }
 
-    public ICollection<NativeApplicationAccessDB> Accesses { get; set; } = [];
-}
+    }

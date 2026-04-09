@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Entities;
 
 namespace SharpClaw.Application.Infrastructure.Models.Resources;
@@ -24,5 +23,4 @@ public class WebsiteDB : BaseEntity
     public Guid? SkillId { get; set; }
     public SkillDB? Skill { get; set; }
 
-    public ICollection<WebsiteAccessDB> Accesses { get; set; } = [];
-}
+    }

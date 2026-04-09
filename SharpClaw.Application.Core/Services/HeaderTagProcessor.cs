@@ -50,6 +50,53 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
     // ── Sensitive-field cache (thread-safe, lives for app lifetime) ─
     private static readonly ConcurrentDictionary<Type, HashSet<string>> SensitiveFieldCache = new();
 
+    // ── Resource type → human label (used by CollectGrantNames) ───
+    private static readonly (string ResourceType, string Label)[] ResourceGrantLabels =
+    [
+        (ResourceTypes.DsShell,         "DangerousShell"),
+        (ResourceTypes.Mk8Shell,        "SafeShell"),
+        (ResourceTypes.Container,       "ContainerAccess"),
+        (ResourceTypes.WaWebsite,       "WebsiteAccess"),
+        (ResourceTypes.WaSearch,        "SearchEngineAccess"),
+        (ResourceTypes.DbInternal,      "InternalDatabase"),
+        (ResourceTypes.DbExternal,      "ExternalDatabase"),
+        (ResourceTypes.TrAudio,         "InputAudio"),
+        (ResourceTypes.CuDisplay,       "DisplayDevice"),
+        (ResourceTypes.EditorSession,   "EditorSession"),
+        (ResourceTypes.AoAgent,         "ManageAgent"),
+        (ResourceTypes.AoTask,          "EditTask"),
+        (ResourceTypes.AoSkill,         "AccessSkill"),
+        (ResourceTypes.AoAgentHeader,   "EditAgentHeader[res]"),
+        (ResourceTypes.AoChannelHeader, "EditChannelHeader[res]"),
+        (ResourceTypes.BiChannel,       "BotIntegration"),
+        (ResourceTypes.OaDocument,      "DocumentSession"),
+        (ResourceTypes.CuNativeApp,     "NativeApplication"),
+    ];
+
+    // ── Resource type → (label, wildcard ID loader) ──────────────
+    private static readonly (string ResourceType, string Label,
+        Func<SharpClawDbContext, CancellationToken, Task<List<Guid>>> LoadAllIds)[] ResourceGrantExpanders =
+    [
+        (ResourceTypes.DsShell,         "DangerousShell",        (d, ct) => d.SystemUsers.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.Mk8Shell,        "SafeShell",             (d, ct) => d.Containers.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.Container,       "ContainerAccess",       (d, ct) => d.Containers.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.WaWebsite,       "WebsiteAccess",         (d, ct) => d.Websites.Select(w => w.Id).ToListAsync(ct)),
+        (ResourceTypes.WaSearch,        "SearchEngineAccess",    (d, ct) => d.SearchEngines.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.DbInternal,      "InternalDatabase",      (d, ct) => d.InternalDatabases.Select(l => l.Id).ToListAsync(ct)),
+        (ResourceTypes.DbExternal,      "ExternalDatabase",      (d, ct) => d.ExternalDatabases.Select(e => e.Id).ToListAsync(ct)),
+        (ResourceTypes.TrAudio,         "InputAudio",            (d, ct) => d.InputAudios.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.CuDisplay,       "DisplayDevice",         (d, ct) => d.DisplayDevices.Select(d2 => d2.Id).ToListAsync(ct)),
+        (ResourceTypes.EditorSession,   "EditorSession",         (d, ct) => d.EditorSessions.Select(e => e.Id).ToListAsync(ct)),
+        (ResourceTypes.AoAgent,         "ManageAgent",           (d, ct) => d.Agents.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.AoTask,          "EditTask",              (d, ct) => d.ScheduledTasks.Select(t => t.Id).ToListAsync(ct)),
+        (ResourceTypes.AoSkill,         "AccessSkill",           (d, ct) => d.Skills.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.AoAgentHeader,   "EditAgentHeader",       (d, ct) => d.Agents.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.AoChannelHeader, "EditChannelHeader",     (d, ct) => d.Channels.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.BiChannel,       "BotIntegration",        (d, ct) => d.BotIntegrations.Select(b => b.Id).ToListAsync(ct)),
+        (ResourceTypes.OaDocument,      "DocumentSession",       (d, ct) => d.DocumentSessions.Select(d2 => d2.Id).ToListAsync(ct)),
+        (ResourceTypes.CuNativeApp,     "NativeApplication",     (d, ct) => d.NativeApplications.Select(n => n.Id).ToListAsync(ct)),
+    ];
+
     /// <summary>
     /// Expands all <c>{{tag}}</c> placeholders in <paramref name="template"/>
     /// and returns the fully resolved header string.
@@ -107,24 +154,9 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
             if (user?.Role?.PermissionSetId is { } psId)
             {
                 userPs = await db.PermissionSets
-                    .Include(p => p.DangerousShellAccesses)
-                    .Include(p => p.SafeShellAccesses)
-                    .Include(p => p.ContainerAccesses)
-                    .Include(p => p.WebsiteAccesses)
-                    .Include(p => p.SearchEngineAccesses)
-                    .Include(p => p.InternalDatabaseAccesses)
-                    .Include(p => p.ExternalDatabaseAccesses)
-                    .Include(p => p.InputAudioAccesses)
-                    .Include(p => p.DisplayDeviceAccesses)
-                    .Include(p => p.EditorSessionAccesses)
-                    .Include(p => p.AgentPermissions)
-                    .Include(p => p.TaskPermissions)
-                    .Include(p => p.SkillPermissions)
-                    .Include(p => p.AgentHeaderAccesses)
-                    .Include(p => p.ChannelHeaderAccesses)
-                    .Include(p => p.BotIntegrationAccesses)
-                    .AsSplitQuery()
-                    .FirstOrDefaultAsync(p => p.Id == psId, ct);
+                        .Include(p => p.ResourceAccesses)
+                        .AsSplitQuery()
+                        .FirstOrDefaultAsync(p => p.Id == psId, ct);
             }
         }
 
@@ -136,21 +168,7 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (agentWithRole?.Role?.PermissionSetId is { } agentPsId)
         {
             agentPs = await db.PermissionSets
-                .Include(p => p.SafeShellAccesses)
-                .Include(p => p.ContainerAccesses)
-                .Include(p => p.WebsiteAccesses)
-                .Include(p => p.SearchEngineAccesses)
-                .Include(p => p.InternalDatabaseAccesses)
-                .Include(p => p.ExternalDatabaseAccesses)
-                .Include(p => p.InputAudioAccesses)
-                .Include(p => p.DisplayDeviceAccesses)
-                .Include(p => p.EditorSessionAccesses)
-                .Include(p => p.AgentPermissions)
-                .Include(p => p.TaskPermissions)
-                .Include(p => p.SkillPermissions)
-                .Include(p => p.AgentHeaderAccesses)
-                .Include(p => p.ChannelHeaderAccesses)
-                .Include(p => p.BotIntegrationAccesses)
+                .Include(p => p.ResourceAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
         }
@@ -260,23 +278,13 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.CanSendHotkey) grants.Add("SendHotkey");
         if (ps.CanReadClipboard) grants.Add("ReadClipboard");
         if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
-        if (ps.DangerousShellAccesses.Count > 0) grants.Add("DangerousShell");
-        if (ps.SafeShellAccesses.Count > 0) grants.Add("SafeShell");
-        if (ps.ContainerAccesses.Count > 0) grants.Add("ContainerAccess");
-        if (ps.WebsiteAccesses.Count > 0) grants.Add("WebsiteAccess");
-        if (ps.SearchEngineAccesses.Count > 0) grants.Add("SearchEngineAccess");
-        if (ps.InternalDatabaseAccesses.Count > 0) grants.Add("InternalDatabase");
-        if (ps.ExternalDatabaseAccesses.Count > 0) grants.Add("ExternalDatabase");
-        if (ps.InputAudioAccesses.Count > 0) grants.Add("InputAudio");
-        if (ps.DisplayDeviceAccesses.Count > 0) grants.Add("DisplayDevice");
-        if (ps.EditorSessionAccesses.Count > 0) grants.Add("EditorSession");
-        if (ps.AgentPermissions.Count > 0) grants.Add("ManageAgent");
-        if (ps.TaskPermissions.Count > 0) grants.Add("EditTask");
-        if (ps.SkillPermissions.Count > 0) grants.Add("AccessSkill");
-        if (ps.AgentHeaderAccesses.Count > 0) grants.Add("EditAgentHeader[res]");
-        if (ps.ChannelHeaderAccesses.Count > 0) grants.Add("EditChannelHeader[res]");
-        if (ps.DocumentSessionAccesses.Count > 0) grants.Add("DocumentSession");
-        if (ps.NativeApplicationAccesses.Count > 0) grants.Add("NativeApplication");
+
+        foreach (var (rt, label) in ResourceGrantLabels)
+        {
+            if (ps.ResourceAccesses.Any(a => a.ResourceType == rt))
+                grants.Add(label);
+        }
+
         return grants;
     }
 
@@ -309,77 +317,15 @@ public sealed partial class HeaderTagProcessor(SharpClawDbContext db)
         if (ps.CanReadClipboard) grants.Add("ReadClipboard");
         if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
 
-        await AppendResourceGrantAsync(grants, "DangerousShell",
-            ps.DangerousShellAccesses.Select(a => a.SystemUserId),
-            () => db.SystemUsers.Select(s => s.Id).ToListAsync(ct));
+        foreach (var (rt, label, loadAllIds) in ResourceGrantExpanders)
+        {
+            var grantedIds = ps.ResourceAccesses
+                .Where(a => a.ResourceType == rt)
+                .Select(a => a.ResourceId)
+                .ToList();
 
-        await AppendResourceGrantAsync(grants, "SafeShell",
-            ps.SafeShellAccesses.Select(a => a.ContainerId),
-            () => db.Containers.Select(c => c.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "ContainerAccess",
-            ps.ContainerAccesses.Select(a => a.ContainerId),
-            () => db.Containers.Select(c => c.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "WebsiteAccess",
-            ps.WebsiteAccesses.Select(a => a.WebsiteId),
-            () => db.Websites.Select(w => w.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "SearchEngineAccess",
-            ps.SearchEngineAccesses.Select(a => a.SearchEngineId),
-            () => db.SearchEngines.Select(s => s.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "InternalDatabase",
-            ps.InternalDatabaseAccesses.Select(a => a.InternalDatabaseId),
-            () => db.InternalDatabases.Select(l => l.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "ExternalDatabase",
-            ps.ExternalDatabaseAccesses.Select(a => a.ExternalDatabaseId),
-            () => db.ExternalDatabases.Select(e => e.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "InputAudio",
-            ps.InputAudioAccesses.Select(a => a.InputAudioId),
-            () => db.InputAudios.Select(a => a.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "DisplayDevice",
-            ps.DisplayDeviceAccesses.Select(a => a.DisplayDeviceId),
-            () => db.DisplayDevices.Select(d => d.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "EditorSession",
-            ps.EditorSessionAccesses.Select(a => a.EditorSessionId),
-            () => db.EditorSessions.Select(e => e.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "ManageAgent",
-            ps.AgentPermissions.Select(a => a.AgentId),
-            () => db.Agents.Select(a => a.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "EditTask",
-            ps.TaskPermissions.Select(a => a.ScheduledTaskId),
-            () => db.ScheduledTasks.Select(t => t.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "AccessSkill",
-            ps.SkillPermissions.Select(a => a.SkillId),
-            () => db.Skills.Select(s => s.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "EditAgentHeader",
-            ps.AgentHeaderAccesses.Select(a => a.AgentId),
-            () => db.Agents.Select(a => a.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "EditChannelHeader",
-            ps.ChannelHeaderAccesses.Select(a => a.ChannelId),
-            () => db.Channels.Select(c => c.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "BotIntegration",
-            ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
-            () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "DocumentSession",
-            ps.DocumentSessionAccesses.Select(a => a.DocumentSessionId),
-            () => db.DocumentSessions.Select(d => d.Id).ToListAsync(ct));
-
-        await AppendResourceGrantAsync(grants, "NativeApplication",
-            ps.NativeApplicationAccesses.Select(a => a.NativeApplicationId),
-            () => db.NativeApplications.Select(n => n.Id).ToListAsync(ct));
+            await AppendResourceGrantAsync(grants, label, grantedIds, () => loadAllIds(db, ct));
+        }
 
         return grants;
     }

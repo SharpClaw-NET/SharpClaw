@@ -99,22 +99,21 @@ public sealed class ContainerService(SharpClawDbContext db, SessionService sessi
     {
         var permissionSet = new PermissionSetDB
         {
-            ContainerAccesses =
+            ResourceAccesses =
             [
-                new ContainerAccessDB
+                new ResourceAccessDB
                 {
-                    ContainerId = container.Id,
+                    ResourceType = ResourceTypes.Container,
+                    ResourceId = container.Id,
                     Clearance = PermissionClearance.Independent,
-                }
-            ],
-            SafeShellAccesses =
-            [
-                new SafeShellAccessDB
+                },
+                new ResourceAccessDB
                 {
-                    ContainerId = container.Id,
+                    ResourceType = ResourceTypes.Mk8Shell,
+                    ResourceId = container.Id,
                     Clearance = PermissionClearance.Independent,
-                    ShellType = SafeShellType.Mk8Shell,
-                }
+                    SubType = SafeShellType.Mk8Shell.ToString(),
+                },
             ],
         };
 

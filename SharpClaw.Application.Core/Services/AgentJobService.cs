@@ -1,6 +1,8 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using System.Threading.Channels;
@@ -36,6 +38,8 @@ ILiveTranscriptionOrchestrator orchestrator,
 SessionService session,
 DocumentSessionService documentSessionService,
 ModuleRegistry moduleRegistry,
+ModuleMetricsCollector metricsCollector,
+ModuleEventDispatcher eventDispatcher,
 IServiceScopeFactory serviceScopeFactory,
 IConfiguration configuration)
 {
@@ -53,7 +57,7 @@ IConfiguration configuration)
     /// is inferred from the channel unless explicitly overridden in the
     /// request.  Permission is evaluated immediately:
     /// <list type="bullet">
-    ///   <item>Approved → executes inline, returns <see cref="AgentJobStatus.Completed"/>
+    ///   <item>Approved → executes inline, returns <see cref="AgentJobStatus.Completed/>
     ///         or <see cref="AgentJobStatus.Failed"/> (or <see cref="AgentJobStatus.Executing"/>
     ///         for long-running jobs like transcription).</item>
     ///   <item>PendingApproval → returns <see cref="AgentJobStatus.AwaitingApproval"/>.</item>
@@ -720,6 +724,8 @@ IConfiguration configuration)
             ?? throw new InvalidOperationException(
                 $"Module '{envelope.Module}' is not loaded.");
 
+        var prefixedToolName = $"{module.ToolPrefix}_{envelope.Tool}";
+
         var jobContext = new AgentJobContext(
             JobId: job.Id,
             AgentId: job.AgentId,
@@ -735,11 +741,17 @@ IConfiguration configuration)
             throw new InvalidOperationException(
                 $"Module '{envelope.Module}' is unloading — cannot execute tools.");
 
+        var sw = Stopwatch.StartNew();
         try
         {
             using var scope = externalHost is not null
                 ? externalHost.CreateScope()
                 : serviceScopeFactory.CreateScope();
+
+            // Set ModuleExecutionContext so IModuleConfigStore resolves correctly.
+            var execCtx = scope.ServiceProvider.GetService<ModuleExecutionContext>();
+            if (execCtx is not null) execCtx.ModuleId = module.Id;
+
             var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
 
             // Timeout: per-tool override → manifest default → 30s.
@@ -751,17 +763,40 @@ IConfiguration configuration)
 
             try
             {
-                return await module.ExecuteToolAsync(
+                // Try streaming variant first; fall back to non-streaming.
+                var stream = module.ExecuteToolStreamingAsync(
                     envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+
+                string? result;
+                if (stream is not null)
+                {
+                    var sb = new StringBuilder();
+                    await foreach (var chunk in stream.WithCancellation(cts.Token))
+                        sb.Append(chunk);
+                    result = sb.ToString();
+                }
+                else
+                {
+                    result = await module.ExecuteToolAsync(
+                        envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+                }
+
+                sw.Stop();
+                metricsCollector.RecordSuccess(prefixedToolName, sw.Elapsed);
+                return result;
             }
             catch (OperationCanceledException) when (cts.IsCancellationRequested && !ct.IsCancellationRequested)
             {
+                sw.Stop();
+                metricsCollector.RecordTimeout(prefixedToolName);
                 throw new InvalidOperationException(
                     $"Module tool '{envelope.Module}.{envelope.Tool}' " +
                     $"exceeded timeout ({timeoutSeconds}s).");
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
             {
+                sw.Stop();
+                metricsCollector.RecordFailure(prefixedToolName);
                 throw new InvalidOperationException(
                     ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message));
             }
@@ -941,20 +976,7 @@ IConfiguration configuration)
 
         var permissionSets = await db.PermissionSets
             .Where(p => permissionSetIds.Contains(p.Id))
-            .Include(p => p.DefaultInternalDatabaseAccess)
-            .Include(p => p.DefaultExternalDatabaseAccess)
-            .Include(p => p.DefaultWebsiteAccess)
-            .Include(p => p.DefaultSearchEngineAccess)
-            .Include(p => p.DefaultContainerAccess)
-            .Include(p => p.DefaultInputAudioAccess)
-            .Include(p => p.DefaultDisplayDeviceAccess)
-            .Include(p => p.DefaultEditorSessionAccess)
-            .Include(p => p.DefaultAgentPermission)
-            .Include(p => p.DefaultTaskPermission)
-            .Include(p => p.DefaultSkillPermission)
-            .Include(p => p.DefaultBotIntegrationAccess)
-            .Include(p => p.DefaultDocumentSessionAccess)
-            .Include(p => p.DefaultNativeApplicationAccess)
+            .Include(p => p.ResourceAccesses)
             .ToListAsync(ct);
 
         foreach (var psId in permissionSetIds)
@@ -1018,24 +1040,18 @@ IConfiguration configuration)
     /// a permission set, or <c>null</c> if no default is configured.
     /// </summary>
     private static Guid? ExtractDefaultResourceId(
-        PermissionSetDB permissionSet, string? delegateTo) => delegateTo switch
+        PermissionSetDB permissionSet, string? delegateTo)
     {
-        "AccessInternalDatabaseAsync" => permissionSet.DefaultInternalDatabaseAccess?.InternalDatabaseId,
-        "AccessExternalDatabaseAsync" => permissionSet.DefaultExternalDatabaseAccess?.ExternalDatabaseId,
-        "AccessWebsiteAsync" => permissionSet.DefaultWebsiteAccess?.WebsiteId,
-        "QuerySearchEngineAsync" => permissionSet.DefaultSearchEngineAccess?.SearchEngineId,
-        "AccessContainerAsync" => permissionSet.DefaultContainerAccess?.ContainerId,
-        "AccessInputAudioAsync" => permissionSet.DefaultInputAudioAccess?.InputAudioId,
-        "AccessDisplayDeviceAsync" => permissionSet.DefaultDisplayDeviceAccess?.DisplayDeviceId,
-        "AccessEditorSessionAsync" => permissionSet.DefaultEditorSessionAccess?.EditorSessionId,
-        "ManageAgentAsync" => permissionSet.DefaultAgentPermission?.AgentId,
-        "EditTaskAsync" => permissionSet.DefaultTaskPermission?.ScheduledTaskId,
-        "AccessSkillAsync" => permissionSet.DefaultSkillPermission?.SkillId,
-        "AccessBotIntegrationAsync" => permissionSet.DefaultBotIntegrationAccess?.BotIntegrationId,
-        "AccessDocumentSessionAsync" => permissionSet.DefaultDocumentSessionAccess?.DocumentSessionId,
-        "LaunchNativeApplicationAsync" => permissionSet.DefaultNativeApplicationAccess?.NativeApplicationId,
-        _ => null,
-    };
+        if (delegateTo is null || !ResourceTypes.ByDelegateName.TryGetValue(delegateTo, out var resourceType))
+            return null;
+
+        if (resourceType is null)
+            return null;
+
+        return permissionSet.ResourceAccesses
+            .FirstOrDefault(a => a.ResourceType == resourceType && a.IsDefault)
+            ?.ResourceId;
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Channel / context pre-authorisation

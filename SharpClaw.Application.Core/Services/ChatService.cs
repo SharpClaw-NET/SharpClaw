@@ -6,6 +6,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts.Modules;
 using Microsoft.Extensions.DependencyInjection;
@@ -33,6 +34,7 @@ public sealed class ChatService(
     HeaderTagProcessor headerTagProcessor,
     ThreadActivitySignal threadActivity,
     ModuleRegistry moduleRegistry,
+    ModuleMetricsCollector metricsCollector,
     IServiceScopeFactory serviceScopeFactory,
     IConfiguration configuration)
 {
@@ -48,6 +50,30 @@ public sealed class ChatService(
 
     private readonly bool _disableCustomProviderParameters =
         configuration.GetValue<bool>("Agent:DisableCustomProviderParameters");
+
+    // ── Resource type → (label, wildcard ID loader) ──────────────
+    private static readonly (string ResourceType, string Label,
+        Func<SharpClawDbContext, CancellationToken, Task<List<Guid>>> LoadAllIds)[] ResourceGrantExpanders =
+    [
+        (ResourceTypes.DsShell,         "DangerousShell",        (d, ct) => d.SystemUsers.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.Mk8Shell,        "SafeShell",             (d, ct) => d.Containers.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.Container,       "ContainerAccess",       (d, ct) => d.Containers.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.WaWebsite,       "WebsiteAccess",         (d, ct) => d.Websites.Select(w => w.Id).ToListAsync(ct)),
+        (ResourceTypes.WaSearch,        "SearchEngineAccess",    (d, ct) => d.SearchEngines.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.DbInternal,      "InternalDatabase",      (d, ct) => d.InternalDatabases.Select(l => l.Id).ToListAsync(ct)),
+        (ResourceTypes.DbExternal,      "ExternalDatabase",      (d, ct) => d.ExternalDatabases.Select(e => e.Id).ToListAsync(ct)),
+        (ResourceTypes.TrAudio,         "InputAudio",            (d, ct) => d.InputAudios.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.CuDisplay,       "DisplayDevice",         (d, ct) => d.DisplayDevices.Select(d2 => d2.Id).ToListAsync(ct)),
+        (ResourceTypes.EditorSession,   "EditorSession",         (d, ct) => d.EditorSessions.Select(e => e.Id).ToListAsync(ct)),
+        (ResourceTypes.AoAgent,         "ManageAgent",           (d, ct) => d.Agents.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.AoTask,          "EditTask",              (d, ct) => d.ScheduledTasks.Select(t => t.Id).ToListAsync(ct)),
+        (ResourceTypes.AoSkill,         "AccessSkill",           (d, ct) => d.Skills.Select(s => s.Id).ToListAsync(ct)),
+        (ResourceTypes.AoAgentHeader,   "EditAgentHeader",       (d, ct) => d.Agents.Select(a => a.Id).ToListAsync(ct)),
+        (ResourceTypes.AoChannelHeader, "EditChannelHeader",     (d, ct) => d.Channels.Select(c => c.Id).ToListAsync(ct)),
+        (ResourceTypes.BiChannel,       "BotIntegration",        (d, ct) => d.BotIntegrations.Select(b => b.Id).ToListAsync(ct)),
+        (ResourceTypes.OaDocument,      "DocumentSession",       (d, ct) => d.DocumentSessions.Select(d2 => d2.Id).ToListAsync(ct)),
+        (ResourceTypes.CuNativeApp,     "NativeApplication",     (d, ct) => d.NativeApplications.Select(n => n.Id).ToListAsync(ct)),
+    ];
 
     public async Task<ChatResponse> SendMessageAsync(
         Guid channelId, ChatRequest request,
@@ -474,35 +500,18 @@ public sealed class ChatService(
         var user = await db.Users
             .Include(u => u.Role)
             .ThenInclude(r => r!.PermissionSet)
-            .ThenInclude(ps => ps!.DangerousShellAccesses)
             .AsSplitQuery()
             .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
         if (user is null)
             return null;
 
-        // Load remaining grant collections if the user has a permission set
+        // Load resource grants if the user has a permission set
         PermissionSetDB? ps = null;
         if (user.Role?.PermissionSetId is { } psId)
         {
             ps = await db.PermissionSets
-                .Include(p => p.SafeShellAccesses)
-                .Include(p => p.ContainerAccesses)
-                .Include(p => p.WebsiteAccesses)
-                .Include(p => p.SearchEngineAccesses)
-                .Include(p => p.InternalDatabaseAccesses)
-                .Include(p => p.ExternalDatabaseAccesses)
-                .Include(p => p.InputAudioAccesses)
-                .Include(p => p.DisplayDeviceAccesses)
-                .Include(p => p.EditorSessionAccesses)
-                .Include(p => p.AgentPermissions)
-                .Include(p => p.TaskPermissions)
-                .Include(p => p.SkillPermissions)
-                .Include(p => p.AgentHeaderAccesses)
-                .Include(p => p.ChannelHeaderAccesses)
-                .Include(p => p.BotIntegrationAccesses)
-                .Include(p => p.DocumentSessionAccesses)
-                .Include(p => p.NativeApplicationAccesses)
+                .Include(p => p.ResourceAccesses)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == psId, ct);
         }
@@ -550,23 +559,7 @@ public sealed class ChatService(
             if (agentRole.PermissionSetId is { } agentPsId)
             {
                 agentPs = await db.PermissionSets
-                    .Include(p => p.SafeShellAccesses)
-                    .Include(p => p.ContainerAccesses)
-                    .Include(p => p.WebsiteAccesses)
-                    .Include(p => p.SearchEngineAccesses)
-                    .Include(p => p.InternalDatabaseAccesses)
-                    .Include(p => p.ExternalDatabaseAccesses)
-                    .Include(p => p.InputAudioAccesses)
-                    .Include(p => p.DisplayDeviceAccesses)
-                    .Include(p => p.EditorSessionAccesses)
-                    .Include(p => p.AgentPermissions)
-                    .Include(p => p.TaskPermissions)
-                    .Include(p => p.SkillPermissions)
-                    .Include(p => p.AgentHeaderAccesses)
-                    .Include(p => p.ChannelHeaderAccesses)
-                    .Include(p => p.BotIntegrationAccesses)
-                    .Include(p => p.DocumentSessionAccesses)
-                    .Include(p => p.NativeApplicationAccesses)
+                    .Include(p => p.ResourceAccesses)
                     .AsSplitQuery()
                     .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
@@ -677,6 +670,12 @@ public sealed class ChatService(
     /// IDs of that type are resolved from the database so the reader
     /// knows exactly which resources the permission set covers.
     /// </summary>
+    /// <summary>
+    /// Collects grant names with enumerated resource IDs for the chat
+    /// header (both user and agent sections). Uses the unified
+    /// <see cref="ResourceAccessDB"/> collection and the same expander
+    /// table as <see cref="HeaderTagProcessor"/>.
+    /// </summary>
     private async Task<List<string>> CollectGrantsWithResourcesAsync(
         PermissionSetDB ps, CancellationToken ct)
     {
@@ -700,77 +699,15 @@ public sealed class ChatService(
         if (ps.CanReadClipboard) grants.Add("ReadClipboard");
         if (ps.CanWriteClipboard) grants.Add("WriteClipboard");
 
-        await AppendResourceGrantAsync(grants, "DangerousShell",
-            ps.DangerousShellAccesses.Select(a => a.SystemUserId),
-            () => db.SystemUsers.Select(s => s.Id).ToListAsync(ct), ct);
+        foreach (var (rt, label, loadAllIds) in ResourceGrantExpanders)
+        {
+            var grantedIds = ps.ResourceAccesses
+                .Where(a => a.ResourceType == rt)
+                .Select(a => a.ResourceId)
+                .ToList();
 
-        await AppendResourceGrantAsync(grants, "SafeShell",
-            ps.SafeShellAccesses.Select(a => a.ContainerId),
-            () => db.Containers.Select(c => c.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "ContainerAccess",
-            ps.ContainerAccesses.Select(a => a.ContainerId),
-            () => db.Containers.Select(c => c.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "WebsiteAccess",
-            ps.WebsiteAccesses.Select(a => a.WebsiteId),
-            () => db.Websites.Select(w => w.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "SearchEngineAccess",
-            ps.SearchEngineAccesses.Select(a => a.SearchEngineId),
-            () => db.SearchEngines.Select(s => s.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "InternalDatabase",
-            ps.InternalDatabaseAccesses.Select(a => a.InternalDatabaseId),
-            () => db.InternalDatabases.Select(l => l.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "ExternalDatabase",
-            ps.ExternalDatabaseAccesses.Select(a => a.ExternalDatabaseId),
-            () => db.ExternalDatabases.Select(e => e.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "InputAudio",
-            ps.InputAudioAccesses.Select(a => a.InputAudioId),
-            () => db.InputAudios.Select(a => a.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "DisplayDevice",
-            ps.DisplayDeviceAccesses.Select(a => a.DisplayDeviceId),
-            () => db.DisplayDevices.Select(d => d.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "EditorSession",
-            ps.EditorSessionAccesses.Select(a => a.EditorSessionId),
-            () => db.EditorSessions.Select(e => e.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "ManageAgent",
-            ps.AgentPermissions.Select(a => a.AgentId),
-            () => db.Agents.Select(a => a.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "EditTask",
-            ps.TaskPermissions.Select(a => a.ScheduledTaskId),
-            () => db.ScheduledTasks.Select(t => t.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "AccessSkill",
-            ps.SkillPermissions.Select(a => a.SkillId),
-            () => db.Skills.Select(s => s.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "BotIntegration",
-            ps.BotIntegrationAccesses.Select(a => a.BotIntegrationId),
-            () => db.BotIntegrations.Select(b => b.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "EditAgentHeader",
-            ps.AgentHeaderAccesses.Select(a => a.AgentId),
-            () => db.Agents.Select(a => a.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "EditChannelHeader",
-            ps.ChannelHeaderAccesses.Select(a => a.ChannelId),
-            () => db.Channels.Select(c => c.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "DocumentSession",
-            ps.DocumentSessionAccesses.Select(a => a.DocumentSessionId),
-            () => db.DocumentSessions.Select(d => d.Id).ToListAsync(ct), ct);
-
-        await AppendResourceGrantAsync(grants, "NativeApplication",
-            ps.NativeApplicationAccesses.Select(a => a.NativeApplicationId),
-            () => db.NativeApplications.Select(n => n.Id).ToListAsync(ct), ct);
+            await AppendResourceGrantAsync(grants, label, grantedIds, () => loadAllIds(db, ct));
+        }
 
         return grants;
     }
@@ -781,13 +718,9 @@ public sealed class ChatService(
     /// type are loaded from the database so the agent sees the resolved
     /// list instead of the wildcard.
     /// </summary>
-
     private static async Task AppendResourceGrantAsync(
-        List<string> grants,
-        string grantName,
-        IEnumerable<Guid> grantedIds,
-        Func<Task<List<Guid>>> loadAllIdsAsync,
-        CancellationToken ct)
+        List<string> grants, string grantName,
+        IEnumerable<Guid> grantedIds, Func<Task<List<Guid>>> loadAllIdsAsync)
     {
         var ids = grantedIds.ToList();
         if (ids.Count == 0)
@@ -795,13 +728,9 @@ public sealed class ChatService(
 
         List<Guid> resolved;
         if (ids.Any(id => id == WellKnownIds.AllResources))
-        {
             resolved = await loadAllIdsAsync();
-        }
         else
-        {
             resolved = ids;
-        }
 
         if (resolved.Count == 0)
         {
@@ -1308,6 +1237,8 @@ public sealed class ChatService(
             ?? throw new InvalidOperationException(
                 $"Module '{moduleId}' resolved by registry but not loaded.");
 
+        var prefixedToolName = $"{module.ToolPrefix}_{canonicalName}";
+
         var context = new InlineToolContext(agentId, channelId, threadId, toolCall.Id);
 
         JsonElement parameters;
@@ -1326,19 +1257,31 @@ public sealed class ChatService(
         if (externalHost is not null && !externalHost.TryAcquireExecution())
             return $"Error: module '{moduleId}' is unloading.";
 
+        var sw = Stopwatch.StartNew();
         try
         {
             using var scope = externalHost is not null
                 ? externalHost.CreateScope()
                 : serviceScopeFactory.CreateScope();
+
+            // Set ModuleExecutionContext so IModuleConfigStore resolves correctly.
+            var execCtx = scope.ServiceProvider.GetService<ModuleExecutionContext>();
+            if (execCtx is not null) execCtx.ModuleId = module.Id;
+
             var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
 
-            return await module.ExecuteInlineToolAsync(
+            var result = await module.ExecuteInlineToolAsync(
                 canonicalName, parameters, context, restrictedScope, ct);
+
+            sw.Stop();
+            metricsCollector.RecordSuccess(prefixedToolName, sw.Elapsed);
+            return result;
         }
         catch (OperationCanceledException) { throw; }
         catch (Exception ex)
         {
+            sw.Stop();
+            metricsCollector.RecordFailure(prefixedToolName);
             return $"Error executing inline tool '{toolCall.Name}': {ex.Message}";
         }
         finally

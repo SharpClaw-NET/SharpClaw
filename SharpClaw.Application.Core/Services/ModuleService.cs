@@ -22,6 +22,7 @@ public sealed class ModuleService(
     SharpClawDbContext db,
     ModuleLoader loader,
     ModuleRegistry registry,
+    ModuleEventDispatcher eventDispatcher,
     ILoggerFactory loggerFactory,
     ILogger<ModuleService> logger)
 {
@@ -74,6 +75,59 @@ public sealed class ModuleService(
         }
 
         return null;
+    }
+
+    /// <summary>Get enriched detail for a single module, including manifest and tool/contract info.</summary>
+    public async Task<ModuleDetailResponse?> GetDetailAsync(string moduleId, CancellationToken ct = default)
+    {
+        ISharpClawModule? module = loader.GetBundledModule(moduleId);
+        ModuleStateDB? state = null;
+        ModuleManifest? manifest;
+        bool isExternal = false;
+
+        if (module is not null)
+        {
+            state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
+            manifest = loader.GetManifest(moduleId);
+        }
+        else
+        {
+            module = registry.GetModule(moduleId);
+            if (module is null) return null;
+            manifest = registry.GetManifest(moduleId);
+            isExternal = true;
+        }
+
+        var enabled = isExternal || (state?.Enabled ?? false);
+        var toolCount = module.GetToolDefinitions().Count;
+        var inlineToolCount = module.GetInlineToolDefinitions().Count;
+        var exportedContracts = module.ExportedContracts.Select(e => e.ContractName).ToArray();
+        var requiredContracts = module.RequiredContracts.Select(r => r.ContractName).ToArray();
+
+        var allSatisfied = !module.RequiredContracts
+            .Where(r => !r.Optional)
+            .Any(r => registry.ResolveContract(r.ContractName) is null);
+
+        return new ModuleDetailResponse(
+            ModuleId: module.Id,
+            DisplayName: module.DisplayName,
+            ToolPrefix: module.ToolPrefix,
+            Enabled: enabled,
+            Version: manifest?.Version ?? state?.Version,
+            Registered: isExternal || state is not null,
+            IsExternal: isExternal,
+            CreatedAt: state?.CreatedAt,
+            UpdatedAt: state?.UpdatedAt,
+            Author: manifest?.Author,
+            Description: manifest?.Description,
+            License: manifest?.License,
+            Platforms: manifest?.Platforms,
+            ExecutionTimeoutSeconds: manifest?.ExecutionTimeoutSeconds ?? 60,
+            ToolCount: toolCount,
+            InlineToolCount: inlineToolCount,
+            ExportedContracts: exportedContracts,
+            RequiredContracts: requiredContracts,
+            AllRequirementsSatisfied: allSatisfied);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -144,6 +198,13 @@ public sealed class ModuleService(
             }
         }
 
+        eventDispatcher.InvalidateSinkCache();
+        eventDispatcher.Dispatch(new SharpClawEvent(
+            SharpClawEventType.ModuleEnabled,
+            DateTimeOffset.UtcNow,
+            SourceId: moduleId,
+            Summary: $"Module '{moduleId}' enabled"));
+
         return ToResponse(module, state, manifest);
     }
 
@@ -206,6 +267,13 @@ public sealed class ModuleService(
 
         // Write .modules.env
         await WriteModulesEnvAsync(ct);
+
+        eventDispatcher.InvalidateSinkCache();
+        eventDispatcher.Dispatch(new SharpClawEvent(
+            SharpClawEventType.ModuleDisabled,
+            DateTimeOffset.UtcNow,
+            SourceId: moduleId,
+            Summary: $"Module '{moduleId}' disabled"));
 
         return ToResponse(module, state, manifest);
     }
@@ -436,3 +504,25 @@ public sealed record ModuleStateResponse(
     bool IsExternal,
     DateTimeOffset? CreatedAt,
     DateTimeOffset? UpdatedAt);
+
+/// <summary>Extended module detail as returned by <c>GET /modules/{id}</c>.</summary>
+public sealed record ModuleDetailResponse(
+    string ModuleId,
+    string DisplayName,
+    string ToolPrefix,
+    bool Enabled,
+    string? Version,
+    bool Registered,
+    bool IsExternal,
+    DateTimeOffset? CreatedAt,
+    DateTimeOffset? UpdatedAt,
+    string? Author,
+    string? Description,
+    string? License,
+    string[]? Platforms,
+    int ExecutionTimeoutSeconds,
+    int ToolCount,
+    int InlineToolCount,
+    string[] ExportedContracts,
+    string[] RequiredContracts,
+    bool AllRequirementsSatisfied);

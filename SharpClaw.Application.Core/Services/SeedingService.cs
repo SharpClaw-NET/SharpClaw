@@ -101,21 +101,27 @@ public sealed class SeedingService(
         // Wildcard grants — access to ALL resources of each type.
         // WellKnownIds.AllResources is recognised as a universal match
         // by AgentActionService and is immutable at runtime.
-        DangerousShellAccesses       = [new() { SystemUserId               = WellKnownIds.AllResources }],
-        SafeShellAccesses            = [new() { ContainerId               = WellKnownIds.AllResources }],
-        InternalDatabaseAccesses     = [new() { InternalDatabaseId         = WellKnownIds.AllResources }],
-        ExternalDatabaseAccesses     = [new() { ExternalDatabaseId         = WellKnownIds.AllResources }],
-        WebsiteAccesses              = [new() { WebsiteId                  = WellKnownIds.AllResources }],
-        SearchEngineAccesses         = [new() { SearchEngineId             = WellKnownIds.AllResources }],
-        ContainerAccesses            = [new() { ContainerId                = WellKnownIds.AllResources }],
-        InputAudioAccesses           = [new() { InputAudioId               = WellKnownIds.AllResources }],
-        DisplayDeviceAccesses        = [new() { DisplayDeviceId            = WellKnownIds.AllResources }],
-        EditorSessionAccesses        = [new() { EditorSessionId            = WellKnownIds.AllResources }],
-        AgentPermissions             = [new() { AgentId                    = WellKnownIds.AllResources }],
-        TaskPermissions              = [new() { ScheduledTaskId            = WellKnownIds.AllResources }],
-        SkillPermissions             = [new() { SkillId                    = WellKnownIds.AllResources }],
-        AgentHeaderAccesses          = [new() { AgentId                    = WellKnownIds.AllResources }],
-        ChannelHeaderAccesses        = [new() { ChannelId                  = WellKnownIds.AllResources }],
+        ResourceAccesses =
+        [
+            new() { ResourceType = ResourceTypes.DsShell,         ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.Mk8Shell,        ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.DbInternal,      ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.DbExternal,      ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.WaWebsite,       ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.WaSearch,        ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.Container,       ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.TrAudio,         ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.CuDisplay,       ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.EditorSession,   ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.AoAgent,         ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.AoTask,          ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.AoSkill,         ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.AoAgentHeader,   ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.AoChannelHeader, ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.BiChannel,       ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.OaDocument,      ResourceId = WellKnownIds.AllResources },
+            new() { ResourceType = ResourceTypes.CuNativeApp,     ResourceId = WellKnownIds.AllResources },
+        ],
     };
 
     /// <summary>
@@ -127,21 +133,7 @@ public sealed class SeedingService(
         SharpClawDbContext db, Guid psId, CancellationToken ct)
     {
         var ps = await db.PermissionSets
-            .Include(p => p.DangerousShellAccesses)
-            .Include(p => p.SafeShellAccesses)
-            .Include(p => p.ContainerAccesses)
-            .Include(p => p.WebsiteAccesses)
-            .Include(p => p.SearchEngineAccesses)
-            .Include(p => p.InternalDatabaseAccesses)
-            .Include(p => p.ExternalDatabaseAccesses)
-            .Include(p => p.InputAudioAccesses)
-            .Include(p => p.DisplayDeviceAccesses)
-            .Include(p => p.EditorSessionAccesses)
-            .Include(p => p.AgentPermissions)
-            .Include(p => p.TaskPermissions)
-            .Include(p => p.SkillPermissions)
-            .Include(p => p.AgentHeaderAccesses)
-            .Include(p => p.ChannelHeaderAccesses)
+            .Include(p => p.ResourceAccesses)
             .AsSplitQuery()
             .FirstOrDefaultAsync(p => p.Id == psId, ct);
 
@@ -168,36 +160,33 @@ public sealed class SeedingService(
         changed |= ReconcileFlag(v => ps.CanEditChannelHeader = v, ps.CanEditChannelHeader);
 
         // ── Wildcard resource grants ──────────────────────────────
-        changed |= EnsureWildcard(ps.DangerousShellAccesses, a => a.SystemUserId,
-            () => new DangerousShellAccessDB { PermissionSetId = psId, SystemUserId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.SafeShellAccesses, a => a.ContainerId,
-            () => new SafeShellAccessDB { PermissionSetId = psId, ContainerId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.ContainerAccesses, a => a.ContainerId,
-            () => new ContainerAccessDB { PermissionSetId = psId, ContainerId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.WebsiteAccesses, a => a.WebsiteId,
-            () => new WebsiteAccessDB { PermissionSetId = psId, WebsiteId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.SearchEngineAccesses, a => a.SearchEngineId,
-            () => new SearchEngineAccessDB { PermissionSetId = psId, SearchEngineId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.InternalDatabaseAccesses, a => a.InternalDatabaseId,
-            () => new InternalDatabaseAccessDB { PermissionSetId = psId, InternalDatabaseId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.ExternalDatabaseAccesses, a => a.ExternalDatabaseId,
-            () => new ExternalDatabaseAccessDB { PermissionSetId = psId, ExternalDatabaseId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.InputAudioAccesses, a => a.InputAudioId,
-            () => new InputAudioAccessDB { PermissionSetId = psId, InputAudioId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.DisplayDeviceAccesses, a => a.DisplayDeviceId,
-            () => new DisplayDeviceAccessDB { PermissionSetId = psId, DisplayDeviceId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.EditorSessionAccesses, a => a.EditorSessionId,
-            () => new EditorSessionAccessDB { PermissionSetId = psId, EditorSessionId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.AgentPermissions, a => a.AgentId,
-            () => new AgentManagementAccessDB { PermissionSetId = psId, AgentId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.TaskPermissions, a => a.ScheduledTaskId,
-            () => new TaskManageAccessDB { PermissionSetId = psId, ScheduledTaskId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.SkillPermissions, a => a.SkillId,
-            () => new SkillManageAccessDB { PermissionSetId = psId, SkillId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.AgentHeaderAccesses, a => a.AgentId,
-            () => new AgentHeaderAccessDB { PermissionSetId = psId, AgentId = WellKnownIds.AllResources });
-        changed |= EnsureWildcard(ps.ChannelHeaderAccesses, a => a.ChannelId,
-            () => new ChannelHeaderAccessDB { PermissionSetId = psId, ChannelId = WellKnownIds.AllResources });
+        string[] allResourceTypes =
+        [
+            ResourceTypes.DsShell,      ResourceTypes.Mk8Shell,
+            ResourceTypes.DbInternal,   ResourceTypes.DbExternal,
+            ResourceTypes.WaWebsite,    ResourceTypes.WaSearch,
+            ResourceTypes.Container,    ResourceTypes.TrAudio,
+            ResourceTypes.CuDisplay,    ResourceTypes.EditorSession,
+            ResourceTypes.AoAgent,      ResourceTypes.AoTask,
+            ResourceTypes.AoSkill,      ResourceTypes.AoAgentHeader,
+            ResourceTypes.AoChannelHeader, ResourceTypes.BiChannel,
+            ResourceTypes.OaDocument,   ResourceTypes.CuNativeApp,
+        ];
+
+        foreach (var rt in allResourceTypes)
+        {
+            if (!ps.ResourceAccesses.Any(a =>
+                    a.ResourceType == rt && a.ResourceId == WellKnownIds.AllResources))
+            {
+                ps.ResourceAccesses.Add(new ResourceAccessDB
+                {
+                    PermissionSetId = psId,
+                    ResourceType = rt,
+                    ResourceId = WellKnownIds.AllResources,
+                });
+                changed = true;
+            }
+        }
 
         if (changed)
         {
@@ -212,15 +201,6 @@ public sealed class SeedingService(
         {
             if (current) return false;
             setter(true);
-            return true;
-        }
-
-        static bool EnsureWildcard<T>(
-            ICollection<T> collection, Func<T, Guid> selector, Func<T> factory)
-        {
-            if (collection.Any(a => selector(a) == WellKnownIds.AllResources))
-                return false;
-            collection.Add(factory());
             return true;
         }
     }

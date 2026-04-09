@@ -103,76 +103,12 @@ public class PermissionSetDB : BaseEntity
 
     // ── Per-resource grant collections ────────────────────
 
-    public ICollection<DangerousShellAccessDB> DangerousShellAccesses { get; set; } = [];
-    public ICollection<SafeShellAccessDB> SafeShellAccesses { get; set; } = [];
-    public ICollection<InternalDatabaseAccessDB> InternalDatabaseAccesses { get; set; } = [];
-    public ICollection<ExternalDatabaseAccessDB> ExternalDatabaseAccesses { get; set; } = [];
-    public ICollection<WebsiteAccessDB> WebsiteAccesses { get; set; } = [];
-    public ICollection<SearchEngineAccessDB> SearchEngineAccesses { get; set; } = [];
-    public ICollection<ContainerAccessDB> ContainerAccesses { get; set; } = [];
-    public ICollection<InputAudioAccessDB> InputAudioAccesses { get; set; } = [];
-    public ICollection<DisplayDeviceAccessDB> DisplayDeviceAccesses { get; set; } = [];
-    public ICollection<EditorSessionAccessDB> EditorSessionAccesses { get; set; } = [];
-    public ICollection<AgentManagementAccessDB> AgentPermissions { get; set; } = [];
-    public ICollection<TaskManageAccessDB> TaskPermissions { get; set; } = [];
-    public ICollection<SkillManageAccessDB> SkillPermissions { get; set; } = [];
-    public ICollection<AgentHeaderAccessDB> AgentHeaderAccesses { get; set; } = [];
-    public ICollection<ChannelHeaderAccessDB> ChannelHeaderAccesses { get; set; } = [];
-    public ICollection<BotIntegrationAccessDB> BotIntegrationAccesses { get; set; } = [];
-    public ICollection<DocumentSessionAccessDB> DocumentSessionAccesses { get; set; } = [];
-    public ICollection<NativeApplicationAccessDB> NativeApplicationAccesses { get; set; } = [];
-
-    // ── Default resource accesses ─────────────────────────────────
-    // Optional defaults used when starting a job and no specific
-    // resource of that type is provided by the context or channel.
-
-    public Guid? DefaultDangerousShellAccessId { get; set; }
-    public DangerousShellAccessDB? DefaultDangerousShellAccess { get; set; }
-
-    public Guid? DefaultSafeShellAccessId { get; set; }
-    public SafeShellAccessDB? DefaultSafeShellAccess { get; set; }
-
-    public Guid? DefaultInternalDatabaseAccessId { get; set; }
-    public InternalDatabaseAccessDB? DefaultInternalDatabaseAccess { get; set; }
-
-    public Guid? DefaultExternalDatabaseAccessId { get; set; }
-    public ExternalDatabaseAccessDB? DefaultExternalDatabaseAccess { get; set; }
-
-    public Guid? DefaultWebsiteAccessId { get; set; }
-    public WebsiteAccessDB? DefaultWebsiteAccess { get; set; }
-
-    public Guid? DefaultSearchEngineAccessId { get; set; }
-    public SearchEngineAccessDB? DefaultSearchEngineAccess { get; set; }
-
-    public Guid? DefaultContainerAccessId { get; set; }
-    public ContainerAccessDB? DefaultContainerAccess { get; set; }
-
-    public Guid? DefaultInputAudioAccessId { get; set; }
-    public InputAudioAccessDB? DefaultInputAudioAccess { get; set; }
-
-    public Guid? DefaultDisplayDeviceAccessId { get; set; }
-    public DisplayDeviceAccessDB? DefaultDisplayDeviceAccess { get; set; }
-
-    public Guid? DefaultEditorSessionAccessId { get; set; }
-    public EditorSessionAccessDB? DefaultEditorSessionAccess { get; set; }
-
-    public Guid? DefaultAgentPermissionId { get; set; }
-    public AgentManagementAccessDB? DefaultAgentPermission { get; set; }
-
-    public Guid? DefaultTaskPermissionId { get; set; }
-    public TaskManageAccessDB? DefaultTaskPermission { get; set; }
-
-    public Guid? DefaultSkillPermissionId { get; set; }
-    public SkillManageAccessDB? DefaultSkillPermission { get; set; }
-
-    public Guid? DefaultBotIntegrationAccessId { get; set; }
-    public BotIntegrationAccessDB? DefaultBotIntegrationAccess { get; set; }
-
-    public Guid? DefaultDocumentSessionAccessId { get; set; }
-    public DocumentSessionAccessDB? DefaultDocumentSessionAccess { get; set; }
-
-    public Guid? DefaultNativeApplicationAccessId { get; set; }
-    public NativeApplicationAccessDB? DefaultNativeApplicationAccess { get; set; }
+    /// <summary>
+    /// All per-resource permission grants for this permission set.
+    /// Filtered by <see cref="ResourceAccessDB.ResourceType"/> at query time.
+    /// See Module-System-Design §3.10.4.
+    /// </summary>
+    public ICollection<ResourceAccessDB> ResourceAccesses { get; set; } = [];
 
     // ── Clearance whitelists ──────────────────────────────────────
 

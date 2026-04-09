@@ -1,4 +1,3 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
@@ -49,6 +48,4 @@ public class BotIntegrationDB : BaseEntity
     [HeaderSensitive]
     public string? PlatformConfig { get; set; }
 
-    /// <summary>Permission grants linking roles to this bot integration.</summary>
-    public ICollection<BotIntegrationAccessDB> Accesses { get; set; } = [];
-}
+    }
