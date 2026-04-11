@@ -35,6 +35,7 @@ intercepted before dispatch reaches the module and routed to
   - [tr_transcribe_audio_stream](#tr_transcribe_audio_stream)
   - [tr_transcribe_audio_file](#tr_transcribe_audio_file)
 - [Transcription Modes](#transcription-modes)
+- [Audio Pipeline](#audio-pipeline)
 - [Deduplication Pipeline](#deduplication-pipeline)
 - [Language Enforcement](#language-enforcement)
 - [Streaming Transports](#streaming-transports)
@@ -52,7 +53,7 @@ intercepted before dispatch reaches the module and routed to
 
 | Value | Int | Description |
 |-------|-----|-------------|
-| `SlidingWindow` | 0 | Two-pass sliding window (default). Segments are emitted provisionally, then finalized or retracted after commit delay. |
+| `SlidingWindow` | 0 | Two-pass sliding window (default). Segments are emitted provisionally, then finalized after commit delay. |
 | `StrictWindow` | 2 | Non-overlapping sequential windows. Each window transcribed exactly once. Minimal token cost; perceived latency equals window length. |
 
 ---
@@ -63,11 +64,18 @@ intercepted before dispatch reaches the module and routed to
 
 Start live transcription from an input audio device.
 
-**Parameters:**
+**Alias:** `tr_transcribe_from_audio_device`
+
+**Tool Schema Parameter:**
 
 | Field | Type | Required | Description |
 |-------|------|----------|-------------|
-| `targetId` | string (GUID) | yes | Input audio device resource GUID |
+| `resource_id` | string (GUID) | yes | Input audio device resource GUID |
+
+**Job-level Parameters** (set via job submission / channel / context defaults):
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
 | `transcriptionModelId` | string (GUID) | no | Override model (defaults from channel → context) |
 | `language` | string | no | BCP-47 language hint (e.g. `"en"`, `"de"`, `"ja"`) |
 | `transcriptionMode` | string | no | `"SlidingWindow"` (default) or `"StrictWindow"` |
@@ -110,8 +118,13 @@ Two-pass pipeline. Segments go through a lifecycle:
    `isProvisional: true`.
 2. **Finalized** — confirmed after commit delay (2 s). Same `id`,
    updated text/confidence, `isProvisional: false`.
-3. **Retracted** — if not confirmed within 2× commit delay (likely
-   hallucination), tombstone event with empty text.
+3. **Stale finalization** — provisionals older than 2× commit delay
+   are auto-finalized with their existing text to prevent indefinite
+   provisional state.
+
+The first inference fires after **1 s** (fast-start) rather than the
+normal poll interval so users hear feedback sooner. The two-pass
+lifecycle corrects any inaccuracies from short initial audio clips.
 
 ### StrictWindow
 
@@ -127,8 +140,77 @@ final on first emission (`isProvisional` always `false`).
 | `InferenceIntervalSeconds` | 2 | Default step between ticks |
 | `BufferCapacitySeconds` | 15 | Ring buffer size / max window clamp |
 | `CommitDelaySeconds` | 2.0 | Delay before provisional → finalized |
-| `MaxPromptChars` | 500 | Rolling prompt buffer size for Whisper |
+| `MaxPromptChars` | 250 | Rolling prompt buffer size for Whisper |
 | `SampleRate` | 16 000 | Audio sample rate (mono PCM) |
+
+---
+
+## Audio Pipeline
+
+### AudioNormalizer
+
+Ensures all audio is in the optimal format for Whisper / ASR:
+mono, 16 kHz sample rate, 16-bit PCM, WAV container. Pipeline:
+input stream → decode → stereo→mono → resample→16 kHz → write
+16-bit PCM WAV. If the input already matches the target format the
+bytes are returned unchanged (fast path). Applied by both
+`OpenAiTranscriptionApiClient` and `LocalTranscriptionClient` before
+each inference call.
+
+### AudioRingBuffer
+
+Thread-safe (single-writer, multi-reader) ring buffer of float PCM
+samples. Pre-allocated to `BufferCapacitySeconds` (15 s) and wraps
+around — older samples are silently overwritten. The WASAPI capture
+callback writes via `Write(ReadOnlySpan<float>)` with volatile
+publish semantics; inference loops read via `GetLastSeconds(int)`.
+
+### AudioVad
+
+Lightweight energy-based Voice Activity Detection. Computes RMS energy
+over a span of float PCM samples and compares against a configurable
+silence threshold (`DefaultSilenceThreshold = 0.005`). Used as a
+pre-filter to avoid sending purely silent audio to the transcription
+API. Does not replace Whisper's own `no_speech_prob` detection — both
+are used in tandem.
+
+### SharedAudioCaptureManager
+
+Singleton that manages shared WASAPI capture sessions per device.
+Multiple transcription jobs targeting the same device share a single
+capture task and `AudioRingBuffer` instead of each opening its own.
+`Acquire()` starts capture on first subscriber (returns the shared
+ring buffer); `ReleaseAsync()` stops capture when the last subscriber
+releases. Includes health monitoring via `GetCaptureStatus()`.
+
+### Startup Verification
+
+Before entering the main inference loop, the orchestrator verifies
+audio is actually flowing from the device:
+
+- Polls for up to **5 s** (100 ms intervals) waiting for the first
+  sample to arrive in the ring buffer.
+- Checks `SharedAudioCaptureManager.GetCaptureStatus()` each poll to
+  detect early capture failures.
+- Throws if no data is received within the timeout.
+
+### Data-flow Watchdog
+
+During the inference loop, a watchdog detects when the audio capture
+has stalled or the device has stopped producing samples:
+
+- Tracks `ringBuffer.TotalWritten` between poll ticks.
+- After **10 consecutive** ticks with no new data, the job is aborted.
+- Each stalled tick also checks `GetCaptureStatus()` for capture task
+  faults.
+
+### Step-region Silence Check
+
+In SlidingWindow mode (where `step < window`), most audio was already
+processed last tick. When the **new portion** (last `stepSeconds`
+seconds) is silent (RMS < 0.005), the full-window inference API call
+is skipped entirely. This gate is bypassed on tick 1 since all
+captured audio is new.
 
 ---
 
@@ -159,11 +241,17 @@ When `language` is set:
 - Whisper prompt is seeded with a natural phrase from an embedded
   `transcription-language-seeds.json` covering 99 Whisper-supported
   languages.
-- If the API response language tag doesn't match, the chunk is retried
-  up to 4 times with escalating reinforcement (single seed → triple →
-  instruction preamble → max saturation block).
-- Final result is accepted even on mismatch — no audio is silently
-  dropped.
+- `LanguageScriptValidator.GetPromptSeed(language)` provides the
+  initial seed used at the start of the sliding-window loop.
+- `LanguageScriptValidator.GetReinforcedPrompt()` supports 4
+  escalation levels (single seed → triple → instruction preamble →
+  max saturation block) for retry scenarios. **Currently unused** by
+  the orchestrator — only the initial prompt seed is applied.
+- `ResponseLanguageMatches()` normalises BCP-47 tags to their base
+  subtag for comparison.
+- If auto-detected language (`effectiveLanguage`) is null and the API
+  response includes a language tag, the orchestrator adopts it for
+  subsequent ticks.
 
 ---
 
@@ -211,7 +299,7 @@ resource inputaudio sync            Import system input audio devices
 | Input Audio Devices | All transcription tools |
 
 Input audio devices can be synced via
-`POST /resources/audiodevices/sync` or `resource inputaudio sync`.
+`POST /resources/inputaudios/sync` or `resource inputaudio sync`.
 
 A default input audio device ("Default", identifier `"default"`) is
 seeded on module startup.
@@ -239,12 +327,23 @@ seeded on module startup.
 
 ## Audio / Concurrency Contract
 
-- One job = one task.
-- Single consumer `Channel<(byte[], int)>`.
-- No `Task.Run` per chunk.
-- Linked CTS propagates errors.
-- Consumer awaited before rethrow.
-- OpenAI client uses 3 retries with exponential backoff on 429.
+- One job = one orchestrator task (`RunSlidingWindowLoopAsync`).
+- Audio flows through a shared `AudioRingBuffer` (float ring buffer,
+  single-writer / multi-reader) managed by `SharedAudioCaptureManager`.
+- Multiple jobs on the same device share one WASAPI capture task and
+  ring buffer via ref-counting.
+- No `Task.Run` per chunk — the capture callback writes directly to
+  the ring buffer.
+- `CancellationTokenSource` per job; `StopAllAsync()` cancels all on
+  module shutdown.
+- Job failure path: status set to `Failed` with error log; capture
+  session released in `finally`.
+- OpenAI client uses 3 retries with exponential backoff on 429
+  (initial backoff 2 s). Permanent `insufficient_quota` errors are
+  not retried.
+- Non-retryable 4xx errors in the inference loop abort the job
+  immediately. Other errors accumulate up to 5 consecutive failures
+  before aborting.
 
 ---
 

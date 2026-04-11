@@ -23,7 +23,7 @@ ILiveTranscriptionOrchestrator.StartTranscriptionAsync.
 ENUMS
 ────────────────────────────────────────
 TranscriptionMode:
-  SlidingWindow (0) — two-pass, provisional then finalized/retracted.
+  SlidingWindow (0) — two-pass, provisional then finalized after commit delay.
   StrictWindow (2)  — non-overlapping sequential windows, final-only.
 
 ────────────────────────────────────────
@@ -32,12 +32,13 @@ TOOLS (3)
 
 tr_transcribe_audio_device
   Start live transcription from an input audio device.
-  Params: targetId (audio device GUID, required),
-          transcriptionModelId (GUID, optional — override model),
-          language (string, optional — BCP-47 hint e.g. "en", "de"),
-          transcriptionMode (string, optional — "SlidingWindow"|"StrictWindow"),
-          windowSeconds (int, optional — 5-15, default 10),
-          stepSeconds (int, optional — 1-window, default 2, SlidingWindow only)
+  Alias: tr_transcribe_from_audio_device
+  Tool schema: resource_id (audio device GUID, required)
+  Job-level: transcriptionModelId (GUID, optional — override model),
+             language (string, optional — BCP-47 hint e.g. "en", "de"),
+             transcriptionMode (string, optional — "SlidingWindow"|"StrictWindow"),
+             windowSeconds (int, optional — 5-15, default 10),
+             stepSeconds (int, optional — 1-window, default 2, SlidingWindow only)
   Permission: per-resource (InputAudioDevice)
 
 tr_transcribe_audio_stream
@@ -54,15 +55,15 @@ tr_transcribe_audio_file
 TRANSCRIPTION MODES
 ────────────────────────────────────────
 SlidingWindow (default):
-  Provisional → Finalized (commit delay 2s) or Retracted (hallucination).
-  Step interval ~2s. Low latency.
+  Provisional → Finalized (commit delay 2s) or stale-finalized (2× delay).
+  First inference at 1s (fast-start), then step interval ~2s. Low latency.
 
 StrictWindow:
   Non-overlapping windows (default 10s). One API call per window.
   All segments final. Minimal token cost. Latency = window length.
 
 Pipeline constants: WindowSeconds=10, InferenceInterval=2,
-  BufferCapacity=15, CommitDelay=2.0, MaxPromptChars=500, SampleRate=16000.
+  BufferCapacity=15, CommitDelay=2.0, MaxPromptChars=250, SampleRate=16000.
 
 ────────────────────────────────────────
 STREAMING
