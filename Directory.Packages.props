@@ -50,7 +50,7 @@
     <!-- VS 2026 VSIX extension (new out-of-proc model, SharpClaw.VisualStudio2026) -->
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility" Version="17.14.54" />
     <!-- Document tools (Open XML spreadsheet + CSV) -->
-    <PackageVersion Include="ClosedXML" Version="0.104.2" />
+    <PackageVersion Include="ClosedXML" Version="0.105.0" />
     <PackageVersion Include="CsvHelper" Version="33.0.1" />
     <!-- Database drivers (Database Access module) -->
     <PackageVersion Include="Npgsql" Version="10.0.2" />
