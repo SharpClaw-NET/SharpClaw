@@ -10,6 +10,9 @@
       <Deploy />
     </Project>
   </Folder>
+  <Folder Name="/DefaultModules/ModuleDev/">
+    <Project Path="DefaultModules/ModuleDev/SharpClaw.Modules.ModuleDev.csproj" />
+  </Folder>
   <Folder Name="/Gateway/">
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
@@ -45,14 +48,38 @@
     <File Path="docs/App-API-documentation.md" />
     <File Path="docs/App-API-skill.md" />
     <File Path="docs/Gateway-documentation.md" />
-    <File Path="docs/Module-ComputerUse-skill.md" />
-    <File Path="docs/Module-ComputerUse.md" />
-    <File Path="docs/Module-OfficeApps-skill.md" />
-    <File Path="docs/Module-OfficeApps.md" />
     <File Path="docs/Provider-Parameters.md" />
   </Folder>
   <Folder Name="/Solution Items/Git/">
     <File Path=".gitignore" />
+  </Folder>
+  <Folder Name="/Solution Items/Modules/">
+    <File Path="docs/Module-AgentOrchestration-skill.md" />
+    <File Path="docs/Module-AgentOrchestration.md" />
+    <File Path="docs/Module-BotIntegration-skill.md" />
+    <File Path="docs/Module-BotIntegration.md" />
+    <File Path="docs/Module-ComputerUse-skill.md" />
+    <File Path="docs/Module-ComputerUse.md" />
+    <File Path="docs/Module-ContextTools-skill.md" />
+    <File Path="docs/Module-ContextTools.md" />
+    <File Path="docs/Module-DangerousShell-skill.md" />
+    <File Path="docs/Module-DangerousShell.md" />
+    <File Path="docs/Module-DatabaseAccess-skill.md" />
+    <File Path="docs/Module-DatabaseAccess.md" />
+    <File Path="docs/Module-EditorCommon-skill.md" />
+    <File Path="docs/Module-EditorCommon.md" />
+    <File Path="docs/Module-Mk8Shell-skill.md" />
+    <File Path="docs/Module-Mk8Shell.md" />
+    <File Path="docs/Module-OfficeApps-skill.md" />
+    <File Path="docs/Module-OfficeApps.md" />
+    <File Path="docs/Module-Transcription-skill.md" />
+    <File Path="docs/Module-Transcription.md" />
+    <File Path="docs/Module-VS2026Editor-skill.md" />
+    <File Path="docs/Module-VS2026Editor.md" />
+    <File Path="docs/Module-VSCodeEditor-skill.md" />
+    <File Path="docs/Module-VSCodeEditor.md" />
+    <File Path="docs/Module-WebAccess-skill.md" />
+    <File Path="docs/Module-WebAccess.md" />
   </Folder>
   <Folder Name="/Solution Items/Notices/">
     <File Path="CONTRIBUTING.md" />

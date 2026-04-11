@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <EmbeddedResource Include="Templates\ModuleClass.cs.template" />
+    <EmbeddedResource Include="Templates\ProjectFile.csproj.template" />
+    <EmbeddedResource Include="Templates\Manifest.json.template" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="module.json" Link="modules\sharpclaw_module_dev\module.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

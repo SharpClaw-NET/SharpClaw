@@ -1,0 +1,14 @@
+{
+  "id": "{{MODULE_ID}}",
+  "displayName": "{{DISPLAY_NAME}}",
+  "version": "0.1.0",
+  "toolPrefix": "{{TOOL_PREFIX}}",
+  "entryAssembly": "{{ASSEMBLY_NAME}}.dll",
+  "minHostVersion": "1.0.0",
+  "description": "{{DESCRIPTION}}",
+  "platforms": null,
+  "enabled": true,
+  "executionTimeoutSeconds": 60,
+  "exports": [],
+  "requires": []
+}

@@ -1,0 +1,33 @@
+using System.Text.Json;
+using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Contracts.Modules;
+
+namespace {{NAMESPACE}};
+
+public sealed class {{CLASS_NAME}} : ISharpClawModule
+{
+    public string Id => "{{MODULE_ID}}";
+    public string DisplayName => "{{DISPLAY_NAME}}";
+    public string ToolPrefix => "{{TOOL_PREFIX}}";
+
+    public void ConfigureServices(IServiceCollection services)
+    {
+        // Register your services here
+    }
+
+    public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
+    [
+{{TOOL_STUBS}}
+    ];
+
+    public Task<string> ExecuteToolAsync(
+        string toolName, JsonElement parameters,
+        AgentJobContext job, IServiceProvider sp, CancellationToken ct)
+    {
+        return toolName switch
+        {
+{{TOOL_DISPATCH}}
+            _ => throw new NotSupportedException($"Unknown tool: {toolName}")
+        };
+    }
+}

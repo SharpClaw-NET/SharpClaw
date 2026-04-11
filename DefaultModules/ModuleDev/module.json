@@ -1,0 +1,18 @@
+{
+  "id": "sharpclaw_module_dev",
+  "displayName": "Module Development Kit",
+  "version": "1.0.0",
+  "toolPrefix": "mdk",
+  "entryAssembly": "SharpClaw.Modules.ModuleDev",
+  "minHostVersion": "1.0.0",
+  "description": "Autonomous module authoring, building, hot-loading, and development introspection tools.",
+  "platforms": null,
+  "exports": [],
+  "requires": [
+    {
+      "contractName": "window_management",
+      "serviceType": "SharpClaw.Contracts.Modules.Contracts.IWindowManager",
+      "optional": true
+    }
+  ]
+}
