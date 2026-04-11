@@ -797,7 +797,9 @@ IConfiguration configuration)
                 sw.Stop();
                 metricsCollector.RecordFailure(prefixedToolName);
                 throw new InvalidOperationException(
-                    ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message));
+                    $"[{ex.GetType().Name}] " +
+                    ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message),
+                    ex);
             }
         }
         finally
@@ -878,10 +880,25 @@ IConfiguration configuration)
         if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
             return null;
 
-        // Parse the raw ScriptJson into a JsonElement for the envelope params.
-        var paramsElement = string.IsNullOrWhiteSpace(job.ScriptJson)
-            ? JsonDocument.Parse("{}").RootElement.Clone()
-            : JsonDocument.Parse(job.ScriptJson).RootElement.Clone();
+        // Parse the raw ScriptJson into tool parameters.  When ScriptJson
+        // is already a full ModuleEnvelope (created by ParseNativeToolCall),
+        // extract only the nested "params" element to avoid double-wrapping.
+        JsonElement paramsElement;
+        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
+        {
+            using var doc = JsonDocument.Parse(job.ScriptJson);
+            var root = doc.RootElement;
+            if ((root.TryGetProperty("module", out _) || root.TryGetProperty("Module", out _)) &&
+                (root.TryGetProperty("tool", out _) || root.TryGetProperty("Tool", out _)) &&
+                (root.TryGetProperty("params", out var nested) || root.TryGetProperty("Params", out nested)))
+                paramsElement = nested.Clone();
+            else
+                paramsElement = root.Clone();
+        }
+        else
+        {
+            paramsElement = JsonDocument.Parse("{}").RootElement.Clone();
+        }
 
         // Build a ModuleEnvelope from the job's existing data.
         var envelope = new ModuleEnvelope(moduleId, toolName, paramsElement);

@@ -449,6 +449,7 @@ public class SharpClawDbContext(
             e.Property(j => j.EffectiveClearance).HasConversion<string>();
             e.Property(j => j.DangerousShellType).HasConversion<string>();
             e.Property(j => j.SafeShellType).HasConversion<string>();
+            e.Property(j => j.TranscriptionMode).HasConversion<string>();
             e.HasOne(j => j.Agent)
                 .WithMany()
                 .HasForeignKey(j => j.AgentId)

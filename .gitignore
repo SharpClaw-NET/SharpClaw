@@ -3,16 +3,7 @@
 ## My additions will be here at the top:
 
 # Internal specs & docs
-docs/Product-comparison.md
-docs/Module-System-Design.md
-docs/Module-Migration-Plan.md
-docs/Module-Migration-Plan-Mk8Shell.md
-docs/Module-Migration-Plan-VS2026Editor.md
-docs/Module-Migration-Plan-VSCodeEditor.md
-docs/Module-Migration-Plan-Transcription.md
-docs/Module-Migration-Plan-WebAccess.md
-docs/Module-Migration-Plan-BotIntegration.md
-docs/Uno-Module-Tab-Spec.md
+docs/internal/
 
 # Copilot
 .github/upgrades

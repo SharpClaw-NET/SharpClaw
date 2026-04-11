@@ -35,19 +35,29 @@ internal sealed class ModuleServiceScope(
     public object GetRequiredService(Type serviceType)
     {
         ThrowIfBlocked(serviceType);
-        return ((ISupportRequiredService)inner).GetRequiredService(serviceType);
+        if (inner is ISupportRequiredService required)
+            return required.GetRequiredService(serviceType);
+        return inner.GetService(serviceType)
+            ?? throw new InvalidOperationException(
+                $"No service for type '{serviceType.FullName}' has been registered.");
     }
 
     public object? GetKeyedService(Type serviceType, object? serviceKey)
     {
         ThrowIfBlocked(serviceType);
-        return ((IKeyedServiceProvider)inner).GetKeyedService(serviceType, serviceKey);
+        if (inner is IKeyedServiceProvider keyed)
+            return keyed.GetKeyedService(serviceType, serviceKey);
+        throw new InvalidOperationException(
+            "The inner service provider does not support keyed services.");
     }
 
     public object GetRequiredKeyedService(Type serviceType, object? serviceKey)
     {
         ThrowIfBlocked(serviceType);
-        return ((IKeyedServiceProvider)inner).GetRequiredKeyedService(serviceType, serviceKey);
+        if (inner is IKeyedServiceProvider keyed)
+            return keyed.GetRequiredKeyedService(serviceType, serviceKey);
+        throw new InvalidOperationException(
+            "The inner service provider does not support keyed services.");
     }
 
     private void ThrowIfBlocked(Type serviceType)
