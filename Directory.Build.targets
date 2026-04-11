@@ -20,23 +20,19 @@
   </Target>
 
   <!--
-    Force-copy .env files to output directory on every build, even when
-    source isn't newer (user edits in source tree must always propagate).
-    Also register generated .env files for Clean to delete.
+    Dynamically register .env files as Content items AFTER _EnsureEnvironmentFiles
+    has generated them from templates. Runs before AssignTargetPaths (current project's
+    content pipeline) and GetCopyToOutputDirectoryItems (what referencing projects call),
+    so the files propagate transitively through ProjectReference.
+    CopyToOutputDirectory="Always" ensures source edits always reach the output.
   -->
-  <Target Name="_CopyEnvironmentFiles" AfterTargets="Build"
+  <Target Name="_RegisterEnvironmentContent"
+          BeforeTargets="AssignTargetPaths;GetCopyToOutputDirectoryItems"
+          DependsOnTargets="_EnsureEnvironmentFiles"
           Condition="Exists('Environment')">
     <ItemGroup>
-      <_SourceEnvFile Include="Environment\*.env" Exclude="Environment\*.template" />
-      <_OutputEnvFile Include="@(_SourceEnvFile->'$(OutputPath)Environment\%(Filename)%(Extension)')" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_SourceEnvFile)"
-          DestinationFiles="@(_OutputEnvFile)"
-          SkipUnchangedFiles="false"
-          Condition="'@(_SourceEnvFile)' != ''" />
-    <ItemGroup>
-      <FileWrites Include="@(_SourceEnvFile)" />
-      <FileWrites Include="@(_OutputEnvFile)" />
+      <Content Include="Environment\*.env" Exclude="Environment\*.template"
+               CopyToOutputDirectory="Always" />
     </ItemGroup>
   </Target>
 

@@ -297,7 +297,8 @@ try
     // Scan external-modules directory and hot-load any found modules
     try
     {
-        var moduleSvc = app.Services.GetRequiredService<ModuleService>();
+        using var extScope = app.Services.CreateScope();
+        var moduleSvc = extScope.ServiceProvider.GetRequiredService<ModuleService>();
         var externalModules = await moduleSvc.ScanExternalModulesAsync(app.Services);
         foreach (var ext in externalModules)
             Log.Information("External module '{ModuleId}' loaded ({Version})", ext.ModuleId, ext.Version);

@@ -29,7 +29,7 @@
 
   <ItemGroup>
     <Content Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
-    <!-- .env files are now copied by Directory.Build.targets -->
+    <!-- .env files registered dynamically by Directory.Build.targets (_RegisterEnvironmentContent) -->
   </ItemGroup>
 
   <ItemGroup>

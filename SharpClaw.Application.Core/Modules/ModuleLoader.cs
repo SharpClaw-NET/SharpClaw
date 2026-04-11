@@ -22,12 +22,31 @@ public sealed class ModuleLoader
     }
 
     /// <summary>
-    /// Scan all loaded assemblies for concrete <see cref="ISharpClawModule"/>
-    /// implementations with a public parameterless constructor. Returns a new
-    /// <see cref="ModuleLoader"/> populated with one instance of each discovered module.
+    /// Discover bundled <see cref="ISharpClawModule"/> implementations by loading all
+    /// <c>SharpClaw.Modules.*.dll</c> assemblies from the application base directory,
+    /// then scanning for concrete types with a public parameterless constructor.
+    /// Returns a new <see cref="ModuleLoader"/> populated with one instance of each
+    /// discovered module.
     /// </summary>
     public static ModuleLoader DiscoverBundled()
     {
+        // Module assemblies are only present in the output directory via ProjectReference
+        // but are NOT loaded into the AppDomain unless something forces type resolution.
+        // Explicitly load all matching DLLs so the type scan below can find them.
+        var baseDir = AppContext.BaseDirectory;
+        foreach (var dll in Directory.GetFiles(baseDir, "SharpClaw.Modules.*.dll"))
+        {
+            try
+            {
+                Assembly.LoadFrom(dll);
+            }
+            catch
+            {
+                // Skip assemblies that fail to load (e.g. native-only, already loaded
+                // under a different identity, or missing transitive dependencies).
+            }
+        }
+
         var moduleType = typeof(ISharpClawModule);
         var modules = AppDomain.CurrentDomain.GetAssemblies()
             .Where(a => !a.IsDynamic)

@@ -29,17 +29,21 @@ public static class LocalEnvironment
         """
         {
           "Modules": {
+            "sharpclaw_agent_orchestration": false,
+            "sharpclaw_bot_integration": false,
             "sharpclaw_computer_use": false,
+            "sharpclaw_context_tools": false,
             "sharpclaw_dangerous_shell": false,
+            "sharpclaw_database_access": false,
+            "sharpclaw_editor_common": false,
             "sharpclaw_mk8shell": false,
             "sharpclaw_office_apps": false,
-            "sharpclaw_vs2026_editor": false,
-            "sharpclaw_vscode_editor": false,
-            "sharpclaw_database_access": false
+            "sharpclaw_transcription": false,
+            "sharpclaw_web_access": false
           }
         }
-        """;
-
+        """
+;
     public static IConfigurationBuilder AddLocalEnvironment(
         this IConfigurationBuilder builder, bool isDevelopment = false)
     {

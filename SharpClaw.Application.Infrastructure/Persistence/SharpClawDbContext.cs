@@ -150,7 +150,11 @@ public class SharpClawDbContext(
             e.HasIndex(t => t.Name).IsUnique();
             e.Property(t => t.Tools).HasConversion(
                 v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(v, (JsonSerializerOptions?)null)! : new());
+                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(v, (JsonSerializerOptions?)null)! : new())
+                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, bool>>(
+                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+                    v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode() : 0,
+                    v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)! : new()));
         });
 
         // ── Agents & Chat ─────────────────────────────────────────
@@ -159,7 +163,11 @@ public class SharpClawDbContext(
             e.HasIndex(a => a.Name).IsUnique();
             e.Property(a => a.ProviderParameters).HasConversion(
                 v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null) : null,
-                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(v, (JsonSerializerOptions?)null) : null);
+                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(v, (JsonSerializerOptions?)null) : null)
+                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, JsonElement>?>(
+                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
+                    v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode() : 0,
+                    v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null) : null));
             e.HasMany(a => a.Contexts)
                 .WithOne(c => c.Agent)
                 .HasForeignKey(c => c.AgentId)
@@ -518,8 +526,7 @@ public class SharpClawDbContext(
             e.Property(c => c.Value).HasMaxLength(4096);
         });
 
-        modelBuilder.ApplyConfigurationsFromAssembly(typeof(SharpClawDbContext).Assembly);
-    }
+        }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
