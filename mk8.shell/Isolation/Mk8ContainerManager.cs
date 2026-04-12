@@ -359,6 +359,9 @@ public sealed class Mk8ContainerManager : IAsyncDisposable
 
     private static async Task RecoverWsl2ContainersAsync(CancellationToken ct)
     {
+        if (!OperatingSystem.IsWindows())
+            return;
+
         if (!Mk8Wsl2SandboxContainer.IsAvailable())
             return;
 

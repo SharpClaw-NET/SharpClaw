@@ -32,7 +32,8 @@ public sealed class OfficeAppsModule : ISharpClawModule
     {
         services.AddScoped<DocumentSessionService>();
         services.AddSingleton<SpreadsheetService>();
-        services.AddSingleton<ExcelComInteropService>();
+        if (OperatingSystem.IsWindows())
+            services.AddSingleton<ExcelComInteropService>();
     }
 
     public void MapEndpoints(object app)
@@ -261,7 +262,9 @@ public sealed class OfficeAppsModule : ISharpClawModule
         IServiceProvider sp, CancellationToken ct)
     {
         var spreadsheet = sp.GetRequiredService<SpreadsheetService>();
+#pragma warning disable CA1416 // ExcelComInteropService is Windows-only; live_* tools require Windows
         var excel = sp.GetRequiredService<ExcelComInteropService>();
+#pragma warning restore CA1416
 
         return toolName switch
         {
@@ -398,9 +401,11 @@ public sealed class OfficeAppsModule : ISharpClawModule
 
         return toolName switch
         {
+#pragma warning disable CA1416 // Live COM interop is Windows-only
             "live_read_range" => excel.ReadRange(docSession.FilePath, sheetName, range),
             "live_write_range" => excel.WriteRange(
                 docSession.FilePath, sheetName, range, ExtractJsonData(parameters)),
+#pragma warning restore CA1416
             _ => throw new InvalidOperationException(
                 $"Unexpected live spreadsheet action: {toolName}"),
         };

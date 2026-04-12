@@ -42,7 +42,8 @@ public sealed class JsonFilePersistenceService(
                     .Select(n => n.PropertyInfo)
                     .Concat(g.First().GetSkipNavigations().Select(n => n.PropertyInfo))
                     .Where(p => p is not null)
-                    .ToList()!);
+                    .Select(p => p!)
+                    .ToList());
     }
 
     /// <summary>

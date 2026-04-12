@@ -84,8 +84,6 @@ public sealed class Mk8TaskContainer : IAsyncDisposable, IDisposable
     /// </summary>
     public Mk8SandboxContainer SandboxContainer { get; }
 
-    private bool _disposed;
-
     private Mk8TaskContainer(
         Mk8Sandbox sandbox,
         Mk8WorkspaceContext workspace,
@@ -284,12 +282,10 @@ public sealed class Mk8TaskContainer : IAsyncDisposable, IDisposable
     {
         // Per-command state only — the sandbox container is NOT ours
         // to stop. It runs continuously under Mk8ContainerManager.
-        _disposed = true;
         return ValueTask.CompletedTask;
     }
 
     public void Dispose()
     {
-        _disposed = true;
     }
 }

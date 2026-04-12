@@ -261,7 +261,7 @@ public sealed class WebsiteAccessService(
         sb.AppendLine();
         sb.Append(body);
 
-        if (!reader.EndOfStream)
+        if (charsRead == buffer.Length)
             sb.AppendLine("\n\n[TRUNCATED — response exceeded 2 MB limit]");
 
         return sb.ToString();

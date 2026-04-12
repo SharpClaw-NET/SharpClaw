@@ -605,7 +605,7 @@ public sealed class SearchEngineService(
         var charsRead = await reader.ReadBlockAsync(buffer, 0, buffer.Length);
         var body = new string(buffer, 0, charsRead);
 
-        if (!reader.EndOfStream)
+        if (charsRead == buffer.Length)
             body += "\n\n[TRUNCATED — response exceeded 1 MB limit]";
 
         return body;

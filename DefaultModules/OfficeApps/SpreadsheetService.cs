@@ -147,7 +147,7 @@ public sealed class SpreadsheetService
             };
         }).ToList();
 
-        var namedRanges = workbook.NamedRanges
+        var namedRanges = workbook.DefinedNames
             .Select(nr => new { name = nr.Name, refersTo = nr.RefersTo })
             .ToList();
 

@@ -522,7 +522,9 @@ public sealed class DesktopAwarenessService : IWindowManager
         if (!OperatingSystem.IsWindows())
             return Task.FromResult(NotSupportedJson("Read clipboard"));
 
-        return RunOnStaThread(() => ReadClipboardWindows(format));
+        #pragma warning disable CA1416 // Guarded by OperatingSystem.IsWindows() above
+                return RunOnStaThread(() => ReadClipboardWindows(format));
+        #pragma warning restore CA1416
     }
 
     /// <summary>Write text or file paths to clipboard. Runs on STA thread.</summary>
@@ -536,7 +538,9 @@ public sealed class DesktopAwarenessService : IWindowManager
         if (!OperatingSystem.IsWindows())
             return Task.FromResult(NotSupportedJson("Write clipboard"));
 
-        return RunOnStaThread(() => WriteClipboardWindows(text, filePaths));
+        #pragma warning disable CA1416 // Guarded by OperatingSystem.IsWindows() above
+                return RunOnStaThread(() => WriteClipboardWindows(text, filePaths));
+        #pragma warning restore CA1416
     }
 
     [SupportedOSPlatform("windows")]
@@ -659,6 +663,7 @@ public sealed class DesktopAwarenessService : IWindowManager
         }
     }
 
+    [SupportedOSPlatform("windows")]
     private static Task<string> RunOnStaThread(Func<string> action)
     {
         var tcs = new TaskCompletionSource<string>();
