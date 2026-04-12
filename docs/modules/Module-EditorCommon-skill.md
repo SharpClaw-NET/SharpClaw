@@ -9,6 +9,31 @@ Exports: editor_bridge, editor_session
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_editor_common
+Default: disabled
+Prerequisites: none
+Platform: All
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_editor_common": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+IMPORTANT: This is a dependency for VS 2026 Editor and VS Code Editor.
+Disabling this module will cascade-disable both editor modules.
+
+Exports: editor_bridge (EditorBridgeService),
+         editor_session (EditorSessionService).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_editor_common
+  module enable sharpclaw_editor_common
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Infrastructure module: shared editor bridge (WebSocket) and session

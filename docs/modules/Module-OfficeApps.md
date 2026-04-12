@@ -10,6 +10,34 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_office_apps` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | Windows, Linux, macOS |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_office_apps": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_office_apps
+module enable sharpclaw_office_apps
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Office Apps module provides document session management, file-based

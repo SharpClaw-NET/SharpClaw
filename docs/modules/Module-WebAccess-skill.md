@@ -9,6 +9,25 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_web_access
+Default: disabled
+Prerequisites: none
+Platform: All
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_web_access": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_web_access
+  module enable sharpclaw_web_access
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Localhost access (headless browser + direct HTTP), external website access

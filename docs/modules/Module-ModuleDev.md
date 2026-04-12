@@ -10,6 +10,46 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_module_dev` |
+| **Default** | ❌ **Disabled** (not listed in default `.env`) |
+| **Prerequisites** | [Computer Use](Module-ComputerUse.md) *(optional)* |
+| **Platform** | All |
+
+This module is **disabled by default**. To enable, add to your core
+`.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_module_dev": "true"
+```
+
+For enhanced process inspection (window-title → PID resolution),
+also enable Computer Use:
+
+```jsonc
+"sharpclaw_computer_use": "true",
+"sharpclaw_module_dev": "true"
+```
+
+Without Computer Use, process inspection falls back to
+`Process.GetProcessesByName` (less precise).
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_module_dev
+module enable sharpclaw_module_dev
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Module Development Kit (MDK) enables an LLM agent to **autonomously

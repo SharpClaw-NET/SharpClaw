@@ -1,4 +1,4 @@
-# SharpClaw Application API Reference
+# SharpClaw Core API Reference
 
 > **Base URL:** `http://127.0.0.1:48923`
 >
@@ -50,7 +50,6 @@ fastest way to make that happen.
 - [Chat streaming (SSE)](#chat-streaming-sse)
 - [Agent Jobs](#agent-jobs)
 - [Inline tools](#inline-tools)
-- [Transcription streaming](#transcription-streaming)
 - [Resources](#resources)
 - [Roles](#roles)
 - [Default resources](#default-resources)
@@ -62,6 +61,7 @@ fastest way to make that happen.
 - [Custom chat header](#custom-chat-header)
 - [Tool awareness sets](#tool-awareness-sets)
 - [Permission Resolution](#permission-resolution)
+- [Bundled modules](#bundled-modules)
 
 ---
 
@@ -1715,21 +1715,15 @@ unless overridden via `agentId`.
 
 ```json
 {
-  "actionType": "ExecuteAsSafeShell",
+  "actionKey": "string",
   "resourceId": "guid | null",
   "agentId": "guid | null",
-  "callerAgentId": "guid | null",
-  "dangerousShellType": "Bash | PowerShell | CommandPrompt | Git | null",
-  "safeShellType": "Mk8Shell | null",
-  "scriptJson": "string | null",
-  "workingDirectory": "string | null",
-  "transcriptionModelId": "guid | null",
-  "language": "string | null",
-  "transcriptionMode": "SlidingWindow | StrictWindow | null",
-  "windowSeconds": "int | null",
-  "stepSeconds": "int | null"
+  "callerAgentId": "guid | null"
 }
 ```
+
+`actionKey` identifies the action to execute. The set of valid action
+keys is dynamic — query `GET /modules` for the authoritative list.
 
 `agentId` optionally overrides the channel's default agent. The agent
 must be the channel default or in its `allowedAgentIds`.
@@ -1738,73 +1732,11 @@ must be the channel default or in its `allowedAgentIds`.
 defaults are resolved from the channel → context → agent role permission
 sets. Global action types ignore it.
 
-#### Shell fields
-
-For shell jobs:
-
-- **`dangerousShellType`** — required for `UnsafeExecuteAsDangerousShell`.
-  Values: `Bash`, `PowerShell`, `CommandPrompt`, `Git`.
-- **`safeShellType`** — required for `ExecuteAsSafeShell`. Value: `Mk8Shell`.
-- **`scriptJson`** — serialised `Mk8ShellScript` JSON for safe shell;
-  raw command text for dangerous shell.
-- **`workingDirectory`** — absolute path where the dangerous shell
-  process should be spawned. Overrides the system user's default
-  working directory. Not sandboxed — dangerous by design.
-
-#### Transcription fields
-
-For transcription jobs (`TranscribeFromAudioDevice`,
-`TranscribeFromAudioStream`, `TranscribeFromAudioFile`):
-
-- **`transcriptionModelId`** — overrides the agent's model with a
-  specific transcription model. When omitted the default transcription
-  model is resolved from the channel → context default resource set.
-- **`language`** — BCP-47 language hint (e.g. `"en"`, `"de"`, `"ja"`)
-  forwarded to the STT provider. When omitted, the model auto-detects
-  the spoken language. **Supplying the correct language code improves
-  accuracy and reduces latency** — especially for short audio chunks
-  where auto-detection is unreliable.  When set, the orchestrator
-  enforces the language via prompt seeding: the Whisper prompt is
-  initialised with a natural phrase from an embedded
-  `transcription-language-seeds.json` resource covering all 99
-  Whisper-supported languages. If the API's response-level language
-  tag doesn't match, the chunk is retried up to 4 times with
-  escalating reinforcement (single seed → triple seed → instruction
-  preamble + seed → max saturation block). If all retries still
-  return the wrong language the result is accepted anyway — no audio
-  is ever silently dropped.
-- **`transcriptionMode`** — pipeline mode. `SlidingWindow` (default):
-  two-pass — segments are emitted provisionally within one inference
-  tick, then finalized or retracted once the commit delay confirms
-  them.  `StrictWindow`: non-overlapping sequential windows (default
-  10 s) — each window transcribed exactly once with minimal token cost.
-  Whisper needs a full window of audio context to produce accurate
-  results, so perceived latency equals the window length.
-- **`windowSeconds`** — seconds of audio sent to Whisper per inference
-  tick. Clamped to [5, 15]. Default 10. Larger windows give more
-  context but cost more per API call.
-- **`stepSeconds`** — seconds between inference ticks (SlidingWindow
-  mode only). Clamped to [1, window]. Default 2. Ignored in
-  StrictWindow mode where step equals window.
-
-> **CLI equivalent:**
-> `job submit <channelId> TranscribeFromAudioDevice <audioDeviceId> --model <id> --lang en --mode window --window 12`
->
-> Mode shortcuts: `sliding` (default, two-pass), `window` (sequential windows).
-
-Audio is automatically normalised to mono 16 kHz 16-bit PCM before
-being sent to the transcription model (Whisper-optimal format).
-
-#### Dedup pipeline constants
-
-| Constant | Value | Description |
-|----------|-------|-------------|
-| `WindowSeconds` | 10 | Default audio window per inference tick |
-| `InferenceIntervalSeconds` | 2 | Default step between ticks |
-| `BufferCapacitySeconds` | 15 | Ring buffer size / max window clamp |
-| `CommitDelaySeconds` | 2.0 | Delay before provisional → finalized |
-| `MaxPromptChars` | 500 | Rolling prompt buffer size for Whisper |
-| `SampleRate` | 16 000 | Audio sample rate (mono PCM) |
+> **Module-specific fields:** The DTO may include additional fields
+> consumed by the module that owns the action key (e.g. shell
+> type/script parameters, transcription parameters). These fields are
+> ignored by the core and passed through to the module. See individual
+> module documentation for details.
 
 **Response `200`:** `AgentJobResponse`
 
@@ -1833,7 +1765,7 @@ jobs without their heavy payloads.
     "id": "guid",
     "channelId": "guid",
     "agentId": "guid",
-    "actionType": "CaptureDisplay",
+    "actionKey": "string",
     "resourceId": "guid | null",
     "status": "Completed",
     "createdAt": "datetime",
@@ -1873,8 +1805,8 @@ requirement.
 
 ### POST /channels/{channelId}/jobs/{jobId}/stop
 
-Stop a long-running transcription job (completes it normally).
-Also accepts `Paused` transcription jobs.
+Gracefully stop a long-running job (completes it normally).
+Also accepts `Paused` jobs.
 
 **Response `200`:** `AgentJobResponse`
 **Response `404`:** Not found.
@@ -1892,9 +1824,9 @@ Cancel a job that has not yet completed. Also accepts `Paused` jobs.
 
 ### PUT /channels/{channelId}/jobs/{jobId}/pause
 
-Pause a long-running job. For transcription jobs this stops the audio
-capture and inference loop so no further API calls (and therefore no
-token costs) are incurred while paused. The job can be resumed later.
+Pause a long-running job. The specific effect depends on the module
+that owns the action (e.g. stopping capture loops, suspending
+processing). The job can be resumed later.
 
 Only jobs with status `Executing` can be paused.
 
@@ -1905,8 +1837,8 @@ Only jobs with status `Executing` can be paused.
 
 ### PUT /channels/{channelId}/jobs/{jobId}/resume
 
-Resume a previously paused job. For transcription jobs this restarts
-the audio capture and inference loop using the original job parameters.
+Resume a previously paused job. The module restarts its processing
+loop using the original job parameters.
 
 Only jobs with status `Paused` can be resumed.
 
@@ -1917,7 +1849,8 @@ Only jobs with status `Paused` can be resumed.
 
 ### POST /channels/{channelId}/jobs/{jobId}/segments
 
-Push a transcription segment into an executing transcription job.
+Push a data segment into an executing job. Used by modules for
+incremental output (e.g. transcription segments).
 
 **Request:**
 
@@ -1937,7 +1870,7 @@ Push a transcription segment into an executing transcription job.
 
 ### GET /channels/{channelId}/jobs/{jobId}/segments?since={datetime}
 
-Retrieve transcription segments added after the given timestamp.
+Retrieve segments added after the given timestamp.
 
 **Response `200`:** `TranscriptionSegmentResponse[]`
 
@@ -1950,7 +1883,7 @@ Retrieve transcription segments added after the given timestamp.
   "id": "guid",
   "channelId": "guid",
   "agentId": "guid",
-  "actionType": "ExecuteAsSafeShell",
+  "actionKey": "string",
   "resourceId": "guid | null",
   "status": "Completed",
   "effectiveClearance": "ApprovedBySameLevelUser",
@@ -1966,13 +1899,7 @@ Retrieve transcription segments added after the given timestamp.
   "createdAt": "datetime",
   "startedAt": "datetime | null",
   "completedAt": "datetime | null",
-  "dangerousShellType": "Bash | null",
-  "safeShellType": "Mk8Shell | null",
-  "scriptJson": "string | null",
-  "workingDirectory": "string | null",
-  "transcriptionModelId": "guid | null",
-  "language": "string | null",
-  "transcriptionMode": "SlidingWindow | StrictWindow | null",
+  "segments": [
     {
       "id": "guid",
       "text": "string",
@@ -1998,8 +1925,11 @@ Retrieve transcription segments added after the given timestamp.
 }
 ```
 
-`segments` is only populated for transcription action types; `null`
-otherwise.
+The response also includes module-specific fields from the original
+request (e.g. shell type, transcription parameters) when applicable.
+
+`segments` is populated for action types that produce incremental
+output (e.g. transcription); `null` otherwise.
 
 `jobCost` contains the prompt and completion tokens attributed to this
 specific job from the LLM round that triggered it. `null` for jobs
@@ -2009,74 +1939,6 @@ that were not submitted during a chat tool-call round.
 (Submit, GetById, Approve, Stop, Cancel, Pause, Resume) so callers
 receive up-to-date token usage without a separate round-trip.
 List and summary endpoints omit it.
-
-#### Two-pass segment lifecycle (SlidingWindow mode)
-
-In the default `SlidingWindow` mode, segments go through a two-pass
-lifecycle:
-
-1. **Provisional** — emitted as soon as the segment passes the dedup
-   pipeline (within one inference tick, ~2 s). `isProvisional: true`.
-   The text may shift slightly in later inference passes.
-
-2. **Finalized** — once the commit delay (2 s) confirms the segment, a
-   second event is pushed with the same `id`, updated `text` /
-   `confidence`, and `isProvisional: false`. Consumers should replace
-   the provisional version in-place.
-
-3. **Retracted** — if a provisional segment is not confirmed within
-   twice the commit delay (likely a hallucination), it is deleted and a
-   tombstone event is pushed with the same `id`, empty `text`, and
-   `isProvisional: false`. Consumers should remove it.
-
-In `StrictWindow` mode all segments are final on first emission
-(`isProvisional` is always `false`).
-
-#### Deduplication pipeline (non-timestamped API responses)
-
-When the STT API returns the full window as a single text blob without
-per-word timestamps (e.g. `gpt-4o-transcribe`), the orchestrator uses a
-multi-layer dedup pipeline to extract genuinely new content:
-
-1. **Text diff (`RemoveOverlap`)** — compares the current API response
-   against `previousWindowText` (the last response that produced new
-   content):
-   - *Containment check* — if the current text is a word-level subset
-     of the previous text, it is already-seen content and is skipped.
-     Uses strict matching for short sequences (< 10 words) and 10%
-     fuzzy tolerance (floor) for longer ones to catch minor Whisper
-     hallucinations like "a" → "the".
-   - *Suffix-prefix overlap* — finds the longest suffix of the previous
-     text matching a prefix of the current text, and returns only the
-     tail that is genuinely new.
-
-2. **Context tracking** — `previousWindowText` is updated carefully:
-   - When new text **is** found: always updated to the current response.
-   - When new text is **not** found: only upgraded to a **longer**
-     response (never downgraded to a shorter subset). This prevents
-     context loss that would let already-emitted content slip through
-     as "new" in later ticks.
-
-3. **Sentence splitting** — when multiple sentences accumulate as "new"
-   in a single tick, they are split at sentence boundaries
-   (`[.!?]` + space + uppercase letter). Each sentence becomes its own
-   segment with timestamps distributed proportionally by character
-   count across the available time span. This prevents multi-sentence
-   bursts from being emitted as a single segment.
-
-4. **Fragment merge** — very short residuals (≤ 2 words starting with a
-   lowercase letter) from API truncation at window boundaries are merged
-   into the most recent provisional segment rather than emitted
-   standalone.
-
-5. **Emitted-text guard** — a `HashSet` tracks all emitted segment texts
-   (normalized: trimmed, trailing period stripped, case-insensitive).
-   Any segment whose text was already emitted is skipped at emission
-   time. This catches Whisper hallucination replay where the API
-   regurgitates the entire transcript history as if it were new speech.
-
-6. **Timestamp guard** — segments whose `absEnd ≤ lastSeenEnd` are
-   skipped to prevent backward-looking duplicates.
 
 ---
 
@@ -2130,248 +1992,27 @@ the same double-gate as `list_accessible_threads`.
 
 ---
 
-## Transcription streaming
-
-Two streaming transports are provided for live transcription segments.
-
-WebSocket:
-
-    /jobs/{jobId}/ws
-
-- Connect with WebSocket; the server will send JSON text frames with
-  transcription segment objects.
-
-SSE:
-
-    /jobs/{jobId}/stream
-
-- Server-sent events with transcription segments in `data` frames.
-
-Both endpoints return `404` if the job is not found or has no active
-subscription.
-
----
-
 ## Resources
 
 The API exposes multiple resource types under the `/resources` group.
 All resource types follow the same CRUD pattern.
 
-### Containers
+The set of available `/resources/*` endpoints is not fixed — it grows
+or shrinks as modules are enabled or disabled. Each module registers
+its own resource types at startup. All follow the same pattern:
 
 ```
-POST   /resources/containers
-GET    /resources/containers
-GET    /resources/containers/{id}
-PUT    /resources/containers/{id}
-DELETE /resources/containers/{id}
-POST   /resources/containers/sync
+POST   /resources/{type}
+GET    /resources/{type}
+GET    /resources/{type}/{id}
+PUT    /resources/{type}/{id}
+DELETE /resources/{type}/{id}
+POST   /resources/{type}/sync        (some types)
 ```
 
-`sync` scans the local filesystem for registered mk8.shell workspaces.
-
-Typical request/response bodies are `CreateContainerRequest`, `ContainerResponse`,
-etc.
-
-### Audio devices
-
-```
-POST   /resources/audiodevices
-GET    /resources/audiodevices
-GET    /resources/audiodevices/{id}
-PUT    /resources/audiodevices/{id}
-DELETE /resources/audiodevices/{id}
-POST   /resources/audiodevices/sync
-```
-
-`sync` discovers WASAPI capture devices on the local machine
-(Windows-only).
-
-### Display devices
-
-```
-POST   /resources/displaydevices
-GET    /resources/displaydevices
-GET    /resources/displaydevices/{id}
-PUT    /resources/displaydevices/{id}
-DELETE /resources/displaydevices/{id}
-POST   /resources/displaydevices/sync
-```
-
-`sync` enumerates connected displays.
-
-**CreateDisplayDeviceRequest:**
-
-```json
-{
-  "name": "string",
-  "deviceIdentifier": "string | null",
-  "displayIndex": 0,
-  "description": "string | null"
-}
-```
-
-**DisplayDeviceResponse:**
-
-```json
-{
-  "id": "guid",
-  "name": "string",
-  "deviceIdentifier": "string | null",
-  "displayIndex": 0,
-  "description": "string | null",
-  "skillId": "guid | null",
-  "createdAt": "datetime"
-}
-```
-
-### Editor sessions
-
-Editor sessions are resource entities that represent registered IDE
-connections. They are used for permission grants on editor actions.
-
-```
-POST   /resources/editorsessions
-GET    /resources/editorsessions
-GET    /resources/editorsessions/{id}
-PUT    /resources/editorsessions/{id}
-DELETE /resources/editorsessions/{id}
-```
-
-**CreateEditorSessionRequest:**
-
-```json
-{
-  "name": "string",
-  "editorType": "VisualStudio2026 | VisualStudioCode | Other",
-  "editorVersion": "string | null",
-  "workspacePath": "string | null",
-  "description": "string | null"
-}
-```
-
-**UpdateEditorSessionRequest:**
-
-```json
-{
-  "name": "string | null",
-  "description": "string | null"
-}
-```
-
-**EditorSessionResponse:**
-
-```json
-{
-  "id": "guid",
-  "name": "string",
-  "editorType": "VisualStudio2026",
-  "editorVersion": "string | null",
-  "workspacePath": "string | null",
-  "description": "string | null",
-  "isConnected": true,
-  "createdAt": "datetime"
-}
-```
-
-### Document sessions
-
-Document sessions register a file path for spreadsheet / CSV / document
-manipulation by agents. The `documentType` is inferred from the file
-extension.
-
-```
-POST   /resources/documentsessions
-GET    /resources/documentsessions
-GET    /resources/documentsessions/{id}
-PUT    /resources/documentsessions/{id}
-DELETE /resources/documentsessions/{id}
-```
-
-**CreateDocumentSessionRequest:**
-
-```json
-{
-  "filePath": "string",
-  "name": "string | null",
-  "description": "string | null"
-}
-```
-
-`filePath` is required and must point to an existing file. The
-`documentType` is inferred automatically from the extension.
-
-**UpdateDocumentSessionRequest:**
-
-```json
-{
-  "name": "string | null",
-  "description": "string | null"
-}
-```
-
-**DocumentSessionResponse:**
-
-```json
-{
-  "id": "guid",
-  "name": "string",
-  "filePath": "string",
-  "documentType": "Spreadsheet | Csv | Document | Presentation",
-  "description": "string | null",
-  "createdAt": "datetime",
-  "updatedAt": "datetime"
-}
-```
-
-### Native applications
-
-Native applications register executables that agents can launch. An
-optional `alias` provides a short friendly name for CLI use.
-
-```
-POST   /resources/nativeapplications
-GET    /resources/nativeapplications
-GET    /resources/nativeapplications/{id}
-PUT    /resources/nativeapplications/{id}
-DELETE /resources/nativeapplications/{id}
-```
-
-**CreateNativeApplicationRequest:**
-
-```json
-{
-  "name": "string",
-  "executablePath": "string",
-  "alias": "string | null",
-  "description": "string | null"
-}
-```
-
-**UpdateNativeApplicationRequest:**
-
-```json
-{
-  "name": "string | null",
-  "executablePath": "string | null",
-  "alias": "string | null",
-  "description": "string | null"
-}
-```
-
-**NativeApplicationResponse:**
-
-```json
-{
-  "id": "guid",
-  "name": "string",
-  "executablePath": "string",
-  "alias": "string | null",
-  "description": "string | null",
-  "createdAt": "datetime",
-  "updatedAt": "datetime"
-}
-```
+Query `GET /modules` for each module's registered resource types and
+their request/response shapes. See individual module documentation
+for details.
 
 ### Resource lookup
 
@@ -3652,3 +3293,31 @@ The agent must also be the channel's primary agent or listed in its
 Accessible threads are surfaced in the chat header
 (`accessible-threads:` section) and via the `list_accessible_threads`
 and `read_thread_history` inline tools.
+
+---
+
+## Bundled modules
+
+SharpClaw ships with a set of default modules that register their own
+action keys, resource types, and REST endpoints at startup. Each module
+has its own documentation:
+
+| Module | Documentation |
+|--------|---------------|
+| Agent Orchestration | [Module-AgentOrchestration.md](modules/Module-AgentOrchestration.md) |
+| Bot Integration | [Module-BotIntegration.md](modules/Module-BotIntegration.md) |
+| Computer Use | [Module-ComputerUse.md](modules/Module-ComputerUse.md) |
+| Context Tools | [Module-ContextTools.md](modules/Module-ContextTools.md) |
+| Dangerous Shell | [Module-DangerousShell.md](modules/Module-DangerousShell.md) |
+| Database Access | [Module-DatabaseAccess.md](modules/Module-DatabaseAccess.md) |
+| Editor Common | [Module-EditorCommon.md](modules/Module-EditorCommon.md) |
+| Mk8 Shell | [Module-Mk8Shell.md](modules/Module-Mk8Shell.md) |
+| Module Dev | [Module-ModuleDev.md](modules/Module-ModuleDev.md) |
+| Office Apps | [Module-OfficeApps.md](modules/Module-OfficeApps.md) |
+| Transcription | [Module-Transcription.md](modules/Module-Transcription.md) |
+| VS 2026 Editor | [Module-VS2026Editor.md](modules/Module-VS2026Editor.md) |
+| VS Code Editor | [Module-VSCodeEditor.md](modules/Module-VSCodeEditor.md) |
+| Web Access | [Module-WebAccess.md](modules/Module-WebAccess.md) |
+
+For enabling/disabling modules, see the
+[Module Enablement Guide](modules/Module-Enablement-Guide.md).

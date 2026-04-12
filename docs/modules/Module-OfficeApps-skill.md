@@ -9,6 +9,25 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_office_apps
+Default: disabled
+Prerequisites: none
+Platform: Windows, Linux, macOS
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_office_apps": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_office_apps
+  module enable sharpclaw_office_apps
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Document session management, file-based spreadsheet operations

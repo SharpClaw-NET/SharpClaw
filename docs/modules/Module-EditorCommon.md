@@ -10,6 +10,39 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_editor_common` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | All |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_editor_common": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+> **Important:** This is an infrastructure module required by **VS 2026 Editor**
+> and **VS Code Editor**. Disabling it will cascade-disable both editor modules.
+
+Exports: `editor_bridge` (`EditorBridgeService`), `editor_session` (`EditorSessionService`).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_editor_common
+module enable sharpclaw_editor_common
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Editor Common module is an **infrastructure module** that provides

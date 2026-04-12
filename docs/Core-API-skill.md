@@ -1,4 +1,4 @@
-SharpClaw Application API — Agent Skill Reference
+SharpClaw Core API — Agent Skill Reference
 
 Base: http://127.0.0.1:48923
 Auth: X-Api-Key header on every request. Key at %LOCALAPPDATA%/SharpClaw/.api-key.
@@ -58,19 +58,6 @@ POST   /models/local/{id}/unload
 DELETE /models/local/{id}
 
 LocalModelStatus: Pending, Downloading, Ready, Failed.
-
-────────────────────────────────────────
-BOT INTEGRATIONS
-────────────────────────────────────────
-Bot integration CRUD and messaging is provided by the Bot Integration module.
-See Module-BotIntegration-skill.md for tool definitions, CLI, and BotType values.
-
-REST endpoints:
-GET    /bots                       → list all
-GET    /bots/{id}                  → get by id
-GET    /bots/type/{type}           → get by type name
-PUT    /bots/{id}                  { enabled?, botToken?, defaultChannelId? }
-GET    /bots/config/{type}         → decrypted config
 
 ────────────────────────────────────────
 AGENTS
@@ -229,76 +216,37 @@ AGENT JOBS
 ────────────────────────────────────────
 POST   /channels/{channelId}/jobs              (SubmitAgentJobRequest)
 GET    /channels/{channelId}/jobs
-GET    /channels/{channelId}/jobs/summaries    (lightweight: id, channelId, agentId, actionType, resourceId, status, createdAt, startedAt, completedAt — no resultData/errorLog/logs/segments)
+GET    /channels/{channelId}/jobs/summaries    (lightweight: id, channelId, agentId, actionKey, resourceId, status, createdAt, startedAt, completedAt — no resultData/errorLog/logs/segments)
 GET    /channels/{channelId}/jobs/{jobId}
 POST   /channels/{channelId}/jobs/{jobId}/approve   { approverAgentId? }
-POST   /channels/{channelId}/jobs/{jobId}/stop      (transcription: complete normally; also accepts Paused)
-POST   /channels/{channelId}/jobs/{jobId}/cancel    (also accepts Paused)
-PUT    /channels/{channelId}/jobs/{jobId}/pause     (pause an Executing job; stops capture/inference)
-PUT    /channels/{channelId}/jobs/{jobId}/resume    (resume a Paused job; restarts capture/inference)
+POST   /channels/{channelId}/jobs/{jobId}/stop      (graceful stop; also accepts Paused jobs)
+POST   /channels/{channelId}/jobs/{jobId}/cancel    (also accepts Paused jobs)
+PUT    /channels/{channelId}/jobs/{jobId}/pause     (pause an Executing job)
+PUT    /channels/{channelId}/jobs/{jobId}/resume    (resume a Paused job)
 
 SubmitAgentJobRequest:
-  actionType (required), resourceId?, agentId?, callerAgentId?,
-  dangerousShellType?, safeShellType?, scriptJson?, workingDirectory?,
-  transcriptionModelId?, language?, transcriptionMode?, windowSeconds?, stepSeconds?
+  actionKey (string, required): identifies the action to execute. The set of valid
+    action keys is dynamic — query GET /modules for the authoritative list.
+  resourceId?: target resource for per-resource actions.
+  agentId?: override the channel's default agent (must be in allowed set).
+  callerAgentId?: the agent that triggered the job (for sub-agent chains).
 
-TranscriptionMode values: SlidingWindow (default, two-pass), StrictWindow.
+  Module-specific fields may also be present on the DTO (e.g. shell type/script,
+  transcription parameters). These are consumed by the module that owns the action
+  key. See individual module documentation for details.
 
-AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6, Paused=7.
-
-Transcription segments:
+Segments (generic data push/pull for long-running jobs):
   POST   /channels/{channelId}/jobs/{jobId}/segments  { text, startTime, endTime, confidence }
   GET    /channels/{channelId}/jobs/{jobId}/segments?since={datetime}
 
-When resourceId is omitted for a per-resource action, default resources are resolved automatically from the channel's DefaultResourceSet → context's DefaultResourceSet → permission set defaults.
+AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6, Paused=7.
 
-When transcriptionModelId is omitted for transcription actions, the default transcription model is resolved from the channel → context default resource set.
+When resourceId is omitted for a per-resource action, default resources are resolved
+automatically from the channel's DefaultResourceSet → context's DefaultResourceSet →
+permission set defaults.
 
-language is a BCP-47 hint (e.g. "en", "de"). Omit for auto-detect. Supplying it improves accuracy on short chunks. When set, the orchestrator enforces it: prompt is seeded with a target-language phrase, and up to 4 retries with escalating reinforcement if Whisper returns the wrong language. Never drops audio — accepts after retries.
-
-transcriptionMode: SlidingWindow (default) or StrictWindow.
-  SlidingWindow: two-pass with multi-layer dedup. Audio flows: mic → ring buffer → silence gate → sliding window → STT API → dedup → emit.
-    Every step interval, a window of audio is extracted and sent to the API. The response is diffed against
-    the previous window's text to extract genuinely new content. New text is split into per-sentence segments
-    with proportionally distributed timestamps. Segments are emitted provisionally within ~2 s (isProvisional=true),
-    then finalized after the commit delay confirms them. A HashSet of all emitted texts prevents hallucination
-    replay (where the API regurgitates the entire transcript as new speech).
-  StrictWindow: non-overlapping sequential windows (default 10 s). Each window transcribed exactly once — one API call per window. Full dedup pipeline runs as safety net. Minimal token cost; perceived latency equals the window length. Use windowSeconds to control window size (clamped [5, 15]).
-
-windowSeconds: seconds of audio per inference tick. Clamped [5, 15]. Default 10.
-stepSeconds: seconds between inference ticks (SlidingWindow mode only). Clamped [1, window]. Default 2. Ignored in StrictWindow mode where step equals window.
-
-TranscriptionMode enum: SlidingWindow=0, StrictWindow=2.
-
-Two-pass segment lifecycle (SlidingWindow mode):
-  1. Provisional: emitted quickly with isProvisional=true after passing the dedup pipeline (~2 s). Text may shift.
-  2. Finalized: same id re-pushed with isProvisional=false, updated text/confidence after commit delay (2 s).
-  3. Retracted: stale provisional deleted, tombstone pushed (empty text, isProvisional=false).
-  StrictWindow always emits isProvisional=false.
-
-Dedup pipeline (non-timestamped API responses):
-  When the STT API returns the full window as a single text blob without timestamps:
-  1. Text diff: current response compared against previousWindowText. Containment check
-     (strict for <10 words, 10% fuzzy floor for longer) suppresses subsets. Suffix-prefix
-     overlap removes already-seen prefixes, returning only the genuinely new tail.
-  2. Context tracking: previousWindowText only upgrades to longer responses when no new text
-     is found (never downgrades to shorter subsets to prevent context loss and re-emission).
-  3. Sentence splitting: multi-sentence new text split at [.!?]+space+uppercase boundaries.
-     Each sentence gets its own segment with proportionally distributed timestamps.
-  4. Fragment merge: ≤2-word lowercase residuals merged into the latest provisional.
-  5. Emitted-text guard: HashSet of all emitted texts (trimmed, period-stripped,
-     case-insensitive) blocks duplicates at emission time, including hallucination replay.
-  6. Timestamp guard: segments with absEnd ≤ lastSeenEnd are skipped.
-
-Audio is automatically normalised to mono 16 kHz 16-bit PCM (Whisper-optimal).
-
-────────────────────────────────────────
-JOB STREAMING
-────────────────────────────────────────
-Long-running jobs (transcription, etc.) can push incremental results:
-
-WebSocket: /jobs/{jobId}/ws       → JSON text frames
-SSE:       /jobs/{jobId}/stream   → data: frames with JSON
+Job streaming endpoints (WebSocket, SSE) are module-provided. See individual module
+documentation for available transports (e.g. Module-Transcription for live segments).
 
 ────────────────────────────────────────
 RESOURCES
@@ -335,7 +283,7 @@ Concepts:
     resource types, and optional DI service exports, loaded at startup
     from a manifest and an entry assembly.
   Tool: a single callable operation exposed to the LLM. Dispatched via
-    AgentActionType = ModuleAction (100) and routed by action key.
+    ActionKey (string) — the sole routing mechanism for job execution.
   Tool prefix: a short string (e.g. "cu_", "oa_") prepended to all of a
     module's tool names to avoid collisions.
   Contract: a named DI service a module exports for others to consume.
@@ -387,184 +335,36 @@ Cross-thread history access (double-gate):
   Accessible threads listed in chat header (accessible-threads section) and via list_accessible_threads / read_thread_history inline tools.
 
 ────────────────────────────────────────────────────────────────────
-ADVANCED EXAMPLE: Transcription Channel Setup
-────────────────────────────────────────────────────────────────────
-
-Goal: Create a channel called "TranscriptionChannel" with a default agent using OpenAI's whisper-1 model, a role granting Independent transcription permission for all audio devices, and a default audio device — so that submitting a transcription job requires only { actionType } and nothing else.
-
-Step 1 — Ensure provider and model exist.
-
-  Assume an OpenAI provider already exists with id PROVIDER_ID and key set.
-  Sync models to pick up whisper-1:
-
-    POST /providers/PROVIDER_ID/sync-models
-
-  Find the whisper-1 model id from the response (or GET /models and filter).
-  Call it WHISPER_MODEL_ID.
-  Verify it has Transcription capability. If sync didn't set it:
-
-    PUT /models/WHISPER_MODEL_ID
-    { "capabilities": "Transcription" }
-
-Step 2 — Create an agent for transcription.
-
-    POST /agents
-    {
-      "name": "Transcription Agent",
-      "modelId": "WHISPER_MODEL_ID",
-      "systemPrompt": null
-    }
-
-  → AGENT_ID
-
-Step 3 — Set up a role with Independent transcription permission for all audio devices.
-
-  Get the list of roles:
-
-    GET /roles
-
-  Pick one (or use the seeded Admin role). Call it ROLE_ID.
-  Set its permissions to include audioDeviceAccesses with wildcard grant:
-
-    PUT /roles/ROLE_ID/permissions
-    {
-      "defaultClearance": "Independent",
-      "canCreateSubAgents": false,
-      "canCreateContainers": false,
-      "canRegisterInfoStores": false,
-      "canAccessLocalhostInBrowser": false,
-      "canAccessLocalhostCli": false,
-      "canClickDesktop": false,
-      "canTypeOnDesktop": false,
-      "canReadCrossThreadHistory": false,
-      "audioDeviceAccesses": [
-        { "resourceId": "ffffffff-ffff-ffff-ffff-ffffffffffff", "clearance": "Independent" }
-      ]
-    }
-
-Step 4 — Assign the role to the agent.
-
-    PUT /agents/AGENT_ID/role
-    { "roleId": "ROLE_ID", "callerUserId": "USER_ID" }
-
-Step 5 — Discover audio devices.
-
-    POST /resources/audiodevices/sync
-
-    GET /resources/audiodevices
-
-  Pick the target device. Call it AUDIO_DEVICE_ID.
-
-Step 6 — Create the channel.
-
-    POST /channels
-    {
-      "agentId": "AGENT_ID",
-      "title": "TranscriptionChannel"
-    }
-
-  → CHANNEL_ID
-
-Step 7 — Set channel defaults so jobs resolve automatically.
-
-  Set the default audio device:
-
-    PUT /channels/CHANNEL_ID/defaults/audiodevice
-    { "resourceId": "AUDIO_DEVICE_ID" }
-
-  Set the default transcription model:
-
-    PUT /channels/CHANNEL_ID/defaults/transcriptionmodel
-    { "resourceId": "WHISPER_MODEL_ID" }
-
-Step 8 — Submit a transcription job with minimal params.
-
-  Everything is inferred from the channel:
-  - Agent → channel default (Transcription Agent)
-  - Resource → channel default audiodevice (AUDIO_DEVICE_ID)
-  - Model → channel default transcriptionmodel (WHISPER_MODEL_ID)
-  - Permission → agent's role grants Independent on all audio devices
-
-    POST /channels/CHANNEL_ID/jobs
-    {
-      "actionType": "TranscribeFromAudioDevice"
-    }
-
-  That's it. No resourceId, no transcriptionModelId, no agentId needed.
-  The job is auto-approved (Independent clearance) and begins capturing audio immediately.
-
-  Optional: pass language for strict enforcement — prompt is seeded in target language, up to 4 retries on mismatch:
-
-    POST /channels/CHANNEL_ID/jobs
-    {
-      "actionType": "TranscribeFromAudioDevice",
-      "language": "en"
-    }
-
-  Optional: use StrictWindow mode for cheap, sequential transcription:
-
-    POST /channels/CHANNEL_ID/jobs
-    {
-      "actionType": "TranscribeFromAudioDevice",
-      "language": "en",
-      "transcriptionMode": "StrictWindow"
-    }
-
-  Optional: custom sliding window timing (12s window, 4s step):
-
-    POST /channels/CHANNEL_ID/jobs
-    {
-      "actionType": "TranscribeFromAudioDevice",
-      "transcriptionMode": "SlidingWindow",
-      "windowSeconds": 12,
-      "stepSeconds": 4
-    }
-
-Step 9 — Stream live segments.
-
-  From the job response, take JOB_ID.
-
-  WebSocket: connect to /jobs/JOB_ID/ws → receive JSON segment frames.
-  SSE: GET /jobs/JOB_ID/stream → data: frames with segment JSON.
-  Poll: GET /channels/CHANNEL_ID/jobs/JOB_ID/segments?since=2025-01-01T00:00:00Z
-
-Step 10 — Stop the transcription.
-
-    POST /channels/CHANNEL_ID/jobs/JOB_ID/stop
-
-  Job transitions to Completed. Remaining buffered audio is flushed and transcribed.
-
-────────────────────────────────────────────────────────────────────
 ADVANCED EXAMPLE: Multi-Agent Channel with Context
 ────────────────────────────────────────────────────────────────────
 
-Goal: A context with a primary chat agent and a secondary transcription agent,
+Goal: A context with a primary agent and a secondary specialist agent,
 where channels inherit the context's defaults. Agents can be switched per-message.
 
-Step 1 — Assume CHAT_AGENT_ID and TRANSCRIPTION_AGENT_ID already exist with appropriate roles.
+Step 1 — Assume MAIN_AGENT_ID and SPECIALIST_AGENT_ID already exist with appropriate roles.
 
 Step 2 — Create a context.
 
     POST /channel-contexts
     {
-      "agentId": "CHAT_AGENT_ID",
+      "agentId": "MAIN_AGENT_ID",
       "name": "Multi-Agent Context"
     }
 
   → CONTEXT_ID
 
-Step 3 — Add the transcription agent as an allowed agent.
+Step 3 — Add the specialist agent as an allowed agent.
 
     POST /channel-contexts/CONTEXT_ID/agents
-    { "agentId": "TRANSCRIPTION_AGENT_ID" }
+    { "agentId": "SPECIALIST_AGENT_ID" }
 
 Step 4 — Set context-level defaults (inherited by all channels in it).
 
-    PUT /channel-contexts/CONTEXT_ID/defaults/audiodevice
-    { "resourceId": "AUDIO_DEVICE_ID" }
+  Default resources are configured per module. For example, if a shell module
+  is enabled:
 
     PUT /channel-contexts/CONTEXT_ID/defaults/safeshell
-    { "resourceId": "MK8_CONTAINER_ID" }
+    { "resourceId": "CONTAINER_ID" }
 
 Step 5 — Create a channel inside the context.
 
@@ -582,43 +382,24 @@ Step 6 — Chat with the default agent.
     POST /channels/CHANNEL_ID/chat
     { "message": "What's the server status?" }
 
-Step 7 — Override to the transcription agent for a specific request.
+Step 7 — Override to the specialist agent for a specific message.
 
-    POST /channels/CHANNEL_ID/jobs
+    POST /channels/CHANNEL_ID/chat
     {
-      "actionType": "TranscribeFromAudioDevice",
-      "agentId": "TRANSCRIPTION_AGENT_ID"
+      "message": "Analyse this code for security issues",
+      "agentId": "SPECIALIST_AGENT_ID"
     }
 
-  resourceId resolved from context defaults. Agent override is allowed because TRANSCRIPTION_AGENT_ID is in the context's allowed agents.
+  Agent override is allowed because SPECIALIST_AGENT_ID is in the context's allowed agents.
 
-Step 8 — Channel-level override. Set a different default audio device just for this channel.
+Step 8 — Channel-level override. Set different defaults just for this channel.
 
-    PUT /channels/CHANNEL_ID/defaults/audiodevice
-    { "resourceId": "DIFFERENT_AUDIO_DEVICE_ID" }
+  Per-key endpoint overrides the context's default for this channel only:
 
-  Now jobs on this channel use DIFFERENT_AUDIO_DEVICE_ID. Other channels in the same context still use AUDIO_DEVICE_ID from the context defaults.
+    PUT /channels/CHANNEL_ID/defaults/safeshell
+    { "resourceId": "DIFFERENT_CONTAINER_ID" }
 
-────────────────────────────────────────────────────────────────────
-ADVANCED EXAMPLE: Safe Shell Execution
-────────────────────────────────────────────────────────────────────
-
-Goal: Submit an mk8.shell job on a channel with defaults so only the script needs to be provided.
-
-Assuming channel CHANNEL_ID already has:
-- A default agent with a role granting Independent on safeShellAccesses (wildcard)
-- A default safeshell resource (mk8.shell container)
-
-    POST /channels/CHANNEL_ID/jobs
-    {
-      "actionType": "ExecuteAsSafeShell",
-      "safeShellType": "Mk8Shell",
-      "scriptJson": "{\"operations\":[{\"verb\":\"Echo\",\"args\":[\"Hello from mk8.shell\"]}]}"
-    }
-
-resourceId is resolved from channel defaults (safeshell key).
-Agent is resolved from channel default.
-Permission is auto-approved via Independent clearance.
+  Other channels in the same context still use the context defaults.
 
 ────────────────────────────────────────────────────────────────────
 ADVANCED EXAMPLE: Threaded Conversation with History
@@ -704,6 +485,8 @@ Resource tags (enumerate entities):
 
 Supported resource tag names: Agents, Models, Providers, Channels, Threads, Roles, Users, Containers, Websites, SearchEngines, AudioDevices, DisplayDevices, EditorSessions, Skills, SystemUsers, LocalInfoStores, ExternalInfoStores, ScheduledTasks, Tasks.
 
+Note: Some entity types (Containers, Websites, SearchEngines, AudioDevices, DisplayDevices, EditorSessions, SystemUsers, LocalInfoStores, ExternalInfoStores) are module-registered resources. They return results only when their owning module is enabled.
+
 Fields with [HeaderSensitive] (PasswordHash, PasswordSalt, EncryptedApiKey) → [redacted]. Unknown fields → [FieldName?].
 
 Permissions: canEditAgentHeader / canEditChannelHeader (global flags) + agentHeaderAccesses / channelHeaderAccesses (per-resource arrays in role permissions).
@@ -736,7 +519,7 @@ GET    /tool-awareness-sets/{id}
 PUT    /tool-awareness-sets/{id}               { name?, tools? }
 DELETE /tool-awareness-sets/{id}
 
-tools: Dictionary<string, bool>. Keys are tool names (e.g. "execute_mk8_shell", "cu_capture_display"). Tools whose key is true or absent are included; only tools explicitly set to false are excluded. Empty dict {} = all tools enabled.
+tools: Dictionary<string, bool>. Keys are tool names (module-defined, e.g. query GET /modules for valid names). Tools whose key is true or absent are included; only tools explicitly set to false are excluded. Empty dict {} = all tools enabled.
 
 Override chain: channel.toolAwarenessSetId > agent.toolAwarenessSetId > null (all tools). Assign via toolAwarenessSetId field on POST/PUT agents and channels.
 

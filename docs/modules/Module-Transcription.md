@@ -10,6 +10,36 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_transcription` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | Windows only (WASAPI audio capture) |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_transcription": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+> **Note:** Exports `transcription_stt` and `transcription_audio_capture` contracts.
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_transcription
+module enable sharpclaw_transcription
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Transcription module provides live audio transcription, input audio

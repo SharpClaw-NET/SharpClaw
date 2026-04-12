@@ -10,6 +10,34 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_context_tools` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | All |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_context_tools": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_context_tools
+module enable sharpclaw_context_tools
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Context Tools module provides lightweight **inline** context tools

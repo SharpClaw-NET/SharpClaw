@@ -9,6 +9,25 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_context_tools
+Default: disabled
+Prerequisites: none
+Platform: All
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_context_tools": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_context_tools
+  module enable sharpclaw_context_tools
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Lightweight inline context tools that execute directly in the ChatService

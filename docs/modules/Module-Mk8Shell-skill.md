@@ -9,6 +9,25 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_mk8shell
+Default: disabled
+Prerequisites: none
+Platform: Windows, Linux, macOS
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_mk8shell": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_mk8shell
+  module enable sharpclaw_mk8shell
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Sandboxed mk8.shell script execution and sandbox container lifecycle.

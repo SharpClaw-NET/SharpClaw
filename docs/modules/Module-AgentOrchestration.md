@@ -10,6 +10,34 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_agent_orchestration` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | All |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_agent_orchestration": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_agent_orchestration
+module enable sharpclaw_agent_orchestration
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Agent Orchestration module provides agent lifecycle management

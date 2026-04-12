@@ -10,6 +10,34 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_web_access` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | All |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_web_access": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_web_access
+module enable sharpclaw_web_access
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Web Access module provides localhost access (headless browser and

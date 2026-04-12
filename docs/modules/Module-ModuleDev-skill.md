@@ -9,6 +9,30 @@ Exports: none
 Requires: window_management (optional)
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_module_dev
+Default: DISABLED (not listed in default .env)
+Prerequisites: Computer Use (sharpclaw_computer_use) — OPTIONAL.
+  Provides window_management contract for window-title → PID resolution.
+  Without it, falls back to Process.GetProcessesByName.
+Platform: All
+
+To enable, add to your core .env Modules section:
+  "sharpclaw_module_dev": "true"
+
+For enhanced process inspection, also enable Computer Use:
+  "sharpclaw_computer_use": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_module_dev
+  module enable sharpclaw_module_dev
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Autonomous module authoring, building, hot-loading, testing, and

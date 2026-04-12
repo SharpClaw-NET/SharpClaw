@@ -10,6 +10,34 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_mk8shell` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | Windows, Linux, macOS |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_mk8shell": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_mk8shell
+module enable sharpclaw_mk8shell
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The mk8.shell module provides **sandboxed** script execution through the

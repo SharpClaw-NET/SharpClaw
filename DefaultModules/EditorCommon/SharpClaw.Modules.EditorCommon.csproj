@@ -14,8 +14,4 @@
     <ProjectReference Include="..\..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
   </ItemGroup>
 
-  <ItemGroup>
-    <Content Include="module.json" Link="modules\sharpclaw_editor_common\module.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
 </Project>

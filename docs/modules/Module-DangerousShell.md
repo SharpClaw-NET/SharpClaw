@@ -10,6 +10,37 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_dangerous_shell` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | Windows, Linux, macOS |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_dangerous_shell": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+> ⚠️ **Security note:** This module bypasses all sandbox protections.
+> Ensure agents using it have appropriate clearance levels configured.
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_dangerous_shell
+module enable sharpclaw_dangerous_shell
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The Dangerous Shell module provides **unsandboxed** real shell execution

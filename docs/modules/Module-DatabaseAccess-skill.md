@@ -9,6 +9,25 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_database_access
+Default: disabled
+Prerequisites: none
+Platform: Windows, Linux, macOS
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_database_access": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_database_access
+  module enable sharpclaw_database_access
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Register and query internal/external databases. Supports PostgreSQL,

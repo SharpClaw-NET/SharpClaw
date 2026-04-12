@@ -131,8 +131,8 @@ The CLI covers everything the API does: providers, models, agents, channels, thr
 
 | Document | What it covers |
 |---|---|
-| [App API Reference](docs/App-API-documentation.md) | Full HTTP API with request/response shapes |
-| [App API Skill Reference](docs/App-API-skill.md) | Compact endpoint listing for agent consumption |
+| [Core API Reference](docs/Core-API-documentation.md) | Full HTTP API with request/response shapes |
+| [Core API Skill Reference](docs/Core-API-skill.md) | Compact endpoint listing for agent consumption |
 | [Gateway API Reference](docs/Gateway-documentation.md) | Public gateway endpoints, rate limiting, toggles |
 | [Provider Parameters](docs/Provider-Parameters.md) | Per-provider completion parameter support and validation |
 | [Module System Design](docs/Module-System-Design.md) | Module architecture, contracts, permission model, lifecycle |

@@ -9,6 +9,30 @@ Exports: none
 Requires: editor_bridge, editor_session (from Editor Common)
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_vscode_editor
+Default: DISABLED (not listed in default .env)
+Prerequisites: Editor Common (sharpclaw_editor_common) must be enabled.
+  Provides required contracts: editor_bridge, editor_session.
+Platform: All
+
+To enable, add BOTH keys to your core .env Modules section:
+  "sharpclaw_editor_common": "true",
+  "sharpclaw_vscode_editor": "true"
+
+If Editor Common is disabled, this module will be excluded during
+dependency resolution with a missing-contract error.
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_vscode_editor
+  module enable sharpclaw_vscode_editor
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Visual Studio Code integration — read/write files, diagnostics, builds,

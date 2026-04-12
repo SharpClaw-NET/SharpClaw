@@ -6,6 +6,38 @@
 > **Tool Prefix:** `cu`
 > **Platforms:** Windows only
 > **Exports:** `window_management` (`IWindowManager`), `desktop_input` (`IDesktopInput`)
+> **Requires:** none
+
+---
+
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_computer_use` |
+| **Default** | ❌ Disabled |
+| **Prerequisites** | None |
+| **Platform** | Windows only |
+
+To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_computer_use": "true"
+```
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+> **Note:** This module exports `window_management` and `desktop_input`
+> contracts, consumed optionally by the Module Development Kit.
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_computer_use
+module enable sharpclaw_computer_use
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
 
 ---
 

@@ -9,6 +9,28 @@ Exports: none
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_dangerous_shell
+Default: disabled
+Prerequisites: none
+Platform: Windows, Linux, macOS
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_dangerous_shell": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+WARNING: This module bypasses all sandbox protections. Ensure agents
+using it have appropriate clearance levels configured.
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_dangerous_shell
+  module enable sharpclaw_dangerous_shell
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Unsandboxed real shell execution — Bash, PowerShell, CommandPrompt, Git.

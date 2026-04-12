@@ -10,6 +10,41 @@
 
 ---
 
+## How to Enable
+
+| Setting | Value |
+|---------|-------|
+| **.env key** | `Modules:sharpclaw_vs2026_editor` |
+| **Default** | ❌ **Disabled** (not listed in default `.env`) |
+| **Prerequisites** | **[Editor Common](Module-EditorCommon.md)** must be enabled |
+| **Platform** | Windows only |
+
+This module requires the `editor_bridge` and `editor_session` contracts
+exported by the Editor Common module. Both modules must be enabled.
+
+Add **both** keys to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+
+```jsonc
+"sharpclaw_editor_common": "true",
+"sharpclaw_vs2026_editor": "true"
+```
+
+> ⚠️ If Editor Common is disabled, this module will be **excluded during
+> dependency resolution** with a missing-contract error.
+
+To disable, set to `"false"` or remove the key (missing = disabled).
+
+**Runtime toggle** (no restart required):
+
+```
+module disable sharpclaw_vs2026_editor
+module enable sharpclaw_vs2026_editor
+```
+
+See [Module Enablement Guide](Module-Enablement-Guide.md) for full details.
+
+---
+
 ## Overview
 
 The VS 2026 Editor module provides Visual Studio 2026 integration —

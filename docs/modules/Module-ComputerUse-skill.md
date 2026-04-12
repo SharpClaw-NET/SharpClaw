@@ -6,6 +6,29 @@ Tool Prefix: cu
 Version: 1.0.0
 Platforms: Windows only
 Exports: window_management, desktop_input
+Requires: none
+
+────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_computer_use
+Default: disabled
+Prerequisites: none
+Platform: Windows only
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_computer_use": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Exports: window_management (IWindowManager), desktop_input (IDesktopInput).
+These contracts are consumed optionally by Module Dev.
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_computer_use
+  module enable sharpclaw_computer_use
+
+See docs/Module-Enablement-Guide.md for full details.
 
 ────────────────────────────────────────
 OVERVIEW

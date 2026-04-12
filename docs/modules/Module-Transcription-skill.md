@@ -9,6 +9,27 @@ Exports: transcription_stt, transcription_audio_capture
 Requires: none
 
 ────────────────────────────────────────
+ENABLING
+────────────────────────────────────────
+.env key: Modules:sharpclaw_transcription
+Default: disabled
+Prerequisites: none
+Platform: Windows only (WASAPI audio capture)
+
+To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
+  "sharpclaw_transcription": "true"
+
+To disable, set to "false" or remove the key (missing = disabled).
+
+Exports: transcription_stt, transcription_audio_capture.
+
+Runtime toggle (no restart required):
+  module disable sharpclaw_transcription
+  module enable sharpclaw_transcription
+
+See docs/Module-Enablement-Guide.md for full details.
+
+────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
 Live audio transcription, input audio device management, and STT provider

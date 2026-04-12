@@ -1,0 +1,21 @@
+{
+  "id": "sharpclaw_editor_common",
+  "displayName": "Editor Common",
+  "version": "1.0.0",
+  "toolPrefix": "edc",
+  "entryAssembly": "SharpClaw.Modules.EditorCommon",
+  "minHostVersion": "1.0.0",
+  "description": "Infrastructure module: shared editor bridge (WebSocket) and session management consumed by VS 2026 and VS Code editor modules.",
+  "platforms": null,
+  "exports": [
+    {
+      "contractName": "editor_bridge",
+      "serviceType": "SharpClaw.Modules.EditorCommon.Services.EditorBridgeService"
+    },
+    {
+      "contractName": "editor_session",
+      "serviceType": "SharpClaw.Modules.EditorCommon.Services.EditorSessionService"
+    }
+  ],
+  "requires": []
+}
