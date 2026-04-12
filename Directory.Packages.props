@@ -51,7 +51,7 @@
     <PackageVersion Include="Microsoft.VisualStudio.Extensibility" Version="17.14.54" />
     <!-- Document tools (Open XML spreadsheet + CSV) -->
     <PackageVersion Include="ClosedXML" Version="0.105.0" />
-    <PackageVersion Include="CsvHelper" Version="33.0.1" />
+    <PackageVersion Include="CsvHelper" Version="33.1.0" />
     <!-- Database drivers (Database Access module) -->
     <PackageVersion Include="Npgsql" Version="10.0.2" />
     <PackageVersion Include="MySqlConnector" Version="2.4.0" />
