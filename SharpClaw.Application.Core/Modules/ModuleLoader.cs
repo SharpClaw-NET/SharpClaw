@@ -58,7 +58,7 @@ public sealed class ModuleLoader
             .Where(t => t is { IsClass: true, IsAbstract: false }
                         && moduleType.IsAssignableFrom(t)
                         && t.GetConstructor(Type.EmptyTypes) is not null)
-            .Select(t => (ISharpClawModule)Activator.CreateInstance(t)!)
+            .Select(t => (ISharpClawModule)Activator.CreateInstance(t!)!)
             .ToArray();
 
         return new ModuleLoader(modules);

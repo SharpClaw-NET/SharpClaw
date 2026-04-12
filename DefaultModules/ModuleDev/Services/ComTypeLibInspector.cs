@@ -93,10 +93,10 @@ internal sealed partial class ComTypeLibInspector
 
             var kind = typeAttr.typekind switch
             {
-                System.Runtime.InteropServices.ComTypes.TYPEKIND.CYCLEREF_TKIND_COCLASS => "CoClass",
-                System.Runtime.InteropServices.ComTypes.TYPEKIND.CYCLEREF_TKIND_INTERFACE => "Interface",
-                System.Runtime.InteropServices.ComTypes.TYPEKIND.CYCLEREF_TKIND_DISPATCH => "DispatchInterface",
-                System.Runtime.InteropServices.ComTypes.TYPEKIND.CYCLEREF_TKIND_ENUM => "Enum",
+                System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_COCLASS => "CoClass",
+                System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_INTERFACE => "Interface",
+                System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_DISPATCH => "DispatchInterface",
+                System.Runtime.InteropServices.ComTypes.TYPEKIND.TKIND_ENUM => "Enum",
                 _ => typeAttr.typekind.ToString()
             };
 

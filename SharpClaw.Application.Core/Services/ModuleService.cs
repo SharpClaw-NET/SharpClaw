@@ -374,7 +374,7 @@ public sealed class ModuleService(
         return loaded;
     }
 
-    internal static string ResolveExternalModulesDir()
+    public static string ResolveExternalModulesDir()
     {
         return Path.Combine(
             Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,

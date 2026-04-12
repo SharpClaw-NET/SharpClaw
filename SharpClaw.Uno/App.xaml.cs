@@ -136,6 +136,8 @@ public partial class App : Application
                     services.AddSingleton(new SharpClawApiClient(apiUrl));
                     services.AddSingleton(new ClientSettings());
                     services.AddSingleton(new AccountStore());
+                    services.AddSingleton(new ModuleStateCache());
+                    services.AddSingleton(new ModuleUiHookService());
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );

@@ -178,8 +178,10 @@ public sealed record CompletionParameterSpec
         },
 
         // ─────────────────────────────────────────────────────────
-        // Google Vertex AI  (OpenAI-compatible endpoint)
+        // Google Vertex AI  (native generateContent endpoint)
         // https://cloud.google.com/vertex-ai/generative-ai/docs
+        // NOT YET IMPLEMENTED — stub mirrors GoogleGemini native
+        // constraints for forward-compat.
         // ─────────────────────────────────────────────────────────
         [ProviderType.GoogleVertexAI] = new()
         {
@@ -193,6 +195,33 @@ public sealed record CompletionParameterSpec
             SupportsTopK = true,
             TopKMin = 1,
             TopKMax = 40,
+            SupportsFrequencyPenalty = false,
+            SupportsPresencePenalty = false,
+            SupportsStop = true,
+            MaxStopSequences = 5,
+            SupportsSeed = true,
+            SupportsResponseFormat = true,
+            SupportsReasoningEffort = true,
+            ValidReasoningEffortValues = ["none", "minimal", "low", "medium", "high"],
+        },
+
+        // ─────────────────────────────────────────────────────────
+        // Google Vertex AI OpenAI-compat  (/v1beta1/openai endpoint)
+        // https://cloud.google.com/vertex-ai/generative-ai/docs
+        // topK is NOT supported — the OpenAI-compatible schema has
+        // no top_k field and it is not serialised by the base client.
+        // Use providerParameters to pass topK via extra_body if needed.
+        // ─────────────────────────────────────────────────────────
+        [ProviderType.GoogleVertexAIOpenAi] = new()
+        {
+            ProviderName = "Google Vertex AI (OpenAI-compat)",
+            SupportsTemperature = true,
+            TemperatureMin = 0.0f,
+            TemperatureMax = 2.0f,
+            SupportsTopP = true,
+            TopPMin = 0.0f,
+            TopPMax = 1.0f,
+            SupportsTopK = false,
             SupportsFrequencyPenalty = true,
             FrequencyPenaltyMin = -2.0f,
             FrequencyPenaltyMax = 2.0f,
@@ -209,8 +238,12 @@ public sealed record CompletionParameterSpec
         },
 
         // ─────────────────────────────────────────────────────────
-        // Google Gemini  (OpenAI-compatible endpoint)
-        // https://ai.google.dev/gemini-api/docs/openai
+        // Google Gemini  (native generateContent endpoint)
+        // https://ai.google.dev/gemini-api/docs
+        // Parameters are passed through as-is in the native Gemini
+        // schema.  CompletionParameters are mapped to generationConfig
+        // fields (temperature, topP, topK, stopSequences, seed,
+        // responseMimeType, maxOutputTokens, thinkingConfig).
         // ─────────────────────────────────────────────────────────
         [ProviderType.GoogleGemini] = new()
         {
@@ -224,6 +257,33 @@ public sealed record CompletionParameterSpec
             SupportsTopK = true,
             TopKMin = 1,
             TopKMax = 40,
+            SupportsFrequencyPenalty = false,
+            SupportsPresencePenalty = false,
+            SupportsStop = true,
+            MaxStopSequences = 5,
+            SupportsSeed = true,
+            SupportsResponseFormat = true,
+            SupportsReasoningEffort = true,
+            ValidReasoningEffortValues = ["none", "minimal", "low", "medium", "high"],
+        },
+
+        // ─────────────────────────────────────────────────────────
+        // Google Gemini OpenAI-compat  (/v1beta/openai endpoint)
+        // https://ai.google.dev/gemini-api/docs/openai
+        // topK is NOT supported — the OpenAI-compatible schema has
+        // no top_k field and it is not serialised by the base client.
+        // Use providerParameters to pass topK via extra_body if needed.
+        // ─────────────────────────────────────────────────────────
+        [ProviderType.GoogleGeminiOpenAi] = new()
+        {
+            ProviderName = "Google Gemini (OpenAI-compat)",
+            SupportsTemperature = true,
+            TemperatureMin = 0.0f,
+            TemperatureMax = 2.0f,
+            SupportsTopP = true,
+            TopPMin = 0.0f,
+            TopPMax = 1.0f,
+            SupportsTopK = false,
             SupportsFrequencyPenalty = true,
             FrequencyPenaltyMin = -2.0f,
             FrequencyPenaltyMax = 2.0f,

@@ -317,6 +317,11 @@ public sealed partial class LoginPage : Page
 
                     App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
 
+                    // Pre-populate module caches for the session
+                    var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
+                    await App.Services!.GetRequiredService<ModuleStateCache>().RefreshAsync(api2);
+                    await App.Services!.GetRequiredService<ModuleUiHookService>().RefreshAsync(api2);
+
                     ShowStatus("✓ Authenticated.", error: false, success: true);
                     await Task.Delay(400);
 

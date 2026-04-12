@@ -106,7 +106,9 @@ try
     builder.Services.AddSingleton<IProviderApiClient, AnthropicApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, OpenRouterApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, GoogleVertexAIApiClient>();
+    builder.Services.AddSingleton<IProviderApiClient, GoogleVertexAIOpenAiApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, GoogleGeminiApiClient>();
+    builder.Services.AddSingleton<IProviderApiClient, GoogleGeminiOpenAiApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, ZAIApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, VercelAIGatewayApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, XAIApiClient>();

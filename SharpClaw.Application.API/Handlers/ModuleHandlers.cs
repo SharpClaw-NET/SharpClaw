@@ -343,4 +343,105 @@ public static class ModuleHandlers
 
     /// <summary>Request body for config PUT operations.</summary>
     public sealed record ConfigValueBody(string? Value);
+
+    // ── Permissions Metadata ─────────────────────────────────────
+
+    /// <summary>
+    /// Return all permission metadata (global flags and resource types) grouped by
+    /// owning module. Includes dependency information for UI ordering.
+    /// </summary>
+    [MapGet("/permissions-metadata")]
+    public static async Task<IResult> GetPermissionsMetadata(
+        ModuleRegistry registry, ModuleService svc, CancellationToken ct)
+    {
+        var states = await svc.ListAsync(ct);
+        var stateMap = states.ToDictionary(s => s.ModuleId, StringComparer.Ordinal);
+        var flagsByModule = registry.GetFlagsByModule();
+        var resourcesByModule = registry.GetResourceTypesByModule();
+
+        // Collect all module IDs that own flags or resources
+        var moduleIds = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var id in flagsByModule.Keys) moduleIds.Add(id);
+        foreach (var id in resourcesByModule.Keys) moduleIds.Add(id);
+
+        var modules = new List<object>(moduleIds.Count);
+        foreach (var moduleId in moduleIds)
+        {
+            var module = registry.GetModule(moduleId);
+            if (module is null) continue;
+
+            var enabled = stateMap.TryGetValue(moduleId, out var st) && st.Enabled;
+
+            var flags = flagsByModule.TryGetValue(moduleId, out var fl)
+                ? fl.Select(f => new { flagKey = f.FlagKey, displayName = f.DisplayName, description = f.Description }).ToList()
+                : [];
+
+            var resources = resourcesByModule.TryGetValue(moduleId, out var rl)
+                ? rl.Select(r => new { resourceType = r.ResourceType, grantLabel = r.GrantLabel }).ToList()
+                : [];
+
+            // Resolve contract dependencies to module IDs
+            var dependsOn = module.RequiredContracts
+                .Where(r => !r.Optional)
+                .Select(r => registry.ResolveContract(r.ContractName)?.ModuleId)
+                .Where(id => id is not null)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+
+            modules.Add(new
+            {
+                moduleId,
+                displayName = module.DisplayName,
+                enabled,
+                globalFlags = flags,
+                resourceTypes = resources,
+                dependsOn,
+            });
+        }
+
+        return Results.Ok(new { modules });
+    }
+
+    // ── UI Contributions ─────────────────────────────────────────
+
+    /// <summary>
+    /// Return all UI contributions from all enabled modules, grouped by
+    /// contribution point. Clients use this to render module-specific UI
+    /// elements at designated locations.
+    /// </summary>
+    [MapGet("/ui-contributions")]
+    public static IResult GetUiContributions(ModuleRegistry registry)
+    {
+        var contributions = new Dictionary<string, List<object>>(StringComparer.Ordinal);
+
+        foreach (var module in registry.GetAllModules())
+        {
+            var items = module.GetUiContributions();
+            if (items is not { Count: > 0 }) continue;
+
+            foreach (var item in items)
+            {
+                if (!contributions.TryGetValue(item.ContributionPoint, out var list))
+                {
+                    list = [];
+                    contributions[item.ContributionPoint] = list;
+                }
+                list.Add(new
+                {
+                    moduleId = module.Id,
+                    contributionPoint = item.ContributionPoint,
+                    elementType = item.ElementType,
+                    elementId = item.ElementId,
+                    icon = item.Icon,
+                    label = item.Label,
+                    tooltip = item.Tooltip,
+                    actionToolName = item.ActionToolName,
+                    requiredModuleId = item.RequiredModuleId ?? module.Id,
+                    metadata = item.Metadata,
+                });
+            }
+        }
+
+        return Results.Ok(contributions);
+    }
 }

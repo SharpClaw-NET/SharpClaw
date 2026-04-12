@@ -109,9 +109,15 @@ public sealed partial class SettingsPage : Page
     /// <summary>Only adds the tab button if its required module is enabled.</summary>
     private void AddConditionalTabButton(string label, string cursorCmd)
     {
-        if (TabRequiredModules.TryGetValue(label, out var requiredModule)
-            && _cachedModuleStates?.Any(m => m.ModuleId == requiredModule && m.Enabled) != true)
-            return;
+        if (TabRequiredModules.TryGetValue(label, out var requiredModule))
+        {
+            var moduleCache = App.Services?.GetService<ModuleStateCache>();
+            if (moduleCache is not null && !moduleCache.IsEnabled(requiredModule))
+                return;
+            if (moduleCache is null
+                && _cachedModuleStates?.Any(m => m.ModuleId == requiredModule && m.Enabled) != true)
+                return;
+        }
         AddTabButton(label, cursorCmd);
     }
 
@@ -145,11 +151,17 @@ public sealed partial class SettingsPage : Page
     private void SelectTab(string tab)
     {
         // Guard: if a selected tab requires a disabled module, redirect.
-        if (TabRequiredModules.TryGetValue(tab, out var req)
-            && _cachedModuleStates?.Any(m => m.ModuleId == req && m.Enabled) != true)
+        if (TabRequiredModules.TryGetValue(tab, out var req))
         {
-            SelectTab("Manage Modules");
-            return;
+            var moduleCache = App.Services?.GetService<ModuleStateCache>();
+            var enabled = moduleCache is not null
+                ? moduleCache.IsEnabled(req)
+                : _cachedModuleStates?.Any(m => m.ModuleId == req && m.Enabled) == true;
+            if (!enabled)
+            {
+                SelectTab("Manage Modules");
+                return;
+            }
         }
 
         _activeTab = tab;
@@ -1662,14 +1674,11 @@ public sealed partial class SettingsPage : Page
             .WithFlagClearance(true)
             .WithGrantClearance(true);
 
-        Sub("Global Permissions");
-        Lbl("Capabilities the agent can use. Each has its own clearance level.", 0x808080);
-        if (!_permEditor.BuildGlobalFlags(ContentPanel))
-            Lbl("You hold no global permissions to grant.", 0x555555);
+        var metadata = await TerminalUI.LoadPermissionMetadataAsync(Api);
 
-        Sub("Resource Accesses");
-        Lbl("Per-resource grants with individual clearance levels.", 0x808080);
-        await _permEditor.BuildResourceGrantsAsync(ContentPanel);
+        Sub("Permissions (grouped by module)");
+        Lbl("Capabilities and resource grants the agent can use, organised by owning module.", 0x808080);
+        await _permEditor.BuildGroupedByModuleAsync(ContentPanel, metadata);
 
         var saveBtn = new Button
         {

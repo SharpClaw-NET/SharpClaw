@@ -58,9 +58,12 @@ public sealed record CompletionParameters
     /// <summary>
     /// Structured output format passed as-is to the provider.
     /// <para>
-    /// Google's OpenAI compatibility endpoint only supports the full
-    /// <c>json_schema</c> variant (<c>{"type": "json_schema", …}</c>).
-    /// The simplified <c>{"type": "json_object"}</c> form is rejected —
+    /// On <see cref="ProviderType.GoogleGemini"/> (native), this is mapped to
+    /// <c>responseMimeType</c> inside <c>generationConfig</c>.
+    /// On <see cref="ProviderType.GoogleGeminiOpenAi"/> and
+    /// <see cref="ProviderType.GoogleVertexAIOpenAi"/> (OpenAI-compat), only the full
+    /// <c>json_schema</c> variant is supported; the simplified
+    /// <c>{"type": "json_object"}</c> form is rejected —
     /// see <see cref="CompletionParameterSpec.RejectsJsonObjectResponseFormat"/>.
     /// </para>
     /// See <see cref="CompletionParameterSpec"/> for per-provider support.

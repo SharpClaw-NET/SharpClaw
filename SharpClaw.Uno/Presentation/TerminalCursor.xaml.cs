@@ -9,8 +9,6 @@ public sealed partial class TerminalCursor : UserControl
     private bool _cursorVisible = true;
     private TaskCompletionSource? _typeTcs;
 
-    private bool _frozen;
-
     public TerminalCursor()
     {
         this.InitializeComponent();
@@ -88,7 +86,6 @@ public sealed partial class TerminalCursor : UserControl
     /// </summary>
     public void Freeze()
     {
-        _frozen = true;
         _blinkTimer.Stop();
         BlinkBlock.Visibility = Visibility.Collapsed;
     }
@@ -98,7 +95,6 @@ public sealed partial class TerminalCursor : UserControl
     /// </summary>
     public void Unfreeze()
     {
-        _frozen = false;
         BlinkBlock.Visibility = Visibility.Visible;
         BlinkBlock.Text = "_";
         _cursorVisible = true;

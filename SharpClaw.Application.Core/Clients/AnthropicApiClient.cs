@@ -460,7 +460,7 @@ public sealed class AnthropicApiClient : IProviderApiClient
         string? currentToolName = null;
         System.Text.StringBuilder? currentToolArgs = null;
 
-        while (!reader.EndOfStream)
+        while (true)
         {
             var line = await reader.ReadLineAsync(ct);
             if (line is null) break;

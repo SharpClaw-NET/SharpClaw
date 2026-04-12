@@ -115,7 +115,7 @@ public static class TranscriptionStreamingProxy
 
         try
         {
-            while (!reader.EndOfStream && !context.RequestAborted.IsCancellationRequested)
+            while (!context.RequestAborted.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(context.RequestAborted);
                 if (line is null) break;

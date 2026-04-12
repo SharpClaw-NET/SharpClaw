@@ -37,6 +37,9 @@ public sealed class TaskOrchestrator(
     IHttpClientFactory httpClientFactory,
     IServiceScopeFactory scopeFactory)
 {
+    private readonly ChatService _chatService = chatService;
+    private readonly AgentJobService _agentJobService = agentJobService;
+
     /// <summary>
     /// Per-instance cancellation so external callers can stop a task.
     /// </summary>

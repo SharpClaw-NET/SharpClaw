@@ -50,7 +50,7 @@ public sealed partial class BootPage : Page
     {
         base.OnNavigatedTo(e);
 
-        var services = App.Services;
+        var services = App.Services!;
         _model ??= new BootModel(
             services.GetRequiredService<BackendProcessManager>(),
             services.GetRequiredService<GatewayProcessManager>(),
@@ -343,7 +343,7 @@ public sealed partial class BootPage : Page
         }
 
         // Show backend process output if available
-        var backend = App.Services.GetRequiredService<BackendProcessManager>();
+        var backend = App.Services!.GetRequiredService<BackendProcessManager>();
         var output = backend.ProcessOutput;
         if (output.Count > 0)
         {
@@ -462,6 +462,10 @@ public sealed partial class BootPage : Page
 
             // Switch per-user settings
             App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
+
+            // Pre-populate module caches for the session
+            await App.Services!.GetRequiredService<ModuleStateCache>().RefreshAsync(api);
+            await App.Services!.GetRequiredService<ModuleUiHookService>().RefreshAsync(api);
 
             await Task.Delay(1000, CancellationToken.None);
             var needsSetup = !FirstSetupMarker.IsCompleted;

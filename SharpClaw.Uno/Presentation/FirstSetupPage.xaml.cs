@@ -784,36 +784,15 @@ public sealed partial class FirstSetupPage : Page
 
     private async Task BuildPermissionsEditorAsync()
     {
-        // Populate per-flag clearance selectors (XAML-defined)
-        PopulateClearanceCombo(ClrLocalhostBrowser);
-        PopulateClearanceCombo(ClrLocalhostCli);
-        PopulateClearanceCombo(ClrClickDesktop);
-        PopulateClearanceCombo(ClrTypeOnDesktop);
-        PopulateClearanceCombo(ClrCreateSubAgents);
-        PopulateClearanceCombo(ClrCreateContainers);
-        PopulateClearanceCombo(ClrRegisterInfoStores);
-
-        // Build resource grants UI via shared builder
+        // Build the entire permission editor dynamically, grouped by owning module
         _permEditor = new PermissionEditorBuilder(Api)
-            .WithGrantClearance(true);
-        ResourceGrantsContainer.Children.Clear();
-        await _permEditor.BuildResourceGrantsAsync(ResourceGrantsContainer);
-    }
+            .WithGrantClearance(true)
+            .WithFlagClearance(true);
 
-    private static void PopulateClearanceCombo(ComboBox box)
-    {
-        box.Items.Clear();
-        box.Items.Add(new ComboBoxItem { Content = "Unset", Tag = "Unset" });
-        box.Items.Add(new ComboBoxItem { Content = "Can act without approval", Tag = "Independent" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a managing agent", Tag = "ApprovedByWhitelistedAgent" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from an agent that has clearance to act", Tag = "ApprovedByPermittedAgent" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user", Tag = "ApprovedByWhitelistedUser" });
-        box.Items.Add(new ComboBoxItem { Content = "Only with approval from a user that can grant the permission", Tag = "ApprovedBySameLevelUser" });
-        box.SelectedIndex = 1; // Default to Independent for first-time setup
+        DynamicPermissionsContainer.Children.Clear();
+        var metadata = await TerminalUI.LoadPermissionMetadataAsync(Api);
+        await _permEditor.BuildGroupedByModuleAsync(DynamicPermissionsContainer, metadata);
     }
-
-    private static string GetClearanceTag(ComboBox box)
-        => box.SelectedItem is ComboBoxItem { Tag: string cl } ? cl : "Independent";
 
     private async Task CreateRoleAndAssignAsync(Guid agentId)
     {
@@ -839,31 +818,9 @@ public sealed partial class FirstSetupPage : Page
             throw new InvalidOperationException(
                 $"Failed to assign role ({(int)assignResp.StatusCode}). {await ExtractErrorAsync(assignResp)}");
 
-        // 3. Build the permission set from the UI
-        var globalFlags = new Dictionary<string, object?>();
-        void AddFlag(CheckBox chk, ComboBox clr, string flagKey)
-        {
-            if (chk.IsChecked == true)
-                globalFlags[flagKey] = GetClearanceTag(clr);
-        }
-        AddFlag(ChkCreateSubAgents, ClrCreateSubAgents, "CanCreateSubAgents");
-        AddFlag(ChkCreateContainers, ClrCreateContainers, "CanCreateContainers");
-        AddFlag(ChkRegisterInfoStores, ClrRegisterInfoStores, "CanRegisterDatabases");
-        AddFlag(ChkLocalhostBrowser, ClrLocalhostBrowser, "CanAccessLocalhostInBrowser");
-        AddFlag(ChkLocalhostCli, ClrLocalhostCli, "CanAccessLocalhostCli");
-        AddFlag(ChkClickDesktop, ClrClickDesktop, "CanClickDesktop");
-        AddFlag(ChkTypeOnDesktop, ClrTypeOnDesktop, "CanTypeOnDesktop");
-
-        var req = new Dictionary<string, object?>
-        {
-            ["globalFlags"] = globalFlags,
-        };
-
-        // Per-resource grants from shared builder
-        if (_permEditor is not null)
-            req["resourceGrants"] = _permEditor.CollectGrants();
-
-        var permBody = JsonSerializer.Serialize(req, Json);
+        // 3. Collect the permission set from the dynamic builder
+        if (_permEditor is null) return;
+        var permBody = JsonSerializer.Serialize(_permEditor.CollectAll(), Json);
 
         var permResp = await Api.PutAsync($"/roles/{roleId}/permissions",
             new StringContent(permBody, Encoding.UTF8, "application/json"));

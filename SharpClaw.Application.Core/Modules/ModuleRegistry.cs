@@ -44,6 +44,11 @@ public sealed class ModuleRegistry
     // AgentActionService resolves DelegateTo strings to flag keys through this registry.
     private readonly Dictionary<string, string> _delegateToFlagKey = new(StringComparer.Ordinal);
 
+    // Owner tracking: flag key / resource type → module ID.
+    // Used by the permissions-metadata endpoint to group flags and resources by module.
+    private readonly Dictionary<string, string> _flagOwnerModule = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, string> _resourceTypeOwnerModule = new(StringComparer.Ordinal);
+
     // External (hot-loaded) module hosts keyed by module ID.
     private readonly Dictionary<string, ExternalModuleHost> _externalHosts = new(StringComparer.Ordinal);
 
@@ -245,12 +250,14 @@ public sealed class ModuleRegistry
             {
                 _resourceTypeDescriptors[desc.ResourceType] = desc;
                 _delegateToResourceType[desc.DelegateMethodName] = desc.ResourceType;
+                _resourceTypeOwnerModule[desc.ResourceType] = module.Id;
             }
 
             foreach (var flag in flagDescriptors)
             {
                 _globalFlagDescriptors[flag.FlagKey] = flag;
                 _delegateToFlagKey[flag.DelegateMethodName] = flag.FlagKey;
+                _flagOwnerModule[flag.FlagKey] = module.Id;
             }
 
             if (externalHost is not null)
@@ -316,6 +323,7 @@ public sealed class ModuleRegistry
             {
                 _resourceTypeDescriptors.Remove(desc.ResourceType);
                 _delegateToResourceType.Remove(desc.DelegateMethodName);
+                _resourceTypeOwnerModule.Remove(desc.ResourceType);
             }
 
             // Remove any global flag descriptors this module provided.
@@ -323,6 +331,7 @@ public sealed class ModuleRegistry
             {
                 _globalFlagDescriptors.Remove(flag.FlagKey);
                 _delegateToFlagKey.Remove(flag.DelegateMethodName);
+                _flagOwnerModule.Remove(flag.FlagKey);
             }
 
             _manifestCache.Remove(moduleId);
@@ -378,6 +387,33 @@ public sealed class ModuleRegistry
         _lock.EnterReadLock();
         try { return _modules.GetValueOrDefault(moduleId); }
         finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Find a module by its tool prefix, or <c>null</c> if no module uses that prefix.</summary>
+    public ISharpClawModule? GetModuleByPrefix(string toolPrefix)
+    {
+        _lock.EnterReadLock();
+        try { return _modules.Values.FirstOrDefault(m => m.ToolPrefix == toolPrefix); }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>
+    /// Resolve a tool name (or alias) to its owning module and canonical tool name.
+    /// Returns <c>null</c> if the tool is not registered by any loaded module.
+    /// </summary>
+    public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            if (!_toolIndex.TryGetValue(toolName, out var entry)) return null;
+            if (!_modules.TryGetValue(entry.ModuleId, out var module)) return null;
+            return (module, entry.ToolName);
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
     }
 
     /// <summary>Get all loaded modules.</summary>
@@ -639,6 +675,66 @@ public sealed class ModuleRegistry
     {
         _lock.EnterReadLock();
         try { return _globalFlagDescriptors.GetValueOrDefault(flagKey); }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Get the module ID that owns a specific global flag, or <c>null</c>.</summary>
+    public string? GetFlagOwnerModule(string flagKey)
+    {
+        _lock.EnterReadLock();
+        try { return _flagOwnerModule.GetValueOrDefault(flagKey); }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Get the module ID that owns a specific resource type, or <c>null</c>.</summary>
+    public string? GetResourceTypeOwnerModule(string resourceType)
+    {
+        _lock.EnterReadLock();
+        try { return _resourceTypeOwnerModule.GetValueOrDefault(resourceType); }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Get all global flag descriptors grouped by owning module ID.</summary>
+    public Dictionary<string, List<ModuleGlobalFlagDescriptor>> GetFlagsByModule()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            var result = new Dictionary<string, List<ModuleGlobalFlagDescriptor>>(StringComparer.Ordinal);
+            foreach (var (flagKey, descriptor) in _globalFlagDescriptors)
+            {
+                if (!_flagOwnerModule.TryGetValue(flagKey, out var moduleId)) continue;
+                if (!result.TryGetValue(moduleId, out var list))
+                {
+                    list = [];
+                    result[moduleId] = list;
+                }
+                list.Add(descriptor);
+            }
+            return result;
+        }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    /// <summary>Get all resource type descriptors grouped by owning module ID.</summary>
+    public Dictionary<string, List<ModuleResourceTypeDescriptor>> GetResourceTypesByModule()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            var result = new Dictionary<string, List<ModuleResourceTypeDescriptor>>(StringComparer.Ordinal);
+            foreach (var (resType, descriptor) in _resourceTypeDescriptors)
+            {
+                if (!_resourceTypeOwnerModule.TryGetValue(resType, out var moduleId)) continue;
+                if (!result.TryGetValue(moduleId, out var list))
+                {
+                    list = [];
+                    result[moduleId] = list;
+                }
+                list.Add(descriptor);
+            }
+            return result;
+        }
         finally { _lock.ExitReadLock(); }
     }
 

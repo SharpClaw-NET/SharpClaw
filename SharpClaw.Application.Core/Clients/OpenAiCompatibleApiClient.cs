@@ -323,7 +323,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         var toolCallAccumulator = new Dictionary<int, (string Id, string Name, System.Text.StringBuilder Args)>();
         TokenUsage? streamUsage = null;
 
-        while (!reader.EndOfStream)
+        while (true)
         {
             var line = await reader.ReadLineAsync(ct);
             if (line is null) break;
@@ -878,7 +878,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         var outputIndexToCallId = new Dictionary<int, string>();
         TokenUsage? respUsage = null;
 
-        while (!reader.EndOfStream)
+        while (true)
         {
             var line = await reader.ReadLineAsync(ct);
             if (line is null) break;

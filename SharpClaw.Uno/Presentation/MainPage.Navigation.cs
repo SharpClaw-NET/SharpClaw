@@ -13,6 +13,15 @@ public sealed partial class MainPage
 
     private void UpdateMicState()
     {
+        // Hide the mic button entirely when the transcription module is disabled
+        var moduleCache = App.Services?.GetService<ModuleStateCache>();
+        if (moduleCache is not null && !moduleCache.IsEnabled("sharpclaw_transcription"))
+        {
+            MicButton.Visibility = Visibility.Collapsed;
+            return;
+        }
+        MicButton.Visibility = Visibility.Visible;
+
         var agentId = LoadLocalSetting(ClientSettings.TranscriptionAgentId);
         var deviceId = LoadLocalSetting(ClientSettings.SelectedInputAudioId);
         var configured = agentId is not null && Guid.TryParse(agentId, out _)
@@ -128,7 +137,7 @@ public sealed partial class MainPage
             using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
             using var reader = new StreamReader(stream);
 
-            while (!reader.EndOfStream && !ct.IsCancellationRequested)
+            while (!ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
                 if (line is null) break;

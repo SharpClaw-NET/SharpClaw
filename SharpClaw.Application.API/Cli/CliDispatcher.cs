@@ -318,8 +318,10 @@ public static class CliDispatcher
                     svc),
             "add" when args.Length < 4
                 => UsageResult("provider add <name> <type>",
-                    "Types: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,",
-                    "       ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Minimax, Custom"),
+                    "Types: OpenAI, Anthropic, OpenRouter, GoogleVertexAI,",
+                    "       GoogleVertexAIOpenAi, GoogleGemini, GoogleGeminiOpenAi,",
+                    "       ZAI, VercelAIGateway, XAI, Groq, Cerebras,",
+                    "       Mistral, GitHubCopilot, Minimax, Custom"),
             "add" => UsageResult("Unknown provider type. Valid types: " +
                      string.Join(", ", Enum.GetNames<ProviderType>())),
 

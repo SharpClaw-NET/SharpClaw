@@ -130,6 +130,14 @@ public interface ISharpClawModule
     IReadOnlyList<ModuleGlobalFlagDescriptor> GetGlobalFlagDescriptors() => [];
 
     /// <summary>
+    /// Optional. Return UI contribution descriptors for this module.
+    /// Client applications use these to render module-specific UI elements
+    /// at designated contribution points (e.g. <c>"chat_input_actions"</c>,
+    /// <c>"settings_sidebar"</c>).
+    /// </summary>
+    IReadOnlyList<ModuleUiContribution> GetUiContributions() => [];
+
+    /// <summary>
     /// Optional. Return CLI commands this module provides.
     /// Commands are registered in the CLI REPL at their declared
     /// <see cref="ModuleCliScope"/> (top-level verb or resource type).

@@ -204,4 +204,158 @@ internal static class TerminalUI
         btn.Click += (_, _) => onClick();
         return btn;
     }
+
+    // ── Dynamic module permission metadata ──────────────────────
+
+    /// <summary>Cached permission metadata grouped by module. <c>null</c> until first fetch.</summary>
+    private static List<ModulePermissionMetadata>? _cachedPermMetadata;
+
+    /// <summary>
+    /// Fetch permission metadata from the API, grouping global flags and resource
+    /// types by owning module. Results are cached; call with <paramref name="forceRefresh"/>
+    /// to re-fetch.
+    /// </summary>
+    public static async Task<List<ModulePermissionMetadata>> LoadPermissionMetadataAsync(
+        SharpClaw.Services.SharpClawApiClient api, bool forceRefresh = false)
+    {
+        if (_cachedPermMetadata is not null && !forceRefresh)
+            return _cachedPermMetadata;
+
+        try
+        {
+            using var resp = await api.GetAsync("/modules/permissions-metadata");
+            if (!resp.IsSuccessStatusCode)
+                return _cachedPermMetadata ?? BuildFallbackMetadata();
+
+            using var stream = await resp.Content.ReadAsStreamAsync();
+            using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream);
+
+            if (!doc.RootElement.TryGetProperty("modules", out var modulesArr))
+                return _cachedPermMetadata ?? BuildFallbackMetadata();
+
+            var result = new List<ModulePermissionMetadata>();
+            foreach (var m in modulesArr.EnumerateArray())
+            {
+                var entry = new ModulePermissionMetadata
+                {
+                    ModuleId = m.GetProperty("moduleId").GetString() ?? "",
+                    DisplayName = m.GetProperty("displayName").GetString() ?? "",
+                    Enabled = m.TryGetProperty("enabled", out var en) && en.GetBoolean(),
+                    GlobalFlags = [],
+                    ResourceTypes = [],
+                    DependsOn = [],
+                };
+
+                if (m.TryGetProperty("globalFlags", out var flags) && flags.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var f in flags.EnumerateArray())
+                        entry.GlobalFlags.Add(new ModulePermissionMetadata.FlagEntry(
+                            f.GetProperty("flagKey").GetString() ?? "",
+                            f.GetProperty("displayName").GetString() ?? "",
+                            f.TryGetProperty("description", out var desc) ? desc.GetString() ?? "" : ""));
+
+                if (m.TryGetProperty("resourceTypes", out var res) && res.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var r in res.EnumerateArray())
+                        entry.ResourceTypes.Add(new ModulePermissionMetadata.ResourceTypeEntry(
+                            r.GetProperty("resourceType").GetString() ?? "",
+                            r.GetProperty("grantLabel").GetString() ?? ""));
+
+                if (m.TryGetProperty("dependsOn", out var deps) && deps.ValueKind == System.Text.Json.JsonValueKind.Array)
+                    foreach (var d in deps.EnumerateArray())
+                        if (d.GetString() is { } depId)
+                            entry.DependsOn.Add(depId);
+
+                result.Add(entry);
+            }
+
+            _cachedPermMetadata = result;
+            return result;
+        }
+        catch
+        {
+            return _cachedPermMetadata ?? BuildFallbackMetadata();
+        }
+    }
+
+    /// <summary>
+    /// Topologically sort modules so dependencies come before dependents.
+    /// Modules with no dependencies come first.
+    /// </summary>
+    public static List<ModulePermissionMetadata> TopologicalSort(List<ModulePermissionMetadata> modules)
+    {
+        var byId = modules.ToDictionary(m => m.ModuleId, StringComparer.Ordinal);
+        var inDegree = modules.ToDictionary(m => m.ModuleId, _ => 0, StringComparer.Ordinal);
+
+        foreach (var m in modules)
+            foreach (var dep in m.DependsOn)
+                if (inDegree.ContainsKey(dep))
+                    inDegree[m.ModuleId]++;
+
+        var queue = new Queue<string>(modules.Where(m => inDegree[m.ModuleId] == 0).Select(m => m.ModuleId));
+        var sorted = new List<ModulePermissionMetadata>(modules.Count);
+
+        while (queue.Count > 0)
+        {
+            var id = queue.Dequeue();
+            sorted.Add(byId[id]);
+
+            foreach (var m in modules)
+            {
+                if (!m.DependsOn.Contains(id)) continue;
+                inDegree[m.ModuleId]--;
+                if (inDegree[m.ModuleId] == 0)
+                    queue.Enqueue(m.ModuleId);
+            }
+        }
+
+        // Append any remaining (circular deps — shouldn't happen)
+        foreach (var m in modules)
+            if (!sorted.Contains(m))
+                sorted.Add(m);
+
+        return sorted;
+    }
+
+    /// <summary>
+    /// Build fallback metadata from the hardcoded arrays when the API is unreachable.
+    /// All flags and resources are placed under a synthetic "core" module.
+    /// </summary>
+    private static List<ModulePermissionMetadata> BuildFallbackMetadata()
+    {
+        var flags = GlobalFlagNames.Select(f => new ModulePermissionMetadata.FlagEntry(
+            f, FormatFlagName(f),
+            GlobalFlagTooltips.GetValueOrDefault(f) ?? "")).ToList();
+
+        var resources = ResourceAccessTypes.Select(r => new ModulePermissionMetadata.ResourceTypeEntry(
+            r.ApiName, r.DisplayName)).ToList();
+
+        return [new ModulePermissionMetadata
+        {
+            ModuleId = "core",
+            DisplayName = "Core",
+            Enabled = true,
+            GlobalFlags = flags,
+            ResourceTypes = resources,
+            DependsOn = [],
+        }];
+    }
+
+    /// <summary>Invalidate the cached permission metadata so the next call re-fetches.</summary>
+    public static void InvalidatePermissionMetadataCache() => _cachedPermMetadata = null;
+}
+
+/// <summary>
+/// Client-side DTO for module permission metadata returned by
+/// <c>GET /modules/permissions-metadata</c>.
+/// </summary>
+internal sealed class ModulePermissionMetadata
+{
+    public required string ModuleId { get; init; }
+    public required string DisplayName { get; init; }
+    public required bool Enabled { get; init; }
+    public required List<FlagEntry> GlobalFlags { get; init; }
+    public required List<ResourceTypeEntry> ResourceTypes { get; init; }
+    public required List<string> DependsOn { get; init; }
+
+    public sealed record FlagEntry(string FlagKey, string DisplayName, string Description);
+    public sealed record ResourceTypeEntry(string ResourceType, string DisplayName);
 }

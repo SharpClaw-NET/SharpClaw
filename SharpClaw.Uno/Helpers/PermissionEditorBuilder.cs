@@ -450,4 +450,159 @@ internal sealed class PermissionEditorBuilder
         if (selector.Items.Count > 0)
             selector.SelectedIndex = 0;
     }
+
+    // ── Module-grouped build ─────────────────────────────────────
+
+    /// <summary>
+    /// Builds the entire permission editor (flags + grants) grouped by owning module.
+    /// Each enabled module gets a collapsible section header, its flags, and its resource grants.
+    /// </summary>
+    public async Task BuildGroupedByModuleAsync(
+        StackPanel container,
+        List<ModulePermissionMetadata> metadata)
+    {
+        _flagEditors.Clear();
+        _grantPanels.Clear();
+        _nameCache.Clear();
+        _resourcesByType.Clear();
+        await PreloadResourceNamesAsync();
+
+        JsonElement? existingFlags = _existing is { } ex
+            && ex.TryGetProperty("globalFlags", out var ef) ? ef : null;
+        JsonElement? callerFlags = _callerFilter is { } cf
+            && cf.TryGetProperty("globalFlags", out var cff) ? cff : null;
+        JsonElement? existingGrants = _existing is { } exg
+            && exg.TryGetProperty("resourceGrants", out var eg) ? eg : null;
+        JsonElement? callerGrants = _callerFilter is { } cfg
+            && cfg.TryGetProperty("resourceGrants", out var cg) ? cg : null;
+
+        var sorted = TerminalUI.TopologicalSort(metadata);
+
+        foreach (var module in sorted)
+        {
+            if (!module.Enabled) continue;
+            if (module.GlobalFlags.Count == 0 && module.ResourceTypes.Count == 0) continue;
+
+            // ── Module section header ──
+            var header = new TextBlock
+            {
+                Text = $"── {module.DisplayName} ──",
+                FontFamily = TerminalUI.Mono, FontSize = 12,
+                Foreground = TerminalUI.Brush(0x00CCFF),
+                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
+                Margin = new Thickness(0, 12, 0, 4),
+            };
+            container.Children.Add(header);
+
+            // ── Global flags for this module ──
+            if (module.GlobalFlags.Count > 0)
+            {
+                var flagPanel = new StackPanel { Spacing = _flagClearance ? 10 : 4, Margin = new Thickness(8, 0, 0, 0) };
+
+                foreach (var flag in module.GlobalFlags)
+                {
+                    if (_callerFilter is not null)
+                    {
+                        if (callerFlags is null || !callerFlags.Value.TryGetProperty(flag.FlagKey, out _))
+                            continue;
+                    }
+
+                    var on = existingFlags is { } ef2 && ef2.TryGetProperty(flag.FlagKey, out _);
+                    var cb = new CheckBox
+                    {
+                        IsChecked = on, MinWidth = 0, MinHeight = 0,
+                        Padding = new Thickness(4, 0, 0, 0),
+                        Content = new TextBlock
+                        {
+                            Text = flag.DisplayName,
+                            FontFamily = TerminalUI.Mono, FontSize = 11,
+                            Foreground = TerminalUI.Brush(0xE0E0E0),
+                        },
+                    };
+                    if (!string.IsNullOrEmpty(flag.Description))
+                        ToolTipService.SetToolTip(cb, flag.Description);
+
+                    ComboBox? clrBox = null;
+                    if (_flagClearance)
+                    {
+                        var cl = existingFlags is { } ef3
+                            && ef3.TryGetProperty(flag.FlagKey, out var clrProp)
+                                ? clrProp.GetString() ?? "Unset" : "Unset";
+
+                        var row = new StackPanel { Spacing = 4 };
+                        row.Children.Add(cb);
+                        row.Children.Add(new TextBlock
+                        {
+                            Text = "Clearance:", FontFamily = TerminalUI.Mono, FontSize = 9,
+                            Foreground = TerminalUI.Brush(0x808080), Margin = new Thickness(24, 2, 0, 0),
+                        });
+                        clrBox = TerminalUI.MakeClearanceCombo(cl, includeUnset: true);
+                        clrBox.Margin = new Thickness(24, 0, 0, 0);
+                        row.Children.Add(clrBox);
+                        flagPanel.Children.Add(row);
+                    }
+                    else
+                    {
+                        flagPanel.Children.Add(cb);
+                    }
+
+                    _flagEditors[flag.FlagKey] = (cb, clrBox);
+                }
+
+                if (flagPanel.Children.Count > 0)
+                    container.Children.Add(flagPanel);
+            }
+
+            // ── Resource types for this module ──
+            if (module.ResourceTypes.Count > 0)
+            {
+                var resCont = new StackPanel { Spacing = _grantClearance ? 10 : 6, Margin = new Thickness(8, 4, 0, 0) };
+
+                foreach (var resType in module.ResourceTypes)
+                {
+                    var callerIds = GetCallerResourceIds(callerGrants, resType.ResourceType);
+                    if (_callerFilter is not null && callerIds is null)
+                        continue;
+
+                    var section = new StackPanel { Spacing = _grantClearance ? 4 : 2 };
+                    var resHeader = new TextBlock
+                    {
+                        Text = resType.DisplayName, FontFamily = TerminalUI.Mono, FontSize = 11,
+                        Foreground = TerminalUI.Brush(0x00CCFF),
+                    };
+                    if (TerminalUI.ResourceAccessTooltips.TryGetValue(resType.ResourceType, out var resTip))
+                        ToolTipService.SetToolTip(resHeader, resTip);
+                    section.Children.Add(resHeader);
+
+                    var gp = new StackPanel { Spacing = _grantClearance ? 6 : 2, Margin = new Thickness(12, 0, 0, 0) };
+                    _grantPanels[resType.ResourceType] = gp;
+
+                    if (existingGrants is { } eg2
+                        && eg2.TryGetProperty(resType.ResourceType, out var ap) && ap.ValueKind == JsonValueKind.Array)
+                        foreach (var g in ap.EnumerateArray())
+                            if (g.TryGetProperty("resourceId", out var rid) && rid.ValueKind == JsonValueKind.String)
+                            {
+                                var cl = g.TryGetProperty("clearance", out var clp) ? clp.GetString() ?? "Independent" : "Independent";
+                                AddGrantRow(gp, rid.GetGuid(), cl);
+                            }
+
+                    section.Children.Add(gp);
+
+                    var capturedApi = resType.ResourceType;
+                    var actionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
+
+                    if (_useAutoSuggest)
+                        BuildAutoSuggestSelector(actionsRow, capturedApi, resType.ResourceType);
+                    else
+                        BuildComboSelector(actionsRow, capturedApi, callerIds);
+
+                    section.Children.Add(actionsRow);
+                    resCont.Children.Add(section);
+                }
+
+                if (resCont.Children.Count > 0)
+                    container.Children.Add(resCont);
+            }
+        }
+    }
 }

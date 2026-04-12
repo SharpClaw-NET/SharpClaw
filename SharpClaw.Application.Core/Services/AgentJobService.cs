@@ -33,16 +33,19 @@ namespace SharpClaw.Application.Services;
 /// (orchestrator, channels, segments).
 /// </summary>
 public sealed class AgentJobService(
-SharpClawDbContext db,
-AgentActionService actions,
-ILiveTranscriptionOrchestrator orchestrator,
-SessionService session,
-ModuleRegistry moduleRegistry,
-ModuleMetricsCollector metricsCollector,
-ModuleEventDispatcher eventDispatcher,
-IServiceScopeFactory serviceScopeFactory,
-IConfiguration configuration)
+    SharpClawDbContext db,
+    AgentActionService actions,
+    ILiveTranscriptionOrchestrator orchestrator,
+    SessionService session,
+    ModuleRegistry moduleRegistry,
+    ModuleMetricsCollector metricsCollector,
+    ModuleEventDispatcher eventDispatcher,
+    IServiceScopeFactory serviceScopeFactory,
+    IConfiguration configuration)
 {
+    private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
+    private readonly IConfiguration _configuration = configuration;
+
     /// <summary>
     /// Per-job broadcast channels for live transcription streaming.
     /// </summary>
