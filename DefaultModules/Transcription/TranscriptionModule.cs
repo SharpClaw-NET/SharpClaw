@@ -240,6 +240,7 @@ public sealed class TranscriptionModule : ISharpClawModule
         var endpoints = (Microsoft.AspNetCore.Routing.IEndpointRouteBuilder)app;
         endpoints.MapTranscriptionStreaming();
         endpoints.MapInputAudioEndpoints();
+        endpoints.MapTranscriptionJobEndpoints();
     }
 
     // ═══════════════════════════════════════════════════════════════
