@@ -1,0 +1,50 @@
+<?xml version="1.0" encoding="utf-8"?>
+<CommandTable xmlns="http://schemas.microsoft.com/VisualStudio/2005-10-18/CommandTable" xmlns:xs="http://www.w3.org/2001/XMLSchema">
+
+  <Extern href="stdidcmd.h"/>
+  <Extern href="vsshlids.h"/>
+
+  <Commands package="guidSharpClawPackage">
+    <Groups>
+      <Group guid="guidSharpClawPackageCmdSet" id="SharpClawMenuGroup" priority="0x0600">
+        <Parent guid="guidSHLMainMenu" id="IDM_VS_MENU_TOOLS"/>
+      </Group>
+    </Groups>
+
+    <Buttons>
+      <Button guid="guidSharpClawPackageCmdSet" id="ConnectCommandId" priority="0x0100" type="Button">
+        <Parent guid="guidSharpClawPackageCmdSet" id="SharpClawMenuGroup" />
+        <Icon guid="guidImages" id="bmpPic1" />
+        <Strings>
+          <ButtonText>Connect to SharpClaw</ButtonText>
+        </Strings>
+      </Button>
+      <Button guid="guidSharpClawPackageCmdSet" id="DisconnectCommandId" priority="0x0101" type="Button">
+        <Parent guid="guidSharpClawPackageCmdSet" id="SharpClawMenuGroup" />
+        <Icon guid="guidImages" id="bmpPic2" />
+        <Strings>
+          <ButtonText>Disconnect from SharpClaw</ButtonText>
+        </Strings>
+      </Button>
+    </Buttons>
+
+    <Bitmaps>
+      <Bitmap guid="guidImages" href="Resources\Icon.png" usedList="bmpPic1, bmpPic2"/>
+    </Bitmaps>
+  </Commands>
+
+  <Symbols>
+    <GuidSymbol name="guidSharpClawPackage" value="{d5e3a8f1-4c2b-4e9d-8f1a-2b3c4d5e6f7a}" />
+
+    <GuidSymbol name="guidSharpClawPackageCmdSet" value="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
+      <IDSymbol name="SharpClawMenuGroup" value="0x1020" />
+      <IDSymbol name="ConnectCommandId" value="0x0100" />
+      <IDSymbol name="DisconnectCommandId" value="0x0101" />
+    </GuidSymbol>
+
+    <GuidSymbol name="guidImages" value="{b2c3d4e5-f6a7-8901-bcde-f12345678901}" >
+      <IDSymbol name="bmpPic1" value="1" />
+      <IDSymbol name="bmpPic2" value="2" />
+    </GuidSymbol>
+  </Symbols>
+</CommandTable>

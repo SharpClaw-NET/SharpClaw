@@ -86,6 +86,21 @@ public sealed class VS2026EditorModule : ISharpClawModule
                 """),
                 editorSession),
 
+            new("vs26_write_file",
+                "Write (overwrite) full content to a file in the connected VS 2026 workspace.",
+                BuildSchema("""
+                {
+                    "type": "object",
+                    "properties": {
+                        "targetId": { "type": "string", "description": "EditorSession GUID." },
+                        "filePath": { "type": "string", "description": "File path relative to workspace root." },
+                        "content": { "type": "string", "description": "Full file content to write." }
+                    },
+                    "required": ["targetId", "filePath", "content"]
+                }
+                """),
+                editorSession),
+
             new("vs26_get_open_files",
                 "List open files/tabs in the connected VS 2026 instance.",
                 BuildResourceOnlySchema(),

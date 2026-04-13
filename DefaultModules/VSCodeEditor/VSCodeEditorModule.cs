@@ -70,6 +70,21 @@ public sealed class VSCodeEditorModule : ISharpClawModule
                 """),
                 editorSession),
 
+            new("vsc_write_file",
+                "Write (overwrite) full content to a file in the connected VS Code workspace.",
+                BuildSchema("""
+                {
+                    "type": "object",
+                    "properties": {
+                        "targetId": { "type": "string", "description": "EditorSession GUID." },
+                        "filePath": { "type": "string", "description": "File path relative to workspace root." },
+                        "content": { "type": "string", "description": "Full file content to write." }
+                    },
+                    "required": ["targetId", "filePath", "content"]
+                }
+                """),
+                editorSession),
+
             new("vsc_get_open_files",
                 "List open files/tabs in the connected VS Code instance.",
                 BuildResourceOnlySchema(),

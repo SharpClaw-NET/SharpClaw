@@ -1,0 +1,14 @@
+<Project>
+  <!-- Exclude VS extension from regular solution builds -->
+  <PropertyGroup>
+    <!-- Only included when explicitly building this project -->
+    <IsPackable>false</IsPackable>
+    <IsTestProject>false</IsTestProject>
+    
+    <!-- Skip this project during solution-wide builds unless explicitly enabled -->
+    <BuildInParallel Condition="'$(PublishVSExtension)' != 'true'">false</BuildInParallel>
+    
+    <!-- Exclude from default build targets unless publishing -->
+    <ExcludeFromBuild Condition="'$(PublishVSExtension)' != 'true'">true</ExcludeFromBuild>
+  </PropertyGroup>
+</Project>

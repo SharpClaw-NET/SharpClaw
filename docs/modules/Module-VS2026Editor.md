@@ -57,10 +57,14 @@ Tools are dispatched via the SharpClaw module system
 when sent to the model. The `vs26_` prefix is stripped before forwarding
 the action to the WebSocket bridge.
 
+**Requires VS2026 Extension**: This module requires the SharpClaw VS2026
+Extension to be installed in Visual Studio 2026. See [Extension Setup](#extension-setup).
+
 ---
 
 ## Table of Contents
 
+- [Extension Setup](#extension-setup)
 - [Tools](#tools)
 - [CLI Commands](#cli-commands)
 - [Resource Dependencies](#resource-dependencies)
@@ -69,12 +73,73 @@ the action to the WebSocket bridge.
 
 ---
 
+## Extension Setup
+
+### Installation
+
+1. **Download VSIX Package**:
+   - From GitHub releases: https://github.com/mkn8rn/SharpClaw/releases
+   - Or build from source (see [Development Guide](../../sharpclaw-vs2026/DEVELOPMENT.md))
+
+2. **Install Extension**:
+   ```powershell
+   # Option 1: Double-click VSIX file
+   explorer.exe SharpClaw.VS2026Extension.vsix
+   
+   # Option 2: Command line
+   VSIXInstaller.exe /quiet SharpClaw.VS2026Extension.vsix
+   ```
+
+3. **Restart Visual Studio 2026**
+
+### Connection
+
+The extension auto-connects to SharpClaw backend on startup. Manual controls:
+
+- **Tools → Connect to SharpClaw** - Manually connect
+- **Tools → Disconnect from SharpClaw** - Manually disconnect
+
+Status is shown in the VS status bar.
+
+### Configuration
+
+Default connection: `ws://localhost:5163/api/editor/bridge`
+
+To change the port, update `SharpClaw.Application.API` listen URL in:
+`Infrastructure/Environment/.env`
+
+```jsonc
+"Api": {
+  "ListenUrl": "http://localhost:5163"
+}
+```
+
+### Building Extension from Source
+
+The extension is **excluded from regular solution builds**. To build:
+
+```powershell
+# Build VSIX package
+dotnet build sharpclaw-vs2026/SharpClaw.VS2026Extension.csproj -c Release /p:PublishVSExtension=true
+
+# Or use publish script
+sharpclaw-vs2026\.vsextension\publish.ps1
+```
+
+See [Development Guide](../../sharpclaw-vs2026/DEVELOPMENT.md) for full details.
+
+---
+
 ## Tools
+
+> **Implementation Status**: All tool operations are fully implemented.
 
 ### vs26_read_file
 
 Read file content from a connected VS 2026 instance. Optional
 startLine/endLine for partial reads.
+
+**Status:** ✅ Fully implemented
 
 **Parameters:**
 
@@ -89,9 +154,29 @@ startLine/endLine for partial reads.
 
 ---
 
+### vs26_write_file
+
+Write content to a file in the connected VS 2026 workspace.
+
+**Status:** ✅ Fully implemented
+
+**Parameters:**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| `targetId` | string (GUID) | yes | EditorSession GUID |
+| `filePath` | string | yes | File path relative to workspace root |
+| `content` | string | yes | Full file content to write |
+
+**Permission:** Per-resource — requires `editorSessionAccesses` grant.
+
+---
+
 ### vs26_get_open_files
 
 List open files/tabs in the connected VS 2026 instance.
+
+**Status:** ✅ Fully implemented
 
 **Parameters:**
 
@@ -107,6 +192,8 @@ List open files/tabs in the connected VS 2026 instance.
 
 Get the active file, cursor position, and selected text in VS 2026.
 
+**Status:** ✅ Fully implemented
+
 **Parameters:**
 
 | Field | Type | Required | Description |
@@ -120,6 +207,8 @@ Get the active file, cursor position, and selected text in VS 2026.
 ### vs26_get_diagnostics
 
 Get errors and warnings from VS 2026. Optional filePath to scope.
+
+**Status:** ✅ Fully implemented (Error List category filter cycling for severity)
 
 **Parameters:**
 
@@ -135,6 +224,8 @@ Get errors and warnings from VS 2026. Optional filePath to scope.
 ### vs26_apply_edit
 
 Replace a line range with new text in VS 2026.
+
+**Status:** ✅ Fully implemented (file-based line replacement)
 
 **Parameters:**
 
@@ -154,6 +245,8 @@ Replace a line range with new text in VS 2026.
 
 Create a new file in the VS 2026 workspace.
 
+**Status:** ✅ Fully implemented
+
 **Parameters:**
 
 | Field | Type | Required | Description |
@@ -170,6 +263,8 @@ Create a new file in the VS 2026 workspace.
 
 Delete a file from the VS 2026 workspace.
 
+**Status:** ✅ Fully implemented
+
 **Parameters:**
 
 | Field | Type | Required | Description |
@@ -184,6 +279,8 @@ Delete a file from the VS 2026 workspace.
 ### vs26_show_diff
 
 Show a diff view in VS 2026 for user review (accept/reject).
+
+**Status:** ✅ Fully implemented (IVsDifferenceService comparison window)
 
 **Parameters:**
 
@@ -203,6 +300,8 @@ Show a diff view in VS 2026 for user review (accept/reject).
 Trigger a build task in the connected VS 2026 instance and return
 output.
 
+**Status:** ✅ Fully implemented (async DTE SolutionBuild with OnBuildDone event)
+
 **Parameters:**
 
 | Field | Type | Required | Description |
@@ -216,6 +315,8 @@ output.
 ### vs26_run_terminal
 
 Run a command in the VS 2026 integrated terminal.
+
+**Status:** ✅ Fully implemented (cmd.exe subprocess with stdout/stderr capture)
 
 **Parameters:**
 
@@ -272,4 +373,3 @@ the WebSocket bridge. The module validates that the session's
   "exports": [],
   "requires": ["editor_bridge", "editor_session"]
 }
-```
