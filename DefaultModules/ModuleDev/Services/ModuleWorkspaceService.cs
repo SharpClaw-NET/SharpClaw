@@ -26,7 +26,11 @@ internal sealed class ModuleWorkspaceService
     public string ResolveModuleDir(string moduleId)
     {
         ValidateModuleId(moduleId);
-        return Path.Combine(_externalModulesDir, moduleId);
+
+        var moduleDir = Path.GetFullPath(Path.Combine(_externalModulesDir, moduleId));
+        PathGuard.EnsureContainedIn(moduleDir, _externalModulesDir);
+
+        return moduleDir;
     }
 
     /// <summary>
@@ -38,7 +42,7 @@ internal sealed class ModuleWorkspaceService
         ValidateModuleId(moduleId);
         ValidateRelativePath(relativePath);
 
-        var moduleDir = Path.GetFullPath(Path.Combine(_externalModulesDir, moduleId));
+        var moduleDir = ResolveModuleDir(moduleId);
         var fullPath = Path.GetFullPath(Path.Combine(moduleDir, relativePath));
 
         if (!fullPath.StartsWith(moduleDir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)
