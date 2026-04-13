@@ -69,7 +69,7 @@ internal sealed partial class ModuleBuildService(ModuleWorkspaceService workspac
             FileName = "dotnet",
             ArgumentList = { "build", csprojPath, "-c", configuration, "-nologo",
                 "-consoleloggerparameters:NoSummary" },
-            WorkingDirectory = moduleDir,
+            WorkingDirectory = ModuleService.ResolveExternalModulesDir(),
             RedirectStandardOutput = true,
             RedirectStandardError = true,
             UseShellExecute = false,
