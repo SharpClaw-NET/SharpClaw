@@ -281,9 +281,10 @@ public sealed class ModuleService(
     public async Task<ModuleStateResponse> LoadExternalAsync(
         string moduleDir, IServiceProvider hostServices, CancellationToken ct = default)
     {
-        // Validate that moduleDir is strictly inside the external-modules root.
+        // Validate that moduleDir resolves strictly inside the external-modules root.
         var externalRoot = ResolveExternalModulesDir();
-        var canonicalModuleDir = PathGuard.EnsureContainedIn(moduleDir, externalRoot);
+        var combinedModuleDir = Path.Combine(externalRoot, moduleDir);
+        var canonicalModuleDir = PathGuard.EnsureContainedIn(combinedModuleDir, externalRoot);
 
         var manifestPath = PathGuard.EnsureContainedIn(
             Path.Combine(canonicalModuleDir, "module.json"), canonicalModuleDir);
