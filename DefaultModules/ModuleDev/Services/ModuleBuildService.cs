@@ -33,7 +33,6 @@ internal sealed partial class ModuleBuildService(ModuleWorkspaceService workspac
     private static readonly TimeSpan BuildTimeout = TimeSpan.FromSeconds(120);
     private static readonly HashSet<string> AllowedConfigurations =
         new(StringComparer.OrdinalIgnoreCase) { "Debug", "Release" };
-    private static readonly Regex ModuleIdRegex = new("^[A-Za-z0-9_-]+$", RegexOptions.CultureInvariant);
 
     /// <summary>
     /// Build a module project. Returns structured diagnostics.
@@ -133,8 +132,9 @@ internal sealed partial class ModuleBuildService(ModuleWorkspaceService workspac
     private static string EnsureSafeModuleId(string moduleId)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(moduleId, nameof(moduleId));
-        if (!ModuleIdRegex.IsMatch(moduleId))
-            throw new ArgumentException("Module ID contains invalid characters.", nameof(moduleId));
+        if (!ModuleIdRegex().IsMatch(moduleId))
+            throw new ArgumentException(
+                $"Invalid module ID '{moduleId}'. Must match ^[a-z][a-z0-9_]{{0,39}}$.", nameof(moduleId));
         return moduleId;
     }
 
@@ -164,6 +164,9 @@ internal sealed partial class ModuleBuildService(ModuleWorkspaceService workspac
 
         return diagnostics;
     }
+
+    [GeneratedRegex(@"^[a-z][a-z0-9_]{0,39}$")]
+    private static partial Regex ModuleIdRegex();
 
     [GeneratedRegex(@"(?<file>[^(]+)\((?<line>\d+),(?<col>\d+)\):\s+(?<severity>error|warning)\s+(?<code>\w+):\s+(?<msg>.+)")]
     private static partial Regex MsBuildDiagnosticRegex();
