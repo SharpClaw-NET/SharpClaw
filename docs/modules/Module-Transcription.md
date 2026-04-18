@@ -112,7 +112,7 @@ Start live transcription from an input audio device.
 | `windowSeconds` | integer | no | Audio window per inference tick (5–15, default 10) |
 | `stepSeconds` | integer | no | Step between ticks, SlidingWindow only (1–window, default 2) |
 
-**Permission:** Per-resource — requires `audioDeviceAccesses` grant.
+**Permission:** Per-resource — requires `TrAudio` grant (resource type `InputAudio`).
 
 **Returns:** Transcription segments (streamed via WebSocket or SSE).
 
@@ -124,7 +124,7 @@ Start live transcription from an audio stream.
 
 **Parameters:** Same as `tr_transcribe_audio_device`.
 
-**Permission:** Per-resource — requires `audioDeviceAccesses` grant.
+**Permission:** Per-resource — requires `TrAudio` grant (resource type `InputAudio`).
 
 ---
 
@@ -134,7 +134,7 @@ Transcribe an audio file.
 
 **Parameters:** Same as `tr_transcribe_audio_device`.
 
-**Permission:** Per-resource — requires `audioDeviceAccesses` grant.
+**Permission:** Per-resource — requires `TrAudio` grant (resource type `InputAudio`).
 
 ---
 
@@ -342,7 +342,7 @@ seeded on module startup.
 
 | Array | Resource Type | Tools |
 |-------|---------------|-------|
-| `audioDeviceAccesses` | InputAudioDevices | All transcription tools |
+| `TrAudio` | InputAudio | All transcription tools |
 
 ---
 

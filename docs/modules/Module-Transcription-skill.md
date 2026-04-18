@@ -109,12 +109,12 @@ Aliases: ia
 ────────────────────────────────────────
 RESOURCE DEPENDENCIES
 ────────────────────────────────────────
-- InputAudioDevices — for all transcription tools
+- InputAudio — for all transcription tools
 
 ────────────────────────────────────────
 ROLE PERMISSIONS (relevant)
 ────────────────────────────────────────
-Per-resource: audioDeviceAccesses (InputAudioDevices)
+Per-resource: TrAudio (InputAudio)
 
 ────────────────────────────────────────
 EXPORTED CONTRACTS

@@ -98,7 +98,7 @@ Resource permissions are tied to specific instances:
 - **Search Engine Accesses**: Query specific search engines
 - **Local Info Store Accesses**: Query local information stores
 - **External Info Store Accesses**: Query external APIs
-- **Audio Device Accesses**: Use specific audio input devices
+- **Input Audio Accesses** (`TrAudio`): Use specific audio input devices
 - **Display Device Accesses**: Capture screenshots from specific displays
 - **Agent Management Accesses**: Modify specific agents
 - **Task Manage Accesses**: Edit specific task definitions

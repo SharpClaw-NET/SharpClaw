@@ -5,6 +5,8 @@ using Microsoft.Extensions.Logging;
 
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models;
+using SharpClaw.Application.Infrastructure.Models.Access;
+using SharpClaw.Contracts;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
@@ -191,6 +193,10 @@ public sealed class ModuleService(
                 registry.Unregister(moduleId);
                 throw;
             }
+
+            // Reconcile: backfill wildcard grants for newly registered
+            // resource types and global flags into existing permission sets.
+            await ReconcilePermissionsForModuleAsync(module, ct);
         }
 
         eventDispatcher.InvalidateSinkCache();
@@ -437,6 +443,86 @@ public sealed class ModuleService(
 
         await db.SaveChangesAsync(ct);
         return enabledSet;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Permission reconciliation
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Backfills wildcard resource grants and global flags introduced by a
+    /// newly enabled module into every existing permission set that already
+    /// uses the <see cref="WellKnownIds.AllResources"/> wildcard for at least
+    /// one resource type. This is the runtime counterpart of
+    /// <c>SeedingService.ReconcileAdminPermissionsAsync</c> and ensures that
+    /// roles created before the module was enabled automatically gain access
+    /// to its resource types and global flags.
+    /// </summary>
+    private async Task ReconcilePermissionsForModuleAsync(
+        ISharpClawModule module, CancellationToken ct)
+    {
+        var newResourceTypes = module.GetResourceTypeDescriptors()
+            .Select(d => d.ResourceType)
+            .ToList();
+        var newFlagKeys = module.GetGlobalFlagDescriptors()
+            .Select(d => d.FlagKey)
+            .ToList();
+
+        if (newResourceTypes.Count == 0 && newFlagKeys.Count == 0)
+            return;
+
+        // Find permission sets that have at least one wildcard grant — these are
+        // the "broad access" sets (typically admin roles) that should be reconciled.
+        var permissionSets = await db.PermissionSets
+            .Include(p => p.ResourceAccesses)
+            .Include(p => p.GlobalFlags)
+            .AsSplitQuery()
+            .Where(p => p.ResourceAccesses.Any(a => a.ResourceId == WellKnownIds.AllResources))
+            .ToListAsync(ct);
+
+        if (permissionSets.Count == 0)
+            return;
+
+        var changed = false;
+
+        foreach (var ps in permissionSets)
+        {
+            foreach (var rt in newResourceTypes)
+            {
+                if (!ps.ResourceAccesses.Any(a =>
+                        a.ResourceType == rt && a.ResourceId == WellKnownIds.AllResources))
+                {
+                    ps.ResourceAccesses.Add(new ResourceAccessDB
+                    {
+                        PermissionSetId = ps.Id,
+                        ResourceType = rt,
+                        ResourceId = WellKnownIds.AllResources,
+                    });
+                    changed = true;
+                }
+            }
+
+            foreach (var flagKey in newFlagKeys)
+            {
+                if (!ps.GlobalFlags.Any(f => f.FlagKey == flagKey))
+                {
+                    ps.GlobalFlags.Add(new GlobalFlagDB
+                    {
+                        PermissionSetId = ps.Id,
+                        FlagKey = flagKey,
+                    });
+                    changed = true;
+                }
+            }
+        }
+
+        if (changed)
+        {
+            logger.LogInformation(
+                "Reconciled permissions for module '{ModuleId}' — backfilled grants into {Count} permission set(s).",
+                module.Id, permissionSets.Count);
+            await db.SaveChangesAsync(ct);
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
