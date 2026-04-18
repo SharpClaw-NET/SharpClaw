@@ -15,4 +15,8 @@
     <Content Include="module.json" Link="modules\vs2026_editor\module.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
 </Project>

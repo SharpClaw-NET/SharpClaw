@@ -15,6 +15,7 @@
 
   <ItemGroup>
     <PackageReference Include="System.Diagnostics.EventLog" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
     <PackageReference Include="System.ServiceProcess.ServiceController" />
   </ItemGroup>
 

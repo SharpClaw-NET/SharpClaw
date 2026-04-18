@@ -18,4 +18,8 @@
     <Content Include="module.json" Link="modules\sharpclaw_editor_common\module.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
 </Project>

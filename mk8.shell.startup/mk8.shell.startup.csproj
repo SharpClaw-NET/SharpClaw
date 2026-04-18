@@ -8,6 +8,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\mk8.shell\mk8.shell.csproj" />
   </ItemGroup>
 

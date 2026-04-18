@@ -27,4 +27,8 @@
     <Content Include="module.json" Link="modules\mk8shell\module.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
+  <ItemGroup>
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
 </Project>

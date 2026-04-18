@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using SharpClaw.Helpers;
@@ -9,6 +10,11 @@ namespace SharpClaw.Presentation;
 // and thread activity watch (real-time updates from other clients).
 public sealed partial class MainPage
 {
+    private const string ChatLogCategory = "SharpClaw.Chat";
+
+    [Conditional("DEBUG")]
+    private static void ChatLog(string message) => Debug.WriteLine(message, ChatLogCategory);
+
     // ── Thread activity watch ────────────────────────────────────
 
     private void ConnectThreadWatch(Guid channelId, Guid threadId)
@@ -21,6 +27,12 @@ public sealed partial class MainPage
 
     private void DisconnectThreadWatch()
     {
+        if (_streamCts is not null)
+        {
+            _streamCts.Cancel();
+            _streamCts.Dispose();
+            _streamCts = null;
+        }
         if (_threadWatchCts is not null)
         {
             _threadWatchCts.Cancel();
@@ -33,12 +45,18 @@ public sealed partial class MainPage
     private async Task RunThreadWatchAsync(Guid channelId, Guid threadId, CancellationToken ct)
     {
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        ChatLog($"[ThreadWatch] Connecting watch for channel={channelId} thread={threadId}");
         try
         {
             using var resp = await api.GetStreamAsync(
                 $"/channels/{channelId}/chat/threads/{threadId}/watch", ct);
-            if (!resp.IsSuccessStatusCode) return;
+            if (!resp.IsSuccessStatusCode)
+            {
+                ChatLog($"[ThreadWatch] Watch returned {(int)resp.StatusCode}");
+                return;
+            }
 
+            ChatLog("[ThreadWatch] Connected, reading SSE events...");
             using var stream = await resp.Content.ReadAsStreamAsync(ct);
             using var reader = new StreamReader(stream);
 
@@ -47,7 +65,10 @@ public sealed partial class MainPage
             while (!ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(ct);
-                if (line is null) break;
+                if (line is null) { ChatLog("[ThreadWatch] Stream ended (null)"); break; }
+                if (line.Length == 0) continue;
+
+                ChatLog($"[ThreadWatch] SSE: {line}");
 
                 if (line.StartsWith("event: "))
                 {
@@ -59,6 +80,7 @@ public sealed partial class MainPage
 
                     if (evtSpan.SequenceEqual("Processing"))
                     {
+                        ChatLog("[ThreadWatch] Event: Processing");
                         DispatcherQueue.TryEnqueue(() =>
                         {
                             _isThreadBusy = true;
@@ -71,6 +93,7 @@ public sealed partial class MainPage
                     }
                     else if (evtSpan.SequenceEqual("NewMessages"))
                     {
+                        ChatLog("[ThreadWatch] Event: NewMessages");
                         DispatcherQueue.TryEnqueue(async () =>
                         {
                             _isThreadBusy = false;
@@ -80,14 +103,9 @@ public sealed partial class MainPage
                                 MessageInput.IsEnabled = true;
                             }
 
-                            // Skip history reload while actively streaming — the
-                            // streaming bubble is already showing live content, and
-                            // LoadHistoryAsync would wipe it out (clearing all
-                            // children including the live bubble and tool-call
-                            // markers).  Instead, flag the history as stale so a
-                            // reload happens once streaming completes.
                             if (_isSending)
                             {
+                                ChatLog("[ThreadWatch] NewMessages during send — flagging stale");
                                 _historyStaleAfterSend = true;
                                 return;
                             }
@@ -105,9 +123,10 @@ public sealed partial class MainPage
                 }
             }
         }
-        catch (OperationCanceledException) { /* normal disconnect */ }
-        catch { /* swallow — server unreachable or stream ended */ }
+        catch (OperationCanceledException) { ChatLog("[ThreadWatch] Cancelled (normal)"); }
+        catch (Exception ex) { ChatLog($"[ThreadWatch] Error: {ex.GetType().Name}: {ex.Message}"); }
     }
+
     // ── Cost bars ────────────────────────────────────────────────
 
     private async Task LoadCostAsync(Guid channelId)
@@ -236,6 +255,7 @@ public sealed partial class MainPage
 
     private async Task LoadHistoryAsync(Guid channelId)
     {
+        ChatLog($"[History] LoadHistoryAsync channel={channelId} thread={_selectedThreadId}");
         _chatBubblePoolUsed = 0;
         MessagesPanel.Children.Clear();
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
@@ -245,14 +265,20 @@ public sealed partial class MainPage
             if (_selectedThreadId is not { } tid) return;
 
             var url = $"/channels/{channelId}/chat/threads/{tid}";
+            ChatLog($"[History] GET {url}");
             using var resp = await api.GetAsync(url);
-            if (!resp.IsSuccessStatusCode) return;
+            if (!resp.IsSuccessStatusCode)
+            {
+                ChatLog($"[History] Failed: {(int)resp.StatusCode}");
+                return;
+            }
 
             using var contentStream = await resp.Content.ReadAsStreamAsync();
             var messages = await JsonSerializer.DeserializeAsync<List<ChatMessageDto>>(
                 contentStream, Json);
 
-            if (messages is null) return;
+            if (messages is null) { ChatLog("[History] Null response"); return; }
+            ChatLog($"[History] Loaded {messages.Count} messages");
 
             var fallbackAgentName = _allAgents.FirstOrDefault(a => a.Id == _selectedAgentId)?.Name;
             foreach (var msg in messages)
@@ -269,7 +295,7 @@ public sealed partial class MainPage
                     clientType: msg.ClientType);
             }
         }
-        catch { /* swallow */ }
+        catch (Exception ex) { ChatLog($"[History] Error: {ex.GetType().Name}: {ex.Message}"); }
 
         ScrollToBottom();
     }
@@ -364,9 +390,11 @@ public sealed partial class MainPage
         MessagesPanel.Children.Add(row.Root);
     }
 
-    private void ScrollToBottom()
+    private void ScrollToBottom(bool forceLayout = true)
     {
-        MessagesScroller.UpdateLayout();
+        if (forceLayout)
+            MessagesScroller.UpdateLayout();
+
         MessagesScroller.ChangeView(null, MessagesScroller.ScrollableHeight, null);
     }
 
@@ -501,6 +529,7 @@ public sealed partial class MainPage
 
         UpdateCursor(text);
 
+        // ── Streaming bubble ─────────────────────────────────────
         var streamBubble = AcquireChatBubble();
         streamBubble.Root.Background = Brush(0x1A1A1A);
         streamBubble.Root.HorizontalAlignment = HorizontalAlignment.Left;
@@ -512,235 +541,384 @@ public sealed partial class MainPage
         streamBubble.Content.Foreground = Brush(0xCCCCCC);
         streamBubble.Root.ContextFlyout = BuildRoleMenuFlyout(isUser: false, _selectedAgentId);
         MessagesPanel.Children.Add(streamBubble.Root);
-        var assistantContent = streamBubble.Content;
         ScrollToBottom();
-
-        _pooledStreamBuilder.Clear();
-        if (_pooledStreamBuilder.Capacity > 32 * 1024)
-            _pooledStreamBuilder.Capacity = 4096;
-        var accumulated = _pooledStreamBuilder;
-        var dispatcher = DispatcherQueue;
-
-        ChannelCostDto? doneCostChannel = null;
-        ThreadCostDto? doneCostThread = null;
 
         try
         {
-            var body = JsonSerializer.Serialize(new { message = text, agentId = _selectedAgentId, clientType = _clientType }, Json);
-            var content = new StringContent(body, Encoding.UTF8, "application/json");
-            var streamUrl = _selectedThreadId is { } tid
-                ? $"/channels/{channelId}/chat/threads/{tid}/stream"
-                : $"/channels/{channelId}/chat/stream";
-
-            using var resp = await api.PostStreamAsync(streamUrl, content);
-
-            if (!resp.IsSuccessStatusCode)
-            {
-                assistantContent.Text = $"✗ Error {(int)resp.StatusCode}: {resp.ReasonPhrase}";
-                assistantContent.Foreground = Brush(0xFF4444);
-                return;
-            }
-
-            using var stream = await resp.Content.ReadAsStreamAsync();
-            using var reader = new StreamReader(stream);
-
-            ReadOnlyMemory<char> eventTypeMem = default;
-            var lastWasToolEvent = false;
-            var lastFlushedLength = 0;
-
-            await Task.Run(async () =>
-            {
-                while (true)
-                {
-                    var line = await reader.ReadLineAsync();
-                    if (line is null) break;
-
-                    if (line.StartsWith("event: "))
-                    {
-                        eventTypeMem = line.AsMemory(7);
-                    }
-                    else if (line.StartsWith("data: ") && eventTypeMem.Length > 0)
-                    {
-                        var evtSpan = eventTypeMem.Span;
-
-                        if (evtSpan.SequenceEqual("TextDelta"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            if (doc.RootElement.TryGetProperty("delta", out var dp)
-                                && dp.GetString() is { } delta)
-                            {
-                                if (lastWasToolEvent)
-                                {
-                                    accumulated.Append('\n');
-                                    lastWasToolEvent = false;
-                                }
-                                accumulated.Append(delta);
-
-                                if (accumulated.Length > lastFlushedLength)
-                                {
-                                    lastFlushedLength = accumulated.Length;
-                                    var snapshot = accumulated.ToString();
-                                    dispatcher.TryEnqueue(() =>
-                                    {
-                                        assistantContent.Text = snapshot + "▍";
-                                        ScrollToBottom();
-                                    });
-                                }
-                            }
-                        }
-                        else if (evtSpan.SequenceEqual("ToolCallStart"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var actionKey = "unknown";
-                            var status = "unknown";
-                            if (doc.RootElement.TryGetProperty("job", out var job))
-                            {
-                                if (job.TryGetProperty("actionKey", out var ak) && ak.GetString() is { } a)
-                                    actionKey = a;
-                                if (job.TryGetProperty("status", out var st) && st.GetString() is { } s)
-                                    status = s;
-                            }
-                            accumulated.Append($"\n⚙ [{actionKey}] → {status}");
-                            lastWasToolEvent = true;
-                            lastFlushedLength = accumulated.Length;
-                            var snap = accumulated.ToString();
-                            dispatcher.TryEnqueue(() =>
-                            {
-                                assistantContent.Text = snap + "▍";
-                                ScrollToBottom();
-                            });
-                        }
-                        else if (evtSpan.SequenceEqual("ToolCallResult"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var actionKey = "unknown";
-                            var status = "unknown";
-                            if (doc.RootElement.TryGetProperty("result", out var res))
-                            {
-                                if (res.TryGetProperty("actionKey", out var ak) && ak.GetString() is { } a)
-                                    actionKey = a;
-                                if (res.TryGetProperty("status", out var st) && st.GetString() is { } s)
-                                    status = s;
-                            }
-                            accumulated.Append($"\n⚙ [{actionKey}] → {status}");
-                            lastWasToolEvent = true;
-                            lastFlushedLength = accumulated.Length;
-                            var snap = accumulated.ToString();
-                            dispatcher.TryEnqueue(() =>
-                            {
-                                assistantContent.Text = snap + "▍";
-                                ScrollToBottom();
-                            });
-                        }
-                        else if (evtSpan.SequenceEqual("ApprovalRequired"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var actionKey = "unknown";
-                            if (doc.RootElement.TryGetProperty("pendingJob", out var pj)
-                                && pj.TryGetProperty("actionKey", out var ak)
-                                && ak.GetString() is { } a)
-                                actionKey = a;
-                            accumulated.Append($"\n⏳ [{actionKey}] awaiting approval");
-                            lastWasToolEvent = true;
-                            lastFlushedLength = accumulated.Length;
-                            var snap = accumulated.ToString();
-                            dispatcher.TryEnqueue(() =>
-                            {
-                                assistantContent.Text = snap + "▍";
-                                ScrollToBottom();
-                            });
-                        }
-                        else if (evtSpan.SequenceEqual("ApprovalResult"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            var actionKey = "unknown";
-                            var status = "unknown";
-                            if (doc.RootElement.TryGetProperty("approvalOutcome", out var ao))
-                            {
-                                if (ao.TryGetProperty("actionKey", out var ak) && ak.GetString() is { } a)
-                                    actionKey = a;
-                                if (ao.TryGetProperty("status", out var st) && st.GetString() is { } s)
-                                    status = s;
-                            }
-                            accumulated.Append($"\n⚙ [{actionKey}] → {status}");
-                            lastWasToolEvent = true;
-                            lastFlushedLength = accumulated.Length;
-                            var snap = accumulated.ToString();
-                            dispatcher.TryEnqueue(() =>
-                            {
-                                assistantContent.Text = snap + "▍";
-                                ScrollToBottom();
-                            });
-                        }
-                        else if (evtSpan.SequenceEqual("Error"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            if (doc.RootElement.TryGetProperty("error", out var ep))
-                            {
-                                var errorMsg = ep.GetString();
-                                dispatcher.TryEnqueue(() =>
-                                {
-                                    assistantContent.Text = $"✗ {errorMsg}";
-                                    assistantContent.Foreground = Brush(0xFF4444);
-                                });
-                            }
-                        }
-                        else if (evtSpan.SequenceEqual("Done"))
-                        {
-                            using var doc = JsonDocument.Parse(line.AsMemory(6));
-                            if (doc.RootElement.TryGetProperty("finalResponse", out var fr))
-                            {
-                                if (fr.TryGetProperty("channelCost", out var cc) && cc.ValueKind == JsonValueKind.Object)
-                                    doneCostChannel = JsonSerializer.Deserialize<ChannelCostDto>(cc.GetRawText(), Json);
-                                if (fr.TryGetProperty("threadCost", out var tc) && tc.ValueKind == JsonValueKind.Object)
-                                    doneCostThread = JsonSerializer.Deserialize<ThreadCostDto>(tc.GetRawText(), Json);
-                            }
-
-                            var finalText = accumulated.Length > 0
-                                ? accumulated.ToString()
-                                : "(empty response)";
-                            dispatcher.TryEnqueue(() =>
-                            {
-                                assistantContent.Text = finalText;
-                            });
-                        }
-
-                        eventTypeMem = default;
-                    }
-                }
-            });
-
-            if (assistantContent.Text.EndsWith("▍"))
-                assistantContent.Text = accumulated.Length > 0
-                    ? accumulated.ToString()
-                    : "(empty response)";
-        }
-        catch (Exception ex)
-        {
-            assistantContent.Text = $"✗ {ex.Message}";
-            assistantContent.Foreground = Brush(0xFF4444);
+            await StreamChatResponseAsync(channelId, text, streamBubble);
         }
         finally
         {
             _isSending = false;
+            _historyStaleAfterSend = false;
             SendButton.IsEnabled = !_isThreadBusy;
             MessageInput.IsEnabled = !_isThreadBusy;
-            if (doneCostChannel is not null)
-                RenderInlineCost(doneCostChannel, doneCostThread);
-            ScrollToBottom();
             UpdateCursor();
             DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
+        }
+    }
 
-            // If the thread watch fired NewMessages while we were streaming,
-            // history is stale — reload now to pick up persisted messages
-            // (our own + any from other clients).
-            if (_historyStaleAfterSend && _selectedChannelId is { } staleChId)
+    // ── SSE Streaming ────────────────────────────────────────────
+
+    private static readonly JsonSerializerOptions SseJson = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+    };
+
+    private async Task StreamChatResponseAsync(Guid channelId, string message, ChatBubbleRow bubble)
+    {
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        _pooledStreamBuilder.Clear();
+        _needsNewlineBeforeNextDelta = false;
+
+        var cts = new CancellationTokenSource();
+        _streamCts = cts;
+        var ct = cts.Token;
+
+        var threadPart = _selectedThreadId is { } tid
+            ? $"/threads/{tid}"
+            : "";
+        var url = $"/channels/{channelId}/chat{threadPart}/stream";
+        ChatLog($"[Stream] POST {url}");
+
+        var body = JsonSerializer.Serialize(new
+        {
+            message,
+            agentId = _selectedAgentId,
+            clientType = _clientType
+        }, Json);
+        var content = new StringContent(body, Encoding.UTF8, "application/json");
+
+        var sw = Stopwatch.StartNew();
+        HttpResponseMessage? resp = null;
+        try
+        {
+            resp = await api.PostStreamAsync(url, content, ct);
+            ChatLog($"[Stream] Headers: {(int)resp.StatusCode} in {sw.ElapsedMilliseconds}ms");
+
+            if (!resp.IsSuccessStatusCode)
             {
-                _historyStaleAfterSend = false;
-                await LoadHistoryAsync(staleChId);
-                await LoadCostAsync(staleChId);
-                ScrollToBottom();
+                bubble.Content.Text = $"✗ {(int)resp.StatusCode} {resp.ReasonPhrase}";
+                bubble.Content.Foreground = Brush(0xFF4444);
+                return;
+            }
+
+            var contentType = resp.Content.Headers.ContentType?.MediaType ?? "";
+            if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
+            {
+                var fallback = await resp.Content.ReadAsStringAsync(ct);
+                ChatLog($"[Stream] Unexpected content-type: {contentType}");
+                bubble.Content.Text = $"✗ Unexpected response: {TerminalUI.Truncate(fallback, 200)}";
+                bubble.Content.Foreground = Brush(0xFF4444);
+                return;
+            }
+
+            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            await ReadSseStreamAsync(stream, bubble, channelId, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            ChatLog("[Stream] Cancelled");
+            if (_pooledStreamBuilder.Length == 0)
+                bubble.Content.Text = "(cancelled)";
+            else
+                bubble.Content.Text = _pooledStreamBuilder.ToString();
+        }
+        catch (Exception ex)
+        {
+            ChatLog($"[Stream] Error: {ex.GetType().Name}: {ex.Message}");
+            bubble.Content.Text = _pooledStreamBuilder.Length > 0
+                ? _pooledStreamBuilder.ToString() + $"\n✗ {ex.Message}"
+                : $"✗ {ex.Message}";
+            bubble.Content.Foreground = Brush(0xFF4444);
+        }
+        finally
+        {
+            sw.Stop();
+            ChatLog($"[Stream] End: {sw.ElapsedMilliseconds}ms total");
+            resp?.Dispose();
+            if (_streamCts == cts)
+                _streamCts = null;
+            cts.Dispose();
+        }
+    }
+
+    private async Task ReadSseStreamAsync(Stream stream, ChatBubbleRow bubble, Guid channelId, CancellationToken ct)
+    {
+        // Parsed SSE event produced by the background reader.
+        var events = System.Threading.Channels.Channel.CreateUnbounded<(string EventType, string DataJson)>(
+            new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+
+        // Background task: read bytes from the network stream, decode UTF-8, extract SSE
+        // lines, and push parsed (eventType, dataJson) pairs into the channel.
+        // This keeps all blocking I/O off the UI thread.
+        var readerTask = Task.Run(async () =>
+        {
+            var buffer = new byte[4096];
+            var decoder = Encoding.UTF8.GetDecoder();
+            var charBuf = new char[4096];
+            var lineBuilder = new StringBuilder(512);
+            string? currentEventType = null;
+            var readCount = 0;
+
+            try
+            {
+                while (!ct.IsCancellationRequested)
+                {
+                    var bytesRead = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+                    if (bytesRead == 0)
+                    {
+                        ChatLog($"[Stream] Read #{readCount}: 0B (end of stream)");
+                        break;
+                    }
+
+                    readCount++;
+                    ChatLog($"[Stream] Read #{readCount}: {bytesRead}B");
+
+                    var charsDecoded = decoder.GetChars(buffer.AsSpan(0, bytesRead), charBuf, flush: false);
+                    lineBuilder.Append(charBuf, 0, charsDecoded);
+
+                    while (TryExtractLine(lineBuilder, out var line))
+                    {
+                        if (line.Length == 0) { currentEventType = null; continue; }
+                        if (line.StartsWith(':')) continue;
+
+                        if (line.StartsWith("event: ", StringComparison.Ordinal))
+                        {
+                            currentEventType = line[7..];
+                            continue;
+                        }
+
+                        if (line.StartsWith("data: ", StringComparison.Ordinal) && currentEventType is not null)
+                        {
+                            var dataJson = line[6..];
+                            events.Writer.TryWrite((currentEventType, dataJson));
+                            currentEventType = null;
+                        }
+                    }
+                }
+            }
+            finally
+            {
+                events.Writer.Complete();
+            }
+        }, ct);
+
+        // UI consumer: read parsed events from the channel and update the UI.
+        var eventCount = 0;
+        var doneReceived = false;
+
+        await foreach (var (eventType, dataJson) in events.Reader.ReadAllAsync(ct))
+        {
+            eventCount++;
+            ChatLog($"[Stream] SSE #{eventCount}: {eventType} {TerminalUI.Truncate(dataJson, 120)}");
+
+            if (ProcessSseEvent(eventType, dataJson, bubble, channelId))
+            {
+                doneReceived = true;
+                break;
+            }
+
+            if (!doneReceived)
+                bubble.Content.Text = _pooledStreamBuilder.ToString() + "▍";
+            ScrollToBottom(forceLayout: false);
+        }
+
+        // Wait for the background reader to finish cleanly.
+        try { await readerTask.ConfigureAwait(false); }
+        catch (OperationCanceledException) { /* expected on cancel */ }
+
+        // Final text (no cursor)
+        if (_pooledStreamBuilder.Length > 0)
+            bubble.Content.Text = _pooledStreamBuilder.ToString();
+        else if (!doneReceived)
+            bubble.Content.Text = "(no response)";
+
+        ScrollToBottom(forceLayout: true);
+
+        if (!doneReceived)
+        {
+            ChatLog("[Stream] Ended without Done event, falling back to LoadCostAsync");
+            await LoadCostAsync(channelId);
+        }
+    }
+
+    /// <summary>
+    /// Processes a single SSE event. Returns <c>true</c> if the stream should end (Done or Error received).
+    /// </summary>
+    private bool ProcessSseEvent(string eventType, string dataJson, ChatBubbleRow bubble, Guid channelId)
+    {
+        switch (eventType)
+        {
+            case "TextDelta":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var delta = doc.RootElement.GetProperty("delta").GetString();
+                    if (delta is not null)
+                    {
+                        if (_needsNewlineBeforeNextDelta)
+                        {
+                            _pooledStreamBuilder.Append('\n');
+                            _needsNewlineBeforeNextDelta = false;
+                        }
+                        _pooledStreamBuilder.Append(delta);
+                        ChatLog($"[Stream] Delta: +{delta.Length} total={_pooledStreamBuilder.Length}");
+                    }
+                }
+                catch (Exception ex) { ChatLog($"[Stream] TextDelta parse error: {ex.Message}"); }
+                return false;
+            }
+
+            case "ToolCallStart":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var actionKey = doc.RootElement.GetProperty("job").GetProperty("actionKey").GetString() ?? "?";
+                    var status = doc.RootElement.GetProperty("job").GetProperty("status").GetString() ?? "started";
+                    _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
+                    _needsNewlineBeforeNextDelta = true;
+                    ChatLog($"[Stream] Tool: ToolCallStart {actionKey} → {status}");
+                }
+                catch (Exception ex) { ChatLog($"[Stream] ToolCallStart parse error: {ex.Message}"); }
+                return false;
+            }
+
+            case "ToolCallResult":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var actionKey = doc.RootElement.GetProperty("result").GetProperty("actionKey").GetString() ?? "?";
+                    var status = doc.RootElement.GetProperty("result").GetProperty("status").GetString() ?? "done";
+                    _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
+                    _needsNewlineBeforeNextDelta = true;
+                    ChatLog($"[Stream] Tool: ToolCallResult {actionKey} → {status}");
+                }
+                catch (Exception ex) { ChatLog($"[Stream] ToolCallResult parse error: {ex.Message}"); }
+                return false;
+            }
+
+            case "ApprovalRequired":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var actionKey = doc.RootElement.GetProperty("pendingJob").GetProperty("actionKey").GetString() ?? "?";
+                    _pooledStreamBuilder.Append($"\n⏳ [{actionKey}] awaiting approval");
+                    _needsNewlineBeforeNextDelta = true;
+                    ChatLog($"[Stream] Tool: ApprovalRequired {actionKey}");
+                }
+                catch (Exception ex) { ChatLog($"[Stream] ApprovalRequired parse error: {ex.Message}"); }
+                return false;
+            }
+
+            case "ApprovalResult":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var actionKey = doc.RootElement.GetProperty("approvalOutcome").GetProperty("actionKey").GetString() ?? "?";
+                    var status = doc.RootElement.GetProperty("approvalOutcome").GetProperty("status").GetString() ?? "resolved";
+                    _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
+                    _needsNewlineBeforeNextDelta = true;
+                    ChatLog($"[Stream] Tool: ApprovalResult {actionKey} → {status}");
+                }
+                catch (Exception ex) { ChatLog($"[Stream] ApprovalResult parse error: {ex.Message}"); }
+                return false;
+            }
+
+            case "Error":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var error = doc.RootElement.GetProperty("error").GetString() ?? "Unknown error";
+                    ChatLog($"[Stream] Error event: {error}");
+                    bubble.Content.Text = _pooledStreamBuilder.Length > 0
+                        ? _pooledStreamBuilder.ToString() + $"\n✗ {error}"
+                        : $"✗ {error}";
+                    bubble.Content.Foreground = Brush(0xFF4444);
+                }
+                catch (Exception ex)
+                {
+                    ChatLog($"[Stream] Error parse error: {ex.Message}");
+                    bubble.Content.Text = "✗ Stream error";
+                    bubble.Content.Foreground = Brush(0xFF4444);
+                }
+                return true;
+            }
+
+            case "Done":
+            {
+                try
+                {
+                    using var doc = JsonDocument.Parse(dataJson);
+                    var root = doc.RootElement;
+
+                    if (root.TryGetProperty("finalResponse", out var fr))
+                    {
+                        // Extract final assistant text if available
+                        if (fr.TryGetProperty("assistantMessage", out var am) &&
+                            am.TryGetProperty("content", out var contentEl))
+                        {
+                            var finalText = contentEl.GetString();
+                            if (finalText is not null)
+                            {
+                                _pooledStreamBuilder.Clear();
+                                _pooledStreamBuilder.Append(finalText);
+                            }
+                        }
+
+                        // Extract and render costs inline
+                        if (fr.TryGetProperty("channelCost", out var ccEl))
+                        {
+                            var channelCost = ccEl.Deserialize<ChannelCostDto>(SseJson);
+                            ThreadCostDto? threadCost = null;
+                            if (fr.TryGetProperty("threadCost", out var tcEl))
+                                threadCost = tcEl.Deserialize<ThreadCostDto>(SseJson);
+
+                            if (channelCost is not null)
+                            {
+                                ChatLog($"[Stream] Done: ch={channelCost.TotalTokens} th={threadCost?.TotalTokens}");
+                                RenderInlineCost(channelCost, threadCost);
+                            }
+                        }
+                    }
+                }
+                catch (Exception ex) { ChatLog($"[Stream] Done parse error: {ex.Message}"); }
+
+                // Set final text
+                bubble.Content.Text = _pooledStreamBuilder.Length > 0
+                    ? _pooledStreamBuilder.ToString()
+                    : "(empty response)";
+                return true;
+            }
+
+            default:
+                ChatLog($"[Stream] Unknown event type: {eventType}");
+                return false;
+        }
+    }
+
+    private static bool TryExtractLine(StringBuilder sb, out string line)
+    {
+        for (var i = 0; i < sb.Length; i++)
+        {
+            if (sb[i] == '\n')
+            {
+                var len = i > 0 && sb[i - 1] == '\r' ? i - 1 : i;
+                line = sb.ToString(0, len);
+                sb.Remove(0, i + 1);
+                return true;
             }
         }
+
+        line = "";
+        return false;
     }
 }

@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
@@ -28,6 +29,11 @@ public static class ChatStreamHandlers
     /// registers a TCS here; the companion POST resolves it.
     /// </summary>
     private static readonly ConcurrentDictionary<Guid, TaskCompletionSource<bool>> PendingApprovals = new();
+
+    private const string LogCategory = "SharpClaw.SSE";
+
+    [Conditional("DEBUG")]
+    private static void Log(string message) => Debug.WriteLine(message, LogCategory);
 
     /// <summary>
     /// <c>POST /channels/{id}/chat/stream</c> — streams the response as SSE.
@@ -66,24 +72,44 @@ public static class ChatStreamHandlers
             }
         }
 
+        var streamId = Guid.NewGuid().ToString("N")[..8];
+        var eventIndex = 0;
+        var sw = Stopwatch.StartNew();
+        Log($"[{streamId}] ── STREAM START ── channel={id} threadId=(none)");
+
         try
         {
+            // Flush response headers immediately so the client receives the
+            // 200 OK and can start the SSE reader before the first event.
+            // Without this, Kestrel defers header transmission until the
+            // first WriteAsync, which may not happen until the provider
+            // yields its first token — causing the client to buffer the
+            // entire stream.
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+
             await foreach (var evt in chatService.SendMessageStreamAsync(
                 id, request, ApprovalCallback, threadId: null, context.RequestAborted))
             {
                 var json = JsonSerializer.Serialize(evt, JsonOptions);
                 var eventName = evt.Type.ToString();
+                Log($"[{streamId}] #{eventIndex++} {eventName} ({sw.ElapsedMilliseconds}ms): {json}");
                 await context.Response.WriteAsync($"event: {eventName}\ndata: {json}\n\n",
                     context.RequestAborted);
                 await context.Response.Body.FlushAsync(context.RequestAborted);
             }
+
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM END ── {eventIndex} events in {sw.ElapsedMilliseconds}ms");
         }
         catch (OperationCanceledException)
         {
-            // Client disconnected — clean up any pending approvals
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM CANCELLED ── {eventIndex} events in {sw.ElapsedMilliseconds}ms (client disconnected)");
         }
         catch (Exception ex)
         {
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM ERROR ── {eventIndex} events in {sw.ElapsedMilliseconds}ms: {ex.Message}");
             try
             {
                 var errorEvt = ChatStreamEvent.Err(ex.Message);

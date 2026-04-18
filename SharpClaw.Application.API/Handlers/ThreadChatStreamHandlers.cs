@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
@@ -24,6 +25,11 @@ public static class ThreadChatStreamHandlers
     };
 
     private static readonly ConcurrentDictionary<Guid, TaskCompletionSource<bool>> PendingApprovals = new();
+
+    private const string LogCategory = "SharpClaw.SSE";
+
+    [Conditional("DEBUG")]
+    private static void Log(string message) => Debug.WriteLine(message, LogCategory);
 
     [MapPost("stream")]
     public static async Task StreamChat(
@@ -54,24 +60,40 @@ public static class ThreadChatStreamHandlers
             }
         }
 
+        var streamId = Guid.NewGuid().ToString("N")[..8];
+        var eventIndex = 0;
+        var sw = Stopwatch.StartNew();
+        Log($"[{streamId}] ── STREAM START ── channel={id} threadId={threadId}");
+
         try
         {
+            // Flush response headers immediately so the client receives the
+            // 200 OK and can start the SSE reader before the first event.
+            await context.Response.Body.FlushAsync(context.RequestAborted);
+
             await foreach (var evt in chatService.SendMessageStreamAsync(
                 id, request, ApprovalCallback, threadId, context.RequestAborted))
             {
                 var json = JsonSerializer.Serialize(evt, JsonOptions);
                 var eventName = evt.Type.ToString();
+                Log($"[{streamId}] #{eventIndex++} {eventName} ({sw.ElapsedMilliseconds}ms): {json}");
                 await context.Response.WriteAsync($"event: {eventName}\ndata: {json}\n\n",
                     context.RequestAborted);
                 await context.Response.Body.FlushAsync(context.RequestAborted);
             }
+
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM END ── {eventIndex} events in {sw.ElapsedMilliseconds}ms");
         }
         catch (OperationCanceledException)
         {
-            // Client disconnected
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM CANCELLED ── {eventIndex} events in {sw.ElapsedMilliseconds}ms (client disconnected)");
         }
         catch (Exception ex)
         {
+            sw.Stop();
+            Log($"[{streamId}] ── STREAM ERROR ── {eventIndex} events in {sw.ElapsedMilliseconds}ms: {ex.Message}");
             try
             {
                 var errorEvt = ChatStreamEvent.Err(ex.Message);

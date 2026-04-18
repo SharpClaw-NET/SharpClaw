@@ -31,6 +31,8 @@ public sealed partial class MainPage : Page
     private bool _isThreadBusy;
     private bool _historyStaleAfterSend;
     private CancellationTokenSource? _threadWatchCts;
+    private CancellationTokenSource? _streamCts;
+    private bool _needsNewlineBeforeNextDelta;
     private bool _suppressThreadSelection;
     private bool _suppressJobSelection;
     private readonly Dictionary<Guid, bool> _expandedContexts = [];

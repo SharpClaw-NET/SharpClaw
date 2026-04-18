@@ -1,0 +1,81 @@
+{
+  "name": "sharpclaw",
+  "displayName": "SharpClaw",
+  "description": "SharpClaw editor bridge for VS Code — connects to the SharpClaw backend and handles AI agent tool calls.",
+  "version": "0.1.0",
+  "publisher": "sharpclaw",
+  "engines": {
+    "vscode": "^1.85.0"
+  },
+  "categories": [
+    "Other"
+  ],
+  "activationEvents": [
+    "onStartupFinished"
+  ],
+  "main": "./out/extension.js",
+  "contributes": {
+    "commands": [
+      {
+        "command": "sharpclaw.connect",
+        "title": "SharpClaw: Connect"
+      },
+      {
+        "command": "sharpclaw.disconnect",
+        "title": "SharpClaw: Disconnect"
+      }
+    ],
+    "configuration": {
+      "title": "SharpClaw",
+      "properties": {
+        "sharpclaw.host": {
+          "type": "string",
+          "default": "127.0.0.1",
+          "description": "Hostname or IP address of the SharpClaw backend (default: 127.0.0.1)."
+        },
+        "sharpclaw.port": {
+          "type": "number",
+          "default": 48923,
+          "description": "TCP port the SharpClaw backend listens on (default: 48923)."
+        },
+        "sharpclaw.apiKeyFilePath": {
+          "type": "string",
+          "default": "",
+          "description": "Path to the API key file. Leave empty to use the default (%LOCALAPPDATA%/SharpClaw/.api-key on Windows, ~/.local/share/SharpClaw/.api-key on Linux/macOS). Environment variables are expanded."
+        },
+        "sharpclaw.autoConnect": {
+          "type": "boolean",
+          "default": true,
+          "description": "Automatically connect to the SharpClaw backend when VS Code starts."
+        },
+        "sharpclaw.autoConnectDelaySeconds": {
+          "type": "number",
+          "default": 3,
+          "minimum": 0,
+          "description": "Seconds to wait after VS Code startup before attempting auto-connect. Gives VS Code time to finish loading (default: 3)."
+        },
+        "sharpclaw.connectionTimeoutSeconds": {
+          "type": "number",
+          "default": 10,
+          "minimum": 1,
+          "description": "Maximum seconds to wait for a connection attempt before giving up (default: 10)."
+        }
+      }
+    }
+  },
+  "scripts": {
+    "vscode:prepublish": "npm run compile",
+    "compile": "tsc -p ./",
+    "watch": "tsc -watch -p ./",
+    "package": "npx @vscode/vsce package"
+  },
+  "dependencies": {
+    "ws": "^8.18.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/vscode": "^1.85.0",
+    "@types/ws": "^8.5.13",
+    "typescript": "^5.7.0"
+  }
+}

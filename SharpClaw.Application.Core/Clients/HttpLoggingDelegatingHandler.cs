@@ -65,14 +65,15 @@ public sealed class HttpLoggingDelegatingHandler : DelegatingHandler
             Log($"[{requestId}] <<< Content Headers:\n{response.Content.Headers.ToString().TrimEnd()}");
 
             var responseContentType = response.Content.Headers.ContentType?.MediaType ?? "";
-            if (IsTextContent(responseContentType))
+            if (IsTextContent(responseContentType)
+                && responseContentType is not "text/event-stream")
             {
                 var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
                 Log($"[{requestId}] <<< Body:\n{responseBody}");
             }
             else
             {
-                Log($"[{requestId}] <<< Body: <binary {responseContentType}, {response.Content.Headers.ContentLength} bytes>");
+                Log($"[{requestId}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
             }
         }
 
