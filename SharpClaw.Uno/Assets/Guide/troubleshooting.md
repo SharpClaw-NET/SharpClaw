@@ -217,7 +217,7 @@ Solutions to common SharpClaw issues.
 
 4. **Set clearance to Independent (if trusted):**
    - Go to Settings → Roles → click role → **Permissions** tab
-   - Set DefaultClearance to **Independent** for auto-approval
+   - Set each action's clearance to **Independent** for auto-approval
 
 ## Job Issues
 

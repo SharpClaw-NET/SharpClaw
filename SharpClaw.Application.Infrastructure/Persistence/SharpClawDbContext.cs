@@ -274,8 +274,6 @@ public class SharpClawDbContext(
         // ── PermissionSets ────────────────────────────────────────
         modelBuilder.Entity<PermissionSetDB>(e =>
         {
-            e.Property(p => p.DefaultClearance).HasConversion<string>();
-
             e.HasMany(p => p.ClearanceUserWhitelist)
                 .WithOne(w => w.PermissionSet)
                 .HasForeignKey(w => w.PermissionSetId)

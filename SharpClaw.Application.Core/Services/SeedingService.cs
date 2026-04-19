@@ -88,13 +88,13 @@ public sealed class SeedingService(
 
     private PermissionSetDB CreateAdminPermissions() => new()
     {
-        DefaultClearance = PermissionClearance.Independent,
-
-        // Global flags — all registered flag keys enabled for admin.
+        // Global flags — all registered flag keys enabled for admin
+        // with explicit Independent clearance on each flag.
         GlobalFlags = [.. moduleRegistry.GetAllRegisteredGlobalFlags()
             .Select(fk => new GlobalFlagDB
             {
                 FlagKey = fk,
+                Clearance = PermissionClearance.Independent,
             })],
 
         // Wildcard grants — access to ALL resources of each type.
@@ -127,24 +127,24 @@ public sealed class SeedingService(
 
         var changed = false;
 
-        // ── Global flags ──────────────────────────────────────────
-        if (ps.DefaultClearance != PermissionClearance.Independent)
-        {
-            ps.DefaultClearance = PermissionClearance.Independent;
-            changed = true;
-        }
-
         // ── Global flag grants ─────────────────────────────────────
         var allFlagKeys = moduleRegistry.GetAllRegisteredGlobalFlags();
         foreach (var flagKey in allFlagKeys)
         {
-            if (!ps.GlobalFlags.Any(f => f.FlagKey == flagKey))
+            var existing = ps.GlobalFlags.FirstOrDefault(f => f.FlagKey == flagKey);
+            if (existing is null)
             {
                 ps.GlobalFlags.Add(new GlobalFlagDB
                 {
                     PermissionSetId = psId,
                     FlagKey = flagKey,
+                    Clearance = PermissionClearance.Independent,
                 });
+                changed = true;
+            }
+            else if (existing.Clearance != PermissionClearance.Independent)
+            {
+                existing.Clearance = PermissionClearance.Independent;
                 changed = true;
             }
         }

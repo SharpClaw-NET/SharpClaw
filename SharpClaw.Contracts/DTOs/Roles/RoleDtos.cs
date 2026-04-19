@@ -21,7 +21,6 @@ public sealed record CreateRoleRequest(string Name);
 /// </para>
 /// </summary>
 public sealed record SetRolePermissionsRequest(
-    PermissionClearance DefaultClearance = PermissionClearance.Unset,
 
     /// <summary>
     /// Global flag grants. Key = FlagKey (e.g. "CanClickDesktop"),
@@ -61,6 +60,5 @@ public sealed record RoleResponse(
 public sealed record RolePermissionsResponse(
     Guid RoleId,
     string RoleName,
-    PermissionClearance DefaultClearance,
     IReadOnlyDictionary<string, PermissionClearance> GlobalFlags,
     IReadOnlyDictionary<string, IReadOnlyList<ResourceGrant>> ResourceGrants);

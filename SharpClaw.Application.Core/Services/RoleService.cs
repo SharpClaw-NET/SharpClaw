@@ -126,7 +126,6 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
         }
 
         // Apply global flags — generic loop over dictionary.
-        ps.DefaultClearance = request.DefaultClearance;
         if (request.GlobalFlags is not null)
         {
             foreach (var (key, clearance) in request.GlobalFlags)
@@ -260,7 +259,6 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
         new(
             RoleId: role.Id,
             RoleName: role.Name,
-            DefaultClearance: ps?.DefaultClearance ?? PermissionClearance.Unset,
             GlobalFlags: ps?.GlobalFlags
                 .ToDictionary(f => f.FlagKey, f => f.Clearance)
                 ?? new Dictionary<string, PermissionClearance>(),

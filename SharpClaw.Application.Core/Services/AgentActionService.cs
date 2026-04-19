@@ -52,9 +52,8 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
 
     /// <summary>
     /// Evaluate a boolean (global-flag) permission.
-    /// Each flag has its own clearance level; when it is
-    /// <see cref="PermissionClearance.Unset"/> the group
-    /// <see cref="PermissionSetDB.DefaultClearance"/> is used.
+    /// Each flag has its own clearance level; <see cref="PermissionClearance.Unset"/>
+    /// means the grant is inert and the action is denied.
     /// </summary>
     private async Task<AgentActionResult> EvaluateGlobalFlagAsync(
         Guid agentId,
@@ -72,7 +71,7 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
         if (!hasFlag(agentPerms))
             return AgentActionResult.Denied($"Agent does not have permission to {flagDescription}.");
 
-        var effective = ResolveClearance(getFlagClearance(agentPerms), agentPerms.DefaultClearance);
+        var effective = ResolveClearance(getFlagClearance(agentPerms));
 
         var result = await EvaluateCallerClearanceAsync(
             agentPerms, effective, caller,
@@ -134,7 +133,7 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
             return AgentActionResult.Denied($"Agent does not have {resourceDescription}.");
         }
 
-        var effective = ResolveClearance(access.Clearance, agentPerms.DefaultClearance);
+        var effective = ResolveClearance(access.Clearance);
 
         var result = await EvaluateCallerClearanceAsync(
             agentPerms, effective, caller,
@@ -169,6 +168,12 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
         Func<PermissionSetDB, bool> callerHasSamePermission,
         CancellationToken ct)
     {
+        // ── Level 0: Unset / Denied — no approval path ────────
+        if (effectiveClearance == PermissionClearance.Unset)
+            return AgentActionResult.Denied(
+                "Permission clearance is not configured (Unset). "
+                + "An admin must explicitly set a clearance level.");
+
         // ── Level 5: independent ─────────────────────────────────
         if (effectiveClearance == PermissionClearance.Independent)
             return AgentActionResult.Approve(
@@ -330,16 +335,11 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Resolves the effective clearance: per-permission value wins;
-    /// falls back to the group default; ultimate fallback is
-    /// <see cref="PermissionClearance.ApprovedBySameLevelUser"/>.
+    /// Returns the per-permission clearance as-is. <see cref="PermissionClearance.Unset"/>
+    /// is preserved — the caller (<see cref="EvaluateCallerClearanceAsync"/>) treats it
+    /// as a hard deny.
     /// </summary>
     private static PermissionClearance ResolveClearance(
-        PermissionClearance perPermission,
-        PermissionClearance groupDefault) =>
-        perPermission is not PermissionClearance.Unset
-            ? perPermission
-            : groupDefault is not PermissionClearance.Unset
-                ? groupDefault
-                : PermissionClearance.ApprovedBySameLevelUser;
+        PermissionClearance perPermission) =>
+        perPermission;
 }

@@ -1712,7 +1712,7 @@ public static class CliDispatcher
                 "role permissions <roleId> set [flags...]  Set role permissions",
                 "",
                 "Permission flags:",
-                "  --clearance <level>                     Default clearance (Unset, Independent, etc.)",
+                "  --flag FlagKey[:clearance]              Grant a global flag with optional clearance",
                 "  --create-sub-agents                     Grant CanCreateSubAgents",
                 "  --create-containers                     Grant CanCreateContainers",
                 "  --register-databases                    Grant CanRegisterDatabases",
@@ -1789,13 +1789,11 @@ public static class CliDispatcher
         }
 
         // role permissions <id> set [flags...]
-        // Syntax: --clearance <value>
-        //         --flag FlagKey[:clearance]
+        // Syntax: --flag FlagKey[:clearance]
         //         --grant ResourceType id[:clearance]
         if (_currentUserId is null)
             return UsageResult("You must be logged in to set permissions.");
 
-        var clearance = PermissionClearance.Unset;
         var globalFlags = new Dictionary<string, PermissionClearance>();
         var resourceGrants = new Dictionary<string, List<ResourceGrant>>();
 
@@ -1803,11 +1801,6 @@ public static class CliDispatcher
         {
             switch (args[i])
             {
-                case "--clearance" when i + 1 < args.Length:
-                    if (Enum.TryParse<PermissionClearance>(args[++i], true, out var cl))
-                        clearance = cl;
-                    break;
-
                 case "--flag" when i + 1 < args.Length:
                 {
                     var (flagKey, flagClearance) = ParseFlagArg(args[++i]);
@@ -1831,7 +1824,6 @@ public static class CliDispatcher
         }
 
         var request = new SetRolePermissionsRequest(
-            DefaultClearance: clearance,
             GlobalFlags: globalFlags.Count > 0 ? globalFlags : null,
             ResourceGrants: resourceGrants.Count > 0
                 ? resourceGrants.ToDictionary(

@@ -126,6 +126,7 @@ public sealed partial class HeaderTagProcessor(
         {
             agentPs = await db.PermissionSets
                 .Include(p => p.ResourceAccesses)
+                .Include(p => p.GlobalFlags)
                 .AsSplitQuery()
                 .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
         }
@@ -179,11 +180,6 @@ public sealed partial class HeaderTagProcessor(
             : ctx.User.Role.Name;
     }
 
-    // NOTE: DefaultClearance is intentionally NOT included in the header.
-    // It is an internal fallback sentinel that agents misinterpret as "no
-    // clearance" or "disabled." Effective clearance is resolved per-action
-    // at runtime (AgentActionService.ResolveClearance). The grants list
-    // already tells the agent what it can do. Do not re-add it.
     private async Task<string> FormatAgentRoleAsync(HeaderContext ctx, CancellationToken ct)
     {
         if (ctx.AgentRole is null)
@@ -306,19 +302,37 @@ public sealed partial class HeaderTagProcessor(
 
     private async Task<string> FormatAccessibleThreadsAsync(HeaderContext ctx, CancellationToken ct)
     {
-        // Reuse the same logic as ChatService — find threads from channels
-        // where the agent is primary or allowed, that opt-in with ReadCrossThreadHistory.
         if (ctx.AgentPs is null || !ctx.AgentPs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory"))
             return "(none)";
+
+        var isIndependent = ctx.AgentPs.GlobalFlags
+            .FirstOrDefault(f => f.FlagKey == "CanReadCrossThreadHistory")
+            ?.Clearance == PermissionClearance.Independent;
 
         var agentId = ctx.Agent.Id;
         var currentChannelId = ctx.Channel.Id;
 
         var accessibleChannels = await db.Channels
             .Include(c => c.Threads)
+            .Include(c => c.PermissionSet).ThenInclude(ps => ps!.GlobalFlags)
+            .Include(c => c.AgentContext).ThenInclude(ctx2 => ctx2!.PermissionSet)
+                .ThenInclude(ps => ps!.GlobalFlags)
             .Where(c => c.Id != currentChannelId
                 && (c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId)))
             .ToListAsync(ct);
+
+        // When not Independent, only include channels that opt in.
+        if (!isIndependent)
+        {
+            accessibleChannels = accessibleChannels
+                .Where(c =>
+                {
+                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
+                    return effectivePs is not null
+                        && effectivePs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory");
+                })
+                .ToList();
+        }
 
         var entries = new List<string>();
         foreach (var ch in accessibleChannels)

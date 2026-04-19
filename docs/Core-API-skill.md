@@ -88,9 +88,8 @@ GET    /roles/{id}/permissions
 PUT    /roles/{id}/permissions     (full replacement)
 
 SetRolePermissionsRequest fields:
-  defaultClearance (PermissionClearance enum)
-  Global flags: canCreateSubAgents, canCreateContainers, canRegisterInfoStores, canAccessLocalhostInBrowser, canAccessLocalhostCli, canClickDesktop, canTypeOnDesktop, canReadCrossThreadHistory, canEditAgentHeader, canEditChannelHeader, canCreateDocumentSessions, canEnumerateWindows, canFocusWindow, canCloseWindow, canResizeWindow, canSendHotkey, canReadClipboard, canWriteClipboard
-  Clearance overrides for specialized globals: createDocumentSessionsClearance, enumerateWindowsClearance, focusWindowClearance, closeWindowClearance, resizeWindowClearance, sendHotkeyClearance, readClipboardClearance, writeClipboardClearance (PermissionClearance enum, default Unset = use defaultClearance)
+  Global flags:
+  (PermissionClearance enum, default Unset = denied, no approval path)
   Per-resource arrays (each entry is { resourceId, clearance }):
     dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, audioDeviceAccesses, agentAccesses, taskAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses, documentSessionAccesses, nativeApplicationAccesses
 

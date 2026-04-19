@@ -11,14 +11,6 @@ namespace SharpClaw.Application.Infrastructure.Models.Clearance;
 /// </summary>
 public class PermissionSetDB : BaseEntity
 {
-    // ── Default clearance ─────────────────────────────────────────
-
-    /// <summary>
-    /// Fallback clearance level used when an individual permission's
-    /// <see cref="PermissionClearance"/> is <see cref="PermissionClearance.Unset"/>.
-    /// </summary>
-    public PermissionClearance DefaultClearance { get; set; } = PermissionClearance.Unset;
-
     // ── Per-resource grant collections ────────────────────
 
     /// <summary>

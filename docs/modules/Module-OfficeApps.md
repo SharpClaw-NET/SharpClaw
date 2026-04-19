@@ -307,7 +307,7 @@ or via the `oa_register_document` / `oa_create_workbook` tools.
 | `canCreateDocumentSessions` | `oa_register_document`, `oa_create_workbook` |
 
 The `createDocumentSessionsClearance` override defaults to `Unset`
-(uses the role's `defaultClearance`).
+(action denied, no approval path).
 
 ### Per-resource arrays
 

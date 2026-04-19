@@ -598,11 +598,6 @@ public sealed class ChatService(
                         .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
 
-            // NOTE: DefaultClearance is intentionally NOT included in the header.
-            // It is an internal fallback sentinel that agents misinterpret as
-            // "no clearance" or "disabled." Effective clearance is resolved
-            // per-action at runtime (see AgentActionService.ResolveClearance).
-            // The grants list already tells the agent what it can do.
             sb.Append(" | agent-role: ").Append(agentRole.Name);
             if (agentPs is not null)
             {

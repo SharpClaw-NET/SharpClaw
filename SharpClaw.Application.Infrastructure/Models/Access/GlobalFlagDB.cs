@@ -24,9 +24,9 @@ public class GlobalFlagDB : BaseEntity
     public required string FlagKey { get; set; }
 
     /// <summary>
-    /// Per-flag clearance override.
-    /// <see cref="PermissionClearance.Unset"/> falls back to the
-    /// <see cref="PermissionSetDB.DefaultClearance"/>.
+    /// Per-flag clearance level.
+    /// <see cref="PermissionClearance.Unset"/> means the grant is inert —
+    /// the action is denied until an admin explicitly sets a clearance level.
     /// </summary>
     public PermissionClearance Clearance { get; set; } = PermissionClearance.Unset;
 

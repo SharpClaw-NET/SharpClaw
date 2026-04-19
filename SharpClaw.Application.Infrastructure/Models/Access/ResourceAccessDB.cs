@@ -31,8 +31,9 @@ public class ResourceAccessDB : BaseEntity
     public Guid ResourceId { get; set; }
 
     /// <summary>
-    /// Per-grant clearance override.
-    /// <see cref="PermissionClearance.Unset"/> falls back to the group default.
+    /// Per-grant clearance level.
+    /// <see cref="PermissionClearance.Unset"/> means the grant is inert —
+    /// the action is denied until an admin explicitly sets a clearance level.
     /// </summary>
     public PermissionClearance Clearance { get; set; } = PermissionClearance.Unset;
 

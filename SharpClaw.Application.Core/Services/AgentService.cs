@@ -215,12 +215,6 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             throw new UnauthorizedAccessException(
                 $"You have no permissions — cannot assign the '{roleName}' role.");
 
-        // Default clearance: caller must have ≥ target.
-        if (Effective(targetPs.DefaultClearance) > Effective(callerPs.DefaultClearance))
-            throw new UnauthorizedAccessException(
-                $"Cannot assign '{roleName}': target default clearance " +
-                $"{targetPs.DefaultClearance} exceeds your {callerPs.DefaultClearance}.");
-
         // Global flags — generic loop covers all registered flags.
         // Fixes the historical 7-of-18 incomplete check (see §12.3).
         foreach (var targetFlag in targetPs.GlobalFlags)
@@ -233,20 +227,19 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
         foreach (var resourceType in moduleRegistry.GetAllRegisteredResourceTypes())
         {
             ValidateResourceCoverageGeneric(roleName, resourceType,
-                targetPs.ResourceAccesses, callerPs.ResourceAccesses,
-                targetPs.DefaultClearance, callerPs.DefaultClearance);
+                targetPs.ResourceAccesses, callerPs.ResourceAccesses);
         }
     }
 
     /// <summary>
     /// For every resource grant of a given <paramref name="resourceType"/> in the target permission set,
     /// the caller must hold either the same resource or the AllResources wildcard, at the
-    /// same or higher effective clearance.
+    /// same or higher clearance. Grants with <see cref="PermissionClearance.Unset"/> clearance
+    /// are vacuously satisfiable (the grant is inert, so assigning it is harmless).
     /// </summary>
     private static void ValidateResourceCoverageGeneric(
         string roleName, string resourceType,
-        ICollection<ResourceAccessDB> targetAccesses, ICollection<ResourceAccessDB> callerAccesses,
-        PermissionClearance targetDefault, PermissionClearance callerDefault)
+        ICollection<ResourceAccessDB> targetAccesses, ICollection<ResourceAccessDB> callerAccesses)
     {
         var targetFiltered = targetAccesses.Where(a => a.ResourceType == resourceType).ToList();
         var callerFiltered = callerAccesses.Where(a => a.ResourceType == resourceType).ToList();
@@ -258,16 +251,16 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
         if (targetFiltered.Count == 0)
             return;
 
-        // Build caller lookup: resourceId → effective clearance.
+        // Build caller lookup: resourceId → clearance.
         var callerMap = new Dictionary<Guid, PermissionClearance>();
         foreach (var a in callerFiltered)
-            callerMap[a.ResourceId] = EffectiveOr(a.Clearance, callerDefault);
+            callerMap[a.ResourceId] = a.Clearance;
 
         var callerHasWildcard = callerMap.TryGetValue(WellKnownIds.AllResources, out var wildcardClearance);
 
         foreach (var target in targetFiltered)
         {
-            var targetClearance = EffectiveOr(target.Clearance, targetDefault);
+            var targetClearance = target.Clearance;
 
             PermissionClearance callerClearance;
             if (callerMap.TryGetValue(target.ResourceId, out var exact))
@@ -286,15 +279,6 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
                     $"you only have {callerClearance}.");
         }
     }
-
-    /// <summary>Returns the effective clearance, falling back to default when Unset.</summary>
-    private static PermissionClearance EffectiveOr(
-        PermissionClearance clearance, PermissionClearance fallback) =>
-        clearance != PermissionClearance.Unset ? clearance : fallback;
-
-    /// <summary>Returns the effective clearance, treating Unset as the lowest level.</summary>
-    private static PermissionClearance Effective(PermissionClearance clearance) =>
-        clearance != PermissionClearance.Unset ? clearance : PermissionClearance.ApprovedBySameLevelUser;
 
     private static void Deny(string roleName, string flag) =>
         throw new UnauthorizedAccessException(

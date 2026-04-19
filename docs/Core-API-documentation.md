@@ -2039,7 +2039,6 @@ don't have.
 
 ```json
 {
-  "defaultClearance": "Independent",
   "canCreateSubAgents": false,
   "canCreateContainers": false,
   "canRegisterInfoStores": false,
@@ -2113,7 +2112,6 @@ wildcard grant that covers all resources of that type.
 {
   "roleId": "guid",
   "roleName": "string",
-  "defaultClearance": "Independent",
   "canCreateSubAgents": false,
   "canCreateContainers": false,
   "canRegisterInfoStores": false,

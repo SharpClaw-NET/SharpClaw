@@ -8,8 +8,19 @@ namespace SharpClaw.Contracts.Enums;
 /// </summary>
 public enum PermissionClearance
 {
-    /// <summary>Not set / unknown. Falls back to the group-level default.</summary>
+    /// <summary>
+    /// No clearance has been configured. The grant row exists but is inert —
+    /// the action is denied and no approval path exists until an admin
+    /// explicitly sets a clearance level.
+    /// </summary>
     Unset = 0,
+
+    /// <summary>
+    /// Explicit denial. Behaviorally identical to <see cref="Unset"/> — the
+    /// action is denied outright. Use this when the intent is to deliberately
+    /// deny rather than "not yet configured."
+    /// </summary>
+    Denied = 0,
 
     /// <summary>
     /// Requires approval from a user who holds the same permission.

@@ -372,7 +372,7 @@ Native applications are registered via `POST /resources/nativeapplications`.
 
 Each global flag also has a corresponding clearance override
 (e.g. `enumerateWindowsClearance`, `focusWindowClearance`) that
-defaults to `Unset` (uses the role's `defaultClearance`).
+defaults to `Unset` (action denied, no approval path).
 
 ### Per-resource arrays
 
