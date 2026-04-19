@@ -188,6 +188,10 @@ public sealed class DesktopAwarenessService : IWindowManager
     [SupportedOSPlatform("windows")]
     private static nint FindWindow(int? processId, string? processName, string? titleContains)
     {
+        // Normalize empty/whitespace strings to null so they don't participate in matching.
+        if (string.IsNullOrWhiteSpace(processName)) processName = null;
+        if (string.IsNullOrWhiteSpace(titleContains)) titleContains = null;
+
         if (processId is null && processName is null && titleContains is null)
             throw new ArgumentException("At least one of processId, processName, or titleContains is required.");
 

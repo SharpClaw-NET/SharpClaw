@@ -62,6 +62,8 @@ public sealed class ChatService(
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback = null,
         CancellationToken ct = default)
     {
+        bool userMessagePersisted = false;
+
         var channel = await db.Channels
             .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent!).ThenInclude(a => a.ToolAwarenessSet)
@@ -165,6 +167,7 @@ public sealed class ChatService(
 
         db.ChatMessages.Add(userMessage);
         await db.SaveChangesAsync(ct);
+        userMessagePersisted = true;
 
         var loopResult = enableTools
             ? await RunNativeToolLoopAsync(
@@ -212,7 +215,14 @@ public sealed class ChatService(
             threadCost,
             agentCost);
 
-        } // try
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            await PersistStreamErrorAsync(channelId, threadId, request, ex,
+                userMessagePersisted, ct);
+            throw;
+        }
         finally
         {
             threadLock?.Dispose();
@@ -1071,6 +1081,114 @@ public sealed class ChatService(
             threadLock?.Dispose();
             if (isLocal)
                 localModelService.ReleaseAfterChat(model.Id);
+        }
+    }
+
+    /// <summary>
+    /// Persists a <c>system</c>-role error message into the thread/channel
+    /// so the failure is visible when the user reloads history.
+    /// </summary>
+    private async Task PersistStreamErrorAsync(
+        Guid channelId, Guid? threadId, ChatRequest request, Exception ex,
+        bool userMessageAlreadyPersisted, CancellationToken ct)
+    {
+        try
+        {
+            // If the user message was never saved (early validation failure),
+            // persist it now so the history shows what the user typed.
+            if (!userMessageAlreadyPersisted)
+            {
+                var senderUserId = jobService.GetSessionUserId();
+                var senderUsername = senderUserId.HasValue
+                    ? (await db.Users.Where(u => u.Id == senderUserId.Value)
+                        .Select(u => u.Username).FirstOrDefaultAsync(ct))
+                    : request.ExternalDisplayName ?? request.ExternalUsername;
+
+                db.ChatMessages.Add(new ChatMessageDB
+                {
+                    Role = "user",
+                    Content = request.Message,
+                    ChannelId = channelId,
+                    ThreadId = threadId,
+                    SenderUserId = senderUserId,
+                    SenderUsername = senderUsername,
+                    ClientType = request.ClientType
+                });
+            }
+
+            db.ChatMessages.Add(new ChatMessageDB
+            {
+                Role = "system",
+                Content = $"⚠ Error: {ex.Message}",
+                ChannelId = channelId,
+                ThreadId = threadId,
+                ClientType = request.ClientType
+            });
+
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // Best-effort — don't mask the original exception.
+        }
+    }
+
+    /// <summary>
+    /// Persists a <c>system</c>-role error message into the channel/thread
+    /// so the failure is visible when the user reloads history. Intended to
+    /// be called by SSE/stream handlers when an exception is caught outside
+    /// of the <c>IAsyncEnumerable</c> iterator.
+    /// </summary>
+    public async Task PersistChatErrorAsync(
+        Guid channelId, Guid? threadId, ChatRequest request,
+        string errorMessage, CancellationToken ct)
+    {
+        try
+        {
+            // Check whether a user message was already persisted for this
+            // request. The user message is the most recent user-role message
+            // matching the content + channel + thread.
+            var userAlreadySaved = await db.ChatMessages.AnyAsync(
+                m => m.ChannelId == channelId
+                    && m.ThreadId == threadId
+                    && m.Role == "user"
+                    && m.Content == request.Message,
+                ct);
+
+            if (!userAlreadySaved)
+            {
+                var senderUserId = jobService.GetSessionUserId();
+                var senderUsername = senderUserId.HasValue
+                    ? (await db.Users.Where(u => u.Id == senderUserId.Value)
+                        .Select(u => u.Username).FirstOrDefaultAsync(ct))
+                    : request.ExternalDisplayName ?? request.ExternalUsername;
+
+                db.ChatMessages.Add(new ChatMessageDB
+                {
+                    Role = "user",
+                    Content = request.Message,
+                    ChannelId = channelId,
+                    ThreadId = threadId,
+                    SenderUserId = senderUserId,
+                    SenderUsername = senderUsername,
+                    ClientType = request.ClientType
+                });
+            }
+
+            db.ChatMessages.Add(new ChatMessageDB
+            {
+                Role = "system",
+                Content = $"⚠ Error: {errorMessage}",
+                ChannelId = channelId,
+                ThreadId = threadId,
+                ClientType = request.ClientType
+            });
+
+            await db.SaveChangesAsync(ct);
+        }
+        catch
+        {
+            // Best-effort — don't mask the original exception.
         }
     }
 

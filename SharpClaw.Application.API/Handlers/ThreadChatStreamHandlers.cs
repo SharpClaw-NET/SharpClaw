@@ -94,6 +94,11 @@ public static class ThreadChatStreamHandlers
         {
             sw.Stop();
             Log($"[{streamId}] ── STREAM ERROR ── {eventIndex} events in {sw.ElapsedMilliseconds}ms: {ex.Message}");
+
+            // Persist the error as a system message so the user sees it
+            // when they reload the thread history in a future session.
+            await chatService.PersistChatErrorAsync(id, threadId, request, ex.Message, context.RequestAborted);
+
             try
             {
                 var errorEvt = ChatStreamEvent.Err(ex.Message);
