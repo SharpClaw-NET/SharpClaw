@@ -1,16 +1,20 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class ModelService(SharpClawDbContext db)
+public sealed class ModelService(SharpClawDbContext db, IConfiguration configuration)
 {
     public async Task<ModelResponse> CreateAsync(CreateModelRequest request, CancellationToken ct = default)
     {
         var provider = await db.Providers.FindAsync([request.ProviderId], ct)
             ?? throw new ArgumentException($"Provider {request.ProviderId} not found.");
+
+        if (IsUniqueModelNamesEnforced())
+            await EnsureModelNameUniqueAsync(request.Name, excludeId: null, ct);
 
         var model = new ModelDB
         {
@@ -51,7 +55,12 @@ public sealed class ModelService(SharpClawDbContext db)
         var model = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null) return null;
 
-        if (request.Name is not null) model.Name = request.Name;
+        if (request.Name is not null)
+        {
+            if (IsUniqueModelNamesEnforced())
+                await EnsureModelNameUniqueAsync(request.Name, excludeId: id, ct);
+            model.Name = request.Name;
+        }
         if (request.Capabilities is not null) model.Capabilities = request.Capabilities.Value;
         if (request.CustomId is not null) model.CustomId = request.CustomId;
 
@@ -67,5 +76,19 @@ public sealed class ModelService(SharpClawDbContext db)
         db.Models.Remove(model);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private bool IsUniqueModelNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Models"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+    }
+
+    private async Task EnsureModelNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.Models.AnyAsync(
+            m => m.Name == name && (excludeId == null || m.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"A model named '{name}' already exists.");
     }
 }

@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Channels;
@@ -7,7 +8,7 @@ using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class ChannelService(SharpClawDbContext db)
+public sealed class ChannelService(SharpClawDbContext db, IConfiguration configuration)
 {
     /// <summary>
     /// Creates a new channel.  Either <see cref="CreateChannelRequest.AgentId"/>
@@ -44,9 +45,14 @@ public sealed class ChannelService(SharpClawDbContext db)
             throw new ArgumentException(
                 "Either an AgentId or a ContextId (with an agent) is required.");
 
+        var title = request.Title ?? $"Channel {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}";
+
+        if (IsUniqueChannelNamesEnforced())
+            await EnsureChannelTitleUniqueAsync(title, excludeId: null, ct);
+
         var channel = new ChannelDB
         {
-            Title = request.Title ?? $"Channel {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
+            Title = title,
             AgentId = agent?.Id,
             AgentContextId = context?.Id,
             PermissionSetId = request.PermissionSetId,
@@ -121,7 +127,11 @@ public sealed class ChannelService(SharpClawDbContext db)
         if (channel is null) return null;
 
         if (request.Title is not null)
+        {
+            if (IsUniqueChannelNamesEnforced() && request.Title != channel.Title)
+                await EnsureChannelTitleUniqueAsync(request.Title, excludeId: id, ct);
             channel.Title = request.Title;
+        }
 
         // Allow moving into / out of a context
         if (request.ContextId is not null)
@@ -373,4 +383,18 @@ public sealed class ChannelService(SharpClawDbContext db)
             agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
             agent.ProviderParameters, agent.CustomChatHeader, agent.ToolAwarenessSetId,
             agent.DisableToolSchemas);
+
+    private bool IsUniqueChannelNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Channels"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+    }
+
+    private async Task EnsureChannelTitleUniqueAsync(string title, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.Channels.AnyAsync(
+            c => c.Title == title && (excludeId == null || c.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"A channel named '{title}' already exists.");
+    }
 }

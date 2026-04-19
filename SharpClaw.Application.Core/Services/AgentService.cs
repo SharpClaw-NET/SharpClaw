@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Core.Modules;
@@ -13,10 +14,13 @@ using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry)
+public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration)
 {
     public async Task<AgentResponse> CreateAsync(CreateAgentRequest request, CancellationToken ct = default)
     {
+        if (IsUniqueAgentNamesEnforced())
+            await EnsureAgentNameUniqueAsync(request.Name, excludeId: null, ct);
+
         var model = await db.Models
             .Include(m => m.Provider)
             .FirstOrDefaultAsync(m => m.Id == request.ModelId, ct)
@@ -98,7 +102,12 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             .FirstOrDefaultAsync(a => a.Id == id, ct);
         if (agent is null) return null;
 
-        if (request.Name is not null) agent.Name = request.Name;
+        if (request.Name is not null)
+        {
+            if (IsUniqueAgentNamesEnforced() && request.Name != agent.Name)
+                await EnsureAgentNameUniqueAsync(request.Name, excludeId: id, ct);
+            agent.Name = request.Name;
+        }
         if (request.SystemPrompt is not null) agent.SystemPrompt = request.SystemPrompt;
         if (request.MaxCompletionTokens is not null) agent.MaxCompletionTokens = request.MaxCompletionTokens;
         if (request.CustomId is not null) agent.CustomId = request.CustomId;
@@ -472,5 +481,19 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             ReasoningEffort = agent.ReasoningEffort,
         };
         CompletionParameterValidator.ValidateOrThrow(cp, providerType);
+    }
+
+    private bool IsUniqueAgentNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Agents"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+    }
+
+    private async Task EnsureAgentNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.Agents.AnyAsync(
+            a => a.Name == name && (excludeId == null || a.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"An agent named '{name}' already exists.");
     }
 }

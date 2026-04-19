@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Contracts.DTOs.Contexts;
 using SharpClaw.Infrastructure.Models;
@@ -6,11 +7,14 @@ using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class ContextService(SharpClawDbContext db)
+public sealed class ContextService(SharpClawDbContext db, IConfiguration configuration)
 {
     public async Task<ContextResponse> CreateAsync(
         CreateContextRequest request, CancellationToken ct = default)
     {
+        if (request.Name is not null && IsUniqueContextNamesEnforced())
+            await EnsureContextNameUniqueAsync(request.Name, excludeId: null, ct);
+
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
             .Include(a => a.Role)
@@ -76,7 +80,11 @@ public sealed class ContextService(SharpClawDbContext db)
         if (context is null) return null;
 
         if (request.Name is not null)
+        {
+            if (IsUniqueContextNamesEnforced())
+                await EnsureContextNameUniqueAsync(request.Name, excludeId: id, ct);
             context.Name = request.Name;
+        }
 
         // Allow explicit set/unset of permission set
         if (request.PermissionSetId is not null)
@@ -113,6 +121,20 @@ public sealed class ContextService(SharpClawDbContext db)
         db.AgentContexts.Remove(context);
         await db.SaveChangesAsync(ct);
         return true;
+    }
+
+    private bool IsUniqueContextNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Contexts"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+    }
+
+    private async Task EnsureContextNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.AgentContexts.AnyAsync(
+            c => c.Name == name && (excludeId == null || c.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"A context named '{name}' already exists.");
     }
 
     // ═══════════════════════════════════════════════════════════════

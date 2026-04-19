@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts;
@@ -12,7 +13,7 @@ namespace SharpClaw.Application.Services;
 /// Manages roles and their permission sets. Enforces the rule that a
 /// user can only grant permissions they already hold themselves.
 /// </summary>
-public sealed class RoleService(SharpClawDbContext db)
+public sealed class RoleService(SharpClawDbContext db, IConfiguration configuration)
 {
     // ═══════════════════════════════════════════════════════════════
     // Read
@@ -32,6 +33,9 @@ public sealed class RoleService(SharpClawDbContext db)
     public async Task<RoleResponse> CreateAsync(
         string name, CancellationToken ct = default)
     {
+        if (IsUniqueRoleNamesEnforced())
+            await EnsureRoleNameUniqueAsync(name, excludeId: null, ct);
+
         var ps = new PermissionSetDB();
         db.PermissionSets.Add(ps);
         await db.SaveChangesAsync(ct);
@@ -270,4 +274,17 @@ public sealed class RoleService(SharpClawDbContext db)
                             .Select(a => new ResourceGrant(a.ResourceId, a.Clearance))
                             .ToList()));
 
+    private bool IsUniqueRoleNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Roles"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
     }
+
+    private async Task EnsureRoleNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.Roles.AnyAsync(
+            r => r.Name == name && (excludeId == null || r.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"A role named '{name}' already exists.");
+    }
+}

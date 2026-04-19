@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
@@ -13,12 +14,16 @@ public sealed class ProviderService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
     ProviderApiClientFactory clientFactory,
-    IHttpClientFactory httpClientFactory)
+    IHttpClientFactory httpClientFactory,
+    IConfiguration configuration)
 {
     public async Task<ProviderResponse> CreateAsync(CreateProviderRequest request, CancellationToken ct = default)
     {
         if (request.ProviderType == ProviderType.Custom && string.IsNullOrWhiteSpace(request.ApiEndpoint))
             throw new ArgumentException("ApiEndpoint is required for custom providers.");
+
+        if (IsUniqueProviderNamesEnforced())
+            await EnsureProviderNameUniqueAsync(request.Name, excludeId: null, ct);
 
         var provider = new ProviderDB
         {
@@ -54,7 +59,12 @@ public sealed class ProviderService(
         var provider = await db.Providers.FindAsync([id], ct);
         if (provider is null) return null;
 
-        if (request.Name is not null) provider.Name = request.Name;
+        if (request.Name is not null)
+        {
+            if (IsUniqueProviderNamesEnforced())
+                await EnsureProviderNameUniqueAsync(request.Name, excludeId: id, ct);
+            provider.Name = request.Name;
+        }
         if (request.ApiEndpoint is not null) provider.ApiEndpoint = request.ApiEndpoint;
 
         await db.SaveChangesAsync(ct);
@@ -100,6 +110,20 @@ public sealed class ProviderService(
 
         using var httpClient = httpClientFactory.CreateClient();
         return await authClient.StartDeviceCodeFlowAsync(httpClient, ct);
+    }
+
+    private bool IsUniqueProviderNamesEnforced()
+    {
+        var value = configuration["UniqueNames:Providers"];
+        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+    }
+
+    private async Task EnsureProviderNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
+    {
+        var exists = await db.Providers.AnyAsync(
+            p => p.Name == name && (excludeId == null || p.Id != excludeId), ct);
+        if (exists)
+            throw new InvalidOperationException($"A provider named '{name}' already exists.");
     }
 
     /// <summary>
