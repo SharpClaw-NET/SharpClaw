@@ -44,6 +44,12 @@ Contracts -> Utils -> Infrastructure -> Core -> API
 
 **Modules** own all tools. **Core** owns the pipeline (chat, jobs, permissions). **Infrastructure** owns persistence (EF Core, JSON sync). **API** exposes HTTP endpoints. **Gateway** adds rate limiting and endpoint toggles for public access.
 
+## Bundled modules and 1.0.0
+
+Not all modules currently bundled with SharpClaw will ship in 1.0.0. The essential modules (Module Dev Kit, editor tools, context tools, agent orchestration) are permanent. The remaining modules — ComputerUse, Transcription, OfficeApps, BotIntegration, and others — exist in the alpha to stress-test support for advanced features like hardware capture, COM interop, and third-party service integration. They will be gradually phased out of the default distribution as the platform matures.
+
+Users are expected to create and share their own modules. The module system is designed to make this straightforward: implement `ISharpClawModule`, declare your tools, and build. An agent with the right permissions can even develop, compile, and register a new module from within SharpClaw itself, in a single session, without a restart.
+
 ## Modules
 
 Every tool the LLM can call belongs to a module. Modules are self-contained C# projects that declare tool schemas, permission descriptors, and execution handlers. They can be enabled or disabled at runtime without restart.
@@ -88,12 +94,6 @@ The agent's shell access. Not bash.
 Only `ProcRun` spawns a process. Everything else (file I/O, HTTP, text manipulation, JSON, archives, networking) runs in-memory via .NET APIs.
 
 See [mk8.shell Reference](mk8.shell/mk8.shell.md) for the full verb list and execution model.
-
-## Bundled modules and 1.0.0
-
-Not all modules currently bundled with SharpClaw will ship in 1.0.0. The essential modules (Module Dev Kit, editor tools, context tools, agent orchestration) are permanent. The remaining modules — ComputerUse, Transcription, OfficeApps, BotIntegration, and others — exist in the alpha to stress-test support for advanced features like hardware capture, COM interop, and third-party service integration. They will be gradually phased out of the default distribution as the platform matures.
-
-Users are expected to create and share their own modules. The module system is designed to make this straightforward: implement `ISharpClawModule`, declare your tools, and build. An agent with the right permissions can even develop, compile, and register a new module from within SharpClaw itself, in a single session, without a restart.
 
 ## Getting started
 
