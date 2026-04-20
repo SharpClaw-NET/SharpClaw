@@ -42,6 +42,9 @@
     <ProjectReference Include="..\DefaultModules\VS2026Editor\SharpClaw.Modules.VS2026Editor.csproj" />
     <ProjectReference Include="..\DefaultModules\VSCodeEditor\SharpClaw.Modules.VSCodeEditor.csproj" />
     <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj" />
+    <ProjectReference Include="..\SharpClaw.Migrations.Postgres\SharpClaw.Migrations.Postgres.csproj" />
+    <ProjectReference Include="..\SharpClaw.Migrations.SqlServer\SharpClaw.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\SharpClaw.Migrations.SQLite\SharpClaw.Migrations.SQLite.csproj" />
   </ItemGroup>
 
 </Project>

@@ -1,6 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Services;
 
@@ -43,6 +44,7 @@ public sealed class EnvFileService(
 
     /// <summary>
     /// Reads the Core <c>.env</c> file and returns its raw content.
+    /// Decrypts transparently if the file is encrypted on disk.
     /// Returns <c>null</c> when the file does not exist.
     /// Throws <see cref="UnauthorizedAccessException"/> on auth failure.
     /// </summary>
@@ -52,11 +54,15 @@ public sealed class EnvFileService(
             throw new UnauthorizedAccessException("Admin login required to read Application Core environment.");
 
         var path = ResolveEnvFilePath();
-        return File.Exists(path) ? await File.ReadAllTextAsync(path, ct) : null;
+        if (!File.Exists(path)) return null;
+
+        var key = EncryptionKeyResolver.ResolveKey();
+        return await EncryptedEnvFile.ReadAsync(path, key, ct);
     }
 
     /// <summary>
     /// Writes the given content to the Core <c>.env</c> file.
+    /// Always writes encrypted when an encryption key is available.
     /// Creates the directory if it does not exist.
     /// Throws <see cref="UnauthorizedAccessException"/> on auth failure.
     /// </summary>
@@ -66,9 +72,10 @@ public sealed class EnvFileService(
             throw new UnauthorizedAccessException("Admin login required to edit Application Core environment.");
 
         var path = ResolveEnvFilePath();
-        var dir = Path.GetDirectoryName(path)!;
-        Directory.CreateDirectory(dir);
-        await File.WriteAllTextAsync(path, content, ct);
+        var key = EncryptionKeyResolver.ResolveKey();
+        // Always write encrypted — auto-lock ensures the file is encrypted
+        // after first startup, and all subsequent writes preserve that.
+        await EncryptedEnvFile.WriteAsync(path, content, key, encrypt: true, ct);
     }
 
     // ── Internals ──────────────────────────────────────────────────

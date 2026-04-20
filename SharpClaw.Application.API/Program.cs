@@ -87,8 +87,17 @@ try
             "Remove the key from .env to auto-generate a new one, or provide a valid 256-bit Base64 key.");
     }
 
-    // Infrastructure
-    builder.Services.AddInfrastructure(StorageMode.JsonFile, configureJsonFile: opts =>
+    // Infrastructure — resolve provider from .env
+    var storageMode = Enum.TryParse<StorageMode>(
+        builder.Configuration["Database:Provider"], ignoreCase: true, out var parsed)
+        ? parsed
+        : StorageMode.JsonFile;
+
+    var connectionString = storageMode != StorageMode.JsonFile
+        ? builder.Configuration[$"ConnectionStrings:{storageMode}"]
+        : null;
+
+    builder.Services.AddInfrastructure(storageMode, connectionString, opts =>
     {
         if (!string.IsNullOrEmpty(dataDir))
             opts.DataDirectory = dataDir;
@@ -240,6 +249,23 @@ try
 
     // Initialize infrastructure (loads persisted data into InMemory DB)
     await app.Services.InitializeInfrastructureAsync();
+
+    // §8c: Check for pending EF Core migrations on relational providers and warn.
+    if (storageMode != StorageMode.JsonFile)
+    {
+        var migrationSvc = app.Services.GetService<SharpClaw.Infrastructure.Persistence.MigrationService>();
+        if (migrationSvc is not null)
+        {
+            var status = await migrationSvc.GetStatusAsync();
+            if (status.Pending.Count > 0)
+            {
+                Log.Warning(
+                    "Database has {Count} pending migration(s): {Names}. " +
+                    "Run 'db migrate' or POST /admin/db/migrate to apply them.",
+                    status.Pending.Count, string.Join(", ", status.Pending));
+            }
+        }
+    }
 
     // Wire up module loader with built service provider
     moduleLoader.SetRootServices(app.Services);
@@ -409,6 +435,11 @@ try
     app.UseRouting();
     app.UseMiddleware<ApiKeyMiddleware>();
     app.UseMiddleware<JwtSessionMiddleware>();
+
+    // Migration gate — pauses requests during manual migrations (relational only).
+    if (storageMode != StorageMode.JsonFile)
+        app.UseMiddleware<MigrationGateMiddleware>();
+
     app.UseWebSockets();
 
     // Liveness check — no auth required.

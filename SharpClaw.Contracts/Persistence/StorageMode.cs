@@ -3,5 +3,9 @@ namespace SharpClaw.Contracts.Persistence;
 public enum StorageMode
 {
     JsonFile,
-    Postgres
+    Postgres,
+    SqlServer,
+    SQLite,
+    MySql,
+    Oracle
 }

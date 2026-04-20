@@ -5,6 +5,11 @@
     <Project Path="SharpClaw.Application.Infrastructure.Tasks/SharpClaw.Application.Infrastructure.Tasks.csproj" Id="23769044-e624-4ad4-a4ba-66de30a6eb15" />
     <Project Path="SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj" />
   </Folder>
+  <Folder Name="/Migrations/">
+    <Project Path="SharpClaw.Migrations.Postgres/SharpClaw.Migrations.Postgres.csproj" />
+    <Project Path="SharpClaw.Migrations.SQLite/SharpClaw.Migrations.SQLite.csproj" />
+    <Project Path="SharpClaw.Migrations.SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
+  </Folder>
   <Folder Name="/NativeClient/">
     <Project Path="SharpClaw.Uno/SharpClaw.Uno.csproj">
       <Deploy />

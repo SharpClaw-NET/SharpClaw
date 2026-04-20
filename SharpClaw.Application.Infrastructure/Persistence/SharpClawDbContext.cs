@@ -12,6 +12,7 @@ using SharpClaw.Application.Infrastructure.Models.Resources;
 using SharpClaw.Application.Infrastructure.Models.Tasks;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
+using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence.JSON;
@@ -532,7 +533,40 @@ public class SharpClawDbContext(
             e.Property(c => c.Value).HasMaxLength(4096);
         });
 
+        ConfigureForProvider(modelBuilder);
         }
+
+    /// <summary>
+    /// Applies provider-specific model configuration. Called at the end of
+    /// <see cref="OnModelCreating"/> to adjust the model for provider quirks.
+    /// </summary>
+    private void ConfigureForProvider(ModelBuilder modelBuilder)
+    {
+        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        {
+            // SQLite has no native DateTimeOffset support.
+            // Apply a value converter on EVERY entity property of type
+            // DateTimeOffset / DateTimeOffset? — this includes CreatedAt
+            // and UpdatedAt which are auto-set by SaveChangesAsync on
+            // every entity via the base IEntity interface.
+            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            {
+                foreach (var property in entityType.GetProperties())
+                {
+                    if (property.ClrType == typeof(DateTimeOffset))
+                        property.SetValueConverter(
+                            new ValueConverter<DateTimeOffset, long>(
+                                v => v.ToUnixTimeMilliseconds(),
+                                v => DateTimeOffset.FromUnixTimeMilliseconds(v)));
+                    else if (property.ClrType == typeof(DateTimeOffset?))
+                        property.SetValueConverter(
+                            new ValueConverter<DateTimeOffset?, long?>(
+                                v => v.HasValue ? v.Value.ToUnixTimeMilliseconds() : null,
+                                v => v.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(v.Value) : null));
+                }
+            }
+        }
+    }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {

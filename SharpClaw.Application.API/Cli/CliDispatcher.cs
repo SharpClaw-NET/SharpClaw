@@ -23,6 +23,7 @@ using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
+using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
@@ -219,6 +220,8 @@ public static class CliDispatcher
             "module" => await HandleModuleCommand(args, sp),
             "tools" => await HandleToolAwarenessSetCommand(args, sp),
             "bio" => await HandleBioCommand(args, sp),
+            "env" => await HandleEnvCommand(args, sp),
+            "db" => await HandleDbCommand(args, sp),
             "health" => await HandleHealthCommand(sp),
             "me" => await AuthHandlers.Me(
                 sp.GetRequiredService<SessionService>(),
@@ -2902,6 +2905,159 @@ public static class CliDispatcher
         return Results.Ok();
     }
 
+    // ═══════════════════════════════════════════════════════════════
+    // env
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<IResult?> HandleEnvCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "env get                                   Read core .env content",
+                "env set                                   Write core .env (reads from stdin until blank line)",
+                "env auth                                  Check env edit authorisation",
+                "env status                                Show encryption status of .env file",
+                "env unlock                                Decrypt .env file in-place (re-locks on next startup)");
+            return Results.Ok();
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        var svc = sp.GetRequiredService<EnvFileService>();
+
+        return sub switch
+        {
+            "get" => await EnvHandlers.Read(svc),
+            "set" => await HandleEnvSet(svc),
+            "auth" => await EnvHandlers.CheckAuth(svc),
+            "status" => HandleEnvStatus(),
+            "unlock" => await HandleEnvUnlockAsync(),
+            _ => UsageResult($"Unknown sub-command: env {sub}. Try 'env get', 'env set', 'env auth', 'env status', or 'env unlock'.")
+        };
+    }
+
+    private static async Task<IResult> HandleEnvSet(EnvFileService svc)
+    {
+        Console.WriteLine("Paste .env JSON content (blank line to finish):");
+        var lines = new List<string>();
+        while (true)
+        {
+            var line = Console.ReadLine();
+            if (string.IsNullOrEmpty(line))
+                break;
+            lines.Add(line);
+        }
+
+        var content = string.Join(Environment.NewLine, lines);
+        return await EnvHandlers.Write(new EnvWriteRequest(content), svc);
+    }
+
+    private static IResult HandleEnvStatus()
+    {
+        var path = Path.Combine(
+            Path.GetDirectoryName(typeof(CliDispatcher).Assembly.Location)!,
+            "Environment", ".env");
+
+        if (!File.Exists(path))
+        {
+            Console.WriteLine("Core .env file not found.");
+            return Results.Ok();
+        }
+
+        var encrypted = EncryptedEnvFile.IsEncryptedOnDisk(path);
+        Console.WriteLine(encrypted ? "Core .env is encrypted (AES-GCM)." : "Core .env is plaintext.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleEnvUnlockAsync()
+    {
+        var path = Path.Combine(
+            Path.GetDirectoryName(typeof(CliDispatcher).Assembly.Location)!,
+            "Environment", ".env");
+
+        if (!File.Exists(path))
+        {
+            Console.WriteLine("Core .env file not found.");
+            return Results.Ok();
+        }
+
+        if (!EncryptedEnvFile.IsEncryptedOnDisk(path))
+        {
+            Console.WriteLine("Core .env is already plaintext.");
+            return Results.Ok();
+        }
+
+        var key = EncryptionKeyResolver.ResolveKey();
+        if (key is null)
+        {
+            Console.Error.WriteLine("Cannot resolve encryption key.");
+            return Results.BadRequest("No encryption key available.");
+        }
+
+        var json = await EncryptedEnvFile.ReadAsync(path, key);
+        await EncryptedEnvFile.WriteAsync(path, json, key, encrypt: false);
+        Console.WriteLine("Core .env decrypted in-place. It will be re-encrypted on the next app startup.");
+        return Results.Ok();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // db (database / migration management)
+    // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<IResult?> HandleDbCommand(string[] args, IServiceProvider sp)
+    {
+        if (args.Length < 2)
+        {
+            PrintUsage(
+                "db status                                 Show migration gate state + applied/pending migrations",
+                "db migrate                                Drain requests and apply pending EF Core migrations");
+            return Results.Ok();
+        }
+
+        var migrationSvc = sp.GetService<MigrationService>();
+        if (migrationSvc is null)
+        {
+            Console.Error.WriteLine("Migration management is only available for relational database providers.");
+            return Results.BadRequest("Not a relational provider.");
+        }
+
+        return args[1].ToLowerInvariant() switch
+        {
+            "status" => await HandleDbStatus(migrationSvc),
+            "migrate" => await HandleDbMigrate(migrationSvc),
+            _ => null
+        };
+    }
+
+    private static async Task<IResult> HandleDbStatus(MigrationService svc)
+    {
+        var status = await svc.GetStatusAsync();
+        Console.WriteLine($"Gate state : {status.State}");
+        Console.WriteLine($"Applied    : {status.Applied.Count}");
+        if (status.Applied.Count > 0)
+            foreach (var m in status.Applied) Console.WriteLine($"  ✓ {m}");
+        Console.WriteLine($"Pending    : {status.Pending.Count}");
+        if (status.Pending.Count > 0)
+            foreach (var m in status.Pending) Console.WriteLine($"  ⏳ {m}");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleDbMigrate(MigrationService svc)
+    {
+        Console.WriteLine("Draining in-flight requests and applying migrations...");
+        var result = await svc.MigrateAsync();
+
+        if (result.AlreadyInProgress)
+        {
+            Console.Error.WriteLine(result.Message);
+            return Results.Conflict(new { message = result.Message });
+        }
+
+        Console.WriteLine(result.Message);
+        foreach (var m in result.Migrations) Console.WriteLine($"  ✓ {m}");
+        return Results.Ok();
+    }
+
     private static IResult PrintHelp(IServiceProvider? sp = null)
     {
         Console.WriteLine("""
@@ -2980,6 +3136,17 @@ public static class CliDispatcher
               Defaults: 50 messages, 100k chars. Set 0 to reset to default.
 
             Bio:       bio get | set <text> | clear
+
+            Env:       env <sub>                 (get, set, auth, status, unlock)
+              env get                            Read core .env content
+              env set                            Write core .env (stdin input)
+              env auth                           Check env edit authorisation
+              env status                         Show .env encryption status
+              env unlock                         Decrypt .env in-place (re-locks on startup)
+
+            Database:  db <sub>                  (relational providers only)
+              db status                          Show migration gate state + applied/pending
+              db migrate                         Drain requests and apply pending migrations
 
             User:      user <sub> [args]        (admin only)
               user list                          List all registered users

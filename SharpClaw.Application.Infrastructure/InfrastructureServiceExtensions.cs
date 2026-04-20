@@ -15,7 +15,7 @@ public static class InfrastructureServiceExtensions
     public static IServiceCollection AddInfrastructure(
         this IServiceCollection services,
         StorageMode mode,
-        string? postgresConnectionString = null,
+        string? connectionString = null,
         Action<JsonFileOptions>? configureJsonFile = null)
     {
         switch (mode)
@@ -43,13 +43,53 @@ public static class InfrastructureServiceExtensions
                 break;
 
             case StorageMode.Postgres:
-                ArgumentException.ThrowIfNullOrWhiteSpace(postgresConnectionString, nameof(postgresConnectionString));
+                RequireConnectionString(connectionString, mode);
                 services.AddDbContext<SharpClawDbContext>(options =>
-                    options.UseNpgsql(postgresConnectionString));
+                    options.UseNpgsql(connectionString, npgsql =>
+                        npgsql.MigrationsAssembly("SharpClaw.Migrations.Postgres")));
                 break;
+
+            case StorageMode.SqlServer:
+                RequireConnectionString(connectionString, mode);
+                services.AddDbContext<SharpClawDbContext>(options =>
+                    options.UseSqlServer(connectionString, sqlServer =>
+                        sqlServer.MigrationsAssembly("SharpClaw.Migrations.SqlServer")));
+                break;
+
+            case StorageMode.SQLite:
+                RequireConnectionString(connectionString, mode);
+                services.AddDbContext<SharpClawDbContext>(options =>
+                    options.UseSqlite(connectionString, sqlite =>
+                        sqlite.MigrationsAssembly("SharpClaw.Migrations.SQLite")));
+                break;
+
+            case StorageMode.MySql:
+                throw new NotSupportedException(
+                    "MySQL/MariaDB support requires Pomelo.EntityFrameworkCore.MySql " +
+                    "with EFC 10 compatibility. Not yet available.");
+
+            case StorageMode.Oracle:
+                throw new NotSupportedException(
+                    "Oracle support requires Oracle.EntityFrameworkCore " +
+                    "with EFC 10 compatibility. Not yet available.");
+        }
+
+        // Register migration gate and service for relational providers only.
+        if (mode != StorageMode.JsonFile)
+        {
+            services.AddSingleton<MigrationGate>();
+            services.AddSingleton<MigrationService>();
         }
 
         return services;
+    }
+
+    private static void RequireConnectionString(string? cs, StorageMode mode)
+    {
+        if (string.IsNullOrWhiteSpace(cs))
+            throw new InvalidOperationException(
+                $"ConnectionStrings:{mode} is required when Database:Provider is '{mode}'. " +
+                $"Set it in the .env file or environment variables.");
     }
 
     /// <summary>
@@ -184,6 +224,10 @@ public static class InfrastructureServiceExtensions
         var fsys = services.GetService<IPersistenceFileSystem>();
         if (jsonOpts is not null && fsys is not null)
             JsonPersistenceHealthCheck.RemoveSentinel(fsys, jsonOpts);
+
+        // Dispose migration infrastructure.
+        services.GetService<MigrationGate>()?.Dispose();
+        (services.GetService<MigrationService>() as IDisposable)?.Dispose();
 
         var lockManager = services.GetService<DirectoryLockManager>();
         if (lockManager is not null)

@@ -436,6 +436,28 @@ Step 4 — Chat without a thread on the same channel is one-shot (no history).
   This sees no prior messages.
 
 ────────────────────────────────────────
+DATABASE ADMINISTRATION
+────────────────────────────────────────
+Multi-provider EF Core support. Provider selected via Database:Provider in Core .env.
+Supported: JsonFile (default, InMemory+JSON), Postgres, SqlServer, SQLite.
+Stubbed (blocked on EFC 10 packages): MySql, Oracle.
+See docs/Database-Configuration.md for full setup.
+
+Admin endpoints (require authenticated user admin):
+
+  GET  /admin/db/status   → { state, applied[], pending[] }
+    state: Idle | Draining | Migrating
+
+  POST /admin/db/migrate  → { applied (int), migrations[], message }
+    409 if already in progress. Drains in-flight requests first.
+    ⚠️ All requests are held during migration.
+
+CLI equivalent: db migrate
+
+Migrations are NEVER automatic. App starts normally with pending migrations
+(warns at startup). User must explicitly trigger via API or CLI.
+
+────────────────────────────────────────
 ENCRYPTION & KEY MANAGEMENT
 ────────────────────────────────────────
 Provider API keys encrypted at rest with AES-256-GCM.

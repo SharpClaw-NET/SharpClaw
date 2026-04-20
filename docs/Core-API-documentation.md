@@ -56,6 +56,7 @@ fastest way to make that happen.
 - [Task definitions & instances](#task-definitions--instances)
 - [Token cost tracking](#token-cost-tracking)
 - [Provider cost](#provider-cost)
+- [Database administration](#database-administration)
 - [Encryption & key management](#encryption--key-management)
 - [Env file management](#env-file-management)
 - [Custom chat header](#custom-chat-header)
@@ -2740,6 +2741,76 @@ Returned when `simple=true` is passed.
 
 `untrackedProviders` lists providers that have an API key but do not
 expose a billing API. The field is `null` when all providers are tracked.
+
+---
+
+## Database administration
+
+SharpClaw supports multiple EF Core database providers, selected via the
+`Database:Provider` key in the Core `.env` file. See the
+[Database Configuration Guide](Database-Configuration.md) for full setup
+instructions, connection strings, and migration workflows.
+
+The admin endpoints below require the caller to be an **authenticated
+user admin** (JWT + `IsUserAdmin = true`).
+
+### GET /admin/db/status
+
+Returns the current migration gate state and lists applied/pending
+migrations.
+
+**Response `200`:**
+
+```json
+{
+  "state": "Idle",
+  "applied": ["20250601120000_Initial", "20250615090000_AddTokens"],
+  "pending": ["20250701100000_AddTasks"]
+}
+```
+
+| Field | Type | Description |
+|-------|------|-------------|
+| `state` | string | `Idle`, `Draining`, or `Migrating` |
+| `applied` | string[] | Migrations already applied to the database |
+| `pending` | string[] | Migrations awaiting application |
+
+**Response `403`:** Caller is not a user admin.
+
+---
+
+### POST /admin/db/migrate
+
+Drains all in-flight requests (the migration gate closes), applies all
+pending EF Core migrations, then reopens the gate. Only one migration
+can run at a time.
+
+**Response `200`:**
+
+```json
+{
+  "applied": 1,
+  "migrations": ["20250701100000_AddTasks"],
+  "message": "Applied 1 migration(s)."
+}
+```
+
+**Response `409`:** A migration is already in progress.
+
+```json
+{ "message": "A migration is already in progress." }
+```
+
+**Response `403`:** Caller is not a user admin.
+
+> ⚠️ **During migration, all API requests are held at the migration gate
+> until the migration completes.** Plan migrations during low-traffic
+> periods.
+
+> 💡 Migrations are never automatic. The app starts and serves requests
+> even when migrations are pending — it logs a warning at startup. Use
+> `GET /admin/db/status` to check, then `POST /admin/db/migrate` when
+> ready.
 
 ---
 

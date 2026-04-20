@@ -1,6 +1,8 @@
+using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.FileProviders;
 using Microsoft.Extensions.FileProviders.Physical;
+using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Infrastructure.Configuration;
 
@@ -8,6 +10,8 @@ namespace SharpClaw.Infrastructure.Configuration;
 /// Loads environment configuration from <c>Environment/.env</c> (always)
 /// and <c>Environment/.dev.env</c> (development only) relative to the assembly location.
 /// Creates a default <c>.env</c> if it does not exist.
+/// Supports transparent decryption of AES-GCM encrypted <c>.env</c> files
+/// and auto-locks plaintext files on first read.
 /// </summary>
 public static class LocalEnvironment
 {
@@ -36,17 +40,45 @@ public static class LocalEnvironment
         if (!Directory.Exists(envDir))
             return builder;
 
-        // PhysicalFileProvider defaults to ExclusionFilters.Sensitive which
-        // excludes dot-prefixed files (.env, .dev.env). Use None so the
-        // configuration system can see them.
-        var fileProvider = new PhysicalFileProvider(envDir, ExclusionFilters.None);
-
-        builder.AddJsonFile(fileProvider, ".env", optional: true, reloadOnChange: false);
+        AddEnvFile(builder, envDir, ".env");
 
         if (isDevelopment)
-            builder.AddJsonFile(fileProvider, ".dev.env", optional: true, reloadOnChange: false);
+            AddEnvFile(builder, envDir, ".dev.env");
 
         return builder;
+    }
+
+    private static void AddEnvFile(IConfigurationBuilder builder, string envDir, string fileName)
+    {
+        var path = Path.Combine(envDir, fileName);
+        if (!File.Exists(path))
+            return;
+
+        if (EncryptedEnvFile.IsEncryptedOnDisk(path))
+        {
+            // Encrypted — decrypt into memory, load as JSON stream.
+            var key = EncryptionKeyResolver.ResolveKey();
+            var json = EncryptedEnvFile.ReadAsync(path, key, CancellationToken.None)
+                .GetAwaiter().GetResult(); // Sync OK: startup, single call
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+            builder.AddJsonStream(stream);
+        }
+        else
+        {
+            // Plaintext — load into memory, then auto-lock (encrypt in-place)
+            // so the file doesn't remain as readable text on disk.
+            var key = EncryptionKeyResolver.ResolveKey();
+            var json = File.ReadAllText(path);
+            var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
+            builder.AddJsonStream(stream);
+
+            if (key is not null)
+            {
+                // Auto-lock: encrypt the plaintext file in-place immediately.
+                EncryptedEnvFile.WriteAsync(path, json, key, encrypt: true, CancellationToken.None)
+                    .GetAwaiter().GetResult();
+            }
+        }
     }
 
     private static void EnsureEnvironmentFile(string envDir)
@@ -62,7 +94,7 @@ public static class LocalEnvironment
         }
         catch
         {
-                    // Best-effort — read-only or restricted file system.
-                    }
-                }
-            }
+            // Best-effort — read-only or restricted file system.
+        }
+    }
+}
