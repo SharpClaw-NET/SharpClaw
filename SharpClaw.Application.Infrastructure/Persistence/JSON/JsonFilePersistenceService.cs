@@ -116,6 +116,18 @@ public sealed class JsonFilePersistenceService(
 
                 try
                 {
+                    // RGAP-9: detect files written by a newer version of the software.
+                    // This guards against silent data corruption if the binary is rolled back.
+                    var fileVersion = JsonSchemaVersion.ReadFrom(result.Json!);
+                    if (fileVersion > JsonSchemaVersion.Current)
+                    {
+                        logger.LogWarning(
+                            "Entity file {Path} has $schemaVersion {FileVersion} which is newer than " +
+                            "the current schema version {CurrentVersion}. " +
+                            "This file was written by a newer build — data may be lost on re-flush.",
+                            result.File, fileVersion, JsonSchemaVersion.Current);
+                    }
+
                     var entity = JsonSerializer.Deserialize(result.Json!, clrType, JsonOptions);
 
                     if (entity is null)
@@ -656,6 +668,11 @@ public sealed class JsonFilePersistenceService(
     /// <see cref="ArrayBufferWriter{T}"/>, avoiding intermediate
     /// <c>byte[]</c> allocations. Navigation properties are temporarily
     /// nulled using the same snapshot/restore pattern.
+    /// <para>
+    /// A <c>$schemaVersion</c> field is injected into the root JSON object
+    /// so future migration pipelines can detect and upgrade older files
+    /// (RGAP-9 groundwork — no migration logic runs yet).
+    /// </para>
     /// </summary>
     [ThreadStatic]
     private static ArrayBufferWriter<byte>? t_bufferWriter;
@@ -671,7 +688,7 @@ public sealed class JsonFilePersistenceService(
         {
             using var jsonWriter = new Utf8JsonWriter(writer);
             JsonSerializer.Serialize(jsonWriter, entity, clrType, JsonOptions);
-            return writer.WrittenSpan.ToArray();
+            return JsonSchemaVersion.Inject(writer.WrittenSpan);
         }
 
         var saved = new object?[navProps.Count];
@@ -685,7 +702,7 @@ public sealed class JsonFilePersistenceService(
         {
             using var jsonWriter = new Utf8JsonWriter(writer);
             JsonSerializer.Serialize(jsonWriter, entity, clrType, JsonOptions);
-            return writer.WrittenSpan.ToArray();
+            return JsonSchemaVersion.Inject(writer.WrittenSpan);
         }
         finally
         {

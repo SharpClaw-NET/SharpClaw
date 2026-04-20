@@ -36,6 +36,7 @@ public static class InfrastructureServiceExtensions
                 services.AddSingleton<FlushQueue>();
                 services.AddSingleton<FlushWorker>();
                 services.AddSingleton<JsonPersistenceHealthCheck>();
+                services.AddSingleton<EntityMigrationRegistry>();
 
                 services.AddDbContext<SharpClawDbContext>(options =>
                     options.UseInMemoryDatabase("SharpClaw"));
