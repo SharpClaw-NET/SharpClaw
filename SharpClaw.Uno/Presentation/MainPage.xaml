@@ -39,6 +39,13 @@
                      Foreground="#00FF00"
                      VerticalAlignment="Center" />
         </StackPanel>
+        <TextBlock Style="{StaticResource TerminalText}"
+                   FontSize="10"
+                   Foreground="#666666"
+                   TextWrapping="Wrap"
+                   Margin="0,6,0,0"
+                   x:Uid="MainPage.Label.ModuleAlphaNote"
+                   Text="Bundled modules beyond the essentials are included to test advanced feature support and will be phased out before 1.0.0. Create and share your own — agents can even build modules from within SharpClaw." />
       </StackPanel>
 
       <!-- New channel button -->
