@@ -105,17 +105,13 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
             ValidateResourceGrants(request, callerPs);
         }
 
-        // Replace the permission set (delete old access entries, rebuild).
+        // Reconcile the permission set via incremental diff — never deletes wildcard grants.
         PermissionSetDB ps;
         if (role.PermissionSetId is { } existingPsId)
         {
             ps = await LoadFullPermissionSetAsync(existingPsId, ct)
                 ?? throw new InvalidOperationException(
                     $"Permission set {existingPsId} not found.");
-
-            // Clear existing grant collections.
-            ps.ResourceAccesses.Clear();
-            ps.GlobalFlags.Clear();
         }
         else
         {
@@ -125,35 +121,8 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
             role.PermissionSetId = ps.Id;
         }
 
-        // Apply global flags — generic loop over dictionary.
-        if (request.GlobalFlags is not null)
-        {
-            foreach (var (key, clearance) in request.GlobalFlags)
-            {
-                ps.GlobalFlags.Add(new GlobalFlagDB
-                {
-                    FlagKey = key,
-                    Clearance = clearance,
-                });
-            }
-        }
-
-        // Apply per-resource grants — generic loop over dictionary.
-        if (request.ResourceGrants is not null)
-        {
-            foreach (var (resourceType, grants) in request.ResourceGrants)
-            {
-                foreach (var g in grants)
-                {
-                    ps.ResourceAccesses.Add(new ResourceAccessDB
-                    {
-                        ResourceType = resourceType,
-                        ResourceId = g.ResourceId,
-                        Clearance = g.Clearance,
-                    });
-                }
-            }
-        }
+        ReconcileGlobalFlags(ps, request.GlobalFlags);
+        ReconcileResourceAccesses(ps, request.ResourceGrants);
 
         await db.SaveChangesAsync(ct);
 
@@ -284,5 +253,85 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
             r => r.Name == name && (excludeId == null || r.Id != excludeId), ct);
         if (exists)
             throw new InvalidOperationException($"A role named '{name}' already exists.");
+    }
+
+    /// <summary>
+    /// Reconciles global flags in place: adds new flags, updates changed clearances,
+    /// removes absent flags. Global flags carry no wildcard semantics.
+    /// </summary>
+    private static void ReconcileGlobalFlags(
+        PermissionSetDB ps,
+        IReadOnlyDictionary<string, PermissionClearance>? requested)
+    {
+        var requestedMap = requested ?? new Dictionary<string, PermissionClearance>();
+
+        foreach (var existing in ps.GlobalFlags.ToList())
+        {
+            if (!requestedMap.TryGetValue(existing.FlagKey, out var newClearance))
+                ps.GlobalFlags.Remove(existing);
+            else if (existing.Clearance != newClearance)
+                existing.Clearance = newClearance;
+            // else: unchanged — leave untouched, no EF state change.
+        }
+
+        var existingKeys = ps.GlobalFlags.Select(f => f.FlagKey).ToHashSet();
+        foreach (var (key, clearance) in requestedMap)
+            if (!existingKeys.Contains(key))
+                ps.GlobalFlags.Add(new GlobalFlagDB { FlagKey = key, Clearance = clearance });
+    }
+
+    /// <summary>
+    /// Reconciles resource-access grants in place.
+    /// Wildcard grants (<see cref="WellKnownIds.AllResources"/>) are preserved and
+    /// cannot be removed or have their clearance changed through this endpoint.
+    /// Non-wildcard grants may be freely added, updated, or removed.
+    /// </summary>
+    private static void ReconcileResourceAccesses(
+        PermissionSetDB ps,
+        IReadOnlyDictionary<string, IReadOnlyList<ResourceGrant>>? requested)
+    {
+        // Build a flat lookup of the requested grants.
+        var requestedMap = requested?
+            .SelectMany(kvp => kvp.Value.Select(g => (ResourceType: kvp.Key, g.ResourceId, g.Clearance)))
+            .ToDictionary(t => (t.ResourceType, t.ResourceId), t => t.Clearance)
+            ?? [];
+
+        // Pass 1: handle existing rows — remove absent ones, update changed clearances.
+        foreach (var access in ps.ResourceAccesses.ToList())
+        {
+            var key = (access.ResourceType, access.ResourceId);
+            if (!requestedMap.TryGetValue(key, out var newClearance))
+            {
+                if (access.ResourceId == WellKnownIds.AllResources)
+                    throw new InvalidOperationException(
+                        $"Wildcard grant for '{access.ResourceType}' is immutable and cannot be removed.");
+
+                ps.ResourceAccesses.Remove(access);
+            }
+            else if (access.Clearance != newClearance)
+            {
+                if (access.ResourceId == WellKnownIds.AllResources)
+                    throw new InvalidOperationException(
+                        $"Clearance of wildcard grant for '{access.ResourceType}' is immutable and cannot be changed.");
+
+                access.Clearance = newClearance;
+            }
+            // else: unchanged — leave the row untouched, no EF state change.
+        }
+
+        // Pass 2: add rows that are in the request but not yet in the set.
+        var existingKeys = ps.ResourceAccesses
+            .Select(a => (a.ResourceType, a.ResourceId))
+            .ToHashSet();
+
+        foreach (var (resourceType, grants) in requested ?? new Dictionary<string, IReadOnlyList<ResourceGrant>>())
+            foreach (var grant in grants)
+                if (!existingKeys.Contains((resourceType, grant.ResourceId)))
+                    ps.ResourceAccesses.Add(new ResourceAccessDB
+                    {
+                        ResourceType = resourceType,
+                        ResourceId = grant.ResourceId,
+                        Clearance = grant.Clearance,
+                    });
     }
 }

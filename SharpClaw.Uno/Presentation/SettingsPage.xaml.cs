@@ -1824,7 +1824,18 @@ public sealed partial class SettingsPage : Page
             var body = JsonSerializer.Serialize(_permEditor.CollectAll(), Json);
             var resp = await Api.PutAsync($"/roles/{roleId}/permissions",
                 new StringContent(body, Encoding.UTF8, "application/json"));
-            Status(resp.IsSuccessStatusCode ? "✓ Permissions saved." : "✗ Save failed.", resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
+            if (resp.IsSuccessStatusCode) { Status("✓ Permissions saved.", 0x00FF00); return; }
+            string errorMsg;
+            try
+            {
+                var raw = await resp.Content.ReadAsStringAsync();
+                using var doc = JsonDocument.Parse(raw);
+                errorMsg = doc.RootElement.TryGetProperty("detail", out var d) && d.ValueKind == JsonValueKind.String
+                    ? d.GetString() ?? "Save failed."
+                    : "Save failed.";
+            }
+            catch { errorMsg = "Save failed."; }
+            Status($"✗ {errorMsg}", 0xFF4444);
         }
         catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); }
     }

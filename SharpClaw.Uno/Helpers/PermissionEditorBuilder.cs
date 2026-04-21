@@ -282,10 +282,11 @@ internal sealed class PermissionEditorBuilder
 
     private void AddGrantRow(StackPanel panel, Guid resId, string clearance)
     {
+        var isWildcard = resId == TerminalUI.AllResourcesId;
         var row = new StackPanel { Orientation = Orientation.Horizontal, Spacing = _grantClearance ? 10 : 8 };
 
         string idText;
-        if (resId == TerminalUI.AllResourcesId)
+        if (isWildcard)
             idText = "* (all)";
         else if (_nameCache.TryGetValue(resId, out var name))
             idText = _useAutoSuggest ? $"{name}  ({resId.ToString()[..8]}\u2026)" : name;
@@ -295,10 +296,12 @@ internal sealed class PermissionEditorBuilder
         var idBlock = new TextBlock
         {
             Text = idText, FontFamily = TerminalUI.Mono, FontSize = 11,
-            Foreground = TerminalUI.Brush(0xE0E0E0), VerticalAlignment = VerticalAlignment.Center,
+            // Amber foreground signals that wildcard rows are locked/immutable.
+            Foreground = isWildcard ? TerminalUI.Brush(0xFFAA00) : TerminalUI.Brush(0xE0E0E0),
+            VerticalAlignment = VerticalAlignment.Center,
             MinWidth = _grantClearance ? 140 : 80, Tag = resId,
         };
-        if (resId != TerminalUI.AllResourcesId) ToolTipService.SetToolTip(idBlock, resId.ToString());
+        if (!isWildcard) ToolTipService.SetToolTip(idBlock, resId.ToString());
         row.Children.Add(idBlock);
 
         if (_grantClearance)
@@ -308,23 +311,31 @@ internal sealed class PermissionEditorBuilder
                 Text = "Clearance:", FontFamily = TerminalUI.Mono, FontSize = 9,
                 Foreground = TerminalUI.Brush(0x808080), VerticalAlignment = VerticalAlignment.Center,
             });
-            row.Children.Add(TerminalUI.MakeClearanceCombo(clearance));
+            var clrCombo = TerminalUI.MakeClearanceCombo(clearance);
+            // Wildcard clearance is immutable — lock the combo.
+            if (isWildcard) clrCombo.IsEnabled = false;
+            row.Children.Add(clrCombo);
         }
 
-        var rm = TerminalUI.RemoveButton(() =>
+        // Wildcard rows cannot be removed — omit the remove button.
+        if (!isWildcard)
         {
-            panel.Children.Remove(row);
-            _onManualEdit?.Invoke();
-        });
-        rm.Padding = new Thickness(2);
-        if (rm.Content is TextBlock rmTb) rmTb.FontSize = 9;
-        row.Children.Add(rm);
+            var rm = TerminalUI.RemoveButton(() =>
+            {
+                panel.Children.Remove(row);
+                _onManualEdit?.Invoke();
+            });
+            rm.Padding = new Thickness(2);
+            if (rm.Content is TextBlock rmTb) rmTb.FontSize = 9;
+            row.Children.Add(rm);
+        }
+
         panel.Children.Add(row);
     }
 
     private void BuildAutoSuggestSelector(StackPanel actionsRow, string capturedApi, string apiName)
     {
-        // Wildcard button
+        // Wildcard button — hidden if a wildcard row already exists in the panel.
         var addWc = new Button
         {
             Content = new TextBlock { Text = "+ wildcard", FontFamily = TerminalUI.Mono, FontSize = 10, Foreground = TerminalUI.Brush(0x00FF00) },
@@ -333,7 +344,7 @@ internal sealed class PermissionEditorBuilder
         };
         addWc.Click += (_, _) =>
         {
-            if (_grantPanels.TryGetValue(capturedApi, out var panel))
+            if (_grantPanels.TryGetValue(capturedApi, out var panel) && !PanelHasWildcard(panel))
                 AddGrantRow(panel, TerminalUI.AllResourcesId, "Independent");
         };
         actionsRow.Children.Add(addWc);
@@ -455,7 +466,10 @@ internal sealed class PermissionEditorBuilder
 
         var hasWildcard = callerIds is not null && callerIds.Contains(TerminalUI.AllResourcesId);
 
-        if (callerIds is null || hasWildcard)
+        // Only offer the wildcard option if the panel does not already have one —
+        // adding a second wildcard would be rejected by the server and is meaningless.
+        var panelHasWildcard = _grantPanels.TryGetValue(accessType, out var gp) && PanelHasWildcard(gp);
+        if (!panelHasWildcard && (callerIds is null || hasWildcard))
             selector.Items.Add(new ComboBoxItem { Content = "* (all resources)", Tag = TerminalUI.AllResourcesId });
 
         if (_resourcesByType.TryGetValue(accessType, out var items))
@@ -465,6 +479,20 @@ internal sealed class PermissionEditorBuilder
 
         if (selector.Items.Count > 0)
             selector.SelectedIndex = 0;
+    }
+
+    /// <summary>
+    /// Returns <c>true</c> if the grant panel already contains a wildcard
+    /// (<see cref="TerminalUI.AllResourcesId"/>) row.
+    /// </summary>
+    private static bool PanelHasWildcard(StackPanel panel)
+    {
+        foreach (var child in panel.Children)
+            if (child is StackPanel row
+                && row.Children.OfType<TextBlock>().FirstOrDefault(tb => tb.Tag is Guid) is { Tag: Guid id }
+                && id == TerminalUI.AllResourcesId)
+                return true;
+        return false;
     }
 
     // ── Module-grouped build ─────────────────────────────────────

@@ -55,5 +55,9 @@ public static class RoleHandlers
         {
             return Results.Problem(ex.Message, statusCode: StatusCodes.Status403Forbidden);
         }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
     }
 }

@@ -570,16 +570,19 @@ public class SharpClawDbContext(
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
     {
-        // Wildcard resource grants are immutable — reject any attempt
-        // to modify or delete them at runtime.
+        // Wildcard resource grants are immutable — reject any attempt to delete them
+        // or modify their data-carrying properties at runtime.
         foreach (var entry in ChangeTracker.Entries())
         {
-            if (entry.State is EntityState.Modified or EntityState.Deleted
-                && IsProtectedWildcardGrant(entry))
-            {
+            if (!IsProtectedWildcardGrant(entry)) continue;
+
+            if (entry.State == EntityState.Deleted)
                 throw new InvalidOperationException(
-                    "Wildcard resource grants (AllResources) are immutable and cannot be modified or deleted.");
-            }
+                    "Wildcard resource grants (AllResources) are immutable and cannot be deleted.");
+
+            if (entry.State == EntityState.Modified && WildcardGrantDataChanged(entry))
+                throw new InvalidOperationException(
+                    "Wildcard resource grants (AllResources) are immutable and cannot be modified.");
         }
 
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
@@ -679,4 +682,28 @@ public class SharpClawDbContext(
         ResourceAccessDB e => e.ResourceId == WellKnownIds.AllResources,
         _ => false,
     };
+
+    /// <summary>
+    /// Returns <c>true</c> when a <see cref="ResourceAccessDB"/> wildcard row
+    /// has had one of its data-carrying properties actually changed.
+    /// Audit timestamps and shadow properties are intentionally excluded so
+    /// that unrelated EF bookkeeping does not trip the immutability guard.
+    /// </summary>
+    private static bool WildcardGrantDataChanged(EntityEntry entry)
+    {
+        ReadOnlySpan<string> dataProperties =
+        [
+            nameof(ResourceAccessDB.Clearance),
+            nameof(ResourceAccessDB.SubType),
+            nameof(ResourceAccessDB.ResourceType),
+            nameof(ResourceAccessDB.AccessLevel),
+            nameof(ResourceAccessDB.IsDefault),
+        ];
+        foreach (var prop in dataProperties)
+        {
+            if (!Equals(entry.OriginalValues[prop], entry.CurrentValues[prop]))
+                return true;
+        }
+        return false;
+    }
 }
