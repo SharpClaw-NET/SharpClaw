@@ -502,16 +502,30 @@ public sealed record CompletionParameterSpec
         },
 
         // ─────────────────────────────────────────────────────────
-        // LlamaSharp  (in-process LLM inference — no parameter mapping)
+        // LlamaSharp  (in-process LLM inference via DefaultSamplingPipeline)
+        // Temperature, TopP, TopK, FrequencyPenalty, PresencePenalty are
+        // mapped directly to DefaultSamplingPipeline properties.
+        // Stop sequences are handled internally by BuildAntiPrompts.
+        // Seed is not mapped: llama.cpp uses uint; CompletionParameters.Seed is int.
         // ─────────────────────────────────────────────────────────
         [ProviderType.LlamaSharp] = new()
         {
             ProviderName = "LlamaSharp (Local)",
-            SupportsTemperature = false,
-            SupportsTopP = false,
-            SupportsTopK = false,
-            SupportsFrequencyPenalty = false,
-            SupportsPresencePenalty = false,
+            SupportsTemperature = true,
+            TemperatureMin = 0.0f,
+            TemperatureMax = 2.0f,
+            SupportsTopP = true,
+            TopPMin = 0.0f,
+            TopPMax = 1.0f,
+            SupportsTopK = true,
+            TopKMin = 1,
+            TopKMax = 128,
+            SupportsFrequencyPenalty = true,
+            FrequencyPenaltyMin = 0.0f,
+            FrequencyPenaltyMax = 1.0f,
+            SupportsPresencePenalty = true,
+            PresencePenaltyMin = 0.0f,
+            PresencePenaltyMax = 1.0f,
             SupportsStop = false,
             SupportsSeed = false,
             SupportsResponseFormat = false,

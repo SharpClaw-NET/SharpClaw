@@ -81,7 +81,7 @@ public sealed class ContextService(SharpClawDbContext db, IConfiguration configu
 
         if (request.Name is not null)
         {
-            if (IsUniqueContextNamesEnforced())
+            if (IsUniqueContextNamesEnforced() && !request.Name.Trim().Equals(context.Name.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureContextNameUniqueAsync(request.Name, excludeId: id, ct);
             context.Name = request.Name;
         }
@@ -131,9 +131,12 @@ public sealed class ContextService(SharpClawDbContext db, IConfiguration configu
 
     private async Task EnsureContextNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.AgentContexts.AnyAsync(
-            c => c.Name == name && (excludeId == null || c.Id != excludeId), ct);
-        if (exists)
+        var normalized = name.Trim();
+        var names = await db.AgentContexts
+            .Where(c => excludeId == null || c.Id != excludeId)
+            .Select(c => c.Name)
+            .ToListAsync(ct);
+        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A context named '{name}' already exists.");
     }
 

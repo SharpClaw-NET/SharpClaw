@@ -172,7 +172,8 @@ public sealed class LocalModelService(
             throw new InvalidOperationException($"Model file status is {localFile.Status}.");
 
         await processManager.PinAsync(
-            modelId, localFile.FilePath, request.GpuLayers, request.ContextSize, ct);
+            modelId, localFile.FilePath, request.GpuLayers, request.ContextSize,
+            localFile.MmprojPath ?? request.MmprojPath, ct);
     }
 
     /// <summary>
@@ -201,7 +202,7 @@ public sealed class LocalModelService(
         if (localFile.Status != LocalModelStatus.Ready)
             throw new InvalidOperationException($"Model file status is {localFile.Status}.");
 
-        await processManager.AcquireAsync(modelId, localFile.FilePath, ct: ct);
+        await processManager.AcquireAsync(modelId, localFile.FilePath, mmprojPath: localFile.MmprojPath, ct: ct);
     }
 
     /// <summary>
@@ -238,8 +239,23 @@ public sealed class LocalModelService(
                 f.Id, f.ModelId, f.Model.Name, f.SourceUrl,
                 f.FilePath, f.FileSizeBytes, f.Quantization,
                 f.Status, f.DownloadProgress, processManager.IsLoaded(f.ModelId),
-                f.Model.Provider.ProviderType))
+                f.Model.Provider.ProviderType, f.MmprojPath))
             .ToList();
+    }
+
+    /// <summary>
+    /// Persists an optional CLIP / mmproj file path for a registered LlamaSharp model.
+    /// Pass <c>null</c> to clear it. The new value takes effect the next time the
+    /// model is loaded; if the model is already in memory it must be unloaded first.
+    /// </summary>
+    public async Task SetMmprojPathAsync(Guid modelId, string? mmprojPath, CancellationToken ct = default)
+    {
+        var localFile = await db.LocalModelFiles
+            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct)
+            ?? throw new ArgumentException("No local file found for this model.");
+
+        localFile.MmprojPath = mmprojPath;
+        await db.SaveChangesAsync(ct);
     }
 
     /// <summary>

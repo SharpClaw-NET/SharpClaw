@@ -249,9 +249,12 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
 
     private async Task EnsureRoleNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.Roles.AnyAsync(
-            r => r.Name == name && (excludeId == null || r.Id != excludeId), ct);
-        if (exists)
+        var normalized = name.Trim();
+        var names = await db.Roles
+            .Where(r => excludeId == null || r.Id != excludeId)
+            .Select(r => r.Name)
+            .ToListAsync(ct);
+        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A role named '{name}' already exists.");
     }
 

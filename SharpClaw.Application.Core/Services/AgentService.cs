@@ -104,7 +104,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
         if (request.Name is not null)
         {
-            if (IsUniqueAgentNamesEnforced() && request.Name != agent.Name)
+            if (IsUniqueAgentNamesEnforced() && !request.Name.Trim().Equals(agent.Name.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureAgentNameUniqueAsync(request.Name, excludeId: id, ct);
             agent.Name = request.Name;
         }
@@ -475,9 +475,12 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
     private async Task EnsureAgentNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.Agents.AnyAsync(
-            a => a.Name == name && (excludeId == null || a.Id != excludeId), ct);
-        if (exists)
+        var normalized = name.Trim();
+        var names = await db.Agents
+            .Where(a => excludeId == null || a.Id != excludeId)
+            .Select(a => a.Name)
+            .ToListAsync(ct);
+        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"An agent named '{name}' already exists.");
     }
 }

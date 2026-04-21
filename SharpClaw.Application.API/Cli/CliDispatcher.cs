@@ -441,11 +441,15 @@ public static class CliDispatcher
             // ── Local model commands ──────────────────────────────
             "download" => await HandleModelDownload(args, sp),
             "load" when args.Length >= 3 => await HandleModelLoad(args, sp),
-            "load" => UsageResult("model load <id> [--gpu-layers <n>] [--ctx <size>]",
+            "load" => UsageResult("model load <id> [--gpu-layers <n>] [--ctx <size>] [--mmproj <path>]",
                 "  Pins the model so it stays loaded between requests."),
             "unload" when args.Length >= 3 => await HandleModelUnload(args, sp),
             "unload" => UsageResult("model unload <id>",
                 "  Unpins the model. Stops immediately if no active requests."),
+            "mmproj" when args.Length >= 4 => await HandleModelSetMmproj(args, sp),
+            "mmproj" => UsageResult("model mmproj <id> <path>",
+                "  Sets the CLIP/mmproj file path for a registered LlamaSharp model.",
+                "  Use 'none' as path to clear it."),
             "local" when args.Length >= 3 && args[2].ToLowerInvariant() == "list"
                 => await HandleLocalModelList(sp),
             "local" => UsageResult("model local list"),
@@ -543,6 +547,7 @@ public static class CliDispatcher
         var modelId = CliIdMap.Resolve(args[2]);
         int? gpuLayers = null;
         uint? contextSize = null;
+        string? mmprojPath = null;
 
         for (var i = 3; i < args.Length; i++)
         {
@@ -552,13 +557,15 @@ public static class CliDispatcher
                     gpuLayers = gl; i++; break;
                 case "--ctx" when i + 1 < args.Length && uint.TryParse(args[i + 1], out var cs):
                     contextSize = cs; i++; break;
+                case "--mmproj" when i + 1 < args.Length:
+                    mmprojPath = args[++i]; break;
             }
         }
 
         var svc = sp.GetRequiredService<LocalModelService>();
         Console.Write("Pinning model (loading into memory)...");
         await svc.LoadModelAsync(
-            modelId, new LoadModelRequest(gpuLayers, contextSize));
+            modelId, new LoadModelRequest(gpuLayers, contextSize, mmprojPath));
         Console.WriteLine(" ready. Model will stay loaded until 'model unload'.");
         return Results.Ok(new { modelId, pinned = true });
     }
@@ -575,6 +582,24 @@ public static class CliDispatcher
     {
         var svc = sp.GetRequiredService<LocalModelService>();
         return Results.Ok(await svc.ListLocalModelsAsync());
+    }
+
+    private static async Task<IResult> HandleModelSetMmproj(string[] args, IServiceProvider sp)
+    {
+        var modelId   = CliIdMap.Resolve(args[2]);
+        var rawPath   = args[3];
+        var mmproj    = string.Equals(rawPath, "none", StringComparison.OrdinalIgnoreCase)
+            ? null
+            : rawPath;
+
+        var svc = sp.GetRequiredService<LocalModelService>();
+        await svc.SetMmprojPathAsync(modelId, mmproj);
+
+        Console.WriteLine(mmproj is null
+            ? $"Cleared mmproj path for model {modelId}."
+            : $"Set mmproj path for model {modelId}: {mmproj}");
+
+        return Results.Ok(new { modelId, mmprojPath = mmproj });
     }
 
     private static ModelCapability ParseCapabilities(string[] args, int startIndex)

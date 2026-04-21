@@ -84,11 +84,11 @@ format examples, and provider-specific notes:
 
 | Parameter | OpenAI | Anthropic | OpenRouter | Vertex AI³ | Vertex AI OAI | Gemini | Gemini OAI | xAI | Groq | Cerebras | Mistral | Copilot | ZAI | Vercel | Minimax | LlamaSharp | Whisper | Custom | Ollama |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `temperature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `topP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `topK` | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
-| `frequencyPenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| `presencePenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
+| `temperature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `topP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `topK` | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `frequencyPenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `presencePenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
 | `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
 | `seed` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
 | `responseFormat` | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
@@ -116,14 +116,16 @@ format examples, and provider-specific notes:
 | Temperature max **1.0** | Anthropic, Mistral |
 | Temperature max **1.5** | Cerebras |
 | `topK` max **40** | Google Gemini (native), Google Vertex AI (native) |
+| `topK` max **128** | LlamaSharp |
 | `topK` **not supported** (OAI schema has no `top_k`) | GoogleGeminiOpenAi, GoogleVertexAIOpenAi, Ollama |
 | Stop sequences max **5** | Google (all four types) |
 | Stop sequences max **8 192** | Anthropic |
 | `json_object` rejected | GoogleGeminiOpenAi, GoogleVertexAIOpenAi |
 | No `frequencyPenalty` / `presencePenalty` | Anthropic, GoogleGemini (native), GoogleVertexAI (native), Cerebras, Mistral, Minimax |
 | `"xhigh"` reasoning | OpenAI, GitHub Copilot only |
-| No typed parameters at all | LlamaSharp, Whisper |
-| Tool calling: model-dependent reliability | Ollama, Custom |
+| No typed parameters at all | Whisper |
+| `stop` / `seed` not supported | LlamaSharp (stop is model-driven; seed is `uint` mismatch) |
+| Tool calling: model-dependent reliability | LlamaSharp, Ollama, Custom |
 | **Not yet implemented** | GoogleVertexAI (native) — use GoogleVertexAIOpenAi |
 
 ---

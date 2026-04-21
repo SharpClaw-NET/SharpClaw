@@ -128,7 +128,7 @@ public sealed class ChannelService(SharpClawDbContext db, IConfiguration configu
 
         if (request.Title is not null)
         {
-            if (IsUniqueChannelNamesEnforced() && request.Title != channel.Title)
+            if (IsUniqueChannelNamesEnforced() && !request.Title.Trim().Equals(channel.Title.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureChannelTitleUniqueAsync(request.Title, excludeId: id, ct);
             channel.Title = request.Title;
         }
@@ -392,9 +392,12 @@ public sealed class ChannelService(SharpClawDbContext db, IConfiguration configu
 
     private async Task EnsureChannelTitleUniqueAsync(string title, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.Channels.AnyAsync(
-            c => c.Title == title && (excludeId == null || c.Id != excludeId), ct);
-        if (exists)
+        var normalized = title.Trim();
+        var titles = await db.Channels
+            .Where(c => excludeId == null || c.Id != excludeId)
+            .Select(c => c.Title)
+            .ToListAsync(ct);
+        if (titles.Any(t => t.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A channel named '{title}' already exists.");
     }
 }

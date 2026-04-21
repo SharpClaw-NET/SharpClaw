@@ -68,7 +68,7 @@ public sealed class ProviderService(
 
         if (request.Name is not null)
         {
-            if (IsUniqueProviderNamesEnforced())
+            if (IsUniqueProviderNamesEnforced() && !request.Name.Trim().Equals(provider.Name.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureProviderNameUniqueAsync(request.Name, excludeId: id, ct);
             provider.Name = request.Name;
         }
@@ -129,9 +129,12 @@ public sealed class ProviderService(
 
     private async Task EnsureProviderNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.Providers.AnyAsync(
-            p => p.Name == name && (excludeId == null || p.Id != excludeId), ct);
-        if (exists)
+        var normalized = name.Trim();
+        var names = await db.Providers
+            .Where(p => excludeId == null || p.Id != excludeId)
+            .Select(p => p.Name)
+            .ToListAsync(ct);
+        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException($"A provider named '{name}' already exists.");
     }
 

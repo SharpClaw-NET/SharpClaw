@@ -19,7 +19,8 @@ public sealed record DownloadModelRequest(
 
 public sealed record LoadModelRequest(
     int? GpuLayers = null,
-    uint? ContextSize = null);
+    uint? ContextSize = null,
+    string? MmprojPath = null);
 
 public sealed record ResolvedModelFileResponse(
     string DownloadUrl,
@@ -37,4 +38,11 @@ public sealed record LocalModelFileResponse(
     LocalModelStatus Status,
     double DownloadProgress,
     bool IsLoaded,
-    ProviderType ProviderType);
+    ProviderType ProviderType,
+    string? MmprojPath);
+
+/// <summary>
+/// Sets or clears the CLIP / mmproj file path for a registered LlamaSharp model.
+/// Pass <c>null</c> to clear it.
+/// </summary>
+public sealed record SetMmprojRequest(string? MmprojPath);

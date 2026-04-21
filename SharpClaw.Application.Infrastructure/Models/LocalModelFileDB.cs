@@ -44,4 +44,12 @@ public class LocalModelFileDB : BaseEntity
     /// Port the local inference server is currently bound to (null if not running).
     /// </summary>
     public int? ActivePort { get; set; }
+
+    /// <summary>
+    /// Optional absolute path to the CLIP / mmproj model file required for
+    /// multimodal (LLaVA-style) inference. When set, the CLIP projector is
+    /// loaded alongside the main GGUF weights and image inputs can be embedded.
+    /// Null means the model is text-only.
+    /// </summary>
+    public string? MmprojPath { get; set; }
 }

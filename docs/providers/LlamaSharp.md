@@ -13,23 +13,23 @@
 
 ## Completion parameters
 
-| Parameter | Supported |
-|---|---|
-| `temperature` | ❌ |
-| `topP` | ❌ |
-| `topK` | ❌ |
-| `frequencyPenalty` | ❌ |
-| `presencePenalty` | ❌ |
-| `stop` | ❌ |
-| `seed` | ❌ |
-| `responseFormat` | ❌ |
-| `reasoningEffort` | ❌ |
+| Parameter | Supported | Range | Maps to |
+|---|---|---|---|
+| `temperature` | ✅ | 0.0 – 2.0 | `DefaultSamplingPipeline.Temperature` |
+| `topP` | ✅ | 0.0 – 1.0 | `DefaultSamplingPipeline.TopP` |
+| `topK` | ✅ | 1 – 128 | `DefaultSamplingPipeline.TopK` |
+| `frequencyPenalty` | ✅ | -2.0 – 2.0 | `DefaultSamplingPipeline.FrequencyPenalty` |
+| `presencePenalty` | ✅ | -2.0 – 2.0 | `DefaultSamplingPipeline.PresencePenalty` |
+| `stop` | ❌ | — | Stop sequences are model-driven via `BuildAntiPrompts`; the typed field is ignored |
+| `seed` | ❌ | — | `int` vs `uint` mismatch — llama.cpp seed is `uint`; not mapped |
+| `responseFormat` | ❌ | — | Grammar enforcement handles structured output natively |
+| `reasoningEffort` | ❌ | — | Not applicable |
 
-**No typed completion parameters are supported.** All inference settings
-are controlled by the loaded model configuration.
-
-Setting any typed parameter on a LlamaSharp agent will be **rejected** by
-validation.
+All five supported parameters are applied through a shared
+`BuildSamplingPipeline` helper that constructs a
+`DefaultSamplingPipeline` (LLamaSharp). When a parameter is not set,
+the corresponding llama.cpp default is used — there is no server-side
+override.
 
 ---
 
@@ -79,14 +79,39 @@ debug-category warning (`SharpClaw.CLI`).
 
 ---
 
+## Vision / multimodal
+
+Multimodal inference (LLaVA-style image input) is supported when a
+GGUF model has a paired **mmproj / CLIP projector file**.
+
+Register the projector path against a local model:
+
+```
+# CLI
+model mmproj <model-id> /path/to/model-mmproj.gguf
+
+# REST
+PUT /models/local/{id}/mmproj
+{ "mmprojPath": "/path/to/model-mmproj.gguf" }
+```
+
+Pass `"none"` as the path to clear a previously registered projector.
+
+When a projector is loaded and a chat request includes an image (via
+`imageBase64` on a message), the inference path switches automatically
+from `StatelessExecutor` to `InteractiveExecutor` with the MTMD API.
+Models without a registered projector are unaffected.
+
+> ℹ️ The underlying API is `LLama.MtmdWeights` (LLamaSharp 0.26+,
+> MTMD API). The older `LLavaWeights` / LLaVA API is not used.
+
+---
+
 ## Notes
 
 - Inference runs in-process via LLamaSharp — no HTTP requests.
 - GPU layer count is configured via `.env` (`Local__GpuLayerCount`,
   default `-1` = all layers).
-- Model loading, quantization, and sampling settings are managed through
-  the LLamaSharp configuration, not through SharpClaw's typed
-  completion parameters.
 - `providerParameters` is **not** applicable — there is no outgoing HTTP
   request to inject parameters into.
 - The GGUF chat template embedded in the model file is applied

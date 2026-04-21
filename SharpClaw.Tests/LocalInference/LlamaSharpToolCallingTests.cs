@@ -200,11 +200,11 @@ public class LocalInferenceEnvelopeParserTests
     }
 
     [Test]
-    public void ParseEnvelope_InvalidJson_ReturnsEmptyResult()
+    public void ParseEnvelope_InvalidJson_ReturnsFallbackMessage()
     {
         var result = LocalInferenceApiClient.ParseEnvelope("not json at all");
 
-        result.Content.Should().BeEmpty();
+        result.Content.Should().Contain("malformed output");
         result.ToolCalls.Should().BeEmpty();
     }
 

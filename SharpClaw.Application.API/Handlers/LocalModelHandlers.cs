@@ -39,4 +39,11 @@ public static class LocalModelHandlers
     [MapDelete("/{modelId:guid}")]
     public static async Task<IResult> Delete(Guid modelId, LocalModelService svc)
         => await svc.DeleteLocalModelAsync(modelId) ? Results.NoContent() : Results.NotFound();
+
+    [MapPut("/{modelId:guid}/mmproj")]
+    public static async Task<IResult> SetMmproj(Guid modelId, SetMmprojRequest request, LocalModelService svc)
+    {
+        await svc.SetMmprojPathAsync(modelId, request.MmprojPath);
+        return Results.Ok(new { modelId, mmprojPath = request.MmprojPath });
+    }
 }

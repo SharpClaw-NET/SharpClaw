@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
@@ -51,16 +52,21 @@ public sealed class LocalInferenceApiClient(
     /// </summary>
     internal Guid CurrentModelId { get; set; }
 
-    private LocalToolCallingMode _toolCallingMode = LocalToolCallingMode.StructuredGrammar;
+    // Cache of the last successful VRAM probe per model ID.
+    // A probe is skipped when the last successful one is within ProbeTtl,
+    // saving an allocate-and-free round-trip on every sequential call.
+    // ConcurrentDictionary because multiple concurrent requests against the
+    // same model can run simultaneously; static so it survives across calls.
+    private static readonly TimeSpan ProbeTtl = TimeSpan.FromSeconds(30);
+    private static readonly ConcurrentDictionary<Guid, DateTime> _lastProbeSuccess = new();
 
     public ProviderType ProviderType => ProviderType.LlamaSharp;
 
     /// <summary>
-    /// Returns <see langword="true"/> only when grammar-constrained inference is active.
-    /// Set to <see langword="false"/> while the legacy text-scanning path (<see cref="LocalToolCallingMode.PromptText"/>) is in use.
+    /// Always <see langword="true"/>: grammar-constrained inference is the only
+    /// supported mode. The legacy text-scanning path has been removed.
     /// </summary>
-    public bool SupportsNativeToolCalling =>
-        _toolCallingMode == LocalToolCallingMode.StructuredGrammar;
+    public bool SupportsNativeToolCalling => true;
 
     public Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default)
@@ -75,30 +81,37 @@ public sealed class LocalInferenceApiClient(
     {
         var loaded = GetLoadedOrThrow();
 
-        // Probe: validate that KV cache allocation succeeds, then free
-        // the VRAM so the StatelessExecutor can allocate its own context.
-        // Without this the process crashes with an access violation when
-        // VRAM is insufficient.
-        using (loaded.CreateContext()) { }
+        EnsureContextAllocatable(loaded, CurrentModelId);
         var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
         var history = BuildChatHistory(systemPrompt, messages);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights);
 
+        using var plainPipeline = BuildSamplingPipeline(completionParameters);
+
         var inferParams = new InferenceParams
         {
             MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
+            SamplingPipeline = plainPipeline,
         };
 
         var sb = new StringBuilder();
+        var completionTokens = 0;
         await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+        {
             sb.Append(token);
+            completionTokens++;
+        }
 
-        var result = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
-        LogResponse(result);
-        return new ChatCompletionResult { Content = result };
+        var content = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
+        LogResponse(content);
+        return new ChatCompletionResult
+        {
+            Content = content,
+            Usage = BuildUsage(loaded, prompt, completionTokens),
+        };
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
@@ -111,6 +124,10 @@ public sealed class LocalInferenceApiClient(
     {
         var loaded = GetLoadedOrThrow();
 
+        if (loaded.ClipModel is not null && messages.Any(m => m.HasImage))
+            return await ChatCompletionWithToolsMultimodalAsync(
+                loaded, systemPrompt, messages, tools, maxCompletionTokens, completionParameters, ct);
+
         using (loaded.CreateContext()) { }
         var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
@@ -118,11 +135,9 @@ public sealed class LocalInferenceApiClient(
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights);
 
-        using var pipeline = new DefaultSamplingPipeline
-        {
-            Grammar = new Grammar(LlamaSharpToolGrammar.Build(), "root"),
-            GrammarOptimization = DefaultSamplingPipeline.GrammarOptimizationMode.Extended,
-        };
+        using var pipeline = BuildSamplingPipeline(
+            completionParameters,
+            new Grammar(LlamaSharpToolGrammar.Build(), "root"));
 
         var inferParams = new InferenceParams
         {
@@ -132,12 +147,23 @@ public sealed class LocalInferenceApiClient(
         };
 
         var sb = new StringBuilder();
+        var completionTokens = 0;
         await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+        {
             sb.Append(token);
+            completionTokens++;
+        }
 
         var raw = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
         LogResponse(raw);
-        return ParseEnvelope(raw);
+
+        var envelope = ParseEnvelope(raw);
+        return new ChatCompletionResult
+        {
+            Content = envelope.Content,
+            ToolCalls = envelope.ToolCalls,
+            Usage = BuildUsage(loaded, prompt, completionTokens),
+        };
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
@@ -150,18 +176,27 @@ public sealed class LocalInferenceApiClient(
     {
         var loaded = GetLoadedOrThrow();
 
-        using (loaded.CreateContext()) { }
+        if (loaded.ClipModel is not null && messages.Any(m => m.HasImage))
+        {
+            // Multimodal streaming: delegate to non-streaming path, then yield
+            // the single result as Final. InteractiveExecutor with MTMD doesn't
+            // expose an IAsyncEnumerable — wrap it for interface compatibility.
+            var multimodalResult = await ChatCompletionWithToolsMultimodalAsync(
+                loaded, systemPrompt, messages, tools, maxCompletionTokens, completionParameters, ct);
+            yield return ChatStreamChunk.Final(multimodalResult);
+            yield break;
+        }
+
+        EnsureContextAllocatable(loaded, CurrentModelId);
         var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
         var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights);
 
-        using var pipeline = new DefaultSamplingPipeline
-        {
-            Grammar = new Grammar(LlamaSharpToolGrammar.Build(), "root"),
-            GrammarOptimization = DefaultSamplingPipeline.GrammarOptimizationMode.Extended,
-        };
+        using var pipeline = BuildSamplingPipeline(
+            completionParameters,
+            new Grammar(LlamaSharpToolGrammar.Build(), "root"));
 
         var inferParams = new InferenceParams
         {
@@ -189,9 +224,11 @@ public sealed class LocalInferenceApiClient(
         var fullBuffer = new StringBuilder(); // complete raw envelope
         var textContent = new StringBuilder(); // streamed text (message mode)
 
+        var completionTokens = 0;
         await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
         {
             fullBuffer.Append(token);
+            completionTokens++;
 
             // Once mode is known and it's tool_calls, just accumulate.
             if (isToolCallsMode == true)
@@ -273,10 +310,120 @@ public sealed class LocalInferenceApiClient(
         LogResponse(raw);
 
         var result = ParseEnvelope(raw);
-        yield return ChatStreamChunk.Final(result);
+        yield return ChatStreamChunk.Final(new ChatCompletionResult
+        {
+            Content = result.Content,
+            ToolCalls = result.ToolCalls,
+            Usage = BuildUsage(loaded, prompt, completionTokens),
+        });
+    }
+
+    // ── Multimodal inference (MTMD / LLaVA-style) ─────────────────
+
+    /// <summary>
+    /// Runs a single tool-calling turn through the multimodal path using
+    /// <see cref="InteractiveExecutor"/> paired with the loaded
+    /// <see cref="LocalInferenceProcessManager.LoadedModel.ClipModel"/>.
+    /// <para>
+    /// The most recent message carrying an image is used as the visual
+    /// input. <see cref="MtmdWeights.LoadMedia(ReadOnlySpan{byte})"/> stages
+    /// the image bytes before inference; <see cref="MtmdWeights.ClearMedia"/>
+    /// cleans them up afterwards regardless of outcome.
+    /// </para>
+    /// </summary>
+    private async Task<ChatCompletionResult> ChatCompletionWithToolsMultimodalAsync(
+        LocalInferenceProcessManager.LoadedModel loaded,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens,
+        CompletionParameters? completionParameters,
+        CancellationToken ct)
+    {
+        var clipModel = loaded.ClipModel!;
+
+        // Pick the last message that carries an image.
+        var imageMsg = messages.LastOrDefault(m => m.HasImage);
+        var imageBytes = imageMsg?.ImageBase64 is { } b64
+            ? Convert.FromBase64String(b64)
+            : null;
+
+        // Stage image into the MTMD context before inference.
+        if (imageBytes is not null)
+            clipModel.LoadMedia(imageBytes);
+
+        try
+        {
+            using var ctx = loaded.CreateContext();
+            var executor = new InteractiveExecutor(ctx, clipModel, null);
+
+            var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
+            var prompt = ApplyTemplate(loaded.Weights, history);
+            var antiPrompts = BuildAntiPrompts(loaded.Weights);
+
+            using var pipeline = BuildSamplingPipeline(
+                completionParameters,
+                new Grammar(LlamaSharpToolGrammar.Build(), "root"));
+
+            var inferParams = new InferenceParams
+            {
+                MaxTokens = maxCompletionTokens ?? 4096,
+                AntiPrompts = antiPrompts,
+                SamplingPipeline = pipeline,
+            };
+
+            var sb = new StringBuilder();
+            var completionTokens = 0;
+            await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+            {
+                sb.Append(token);
+                completionTokens++;
+            }
+
+            var raw = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
+            LogResponse(raw);
+
+            var envelope = ParseEnvelope(raw);
+            return new ChatCompletionResult
+            {
+                Content = envelope.Content,
+                ToolCalls = envelope.ToolCalls,
+                Usage = BuildUsage(loaded, prompt, completionTokens),
+            };
+        }
+        finally
+        {
+            if (imageBytes is not null)
+                clipModel.ClearMedia();
+        }
     }
 
     // ── Helpers ────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Validates that a KV-cache context can be allocated for <paramref name="loaded"/>
+    /// (VRAM probe). The probe allocates a context then immediately frees it so
+    /// the <see cref="StatelessExecutor"/> can allocate its own; without it the
+    /// process crashes with an access violation when VRAM is insufficient.
+    /// <para>
+    /// The probe is skipped when the same model was successfully probed within
+    /// <see cref="ProbeTtl"/> to avoid the allocation overhead on every sequential
+    /// call in a conversation or agentic loop.
+    /// </para>
+    /// </summary>
+    private static void EnsureContextAllocatable(
+        LocalInferenceProcessManager.LoadedModel loaded, Guid modelId)
+    {
+        var now = DateTime.UtcNow;
+        if (_lastProbeSuccess.TryGetValue(modelId, out var last)
+            && (now - last) < ProbeTtl)
+        {
+            return;
+        }
+
+        using (loaded.CreateContext()) { }
+        _lastProbeSuccess[modelId] = now;
+    }
 
     private LocalInferenceProcessManager.LoadedModel GetLoadedOrThrow() =>
         modelManager.GetLoaded(CurrentModelId)
@@ -381,6 +528,71 @@ public sealed class LocalInferenceApiClient(
         catch { /* Token conversion failed */ }
     }
 
+    // ── Sampling pipeline ─────────────────────────────────────────
+
+    // LLamaSharp / llama.cpp default values for the sampling knobs we map.
+    // Kept here as named constants so they are not scattered across initialisers.
+    private const float DefaultTemperature    = 0.80f;
+    private const float DefaultTopP           = 0.95f;
+    private const int   DefaultTopK           = 40;
+    private const float DefaultFreqPenalty    = 0.00f;
+    private const float DefaultPresencePenalty = 0.00f;
+
+    /// <summary>
+    /// Builds a <see cref="DefaultSamplingPipeline"/> applying any sampling
+    /// parameters from <paramref name="p"/>. When <paramref name="grammar"/> is
+    /// provided the pipeline is grammar-constrained (tool-call paths); otherwise
+    /// a plain sampling pipeline is returned. Caller owns and must dispose the result.
+    /// <para>
+    /// Because all <see cref="DefaultSamplingPipeline"/> properties are <c>init</c>-only,
+    /// the full initialiser is written out each time with null-coalescing to
+    /// llama.cpp defaults when a parameter is not set by the caller.
+    /// </para>
+    /// </summary>
+    private static DefaultSamplingPipeline BuildSamplingPipeline(
+        CompletionParameters? p, Grammar? grammar = null) =>
+        new()
+        {
+            GrammarOptimization = DefaultSamplingPipeline.GrammarOptimizationMode.Extended,
+            Grammar          = grammar,
+            Temperature      = p?.Temperature      ?? DefaultTemperature,
+            TopP             = p?.TopP             ?? DefaultTopP,
+            TopK             = p?.TopK             ?? DefaultTopK,
+            FrequencyPenalty = p?.FrequencyPenalty ?? DefaultFreqPenalty,
+            PresencePenalty  = p?.PresencePenalty  ?? DefaultPresencePenalty,
+        };
+
+    // ── Token usage ───────────────────────────────────────────────
+
+    /// <summary>
+    /// Builds a <see cref="TokenUsage"/> for the completed inference call.
+    /// Completion tokens are the exact count of tokens yielded by <c>InferAsync</c>.
+    /// Prompt tokens are counted by running the model's own tokenizer over the
+    /// formatted prompt — the same vocabulary used at inference time, so the
+    /// count is exact.
+    /// </summary>
+    private static TokenUsage BuildUsage(
+        LocalInferenceProcessManager.LoadedModel loaded,
+        string prompt,
+        int completionTokens)
+    {
+        int promptTokens;
+        try
+        {
+            promptTokens = loaded.Weights
+                .Tokenize(prompt, add_bos: false, special: true, Encoding.UTF8)
+                .Length;
+        }
+        catch
+        {
+            // Tokenizer call unavailable (e.g. model handle closed); fall back to
+            // a rough character-based estimate so Usage is never null.
+            promptTokens = prompt.Length / 4;
+        }
+
+        return new TokenUsage(promptTokens, completionTokens);
+    }
+
     // ── Output cleaning ───────────────────────────────────────────
 
     /// <summary>
@@ -477,7 +689,12 @@ public sealed class LocalInferenceApiClient(
             Debug.WriteLine(
                 $"[WARN] Envelope parse failed — grammar sampler may have been defeated. Input: {json[..Math.Min(json.Length, 200)]} — {ex.Message}",
                 "SharpClaw.CLI");
-            return new ChatCompletionResult { Content = string.Empty };
+            return new ChatCompletionResult
+            {
+                Content = "(Local model returned malformed output. " +
+                          "The quantization level may be too aggressive for reliable tool calling. " +
+                          "Try a higher-bit-depth variant of this model.)"
+            };
         }
     }
 }

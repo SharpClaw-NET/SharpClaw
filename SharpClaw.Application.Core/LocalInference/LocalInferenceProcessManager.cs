@@ -1,6 +1,7 @@
 using System.Collections.Concurrent;
 using LLama;
 using LLama.Common;
+using LLama.Native;
 
 namespace SharpClaw.Application.Core.LocalInference;
 
@@ -29,10 +30,17 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
         public LLamaWeights Weights { get; }
         public ModelParams Params { get; }
 
-        internal LoadedModel(LLamaWeights weights, ModelParams modelParams)
+        /// <summary>
+        /// Optional CLIP / mmproj projector for multimodal (LLaVA-style) inference.
+        /// Null when the model is text-only.
+        /// </summary>
+        public MtmdWeights? ClipModel { get; }
+
+        internal LoadedModel(LLamaWeights weights, ModelParams modelParams, MtmdWeights? clipModel = null)
         {
             Weights = weights;
             Params = modelParams;
+            ClipModel = clipModel;
         }
 
         /// <summary>
@@ -77,7 +85,11 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             return ctx;
         }
 
-        public void Dispose() => Weights.Dispose();
+        public void Dispose()
+        {
+            ClipModel?.Dispose();
+            Weights.Dispose();
+        }
     }
 
     private readonly ConcurrentDictionary<Guid, LoadedModel> _loaded = new();
@@ -127,7 +139,7 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// </summary>
     public async Task<LoadedModel> AcquireAsync(
         Guid modelId, string modelFilePath, int? gpuLayers = null,
-        uint? contextSize = null, CancellationToken ct = default)
+        uint? contextSize = null, string? mmprojPath = null, CancellationToken ct = default)
     {
         lock (_stateLock)
         {
@@ -137,7 +149,7 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
 
         try
         {
-            return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, ct);
+            return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, mmprojPath, ct);
         }
         catch
         {
@@ -177,14 +189,14 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// </summary>
     public async Task<LoadedModel> PinAsync(
         Guid modelId, string modelFilePath, int? gpuLayers = null,
-        uint? contextSize = null, CancellationToken ct = default)
+        uint? contextSize = null, string? mmprojPath = null, CancellationToken ct = default)
     {
         lock (_stateLock)
         {
             _pinnedModels.Add(modelId);
             CancelCooldown(modelId);
         }
-        return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, ct);
+        return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, mmprojPath, ct);
     }
 
     /// <summary>
@@ -213,7 +225,7 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// </summary>
     public async Task<LoadedModel> EnsureLoadedAsync(
         Guid modelId, string modelFilePath, int? gpuLayers = null,
-        uint? contextSize = null, CancellationToken ct = default)
+        uint? contextSize = null, string? mmprojPath = null, CancellationToken ct = default)
     {
         if (_loaded.TryGetValue(modelId, out var existing))
             return existing;
@@ -234,7 +246,15 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             };
 
             var weights = await LLamaWeights.LoadFromFileAsync(modelParams, ct);
-            var loaded = new LoadedModel(weights, modelParams);
+
+            MtmdWeights? clipModel = null;
+            if (!string.IsNullOrWhiteSpace(mmprojPath))
+            {
+                Console.Write(" loading mmproj...");
+                clipModel = MtmdWeights.LoadFromFile(mmprojPath, weights, MtmdContextParams.Default());
+            }
+
+            var loaded = new LoadedModel(weights, modelParams, clipModel);
             _loaded[modelId] = loaded;
 
             Console.WriteLine(" ready.");

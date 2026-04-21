@@ -53,6 +53,10 @@ internal static class LlamaSharpToolPromptBuilder
                     history.AddMessage(AuthorRole.Assistant, FormatAssistantToolCalls(msg));
                     break;
 
+                case "assistant":
+                    history.AddMessage(AuthorRole.Assistant, FormatAssistantMessage(msg.Content));
+                    break;
+
                 default:
                     history.AddMessage(MapRole(msg.Role ?? "user"), msg.Content ?? "");
                     break;
@@ -145,6 +149,18 @@ internal static class LlamaSharpToolPromptBuilder
     // ── History formatting ────────────────────────────────────────
 
     /// <summary>
+    /// Formats a prior plain-text assistant message as a <c>mode: "message"</c>
+    /// envelope so that all assistant turns in history are consistent with the
+    /// envelope contract defined in the system prompt. Without this, messages
+    /// persisted from a prior session would appear as bare prose, contradicting
+    /// the model's own instructions and causing drift on subsequent tool rounds.
+    /// </summary>
+    private static string FormatAssistantMessage(string? content) =>
+        JsonSerializer.Serialize(
+            new { mode = "message", text = content ?? "", calls = Array.Empty<object>() },
+            _jsonOpts);
+
+    /// <summary>
     /// Formats a prior assistant message that contains tool calls as
     /// envelope-formatted JSON (tool_calls mode).
     /// </summary>
@@ -170,11 +186,18 @@ internal static class LlamaSharpToolPromptBuilder
     /// <summary>
     /// Formats a tool-result message as a user-turn JSON structure that
     /// the model was told to expect (matches the envelope result shape).
+    /// When the message carries an image, a marker is prepended so the
+    /// model knows visual data is present in the turn.
     /// </summary>
-    private static string FormatToolResult(ToolAwareMessage msg) =>
-        JsonSerializer.Serialize(
-            new { tool_result = new { id = msg.ToolCallId, content = msg.Content } },
+    private static string FormatToolResult(ToolAwareMessage msg)
+    {
+        var content = msg.Content ?? string.Empty;
+        if (msg.HasImage)
+            content = $"[Image attached]\n{content}";
+        return JsonSerializer.Serialize(
+            new { tool_result = new { id = msg.ToolCallId, content } },
             _jsonOpts);
+    }
 
     // ── Helpers ───────────────────────────────────────────────────
 
