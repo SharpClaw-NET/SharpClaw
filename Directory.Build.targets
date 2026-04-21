@@ -37,17 +37,17 @@
   </Target>
 
   <!--
-    Delete generated .env files from the source tree during Clean.
+    Delete copied .env files from the output directory during Clean.
   -->
   <Target Name="_CleanEnvironmentFiles" AfterTargets="Clean"
           Condition="Exists('Environment')">
     <ItemGroup>
-      <_GeneratedEnvFile Include="Environment\*.env" Exclude="Environment\*.template" />
+      <_OutputEnvFile Include="$(OutputPath)Environment\*.env" Exclude="$(OutputPath)Environment\*.template" />
     </ItemGroup>
-    <Delete Files="@(_GeneratedEnvFile)" Condition="'@(_GeneratedEnvFile)' != ''" />
+    <Delete Files="@(_OutputEnvFile)" Condition="'@(_OutputEnvFile)' != ''" />
     <Message Importance="high"
-             Text="Deleted generated .env files from source tree"
-             Condition="'@(_GeneratedEnvFile)' != ''" />
+             Text="Deleted .env files from output directory"
+             Condition="'@(_OutputEnvFile)' != ''" />
   </Target>
 
 </Project>
