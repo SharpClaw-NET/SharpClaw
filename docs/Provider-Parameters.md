@@ -89,10 +89,10 @@ format examples, and provider-specific notes:
 | `topK` | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
 | `frequencyPenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
 | `presencePenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ |
-| `seed` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| `responseFormat` | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ✅ | ✅ |
-| `reasoningEffort` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ |
+| `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `seed` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `responseFormat` | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅⁴ | ❌ | ✅ | ✅ |
+| `reasoningEffort` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ⚠️⁵ | ❌ | ✅ | ❌ |
 
 > ¹ Google's OpenAI-compatible endpoints (`GoogleGeminiOpenAi`,
 > `GoogleVertexAIOpenAi`) only accept the full `json_schema` variant.
@@ -106,6 +106,28 @@ format examples, and provider-specific notes:
 >
 > ³ `GoogleVertexAI` (native) is **not yet implemented** — the spec is
 > reserved for forward-compatibility. Use `GoogleVertexAIOpenAi` instead.
+>
+> ⁴ LlamaSharp accepts both `{"type":"json_object"}` (mapped to a
+> generic JSON GBNF grammar) and `{"type":"json_schema", …}` (converted
+> by `LlamaSharpJsonSchemaConverter` into a schema-specific GBNF
+> attached to `DefaultSamplingPipeline.Grammar`). The converter covers
+> the OpenAI strict-mode subset — `type`, `properties`, `required`,
+> `additionalProperties`, `items`, `enum`, `const`, `anyOf`/`oneOf`,
+> simple `allOf`, and local `$ref`/`$defs`. Schema features outside
+> that matrix (`pattern`, `patternProperties`, `minProperties`,
+> `maxProperties`, `uniqueItems`, strict numeric ranges, non-local
+> `$ref`, `not`, `if`/`then`/`else`, `contains`) degrade gracefully to
+> the generic JSON grammar with a debug-category warning listing the
+> unsupported keywords. Tool calling takes precedence — when a request
+> contains tools and a `responseFormat`, the tool-envelope grammar wins
+> and `responseFormat` is ignored with a debug-category log line.
+>
+> ⁵ LlamaSharp accepts `reasoningEffort` informationally only. llama.cpp
+> has no reasoning-budget knob; the value is surfaced to the model via a
+> `reasoning-effort: {level} (informational; this model has no
+> mechanical reasoning-effort control)` segment in the default chat
+> header, and as the `{{reasoning-effort}}` tag in custom header
+> templates. The sampling pipeline does not mechanically enforce it.
 
 ---
 
@@ -124,7 +146,8 @@ format examples, and provider-specific notes:
 | No `frequencyPenalty` / `presencePenalty` | Anthropic, GoogleGemini (native), GoogleVertexAI (native), Cerebras, Mistral, Minimax |
 | `"xhigh"` reasoning | OpenAI, GitHub Copilot only |
 | No typed parameters at all | Whisper |
-| `stop` / `seed` not supported | LlamaSharp (stop is model-driven; seed is `uint` mismatch) |
+| `responseFormat` grammar-constrained subset | LlamaSharp (strict-mode schema subset via GBNF; exotic keywords degrade to generic JSON with a logged warning; tool calling takes precedence) |
+| `reasoningEffort` informational only | LlamaSharp (no mechanical reasoning-budget knob in llama.cpp; surfaced via chat header) |
 | Tool calling: model-dependent reliability | LlamaSharp, Ollama, Custom |
 | **Not yet implemented** | GoogleVertexAI (native) — use GoogleVertexAIOpenAi |
 

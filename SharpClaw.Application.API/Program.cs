@@ -42,6 +42,26 @@ Log.Logger = new LoggerConfiguration()
     .Enrich.FromLogContext()
     .CreateLogger();
 
+// L-015: Configure the LLamaSharp native backend before *any* LLama API is touched.
+// NativeLibraryConfig is sticky — the first call to a LLama API freezes the backend
+// selection, so this must run prior to DI registration of LocalInferenceProcessManager
+// (and ahead of any code path that may probe llama.cpp). A startup diagnostic line is
+// emitted so operators can confirm which backend (CUDA/Vulkan/CPU) was chosen.
+NativeLibraryConfig.All
+    .WithCuda(true)
+    .WithVulkan(true)
+    .WithAutoFallback(true)
+    .WithLogCallback((level, message) =>
+    {
+        // Only surface warnings/errors through debug output; suppress the
+        // hundreds of info lines (tensor loads, layer assignments, etc.)
+        // that llama.cpp dumps to stderr during model loading.
+        if (level >= LLamaLogLevel.Warning)
+            System.Diagnostics.Debug.WriteLine($"[llama.cpp] {message?.TrimEnd()}", "SharpClaw.CLI");
+    });
+Log.Information(
+    "LLamaSharp native backend configured (preference: CUDA > Vulkan > CPU, AutoFallback=true).");
+
 try
 {
     var builder = WebApplication.CreateBuilder(args);
@@ -198,19 +218,7 @@ try
     builder.Services.AddScoped<ModuleService>();
 
     // Local inference
-    // Configure native library: prefer CUDA > Vulkan > CPU; suppress verbose logs.
-    NativeLibraryConfig.All
-        .WithCuda(true)
-        .WithVulkan(true)
-        .WithAutoFallback(true)
-        .WithLogCallback((level, message) =>
-        {
-            // Only surface warnings/errors through debug output; suppress the
-            // hundreds of info lines (tensor loads, layer assignments, etc.)
-            // that llama.cpp dumps to stderr during model loading.
-            if (level >= LLamaLogLevel.Warning)
-                System.Diagnostics.Debug.WriteLine($"[llama.cpp] {message?.TrimEnd()}", "SharpClaw.CLI");
-        });
+    // Native library backend was configured before host build (see L-015 block above).
 
     var processManager = new LocalInferenceProcessManager();
     if (int.TryParse(builder.Configuration["Local:GpuLayerCount"], out var gpuLayers))

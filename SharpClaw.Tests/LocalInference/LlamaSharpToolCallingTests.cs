@@ -1,5 +1,6 @@
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
+using System.Text.Json;
 
 namespace SharpClaw.Tests.LocalInference;
 
@@ -200,12 +201,15 @@ public class LocalInferenceEnvelopeParserTests
     }
 
     [Test]
-    public void ParseEnvelope_InvalidJson_ReturnsFallbackMessage()
+    public void ParseEnvelope_InvalidJson_ThrowsEnvelopeException()
     {
-        var result = LocalInferenceApiClient.ParseEnvelope("not json at all");
+        // L-017: malformed envelopes are signalled with a typed exception so
+        // ChatService can surface a clear error instead of a silent fallback
+        // string that downstream code treats as a real assistant message.
+        var act = () => LocalInferenceApiClient.ParseEnvelope("not json at all");
 
-        result.Content.Should().Contain("malformed output");
-        result.ToolCalls.Should().BeEmpty();
+        act.Should().Throw<LocalInferenceEnvelopeException>()
+           .WithInnerException<JsonException>();
     }
 
     [Test]

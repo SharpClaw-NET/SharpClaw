@@ -149,6 +149,19 @@ public static class CompletionParameterValidator
                     "{\"type\": \"json_object\"}. Use the full json_schema variant instead " +
                     "(response_format: {\"type\": \"json_schema\", ...}) or instruct the model " +
                     "to respond in JSON via the system prompt.");
+            // NOTE: no provider in CompletionParameterSpec.Specs currently sets
+            // OnlyJsonObjectResponseFormat = true (LlamaSharp was flipped to false
+            // once json_schema shipped). This branch is retained as dead-but-correct
+            // code so a future provider can opt in without re-deriving the validation.
+            else if (spec.OnlyJsonObjectResponseFormat &&
+                     (responseFormat.ValueKind != System.Text.Json.JsonValueKind.Object ||
+                      !responseFormat.TryGetProperty("type", out var onlyTypeProp) ||
+                      onlyTypeProp.GetString() is not "json_object"))
+                errors.Add(
+                    $"'{spec.ProviderName}' only supports response_format " +
+                    "{\"type\": \"json_object\"}. Structured json_schema output is not " +
+                    "implemented for this provider; use json_object and instruct the model " +
+                    "to match your schema via the system prompt.");
         }
 
         // ── Reasoning effort ─────────────────────────────────────

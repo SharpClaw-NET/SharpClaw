@@ -131,9 +131,15 @@ public sealed class ChatService(
             ? BuildSystemPrompt(agent.SystemPrompt)
             : agent.SystemPrompt ?? "";
 
+        // Resolve completion parameters early so they can feed the chat header
+        // (reasoning-effort informational notice) as well as the wire payload.
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
-            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
+            completionParameters: completionParams, providerType: provider.ProviderType);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -146,8 +152,6 @@ public sealed class ChatService(
         var modelCapabilities = model.Capabilities;
         var maxTokens = agent.MaxCompletionTokens;
         var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
-        var completionParams = BuildCompletionParameters(agent);
-        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
         var toolAwareness = enableTools ? (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools) : null;
 
         // Persist user message immediately so it gets an accurate
@@ -451,7 +455,9 @@ public sealed class ChatService(
         ChannelDB channel, AgentDB agent, ChatClientType clientType,
         EditorContext? editorContext, CancellationToken ct,
         TaskChatContext? taskContext = null,
-        string? externalUsername = null, string? externalDisplayName = null)
+        string? externalUsername = null, string? externalDisplayName = null,
+        CompletionParameters? completionParameters = null,
+        ProviderType providerType = default)
     {
         // Channel-level flag takes precedence; fall back to context.
         var disabled = channel.DisableChatHeader
@@ -484,7 +490,8 @@ public sealed class ChatService(
                 }
             }
 
-            await AppendAgentSuffixAsync(taskSb, agent.Id, channel.Id, editorContext: null, ct);
+            await AppendAgentSuffixAsync(taskSb, agent.Id, channel.Id, editorContext: null, ct,
+                completionParameters, providerType);
             return taskSb.ToString();
         }
 
@@ -494,7 +501,8 @@ public sealed class ChatService(
         {
             var userId2 = jobService.GetSessionUserId();
             return await headerTagProcessor.ExpandAsync(
-                customTemplate, channel, agent, clientType, editorContext, userId2, ct);
+                customTemplate, channel, agent, clientType, editorContext, userId2, ct,
+                completionParameters, providerType);
         }
 
         var userId = jobService.GetSessionUserId();
@@ -509,7 +517,8 @@ public sealed class ChatService(
                 extSb.Append(" (@").Append(externalUsername).Append(')');
             extSb.Append(" | via: ").Append(clientType);
 
-            await AppendAgentSuffixAsync(extSb, agent.Id, channel.Id, editorContext: null, ct);
+            await AppendAgentSuffixAsync(extSb, agent.Id, channel.Id, editorContext: null, ct,
+                completionParameters, providerType);
             return extSb.ToString();
         }
 
@@ -555,7 +564,8 @@ public sealed class ChatService(
         if (!string.IsNullOrWhiteSpace(user.Bio))
             sb.Append(" | bio: ").Append(user.Bio);
 
-        await AppendAgentSuffixAsync(sb, agent.Id, channel.Id, editorContext, ct);
+        await AppendAgentSuffixAsync(sb, agent.Id, channel.Id, editorContext, ct,
+            completionParameters, providerType);
         return sb.ToString();
     }
 
@@ -566,7 +576,9 @@ public sealed class ChatService(
     /// </summary>
     private async Task AppendAgentSuffixAsync(
         StringBuilder sb, Guid agentId, Guid channelId,
-        EditorContext? editorContext, CancellationToken ct)
+        EditorContext? editorContext, CancellationToken ct,
+        CompletionParameters? completionParameters = null,
+        ProviderType providerType = default)
     {
         var agentWithRole = await db.Agents
             .Include(a => a.Role)
@@ -619,6 +631,20 @@ public sealed class ChatService(
                 sb.Append(" file=").Append(editorContext.ActiveFilePath);
             if (editorContext.SelectedText is { Length: > 0 and <= 200 })
                 sb.Append(" selection=\"").Append(editorContext.SelectedText).Append('"');
+        }
+
+        // Informational notice: surfaced when the provider accepts
+        // reasoningEffort but cannot mechanically act on it (see
+        // CompletionParameterSpec.ReasoningEffortInformationalOnly).
+        if (completionParameters?.ReasoningEffort is { } effort)
+        {
+            var spec = CompletionParameterSpec.For(providerType);
+            if (spec.ReasoningEffortInformationalOnly)
+            {
+                var notice = ChatHeaderNotices.FormatReasoningEffortNotice(effort);
+                if (notice.Length > 0)
+                    sb.Append(" | ").Append(notice);
+            }
         }
 
         sb.AppendLine("]");
@@ -837,9 +863,15 @@ public sealed class ChatService(
             ? agent.SystemPrompt ?? ""
             : BuildSystemPrompt(agent.SystemPrompt);
 
+        // Resolve completion parameters early so they can feed the chat header
+        // (reasoning-effort informational notice) as well as the wire payload.
+        var completionParams = BuildCompletionParameters(agent);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, request.EditorContext, ct,
-            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName);
+            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
+            completionParameters: completionParams, providerType: provider.ProviderType);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 
@@ -848,8 +880,6 @@ public sealed class ChatService(
         var supportsVision = model.Capabilities.HasFlag(ModelCapability.Vision);
         var maxTokens = agent.MaxCompletionTokens;
         var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
-        var completionParams = BuildCompletionParameters(agent);
-        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
         var toolAwareness = channel.DisableToolSchemas || agent.DisableToolSchemas
             ? null
             : (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools);

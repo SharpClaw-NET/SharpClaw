@@ -94,10 +94,20 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
 
     private readonly ConcurrentDictionary<Guid, LoadedModel> _loaded = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _loadLocks = new();
+    private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _multimodalLocks = new();
     private readonly object _stateLock = new();
     private readonly Dictionary<Guid, int> _refCounts = new();
     private readonly HashSet<Guid> _pinnedModels = new();
     private readonly Dictionary<Guid, CancellationTokenSource> _cooldownTimers = new();
+
+    /// <summary>
+    /// Raised after a model has been removed from <see cref="_loaded"/>
+    /// and disposed. Subscribers can use this to invalidate caches that
+    /// key off the model ID (for example the VRAM probe TTL in
+    /// <see cref="Clients.LocalInferenceApiClient"/>). See finding
+    /// <c>L-007</c>.
+    /// </summary>
+    public event Action<Guid>? ModelUnloaded;
 
     /// <summary>
     /// How long an unpinned model stays in memory after the last request
@@ -186,6 +196,13 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// Loads the model and marks it as pinned so it stays in memory
     /// between requests until <see cref="Unpin"/> is called.
     /// Cancels any pending cooldown timer.
+    /// <para>
+    /// If <see cref="EnsureLoadedAsync"/> fails (for example: bad path,
+    /// insufficient VRAM, mmproj mismatch) the pin is rolled back so a
+    /// failed <c>model load</c> does not leave a phantom pinned entry
+    /// that blocks later cooldown or reload attempts. See finding
+    /// <c>L-006</c>.
+    /// </para>
     /// </summary>
     public async Task<LoadedModel> PinAsync(
         Guid modelId, string modelFilePath, int? gpuLayers = null,
@@ -196,7 +213,18 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             _pinnedModels.Add(modelId);
             CancelCooldown(modelId);
         }
-        return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, mmprojPath, ct);
+        try
+        {
+            return await EnsureLoadedAsync(modelId, modelFilePath, gpuLayers, contextSize, mmprojPath, ct);
+        }
+        catch
+        {
+            lock (_stateLock)
+            {
+                _pinnedModels.Remove(modelId);
+            }
+            throw;
+        }
     }
 
     /// <summary>
@@ -248,10 +276,23 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             var weights = await LLamaWeights.LoadFromFileAsync(modelParams, ct);
 
             MtmdWeights? clipModel = null;
-            if (!string.IsNullOrWhiteSpace(mmprojPath))
+            try
             {
-                Console.Write(" loading mmproj...");
-                clipModel = MtmdWeights.LoadFromFile(mmprojPath, weights, MtmdContextParams.Default());
+                if (!string.IsNullOrWhiteSpace(mmprojPath))
+                {
+                    Console.Write(" loading mmproj...");
+                    clipModel = MtmdWeights.LoadFromFile(mmprojPath, weights, MtmdContextParams.Default());
+                }
+            }
+            catch
+            {
+                // L-003 — if the projector fails to load, dispose the
+                // already-loaded base weights so we don't leak VRAM /
+                // native memory. Without this, a failed mmproj load
+                // orphans the weights because they never make it into
+                // _loaded and therefore never reach Unload.
+                weights.Dispose();
+                throw;
             }
 
             var loaded = new LoadedModel(weights, modelParams, clipModel);
@@ -270,7 +311,20 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     public void Unload(Guid modelId)
     {
         if (_loaded.TryRemove(modelId, out var loaded))
+        {
             loaded.Dispose();
+            // L-009 — dispose the per-model load lock when the model
+            // leaves memory so a long-running process that loads many
+            // distinct models over time does not accumulate one
+            // SemaphoreSlim per historical model ID.
+            if (_loadLocks.TryRemove(modelId, out var loadSem))
+                loadSem.Dispose();
+            if (_multimodalLocks.TryRemove(modelId, out var mmSem))
+                mmSem.Dispose();
+            // L-007 — notify subscribers (VRAM probe cache, etc.) so
+            // they can invalidate state keyed on this model ID.
+            ModelUnloaded?.Invoke(modelId);
+        }
     }
 
     public bool IsLoaded(Guid modelId) => _loaded.ContainsKey(modelId);
@@ -280,6 +334,18 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// </summary>
     public LoadedModel? GetLoaded(Guid modelId) =>
         _loaded.TryGetValue(modelId, out var m) ? m : null;
+
+    /// <summary>
+    /// Returns a per-model semaphore that callers can use to serialise
+    /// multimodal (MTMD) inference against the same
+    /// <see cref="LoadedModel.ClipModel"/>. Two concurrent requests
+    /// sharing the same projector corrupt each other's staged image
+    /// because <see cref="LLama.Native.MtmdWeights.LoadMedia"/> /
+    /// <see cref="LLama.Native.MtmdWeights.ClearMedia"/> mutate global
+    /// state on the native handle. See finding <c>L-005</c>.
+    /// </summary>
+    public SemaphoreSlim GetMultimodalLock(Guid modelId) =>
+        _multimodalLocks.GetOrAdd(modelId, _ => new SemaphoreSlim(1, 1));
 
     // ── Cooldown timer ────────────────────────────────────────────
 
@@ -301,6 +367,13 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             {
                 return;
             }
+            catch (ObjectDisposedException)
+            {
+                // L-014 — the token source was disposed underneath us
+                // (e.g. another thread called CancelCooldown and then
+                // disposed). Treat as cancellation; do not unload.
+                return;
+            }
 
             bool shouldUnload;
             lock (_stateLock)
@@ -319,7 +392,8 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     {
         if (_cooldownTimers.Remove(modelId, out var cts))
         {
-            cts.Cancel();
+            try { cts.Cancel(); }
+            catch (ObjectDisposedException) { /* already disposed — fine */ }
             cts.Dispose();
         }
     }
@@ -332,7 +406,7 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
         {
             foreach (var (_, cts) in _cooldownTimers)
             {
-                cts.Cancel();
+                try { cts.Cancel(); } catch (ObjectDisposedException) { }
                 cts.Dispose();
             }
             _cooldownTimers.Clear();
@@ -340,6 +414,17 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
 
         foreach (var (id, _) in _loaded)
             Unload(id);
+
+        // L-009 — dispose any remaining per-model locks. Unload() already
+        // removes and disposes the ones keyed to models that were loaded;
+        // this catches entries that were created but never made it to a
+        // successful load (e.g. load failed inside EnsureLoadedAsync).
+        foreach (var (_, sem) in _loadLocks)
+            sem.Dispose();
+        _loadLocks.Clear();
+        foreach (var (_, sem) in _multimodalLocks)
+            sem.Dispose();
+        _multimodalLocks.Clear();
 
         await ValueTask.CompletedTask;
     }

@@ -300,11 +300,13 @@ public sealed class LocalModelService(
 
         if (existing is not null) return existing;
 
+        // L-012: LlamaSharp runs in-process via LocalInferenceApiClient.
+        // No HTTP endpoint is involved, so ApiEndpoint is intentionally left null
+        // to avoid misleading operators/tooling that surface the URL.
         var provider = new ProviderDB
         {
             Name = "LlamaSharp (Local)",
-            ProviderType = ProviderType.LlamaSharp,
-            ApiEndpoint = "http://localhost:18080/v1"
+            ProviderType = ProviderType.LlamaSharp
         };
         db.Providers.Add(provider);
         await db.SaveChangesAsync(ct);

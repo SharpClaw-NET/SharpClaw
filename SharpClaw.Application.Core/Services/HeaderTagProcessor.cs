@@ -3,6 +3,7 @@ using System.Reflection;
 using System.Text;
 using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
@@ -65,13 +66,16 @@ public sealed partial class HeaderTagProcessor(
         ChatClientType clientType,
         EditorContext? editorContext,
         Guid? userId,
-        CancellationToken ct)
+        CancellationToken ct,
+        CompletionParameters? completionParameters = null,
+        ProviderType providerType = default)
     {
         var matches = TagPattern().Matches(template);
         if (matches.Count == 0)
             return template;
 
-        var context = await BuildContextAsync(channel, agent, clientType, editorContext, userId, ct);
+        var context = await BuildContextAsync(channel, agent, clientType, editorContext, userId, ct,
+            completionParameters, providerType);
 
         var sb = new StringBuilder(template.Length * 2);
         var lastIdx = 0;
@@ -98,7 +102,9 @@ public sealed partial class HeaderTagProcessor(
 
     private async Task<HeaderContext> BuildContextAsync(
         ChannelDB channel, AgentDB agent, ChatClientType clientType,
-        EditorContext? editorContext, Guid? userId, CancellationToken ct)
+        EditorContext? editorContext, Guid? userId, CancellationToken ct,
+        CompletionParameters? completionParameters = null,
+        ProviderType providerType = default)
     {
         UserDB? user = null;
         PermissionSetDB? userPs = null;
@@ -133,7 +139,8 @@ public sealed partial class HeaderTagProcessor(
 
         return new HeaderContext(
             channel, agent, clientType, editorContext,
-            user, userPs, agentWithRole?.Role, agentPs);
+            user, userPs, agentWithRole?.Role, agentPs,
+            completionParameters, providerType);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -159,6 +166,7 @@ public sealed partial class HeaderTagProcessor(
             "agent-grants" => await FormatAgentGrantsAsync(ctx, ct),
             "editor" => FormatEditor(ctx.EditorContext),
             "accessible-threads" => await FormatAccessibleThreadsAsync(ctx, ct),
+            "reasoning-effort" => FormatReasoningEffortNotice(ctx),
             _ => await TryExpandResourceTagAsync(tagName, itemTemplate, ct)
         };
 
@@ -298,6 +306,25 @@ public sealed partial class HeaderTagProcessor(
         if (ec.SelectedText is { Length: > 0 and <= 200 })
             sb.Append(" selection=\"").Append(ec.SelectedText).Append('"');
         return sb.ToString();
+    }
+
+    /// <summary>
+    /// Formats the <c>{{reasoning-effort}}</c> notice when the provider
+    /// accepts the hint for UX only (see
+    /// <see cref="CompletionParameterSpec.ReasoningEffortInformationalOnly"/>).
+    /// Returns an empty string otherwise so the tag vanishes cleanly in
+    /// templates that use it unconditionally.
+    /// </summary>
+    private static string FormatReasoningEffortNotice(HeaderContext ctx)
+    {
+        if (ctx.CompletionParameters?.ReasoningEffort is not { } effort)
+            return "";
+
+        var spec = CompletionParameterSpec.For(ctx.ProviderType);
+        if (!spec.ReasoningEffortInformationalOnly)
+            return "";
+
+        return ChatHeaderNotices.FormatReasoningEffortNotice(effort);
     }
 
     private async Task<string> FormatAccessibleThreadsAsync(HeaderContext ctx, CancellationToken ct)
@@ -463,5 +490,7 @@ public sealed partial class HeaderTagProcessor(
         UserDB? User,
         PermissionSetDB? UserPs,
         RoleDB? AgentRole,
-        PermissionSetDB? AgentPs);
+        PermissionSetDB? AgentPs,
+        CompletionParameters? CompletionParameters = null,
+        ProviderType ProviderType = default);
 }

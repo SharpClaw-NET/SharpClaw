@@ -20,12 +20,12 @@
 | `topK` | ✅ | 1 – 128 | `DefaultSamplingPipeline.TopK` |
 | `frequencyPenalty` | ✅ | -2.0 – 2.0 | `DefaultSamplingPipeline.FrequencyPenalty` |
 | `presencePenalty` | ✅ | -2.0 – 2.0 | `DefaultSamplingPipeline.PresencePenalty` |
-| `stop` | ❌ | — | Stop sequences are model-driven via `BuildAntiPrompts`; the typed field is ignored |
-| `seed` | ❌ | — | `int` vs `uint` mismatch — llama.cpp seed is `uint`; not mapped |
-| `responseFormat` | ❌ | — | Grammar enforcement handles structured output natively |
-| `reasoningEffort` | ❌ | — | Not applicable |
+| `stop` | ✅ | up to 16 | Unioned into `InferenceParams.AntiPrompts` alongside the model's native EOS/EOT strings and the built-in `CommonStopSequences` set |
+| `seed` | ✅ | `int` | `DefaultSamplingPipeline.Seed` — reinterpreted as `uint` via `unchecked((uint)seed)` (bijective two's-complement wraparound) |
+| `responseFormat` | ✅ | `json_object` / `json_schema` | `json_object` attaches the generic JSON GBNF grammar to `DefaultSamplingPipeline.Grammar`. `json_schema` is converted by `LlamaSharpJsonSchemaConverter` into a schema-specific GBNF covering the OpenAI strict-mode subset (`type`, `properties`, `required`, `additionalProperties`, `items`, `enum`, `const`, `anyOf`/`oneOf`, simple `allOf`, local `$ref`/`$defs`). Schema features outside that matrix degrade to the generic JSON grammar with a logged warning. **Tool calling takes precedence** — when tools are active the tool-envelope grammar wins and `response_format` is ignored with a debug-category log line. |
+| `reasoningEffort` | ⚠️ | `low`/`medium`/`high`/`xhigh` | **Informational only.** llama.cpp has no reasoning-budget knob; the value is surfaced to the model via the chat-header `reasoning-effort` notice (default header) and the `{{reasoning-effort}}` tag (custom templates) so the model can react to the user's intent, but nothing in the sampling pipeline mechanically enforces it. |
 
-All five supported parameters are applied through a shared
+All seven sampling parameters are applied through a shared
 `BuildSamplingPipeline` helper that constructs a
 `DefaultSamplingPipeline` (LLamaSharp). When a parameter is not set,
 the corresponding llama.cpp default is used — there is no server-side
@@ -107,6 +107,28 @@ Models without a registered projector are unaffected.
 
 ---
 
+## Configuration keys (`Local:*`)
+
+All keys are optional. Bind via `.env` (`Local__Key=...`) or
+`appsettings.json` (`"Local": { "Key": "..." }`).
+
+| Key | Default | Purpose |
+|---|---|---|
+| `GpuLayerCount` | `-1` | Layers offloaded to GPU. `-1` = all, `0` = CPU only. Falls back to CPU automatically when no GPU is available. Bound at startup in `Program.cs` onto `LocalInferenceProcessManager.DefaultGpuLayerCount`. |
+| `ContextSize` | `8192` | Context window in tokens. Bound onto `LocalInferenceProcessManager.DefaultContextSize`. |
+| `KeepLoaded` | `true` | If `true`, models stay resident after first use. If `false`, idle unpinned models are unloaded after `IdleCooldownMinutes`. |
+| `IdleCooldownMinutes` | `5` | Idle time before an unpinned model is unloaded. Only applies when `KeepLoaded=false`. |
+| `ModelsDirectory` | `<AppContext.BaseDirectory>/Models` | Root folder used by `ModelDownloadManager` for GGUF downloads and resume. Set to point at a shared/external SSD to keep models off the install volume. Created on first use. |
+| `HuggingFaceToken` | *(unset)* | Personal access token sent as `Authorization: Bearer <token>` by `HuggingFaceUrlResolver`. Required for gated/private repos and substantially raises Hugging Face anonymous rate limits (`HTTP 429` with `Retry-After`). |
+
+> ℹ️ The native LLamaSharp backend (CUDA / Vulkan / CPU) is configured
+> *before* the host is built in `Program.cs` — it is sticky once any
+> LLama API is touched. A startup log line records the chosen
+> backend; see the top of `Program.cs` if you need to override the
+> preference order.
+
+---
+
 ## Notes
 
 - Inference runs in-process via LLamaSharp — no HTTP requests.
@@ -121,5 +143,23 @@ Models without a registered projector are unaffected.
 - The `ProviderType` wire name changed from `"Local"` to `"LlamaSharp"`
   in the alpha release. Any stored records or API clients using `"Local"`
   must be updated.
+- **`response_format` vs tool calling precedence:** when a request passes
+  both a `responseFormat` and tool definitions, the tool-envelope grammar
+  built by `LlamaSharpToolGrammar` wins unconditionally. The
+  `responseFormat` grammar is skipped and a debug-category warning is
+  logged to `SharpClaw.CLI`. This mirrors how OpenAI behaves in practice
+  (function calling overrides `response_format`) and keeps the streaming
+  envelope parser in `ChatCompletionWithToolsAsync` /
+  `StreamChatCompletionWithToolsAsync` sound, because those paths depend
+  on the `{"mode":"…","text":"…","calls":[…]}` schema.
+- **`reasoningEffort` visibility:** the value is injected as a
+  `reasoning-effort: {level} (informational; this model has no
+  mechanical reasoning-effort control)` segment in the default chat
+  header, and exposed as the `{{reasoning-effort}}` tag in custom header
+  templates. Both paths go through the shared `ChatHeaderNotices`
+  helper so the emitted string is identical. Users on providers that
+  consume `reasoningEffort` on the wire (OpenAI, GitHub Copilot, Gemini,
+  etc.) do not see the notice — the tag renders to an empty string
+  there.
 
 → [Back to overview](../Provider-Parameters.md)

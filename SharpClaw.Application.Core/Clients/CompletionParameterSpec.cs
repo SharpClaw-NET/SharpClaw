@@ -56,8 +56,30 @@ public sealed record CompletionParameterSpec
     /// </summary>
     public bool RejectsJsonObjectResponseFormat { get; init; }
 
+    /// <summary>
+    /// When <see langword="true"/>, the provider supports <c>response_format</c>
+    /// <em>only</em> in the simplified <c>{"type": "json_object"}</c> form.
+    /// The structured <c>json_schema</c> variant is not implemented and is
+    /// rejected upstream. No provider currently sets this flag —
+    /// <see cref="ProviderType.LlamaSharp"/> previously did while the
+    /// schema-to-GBNF converter was pending, but now supports both shapes
+    /// end-to-end via <c>LlamaSharpJsonSchemaConverter</c>.
+    /// </summary>
+    public bool OnlyJsonObjectResponseFormat { get; init; }
+
     // ── Reasoning effort ─────────────────────────────────────────
     public bool SupportsReasoningEffort { get; init; }
+
+    /// <summary>
+    /// When <see langword="true"/>, <see cref="CompletionParameters.ReasoningEffort"/>
+    /// is accepted by the validator but is <em>not</em> mapped into the
+    /// provider wire payload. The value is surfaced only as a notice inside
+    /// the chat header so the model can see the user's intent. Used by
+    /// providers (like <see cref="ProviderType.LlamaSharp"/>) whose local
+    /// runtime has no mechanical reasoning-effort control.
+    /// </summary>
+    public bool ReasoningEffortInformationalOnly { get; init; }
+
     public string[] ValidReasoningEffortValues { get; init; } = ["none", "minimal", "low", "medium", "high", "xhigh"];
 
     // ═════════════════════════════════════════════════════════════
@@ -505,8 +527,20 @@ public sealed record CompletionParameterSpec
         // LlamaSharp  (in-process LLM inference via DefaultSamplingPipeline)
         // Temperature, TopP, TopK, FrequencyPenalty, PresencePenalty are
         // mapped directly to DefaultSamplingPipeline properties.
-        // Stop sequences are handled internally by BuildAntiPrompts.
-        // Seed is not mapped: llama.cpp uses uint; CompletionParameters.Seed is int.
+        // Stop sequences are merged into BuildAntiPrompts alongside the
+        // model's own EOS/EOT tokens.
+        // Seed is mapped via unchecked int→uint reinterpret; Seed=0 means
+        // llama.cpp picks a fresh random seed per call.
+        // ResponseFormat: both {"type":"json_object"} (generic JSON GBNF)
+        // and {"type":"json_schema", …} (converted via
+        // LlamaSharpJsonSchemaConverter into a schema-specific GBNF) are
+        // supported end-to-end. Schema features outside the converter's
+        // coverage matrix degrade to the generic JSON grammar with a
+        // logged warning rather than failing validation — this matches
+        // hosted-OpenAI semantics for best-effort strict-mode support.
+        // ReasoningEffort is not meaningful for llama.cpp — the provider
+        // surfaces it as an informational notice in the chat header
+        // instead of the wire payload.
         // ─────────────────────────────────────────────────────────
         [ProviderType.LlamaSharp] = new()
         {
@@ -526,10 +560,13 @@ public sealed record CompletionParameterSpec
             SupportsPresencePenalty = true,
             PresencePenaltyMin = 0.0f,
             PresencePenaltyMax = 1.0f,
-            SupportsStop = false,
-            SupportsSeed = false,
-            SupportsResponseFormat = false,
-            SupportsReasoningEffort = false,
+            SupportsStop = true,
+            MaxStopSequences = 16,
+            SupportsSeed = true,
+            SupportsResponseFormat = true,
+            OnlyJsonObjectResponseFormat = false,
+            SupportsReasoningEffort = true,
+            ReasoningEffortInformationalOnly = true,
         },
 
         // ─────────────────────────────────────────────────────────
