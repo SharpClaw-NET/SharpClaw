@@ -214,14 +214,14 @@ public sealed class LocalModelService(
     private async Task<ProviderDB> EnsureLocalProviderAsync(CancellationToken ct)
     {
         var existing = await db.Providers
-            .FirstOrDefaultAsync(p => p.ProviderType == ProviderType.Local, ct);
+            .FirstOrDefaultAsync(p => p.ProviderType == ProviderType.LlamaSharp, ct);
 
         if (existing is not null) return existing;
 
         var provider = new ProviderDB
         {
-            Name = "Local",
-            ProviderType = ProviderType.Local,
+            Name = "LlamaSharp (Local)",
+            ProviderType = ProviderType.LlamaSharp,
             ApiEndpoint = "http://localhost:18080/v1"
         };
         db.Providers.Add(provider);

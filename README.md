@@ -147,7 +147,6 @@ The CLI covers everything the API does: providers, models, agents, channels, thr
 | [mk8.shell Reference](mk8.shell/mk8.shell.md) | Verb set, execution model, hardening, sandboxing |
 | [Security Policy](SECURITY.md) | Vulnerability reporting |
 | [Contributing](CONTRIBUTING.md) | CLA, contribution guidelines |
-| [Product Comparison](docs/Product-comparison.md) | SharpClaw vs. OpenClaw analysis |
 
 ## How it compares to OpenClaw
 
@@ -170,8 +169,6 @@ SharpClaw's answer is to not give the agent a shell in the first place.
 | Multi-agent | Typed orchestration, cross-agent approval, tool awareness sets | Sub-agent spawning, no coordination protocol |
 
 An agent that can connect to your IDE, write a module, build it, verify it compiles, register it, and start using it in the same session is a different kind of thing than an agent that cats files and pipes to sed. SharpClaw is building the former.
-
-For the full analysis, see [Product Comparison](docs/Product-comparison.md).
 
 ## License
 

@@ -21,6 +21,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Uno\SharpClaw.Uno.csproj" />
+    <ProjectReference Include="..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
   </ItemGroup>
 </Project>

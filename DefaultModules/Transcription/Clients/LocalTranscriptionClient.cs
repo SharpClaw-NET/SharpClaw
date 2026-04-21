@@ -26,7 +26,7 @@ namespace SharpClaw.Modules.Transcription.Clients;
 public sealed class LocalTranscriptionClient(
     WhisperModelManager whisperManager) : ITranscriptionApiClient
 {
-    public ProviderType ProviderType => ProviderType.Local;
+    public ProviderType ProviderType => ProviderType.Whisper;
 
     /// <summary>
     /// Segments with no-speech probability above this threshold are

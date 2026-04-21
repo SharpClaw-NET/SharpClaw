@@ -50,7 +50,9 @@
   <Folder Name="/Solution Items/Docs/">
     <File Path="docs/Core-API-documentation.md" />
     <File Path="docs/Core-API-skill.md" />
+    <File Path="docs/Database-Configuration.md" />
     <File Path="docs/Gateway-documentation.md" />
+    <File Path="docs/Gateway-skill.md" />
     <File Path="docs/Provider-Parameters.md" />
   </Folder>
   <Folder Name="/Solution Items/Docs/Modules/">
@@ -94,9 +96,10 @@
     <File Path="docs/providers/Google-Vertex-AI-OpenAI.md" />
     <File Path="docs/providers/Google-Vertex-AI.md" />
     <File Path="docs/providers/Groq.md" />
-    <File Path="docs/providers/Local.md" />
+    <File Path="docs/providers/LlamaSharp.md" />
     <File Path="docs/providers/Minimax.md" />
     <File Path="docs/providers/Mistral.md" />
+    <File Path="docs/providers/Ollama.md" />
     <File Path="docs/providers/OpenAI.md" />
     <File Path="docs/providers/OpenRouter.md" />
     <File Path="docs/providers/Vercel-AI.md" />

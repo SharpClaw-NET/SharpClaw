@@ -28,7 +28,12 @@ public enum ProviderType
     Mistral = 10,
     GitHubCopilot = 11,
     Custom = 12,
-    Local = 13,
+
+    /// <summary>
+    /// In-process LLM inference via LLamaSharp (llama.cpp).
+    /// </summary>
+    LlamaSharp = 13,
+
     Minimax = 14,
 
     /// <summary>
@@ -43,5 +48,16 @@ public enum ProviderType
     /// (<c>/v1beta1/openai/chat/completions</c>). Provider parameters
     /// follow the OpenAI schema.
     /// </summary>
-    GoogleVertexAIOpenAi = 16
+    GoogleVertexAIOpenAi = 16,
+
+    /// <summary>
+    /// In-process speech-to-text transcription via Whisper.net.
+    /// </summary>
+    Whisper = 17,
+
+    /// <summary>
+    /// User-managed Ollama server (OpenAI-compatible HTTP API).
+    /// Default endpoint: <c>http://localhost:11434</c>.
+    /// </summary>
+    Ollama = 18
 }

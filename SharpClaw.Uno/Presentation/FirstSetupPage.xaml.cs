@@ -543,12 +543,37 @@ public sealed partial class FirstSetupPage : Page
         if (ProviderTypeSelector.SelectedItem is not ComboBoxItem { Tag: string typeStr }) return;
 
         string? endpoint = null;
-        if (typeStr == "Custom")
+        if (typeStr is "Custom" or "Ollama")
         {
             endpoint = EndpointBox.Text?.Trim();
             if (string.IsNullOrEmpty(endpoint))
             {
+                endpoint = typeStr == "Ollama" ? "http://localhost:11434" : null;
+            }
+            if (string.IsNullOrEmpty(endpoint))
+            {
                 AppendStep("API endpoint is required for Custom providers.", error: true);
+                return;
+            }
+        }
+
+        if (typeStr == "Ollama")
+        {
+            AppendStep("Checking Ollama connection…");
+            try
+            {
+                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                var check = await http.GetAsync(endpoint!.TrimEnd('/') + "/api/tags");
+                if (!check.IsSuccessStatusCode)
+                {
+                    ReplaceLastStep($"Ollama unreachable ({(int)check.StatusCode}). Check the endpoint and try again.", error: true);
+                    return;
+                }
+                ReplaceLastStep("Ollama connection OK.", done: true);
+            }
+            catch (Exception ex)
+            {
+                ReplaceLastStep($"Ollama unreachable: {ex.Message}", error: true);
                 return;
             }
         }
@@ -1259,7 +1284,8 @@ public sealed partial class FirstSetupPage : Page
     private void PopulateProviderTypeSelector()
     {
         string[] types = ["OpenAI", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
-            "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot", "Minimax", "Custom"];
+            "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot",
+            "Minimax", "Custom", "LlamaSharp", "Ollama"];
         foreach (var t in types)
         {
             var item = new ComboBoxItem { Content = t, Tag = t };
@@ -1268,8 +1294,12 @@ public sealed partial class FirstSetupPage : Page
         ProviderTypeSelector.SelectedIndex = 0;
         ProviderTypeSelector.SelectionChanged += (_, _) =>
         {
-            var isCustom = ProviderTypeSelector.SelectedItem is ComboBoxItem { Tag: "Custom" };
-            EndpointPanel.Visibility = isCustom ? Visibility.Visible : Visibility.Collapsed;
+            var tag = (ProviderTypeSelector.SelectedItem as ComboBoxItem)?.Tag as string;
+            var isCustom = tag == "Custom";
+            var isOllama = tag == "Ollama";
+            EndpointPanel.Visibility = (isCustom || isOllama) ? Visibility.Visible : Visibility.Collapsed;
+            if (isOllama && string.IsNullOrEmpty(EndpointBox.Text))
+                EndpointBox.Text = "http://localhost:11434";
         };
     }
 
@@ -1338,7 +1368,7 @@ public sealed partial class FirstSetupPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ProviderDto(Guid Id, string Name, JsonElement ProviderType, string? ApiEndpoint, bool HasApiKey)
     {
-        public bool IsLocal => ProviderType.ToString() is "Local" or "13";
+        public bool IsLocal => ProviderType.ToString() is "LlamaSharp" or "13";
     }
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ModelDto(Guid Id, string Name, JsonElement Capabilities, Guid ProviderId, string ProviderName);

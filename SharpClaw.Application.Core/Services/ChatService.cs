@@ -87,7 +87,7 @@ public sealed class ChatService(
             ?? throw new InvalidOperationException(
                 $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
-        var isLocal = provider.ProviderType == ProviderType.Local;
+        var isLocal = provider.ProviderType == ProviderType.LlamaSharp;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
@@ -796,7 +796,7 @@ public sealed class ChatService(
             ?? throw new InvalidOperationException(
                 $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
-        var isLocal = provider.ProviderType == ProviderType.Local;
+        var isLocal = provider.ProviderType == ProviderType.LlamaSharp;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 

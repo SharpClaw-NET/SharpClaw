@@ -18,7 +18,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     public abstract ProviderType ProviderType { get; }
     public virtual bool SupportsNativeToolCalling => true;
 
-    public async Task<IReadOnlyList<string>> ListModelIdsAsync(
+    public virtual async Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default)
     {
         var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);

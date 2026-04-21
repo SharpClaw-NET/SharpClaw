@@ -502,11 +502,11 @@ public sealed record CompletionParameterSpec
         },
 
         // ─────────────────────────────────────────────────────────
-        // Local inference  (LLamaSharp — no parameter mapping)
+        // LlamaSharp  (in-process LLM inference — no parameter mapping)
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Local] = new()
+        [ProviderType.LlamaSharp] = new()
         {
-            ProviderName = "Local (LLamaSharp)",
+            ProviderName = "LlamaSharp (Local)",
             SupportsTemperature = false,
             SupportsTopP = false,
             SupportsTopK = false,
@@ -514,6 +514,50 @@ public sealed record CompletionParameterSpec
             SupportsPresencePenalty = false,
             SupportsStop = false,
             SupportsSeed = false,
+            SupportsResponseFormat = false,
+            SupportsReasoningEffort = false,
+        },
+
+        // ─────────────────────────────────────────────────────────
+        // Whisper  (in-process STT — does not use completion params)
+        // ─────────────────────────────────────────────────────────
+        [ProviderType.Whisper] = new()
+        {
+            ProviderName = "Whisper (Local)",
+            SupportsTemperature = false,
+            SupportsTopP = false,
+            SupportsTopK = false,
+            SupportsFrequencyPenalty = false,
+            SupportsPresencePenalty = false,
+            SupportsStop = false,
+            SupportsSeed = false,
+            SupportsResponseFormat = false,
+            SupportsReasoningEffort = false,
+        },
+
+        // ─────────────────────────────────────────────────────────
+        // Ollama  (user-managed server — OpenAI-compatible)
+        // https://github.com/ollama/ollama/blob/main/docs/api.md
+        // ─────────────────────────────────────────────────────────
+        [ProviderType.Ollama] = new()
+        {
+            ProviderName = "Ollama",
+            SupportsTemperature = true,
+            TemperatureMin = 0.0f,
+            TemperatureMax = 2.0f,
+            SupportsTopP = true,
+            TopPMin = 0.0f,
+            TopPMax = 1.0f,
+            SupportsTopK = false,
+            SupportsFrequencyPenalty = true,
+            FrequencyPenaltyMin = -2.0f,
+            FrequencyPenaltyMax = 2.0f,
+            SupportsPresencePenalty = true,
+            PresencePenaltyMin = -2.0f,
+            PresencePenaltyMax = 2.0f,
+            SupportsStop = true,
+            MaxStopSequences = 4,
+            SupportsSeed = true,
             SupportsResponseFormat = false,
             SupportsReasoningEffort = false,
         },

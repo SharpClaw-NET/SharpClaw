@@ -137,7 +137,7 @@ public sealed class LiveTranscriptionOrchestrator(
                 throw new InvalidOperationException(
                     $"Provider '{model.Provider.Name}' ({providerType}) does not support transcription.");
 
-            if (providerType == ProviderType.Local)
+            if (providerType == ProviderType.Whisper)
             {
                 var localFile = await db.LocalModelFiles
                     .FirstOrDefaultAsync(f => f.ModelId == modelId, ct)

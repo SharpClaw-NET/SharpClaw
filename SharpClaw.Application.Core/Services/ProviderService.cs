@@ -26,11 +26,15 @@ public sealed class ProviderService(
         if (IsUniqueProviderNamesEnforced())
             await EnsureProviderNameUniqueAsync(request.Name, excludeId: null, ct);
 
+        var storeEndpoint = request.ProviderType is ProviderType.Custom or ProviderType.Ollama
+            ? request.ApiEndpoint
+            : null;
+
         var provider = new ProviderDB
         {
             Name = request.Name,
             ProviderType = request.ProviderType,
-            ApiEndpoint = request.ProviderType == ProviderType.Custom ? request.ApiEndpoint : null,
+            ApiEndpoint = storeEndpoint,
             EncryptedApiKey = request.ApiKey is not null
                 ? encryptionOptions.EncryptProviderKeys
                     ? ApiKeyEncryptor.Encrypt(request.ApiKey, encryptionOptions.Key)
@@ -203,10 +207,13 @@ public sealed class ProviderService(
             .FirstOrDefaultAsync(p => p.Id == providerId, ct)
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
-        if (string.IsNullOrEmpty(provider.EncryptedApiKey))
+        if (string.IsNullOrEmpty(provider.EncryptedApiKey)
+            && provider.ProviderType is not ProviderType.Ollama)
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
-        var apiKey = ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey, encryptionOptions.Key);
+        var apiKey = string.IsNullOrEmpty(provider.EncryptedApiKey)
+            ? string.Empty
+            : ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey, encryptionOptions.Key);
         var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
 
         using var httpClient = httpClientFactory.CreateClient();

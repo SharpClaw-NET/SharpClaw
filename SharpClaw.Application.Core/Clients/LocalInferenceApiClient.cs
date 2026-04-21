@@ -5,6 +5,7 @@ using System.Text.Json;
 using LLama;
 using LLama.Common;
 using LLama.Native;
+using LLama.Sampling;
 using LLama.Transformers;
 using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Contracts.Enums;
@@ -26,8 +27,6 @@ namespace SharpClaw.Application.Core.Clients;
 public sealed class LocalInferenceApiClient(
     LocalInferenceProcessManager modelManager) : IProviderApiClient
 {
-    private const string ToolCallMarker = "{\"tool_call\"";
-
     /// <summary>
     /// Common text-based stop sequences across model families.
     /// These act as a safety net alongside the model's native EOS token
@@ -52,8 +51,16 @@ public sealed class LocalInferenceApiClient(
     /// </summary>
     internal Guid CurrentModelId { get; set; }
 
-    public ProviderType ProviderType => ProviderType.Local;
-    public bool SupportsNativeToolCalling => true;
+    private LocalToolCallingMode _toolCallingMode = LocalToolCallingMode.StructuredGrammar;
+
+    public ProviderType ProviderType => ProviderType.LlamaSharp;
+
+    /// <summary>
+    /// Returns <see langword="true"/> only when grammar-constrained inference is active.
+    /// Set to <see langword="false"/> while the legacy text-scanning path (<see cref="LocalToolCallingMode.PromptText"/>) is in use.
+    /// </summary>
+    public bool SupportsNativeToolCalling =>
+        _toolCallingMode == LocalToolCallingMode.StructuredGrammar;
 
     public Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default)
@@ -107,14 +114,21 @@ public sealed class LocalInferenceApiClient(
         using (loaded.CreateContext()) { }
         var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
-        var history = BuildToolChatHistory(systemPrompt, messages);
+        var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights);
+
+        using var pipeline = new DefaultSamplingPipeline
+        {
+            Grammar = new Grammar(LlamaSharpToolGrammar.Build(), "root"),
+            GrammarOptimization = DefaultSamplingPipeline.GrammarOptimizationMode.Extended,
+        };
 
         var inferParams = new InferenceParams
         {
             MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
+            SamplingPipeline = pipeline,
         };
 
         var sb = new StringBuilder();
@@ -123,20 +137,7 @@ public sealed class LocalInferenceApiClient(
 
         var raw = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
         LogResponse(raw);
-        var toolCalls = ParseToolCalls(raw);
-
-        // Always strip tool-call JSON from content, even if all calls
-        // were filtered (e.g. no-op name "none"). Without this, the
-        // JSON blob would leak into the text content.
-        var content = raw.Contains(ToolCallMarker, StringComparison.Ordinal)
-            ? ContentBeforeFirstToolCall(raw)
-            : raw;
-
-        return new ChatCompletionResult
-        {
-            Content = content,
-            ToolCalls = toolCalls
-        };
+        return ParseEnvelope(raw);
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
@@ -152,45 +153,77 @@ public sealed class LocalInferenceApiClient(
         using (loaded.CreateContext()) { }
         var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
-        var history = BuildToolChatHistory(systemPrompt, messages);
+        var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights);
+
+        using var pipeline = new DefaultSamplingPipeline
+        {
+            Grammar = new Grammar(LlamaSharpToolGrammar.Build(), "root"),
+            GrammarOptimization = DefaultSamplingPipeline.GrammarOptimizationMode.Extended,
+        };
 
         var inferParams = new InferenceParams
         {
             MaxTokens = maxCompletionTokens ?? 4096,
             AntiPrompts = antiPrompts,
+            SamplingPipeline = pipeline,
         };
 
-        // Compute retain length for the holdback buffer.
-        // the longest anti-prompt and the tool-call marker so neither can
-        // be partially flushed before detection.
+        // Holdback buffer length
+        // prefix needed to detect "mode":"tool_calls" in the envelope.
+        // Once the mode field is confirmed we switch streaming phase.
+        const string ToolCallsModeToken = "\"tool_calls\"";
         var maxApLen = 0;
         foreach (var ap in antiPrompts)
             if (ap.Length > maxApLen) maxApLen = ap.Length;
-        var retainLen = Math.Max(maxApLen, ToolCallMarker.Length);
+        var retainLen = Math.Max(maxApLen, ToolCallsModeToken.Length);
 
-        // Buffer trailing text that could be the start of a stop sequence
-        // or a tool-call marker so neither leaks into the stream.
+        // Phase detection: we read the mode field as tokens arrive.
+        // Null  = not yet determined.
+        // true  = "tool_calls" — buffer everything silently.
+        // false = "message"    — stream text value incrementally.
+        bool? isToolCallsMode = null;
+
         var holdback = new StringBuilder();
-        var fullContent = new StringBuilder();
-        var toolCallBuffer = new StringBuilder();
-        bool toolCallDetected = false;
+        var fullBuffer = new StringBuilder(); // complete raw envelope
+        var textContent = new StringBuilder(); // streamed text (message mode)
 
         await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
         {
-            // Phase 2: tool call detected — buffer silently, don't stream.
-            if (toolCallDetected)
-            {
-                toolCallBuffer.Append(token);
-                continue;
-            }
+            fullBuffer.Append(token);
 
-            // Phase 1: normal streaming with holdback.
+            // Once mode is known and it's tool_calls, just accumulate.
+            if (isToolCallsMode == true)
+                continue;
+
             holdback.Append(token);
             var text = holdback.ToString();
 
-            // Check if buffer contains a complete anti-prompt.
+            // Detect mode field as soon as enough tokens have arrived.
+            if (isToolCallsMode is null)
+            {
+                if (text.Contains("\"tool_calls\"", StringComparison.Ordinal))
+                {
+                    isToolCallsMode = true;
+                    holdback.Clear();
+                    continue;
+                }
+
+                if (text.Contains("\"message\"", StringComparison.Ordinal))
+                {
+                    isToolCallsMode = false;
+                    // Fall through to normal text streaming below.
+                }
+                else
+                {
+                    // Mode not confirmed yet — hold back and wait.
+                    continue;
+                }
+            }
+
+            // isToolCallsMode == false: stream text content.
+            // Check for anti-prompts first.
             bool hitStop = false;
             foreach (var ap in antiPrompts)
             {
@@ -200,7 +233,7 @@ public sealed class LocalInferenceApiClient(
                     if (apIdx > 0)
                     {
                         var before = text[..apIdx];
-                        fullContent.Append(before);
+                        textContent.Append(before);
                         yield return ChatStreamChunk.Text(before);
                     }
                     hitStop = true;
@@ -212,73 +245,35 @@ public sealed class LocalInferenceApiClient(
             if (hitStop)
                 break;
 
-            // Check if buffer contains a tool-call start. Once detected,
-            // flush any preceding text and switch to silent buffering.
-            var tcIdx = text.IndexOf(ToolCallMarker, StringComparison.Ordinal);
-            if (tcIdx >= 0)
-            {
-                if (tcIdx > 0)
-                {
-                    var before = text[..tcIdx];
-                    fullContent.Append(before);
-                    yield return ChatStreamChunk.Text(before);
-                }
-                toolCallDetected = true;
-                toolCallBuffer.Append(text[tcIdx..]);
-                holdback.Clear();
-                continue;
-            }
-
-            // Flush characters that cannot be the start of any anti-prompt
-            // or tool-call marker.
+            // Flush characters that cannot be the start of an anti-prompt.
+            // In message mode the grammar only emits the text field value
+            // after the "text": key, so we can stream most of it directly.
             var safeLen = text.Length - retainLen;
             if (safeLen > 0)
             {
                 var safe = text[..safeLen];
-                fullContent.Append(safe);
+                textContent.Append(safe);
                 yield return ChatStreamChunk.Text(safe);
                 holdback.Remove(0, safeLen);
             }
         }
 
-        // Resolve remaining buffers.
-        IReadOnlyList<ChatToolCall> toolCalls;
-        if (toolCallDetected)
+        // Flush remaining holdback in message mode.
+        if (isToolCallsMode == false && holdback.Length > 0)
         {
-            // Tool calls live in the silent buffer.
-            toolCalls = ParseToolCalls(toolCallBuffer.ToString());
-        }
-        else if (holdback.Length > 0)
-        {
-            // No tool calls detected — flush leftover holdback.
             var remaining = StripStopTokens(holdback.ToString(), antiPrompts);
-
-            // Check for tool calls that arrived entirely within holdback.
-            toolCalls = ParseToolCalls(remaining);
-            if (toolCalls.Count > 0)
-            {
-                remaining = ContentBeforeFirstToolCall(remaining);
-            }
-
             if (remaining.Length > 0)
             {
-                fullContent.Append(remaining);
+                textContent.Append(remaining);
                 yield return ChatStreamChunk.Text(remaining);
             }
         }
-        else
-        {
-            toolCalls = [];
-        }
 
-        var content = fullContent.ToString().TrimEnd();
-        LogResponse(content);
+        var raw = StripStopTokens(fullBuffer.ToString(), antiPrompts).TrimEnd();
+        LogResponse(raw);
 
-        yield return ChatStreamChunk.Final(new ChatCompletionResult
-        {
-            Content = content,
-            ToolCalls = toolCalls
-        });
+        var result = ParseEnvelope(raw);
+        yield return ChatStreamChunk.Final(result);
     }
 
     // ── Helpers ────────────────────────────────────────────────────
@@ -302,52 +297,6 @@ public sealed class LocalInferenceApiClient(
 
         foreach (var msg in messages)
             history.AddMessage(MapRole(msg.Role), msg.Content);
-
-        return history;
-    }
-
-    /// <summary>
-    /// Builds a <see cref="ChatHistory"/> from tool-aware messages,
-    /// flattening tool calls/results into text for models that lack
-    /// a native "tool" role in their chat template.
-    /// </summary>
-    private static ChatHistory BuildToolChatHistory(
-        string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages)
-    {
-        var history = new ChatHistory();
-
-        if (!string.IsNullOrEmpty(systemPrompt))
-            history.AddMessage(AuthorRole.System, systemPrompt);
-
-        foreach (var msg in messages)
-        {
-            if (msg.Role == "tool")
-            {
-                // Map tool results to user messages — local models don't
-                // have a native "tool" role in their chat template.
-                // Format matches ChatService's text-based [TOOL_RESULT:] convention.
-                history.AddMessage(AuthorRole.User,
-                    $"[TOOL_RESULT:{msg.ToolCallId}] {msg.Content}");
-            }
-            else if (msg.Role == "assistant" && msg.ToolCalls is { Count: > 0 })
-            {
-                // Serialize previous tool calls in the same [TOOL_CALL:]
-                // format that ChatService's text-based path uses.
-                var content = msg.Content ?? "";
-                foreach (var tc in msg.ToolCalls)
-                {
-                    content += $"\n[TOOL_CALL:{tc.Id}] {tc.ArgumentsJson}";
-                }
-                history.AddMessage(AuthorRole.Assistant, content);
-            }
-            else
-            {
-                history.AddMessage(
-                    MapRole(msg.Role ?? "user"),
-                    msg.Content ?? "");
-            }
-        }
 
         return history;
     }
@@ -450,100 +399,85 @@ public sealed class LocalInferenceApiClient(
         return text;
     }
 
-    // ── Tool call parsing ─────────────────────────────────────────
+    // ── Envelope parsing ──────────────────────────────────────────
 
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
-        PropertyNameCaseInsensitive = true
+        PropertyNameCaseInsensitive = true,
     };
 
     /// <summary>
-    /// Names that local models emit to signal "I don't want to call a
-    /// tool." Treating these as real invocations would feed an error
-    /// back to the model and trigger an infinite tool-call loop.
+    /// Names that local models emit to signal "I don't want to call a tool."
+    /// Treating these as real invocations would feed an error back to the model
+    /// and trigger an infinite tool-call loop.
     /// </summary>
     private static readonly HashSet<string> NoOpToolNames =
         new(StringComparer.OrdinalIgnoreCase)
         { "none", "null", "no_tool", "noop", "no-op", "n/a", "" };
 
-    private static IReadOnlyList<ChatToolCall> ParseToolCalls(string content)
-    {
-        var calls = new List<ChatToolCall>();
-        var remaining = content.AsSpan();
-
-        while (true)
-        {
-            var idx = remaining.IndexOf("{\"tool_call\"");
-            if (idx < 0) break;
-
-            remaining = remaining[idx..];
-            var json = ExtractJson(remaining);
-            if (json is null) break;
-
-            try
-            {
-                using var doc = JsonDocument.Parse(json);
-                if (doc.RootElement.TryGetProperty("tool_call", out var tc))
-                {
-                    var name = tc.GetProperty("name").GetString() ?? "";
-
-                    // Skip no-op names that local models generate to
-                    // indicate "I have no tool to call."
-                    if (!NoOpToolNames.Contains(name))
-                    {
-                        var id = tc.GetProperty("id").GetString()
-                            ?? $"call_{Guid.NewGuid():N}";
-                        var args = tc.TryGetProperty("arguments", out var a)
-                            ? a.GetRawText() : "{}";
-                        calls.Add(new ChatToolCall(id, name, args));
-                    }
-                }
-            }
-            catch (JsonException) { }
-
-            remaining = remaining[json.Length..];
-        }
-
-        return calls;
-    }
-
-    private static string? ExtractJson(ReadOnlySpan<char> text)
-    {
-        if (text.Length == 0 || text[0] != '{') return null;
-
-        var depth = 0;
-        var inString = false;
-        var escaped = false;
-
-        for (var i = 0; i < text.Length; i++)
-        {
-            var c = text[i];
-            if (escaped) { escaped = false; continue; }
-            if (c == '\\' && inString) { escaped = true; continue; }
-            if (c == '"') { inString = !inString; continue; }
-            if (inString) continue;
-            if (c == '{') depth++;
-            else if (c == '}')
-            {
-                depth--;
-                if (depth == 0)
-                    return text[..(i + 1)].ToString();
-            }
-        }
-
-        return null;
-    }
-
     /// <summary>
-    /// Returns only the text content that appears before the first
-    /// tool-call JSON. Everything from the first <c>{"tool_call"</c>
-    /// onward — including the JSON and any trailing explanation — is
-    /// discarded because it is captured separately via
-    /// <see cref="ParseToolCalls"/>.
+    /// Parses the grammar-constrained envelope JSON produced by the model.
+    /// On parse failure — possible on heavily-quantised models that defeat the
+    /// grammar sampler — returns an empty <see cref="ChatCompletionResult"/> and
+    /// logs a warning.
     /// </summary>
-    private static string ContentBeforeFirstToolCall(string content)
+    internal static ChatCompletionResult ParseEnvelope(string json)
     {
-        var idx = content.IndexOf(ToolCallMarker, StringComparison.Ordinal);
-        return idx >= 0 ? content[..idx].TrimEnd() : content;
+        if (string.IsNullOrWhiteSpace(json))
+            return new ChatCompletionResult { Content = string.Empty };
+
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            var root = doc.RootElement;
+
+            var mode = root.TryGetProperty("mode", out var modeEl)
+                ? modeEl.GetString() ?? "message"
+                : "message";
+
+            var text = root.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String
+                ? textEl.GetString() ?? string.Empty
+                : string.Empty;
+
+            if (mode != "tool_calls")
+                return new ChatCompletionResult { Content = text };
+
+            // tool_calls mode — parse the calls array.
+            if (!root.TryGetProperty("calls", out var callsEl)
+                || callsEl.ValueKind != JsonValueKind.Array)
+                return new ChatCompletionResult { Content = text };
+
+            var calls = new List<ChatToolCall>();
+            foreach (var callEl in callsEl.EnumerateArray())
+            {
+                var name = callEl.TryGetProperty("name", out var nameEl)
+                    ? nameEl.GetString() ?? string.Empty
+                    : string.Empty;
+
+                if (NoOpToolNames.Contains(name))
+                    continue;
+
+                var id = callEl.TryGetProperty("id", out var idEl)
+                    ? idEl.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(id))
+                    id = $"call_{Guid.NewGuid():N}";
+
+                var args = callEl.TryGetProperty("args", out var argsEl)
+                    ? argsEl.GetRawText()
+                    : "{}";
+
+                calls.Add(new ChatToolCall(id!, name, args));
+            }
+
+            return new ChatCompletionResult { Content = text, ToolCalls = calls };
+        }
+        catch (JsonException ex)
+        {
+            Debug.WriteLine(
+                $"[WARN] Envelope parse failed — grammar sampler may have been defeated. Input: {json[..Math.Min(json.Length, 200)]} — {ex.Message}",
+                "SharpClaw.CLI");
+            return new ChatCompletionResult { Content = string.Empty };
+        }
     }
 }

@@ -228,13 +228,20 @@ public sealed class SeedingService(
         {
             db.Providers.Add(new ProviderDB
             {
-                Name = pt.ToString(),
+                Name = DisplayNameFor(pt),
                 ProviderType = pt
             });
         }
 
         await db.SaveChangesAsync(ct);
     }
+
+    private static string DisplayNameFor(ProviderType pt) => pt switch
+    {
+        ProviderType.LlamaSharp => "LlamaSharp (Local)",
+        ProviderType.Whisper    => "Whisper (Local)",
+        _                       => pt.ToString(),
+    };
 
     private async Task SeedDefaultDisplayDeviceAsync(SharpClawDbContext db, CancellationToken ct)
     {

@@ -307,7 +307,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
         // Pre-load source URLs for local models so we can derive the suffix.
         var localModelIds = models
-            .Where(m => m.Provider.ProviderType == ProviderType.Local)
+            .Where(m => m.Provider.ProviderType == ProviderType.LlamaSharp)
             .Select(m => m.Id)
             .ToHashSet();
 
@@ -327,7 +327,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
         foreach (var model in models)
         {
             string providerSuffix;
-            if (model.Provider.ProviderType == ProviderType.Local
+            if (model.Provider.ProviderType == ProviderType.LlamaSharp
                 && localSourceUrls.TryGetValue(model.Id, out var sourceUrl))
             {
                 providerSuffix = ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant();

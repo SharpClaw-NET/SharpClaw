@@ -47,7 +47,9 @@ internal static class TerminalUI
     // ── Provider type names (enum order) ────────────────────────
     public static readonly string[] ProviderTypeNames =
         ["OpenAI", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
-         "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot", "Minimax", "Custom"];
+         "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral",
+         "GitHubCopilot", "Custom", "LlamaSharp", "Minimax",
+         "GoogleGeminiOpenAi", "GoogleVertexAIOpenAi", "Whisper", "Ollama"];
 
     public static readonly HashSet<string> DeviceCodeProviderTypes = ["GitHubCopilot"];
 

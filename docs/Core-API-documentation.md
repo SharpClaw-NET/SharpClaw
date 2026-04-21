@@ -99,11 +99,18 @@ Authentication check — requires a valid `X-Api-Key` header.
 ```
 OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
 ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot,
-Minimax, Custom, Local
+Minimax, Custom, LlamaSharp, Whisper, Ollama
 ```
 
-`Local` is used for in-process LLamaSharp / Whisper.net models.
-`Minimax` is the Minimax AI provider.
+| Value | Int | Description |
+|-------|-----|-------------|
+| `LlamaSharp` | 13 | In-process LLM inference via LlamaSharp. No API key required. |
+| `Whisper` | 17 | In-process transcription via Whisper.net. Not assignable to chat models. |
+| `Ollama` | 18 | Ollama HTTP server. No API key required. Default endpoint `http://localhost:11434`. |
+| `Minimax` | — | Minimax AI cloud provider. |
+| `Custom` | — | Any OpenAI-compatible endpoint. |
+
+All other values correspond to their named cloud providers.
 
 ### ActionKey
 

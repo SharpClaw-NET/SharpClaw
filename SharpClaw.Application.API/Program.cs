@@ -154,6 +154,7 @@ try
     builder.Services.AddSingleton<IProviderApiClient, MistralApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, GitHubCopilotApiClient>();
     builder.Services.AddSingleton<IProviderApiClient, MinimaxApiClient>();
+    builder.Services.AddSingleton<IProviderApiClient, OllamaApiClient>();
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
     builder.Services.AddScoped<ProviderService>();

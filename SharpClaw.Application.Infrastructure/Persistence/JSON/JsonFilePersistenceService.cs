@@ -27,7 +27,7 @@ public sealed class JsonFilePersistenceService(
         WriteIndented = true,
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         ReferenceHandler = ReferenceHandler.IgnoreCycles,
-        Converters = { new JsonStringEnumConverter(), new NullableGuidConverter() }
+        Converters = { new NumericOrStringEnumConverterFactory(), new NullableGuidConverter() }
     };
 
     /// <summary>
@@ -85,7 +85,9 @@ public sealed class JsonFilePersistenceService(
                 continue;
 
             var navProps = navigations.GetValueOrDefault(clrType);
-            var files = fs.GetFiles(entityDir, "*.json");
+            var files = fs.GetFiles(entityDir, "*.json")
+                .Where(f => !Path.GetFileName(f).StartsWith('_'))
+                .ToArray();
 
             if (files.Length == 0)
                 continue;
@@ -802,6 +804,92 @@ public sealed class JsonFilePersistenceService(
 
         public override void Write(Utf8JsonWriter writer, Guid value, JsonSerializerOptions options) =>
             writer.WriteStringValue(value);
+    }
+
+    /// <summary>
+    /// Factory that produces converters capable of reading enum values stored as either
+    /// integers (legacy) or strings (current format) and always writing as strings.
+    /// This allows old data files written before the <see cref="JsonStringEnumConverter"/>
+    /// was introduced to be loaded without error.
+    /// </summary>
+    private sealed class NumericOrStringEnumConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) =>
+            typeToConvert.IsEnum ||
+            (Nullable.GetUnderlyingType(typeToConvert)?.IsEnum ?? false);
+
+        public override JsonConverter CreateConverter(Type typeToConvert, JsonSerializerOptions options)
+        {
+            var underlying = Nullable.GetUnderlyingType(typeToConvert);
+            if (underlying is not null)
+            {
+                return (JsonConverter)Activator.CreateInstance(
+                    typeof(NullableNumericOrStringEnumConverter<>).MakeGenericType(underlying))!;
+            }
+
+            return (JsonConverter)Activator.CreateInstance(
+                typeof(NumericOrStringEnumConverter<>).MakeGenericType(typeToConvert))!;
+        }
+    }
+
+    private sealed class NumericOrStringEnumConverter<T> : JsonConverter<T> where T : struct, Enum
+    {
+        /// <summary>
+        /// Legacy enum member name aliases. When an enum member is renamed,
+        /// map the old name to the new member here so existing on-disk files
+        /// continue to deserialize. Key format: "<c>EnumTypeName.OldName</c>".
+        /// </summary>
+        private static readonly Dictionary<string, string> LegacyAliases = new(StringComparer.OrdinalIgnoreCase)
+        {
+            // ProviderType.Local was renamed to ProviderType.LlamaSharp (numeric value 13 unchanged).
+            ["ProviderType.Local"] = "LlamaSharp",
+        };
+
+        public override T Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Number && reader.TryGetInt64(out var numeric))
+                return (T)Enum.ToObject(typeof(T), numeric);
+
+            var str = reader.GetString();
+            if (str is not null)
+            {
+                if (Enum.TryParse<T>(str, ignoreCase: true, out var parsed))
+                    return parsed;
+
+                if (LegacyAliases.TryGetValue($"{typeof(T).Name}.{str}", out var aliasTarget)
+                    && Enum.TryParse<T>(aliasTarget, ignoreCase: true, out var aliased))
+                {
+                    return aliased;
+                }
+            }
+
+            throw new JsonException(
+                $"The JSON value '{str}' could not be converted to {typeof(T).FullName}.");
+        }
+
+        public override void Write(Utf8JsonWriter writer, T value, JsonSerializerOptions options) =>
+            writer.WriteStringValue(value.ToString());
+    }
+
+    private sealed class NullableNumericOrStringEnumConverter<T> : JsonConverter<T?> where T : struct, Enum
+    {
+        private static readonly NumericOrStringEnumConverter<T> _inner = new();
+
+        public override T? Read(ref Utf8JsonReader reader, Type typeToConvert, JsonSerializerOptions options)
+        {
+            if (reader.TokenType == JsonTokenType.Null)
+                return null;
+
+            return _inner.Read(ref reader, typeof(T), options);
+        }
+
+        public override void Write(Utf8JsonWriter writer, T? value, JsonSerializerOptions options)
+        {
+            if (value.HasValue)
+                writer.WriteStringValue(value.Value.ToString());
+            else
+                writer.WriteNullValue();
+        }
     }
 
     /// <summary>

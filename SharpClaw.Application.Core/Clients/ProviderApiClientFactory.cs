@@ -24,6 +24,11 @@ public sealed class ProviderApiClientFactory
             return new CustomOpenAiCompatibleApiClient(apiEndpoint);
         }
 
+        // Ollama: use stored endpoint if provided, otherwise fall back to
+        // the default (http://localhost:11434) baked into OllamaApiClient.
+        if (providerType == ProviderType.Ollama)
+            return new OllamaApiClient(apiEndpoint);
+
         return _clients.TryGetValue(providerType, out var client)
             ? client
             : throw new NotSupportedException($"Provider type '{providerType}' is not supported.");

@@ -31,10 +31,21 @@ public static class InfrastructureServiceExtensions
                 services.AddSingleton<ColdEntityStore>();
                 services.AddSingleton<ColdIndexMaintenanceService>();
 
-                services.AddSingleton<SnapshotService>();
+                services.AddSingleton<FlushQueue>(sp => 
+                    new FlushQueue(sp.GetRequiredService<ILogger<FlushQueue>>(), capacity: 256));
+                services.AddSingleton<SnapshotService>(sp => 
+                    new SnapshotService(
+                        sp.GetRequiredService<IPersistenceFileSystem>(),
+                        sp.GetRequiredService<JsonFileOptions>(),
+                        sp.GetRequiredService<DirectoryLockManager>(),
+                        sp.GetRequiredService<ILogger<SnapshotService>>(),
+                        sp.GetRequiredService<FlushQueue>()));
                 services.AddSingleton<ISnapshotFallback>(sp => sp.GetRequiredService<SnapshotService>());
-                services.AddSingleton<FlushQueue>();
-                services.AddSingleton<FlushWorker>();
+                services.AddSingleton<FlushWorker>(sp =>
+                    new FlushWorker(
+                        sp.GetRequiredService<FlushQueue>(),
+                        sp,
+                        sp.GetRequiredService<ILogger<FlushWorker>>()));
                 services.AddSingleton<JsonPersistenceHealthCheck>();
                 services.AddSingleton<EntityMigrationRegistry>();
 
