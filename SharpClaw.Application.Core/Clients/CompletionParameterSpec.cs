@@ -93,6 +93,15 @@ public sealed record CompletionParameterSpec
     /// </summary>
     public bool SupportsToolChoice { get; init; }
 
+    /// <summary>
+    /// When <see langword="true"/>, the provider can enforce each
+    /// tool's argument JSON Schema at the sampler/server level
+    /// (OpenAI <c>strict: true</c>; LlamaSharp per-tool GBNF).
+    /// When <see langword="false"/> the <see cref="CompletionParameters.StrictTools"/>
+    /// field is accepted but is not enforced mechanically.
+    /// </summary>
+    public bool SupportsStrictTools { get; init; }
+
     // ═════════════════════════════════════════════════════════════
     // Provider catalogue
     // ═════════════════════════════════════════════════════════════
@@ -581,6 +590,7 @@ public sealed record CompletionParameterSpec
             SupportsReasoningEffort = true,
             ReasoningEffortInformationalOnly = true,
             SupportsToolChoice = true,
+            SupportsStrictTools = true,
         },
 
         // ─────────────────────────────────────────────────────────

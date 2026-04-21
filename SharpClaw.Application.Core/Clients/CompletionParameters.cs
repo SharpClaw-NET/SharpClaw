@@ -104,11 +104,32 @@ public sealed record CompletionParameters
     /// </summary>
     public bool? ParallelToolCalls { get; init; }
 
+    /// <summary>
+    /// When <see langword="true"/>, tool-call arguments must conform to
+    /// each tool's <see cref="ChatToolDefinition.ParametersSchema"/>.
+    /// LlamaSharp enforces this by composing per-tool GBNF fragments
+    /// derived from the schemas (<see cref="LlamaSharpJsonSchemaConverter"/>).
+    /// OpenAI maps to <c>strict: true</c> on each tool. Providers that
+    /// support only permissive tool calling ignore this field. Defaults
+    /// to the provider's own default — LlamaSharp opts-in by default.
+    /// </summary>
+    public bool? StrictTools { get; init; }
+
+    /// <summary>
+    /// Optional conversation/thread correlation id used by providers
+    /// that support cross-turn KV-cache reuse (currently LlamaSharp).
+    /// When set, the provider may reuse a cached inference session
+    /// keyed on (model, thread) to skip re-prefilling the conversation
+    /// prefix. Other providers ignore this field.
+    /// </summary>
+    public Guid? ThreadId { get; init; }
+
     /// <summary>Returns <see langword="true"/> when all fields are null.</summary>
     public bool IsEmpty =>
         Temperature is null && TopP is null && TopK is null &&
         FrequencyPenalty is null && PresencePenalty is null &&
         Stop is null && Seed is null && ResponseFormat is null &&
         ReasoningEffort is null &&
-        ToolChoice is null && ParallelToolCalls is null;
+        ToolChoice is null && ParallelToolCalls is null &&
+        StrictTools is null && ThreadId is null;
 }

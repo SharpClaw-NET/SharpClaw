@@ -41,6 +41,21 @@ public sealed class ChatCompletionResult
     /// report one. See <see cref="FinishReason"/> for the mapping table.
     /// </summary>
     public FinishReason FinishReason { get; init; } = FinishReason.Unknown;
+
+    /// <summary>
+    /// Refusal text emitted by the model when it declines to respond
+    /// (policy violation, unsafe request). Mutually exclusive with
+    /// <see cref="Content"/>: when this is non-null, <see cref="Content"/>
+    /// is null and <see cref="FinishReason"/> is
+    /// <see cref="FinishReason.ContentFilter"/>.
+    /// <para>
+    /// LlamaSharp surfaces this via the <c>"refusal"</c> envelope mode
+    /// (<see cref="LocalInference.LlamaSharpToolGrammar"/>). OpenAI
+    /// surfaces it via <c>message.refusal</c> on Chat Completions and a
+    /// <c>type: "refusal"</c> content item on the Responses API.
+    /// </para>
+    /// </summary>
+    public string? Refusal { get; init; }
 }
 
 /// <summary>

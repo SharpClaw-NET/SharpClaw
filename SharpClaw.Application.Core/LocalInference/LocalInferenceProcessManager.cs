@@ -92,6 +92,61 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
         }
     }
 
+    /// <summary>
+    /// Item #3 — a cached <see cref="InteractiveExecutor"/> pinned to a
+    /// particular <c>(modelId, threadId)</c> pair. Preserves the KV
+    /// cache across conversational turns so we only need to feed the
+    /// suffix of the prompt that was not already processed. Callers
+    /// must serialise inference against a single session using
+    /// <see cref="Gate"/>.
+    /// </summary>
+    public sealed class CachedSession : IDisposable
+    {
+        public Guid ModelId { get; }
+        public Guid ThreadId { get; }
+        public LLamaContext Context { get; }
+        public InteractiveExecutor Executor { get; }
+
+        /// <summary>
+        /// Full rendered prompt text that has already been consumed by
+        /// the executor. The client diffs this against the next turn's
+        /// rendered prompt and feeds only the suffix on a prefix match;
+        /// a mismatch forces a full reset.
+        /// </summary>
+        public string AccumulatedPrompt { get; set; } = string.Empty;
+
+        public DateTime LastUsedUtc { get; internal set; } = DateTime.UtcNow;
+
+        internal readonly SemaphoreSlim Gate = new(1, 1);
+
+        internal CachedSession(Guid modelId, Guid threadId, LLamaContext ctx)
+        {
+            ModelId = modelId;
+            ThreadId = threadId;
+            Context = ctx;
+            Executor = new InteractiveExecutor(ctx);
+        }
+
+        /// <summary>
+        /// Test-only constructor that skips native-context allocation so
+        /// session-bookkeeping behaviour (LRU, invalidation, dispose)
+        /// can be covered without loading a real GGUF model.
+        /// </summary>
+        internal CachedSession(Guid modelId, Guid threadId)
+        {
+            ModelId = modelId;
+            ThreadId = threadId;
+            Context = null!;
+            Executor = null!;
+        }
+
+        public void Dispose()
+        {
+            Gate.Dispose();
+            Context?.Dispose();
+        }
+    }
+
     private readonly ConcurrentDictionary<Guid, LoadedModel> _loaded = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _loadLocks = new();
     private readonly ConcurrentDictionary<Guid, SemaphoreSlim> _multimodalLocks = new();
@@ -99,6 +154,12 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     private readonly Dictionary<Guid, int> _refCounts = new();
     private readonly HashSet<Guid> _pinnedModels = new();
     private readonly Dictionary<Guid, CancellationTokenSource> _cooldownTimers = new();
+
+    // Item #3 — KV cache reuse across turns.
+    // Keyed on (modelId, threadId). Guarded by _sessionLock for LRU eviction;
+    // individual sessions serialise their own inference via CachedSession.Gate.
+    private readonly Dictionary<(Guid Model, Guid Thread), CachedSession> _sessions = new();
+    private readonly object _sessionLock = new();
 
     /// <summary>
     /// Raised after a model has been removed from <see cref="_loaded"/>
@@ -139,6 +200,146 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     /// Can be overridden per-request via <c>model load --ctx</c>.
     /// </summary>
     public uint DefaultContextSize { get; set; } = 16384;
+
+    /// <summary>
+    /// Maximum number of <see cref="CachedSession"/> entries kept alive
+    /// at once. When a new session would exceed this cap the least
+    /// recently used entry is evicted. Default 8.
+    /// Configurable via .env key <c>Local__MaxCachedSessions</c>.
+    /// </summary>
+    public int MaxCachedSessions { get; set; } = 8;
+
+    // ── Cached session lifecycle (KV cache reuse, item #3) ────────
+
+    /// <summary>
+    /// Returns an existing <see cref="CachedSession"/> for the given
+    /// <paramref name="modelId"/>/<paramref name="threadId"/> pair, or
+    /// creates a fresh one. The session's <see cref="CachedSession.Gate"/>
+    /// is acquired before returning; the caller must invoke
+    /// <see cref="ReleaseSession"/> in a <c>finally</c> block.
+    /// </summary>
+    public async Task<CachedSession> AcquireSessionAsync(
+        Guid modelId, Guid threadId, LoadedModel loaded, CancellationToken ct = default)
+    {
+        CachedSession session;
+        lock (_sessionLock)
+        {
+            var key = (modelId, threadId);
+            if (!_sessions.TryGetValue(key, out var existing))
+            {
+                EvictLruIfNeeded();
+                var ctx = loaded.CreateContext();
+                existing = new CachedSession(modelId, threadId, ctx);
+                _sessions[key] = existing;
+            }
+            existing.LastUsedUtc = DateTime.UtcNow;
+            session = existing;
+        }
+        await session.Gate.WaitAsync(ct);
+        return session;
+    }
+
+    /// <summary>
+    /// Releases the gate previously acquired by
+    /// <see cref="AcquireSessionAsync"/>.
+    /// </summary>
+    public void ReleaseSession(CachedSession session)
+    {
+        ArgumentNullException.ThrowIfNull(session);
+        try { session.Gate.Release(); }
+        catch (ObjectDisposedException) { /* evicted concurrently — fine */ }
+    }
+
+    /// <summary>
+    /// Drops the cached session for the given
+    /// <paramref name="modelId"/>/<paramref name="threadId"/> pair (for
+    /// example when the prompt no longer prefix-matches the accumulated
+    /// history and the KV cache must be rebuilt from scratch).
+    /// </summary>
+    public void InvalidateSession(Guid modelId, Guid threadId)
+    {
+        CachedSession? removed = null;
+        lock (_sessionLock)
+        {
+            if (_sessions.Remove((modelId, threadId), out var existing))
+                removed = existing;
+        }
+        removed?.Dispose();
+    }
+
+    /// <summary>
+    /// Drops every cached session for the given thread, regardless of
+    /// model.
+    /// </summary>
+    public void InvalidateThread(Guid threadId)
+    {
+        List<CachedSession> removed = new();
+        lock (_sessionLock)
+        {
+            var keys = _sessions.Keys.Where(k => k.Thread == threadId).ToList();
+            foreach (var k in keys)
+            {
+                if (_sessions.Remove(k, out var s))
+                    removed.Add(s);
+            }
+        }
+        foreach (var s in removed)
+            s.Dispose();
+    }
+
+    private void EvictLruIfNeeded()
+    {
+        // Caller must hold _sessionLock.
+        while (_sessions.Count >= MaxCachedSessions && _sessions.Count > 0)
+        {
+            var oldestKey = _sessions
+                .OrderBy(kvp => kvp.Value.LastUsedUtc)
+                .First().Key;
+            if (_sessions.Remove(oldestKey, out var victim))
+                victim.Dispose();
+        }
+    }
+
+    private void InvalidateSessionsForModel(Guid modelId)
+    {
+        List<CachedSession> removed = new();
+        lock (_sessionLock)
+        {
+            var keys = _sessions.Keys.Where(k => k.Model == modelId).ToList();
+            foreach (var k in keys)
+            {
+                if (_sessions.Remove(k, out var s))
+                    removed.Add(s);
+            }
+        }
+        foreach (var s in removed)
+            s.Dispose();
+    }
+
+    // Test-only helpers. The production session API calls
+    // LoadedModel.CreateContext which needs a real GGUF file; these
+    // seams let unit tests drive the bookkeeping (LRU, invalidation,
+    // dispose) with synthetic sessions.
+    internal int CachedSessionCount
+    {
+        get { lock (_sessionLock) return _sessions.Count; }
+    }
+
+    internal IReadOnlyList<(Guid Model, Guid Thread)> CachedSessionKeys()
+    {
+        lock (_sessionLock) return _sessions.Keys.ToList();
+    }
+
+    internal CachedSession SeedSessionForTest(Guid modelId, Guid threadId)
+    {
+        lock (_sessionLock)
+        {
+            EvictLruIfNeeded();
+            var session = new CachedSession(modelId, threadId);
+            _sessions[(modelId, threadId)] = session;
+            return session;
+        }
+    }
 
     // ── Auto-load lifecycle (chat requests) ───────────────────────
 
@@ -312,6 +513,11 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
     {
         if (_loaded.TryRemove(modelId, out var loaded))
         {
+            // Item #3 — drop cached sessions for this model before the
+            // weights are disposed; the sessions' LLamaContext instances
+            // depend on those weights.
+            InvalidateSessionsForModel(modelId);
+
             loaded.Dispose();
             // L-009 — dispose the per-model load lock when the model
             // leaves memory so a long-running process that loads many
@@ -411,6 +617,17 @@ public sealed class LocalInferenceProcessManager : IAsyncDisposable
             }
             _cooldownTimers.Clear();
         }
+
+        // Item #3 — dispose cached sessions before their underlying
+        // weights are torn down by Unload().
+        List<CachedSession> sessions;
+        lock (_sessionLock)
+        {
+            sessions = _sessions.Values.ToList();
+            _sessions.Clear();
+        }
+        foreach (var s in sessions)
+            s.Dispose();
 
         foreach (var (id, _) in _loaded)
             Unload(id);

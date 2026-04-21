@@ -4,6 +4,7 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using LLama;
+using LLama.Abstractions;
 using LLama.Common;
 using LLama.Native;
 using LLama.Sampling;
@@ -120,7 +121,6 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         var loaded = GetLoadedOrThrow();
 
         EnsureContextAllocatable(loaded, CurrentModelId);
-        var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
         var history = BuildChatHistory(systemPrompt, messages);
         var prompt = ApplyTemplate(loaded.Weights, history);
@@ -136,22 +136,143 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             SamplingPipeline = plainPipeline,
         };
 
-        var sb = new StringBuilder();
-        var completionTokens = 0;
-        await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+        // Item #3 — KV cache reuse when the caller supplies a ThreadId.
+        // Text-only, non-tool, non-streaming path. Tool paths below use
+        // the same lease helper; multimodal is excluded because
+        // MtmdWeights staging + the per-model mmLock already imply a
+        // dedicated InteractiveExecutor lifecycle.
+        var lease = await AcquireExecutorLeaseAsync(
+            loaded, completionParameters?.ThreadId, prompt, ct);
+        try
         {
-            sb.Append(token);
-            completionTokens++;
+            var sb = new StringBuilder();
+            var completionTokens = 0;
+            await foreach (var token in lease.Executor.InferAsync(lease.FeedText, inferParams, ct))
+            {
+                sb.Append(token);
+                completionTokens++;
+            }
+
+            var raw = sb.ToString();
+            var content = StripStopTokens(raw, antiPrompts).TrimEnd();
+            LogResponse(content);
+            lease.Commit(raw);
+            return new ChatCompletionResult
+            {
+                Content = content,
+                Usage = BuildUsage(loaded, prompt, completionTokens),
+                FinishReason = InferLocalFinishReason(completionTokens, maxCompletionTokens, hasToolCalls: false),
+            };
+        }
+        catch
+        {
+            lease.Invalidate();
+            throw;
+        }
+        finally
+        {
+            lease.Release();
+        }
+    }
+
+    // ── Session lease (item #3 — KV cache reuse) ──────────────────
+
+    /// <summary>
+    /// Wraps the executor used for a single inference turn. When
+    /// <paramref name="threadId"/> is null this returns a one-shot
+    /// <see cref="StatelessExecutor"/> and <see cref="FeedText"/> equal to
+    /// the full prompt. When a thread ID is supplied the lease wraps a
+    /// cached <see cref="InteractiveExecutor"/>; on prefix-match only the
+    /// suffix is fed, otherwise the session is rebuilt.
+    /// </summary>
+    private readonly struct ExecutorLease
+    {
+        public ILLamaExecutor Executor { get; }
+        public string FeedText { get; }
+        private readonly string _fullPrompt;
+        private readonly LocalInferenceProcessManager.CachedSession? _session;
+        private readonly LocalInferenceProcessManager? _manager;
+        private readonly Guid _modelId;
+        private readonly Guid _threadId;
+
+        internal ExecutorLease(ILLamaExecutor executor, string feedText, string fullPrompt)
+        {
+            Executor = executor;
+            FeedText = feedText;
+            _fullPrompt = fullPrompt;
+            _session = null;
+            _manager = null;
+            _modelId = Guid.Empty;
+            _threadId = Guid.Empty;
         }
 
-        var content = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
-        LogResponse(content);
-        return new ChatCompletionResult
+        internal ExecutorLease(
+            LocalInferenceProcessManager.CachedSession session,
+            string feedText,
+            string fullPrompt,
+            LocalInferenceProcessManager manager,
+            Guid modelId,
+            Guid threadId)
         {
-            Content = content,
-            Usage = BuildUsage(loaded, prompt, completionTokens),
-            FinishReason = InferLocalFinishReason(completionTokens, maxCompletionTokens, hasToolCalls: false),
-        };
+            Executor = session.Executor;
+            FeedText = feedText;
+            _fullPrompt = fullPrompt;
+            _session = session;
+            _manager = manager;
+            _modelId = modelId;
+            _threadId = threadId;
+        }
+
+        public void Commit(string rawOutput)
+        {
+            if (_session is null) return;
+            _session.AccumulatedPrompt = _fullPrompt + rawOutput;
+            _session.LastUsedUtc = DateTime.UtcNow;
+        }
+
+        public void Invalidate()
+        {
+            if (_manager is null) return;
+            _manager.InvalidateSession(_modelId, _threadId);
+        }
+
+        public void Release()
+        {
+            if (_manager is null || _session is null) return;
+            _manager.ReleaseSession(_session);
+        }
+    }
+
+    private async Task<ExecutorLease> AcquireExecutorLeaseAsync(
+        LocalInferenceProcessManager.LoadedModel loaded,
+        Guid? threadId,
+        string prompt,
+        CancellationToken ct)
+    {
+        if (threadId is not Guid tid || tid == Guid.Empty)
+        {
+            var exec = new StatelessExecutor(loaded.Weights, loaded.Params);
+            return new ExecutorLease(exec, prompt, prompt);
+        }
+
+        var session = await _modelManager.AcquireSessionAsync(CurrentModelId, tid, loaded, ct);
+        string feed;
+        if (!string.IsNullOrEmpty(session.AccumulatedPrompt)
+            && prompt.StartsWith(session.AccumulatedPrompt, StringComparison.Ordinal))
+        {
+            feed = prompt[session.AccumulatedPrompt.Length..];
+        }
+        else
+        {
+            // Divergence: drop and rebuild. Release the gate before
+            // disposing so Invalidate doesn't wait on ourselves.
+            _modelManager.ReleaseSession(session);
+            _modelManager.InvalidateSession(CurrentModelId, tid);
+            session = await _modelManager.AcquireSessionAsync(CurrentModelId, tid, loaded, ct);
+            feed = prompt;
+        }
+
+        return new ExecutorLease(session, feed, prompt, _modelManager, CurrentModelId, tid);
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
@@ -173,9 +294,13 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         // `using (loaded.CreateContext()) {}` paid full context
         // allocation per request even when a recent probe was on file.
         EnsureContextAllocatable(loaded, CurrentModelId);
-        var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
-        var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
+        var strictTools = completionParameters?.StrictTools ?? true;
+        var allowRefusal = ResolveAllowRefusal();
+
+        var history = LlamaSharpToolPromptBuilder.Build(
+            systemPrompt, messages, tools,
+            imageCount: 0, strictTools: strictTools, allowRefusal: allowRefusal);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights, completionParameters?.Stop);
 
@@ -183,7 +308,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
         using var pipeline = BuildSamplingPipeline(
             completionParameters,
-            new Grammar(ResolveToolGrammar(completionParameters), "root"));
+            new Grammar(ResolveToolGrammar(completionParameters, tools), "root"));
 
         var inferParams = new InferenceParams
         {
@@ -192,25 +317,46 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             SamplingPipeline = pipeline,
         };
 
-        var sb = new StringBuilder();
-        var completionTokens = 0;
-        await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+        // Item #3 — reuse cached session when the caller supplies a
+        // ThreadId. Tool-calling multi-turn is the primary use case.
+        var lease = await AcquireExecutorLeaseAsync(
+            loaded, completionParameters?.ThreadId, prompt, ct);
+        try
         {
-            sb.Append(token);
-            completionTokens++;
+            var sb = new StringBuilder();
+            var completionTokens = 0;
+            await foreach (var token in lease.Executor.InferAsync(lease.FeedText, inferParams, ct))
+            {
+                sb.Append(token);
+                completionTokens++;
+            }
+
+            var rawOutput = sb.ToString();
+            var raw = StripStopTokens(rawOutput, antiPrompts).TrimEnd();
+            LogResponse(raw);
+            lease.Commit(rawOutput);
+
+            var envelope = ParseEnvelope(raw);
+            return new ChatCompletionResult
+            {
+                Content = envelope.Content,
+                Refusal = envelope.Refusal,
+                ToolCalls = envelope.ToolCalls,
+                Usage = BuildUsage(loaded, prompt, completionTokens),
+                FinishReason = envelope.Refusal is not null
+                    ? FinishReason.ContentFilter
+                    : InferLocalFinishReason(completionTokens, maxCompletionTokens, envelope.ToolCalls.Count > 0),
+            };
         }
-
-        var raw = StripStopTokens(sb.ToString(), antiPrompts).TrimEnd();
-        LogResponse(raw);
-
-        var envelope = ParseEnvelope(raw);
-        return new ChatCompletionResult
+        catch
         {
-            Content = envelope.Content,
-            ToolCalls = envelope.ToolCalls,
-            Usage = BuildUsage(loaded, prompt, completionTokens),
-            FinishReason = InferLocalFinishReason(completionTokens, maxCompletionTokens, envelope.ToolCalls.Count > 0),
-        };
+            lease.Invalidate();
+            throw;
+        }
+        finally
+        {
+            lease.Release();
+        }
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
@@ -235,9 +381,13 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         }
 
         EnsureContextAllocatable(loaded, CurrentModelId);
-        var executor = new StatelessExecutor(loaded.Weights, loaded.Params);
 
-        var history = LlamaSharpToolPromptBuilder.Build(systemPrompt, messages, tools);
+        var strictTools = completionParameters?.StrictTools ?? true;
+        var allowRefusal = ResolveAllowRefusal();
+
+        var history = LlamaSharpToolPromptBuilder.Build(
+            systemPrompt, messages, tools,
+            imageCount: 0, strictTools: strictTools, allowRefusal: allowRefusal);
         var prompt = ApplyTemplate(loaded.Weights, history);
         var antiPrompts = BuildAntiPrompts(loaded.Weights, completionParameters?.Stop);
 
@@ -245,7 +395,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
         using var pipeline = BuildSamplingPipeline(
             completionParameters,
-            new Grammar(ResolveToolGrammar(completionParameters), "root"));
+            new Grammar(ResolveToolGrammar(completionParameters, tools), "root"));
 
         var inferParams = new InferenceParams
         {
@@ -253,6 +403,12 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             AntiPrompts = antiPrompts,
             SamplingPipeline = pipeline,
         };
+
+        // Item #3 — session reuse for streaming tool calls. Tool
+        // multi-turn is the primary hot path.
+        var lease = await AcquireExecutorLeaseAsync(
+            loaded, completionParameters?.ThreadId, prompt, ct);
+        var committed = false;
 
         // Holdback buffer length
         // prefix needed to detect "mode":"tool_calls" in the envelope.
@@ -275,7 +431,9 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         var walker = new EnvelopeStreamWalker();
 
         var completionTokens = 0;
-        await foreach (var token in executor.InferAsync(prompt, inferParams, ct))
+        try
+        {
+        await foreach (var token in lease.Executor.InferAsync(lease.FeedText, inferParams, ct))
         {
             fullBuffer.Append(token);
             completionTokens++;
@@ -369,13 +527,27 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         var raw = StripStopTokens(fullBuffer.ToString(), antiPrompts).TrimEnd();
         LogResponse(raw);
 
+        lease.Commit(fullBuffer.ToString());
+        committed = true;
+
         var result = ParseEnvelope(raw);
         yield return ChatStreamChunk.Final(new ChatCompletionResult
         {
             Content = result.Content,
+            Refusal = result.Refusal,
             ToolCalls = result.ToolCalls,
             Usage = BuildUsage(loaded, prompt, completionTokens),
+            FinishReason = result.Refusal is not null
+                ? FinishReason.ContentFilter
+                : InferLocalFinishReason(completionTokens, maxCompletionTokens, result.ToolCalls.Count > 0),
         });
+        }
+        finally
+        {
+            if (!committed)
+                lease.Invalidate();
+            lease.Release();
+        }
     }
 
     // ── Multimodal inference (MTMD / LLaVA-style) ─────────────────
@@ -432,8 +604,12 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
                 using var ctx = loaded.CreateContext();
                 var executor = new InteractiveExecutor(ctx, clipModel, null);
 
+                var strictTools = completionParameters?.StrictTools ?? true;
+                var allowRefusal = ResolveAllowRefusal();
+
                 var history = LlamaSharpToolPromptBuilder.Build(
-                    systemPrompt, messages, tools, imagesStaged);
+                    systemPrompt, messages, tools, imagesStaged,
+                    strictTools: strictTools, allowRefusal: allowRefusal);
                 var prompt = ApplyTemplate(loaded.Weights, history);
                 var antiPrompts = BuildAntiPrompts(loaded.Weights, completionParameters?.Stop);
 
@@ -441,7 +617,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
                 using var pipeline = BuildSamplingPipeline(
                     completionParameters,
-                    new Grammar(ResolveToolGrammar(completionParameters), "root"));
+                    new Grammar(ResolveToolGrammar(completionParameters, tools), "root"));
 
                 var inferParams = new InferenceParams
                 {
@@ -465,9 +641,12 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
                 return new ChatCompletionResult
                 {
                     Content = envelope.Content,
+                    Refusal = envelope.Refusal,
                     ToolCalls = envelope.ToolCalls,
                     Usage = BuildUsage(loaded, prompt, completionTokens),
-                    FinishReason = InferLocalFinishReason(completionTokens, maxCompletionTokens, envelope.ToolCalls.Count > 0),
+                    FinishReason = envelope.Refusal is not null
+                        ? FinishReason.ContentFilter
+                        : InferLocalFinishReason(completionTokens, maxCompletionTokens, envelope.ToolCalls.Count > 0),
                 };
             }
             finally
@@ -796,15 +975,38 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
     /// <summary>
     /// Compiles the tool-envelope GBNF grammar for this call, specialised
-    /// by <see cref="CompletionParameters.ToolChoice"/> and
-    /// <see cref="CompletionParameters.ParallelToolCalls"/>. Defaults to
-    /// the cached auto/parallel grammar when no policy is specified.
+    /// by <see cref="CompletionParameters.ToolChoice"/>,
+    /// <see cref="CompletionParameters.ParallelToolCalls"/>, and
+    /// <see cref="CompletionParameters.StrictTools"/>. When strict mode
+    /// is on and <paramref name="tools"/> is non-empty, the grammar
+    /// enforces per-tool argument schemas derived from
+    /// <see cref="ChatToolDefinition.ParametersSchema"/>.
     /// </summary>
-    private static string ResolveToolGrammar(CompletionParameters? p)
+    private static string ResolveToolGrammar(
+        CompletionParameters? p,
+        IReadOnlyList<ChatToolDefinition> tools)
     {
         var choice = p?.ToolChoice ?? ToolChoice.Auto;
         var parallel = p?.ParallelToolCalls ?? true;
-        return LlamaSharpToolGrammar.Build(choice, parallel);
+        var strict = p?.StrictTools ?? true;
+        var allowRefusal = ResolveAllowRefusal();
+        return LlamaSharpToolGrammar.Build(choice, parallel, tools, strict, allowRefusal);
+    }
+
+    /// <summary>
+    /// Resolves whether the envelope grammar should include the third
+    /// <c>"refusal"</c> mode branch. Controlled by the
+    /// <c>Local__AllowRefusal</c> environment variable (default off).
+    /// When on, the parser routes <c>"refusal"</c> envelopes to
+    /// <see cref="ChatCompletionResult.Refusal"/> with
+    /// <see cref="FinishReason.ContentFilter"/>.
+    /// </summary>
+    private static bool ResolveAllowRefusal()
+    {
+        var raw = Environment.GetEnvironmentVariable("Local__AllowRefusal");
+        return !string.IsNullOrWhiteSpace(raw)
+            && (bool.TryParse(raw, out var b) && b
+                || string.Equals(raw, "1", StringComparison.Ordinal));
     }
 
     // ── Sampling pipeline ─────────────────────────────────────────
@@ -953,6 +1155,15 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             var text = root.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String
                 ? textEl.GetString() ?? string.Empty
                 : string.Empty;
+
+            if (mode == "refusal")
+            {
+                // Refusal mode is semantically mutually exclusive with
+                // Content/ToolCalls — text carries the model-provided
+                // decline reason, which surfaces through Refusal so that
+                // ChatService can map finish_reason to ContentFilter.
+                return new ChatCompletionResult { Refusal = text };
+            }
 
             if (mode != "tool_calls")
                 return new ChatCompletionResult { Content = text };

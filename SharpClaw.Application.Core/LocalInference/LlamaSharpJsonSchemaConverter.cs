@@ -88,7 +88,7 @@ internal static class LlamaSharpJsonSchemaConverter
             return false;
         }
 
-        var walker = new SchemaWalker(schema);
+        var walker = new SchemaWalker(schema, prefix: string.Empty);
         var ok = walker.TryBuild(out var built, out var unsupportedList);
         var unsupportedArr = unsupportedList.ToArray();
 
@@ -101,6 +101,50 @@ internal static class LlamaSharpJsonSchemaConverter
         if (!ok) return false;
 
         grammar = built;
+        return true;
+    }
+
+    /// <summary>
+    /// Attempts to convert <paramref name="schema"/> into a GBNF
+    /// <em>fragment</em> whose rules are prefixed with
+    /// <paramref name="prefix"/> so the result can be spliced into a
+    /// larger composite grammar (per-tool strict-mode arguments).
+    /// <para>
+    /// The returned <paramref name="rulesBody"/> contains only the rule
+    /// lines produced by this schema — no <c>root ::=</c> line and no
+    /// shared JSON primitives block. The caller is responsible for
+    /// emitting the primitives fragment (<see cref="LlamaSharpJsonGrammars.BuildJsonValueGrammarFragment"/>)
+    /// exactly once for the combined grammar, and for wiring
+    /// <paramref name="topRuleName"/> into its own root.
+    /// </para>
+    /// </summary>
+    public static bool TryConvertFragment(
+        JsonElement schema,
+        string prefix,
+        out string topRuleName,
+        out string rulesBody,
+        out IReadOnlyList<string> unsupportedKeywords)
+    {
+        topRuleName = string.Empty;
+        rulesBody = string.Empty;
+        unsupportedKeywords = Array.Empty<string>();
+
+        if (schema.ValueKind != JsonValueKind.Object)
+        {
+            unsupportedKeywords = new[] { "/ (non-object schema root)" };
+            return false;
+        }
+
+        var walker = new SchemaWalker(schema, prefix ?? string.Empty);
+        if (!walker.TryBuildFragment(out var top, out var body, out var unsupportedList))
+        {
+            unsupportedKeywords = unsupportedList.ToArray();
+            return false;
+        }
+
+        topRuleName = top;
+        rulesBody = body;
+        unsupportedKeywords = unsupportedList.ToArray();
         return true;
     }
 
@@ -133,6 +177,7 @@ internal static class LlamaSharpJsonSchemaConverter
     private sealed class SchemaWalker
     {
         private readonly JsonElement _root;
+        private readonly string _prefix;
         private readonly Dictionary<string, JsonElement> _defs = new(StringComparer.Ordinal);
         private readonly List<(string Name, string Body)> _rules = new();
         private readonly Dictionary<string, string> _nameByContentHash = new(StringComparer.Ordinal);
@@ -143,9 +188,10 @@ internal static class LlamaSharpJsonSchemaConverter
         private bool _ruleCountExceeded;
         private bool _needsJsonValueFragment;
 
-        public SchemaWalker(JsonElement root)
+        public SchemaWalker(JsonElement root, string prefix = "")
         {
             _root = root;
+            _prefix = prefix ?? string.Empty;
             if (root.TryGetProperty("$defs", out var d) && d.ValueKind == JsonValueKind.Object)
                 foreach (var p in d.EnumerateObject()) _defs[p.Name] = p.Value;
             if (root.TryGetProperty("definitions", out var d2) && d2.ValueKind == JsonValueKind.Object)
@@ -180,6 +226,39 @@ internal static class LlamaSharpJsonSchemaConverter
                 sb.AppendLine(LlamaSharpJsonGrammars.BuildJsonValueGrammarFragment());
 
                 grammar = sb.ToString();
+                return true;
+            }
+            catch (ConversionAbortedException)
+            {
+                return false;
+            }
+        }
+
+        /// <summary>
+        /// Builds the rule body without emitting a <c>root</c> line or
+        /// the shared primitives fragment. Used when the result will
+        /// be spliced into a composite grammar whose caller already
+        /// owns a single <c>root</c> and appends the primitives once.
+        /// </summary>
+        public bool TryBuildFragment(
+            out string topRuleName,
+            out string rulesBody,
+            out IReadOnlyList<string> unsupported)
+        {
+            topRuleName = string.Empty;
+            rulesBody = string.Empty;
+            unsupported = _unsupported;
+            try
+            {
+                var topRule = Visit(_root, "/", "top");
+                if (_ruleCountExceeded || topRule is null) return false;
+
+                var sb = new StringBuilder();
+                foreach (var (name, body) in _rules)
+                    sb.AppendLine($"{name} ::= {body}");
+
+                topRuleName = topRule;
+                rulesBody = sb.ToString();
                 return true;
             }
             catch (ConversionAbortedException)
@@ -774,6 +853,8 @@ internal static class LlamaSharpJsonSchemaConverter
         {
             var candidate = Sanitize(hint);
             if (string.IsNullOrEmpty(candidate)) candidate = "rule";
+            if (!string.IsNullOrEmpty(_prefix))
+                candidate = _prefix + candidate;
             if (!_reservedNames.Contains(candidate) && !NameInUse(candidate))
             {
                 _reservedNames.Add(candidate);

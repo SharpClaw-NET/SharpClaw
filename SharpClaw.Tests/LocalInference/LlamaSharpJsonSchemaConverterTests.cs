@@ -197,9 +197,23 @@ public class LlamaSharpJsonSchemaConverterTests
     }
 
     [Test]
-    public void StringType_With_Pattern_Tracks_Unsupported()
+    public void StringType_With_Simple_Pattern_Is_Converted()
     {
         var schema = Parse("""{ "type": "string", "pattern": "^foo$" }""");
+
+        var ok = LlamaSharpJsonSchemaConverter.TryConvert(
+            schema, out var gbnf, out var unsupported);
+
+        ok.Should().BeTrue();
+        unsupported.Should().BeEmpty();
+        gbnf.Should().Contain("\"f\" \"o\" \"o\"");
+    }
+
+    [Test]
+    public void StringType_With_Unsupported_Pattern_Tracks_Unsupported()
+    {
+        // Backreferences are outside the supported regex subset.
+        var schema = Parse("""{ "type": "string", "pattern": "^(a)\\1$" }""");
 
         var ok = LlamaSharpJsonSchemaConverter.TryConvert(
             schema, out _, out var unsupported);

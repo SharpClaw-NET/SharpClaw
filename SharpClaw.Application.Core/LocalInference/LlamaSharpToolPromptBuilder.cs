@@ -36,15 +36,28 @@ internal static class LlamaSharpToolPromptBuilder
     /// When greater than zero, a short notice is appended to the system
     /// prompt so the model is aware of the attached visual inputs.
     /// </param>
+    /// <param name="strictTools">
+    /// When <see langword="true"/>, per-tool argument schemas are
+    /// enforced by the composite GBNF grammar and the prose parameter
+    /// bullets are omitted — the grammar is ground truth and the
+    /// bullets would only waste prompt tokens.
+    /// </param>
+    /// <param name="allowRefusal">
+    /// When <see langword="true"/>, the system prompt describes the
+    /// third <c>"refusal"</c> envelope shape so the model is aware it
+    /// can decline cleanly instead of emitting plain-text refusals.
+    /// </param>
     public static ChatHistory Build(
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
-        int imageCount = 0)
+        int imageCount = 0,
+        bool strictTools = false,
+        bool allowRefusal = false)
     {
         var history = new ChatHistory();
 
-        var systemContent = BuildSystemPrompt(systemPrompt, tools, imageCount);
+        var systemContent = BuildSystemPrompt(systemPrompt, tools, imageCount, strictTools, allowRefusal);
         history.AddMessage(AuthorRole.System, systemContent);
 
         foreach (var msg in messages)
@@ -75,7 +88,11 @@ internal static class LlamaSharpToolPromptBuilder
     // ── System prompt ─────────────────────────────────────────────
 
     private static string BuildSystemPrompt(
-        string? systemPrompt, IReadOnlyList<ChatToolDefinition> tools, int imageCount)
+        string? systemPrompt,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int imageCount,
+        bool strictTools,
+        bool allowRefusal)
     {
         var sb = new StringBuilder();
 
@@ -103,11 +120,20 @@ internal static class LlamaSharpToolPromptBuilder
         sb.AppendLine("When calling one or more tools:");
         sb.AppendLine("""{"mode":"tool_calls","text":"","calls":[{"id":"call_<unique>","name":"<tool_name>","args":{<arguments>}}]}""");
         sb.AppendLine();
+        if (allowRefusal)
+        {
+            sb.AppendLine("When declining to respond (policy violation, unsafe or out-of-scope request):");
+            sb.AppendLine("""{"mode":"refusal","text":"<short reason>","calls":[]}""");
+            sb.AppendLine();
+        }
         sb.AppendLine("Rules:");
-        sb.AppendLine("- Every response must be valid JSON matching one of the two shapes above.");
-        sb.AppendLine("- `mode` is always either \"message\" or \"tool_calls\".");
+        sb.AppendLine("- Every response must be valid JSON matching one of the shapes above.");
+        if (allowRefusal)
+            sb.AppendLine("- `mode` is one of: \"message\", \"tool_calls\", \"refusal\".");
+        else
+            sb.AppendLine("- `mode` is always either \"message\" or \"tool_calls\".");
         sb.AppendLine("- `text` is always a string (empty string when mode is \"tool_calls\").");
-        sb.AppendLine("- `calls` is always an array (empty when mode is \"message\").");
+        sb.AppendLine("- `calls` is always an array (empty when mode is \"message\" or \"refusal\").");
         sb.AppendLine("- `args` is always a JSON object, never a JSON-encoded string.");
         sb.AppendLine("- Generate a unique `id` for each call (e.g. call_abc123).");
         sb.AppendLine("- Do not include any text outside the JSON object.");
@@ -124,7 +150,12 @@ internal static class LlamaSharpToolPromptBuilder
                 sb.AppendLine(tool.Name);
                 sb.AppendLine(tool.Description);
 
-                if (tool.ParametersSchema.ValueKind == JsonValueKind.Object
+                // In strict mode the composite GBNF grammar enforces each
+                // tool's argument schema exactly — listing parameter
+                // bullets only burns prompt tokens. Reference:
+                // docs/internal/llamasharp-implementable-gaps.md §1.
+                if (!strictTools
+                    && tool.ParametersSchema.ValueKind == JsonValueKind.Object
                     && tool.ParametersSchema.TryGetProperty("properties", out var props)
                     && props.ValueKind == JsonValueKind.Object)
                 {

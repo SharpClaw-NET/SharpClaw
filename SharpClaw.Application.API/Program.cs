@@ -229,6 +229,8 @@ try
         processManager.IdleCooldown = TimeSpan.FromMinutes(cooldownMin);
     if (bool.TryParse(builder.Configuration["Local:KeepLoaded"], out var keepLoaded))
         processManager.KeepLoaded = keepLoaded;
+    if (int.TryParse(builder.Configuration["Local:MaxCachedSessions"], out var maxCachedSessions) && maxCachedSessions > 0)
+        processManager.MaxCachedSessions = maxCachedSessions;
     builder.Services.AddSingleton(processManager);
     builder.Services.AddSingleton(sp => new LocalInferenceApiClient(sp.GetRequiredService<LocalInferenceProcessManager>()));
     builder.Services.AddSingleton<IProviderApiClient>(sp => sp.GetRequiredService<LocalInferenceApiClient>());
