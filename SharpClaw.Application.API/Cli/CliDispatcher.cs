@@ -392,7 +392,7 @@ public static class CliDispatcher
                 "model delete <id>",
                 "",
                 "Local models:",
-                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>]",
+                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp|Whisper>]",
                 "model download list <url>",
                 "model load <id> [--gpu-layers <n>] [--ctx <size>]  Pin model (keep loaded)",
                 "model unload <id>                                  Unpin model",
@@ -480,16 +480,17 @@ public static class CliDispatcher
             return Results.Ok(files);
         }
 
-        // model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>]
+        // model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp|Whisper>]
         if (args.Length < 3)
             return UsageResult(
-                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>]",
+                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp|Whisper>]",
                 "model download list <url>");
 
         var url = args[2];
         string? name = null;
         string? quant = null;
         int? gpuLayers = null;
+        ProviderType? providerType = null;
 
         for (var i = 3; i < args.Length; i++)
         {
@@ -501,6 +502,14 @@ public static class CliDispatcher
                     quant = args[++i]; break;
                 case "--gpu-layers" when i + 1 < args.Length && int.TryParse(args[i + 1], out var gl):
                     gpuLayers = gl; i++; break;
+                case "--provider" when i + 1 < args.Length:
+                    var provStr = args[++i];
+                    if (!Enum.TryParse<ProviderType>(provStr, ignoreCase: true, out var pt)
+                        || pt is not (ProviderType.LlamaSharp or ProviderType.Whisper))
+                        return Results.BadRequest(
+                            $"Unknown provider '{provStr}'. Supported values: LlamaSharp, Whisper.");
+                    providerType = pt;
+                    break;
             }
         }
 
@@ -511,11 +520,21 @@ public static class CliDispatcher
             Console.Write($"\rDownloading... {pct}%");
         });
 
-        var result = await svc.DownloadAndRegisterAsync(
-            new DownloadModelRequest(url, name, quant, gpuLayers),
-            progress);
-
         Console.WriteLine();
+
+        if (providerType is null)
+        {
+            var both = await svc.DownloadAndRegisterBothAsync(
+                new DownloadModelRequest(url, name, quant, gpuLayers), progress);
+            if (both.LlamaSharp is { } l) Console.WriteLine($"LlamaSharp: {l.Name} ({l.Id})");
+            else                          Console.WriteLine("LlamaSharp: skipped");
+            if (both.Whisper    is { } w) Console.WriteLine($"Whisper:    {w.Name} ({w.Id})");
+            else                          Console.WriteLine("Whisper:    skipped");
+            return Results.Ok(both);
+        }
+
+        var result = await svc.DownloadAndRegisterAsync(
+            new DownloadModelRequest(url, name, quant, gpuLayers, providerType), progress);
         return Results.Ok(result);
     }
 
@@ -3084,8 +3103,10 @@ public static class CliDispatcher
               model add <name> <providerId> [--cap Chat,Transcription,...]
                 <name> must be the exact provider model ID (e.g. gpt-4o).
               Local models:
-              model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>]
+              model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp|Whisper>]
               model download list <url>          List available GGUF files at a URL
+                Omit --provider to register with all local providers (LlamaSharp + Whisper).
+                Specify --provider to target one. --gpu-layers has no effect for Whisper.
               model load <id> [--gpu-layers <n>] [--ctx <size>]    Pin (keep loaded)
               model unload <id>                                    Unpin
               model local list                   List downloaded local models

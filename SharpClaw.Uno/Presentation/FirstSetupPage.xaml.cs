@@ -25,6 +25,9 @@ public sealed partial class FirstSetupPage : Page
     private bool _localOnly;
     private bool _switchToCloud;
     private List<ProviderDto>? _providers;
+    // When non-null, OnDownloadModelClick includes providerType in the POST body.
+    // Null = LlamaSharp (default). Set to "Whisper" for the opt-in transcription step.
+    private string? _localDownloadProviderType;
 
     private PermissionEditorBuilder? _permEditor;
 
@@ -494,6 +497,38 @@ public sealed partial class FirstSetupPage : Page
             }
         }
 
+        // ── Step 7 (opt-in): Whisper transcription model ──
+        var hasWhisper = models?.Any(m =>
+            string.Equals(m.ProviderName, "Whisper (Local)", StringComparison.OrdinalIgnoreCase)) == true;
+
+        if (!hasWhisper)
+        {
+            AppendStep("Optional: download a Whisper model for local transcription.");
+            AppendStep("Paste a HuggingFace URL (e.g. https://huggingface.co/ggerganov/whisper.cpp) " +
+                       "and select a file, or skip to use cloud transcription only.");
+
+            _localDownloadProviderType = "Whisper";
+            if (SwitchToCloudBtn is { } btn)
+                btn.Content = "Skip (use cloud transcription only)";
+
+            LocalModelDownloadPanel.Visibility = Visibility.Visible;
+            _localModelTcs = new TaskCompletionSource<bool>();
+            var whisperDownloaded = await _localModelTcs.Task;
+            LocalModelDownloadPanel.Visibility = Visibility.Collapsed;
+
+            _localDownloadProviderType = null;
+            if (SwitchToCloudBtn is { } btn2)
+                btn2.Content = "Switch to cloud provider";
+
+            ReplaceLastStep(whisperDownloaded
+                ? "Whisper model downloaded."
+                : "Whisper step skipped — cloud transcription will be used.", done: true);
+        }
+        else
+        {
+            AppendStep("Whisper model already registered.", done: true);
+        }
+
         // ── Done ──
         AppendStep("Completed first-time setup!");
         await Task.Delay(1000);
@@ -696,7 +731,9 @@ public sealed partial class FirstSetupPage : Page
 
         try
         {
-            var body = JsonSerializer.Serialize(new { url = downloadUrl }, Json);
+            var body = _localDownloadProviderType is null
+                ? JsonSerializer.Serialize(new { url = downloadUrl }, Json)
+                : JsonSerializer.Serialize(new { url = downloadUrl, providerType = _localDownloadProviderType }, Json);
             var resp = await Api.PostAsync("/models/local/download",
                 new StringContent(body, Encoding.UTF8, "application/json"));
 

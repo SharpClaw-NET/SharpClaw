@@ -16,19 +16,80 @@ public sealed class LocalModelService(
     LocalInferenceProcessManager processManager)
 {
     /// <summary>
-    /// Downloads a model from a URL (HuggingFace or direct) and registers
-    /// it as a Local provider + model in the database.
+    /// Downloads a model and registers it under an explicit provider.
+    /// <paramref name="request"/>.<c>ProviderType</c> must be non-null;
+    /// call <see cref="DownloadAndRegisterBothAsync"/> when it is omitted.
     /// </summary>
     public async Task<ModelResponse> DownloadAndRegisterAsync(
         DownloadModelRequest request,
         IProgress<double>? progress = null,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(request.ProviderType,
+            $"{nameof(request)}.{nameof(request.ProviderType)}");
+
+        var (provider, defaultCapability) = request.ProviderType switch
+        {
+            ProviderType.LlamaSharp => (await EnsureLocalProviderAsync(ct),   ModelCapability.Chat),
+            ProviderType.Whisper    => (await EnsureWhisperProviderAsync(ct), ModelCapability.Transcription),
+            _ => throw new ArgumentException(
+                $"Provider type '{request.ProviderType}' does not support local file download. " +
+                "Only LlamaSharp and Whisper are supported.", nameof(request))
+        };
+
+        return await DownloadAndRegisterCoreAsync(request, provider, defaultCapability, progress, ct);
+    }
+
+    /// <summary>
+    /// Downloads a model once and registers it under all compatible local providers
+    /// (LlamaSharp + Whisper). The GGUF architecture header is probed after download
+    /// to skip providers that are clearly incompatible; a null member in the response
+    /// means that provider was skipped, not that an error occurred.
+    /// </summary>
+    public async Task<BothModelsResponse> DownloadAndRegisterBothAsync(
+        DownloadModelRequest request,
+        IProgress<double>? progress = null,
+        CancellationToken ct = default)
+    {
+        var downloaded      = await DownloadFileAsync(request, progress, ct);
+        var modelName       = request.Name ?? Path.GetFileNameWithoutExtension(downloaded.Target.Filename);
+        var architecture    = await GgufHeaderReader.ReadArchitectureAsync(downloaded.DestPath, ct);
+        var targets         = GgufArchitectureClassifier.Classify(architecture);
+
+        var llamaProvider   = targets.LlamaSharp ? await EnsureLocalProviderAsync(ct)   : null;
+        var whisperProvider = targets.Whisper    ? await EnsureWhisperProviderAsync(ct) : null;
+
+        var llamaResponse   = llamaProvider   is not null
+            ? await RegisterModelAsync(downloaded, modelName, llamaProvider,   ModelCapability.Chat,          ct)
+            : null;
+        var whisperResponse = whisperProvider is not null
+            ? await RegisterModelAsync(downloaded, modelName, whisperProvider, ModelCapability.Transcription, ct)
+            : null;
+
+        return new BothModelsResponse(llamaResponse, whisperResponse);
+    }
+
+    private async Task<ModelResponse> DownloadAndRegisterCoreAsync(
+        DownloadModelRequest request,
+        ProviderDB provider,
+        ModelCapability defaultCapability,
+        IProgress<double>? progress,
+        CancellationToken ct)
+    {
+        var downloaded = await DownloadFileAsync(request, progress, ct);
+        var modelName  = request.Name ?? Path.GetFileNameWithoutExtension(downloaded.Target.Filename);
+        return await RegisterModelAsync(downloaded, modelName, provider, defaultCapability, ct);
+    }
+
+    private async Task<DownloadedFile> DownloadFileAsync(
+        DownloadModelRequest request,
+        IProgress<double>? progress,
+        CancellationToken ct)
+    {
         var files = await urlResolver.ResolveAsync(request.Url, ct);
         if (files.Count == 0)
             throw new ArgumentException("No downloadable GGUF files found at the URL.");
 
-        // Pick matching quantization or first file
         var target = request.Quantization is not null
             ? files.FirstOrDefault(f =>
                 f.Quantization?.Equals(request.Quantization, StringComparison.OrdinalIgnoreCase) == true)
@@ -36,65 +97,65 @@ public sealed class LocalModelService(
             : files[0];
 
         var sourceFolder = ModelDownloadManager.ResolveSourceFolder(request.Url);
-        var destPath = downloadManager.GetModelPath(sourceFolder, target.Filename);
+        var destPath     = downloadManager.GetModelPath(sourceFolder, target.Filename);
 
         await downloadManager.DownloadAsync(target.DownloadUrl, destPath, progress, ct);
 
-        var localProvider = await EnsureLocalProviderAsync(ct);
+        return new DownloadedFile(destPath, request.Url, target);
+    }
 
-        var modelName = request.Name ?? Path.GetFileNameWithoutExtension(target.Filename);
-
-        // Avoid duplicate model names under the Local provider
+    private async Task<ModelResponse> RegisterModelAsync(
+        DownloadedFile file,
+        string modelName,
+        ProviderDB provider,
+        ModelCapability defaultCapability,
+        CancellationToken ct)
+    {
         var existingModel = await db.Models
-            .FirstOrDefaultAsync(m => m.Name == modelName && m.ProviderId == localProvider.Id, ct);
+            .FirstOrDefaultAsync(m => m.Name == modelName && m.ProviderId == provider.Id, ct);
 
         if (existingModel is not null)
         {
-            // Update the local file record if it already exists
             var existingFile = await db.LocalModelFiles
                 .FirstOrDefaultAsync(f => f.ModelId == existingModel.Id, ct);
 
             if (existingFile is not null)
             {
-                existingFile.FilePath = destPath;
-                existingFile.FileSizeBytes = new FileInfo(destPath).Length;
-                existingFile.Status = LocalModelStatus.Ready;
+                existingFile.FilePath        = file.DestPath;
+                existingFile.FileSizeBytes   = new FileInfo(file.DestPath).Length;
+                existingFile.Status          = LocalModelStatus.Ready;
                 existingFile.DownloadProgress = 1.0;
-                existingFile.Quantization = target.Quantization;
+                existingFile.Quantization    = file.Target.Quantization;
                 await db.SaveChangesAsync(ct);
             }
 
             return new ModelResponse(existingModel.Id, existingModel.Name,
-                localProvider.Id, "Local", existingModel.Capabilities);
+                provider.Id, provider.Name, existingModel.Capabilities);
         }
 
         var capabilities = ProviderService.InferCapabilities(modelName);
         if (capabilities == ModelCapability.None)
-            capabilities = ModelCapability.Chat;
+            capabilities = defaultCapability;
 
-        var model = new ModelDB
-        {
-            Name = modelName,
-            ProviderId = localProvider.Id,
-            Capabilities = capabilities
-        };
+        var model = new ModelDB { Name = modelName, ProviderId = provider.Id, Capabilities = capabilities };
         db.Models.Add(model);
 
-        var fileInfo = new FileInfo(destPath);
         db.LocalModelFiles.Add(new LocalModelFileDB
         {
-            ModelId = model.Id,
-            SourceUrl = request.Url,
-            FilePath = destPath,
-            FileSizeBytes = fileInfo.Length,
-            Quantization = target.Quantization,
-            Status = LocalModelStatus.Ready,
+            ModelId       = model.Id,
+            SourceUrl     = file.SourceUrl,
+            FilePath      = file.DestPath,
+            FileSizeBytes = new FileInfo(file.DestPath).Length,
+            Quantization  = file.Target.Quantization,
+            Status        = LocalModelStatus.Ready,
             DownloadProgress = 1.0
         });
 
         await db.SaveChangesAsync(ct);
-        return new ModelResponse(model.Id, model.Name, localProvider.Id, "Local", model.Capabilities);
+        return new ModelResponse(model.Id, model.Name, provider.Id, provider.Name, model.Capabilities);
     }
+
+    private sealed record DownloadedFile(string DestPath, string SourceUrl, ResolvedModelFile Target);
 
     /// <summary>
     /// Pins the model so it stays loaded between requests.
@@ -170,12 +231,14 @@ public sealed class LocalModelService(
     {
         var files = await db.LocalModelFiles
             .Include(f => f.Model)
+            .Include(f => f.Model.Provider)
             .ToListAsync(ct);
 
         return files.Select(f => new LocalModelFileResponse(
                 f.Id, f.ModelId, f.Model.Name, f.SourceUrl,
                 f.FilePath, f.FileSizeBytes, f.Quantization,
-                f.Status, f.DownloadProgress, processManager.IsLoaded(f.ModelId)))
+                f.Status, f.DownloadProgress, processManager.IsLoaded(f.ModelId),
+                f.Model.Provider.ProviderType))
             .ToList();
     }
 
@@ -192,8 +255,11 @@ public sealed class LocalModelService(
         // Unload from memory if loaded
         processManager.Unload(modelId);
 
-        // Delete from disk (validate path stays inside the models directory)
-        if (File.Exists(localFile.FilePath))
+        // Only delete the file when no other provider row still references this path
+        var sharedCount = await db.LocalModelFiles
+            .CountAsync(f => f.FilePath == localFile.FilePath && f.ModelId != modelId, ct);
+
+        if (sharedCount == 0 && File.Exists(localFile.FilePath))
         {
             PathGuard.EnsureContainedIn(localFile.FilePath, ModelDownloadManager.ModelsDirectoryPath);
             File.Delete(localFile.FilePath);
@@ -223,6 +289,23 @@ public sealed class LocalModelService(
             Name = "LlamaSharp (Local)",
             ProviderType = ProviderType.LlamaSharp,
             ApiEndpoint = "http://localhost:18080/v1"
+        };
+        db.Providers.Add(provider);
+        await db.SaveChangesAsync(ct);
+        return provider;
+    }
+
+    private async Task<ProviderDB> EnsureWhisperProviderAsync(CancellationToken ct)
+    {
+        var existing = await db.Providers
+            .FirstOrDefaultAsync(p => p.ProviderType == ProviderType.Whisper, ct);
+
+        if (existing is not null) return existing;
+
+        var provider = new ProviderDB
+        {
+            Name = "Whisper (Local)",
+            ProviderType = ProviderType.Whisper,
         };
         db.Providers.Add(provider);
         await db.SaveChangesAsync(ct);

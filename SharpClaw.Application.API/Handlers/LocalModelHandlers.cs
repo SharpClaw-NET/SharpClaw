@@ -10,7 +10,9 @@ public static class LocalModelHandlers
 {
     [MapPost("/download")]
     public static async Task<IResult> Download(DownloadModelRequest request, LocalModelService svc)
-        => Results.Ok(await svc.DownloadAndRegisterAsync(request));
+        => request.ProviderType is null
+            ? Results.Ok(await svc.DownloadAndRegisterBothAsync(request))
+            : Results.Ok(await svc.DownloadAndRegisterAsync(request));
 
     [MapGet("/download/list")]
     public static async Task<IResult> ListFiles(string url, LocalModelService svc)
