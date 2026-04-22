@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -15,7 +16,8 @@ namespace SharpClaw.Gateway.Infrastructure;
 public sealed class InternalApiClient(
     HttpClient httpClient,
     IOptions<InternalApiOptions> options,
-    IHttpContextAccessor httpContextAccessor)
+    IHttpContextAccessor httpContextAccessor,
+    SessionLogWriter sessionLogWriter)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -37,6 +39,7 @@ public sealed class InternalApiClient(
         {
             var body = await response.Content.ReadAsStringAsync(ct);
             Console.WriteLine($"[gateway] 401 on GET {path} — body: {body}");
+            sessionLogWriter.AppendDebug($"401 on GET {path} — body: {body}");
 
             if (TryInvalidateAndReAttach(request))
             {
@@ -190,6 +193,8 @@ public sealed class InternalApiClient(
             $"prefix={key[..Math.Min(6, key.Length)]}.., " +
             $"suffix=..{key[^Math.Min(4, key.Length)..]} " +
             $"GwToken={gatewayToken?.Length.ToString() ?? "none"}");
+        sessionLogWriter.AppendDebug(
+            $"{request.Method} {request.RequestUri} X-Api-Key: {key.Length} chars, GwToken={gatewayToken?.Length.ToString() ?? "none"}");
     }
 
     /// <summary>

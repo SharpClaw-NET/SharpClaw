@@ -3,12 +3,72 @@ using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Gateway.Security;
+using SharpClaw.Utils.Logging;
+using Serilog;
+using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
+
+await using var sessionLogs = new SessionLogWriter("gateway");
+
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+{
+    if (eventArgs.ExceptionObject is Exception exception)
+        sessionLogs.AppendException(exception, "Unhandled AppDomain exception in gateway.");
+    else
+        sessionLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+};
+
+TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+{
+    sessionLogs.AppendException(eventArgs.Exception, "Unobserved task exception in gateway.");
+};
+
+builder.Logging.ClearProviders();
+builder.Host.UseSerilog();
+builder.Services.AddSingleton(sessionLogs);
+builder.Services.AddSingleton<ILoggerProvider>(_ => new SessionLogLoggerProvider(sessionLogs));
+builder.Logging.AddProvider(new SessionLogLoggerProvider(sessionLogs));
 
 // ── Gateway .env (same pattern as Core / Interface) ──────────────
 builder.Configuration.AddGatewayEnvironment(
     isDevelopment: builder.Environment.IsDevelopment());
+
+var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(builder.Configuration);
+
+if (serilogOptions.Enabled)
+{
+    var loggerConfiguration = new LoggerConfiguration()
+        .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.MinimumLevel,
+            LogEventLevel.Information))
+        .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.MicrosoftMinimumLevel,
+            LogEventLevel.Warning))
+        .MinimumLevel.Override("Microsoft.AspNetCore", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.AspNetCoreMinimumLevel,
+            LogEventLevel.Warning))
+        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.EntityFrameworkCoreMinimumLevel,
+            LogEventLevel.Warning))
+        .Enrich.FromLogContext();
+
+    if (serilogOptions.ConsoleEnabled)
+        loggerConfiguration = loggerConfiguration.WriteTo.Console();
+
+    if (serilogOptions.FileEnabled)
+        loggerConfiguration = loggerConfiguration.WriteTo.File(
+            sessionLogs.LogFilePath,
+            rollingInterval: RollingInterval.Infinite);
+
+    Log.Logger = loggerConfiguration.CreateLogger();
+}
+else
+{
+    Log.Logger = new LoggerConfiguration()
+        .MinimumLevel.Fatal()
+        .CreateLogger();
+}
 
 // ── Internal API client ──────────────────────────────────────────
 builder.Services.Configure<InternalApiOptions>(
@@ -105,9 +165,15 @@ builder.Services.AddOpenApi(options =>
 // ── API key diagnostic (visible in Uno process output) ───────────
 var configuredApiKey = builder.Configuration[$"{InternalApiOptions.SectionName}:ApiKey"];
 if (!string.IsNullOrEmpty(configuredApiKey))
+{
     Console.WriteLine($"[gateway] API key resolved from config: {configuredApiKey.Length} chars, prefix={configuredApiKey[..Math.Min(6, configuredApiKey.Length)]}..");
+    sessionLogs.AppendDebug($"API key resolved from config: {configuredApiKey.Length} chars.");
+}
 else
+{
     Console.WriteLine("[gateway] ⚠ No API key found in configuration — will fall back to file read.");
+    sessionLogs.AppendDebug("No API key found in configuration; will fall back to file read.");
+}
 
 var app = builder.Build();
 
@@ -226,6 +292,9 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
+if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
+    app.UseSerilogRequestLogging();
+
 // 1. Endpoint gate — reject requests to disabled endpoint groups
 app.UseMiddleware<EndpointGateMiddleware>();
 
@@ -251,3 +320,5 @@ app.MapSlackWebhookProxy();
 app.MapTeamsWebhookProxy();
 
 app.Run();
+
+await Log.CloseAndFlushAsync();

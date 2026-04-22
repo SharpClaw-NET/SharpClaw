@@ -1,4 +1,5 @@
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Persistence;
@@ -49,29 +50,41 @@ public static class InfrastructureServiceExtensions
                 services.AddSingleton<JsonPersistenceHealthCheck>();
                 services.AddSingleton<EntityMigrationRegistry>();
 
-                services.AddDbContext<SharpClawDbContext>(options =>
-                    options.UseInMemoryDatabase("SharpClaw"));
+                services.AddDbContext<SharpClawDbContext>((sp, options) =>
+                {
+                    ConfigureLogging(sp, options);
+                    options.UseInMemoryDatabase("SharpClaw");
+                });
                 break;
 
             case StorageMode.Postgres:
                 RequireConnectionString(connectionString, mode);
-                services.AddDbContext<SharpClawDbContext>(options =>
+                services.AddDbContext<SharpClawDbContext>((sp, options) =>
+                {
+                    ConfigureLogging(sp, options);
                     options.UseNpgsql(connectionString, npgsql =>
-                        npgsql.MigrationsAssembly("SharpClaw.Migrations.Postgres")));
+                        npgsql.MigrationsAssembly("SharpClaw.Migrations.Postgres"));
+                });
                 break;
 
             case StorageMode.SqlServer:
                 RequireConnectionString(connectionString, mode);
-                services.AddDbContext<SharpClawDbContext>(options =>
+                services.AddDbContext<SharpClawDbContext>((sp, options) =>
+                {
+                    ConfigureLogging(sp, options);
                     options.UseSqlServer(connectionString, sqlServer =>
-                        sqlServer.MigrationsAssembly("SharpClaw.Migrations.SqlServer")));
+                        sqlServer.MigrationsAssembly("SharpClaw.Migrations.SqlServer"));
+                });
                 break;
 
             case StorageMode.SQLite:
                 RequireConnectionString(connectionString, mode);
-                services.AddDbContext<SharpClawDbContext>(options =>
+                services.AddDbContext<SharpClawDbContext>((sp, options) =>
+                {
+                    ConfigureLogging(sp, options);
                     options.UseSqlite(connectionString, sqlite =>
-                        sqlite.MigrationsAssembly("SharpClaw.Migrations.SQLite")));
+                        sqlite.MigrationsAssembly("SharpClaw.Migrations.SQLite"));
+                });
                 break;
 
             case StorageMode.MySql:
@@ -103,6 +116,31 @@ public static class InfrastructureServiceExtensions
             throw new InvalidOperationException(
                 $"ConnectionStrings:{mode} is required when Database:Provider is '{mode}'. " +
                 $"Set it in the .env file or environment variables.");
+    }
+
+    private static void ConfigureLogging(
+        IServiceProvider serviceProvider,
+        DbContextOptionsBuilder options)
+    {
+        var loggerFactory = serviceProvider.GetService<ILoggerFactory>();
+        if (loggerFactory is not null)
+            options.UseLoggerFactory(loggerFactory);
+
+        var configuration = serviceProvider.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+
+        var enableDetailedErrors = configuration is null
+            || !bool.TryParse(configuration["Database:EnableDetailedErrors"], out var detailedErrors)
+            || detailedErrors;
+
+        var enableSensitiveDataLogging = configuration is not null
+            && bool.TryParse(configuration["Database:EnableSensitiveDataLogging"], out var sensitiveDataLogging)
+            && sensitiveDataLogging;
+
+        if (enableDetailedErrors)
+            options.EnableDetailedErrors();
+
+        if (enableSensitiveDataLogging)
+            options.EnableSensitiveDataLogging();
     }
 
     /// <summary>

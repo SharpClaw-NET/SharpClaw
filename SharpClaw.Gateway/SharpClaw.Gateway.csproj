@@ -8,12 +8,15 @@
 
   <ItemGroup>
     <PackageReference Include="Microsoft.AspNetCore.OpenApi" />
+    <PackageReference Include="Serilog" />
+    <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
   </ItemGroup>
 
 </Project>

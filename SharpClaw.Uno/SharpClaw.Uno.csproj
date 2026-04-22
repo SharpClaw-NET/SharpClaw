@@ -55,6 +55,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
   </ItemGroup>
 
   <!--

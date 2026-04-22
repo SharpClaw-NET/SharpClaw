@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.Services;
 
@@ -11,11 +12,13 @@ namespace SharpClaw.Services;
 public sealed class SharpClawApiClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly SessionLogWriter? _sessionLogWriter;
     private string? _cachedApiKey;
 
-    public SharpClawApiClient(string baseUrl)
+    public SharpClawApiClient(string baseUrl, SessionLogWriter? sessionLogWriter = null)
     {
-        _http = new HttpClient(new DebugLoggingHandler(new HttpClientHandler()))
+        _sessionLogWriter = sessionLogWriter;
+        _http = new HttpClient(new DebugLoggingHandler(new HttpClientHandler(), sessionLogWriter))
         {
             BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromMinutes(10)
@@ -201,19 +204,27 @@ public sealed class SharpClawApiClient : IDisposable
     /// under the <c>SharpClaw.Uno</c> category so they appear in the
     /// Visual Studio <b>Output › Debug</b> pane when attached.
     /// </summary>
-    private sealed class DebugLoggingHandler(HttpMessageHandler inner) : DelegatingHandler(inner)
+    private sealed class DebugLoggingHandler(
+        HttpMessageHandler inner,
+        SessionLogWriter? sessionLogWriter) : DelegatingHandler(inner)
     {
         private const string Category = "SharpClaw.Uno";
 
         [Conditional("DEBUG")]
         private static void Log(string message) => Debug.WriteLine(message, Category);
 
+        private void LogPersistent(string message)
+        {
+            Log(message);
+            sessionLogWriter?.AppendDebug(message);
+        }
+
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var id = Guid.NewGuid().ToString("N")[..8];
 
-            Log($"[{id}] >>> {request.Method} {request.RequestUri}");
+            LogPersistent($"[{id}] >>> {request.Method} {request.RequestUri}");
 
             if (request.Content is not null)
             {
@@ -221,11 +232,11 @@ public sealed class SharpClawApiClient : IDisposable
                 if (IsTextContent(contentType))
                 {
                     var body = await request.Content.ReadAsStringAsync(cancellationToken);
-                    Log($"[{id}] >>> Body:\n{body}");
+                    LogPersistent($"[{id}] >>> Body:\n{body}");
                 }
                 else
                 {
-                    Log($"[{id}] >>> Body: <binary {contentType}, {request.Content.Headers.ContentLength} bytes>");
+                    LogPersistent($"[{id}] >>> Body: <binary {contentType}, {request.Content.Headers.ContentLength} bytes>");
                 }
             }
 
@@ -238,12 +249,13 @@ public sealed class SharpClawApiClient : IDisposable
             catch (Exception ex)
             {
                 sw.Stop();
-                Log($"[{id}] !!! FAILED after {sw.ElapsedMilliseconds}ms: {ex.GetType().Name}: {ex.Message}");
+                LogPersistent($"[{id}] !!! FAILED after {sw.ElapsedMilliseconds}ms: {ex.GetType().Name}: {ex.Message}");
+                sessionLogWriter?.AppendException(ex, $"HTTP request failed: {request.Method} {request.RequestUri}");
                 throw;
             }
             sw.Stop();
 
-            Log($"[{id}] <<< {(int)response.StatusCode} {response.ReasonPhrase} ({sw.ElapsedMilliseconds}ms)");
+            LogPersistent($"[{id}] <<< {(int)response.StatusCode} {response.ReasonPhrase} ({sw.ElapsedMilliseconds}ms)");
 
             if (response.Content is not null)
             {
@@ -256,17 +268,17 @@ public sealed class SharpClawApiClient : IDisposable
                     var contentLength = response.Content.Headers.ContentLength;
                     if (contentLength is not null and > 4096)
                     {
-                        Log($"[{id}] <<< Body: <{responseContentType}, {contentLength:N0} bytes>");
+                        LogPersistent($"[{id}] <<< Body: <{responseContentType}, {contentLength:N0} bytes>");
                     }
                     else
                     {
                         var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                        Log($"[{id}] <<< Body:\n{responseBody}");
+                        LogPersistent($"[{id}] <<< Body:\n{responseBody}");
                     }
                 }
                 else
                 {
-                    Log($"[{id}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
+                    LogPersistent($"[{id}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
                 }
             }
 

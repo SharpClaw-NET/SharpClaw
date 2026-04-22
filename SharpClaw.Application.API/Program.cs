@@ -22,25 +22,69 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
+using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Security;
+using Serilog.Events;
 
 var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
-var baseDir = !string.IsNullOrEmpty(dataDir)
-    ? dataDir
-    : Path.GetDirectoryName(System.Reflection.Assembly.GetExecutingAssembly().Location)!;
 
-var logsPath = Path.Combine(
-    !string.IsNullOrEmpty(dataDir) ? Path.GetDirectoryName(dataDir)! : baseDir,
-    "Logs", "sharpclaw-.log");
+await using var sessionLogs = new SessionLogWriter("core");
 
-var consoleLevelSwitch = new Serilog.Core.LoggingLevelSwitch(Serilog.Events.LogEventLevel.Information);
+var earlyConfiguration = new ConfigurationBuilder()
+    .AddLocalEnvironment(isDevelopment: false)
+    .Build();
 
-Log.Logger = new LoggerConfiguration()
-    .MinimumLevel.Debug()
-    .WriteTo.Console(levelSwitch: consoleLevelSwitch)
-    .WriteTo.File(logsPath, rollingInterval: RollingInterval.Day)
-    .Enrich.FromLogContext()
-    .CreateLogger();
+var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(earlyConfiguration);
+
+AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+{
+    if (eventArgs.ExceptionObject is Exception exception)
+        sessionLogs.AppendException(exception, "Unhandled AppDomain exception in core.");
+    else
+        sessionLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+};
+
+TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+{
+    sessionLogs.AppendException(eventArgs.Exception, "Unobserved task exception in core.");
+};
+
+var consoleLevelSwitch = new Serilog.Core.LoggingLevelSwitch(LogEventLevel.Information);
+
+if (serilogOptions.Enabled)
+{
+    var loggerConfiguration = new LoggerConfiguration()
+        .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.MinimumLevel,
+            LogEventLevel.Information))
+        .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.MicrosoftMinimumLevel,
+            LogEventLevel.Warning))
+        .MinimumLevel.Override("Microsoft.AspNetCore", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.AspNetCoreMinimumLevel,
+            LogEventLevel.Warning))
+        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", SerilogEnvironmentOptions.ParseEnum(
+            serilogOptions.EntityFrameworkCoreMinimumLevel,
+            LogEventLevel.Warning))
+        .Enrich.FromLogContext();
+
+    if (serilogOptions.ConsoleEnabled)
+        loggerConfiguration = loggerConfiguration.WriteTo.Console(levelSwitch: consoleLevelSwitch);
+
+    if (serilogOptions.FileEnabled)
+        loggerConfiguration = loggerConfiguration.WriteTo.File(
+            sessionLogs.LogFilePath,
+            rollingInterval: RollingInterval.Infinite);
+
+    Log.Logger = loggerConfiguration.CreateLogger();
+}
+else
+{
+    consoleLevelSwitch.MinimumLevel = LogEventLevel.Fatal;
+    Log.Logger = new LoggerConfiguration()
+        .MinimumLevel.Fatal()
+        .CreateLogger();
+}
 
 // L-015: Configure the LLamaSharp native backend before *any* LLama API is touched.
 // NativeLibraryConfig is sticky — the first call to a LLama API freezes the backend
@@ -57,7 +101,10 @@ NativeLibraryConfig.All
         // hundreds of info lines (tensor loads, layer assignments, etc.)
         // that llama.cpp dumps to stderr during model loading.
         if (level >= LLamaLogLevel.Warning)
+        {
             System.Diagnostics.Debug.WriteLine($"[llama.cpp] {message?.TrimEnd()}", "SharpClaw.CLI");
+            sessionLogs.AppendDebug($"[llama.cpp] {message?.TrimEnd()}");
+        }
     });
 Log.Information(
     "LLamaSharp native backend configured (preference: CUDA > Vulkan > CPU, AutoFallback=true).");
@@ -441,7 +488,8 @@ try
 
     // API mode
     app.UseMiddleware<ExceptionHandlingMiddleware>();
-    app.UseSerilogRequestLogging();
+    if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
+        app.UseSerilogRequestLogging();
     app.UseCors();
     app.UseRouting();
     app.UseMiddleware<ApiKeyMiddleware>();

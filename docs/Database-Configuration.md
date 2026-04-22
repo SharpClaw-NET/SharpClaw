@@ -57,6 +57,41 @@ selected via a single `.env` key — no code changes required.
 All configuration lives in the Core `.env` file (JSON-with-comments
 format).
 
+### EF Core logging and diagnostics
+
+The Core API routes EF Core logs through the standard application logging
+pipeline, which now means Serilog when Serilog is enabled for the Core
+process.
+
+The following `.env` keys control EF Core diagnostics:
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `Database:EnableDetailedErrors` | `true` | Enables EF Core detailed error messages. This is generally safe and useful even outside development. |
+| `Database:EnableSensitiveDataLogging` | `false` | Includes parameter values and entity data in EF Core logs. This can expose secrets or personal data in logs, so it should remain off unless you are doing local debugging. |
+| `Logging:Serilog:EntityFrameworkCoreMinimumLevel` | `Warning` | Controls how noisy EF Core logging is once it reaches Serilog. Lower it to `Information` or `Debug` when investigating query and change-tracking behavior. |
+
+Example:
+
+```jsonc
+{
+  "Database": {
+    "Provider": "Postgres",
+    "EnableDetailedErrors": "true",
+    "EnableSensitiveDataLogging": "false"
+  },
+  "Logging": {
+    "Serilog": {
+      "Enabled": "true",
+      "EntityFrameworkCoreMinimumLevel": "Information"
+    }
+  },
+  "ConnectionStrings": {
+    "Postgres": "Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
+  }
+}
+```
+
 ### JsonFile (default)
 
 No connection string needed. Data is stored in EF Core InMemory with

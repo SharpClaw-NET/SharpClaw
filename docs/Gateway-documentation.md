@@ -262,6 +262,14 @@ A default `.env` is auto-created on first run if missing.
 | `InternalApi` | `TimeoutSeconds` | `300` | HttpClient timeout for core API requests (seconds). Generous default accommodates agent tool-call chains. |
 | `InternalApi` | `ApiKey` | *(auto-read from file)* | Explicit API key override |
 | `InternalApi` | `GatewayToken` | *(auto-read from file)* | Gateway service token for core API auth without user JWT |
+| `Logging:Serilog` | `Enabled` | `true` | Master switch for Serilog in the gateway process |
+| `Logging:Serilog` | `ConsoleEnabled` | `true` | Enable or disable the gateway console sink |
+| `Logging:Serilog` | `FileEnabled` | `true` | Enable or disable the Local AppData session file sink |
+| `Logging:Serilog` | `RequestLoggingEnabled` | `true` | Enable or disable ASP.NET Core request logging through Serilog |
+| `Logging:Serilog` | `MinimumLevel` | `Information` | Default Serilog level for gateway logs |
+| `Logging:Serilog` | `MicrosoftMinimumLevel` | `Warning` | Override level for `Microsoft.*` categories |
+| `Logging:Serilog` | `AspNetCoreMinimumLevel` | `Warning` | Override level for `Microsoft.AspNetCore.*` categories |
+| `Logging:Serilog` | `EntityFrameworkCoreMinimumLevel` | `Warning` | Override level for `Microsoft.EntityFrameworkCore.*` categories |
 | `Gateway:RequestQueue` | `Enabled` | `true` | Enable the mutation request queue (sequential forwarding) |
 | `Gateway:RequestQueue` | `MaxConcurrency` | `1` | Concurrent processing slots (1 = fully sequential) |
 | `Gateway:RequestQueue` | `TimeoutSeconds` | `30` | Per-request timeout for queued forwarding |

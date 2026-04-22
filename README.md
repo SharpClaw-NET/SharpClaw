@@ -69,7 +69,7 @@ Every tool the LLM can call belongs to a module. Modules are self-contained C# p
 | VSCodeEditor | `vsc` | VS Code integration via WebSocket |
 | BotIntegration | `bot` | Telegram, Discord, WhatsApp, and more |
 
-Writing your own module means implementing `ISharpClawModule`, declaring your tools, and dropping the assembly in. The system handles discovery, registration, prefix validation, and permission integration. See [Module System Design](docs/Module-System-Design.md) for the full spec.
+Writing your own module means implementing `ISharpClawModule`, declaring your tools, and dropping the assembly in. The system handles discovery, registration, prefix validation, and permission integration.
 
 ## Permissions
 

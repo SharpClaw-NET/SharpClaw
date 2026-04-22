@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.Services;
 
@@ -15,6 +16,7 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class GatewayProcessManager : IDisposable
 {
+    private readonly SessionLogWriter _sessionLogWriter;
     private Process? _process;
     private readonly string _executablePath;
     private string _gatewayUrl;
@@ -90,8 +92,9 @@ public sealed class GatewayProcessManager : IDisposable
     /// <summary>Returns the number of captured output lines without copying.</summary>
     public int OutputLineCount { get { lock (_outputLock) return _processOutput.Count; } }
 
-    public GatewayProcessManager(string gatewayUrl)
+    public GatewayProcessManager(string gatewayUrl, SessionLogWriter sessionLogWriter)
     {
+        _sessionLogWriter = sessionLogWriter;
         _gatewayUrl = gatewayUrl;
 
         var baseDir = AppContext.BaseDirectory;
@@ -245,6 +248,7 @@ public sealed class GatewayProcessManager : IDisposable
                 "Ensure the gateway is published into the 'gateway' subfolder.");
 
         lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ── Starting gateway process ──");
+        _sessionLogWriter.AppendDebug("[gateway] Starting bundled gateway process.");
         IsExternal = false;
 
         var psi = new ProcessStartInfo
@@ -298,10 +302,12 @@ public sealed class GatewayProcessManager : IDisposable
             psi.EnvironmentVariables["InternalApi__ApiKey"] = resolvedKey;
             psi.ArgumentList.Add($"--InternalApi:ApiKey={resolvedKey}");
             lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}, {resolvedKey.Length} chars, prefix={resolvedKey[..Math.Min(6, resolvedKey.Length)]}..).");
+            _sessionLogWriter.AppendDebug($"[gateway] API key forwarded to bundled gateway ({(ApiKey is not null ? "in-memory" : "file")}).");
         }
         else
         {
             lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ⚠ No API key available to forward — gateway may get 401.");
+            _sessionLogWriter.AppendDebug("[gateway] No API key available to forward to bundled gateway.");
         }
 
         // ── Gateway service token ────────────────────────────────────
@@ -326,6 +332,7 @@ public sealed class GatewayProcessManager : IDisposable
             psi.EnvironmentVariables["InternalApi__GatewayToken"] = resolvedGatewayToken;
             psi.ArgumentList.Add($"--InternalApi:GatewayToken={resolvedGatewayToken}");
             lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded ({resolvedGatewayToken.Length} chars).");
+            _sessionLogWriter.AppendDebug("[gateway] Gateway token forwarded to bundled gateway.");
         }
 
         _process = Process.Start(psi);
@@ -333,12 +340,18 @@ public sealed class GatewayProcessManager : IDisposable
         _process!.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
+            {
                 lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] {e.Data}");
+                _sessionLogWriter.AppendDebug($"[gateway] {e.Data}");
+            }
         };
         _process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is not null)
+            {
                 lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] [stderr] {e.Data}");
+                _sessionLogWriter.AppendException($"[gateway stderr] {e.Data}");
+            }
         };
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();

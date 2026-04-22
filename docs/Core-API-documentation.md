@@ -2958,6 +2958,16 @@ Overwrite the Core `.env` file with new content.
 | `Local:ContextSize` | Default context size for local models |
 | `Local:KeepLoaded` | Keep models pinned after use |
 | `Local:IdleCooldownMinutes` | Idle minutes before unloading unpinned models |
+| `Logging:Serilog:Enabled` | Master switch for Serilog in the Core process. When `false`, Serilog sinks are disabled entirely. |
+| `Logging:Serilog:ConsoleEnabled` | Enable or disable the Core console sink. |
+| `Logging:Serilog:FileEnabled` | Enable or disable the Core Local AppData session file sink. |
+| `Logging:Serilog:RequestLoggingEnabled` | Enable or disable ASP.NET Core request logging through Serilog. |
+| `Logging:Serilog:MinimumLevel` | Default Serilog level for Core logs. Safe default: `Information`. |
+| `Logging:Serilog:MicrosoftMinimumLevel` | Override level for `Microsoft.*` categories. Safe default: `Warning`. |
+| `Logging:Serilog:AspNetCoreMinimumLevel` | Override level for `Microsoft.AspNetCore.*` categories. Safe default: `Warning`. |
+| `Logging:Serilog:EntityFrameworkCoreMinimumLevel` | Override level for `Microsoft.EntityFrameworkCore.*` categories. Safe default: `Warning`. |
+| `Database:EnableDetailedErrors` | Enable EF Core detailed errors. Safe default: `true`. |
+| `Database:EnableSensitiveDataLogging` | Include parameter values and entity data in EF Core logs. Safe default: `false`; enable only for local debugging. |
 | `EnvEditor:AllowNonAdmin` | When `true`, non-admin users can edit the Core `.env` via the API |
 | `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend |
 | `Auth:DisableApiKeyCheck` | Disable API-key middleware (dev only) |
@@ -2970,6 +2980,16 @@ Overwrite the Core `.env` file with new content.
 |-----|-------------|
 | `Api:Url` | API base URL (default: `http://127.0.0.1:48923`) |
 | `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend (default: `true`) |
+| `Gateway:Enabled` | When `false`, the Uno client skips launching the bundled gateway (default: `true`) |
+| `Gateway:Url` | Gateway bind URL used when the Uno client launches the bundled gateway |
+| `Processes:Persistent` | Keep bundled backend and gateway alive when the Uno frontend exits |
+| `Processes:AutoStart` | Register backend and gateway startup scripts at Windows login |
+| `Logging:Serilog:Enabled` | Master switch for Serilog in the Uno frontend |
+| `Logging:Serilog:ConsoleEnabled` | Enable or disable Uno console logging |
+| `Logging:Serilog:FileEnabled` | Enable or disable Uno file logging to the Local AppData session folder |
+| `Logging:Serilog:MinimumLevel` | Default Serilog level for Uno logs. Safe default: `Information`. |
+| `Logging:Serilog:MicrosoftMinimumLevel` | Override level for `Microsoft.*` categories in Uno |
+| `Logging:Serilog:UnoMinimumLevel` | Override level for `Uno.*` categories. Safe default: `Warning`. |
 
 ---
 

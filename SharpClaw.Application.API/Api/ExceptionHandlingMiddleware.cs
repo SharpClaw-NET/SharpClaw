@@ -2,10 +2,13 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Serilog;
 using SharpClaw.Application.Core.Clients;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.Application.API.Api;
 
-public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
+public sealed class ExceptionHandlingMiddleware(
+    RequestDelegate next,
+    SessionLogWriter sessionLogWriter)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -21,6 +24,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         catch (CompletionParameterValidationException ex)
         {
             Log.Warning(ex, "Completion parameter validation failed on {Method} {Path}", context.Request.Method, context.Request.Path);
+            sessionLogWriter.AppendException(ex,
+                $"Completion parameter validation failed on {context.Request.Method} {context.Request.Path}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -36,6 +41,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         catch (InvalidOperationException ex)
         {
             Log.Warning(ex, "Validation error on {Method} {Path}", context.Request.Method, context.Request.Path);
+            sessionLogWriter.AppendException(ex,
+                $"Validation error on {context.Request.Method} {context.Request.Path}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -47,6 +54,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         {
             // Unsupported provider feature (e.g. response_mime_type on Google) → 400.
             Log.Warning(ex, "Unsupported operation on {Method} {Path}", context.Request.Method, context.Request.Path);
+            sessionLogWriter.AppendException(ex,
+                $"Unsupported operation on {context.Request.Method} {context.Request.Path}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status400BadRequest;
@@ -58,6 +67,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         {
             // Provider / upstream HTTP errors → 502 Bad Gateway.
             Log.Warning(ex, "Provider error on {Method} {Path}", context.Request.Method, context.Request.Path);
+            sessionLogWriter.AppendException(ex,
+                $"Provider error on {context.Request.Method} {context.Request.Path}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status502BadGateway;
@@ -68,6 +79,8 @@ public sealed class ExceptionHandlingMiddleware(RequestDelegate next)
         catch (Exception ex)
         {
             Log.Error(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
+            sessionLogWriter.AppendException(ex,
+                $"Unhandled exception on {context.Request.Method} {context.Request.Path}");
             if (!context.Response.HasStarted)
             {
                 context.Response.StatusCode = StatusCodes.Status500InternalServerError;

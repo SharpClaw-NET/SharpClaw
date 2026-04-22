@@ -1,12 +1,18 @@
 using SharpClaw.Configuration;
 using SharpClaw.Services;
 using SharpClaw.Uno;
+using SharpClaw.Utils.Logging;
+using Serilog;
+using Serilog.Events;
+using Microsoft.Extensions.Configuration;
 using Uno.Resizetizer;
 
 namespace SharpClaw;
 
 public partial class App : Application
 {
+    private SessionLogWriter? _sessionLogs;
+
     /// <summary>
     /// Initializes the singleton application object. This is the first line of authored code
     /// executed, and as such is the logical equivalent of main() or WinMain().
@@ -23,6 +29,45 @@ public partial class App : Application
 
     protected async override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        _sessionLogs = new SessionLogWriter("uno");
+        RegisterGlobalExceptionLogging(_sessionLogs);
+
+        var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(
+            new ConfigurationBuilder()
+                .AddLocalEnvironment(isDevelopment: false)
+                .Build());
+
+        if (serilogOptions.Enabled)
+        {
+            var loggerConfiguration = new LoggerConfiguration()
+                .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
+                    serilogOptions.MinimumLevel,
+                    LogEventLevel.Information))
+                .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
+                    serilogOptions.MicrosoftMinimumLevel,
+                    LogEventLevel.Warning))
+                .MinimumLevel.Override("Uno", SerilogEnvironmentOptions.ParseEnum(
+                    serilogOptions.UnoMinimumLevel,
+                    LogEventLevel.Warning))
+                .Enrich.FromLogContext();
+
+            if (serilogOptions.ConsoleEnabled)
+                loggerConfiguration = loggerConfiguration.WriteTo.Console();
+
+            if (serilogOptions.FileEnabled)
+                loggerConfiguration = loggerConfiguration.WriteTo.File(
+                    _sessionLogs.LogFilePath,
+                    rollingInterval: RollingInterval.Infinite);
+
+            Log.Logger = loggerConfiguration.CreateLogger();
+        }
+        else
+        {
+            Log.Logger = new LoggerConfiguration()
+                .MinimumLevel.Fatal()
+                .CreateLogger();
+        }
+
         var builder = this.CreateBuilder(args)
             // Add navigation support for toolkit controls such as TabBar and NavigationView
             .UseToolkitNavigation()
@@ -61,7 +106,9 @@ public partial class App : Application
                     //logBuilder.WebAssemblyLogLevel(LogLevel.Debug);
 
                 }, enableUnoLogging: true)
-                .UseSerilog(consoleLoggingEnabled: true, fileLoggingEnabled: true)
+                .UseSerilog(
+                    consoleLoggingEnabled: serilogOptions.Enabled && serilogOptions.ConsoleEnabled,
+                    fileLoggingEnabled: false)
                 .UseConfiguration(configure: configBuilder =>
                     configBuilder
                         .EmbeddedSource<App>()
@@ -111,12 +158,13 @@ public partial class App : Application
                 )
                 .ConfigureServices((context, services) =>
                 {
+                    services.AddSingleton(_sessionLogs);
                     var isDev = context.HostingEnvironment.IsDevelopment();
                     var apiUrl = LocalEnvironment.LoadApiUrl(isDev);
                     var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
                     var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
 
-                    var backendManager = new BackendProcessManager(apiUrl)
+                    var backendManager = new BackendProcessManager(apiUrl, _sessionLogs)
                     {
                         SkipLaunch = !backendEnabled,
                         Persistent = persistent,
@@ -126,14 +174,14 @@ public partial class App : Application
                     var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
                     var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
 
-                    var gatewayManager = new GatewayProcessManager(gatewayUrl)
+                    var gatewayManager = new GatewayProcessManager(gatewayUrl, _sessionLogs)
                     {
                         SkipLaunch = !gatewayEnabled,
                         Persistent = persistent,
                     };
                     services.AddSingleton(gatewayManager);
 
-                    services.AddSingleton(new SharpClawApiClient(apiUrl));
+                    services.AddSingleton(new SharpClawApiClient(apiUrl, _sessionLogs));
                     services.AddSingleton(new ClientSettings());
                     services.AddSingleton(new AccountStore());
                     services.AddSingleton(new ModuleStateCache());
@@ -177,8 +225,26 @@ public partial class App : Application
 
                 gw?.Dispose();
                 be?.Dispose();
+                _sessionLogs?.Dispose();
+                Log.CloseAndFlush();
             };
         }
+    }
+
+    private static void RegisterGlobalExceptionLogging(SessionLogWriter sessionLogs)
+    {
+        AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
+        {
+            if (eventArgs.ExceptionObject is Exception exception)
+                sessionLogs.AppendException(exception, "Unhandled AppDomain exception in Uno.");
+            else
+                sessionLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+        };
+
+        TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
+        {
+            sessionLogs.AppendException(eventArgs.Exception, "Unobserved task exception in Uno.");
+        };
     }
 
     private static void RegisterRoutes(IViewRegistry views, IRouteRegistry routes)

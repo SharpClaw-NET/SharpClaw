@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.Services;
 
@@ -19,6 +20,7 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class BackendProcessManager : IDisposable
 {
+    private readonly SessionLogWriter _sessionLogWriter;
     private Process? _process;
     private readonly string _executablePath;
     private string _apiUrl;
@@ -64,8 +66,9 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
     public int? ExitCode => _process is { HasExited: true } p ? p.ExitCode : null;
 
-    public BackendProcessManager(string apiUrl)
+    public BackendProcessManager(string apiUrl, SessionLogWriter sessionLogWriter)
     {
+        _sessionLogWriter = sessionLogWriter;
         _apiUrl = apiUrl;
 
         var baseDir = AppContext.BaseDirectory;
@@ -277,12 +280,18 @@ public sealed class BackendProcessManager : IDisposable
         _process!.OutputDataReceived += (_, e) =>
         {
             if (e.Data is not null)
+            {
                 lock (_outputLock) _processOutput.Add(e.Data);
+                _sessionLogWriter.AppendDebug($"[backend] {e.Data}");
+            }
         };
         _process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is not null)
+            {
                 lock (_outputLock) _processOutput.Add($"[stderr] {e.Data}");
+                _sessionLogWriter.AppendException($"[backend stderr] {e.Data}");
+            }
         };
         _process.BeginOutputReadLine();
         _process.BeginErrorReadLine();

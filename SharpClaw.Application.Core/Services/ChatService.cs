@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models.Access;
@@ -38,6 +39,7 @@ public sealed class ChatService(
     ThreadActivitySignal threadActivity,
     ModuleRegistry moduleRegistry,
     ModuleMetricsCollector metricsCollector,
+    ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
     IServiceProvider serviceProvider,
     IConfiguration configuration)
@@ -982,7 +984,7 @@ public sealed class ChatService(
                     continue;
                 }
 
-                var parsed = ParseNativeToolCall(tc);
+                var parsed = await ParseNativeToolCallAsync(tc, ct);
                 if (parsed is null)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id,
@@ -1727,8 +1729,26 @@ public sealed class ChatService(
 
         while (true)
         {
-            var result = await client.ChatCompletionWithToolsAsync(
-                httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+            ChatCompletionResult result;
+            try
+            {
+                result = await client.ChatCompletionWithToolsAsync(
+                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+            }
+            catch (LocalInferenceEnvelopeException ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Local-inference tool loop aborted: malformed envelope from model. Preview={Preview}",
+                    ex.PayloadPreview);
+
+                return BuildEnvelopeFailureResult(
+                    toolNotation,
+                    jobResults,
+                    totalPromptTokens,
+                    totalCompletionTokens,
+                    ex);
+            }
 
             if (result.Usage is { } usage)
             {
@@ -1772,7 +1792,7 @@ public sealed class ChatService(
                     continue;
                 }
 
-                var parsed = ParseNativeToolCall(tc);
+                var parsed = await ParseNativeToolCallAsync(tc, ct);
                 if (parsed is null)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id,
@@ -1826,8 +1846,26 @@ public sealed class ChatService(
 
             if (anyUnresolvableApproval)
             {
-                var finalResult = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+                ChatCompletionResult finalResult;
+                try
+                {
+                    finalResult = await client.ChatCompletionWithToolsAsync(
+                        httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
+                }
+                catch (LocalInferenceEnvelopeException ex)
+                {
+                    logger.LogWarning(
+                        ex,
+                        "Local-inference final approval round aborted: malformed envelope from model. Preview={Preview}",
+                        ex.PayloadPreview);
+
+                    return BuildEnvelopeFailureResult(
+                        toolNotation,
+                        jobResults,
+                        totalPromptTokens,
+                        totalCompletionTokens,
+                        ex);
+                }
                 if (finalResult.Usage is { } finalUsage)
                 {
                     totalPromptTokens += finalUsage.PromptTokens;
@@ -1839,6 +1877,47 @@ public sealed class ChatService(
                 return new ToolLoopResult(finalContent, jobResults, totalPromptTokens, totalCompletionTokens);
             }
         }
+    }
+
+    /// <summary>
+    /// Converts a malformed local-inference tool-loop envelope into a normal
+    /// assistant-visible error result instead of letting the exception bubble
+    /// out as a 500. The earlier tool results (and their authoritative
+    /// notation lines) are preserved so the user can still see what happened
+    /// before the local model lost the grammar and emitted invalid JSON.
+    /// <para>
+    /// This preserves the L-017 contract: <see cref="LocalInferenceApiClient"/>
+    /// still throws a typed exception on malformed envelopes, but the caller
+    /// turns it into a user-facing error response instead of a transport-level
+    /// failure.
+    /// </para>
+    /// </summary>
+    private static ToolLoopResult BuildEnvelopeFailureResult(
+        StringBuilder toolNotation,
+        List<AgentJobResponse> jobResults,
+        int totalPromptTokens,
+        int totalCompletionTokens,
+        LocalInferenceEnvelopeException ex)
+    {
+        var message = new StringBuilder();
+        if (toolNotation.Length > 0)
+            message.Append(toolNotation).Append("\n");
+
+        message.Append(
+            "Error: the local model returned malformed tool-loop output after a tool call. " +
+            "The model likely lost the required JSON envelope format for the follow-up response. ");
+
+        if (!string.IsNullOrWhiteSpace(ex.PayloadPreview))
+        {
+            message.Append("Preview: ");
+            message.Append(ex.PayloadPreview.Trim());
+        }
+
+        return new ToolLoopResult(
+            message.ToString(),
+            jobResults,
+            totalPromptTokens,
+            totalCompletionTokens);
     }
 
     /// <summary>
@@ -1874,7 +1953,9 @@ public sealed class ChatService(
     /// if the tool name is unrecognized or the arguments are malformed.
     /// All tool definitions are resolved via <see cref="ModuleRegistry"/>.
     /// </summary>
-    private ParsedToolCall? ParseNativeToolCall(ChatToolCall toolCall)
+    private async Task<ParsedToolCall?> ParseNativeToolCallAsync(
+        ChatToolCall toolCall,
+        CancellationToken ct)
     {
         if (moduleRegistry.TryResolve(toolCall.Name, out var moduleId, out var toolName))
         {
@@ -1888,27 +1969,55 @@ public sealed class ChatService(
                 new { module = moduleId, tool = toolName, @params = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}").RootElement },
                 SecureJsonOptions.Envelope);
 
-            // Attempt to extract resourceId from the arguments.
-            // Modules use either "resource_id" or "targetId" as the parameter name.
+            // Attempt to extract resourceId / sandboxId from the arguments.
+            // Historically module tools used either "resource_id" or "targetId".
+            // The mk8 shell tools use "resourceId" / "sandboxId". When only a
+            // sandboxId is provided, resolve it to the corresponding Mk8Shell
+            // container GUID so the permission layer sees a concrete per-resource
+            // target instead of null (which previously caused bug #7: the chat loop
+            // denied execute_mk8_shell before job submission with
+            // "ResourceId is required for module tool 'execute_mk8_shell'.").
             Guid? modResourceId = null;
+            string? sandboxId = null;
             try
             {
                 using var doc = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}");
-                if ((doc.RootElement.TryGetProperty("resource_id", out var rp)
+                if ((doc.RootElement.TryGetProperty("resourceId", out var rp)
+                     || doc.RootElement.TryGetProperty("resource_id", out rp)
                      || doc.RootElement.TryGetProperty("targetId", out rp))
                     && Guid.TryParse(rp.GetString(), out var mrid))
                     modResourceId = mrid;
+
+                if (doc.RootElement.TryGetProperty("sandboxId", out var sp))
+                    sandboxId = sp.GetString();
             }
             catch (JsonException) { /* non-critical */ }
 
+            if (!modResourceId.HasValue && !string.IsNullOrWhiteSpace(sandboxId))
+            {
+                modResourceId = await db.Containers
+                    .Where(c => c.Type == ContainerType.Mk8Shell && c.SandboxName == sandboxId)
+                    .Select(c => (Guid?)c.Id)
+                    .FirstOrDefaultAsync(ct);
+            }
+
+            if (string.Equals(toolCall.Name, "execute_mk8_shell", StringComparison.Ordinal))
+            {
+                logger.LogInformation(
+                    "[Bug7Trace] execute_mk8_shell parsed args raw={RawArgs} sandboxId={SandboxId} resourceId={ResourceId}",
+                    toolCall.ArgumentsJson,
+                    sandboxId ?? "(null)",
+                    modResourceId?.ToString() ?? "(null)");
+            }
+
             Debug.WriteLine(
-                $"[ParseToolCall] ResourceId={modResourceId?.ToString() ?? "(null)"} from args: {toolCall.ArgumentsJson}",
+                $"[ParseToolCall] ResourceId={modResourceId?.ToString() ?? "(null)"} SandboxId={sandboxId ?? "(null)"} from args: {toolCall.ArgumentsJson}",
                 "SharpClaw.CLI");
 
             return new ParsedToolCall(
                 toolCall.Id,
                 modResourceId,
-                SandboxId: null,
+                SandboxId: sandboxId,
                 ScriptJson: envelope,
                 ActionKey: toolCall.Name);
         }
