@@ -5,24 +5,29 @@ using SharpClaw.Utils.Logging;
 namespace SharpClaw.Services;
 
 /// <summary>
-/// HTTP client that communicates with the SharpClaw internal API
-/// running on localhost. Reads the per-session API key from the
-/// well-known file written by the API process.
+/// HTTP client that communicates with the selected SharpClaw internal API
+/// and resolves its per-session API key from backend discovery metadata.
 /// </summary>
 public sealed class SharpClawApiClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly FrontendInstanceService? _frontendInstance;
     private readonly SessionLogWriter? _sessionLogWriter;
     private string? _cachedApiKey;
 
-    public SharpClawApiClient(string baseUrl, SessionLogWriter? sessionLogWriter = null)
+    public SharpClawApiClient(
+        string baseUrl,
+        SessionLogWriter? sessionLogWriter = null,
+        FrontendInstanceService? frontendInstance = null)
     {
+        _frontendInstance = frontendInstance;
         _sessionLogWriter = sessionLogWriter;
         _http = new HttpClient(new DebugLoggingHandler(new HttpClientHandler(), sessionLogWriter))
         {
             BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromMinutes(10)
         };
+
     }
 
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>
@@ -35,6 +40,10 @@ public sealed class SharpClawApiClient : IDisposable
     {
         _http.BaseAddress = new Uri(baseUrl);
         _cachedApiKey = null;
+        _frontendInstance?.RememberBackendBinding(
+            backendInstanceId: null,
+            baseUrl,
+            bindingKind: "configured");
     }
 
     public async Task<HttpResponseMessage> GetAsync(
@@ -171,14 +180,12 @@ public sealed class SharpClawApiClient : IDisposable
         if (_cachedApiKey is not null)
             return _cachedApiKey;
 
-        var keyFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw", ".api-key");
+        var keyFilePath = _frontendInstance?.ResolveBackendApiKeyPath(BaseUrl);
 
-        if (!File.Exists(keyFilePath))
+        if (string.IsNullOrWhiteSpace(keyFilePath) || !File.Exists(keyFilePath))
             throw new InvalidOperationException(
-                $"API key file not found at '{keyFilePath}'. " +
-                "Ensure the SharpClaw API process is running.");
+                $"API key file could not be resolved for backend '{BaseUrl}'. " +
+                "Ensure the selected SharpClaw backend is running and has published discovery metadata.");
 
         _cachedApiKey = File.ReadAllText(keyFilePath).Trim();
         return _cachedApiKey;

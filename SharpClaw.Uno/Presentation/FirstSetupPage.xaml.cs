@@ -51,11 +51,13 @@ public sealed partial class FirstSetupPage : Page
 
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
-        if (FirstSetupMarker.NeedsUpgradeRerun)
+        var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
+
+        if (setupMarker.NeedsUpgradeRerun)
         {
             // Major version advanced since last setup — ask whether to redo
-            var oldVer = FirstSetupMarker.CompletedMajorVersion;
-            var newVer = FirstSetupMarker.CurrentMajorVersion;
+            var oldVer = setupMarker.CompletedMajorVersion;
+            var newVer = setupMarker.CurrentMajorVersion;
             var label = oldVer.HasValue
                 ? $"v{oldVer} → v{newVer}"
                 : $"v{newVer}";
@@ -71,7 +73,7 @@ public sealed partial class FirstSetupPage : Page
             if (!redo)
             {
                 // User chose to skip — stamp current version and go to Main
-                FirstSetupMarker.MarkCompleted();
+                setupMarker.MarkCompleted();
                 var navigator = App.Services!.GetRequiredService<INavigator>();
                 await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
                 return;
@@ -533,7 +535,7 @@ public sealed partial class FirstSetupPage : Page
         AppendStep("Completed first-time setup!");
         await Task.Delay(1000);
 
-        FirstSetupMarker.MarkCompleted();
+        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
 
         var navigator = App.Services!.GetRequiredService<INavigator>();
         await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
@@ -832,7 +834,7 @@ public sealed partial class FirstSetupPage : Page
 
     private async void OnSkipSetupClick(object sender, RoutedEventArgs e)
     {
-        FirstSetupMarker.MarkCompleted();
+        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
 
         // Cancel any pending input steps
         _providerTcs?.TrySetResult(false);

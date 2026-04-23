@@ -16,19 +16,29 @@ using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Infrastructure.Logging;
-using SharpClaw.Contracts.Persistence;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
 using SharpClaw.Utils.Logging;
+using SharpClaw.Utils.Instances;
 using SharpClaw.Utils.Security;
 using Serilog.Events;
 
 var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
+var instanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");
+if (string.IsNullOrWhiteSpace(instanceRoot) && !string.IsNullOrWhiteSpace(dataDir))
+    instanceRoot = Path.GetDirectoryName(Path.GetFullPath(dataDir));
 
-await using var sessionLogs = new SessionLogWriter("core");
+var backendInstancePaths = new SharpClawInstancePaths(
+    SharpClawInstanceKind.Backend,
+    instanceRoot);
+backendInstancePaths.EnsureDirectories();
+backendInstancePaths.CleanupStaleDiscoveryEntries(TimeSpan.FromMinutes(2));
+using var backendInstanceLock = new SharpClawInstanceLock(backendInstancePaths);
+
+await using var sessionLogs = new SessionLogWriter("core", backendInstancePaths.LogsDirectory);
 
 var earlyConfiguration = new ConfigurationBuilder()
     .AddLocalEnvironment(isDevelopment: false)
@@ -113,11 +123,13 @@ try
 {
     var builder = WebApplication.CreateBuilder(args);
 
+    var backendManifest = backendInstancePaths.Manifest;
+
     // Ensure the API always binds to the expected port, regardless of
     // whether a launch profile is active.  ASPNETCORE_URLS env var
     // (set by BackendProcessManager) takes precedence if present.
     if (string.IsNullOrEmpty(Environment.GetEnvironmentVariable("ASPNETCORE_URLS")))
-        builder.WebHost.UseUrls("http://127.0.0.1:48923");
+        builder.WebHost.UseUrls(backendManifest.BaseUrl ?? "http://127.0.0.1:48923");
 
     // Configuration: environment files
     builder.Configuration.AddLocalEnvironment(builder.Environment.IsDevelopment());
@@ -125,6 +137,8 @@ try
     builder.Host.UseSerilog();
 
     builder.Services.AddSingleton(sessionLogs);
+    builder.Services.AddSingleton(backendInstancePaths);
+    builder.Services.AddSingleton(backendInstanceLock);
 
     // Module log capture — feeds per-module ring buffers for the /modules/{id}/logs API.
     var moduleLogService = new ModuleLogService();
@@ -134,7 +148,7 @@ try
 
     // Encryption key — resolved early so Infrastructure can use it for JSON file encryption.
     var encryptionKeyBase64 = builder.Configuration["Encryption:Key"]
-        ?? PersistentKeyStore.GetOrCreate("encryption-key");
+        ?? PersistentKeyStore.GetOrCreate("encryption-key", backendInstancePaths);
     byte[] encryptionKey;
     try
     {
@@ -170,6 +184,8 @@ try
     {
         if (!string.IsNullOrEmpty(dataDir))
             opts.DataDirectory = dataDir;
+        else
+            opts.DataDirectory = backendInstancePaths.DataDirectory;
         opts.EncryptAtRest = builder.Configuration
             .GetValue("Encryption:EncryptDatabase", defaultValue: true);
     });
@@ -189,7 +205,7 @@ try
     var jwtOptions = new JwtOptions
     {
         Secret = builder.Configuration["Jwt:Secret"]
-            ?? PersistentKeyStore.GetOrCreate("jwt-secret")
+            ?? PersistentKeyStore.GetOrCreate("jwt-secret", backendInstancePaths)
     };
     builder.Services.AddSingleton(jwtOptions);
     builder.Services.AddScoped<TokenService>();
@@ -294,7 +310,7 @@ try
     builder.Services.AddHostedService<SeedingService>();
 
     // API key
-    var apiKeyProvider = new ApiKeyProvider();
+    var apiKeyProvider = new ApiKeyProvider(backendInstancePaths);
     builder.Services.AddSingleton(apiKeyProvider);
 
     // CLI short-ID resolver (used by module CLI handlers)
@@ -524,7 +540,11 @@ try
         }
     }
 
-    app.Lifetime.ApplicationStopping.Register(apiKeyProvider.Cleanup);
+    app.Lifetime.ApplicationStopping.Register(() =>
+    {
+        apiKeyProvider.Cleanup();
+        backendInstancePaths.DeleteDiscoveryEntry();
+    });
 
     // Module lifecycle: graceful shutdown
     app.Lifetime.ApplicationStopping.Register(() =>
@@ -539,11 +559,25 @@ try
         }
     });
 
+    await app.StartAsync();
+
     var urls = string.Join(", ", app.Urls);
+    var primaryUrl = app.Urls.FirstOrDefault();
+    SharpClawDiscoveryLease? discoveryLease = null;
+    if (!string.IsNullOrWhiteSpace(primaryUrl))
+    {
+        backendManifest.BaseUrl = primaryUrl;
+        backendManifest.DataDirectory = dataDir ?? backendInstancePaths.DataDirectory;
+        backendInstancePaths.SaveManifest(backendManifest);
+        discoveryLease = new SharpClawDiscoveryLease(
+            backendInstancePaths,
+            primaryUrl,
+            TimeSpan.FromSeconds(30));
+        discoveryLease.PublishNow();
+    }
+
     Log.Information("SharpClaw API listening on {Urls}", urls);
     Log.Information("API key written to: {KeyFilePath}", apiKeyProvider.KeyFilePath);
-
-    await app.StartAsync();
 
     // Interactive-mode console logging discipline: when the REPL is actually
     // running, we suppress console logging so Serilog output doesn't scroll
@@ -564,6 +598,7 @@ try
     if (interactive)
         consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Information;
 
+    discoveryLease?.Dispose();
     await app.StopAsync();
 }
 catch (Exception ex)

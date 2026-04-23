@@ -37,11 +37,17 @@ public sealed class SharpClawOptionsPage : DialogPage
     [Category("Connection")]
     [DisplayName("API Key File Path")]
     [Description(
-        "Path to the API key file. Leave empty to use the default " +
-        "(%LOCALAPPDATA%\\SharpClaw\\.api-key). " +
+        "Explicit path to the backend runtime API key file. Leave empty to resolve " +
+        "through backend discovery using Backend Instance Id first, then Host and Port. " +
         "Environment variables are expanded at connect time.")]
     [DefaultValue("")]
     public string ApiKeyFilePath { get; set; } = string.Empty;
+
+    [Category("Connection")]
+    [DisplayName("Backend Instance Id")]
+    [Description("Optional backend instance id to attach to explicitly when resolving discovery metadata and runtime auth files.")]
+    [DefaultValue("")]
+    public string BackendInstanceId { get; set; } = string.Empty;
 
     // ═══════════════════════════════════════════════════════════════
     // Auto-connect
@@ -80,8 +86,7 @@ public sealed class SharpClawOptionsPage : DialogPage
     public Uri BridgeUri => new($"ws://{Host}:{Port}/editor/ws");
 
     /// <summary>
-    /// Returns the resolved API key file path. When <see cref="ApiKeyFilePath"/>
-    /// is empty, falls back to <c>%LOCALAPPDATA%\SharpClaw\.api-key</c>.
+    /// Returns the explicitly configured API key file path, if any.
     /// Environment variables in the path are expanded.
     /// </summary>
     [Browsable(false)]
@@ -89,13 +94,6 @@ public sealed class SharpClawOptionsPage : DialogPage
     {
         get
         {
-            if (string.IsNullOrWhiteSpace(ApiKeyFilePath))
-            {
-                return Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SharpClaw", ".api-key");
-            }
-
             return Environment.ExpandEnvironmentVariables(ApiKeyFilePath);
         }
     }

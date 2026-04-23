@@ -43,8 +43,9 @@ export function activate(context: vscode.ExtensionContext): void {
     const delaySeconds = config.get<number>('autoConnectDelaySeconds', 3) ?? 3;
 
     log(`  Config: host=${config.get<string>('host', '127.0.0.1')}, port=${config.get<number>('port', 48923)}`);
+    log(`  Config: backendInstanceId=${config.get<string>('backendInstanceId', '') || '(none)'}`);
     log(`  Config: autoConnect=${autoConnect}, delaySeconds=${delaySeconds}, timeoutSeconds=${config.get<number>('connectionTimeoutSeconds', 10)}`);
-    log(`  Config: apiKeyFilePath=${config.get<string>('apiKeyFilePath', '') || '(default)'}`);
+    log(`  Config: apiKeyFilePath=${config.get<string>('apiKeyFilePath', '') || '(discovery)'}`);
 
     if (autoConnect) {
         const delayMs = delaySeconds * 1000;
@@ -64,16 +65,18 @@ async function connectClient(): Promise<void> {
     const host = config.get<string>('host', '127.0.0.1')!;
     const port = config.get<number>('port', 48923)!;
     const apiKeyFilePath = config.get<string>('apiKeyFilePath', '')!;
+    const backendInstanceId = config.get<string>('backendInstanceId', '')!;
     const timeoutSeconds = config.get<number>('connectionTimeoutSeconds', 10)!;
 
     log(`Connection sequence starting...`);
     log(`  Target: ws://${host}:${port}/editor/ws`);
     log(`  Timeout: ${timeoutSeconds}s`);
-    log(`  API key path: ${apiKeyFilePath || '(default)'}`);
+    log(`  Backend instance id: ${backendInstanceId || '(none)'}`);
+    log(`  API key path: ${apiKeyFilePath || '(discovery)'}`);
     log(`  Workspace: ${vscode.workspace.workspaceFolders?.[0]?.uri.fsPath ?? '(none)'}`);
 
     try {
-        await client.connect(host, port, apiKeyFilePath, timeoutSeconds);
+        await client.connect(host, port, apiKeyFilePath, backendInstanceId, timeoutSeconds);
         vscode.window.showInformationMessage('SharpClaw: Connected to bridge.');
     } catch (err: any) {
         log(`Connection failed: ${err.message}`);

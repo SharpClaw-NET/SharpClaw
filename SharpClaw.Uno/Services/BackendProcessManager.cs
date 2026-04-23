@@ -20,6 +20,7 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class BackendProcessManager : IDisposable
 {
+    private readonly FrontendInstanceService? _frontendInstance;
     private readonly SessionLogWriter _sessionLogWriter;
     private Process? _process;
     private readonly string _executablePath;
@@ -66,8 +67,12 @@ public sealed class BackendProcessManager : IDisposable
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
     public int? ExitCode => _process is { HasExited: true } p ? p.ExitCode : null;
 
-    public BackendProcessManager(string apiUrl, SessionLogWriter sessionLogWriter)
+    public BackendProcessManager(
+        string apiUrl,
+        SessionLogWriter sessionLogWriter,
+        FrontendInstanceService? frontendInstance = null)
     {
+        _frontendInstance = frontendInstance;
         _sessionLogWriter = sessionLogWriter;
         _apiUrl = apiUrl;
 
@@ -267,10 +272,12 @@ public sealed class BackendProcessManager : IDisposable
         // Redirect the data directory to a writable location.
         // Inside MSIX, the install folder (C:\Program Files\WindowsApps\...) is
         // read-only, so JSON persistence and logs must go to %LOCALAPPDATA%.
-        var dataDir = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw", "Data");
-        psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = dataDir;
+        var instanceRoot = _frontendInstance?.BundledBackendInstanceRoot;
+        if (!string.IsNullOrWhiteSpace(instanceRoot))
+        {
+            psi.EnvironmentVariables["SHARPCLAW_INSTANCE_ROOT"] = instanceRoot;
+            psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = Path.Combine(instanceRoot, "Data");
+        }
 
         _process = Process.Start(psi);
 

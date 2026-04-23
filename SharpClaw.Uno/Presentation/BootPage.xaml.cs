@@ -54,7 +54,8 @@ public sealed partial class BootPage : Page
         _model ??= new BootModel(
             services.GetRequiredService<BackendProcessManager>(),
             services.GetRequiredService<GatewayProcessManager>(),
-            services.GetRequiredService<SharpClawApiClient>());
+            services.GetRequiredService<SharpClawApiClient>(),
+            services.GetRequiredService<FrontendInstanceService>());
 
         // Cancel any in-flight connection attempt from a previous visit.
         _retryCts?.Cancel();
@@ -468,8 +469,9 @@ public sealed partial class BootPage : Page
             await App.Services!.GetRequiredService<ModuleUiHookService>().RefreshAsync(api);
 
             await Task.Delay(1000, CancellationToken.None);
-            var needsSetup = !FirstSetupMarker.IsCompleted;
-            var needsUpgrade = !needsSetup && FirstSetupMarker.NeedsUpgradeRerun;
+            var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
+            var needsSetup = !setupMarker.IsCompleted;
+            var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
             var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
             var navigator = App.Services!.GetRequiredService<INavigator>();
             await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);

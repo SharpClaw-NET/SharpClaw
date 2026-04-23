@@ -16,9 +16,11 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class GatewayProcessManager : IDisposable
 {
+    private readonly FrontendInstanceService? _frontendInstance;
     private readonly SessionLogWriter _sessionLogWriter;
     private Process? _process;
     private readonly string _executablePath;
+    private string _backendBaseUrl;
     private string _gatewayUrl;
     private readonly List<string> _processOutput = [];
     private readonly object _outputLock = new();
@@ -34,6 +36,9 @@ public sealed class GatewayProcessManager : IDisposable
     /// <summary>Current gateway base URL (bind address for the server).</summary>
     public string GatewayUrl => _gatewayUrl;
 
+    /// <summary>Current backend base URL forwarded to the gateway.</summary>
+    public string BackendBaseUrl => _backendBaseUrl;
+
     /// <summary>Full path to the bundled gateway executable.</summary>
     public string ExecutablePath => _executablePath;
 
@@ -43,6 +48,10 @@ public sealed class GatewayProcessManager : IDisposable
     /// client actually reach the gateway.
     /// </summary>
     public string ClientUrl => _gatewayUrl.Replace("://0.0.0.0", "://127.0.0.1");
+
+    public string? BundledGatewayInstanceRoot => _frontendInstance is null
+        ? null
+        : Path.Combine(_frontendInstance.Paths.InstanceRoot, "stack", "gateway");
 
     /// <summary>
     /// When <c>true</c>, <see cref="EnsureStartedAsync"/> will never launch
@@ -92,9 +101,15 @@ public sealed class GatewayProcessManager : IDisposable
     /// <summary>Returns the number of captured output lines without copying.</summary>
     public int OutputLineCount { get { lock (_outputLock) return _processOutput.Count; } }
 
-    public GatewayProcessManager(string gatewayUrl, SessionLogWriter sessionLogWriter)
+    public GatewayProcessManager(
+        string gatewayUrl,
+        string backendBaseUrl,
+        SessionLogWriter sessionLogWriter,
+        FrontendInstanceService? frontendInstance = null)
     {
+        _frontendInstance = frontendInstance;
         _sessionLogWriter = sessionLogWriter;
+        _backendBaseUrl = backendBaseUrl;
         _gatewayUrl = gatewayUrl;
 
         var baseDir = AppContext.BaseDirectory;
@@ -110,6 +125,11 @@ public sealed class GatewayProcessManager : IDisposable
     /// <see cref="EnsureStartedAsync"/> call.
     /// </summary>
     public void UpdateGatewayUrl(string gatewayUrl) => _gatewayUrl = gatewayUrl;
+
+    /// <summary>
+    /// Changes the target backend URL the gateway should forward to.
+    /// </summary>
+    public void UpdateBackendBaseUrl(string backendBaseUrl) => _backendBaseUrl = backendBaseUrl;
 
     /// <summary>
     /// Returns <c>true</c> if the bundled gateway executable exists on disk.
@@ -263,6 +283,36 @@ public sealed class GatewayProcessManager : IDisposable
 
         // Bind to the configured URL.
         psi.EnvironmentVariables["ASPNETCORE_URLS"] = _gatewayUrl;
+        psi.EnvironmentVariables["InternalApi__BaseUrl"] = _backendBaseUrl;
+        psi.ArgumentList.Add($"--InternalApi:BaseUrl={_backendBaseUrl}");
+
+        if (!string.IsNullOrWhiteSpace(BundledGatewayInstanceRoot))
+        {
+            psi.EnvironmentVariables["SHARPCLAW_INSTANCE_ROOT"] = BundledGatewayInstanceRoot;
+            psi.EnvironmentVariables["SHARPCLAW_DATA_DIR"] = Path.Combine(BundledGatewayInstanceRoot, "Data");
+        }
+
+        if (_frontendInstance is not null)
+            psi.EnvironmentVariables["SHARPCLAW_SHARED_ROOT"] = _frontendInstance.Paths.SharedRoot;
+
+        if (_frontendInstance is not null)
+        {
+            var manifest = _frontendInstance.Paths.Manifest;
+            psi.EnvironmentVariables["SharpClawInstance__SelectedBackendBaseUrl"] = _backendBaseUrl;
+            psi.ArgumentList.Add($"--SharpClawInstance:SelectedBackendBaseUrl={_backendBaseUrl}");
+
+            if (!string.IsNullOrWhiteSpace(manifest.SelectedBackendInstanceId))
+            {
+                psi.EnvironmentVariables["SharpClawInstance__SelectedBackendInstanceId"] = manifest.SelectedBackendInstanceId;
+                psi.ArgumentList.Add($"--SharpClawInstance:SelectedBackendInstanceId={manifest.SelectedBackendInstanceId}");
+            }
+
+            if (!string.IsNullOrWhiteSpace(manifest.SelectedBackendBindingKind))
+            {
+                psi.EnvironmentVariables["SharpClawInstance__SelectedBackendBindingKind"] = manifest.SelectedBackendBindingKind;
+                psi.ArgumentList.Add($"--SharpClawInstance:SelectedBackendBindingKind={manifest.SelectedBackendBindingKind}");
+            }
+        }
 
         // Pass the internal API key directly to the gateway process so it
         // does not need to locate the key file itself.  In MSIX packaging,
@@ -280,11 +330,9 @@ public sealed class GatewayProcessManager : IDisposable
         {
             try
             {
-                var keyFilePath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SharpClaw", ".api-key");
+                var keyFilePath = _frontendInstance?.ResolveBackendApiKeyPath(_backendBaseUrl);
 
-                if (File.Exists(keyFilePath))
+                if (!string.IsNullOrWhiteSpace(keyFilePath) && File.Exists(keyFilePath))
                     resolvedKey = File.ReadAllText(keyFilePath).Trim();
             }
             catch
@@ -317,11 +365,9 @@ public sealed class GatewayProcessManager : IDisposable
         {
             try
             {
-                var tokenFilePath = Path.Combine(
-                    Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-                    "SharpClaw", ".gateway-token");
+                var tokenFilePath = _frontendInstance?.ResolveBackendGatewayTokenPath(_backendBaseUrl);
 
-                if (File.Exists(tokenFilePath))
+                if (!string.IsNullOrWhiteSpace(tokenFilePath) && File.Exists(tokenFilePath))
                     resolvedGatewayToken = File.ReadAllText(tokenFilePath).Trim();
             }
             catch { /* best-effort — gateway falls back to file read itself */ }

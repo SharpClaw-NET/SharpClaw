@@ -41,7 +41,12 @@
         "sharpclaw.apiKeyFilePath": {
           "type": "string",
           "default": "",
-          "description": "Path to the API key file. Leave empty to use the default (%LOCALAPPDATA%/SharpClaw/.api-key on Windows, ~/.local/share/SharpClaw/.api-key on Linux/macOS). Environment variables are expanded."
+          "description": "Explicit path to the backend runtime API key file. Leave empty to resolve through backend discovery using sharpclaw.backendInstanceId first, then the configured host and port. Environment variables are expanded."
+        },
+        "sharpclaw.backendInstanceId": {
+          "type": "string",
+          "default": "",
+          "description": "Optional backend instance id to attach to explicitly. When set, SharpClaw resolves runtime auth files from the matching backend discovery entry instead of guessing from host and port."
         },
         "sharpclaw.autoConnect": {
           "type": "boolean",

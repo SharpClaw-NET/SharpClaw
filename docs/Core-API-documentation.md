@@ -3,8 +3,11 @@
 > **Base URL:** `http://127.0.0.1:48923`
 >
 > **Authentication:** Every request must include an `X-Api-Key` header.
-> The key is auto-generated per session and written to
-> `%LOCALAPPDATA%/SharpClaw/.api-key`.
+> The key is auto-generated per backend instance and written to that
+> backend instance's runtime directory. Frontends, gateways, and editor
+> integrations should resolve the runtime auth path through backend
+> discovery metadata or an explicit runtime file path, not by assuming a
+> single machine-global `%LOCALAPPDATA%/SharpClaw/.api-key` file.
 
 All request/response bodies are JSON. Enum fields are serialized as strings.
 Timestamps are ISO 8601 (`DateTimeOffset`).
@@ -213,9 +216,10 @@ Pending, Downloading, Ready, Failed
 SharpClaw uses a two-layer authentication scheme:
 
 1. **API Key** — Every request (except `GET /echo`) must include an
-   `X-Api-Key` header. The key is auto-generated per session and written
-   to `%LOCALAPPDATA%/SharpClaw/.api-key`. This is for local machine
-   trust, not user identity.
+   `X-Api-Key` header. The key is auto-generated per backend instance and
+   written to that instance's runtime `.api-key` file. This is for local
+   machine trust, not user identity. Consumers should resolve the path
+   from backend discovery metadata or an explicit runtime auth path.
 2. **JWT Bearer Token** — After the API key check, a standard
    `Authorization: Bearer <token>` header identifies the user. Endpoints
    that are not exempt (see below) return `401` if the token is missing,
@@ -2943,7 +2947,7 @@ Overwrite the Core `.env` file with new content.
 
 | Key | Description |
 |-----|-------------|
-| `Encryption:Key` | AES-256-GCM key for encrypting provider API keys at rest. Must be exactly 256 bits (32 bytes) Base64-encoded. If empty/unset, auto-generated at `%LOCALAPPDATA%/SharpClaw/.encryption-key`. **Invalid values crash the backend at startup.** ⚠️ Changing this key makes previously encrypted API keys unreadable. |
+| `Encryption:Key` | AES-256-GCM key for encrypting provider API keys at rest. Must be exactly 256 bits (32 bytes) Base64-encoded. If empty/unset, auto-generated in the current backend instance `secrets` directory. **Invalid values crash the backend at startup.** ⚠️ Changing this key makes previously encrypted API keys unreadable. |
 | `Jwt:Secret` | HMAC signing key for JWT access tokens |
 | `Jwt:AccessTokenLifetime` | Access token lifetime (e.g. `"00:30:00"`) |
 | `Jwt:RefreshTokenLifetime` | Refresh token lifetime (e.g. `"30.00:00:00"`) |
@@ -2960,7 +2964,7 @@ Overwrite the Core `.env` file with new content.
 | `Local:IdleCooldownMinutes` | Idle minutes before unloading unpinned models |
 | `Logging:Serilog:Enabled` | Master switch for Serilog in the Core process. When `false`, Serilog sinks are disabled entirely. |
 | `Logging:Serilog:ConsoleEnabled` | Enable or disable the Core console sink. |
-| `Logging:Serilog:FileEnabled` | Enable or disable the Core Local AppData session file sink. |
+| `Logging:Serilog:FileEnabled` | Enable or disable the Core per-instance session file sink under the backend instance `logs` directory. |
 | `Logging:Serilog:RequestLoggingEnabled` | Enable or disable ASP.NET Core request logging through Serilog. |
 | `Logging:Serilog:MinimumLevel` | Default Serilog level for Core logs. Safe default: `Information`. |
 | `Logging:Serilog:MicrosoftMinimumLevel` | Override level for `Microsoft.*` categories. Safe default: `Warning`. |

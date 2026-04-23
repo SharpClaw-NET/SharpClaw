@@ -4,12 +4,66 @@ using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Gateway.Security;
 using SharpClaw.Utils.Logging;
+using SharpClaw.Utils.Instances;
 using Serilog;
 using Serilog.Events;
 
 var builder = WebApplication.CreateBuilder(args);
 
-await using var sessionLogs = new SessionLogWriter("gateway");
+var gatewayPaths = new SharpClawInstancePaths(
+    SharpClawInstanceKind.Gateway,
+    Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT"),
+    Environment.GetEnvironmentVariable("SHARPCLAW_SHARED_ROOT"));
+gatewayPaths.EnsureDirectories();
+gatewayPaths.CleanupStaleDiscoveryEntries(TimeSpan.FromMinutes(2));
+using var gatewayInstanceLock = new SharpClawInstanceLock(gatewayPaths);
+
+var gatewayManifest = gatewayPaths.Manifest;
+var configuredGatewayUrl = builder.Configuration["ASPNETCORE_URLS"]
+    ?? Environment.GetEnvironmentVariable("ASPNETCORE_URLS");
+var selectedBackendBaseUrl = builder.Configuration["SharpClawInstance:SelectedBackendBaseUrl"]
+    ?? builder.Configuration[$"{InternalApiOptions.SectionName}:BaseUrl"];
+var selectedBackendInstanceId = builder.Configuration["SharpClawInstance:SelectedBackendInstanceId"];
+var selectedBackendBindingKind = builder.Configuration["SharpClawInstance:SelectedBackendBindingKind"];
+var gatewayManifestChanged = false;
+
+if (!string.Equals(gatewayManifest.BaseUrl, configuredGatewayUrl, StringComparison.OrdinalIgnoreCase))
+{
+    gatewayManifest.BaseUrl = configuredGatewayUrl;
+    gatewayManifestChanged = true;
+}
+
+if (!string.Equals(gatewayManifest.SelectedBackendBaseUrl, selectedBackendBaseUrl, StringComparison.OrdinalIgnoreCase))
+{
+    gatewayManifest.SelectedBackendBaseUrl = selectedBackendBaseUrl;
+    gatewayManifestChanged = true;
+}
+
+if (!string.Equals(gatewayManifest.SelectedBackendInstanceId, selectedBackendInstanceId, StringComparison.Ordinal))
+{
+    gatewayManifest.SelectedBackendInstanceId = selectedBackendInstanceId;
+    gatewayManifestChanged = true;
+}
+
+if (!string.Equals(gatewayManifest.SelectedBackendBindingKind, selectedBackendBindingKind, StringComparison.Ordinal))
+{
+    gatewayManifest.SelectedBackendBindingKind = selectedBackendBindingKind;
+    gatewayManifestChanged = true;
+}
+
+if (gatewayManifestChanged)
+    gatewayPaths.SaveManifest(gatewayManifest);
+
+await using var sessionLogs = new SessionLogWriter("gateway", gatewayPaths.LogsDirectory);
+
+var publishedGatewayUrl = !string.IsNullOrWhiteSpace(configuredGatewayUrl)
+    ? configuredGatewayUrl
+    : gatewayManifest.BaseUrl ?? "http://127.0.0.1:48924";
+using var gatewayDiscoveryLease = new SharpClawDiscoveryLease(
+    gatewayPaths,
+    publishedGatewayUrl,
+    TimeSpan.FromSeconds(30));
+gatewayDiscoveryLease.PublishNow();
 
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 {
@@ -319,6 +373,13 @@ app.MapWhatsAppWebhookProxy();
 app.MapSlackWebhookProxy();
 app.MapTeamsWebhookProxy();
 
-app.Run();
+try
+{
+    app.Run();
+}
+finally
+{
+    gatewayPaths.DeleteDiscoveryEntry();
+}
 
 await Log.CloseAndFlushAsync();

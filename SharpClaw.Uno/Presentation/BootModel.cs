@@ -25,15 +25,18 @@ public sealed class BootModel
     private readonly BackendProcessManager _backend;
     private readonly GatewayProcessManager _gateway;
     private readonly SharpClawApiClient _api;
+    private readonly FrontendInstanceService? _frontendInstance;
 
     public BootModel(
         BackendProcessManager backend,
         GatewayProcessManager gateway,
-        SharpClawApiClient api)
+        SharpClawApiClient api,
+        FrontendInstanceService? frontendInstance = null)
     {
         _backend = backend;
         _gateway = gateway;
         _api = api;
+        _frontendInstance = frontendInstance;
     }
 
     public bool IsAwaitingInput { get; set; }
@@ -50,6 +53,7 @@ public sealed class BootModel
         {
             var url = customUrl.Trim();
             _backend.UpdateApiUrl(url);
+            _gateway.UpdateBackendBaseUrl(url);
             _api.UpdateBaseUrl(url);
         }
     }
@@ -134,13 +138,21 @@ public sealed class BootModel
     /// </summary>
     public async Task<(StepResult Result, DiagnosticLine? ApiKeyLine)> RunPingStepAsync(CancellationToken ct)
     {
-        var keyPath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw", ".api-key");
+        var keyPath = _frontendInstance?.ResolveBackendApiKeyPath(_backend.ApiUrl);
 
-        DiagnosticLine? apiKeyLine = File.Exists(keyPath)
-            ? new("API Key", "file present", false)
-            : new("API Key", $"file not found at {keyPath}", true);
+        DiagnosticLine? apiKeyLine = null;
+        if (string.IsNullOrWhiteSpace(keyPath))
+        {
+            apiKeyLine = new("API Key", "no matching backend discovery entry found", true);
+        }
+        else if (!File.Exists(keyPath))
+        {
+            apiKeyLine = new("API Key", $"file not found at {keyPath}", true);
+        }
+        else
+        {
+            apiKeyLine = new("API Key", "file present", false);
+        }
 
         _api.InvalidateApiKey();
         try

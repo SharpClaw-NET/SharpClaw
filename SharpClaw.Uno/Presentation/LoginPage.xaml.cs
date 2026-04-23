@@ -26,8 +26,9 @@ public sealed partial class LoginPage : Page
 
     private void OnLoaded(object sender, RoutedEventArgs e)
     {
-        _needsFirstSetup = !FirstSetupMarker.IsCompleted;
-        _needsUpgradeSetup = !_needsFirstSetup && FirstSetupMarker.NeedsUpgradeRerun;
+        var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
+        _needsFirstSetup = !setupMarker.IsCompleted;
+        _needsUpgradeSetup = !_needsFirstSetup && setupMarker.NeedsUpgradeRerun;
         SetupDisclaimer.Visibility = _needsFirstSetup ? Visibility.Visible : Visibility.Collapsed;
         PopulateSavedAccounts();
         UpdateCursor();

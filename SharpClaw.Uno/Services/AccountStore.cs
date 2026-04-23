@@ -4,16 +4,12 @@ using System.Text.Json.Serialization;
 namespace SharpClaw.Services;
 
 /// <summary>
-/// Persists multiple user accounts' authentication tokens to
-/// <c>%LOCALAPPDATA%/SharpClaw/accounts.json</c> for multi-account
+/// Persists multiple user accounts' authentication tokens to the
+/// frontend instance root for multi-account
 /// switching and "remember me" auto-login on app restart.
 /// </summary>
 public sealed class AccountStore
 {
-    private static readonly string StorePath = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SharpClaw", "accounts.json");
-
     private static readonly JsonSerializerOptions JsonOpts = new()
     {
         WriteIndented = true,
@@ -21,11 +17,13 @@ public sealed class AccountStore
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
+    private readonly FrontendInstanceService _frontendInstance;
     private readonly object _lock = new();
     private AccountData _data;
 
-    public AccountStore()
+    public AccountStore(FrontendInstanceService frontendInstance)
     {
+        _frontendInstance = frontendInstance;
         _data = Load();
     }
 
@@ -108,20 +106,20 @@ public sealed class AccountStore
         lock (_lock)
         {
             _data = new();
-            try { File.Delete(StorePath); } catch { /* best-effort */ }
+            try { File.Delete(_frontendInstance.AccountsPath); } catch { /* best-effort */ }
         }
     }
 
     // ── Internal ─────────────────────────────────────────────────
 
-    private static AccountData Load()
+    private AccountData Load()
     {
         try
         {
-            if (!File.Exists(StorePath))
+            if (!File.Exists(_frontendInstance.AccountsPath))
                 return new();
 
-            var json = File.ReadAllText(StorePath);
+            var json = File.ReadAllText(_frontendInstance.AccountsPath);
             return JsonSerializer.Deserialize<AccountData>(json, JsonOpts) ?? new();
         }
         catch
@@ -134,12 +132,12 @@ public sealed class AccountStore
     {
         try
         {
-            var dir = Path.GetDirectoryName(StorePath)!;
+            var dir = Path.GetDirectoryName(_frontendInstance.AccountsPath)!;
             if (!Directory.Exists(dir))
                 Directory.CreateDirectory(dir);
 
             var json = JsonSerializer.Serialize(_data, JsonOpts);
-            File.WriteAllText(StorePath, json);
+            File.WriteAllText(_frontendInstance.AccountsPath, json);
         }
         catch { /* best-effort */ }
     }

@@ -29,7 +29,8 @@ public partial class App : Application
 
     protected async override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _sessionLogs = new SessionLogWriter("uno");
+        var frontendInstance = new FrontendInstanceService();
+        _sessionLogs = new SessionLogWriter("uno", frontendInstance.Paths.LogsDirectory);
         RegisterGlobalExceptionLogging(_sessionLogs);
 
         var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(
@@ -159,12 +160,16 @@ public partial class App : Application
                 .ConfigureServices((context, services) =>
                 {
                     services.AddSingleton(_sessionLogs);
+                    services.AddSingleton(frontendInstance);
                     var isDev = context.HostingEnvironment.IsDevelopment();
-                    var apiUrl = LocalEnvironment.LoadApiUrl(isDev);
+                    var configuredApiUrl = LocalEnvironment.LoadApiUrl(isDev);
+                    var apiUrl = frontendInstance.ResolvePreferredBackendBaseUrl(configuredApiUrl);
+                    if (!string.Equals(configuredApiUrl, LocalEnvironment.DefaultApiUrl, StringComparison.OrdinalIgnoreCase))
+                        frontendInstance.RememberBackendBinding(null, configuredApiUrl, "configured");
                     var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
                     var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
 
-                    var backendManager = new BackendProcessManager(apiUrl, _sessionLogs)
+                    var backendManager = new BackendProcessManager(apiUrl, _sessionLogs, frontendInstance)
                     {
                         SkipLaunch = !backendEnabled,
                         Persistent = persistent,
@@ -174,16 +179,17 @@ public partial class App : Application
                     var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
                     var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
 
-                    var gatewayManager = new GatewayProcessManager(gatewayUrl, _sessionLogs)
+                    var gatewayManager = new GatewayProcessManager(gatewayUrl, apiUrl, _sessionLogs, frontendInstance)
                     {
                         SkipLaunch = !gatewayEnabled,
                         Persistent = persistent,
                     };
                     services.AddSingleton(gatewayManager);
 
-                    services.AddSingleton(new SharpClawApiClient(apiUrl, _sessionLogs));
-                    services.AddSingleton(new ClientSettings());
-                    services.AddSingleton(new AccountStore());
+                    services.AddSingleton(new SharpClawApiClient(apiUrl, _sessionLogs, frontendInstance));
+                    services.AddSingleton(new FirstSetupMarker(frontendInstance));
+                    services.AddSingleton(new ClientSettings(frontendInstance));
+                    services.AddSingleton(new AccountStore(frontendInstance));
                     services.AddSingleton(new ModuleStateCache());
                     services.AddSingleton(new ModuleUiHookService());
                 })

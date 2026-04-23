@@ -16,6 +16,12 @@ interface BridgeMessage {
 
 type ActionResult = Record<string, any>;
 
+interface BackendDiscoveryEntry {
+    instanceId: string;
+    baseUrl: string;
+    apiKeyFilePath: string;
+}
+
 export class BridgeClient {
     private ws: WebSocket | null = null;
     private readonly outputChannel: vscode.OutputChannel;
@@ -34,16 +40,17 @@ export class BridgeClient {
 
     // ── Connection lifecycle ──────────────────────────────────────────────
 
-    async connect(host: string, port: number, apiKeyFilePath: string, timeoutSeconds: number): Promise<void> {
+    async connect(host: string, port: number, apiKeyFilePath: string, backendInstanceId: string, timeoutSeconds: number): Promise<void> {
         if (this.isConnected) {
             await this.disconnect();
         }
 
-        const apiKey = this.readApiKey(apiKeyFilePath);
+        const resolvedApiKeyPath = this.resolveApiKeyPath(apiKeyFilePath, backendInstanceId, host, port);
+        const apiKey = resolvedApiKeyPath ? this.readApiKey(resolvedApiKeyPath) : null;
         if (!apiKey) {
-            this.log('API key read FAILED — key not found or empty.');
+            this.log('API key read FAILED — no matching backend runtime auth file could be resolved.');
             throw new Error(
-                'API key not found. Configure sharpclaw.apiKeyFilePath or ensure the default key file exists.'
+                'API key not found. Configure sharpclaw.apiKeyFilePath explicitly or ensure the selected backend publishes discovery metadata.'
             );
         }
         this.log(`API key read OK (${apiKey.length} chars).`);
@@ -458,21 +465,7 @@ export class BridgeClient {
 
     // ── API key ───────────────────────────────────────────────────────────
 
-    private readApiKey(configuredPath: string): string | null {
-        let keyPath = configuredPath;
-
-        if (!keyPath) {
-            if (process.platform === 'win32') {
-                const localAppData = process.env.LOCALAPPDATA;
-                if (!localAppData) { return null; }
-                keyPath = path.join(localAppData, 'SharpClaw', '.api-key');
-            } else {
-                const home = process.env.HOME;
-                if (!home) { return null; }
-                keyPath = path.join(home, '.local', 'share', 'SharpClaw', '.api-key');
-            }
-        }
-
+    private readApiKey(keyPath: string): string | null {
         if (keyPath.startsWith('~') && process.platform !== 'win32') {
             keyPath = path.join(process.env.HOME ?? '', keyPath.slice(1));
         }
@@ -483,6 +476,81 @@ export class BridgeClient {
             this.log(`API key file not found at: ${keyPath}`);
             return null;
         }
+    }
+
+    private resolveApiKeyPath(configuredPath: string, backendInstanceId: string, host: string, port: number): string | null {
+        if (configuredPath) {
+            return configuredPath;
+        }
+
+        const entries = this.enumerateBackendDiscoveryEntries();
+        if (backendInstanceId) {
+            const byInstanceId = entries.find(e => e.instanceId === backendInstanceId);
+            if (byInstanceId) {
+                this.log(`Resolved API key path from backend instance id '${backendInstanceId}'.`);
+                return byInstanceId.apiKeyFilePath;
+            }
+        }
+
+        const targetUrl = `http://${host}:${port}`;
+        const byUrl = entries.find(e => this.sameBaseUrl(e.baseUrl, targetUrl));
+        if (byUrl) {
+            this.log(`Resolved API key path from backend discovery URL '${targetUrl}'.`);
+            return byUrl.apiKeyFilePath;
+        }
+
+        if (entries.length === 1) {
+            this.log(`Resolved API key path from the only discovered backend '${entries[0].instanceId}'.`);
+            return entries[0].apiKeyFilePath;
+        }
+
+        return null;
+    }
+
+    private enumerateBackendDiscoveryEntries(): BackendDiscoveryEntry[] {
+        const discoveryDirectory = path.join(this.getSharpClawSharedRoot(), 'discovery', 'instances');
+        if (!fs.existsSync(discoveryDirectory)) {
+            return [];
+        }
+
+        const results: BackendDiscoveryEntry[] = [];
+        for (const fileName of fs.readdirSync(discoveryDirectory)) {
+            if (!fileName.startsWith('backend-') || !fileName.endsWith('.json')) {
+                continue;
+            }
+
+            try {
+                const content = fs.readFileSync(path.join(discoveryDirectory, fileName), 'utf-8');
+                const parsed = JSON.parse(content) as Partial<BackendDiscoveryEntry>;
+                if (parsed.instanceId && parsed.baseUrl && parsed.apiKeyFilePath) {
+                    results.push({
+                        instanceId: parsed.instanceId,
+                        baseUrl: parsed.baseUrl,
+                        apiKeyFilePath: parsed.apiKeyFilePath
+                    });
+                }
+            } catch {
+                continue;
+            }
+        }
+
+        return results;
+    }
+
+    private getSharpClawSharedRoot(): string {
+        if (process.platform === 'win32') {
+            const localAppData = process.env.LOCALAPPDATA;
+            if (localAppData) {
+                return path.join(localAppData, 'SharpClaw');
+            }
+        }
+
+        const home = process.env.HOME ?? os.homedir();
+        return path.join(home, '.local', 'share', 'SharpClaw');
+    }
+
+    private sameBaseUrl(left: string, right: string): boolean {
+        return left.replace(/\/$/, '').toLowerCase() === right.replace(/\/$/, '').toLowerCase();
     }
 
     // ── Parameter extraction ──────────────────────────────────────────────

@@ -24,8 +24,18 @@ public sealed class InternalApiOptions
     public string? ApiKey { get; set; }
 
     /// <summary>
+    /// Explicit path to the backend runtime API key file.
+    /// </summary>
+    public string? ApiKeyFilePath { get; set; }
+
+    /// <summary>
     /// Gateway service token for authenticating with the core API without
     /// a user JWT. When <c>null</c>, read from the <c>.gateway-token</c> file.
     /// </summary>
     public string? GatewayToken { get; set; }
+
+    /// <summary>
+    /// Explicit path to the backend runtime gateway token file.
+    /// </summary>
+    public string? GatewayTokenFilePath { get; set; }
 }

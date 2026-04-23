@@ -23,13 +23,15 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
     /// Creates a session log writer for the provided app name.
     /// Existing session files are deleted on startup.
     /// </summary>
-    public SessionLogWriter(string appName, TimeSpan? flushInterval = null)
+    public SessionLogWriter(string appName, string? logsRootDirectory = null, TimeSpan? flushInterval = null)
     {
         if (string.IsNullOrWhiteSpace(appName))
             throw new ArgumentException("App name is required.", nameof(appName));
 
         AppName = appName;
-        DirectoryPath = SharpClawAppDataPaths.GetAppLogDirectory(appName);
+        DirectoryPath = string.IsNullOrWhiteSpace(logsRootDirectory)
+            ? SharpClawAppDataPaths.GetAppLogDirectory(appName)
+            : Path.Combine(logsRootDirectory, appName);
         Directory.CreateDirectory(DirectoryPath);
 
         LogFilePath = Path.Combine(DirectoryPath, "log.txt");

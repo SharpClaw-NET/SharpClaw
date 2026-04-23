@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+using SharpClaw.Utils.Instances;
+
 namespace SharpClaw.Application.API.Api;
 
 /// <summary>
@@ -10,6 +12,8 @@ namespace SharpClaw.Application.API.Api;
 /// </summary>
 public sealed class ApiKeyProvider
 {
+    private readonly SharpClawInstancePaths _instancePaths;
+
     public string ApiKey { get; }
     public string KeyFilePath { get; }
 
@@ -22,18 +26,15 @@ public sealed class ApiKeyProvider
     public string GatewayToken { get; }
     public string GatewayTokenFilePath { get; }
 
-    public ApiKeyProvider()
+    public ApiKeyProvider(SharpClawInstancePaths instancePaths)
     {
-        var directory = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw");
+        _instancePaths = instancePaths;
+        _instancePaths.EnsureDirectories();
 
-        Directory.CreateDirectory(directory);
-
-        KeyFilePath = Path.Combine(directory, ".api-key");
+        KeyFilePath = _instancePaths.ApiKeyFilePath;
         ApiKey = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
-        GatewayTokenFilePath = Path.Combine(directory, ".gateway-token");
+        GatewayTokenFilePath = _instancePaths.GatewayTokenFilePath;
         GatewayToken = Convert.ToBase64String(RandomNumberGenerator.GetBytes(32));
 
         WriteSecureFile(KeyFilePath, ApiKey);
@@ -50,7 +51,6 @@ public sealed class ApiKeyProvider
 
     public void Cleanup()
     {
-        try { File.Delete(KeyFilePath); } catch { /* best-effort */ }
-        try { File.Delete(GatewayTokenFilePath); } catch { /* best-effort */ }
+        _instancePaths.DeleteRuntimeFiles();
     }
 }

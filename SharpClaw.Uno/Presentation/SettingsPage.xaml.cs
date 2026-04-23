@@ -2218,14 +2218,14 @@ public sealed partial class SettingsPage : Page
 
         panel.Children.Add(new TextBlock
         {
-            Text = "Reset All Data", FontFamily = Mono, FontSize = 13,
+            Text = "Reset Current Stack", FontFamily = Mono, FontSize = 13,
             Foreground = B(0xFF4444), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
         });
         panel.Children.Add(new TextBlock
         {
-            Text = "Permanently deletes the entire local database, all saved settings, "
-                 + "encryption keys, API keys, chat history, and the first-setup marker. "
-                 + "The application will restart as if freshly installed.",
+            Text = "Permanently deletes the current frontend instance, its companion gateway state, "
+                 + "and requests the currently selected backend instance to factory reset its own data. "
+                 + "The application will restart as if freshly installed for this stack.",
             FontFamily = Mono, FontSize = 11, Foreground = B(0xBBBBBB),
             TextWrapping = TextWrapping.Wrap, MaxWidth = 560,
         });
@@ -2259,7 +2259,7 @@ public sealed partial class SettingsPage : Page
 
         var showBtn = new Button
         {
-            Content = new TextBlock { Text = "[ Reset All Data ]", FontFamily = Mono, FontSize = 12, Foreground = B(0xFF4444) },
+            Content = new TextBlock { Text = "[ Reset Current Stack ]", FontFamily = Mono, FontSize = 12, Foreground = B(0xFF4444) },
             Background = B(0x2A1111), BorderBrush = B(0xFF4444), BorderThickness = new Thickness(1),
             Padding = new Thickness(12, 6), Margin = new Thickness(0, 4, 0, 0),
         };
@@ -2278,7 +2278,7 @@ public sealed partial class SettingsPage : Page
     {
         ContentPanel.Children.Clear();
         H("Resetting…");
-        Lbl("Stopping backend and deleting all local data…", 0xFF8888);
+        Lbl("Resetting the current frontend instance and selected backend instance…", 0xFF8888);
 
         await Task.Delay(200); // Let UI render
 
@@ -2322,15 +2322,20 @@ public sealed partial class SettingsPage : Page
         try { App.Services?.GetService<AccountStore>()?.Reset(); }
         catch (Exception ex) { errors.Add($"Account store: {ex.Message}"); }
 
-        // 4. Clean %LOCALAPPDATA%/SharpClaw — remove user data but preserve
-        //    .api-key and .gateway-token, which belong to the (potentially
-        //    still-running) backend process.  In dev/external mode Stop() is
-        //    a no-op, so the backend keeps its in-memory key; deleting the
-        //    key file would leave the client unable to authenticate.
-        var localAppData = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw");
-        await CleanDirectoryPreservingAuthFilesAsync(localAppData, errors);
+        // 4. Clean only the frontend-owned instance root. This also removes
+        //    any bundled gateway companion state that lives under the current
+        //    frontend stack. Backend-owned auth files and backend discovery
+        //    entries are handled by backend reset/shutdown instead.
+        try
+        {
+            var frontend = App.Services?.GetService<FrontendInstanceService>();
+            if (frontend is not null)
+                await DeleteWithRetryAsync(frontend.Paths.InstanceRoot, "Frontend instance", errors);
+        }
+        catch (Exception ex)
+        {
+            errors.Add($"Frontend instance: {ex.Message}");
+        }
 
         // 5. Invalidate the client's cached API key so the next request
         //    re-reads from disk (handles both external and bundled restarts).

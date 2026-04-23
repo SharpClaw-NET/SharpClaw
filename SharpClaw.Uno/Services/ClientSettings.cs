@@ -4,8 +4,8 @@ using System.Text.Json.Serialization;
 namespace SharpClaw.Services;
 
 /// <summary>
-/// Persists Uno-specific frontend-only preferences to
-/// <c>%LOCALAPPDATA%/SharpClaw/client-settings.json</c>.
+/// Persists Uno-specific frontend-only preferences to the frontend
+/// instance root.
 /// <para>
 /// These settings are a <b>frontend-only convention</b> — they are never
 /// sent to or read by the API backend. Examples include the default
@@ -22,16 +22,13 @@ namespace SharpClaw.Services;
 /// </summary>
 public sealed class ClientSettings
 {
-    private static readonly string BaseDir = Path.Combine(
-        Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-        "SharpClaw");
-
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         WriteIndented = true,
         DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull,
     };
 
+    private readonly FrontendInstanceService _frontendInstance;
     private readonly object _lock = new();
     private Dictionary<string, string> _values;
     private string _settingsPath;
@@ -46,9 +43,10 @@ public sealed class ClientSettings
     /// <summary>Selected audio input device (microphone).</summary>
     public const string SelectedInputAudioId = "SelectedInputAudioId";
 
-    public ClientSettings()
+    public ClientSettings(FrontendInstanceService frontendInstance)
     {
-        _settingsPath = Path.Combine(BaseDir, "client-settings.json");
+        _frontendInstance = frontendInstance;
+        _settingsPath = _frontendInstance.ClientSettingsPath;
         _values = Load();
     }
 
@@ -58,7 +56,7 @@ public sealed class ClientSettings
     /// <summary>
     /// Switches the settings context to a specific user.
     /// Saves current in-memory state, then loads the target user's settings file
-    /// from <c>%LOCALAPPDATA%/SharpClaw/users/{userId}/settings.json</c>.
+    /// from the frontend instance root.
     /// </summary>
     public void SwitchUser(Guid userId)
     {
@@ -68,13 +66,10 @@ public sealed class ClientSettings
                 Flush();
 
             _activeUserId = userId;
-            _settingsPath = UserSettingsPath(userId);
+            _settingsPath = _frontendInstance.GetUserSettingsPath(userId);
             _values = Load();
         }
     }
-
-    private static string UserSettingsPath(Guid userId)
-        => Path.Combine(BaseDir, "users", userId.ToString("N"), "settings.json");
 
     /// <summary>
     /// Reads a setting value by key. Returns <c>null</c> when absent.
@@ -112,11 +107,11 @@ public sealed class ClientSettings
         {
             _values.Clear();
             _activeUserId = null;
-            _settingsPath = Path.Combine(BaseDir, "client-settings.json");
+            _settingsPath = _frontendInstance.ClientSettingsPath;
             try { File.Delete(_settingsPath); } catch { /* best-effort */ }
             try
             {
-                var usersDir = Path.Combine(BaseDir, "users");
+                var usersDir = _frontendInstance.UsersSettingsDirectory;
                 if (Directory.Exists(usersDir))
                     Directory.Delete(usersDir, recursive: true);
             }

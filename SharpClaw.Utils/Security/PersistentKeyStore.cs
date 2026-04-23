@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 
+using SharpClaw.Utils.Instances;
+
 namespace SharpClaw.Utils.Security;
 
 /// <summary>
@@ -22,6 +24,25 @@ public static class PersistentKeyStore
 
         var filePath = Path.Combine(KeyDirectory, $".{keyName}");
 
+        return GetOrCreateFromFilePath(filePath);
+    }
+
+    /// <summary>
+    /// Returns the base64-encoded key for the given name within the specified
+    /// instance root, generating and persisting a new 256-bit key if one does
+    /// not already exist.
+    /// </summary>
+    public static string GetOrCreate(string keyName, SharpClawInstancePaths instancePaths)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(keyName);
+        ArgumentNullException.ThrowIfNull(instancePaths);
+
+        instancePaths.EnsureDirectories();
+        return GetOrCreateFromFilePath(instancePaths.GetSecretFilePath(keyName));
+    }
+
+    private static string GetOrCreateFromFilePath(string filePath)
+    {
         if (File.Exists(filePath))
             return File.ReadAllText(filePath).Trim();
 

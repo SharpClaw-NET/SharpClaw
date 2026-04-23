@@ -98,6 +98,7 @@ public sealed class SharpClawPackage : AsyncPackage
         var config = new BridgeClientConfig(
             options.BridgeUri,
             options.ResolvedApiKeyFilePath,
+            options.BackendInstanceId,
             options.ConnectionTimeoutSeconds);
 
         _bridgeClient = new SharpClawBridgeClient(workspacePath, this, config);

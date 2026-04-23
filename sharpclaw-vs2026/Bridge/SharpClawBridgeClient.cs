@@ -11,6 +11,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Shell;
 using Microsoft.VisualStudio.Shell.Interop;
+using SharpClaw.Utils.Logging;
 
 namespace SharpClaw.VS2026Extension;
 
@@ -71,11 +72,12 @@ internal sealed class SharpClawBridgeClient
     public async Task ConnectAsync(CancellationToken ct = default)
     {
         var bridgeUri = _config.BridgeUri;
-        var apiKeyPath = _config.ApiKeyFilePath;
+        var apiKeyPath = ResolveApiKeyPath();
 
         await LogAsync("Connection sequence starting...");
         await LogAsync($"  Workspace: {_workspacePath ?? "(none)"}");
         await LogAsync($"  Target:    {bridgeUri}");
+        await LogAsync($"  Backend instance id: {(_config.BackendInstanceId.Length > 0 ? _config.BackendInstanceId : "(none)")}");
 
         _cts = new CancellationTokenSource();
         _socket = new ClientWebSocket();
@@ -948,6 +950,67 @@ internal sealed class SharpClawBridgeClient
                 "Ensure the SharpClaw backend is running.");
 
         return File.ReadAllText(apiKeyFilePath).Trim();
+    }
+
+    private string ResolveApiKeyPath()
+    {
+        if (!string.IsNullOrWhiteSpace(_config.ApiKeyFilePath))
+            return _config.ApiKeyFilePath;
+
+        var entries = EnumerateBackendDiscoveryEntries().ToList();
+        if (!string.IsNullOrWhiteSpace(_config.BackendInstanceId))
+        {
+            var byInstanceId = entries.FirstOrDefault(e => string.Equals(e.InstanceId, _config.BackendInstanceId, StringComparison.Ordinal));
+            if (byInstanceId is not null)
+                return byInstanceId.ApiKeyFilePath;
+        }
+
+        var targetUrl = $"http://{_config.BridgeUri.Host}:{_config.BridgeUri.Port}";
+        var byUrl = entries.FirstOrDefault(e => string.Equals(e.BaseUrl?.TrimEnd('/'), targetUrl.TrimEnd('/'), StringComparison.OrdinalIgnoreCase));
+        if (byUrl is not null)
+            return byUrl.ApiKeyFilePath;
+
+        if (entries.Count == 1)
+            return entries[0].ApiKeyFilePath;
+
+        throw new InvalidOperationException(
+            "API key file could not be resolved from backend discovery. " +
+            "Configure API Key File Path explicitly or provide a Backend Instance Id.");
+    }
+
+    private static IEnumerable<BackendDiscoveryEntry> EnumerateBackendDiscoveryEntries()
+    {
+        var discoveryDirectory = Path.Combine(
+            SharpClawAppDataPaths.GetSharpClawRootDirectory(),
+            "discovery",
+            "instances");
+
+        if (!Directory.Exists(discoveryDirectory))
+            yield break;
+
+        foreach (var filePath in Directory.EnumerateFiles(discoveryDirectory, "backend-*.json"))
+        {
+            BackendDiscoveryEntry? entry;
+            try
+            {
+                var json = File.ReadAllText(filePath);
+                entry = JsonSerializer.Deserialize<BackendDiscoveryEntry>(json, JsonOptions);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (entry is not null && !string.IsNullOrWhiteSpace(entry.ApiKeyFilePath))
+                yield return entry;
+        }
+    }
+
+    private sealed class BackendDiscoveryEntry
+    {
+        public string? InstanceId { get; set; }
+        public string? BaseUrl { get; set; }
+        public string ApiKeyFilePath { get; set; } = string.Empty;
     }
 
     // ═══════════════════════════════════════════════════════════════

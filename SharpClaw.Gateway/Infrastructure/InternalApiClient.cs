@@ -5,6 +5,7 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using SharpClaw.Utils.Logging;
+using SharpClaw.Utils.Instances;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -20,6 +21,13 @@ public sealed class InternalApiClient(
     SessionLogWriter sessionLogWriter)
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        PropertyNameCaseInsensitive = true,
+        Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
+    };
+
+    private static readonly JsonSerializerOptions DiscoveryJsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
         PropertyNameCaseInsensitive = true,
@@ -239,12 +247,16 @@ public sealed class InternalApiClient(
             return _cachedGatewayToken;
         }
 
-        // Read from the well-known file written by the internal API
-        var tokenFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw", ".gateway-token");
+        if (!string.IsNullOrWhiteSpace(opts.GatewayTokenFilePath) && File.Exists(opts.GatewayTokenFilePath))
+        {
+            _cachedGatewayToken = File.ReadAllText(opts.GatewayTokenFilePath).Trim();
+            return _cachedGatewayToken;
+        }
 
-        if (!File.Exists(tokenFilePath))
+        var entry = ResolveSelectedBackendDiscoveryEntry(opts);
+        var tokenFilePath = entry?.GatewayTokenFilePath;
+
+        if (string.IsNullOrWhiteSpace(tokenFilePath) || !File.Exists(tokenFilePath))
             return null;
 
         _cachedGatewayToken = File.ReadAllText(tokenFilePath).Trim();
@@ -264,17 +276,88 @@ public sealed class InternalApiClient(
             return _cachedApiKey;
         }
 
-        // Read from the well-known file written by the internal API
-        var keyFilePath = Path.Combine(
-            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
-            "SharpClaw", ".api-key");
+        if (!string.IsNullOrWhiteSpace(opts.ApiKeyFilePath) && File.Exists(opts.ApiKeyFilePath))
+        {
+            _cachedApiKey = File.ReadAllText(opts.ApiKeyFilePath).Trim();
+            return _cachedApiKey;
+        }
 
-        if (!File.Exists(keyFilePath))
+        var entry = ResolveSelectedBackendDiscoveryEntry(opts);
+        var keyFilePath = entry?.ApiKeyFilePath;
+
+        if (string.IsNullOrWhiteSpace(keyFilePath) || !File.Exists(keyFilePath))
             throw new InvalidOperationException(
-                $"Internal API key file not found at '{keyFilePath}'. " +
-                "Ensure the internal SharpClaw API is running.");
+                "Internal API key file could not be resolved for the selected backend. " +
+                "Ensure the selected SharpClaw backend is running and has published discovery metadata.");
 
         _cachedApiKey = File.ReadAllText(keyFilePath).Trim();
         return _cachedApiKey;
+    }
+
+    private static SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry(InternalApiOptions opts)
+    {
+        var paths = new SharpClawInstancePaths(
+            SharpClawInstanceKind.Gateway,
+            Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT"),
+            Environment.GetEnvironmentVariable("SHARPCLAW_SHARED_ROOT"));
+
+        var manifest = paths.Manifest;
+        var entries = EnumerateBackendDiscoveryEntries(paths.SharedRoot).ToList();
+
+        var explicitInstanceId = Environment.GetEnvironmentVariable("SharpClawInstance__SelectedBackendInstanceId")
+            ?? Environment.GetEnvironmentVariable("SHARPCLAW_SELECTED_BACKEND_INSTANCE_ID");
+        if (!string.IsNullOrWhiteSpace(explicitInstanceId))
+        {
+            var byExplicitInstanceId = entries.FirstOrDefault(e => string.Equals(e.InstanceId, explicitInstanceId, StringComparison.Ordinal));
+            if (byExplicitInstanceId is not null)
+                return byExplicitInstanceId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(manifest.SelectedBackendInstanceId))
+        {
+            var byInstanceId = entries.FirstOrDefault(e => string.Equals(e.InstanceId, manifest.SelectedBackendInstanceId, StringComparison.Ordinal));
+            if (byInstanceId is not null)
+                return byInstanceId;
+        }
+
+        if (!string.IsNullOrWhiteSpace(opts.BaseUrl))
+        {
+            var byConfiguredUrl = entries.FirstOrDefault(e => string.Equals(e.BaseUrl, opts.BaseUrl, StringComparison.OrdinalIgnoreCase));
+            if (byConfiguredUrl is not null)
+                return byConfiguredUrl;
+        }
+
+        if (!string.IsNullOrWhiteSpace(manifest.SelectedBackendBaseUrl))
+        {
+            var byManifestUrl = entries.FirstOrDefault(e => string.Equals(e.BaseUrl, manifest.SelectedBackendBaseUrl, StringComparison.OrdinalIgnoreCase));
+            if (byManifestUrl is not null)
+                return byManifestUrl;
+        }
+
+        return entries.Count == 1 ? entries[0] : null;
+    }
+
+    private static IEnumerable<SharpClawDiscoveryEntry> EnumerateBackendDiscoveryEntries(string sharedRoot)
+    {
+        var discoveryDirectory = Path.Combine(sharedRoot, "discovery", "instances");
+        if (!Directory.Exists(discoveryDirectory))
+            yield break;
+
+        foreach (var filePath in Directory.EnumerateFiles(discoveryDirectory, "backend-*.json"))
+        {
+            SharpClawDiscoveryEntry? entry;
+            try
+            {
+                using var stream = File.OpenRead(filePath);
+                entry = JsonSerializer.Deserialize<SharpClawDiscoveryEntry>(stream, DiscoveryJsonOptions);
+            }
+            catch
+            {
+                continue;
+            }
+
+            if (entry is not null)
+                yield return entry;
+        }
     }
 }
