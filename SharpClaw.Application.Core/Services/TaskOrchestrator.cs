@@ -22,11 +22,12 @@ namespace SharpClaw.Application.Services;
 /// <summary>
 /// Executes a <see cref="CompiledTaskPlan"/> by interpreting its
 /// <see cref="TaskStepDefinition"/> tree.  Each running instance gets
-/// its own <see cref="CancellationTokenSource"/>.
+/// its own runtime entry managed by <see cref="TaskRuntimeHost"/>.
 /// <para>
 /// The orchestrator does <b>not</b> manage persistence — it calls back
 /// into <see cref="TaskService"/> for DB operations and delegates agent
-/// interaction to <see cref="ChatService"/>.
+/// interaction to <see cref="ChatService"/>.  Runtime state (cancellation,
+/// pause gates, output channels) is owned by <see cref="TaskRuntimeHost"/>.
 /// </para>
 /// </summary>
 public sealed class TaskOrchestrator(
@@ -35,25 +36,11 @@ public sealed class TaskOrchestrator(
     ChatService chatService,
     AgentJobService agentJobService,
     IHttpClientFactory httpClientFactory,
-    IServiceScopeFactory scopeFactory)
+    IServiceScopeFactory scopeFactory,
+    TaskRuntimeHost runtimeHost)
 {
     private readonly ChatService _chatService = chatService;
     private readonly AgentJobService _agentJobService = agentJobService;
-
-    /// <summary>
-    /// Per-instance cancellation so external callers can stop a task.
-    /// </summary>
-    private static readonly ConcurrentDictionary<Guid, CancellationTokenSource> _running = new();
-
-    /// <summary>
-    /// Per-instance output channels for SSE / WebSocket streaming.
-    /// </summary>
-    private static readonly ConcurrentDictionary<Guid, Channel<TaskOutputEvent>> _outputChannels = new();
-
-    /// <summary>
-    /// Per-instance monotonic sequence counter for output events.
-    /// </summary>
-    private static readonly ConcurrentDictionary<Guid, long> _sequenceCounters = new();
 
     // ═══════════════════════════════════════════════════════════════
     // Public API
@@ -95,48 +82,46 @@ public sealed class TaskOrchestrator(
             return;
         }
 
-        // Prepare cancellation and output channel
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        _running[instanceId] = cts;
-        _outputChannels[instanceId] = Channel.CreateUnbounded<TaskOutputEvent>();
-        _sequenceCounters[instanceId] = 0;
+        // Prepare runtime entry in the host
+        var runtime = runtimeHost.Register(instanceId, ct);
 
-        // Mark as running
-        instance.Status = TaskInstanceStatus.Running;
-        instance.StartedAt = DateTimeOffset.UtcNow;
-        await db.SaveChangesAsync(ct);
+        if (!await taskService.TryMarkInstanceRunningAsync(instanceId, ct))
+        {
+            runtimeHost.Unregister(instanceId);
+            throw new InvalidOperationException($"Task instance {instanceId} could not transition to Running.");
+        }
 
         await taskService.AppendLogAsync(instanceId, "Task started.", ct: ct);
-        await PushEventAsync(instanceId, TaskOutputEventType.StatusChange, "Running");
+        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, "Running");
 
         // Execute in background so the caller returns immediately
-        _ = Task.Run(() => ExecutePlanAsync(instanceId, compilationResult.Plan, cts.Token), CancellationToken.None);
+        _ = Task.Run(() => ExecutePlanAsync(instanceId, compilationResult.Plan, runtime, runtime.CancellationToken), CancellationToken.None);
     }
 
     /// <summary>
     /// Request cancellation of a running instance.
     /// </summary>
-    public async Task StopAsync(Guid instanceId, CancellationToken ct = default)
-    {
-        if (_running.TryRemove(instanceId, out var cts))
-        {
-            await cts.CancelAsync();
-            cts.Dispose();
-        }
+    public Task StopAsync(Guid instanceId, CancellationToken ct = default)
+        => runtimeHost.StopAsync(instanceId, ct);
 
-        await taskService.CancelInstanceAsync(instanceId, ct);
-    }
+    /// <summary>
+    /// Cooperatively pause a running task instance.
+    /// </summary>
+    public Task<bool> PauseAsync(Guid instanceId, CancellationToken ct = default)
+        => runtimeHost.PauseAsync(instanceId, ct);
+
+    /// <summary>
+    /// Resume a paused task instance.
+    /// </summary>
+    public Task<bool> ResumeAsync(Guid instanceId, CancellationToken ct = default)
+        => runtimeHost.ResumeAsync(instanceId, ct);
 
     /// <summary>
     /// Get a channel reader for streaming task output events.
     /// Returns <c>null</c> if no instance is running with the given ID.
     /// </summary>
     public ChannelReader<TaskOutputEvent>? GetOutputReader(Guid instanceId)
-    {
-        return _outputChannels.TryGetValue(instanceId, out var channel)
-            ? channel.Reader
-            : null;
-    }
+        => runtimeHost.GetOutputReader(instanceId);
 
     // ═══════════════════════════════════════════════════════════════
     // Execution engine
@@ -145,6 +130,7 @@ public sealed class TaskOrchestrator(
     private async Task ExecutePlanAsync(
         Guid instanceId,
         CompiledTaskPlan plan,
+        TaskRuntimeInstance runtime,
         CancellationToken ct)
     {
         // Create a dedicated DI scope for the background execution.
@@ -156,10 +142,10 @@ public sealed class TaskOrchestrator(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var taskService = scope.ServiceProvider.GetRequiredService<TaskService>();
-        var chatService = scope.ServiceProvider.GetRequiredService<ChatService>();
-        var agentJobService = scope.ServiceProvider.GetRequiredService<AgentJobService>();
+        var chatService = scope.ServiceProvider.GetService<ChatService>();
+        var agentJobService = scope.ServiceProvider.GetService<AgentJobService>();
 
-        var context = new TaskExecutionContext(instanceId, plan, ct);
+        var context = new TaskExecutionContext(instanceId, plan, runtime, ct);
 
         // ── Set up shared data store for inter-agent communication ──
         var store = TaskSharedData.GetOrCreate(instanceId);
@@ -170,7 +156,8 @@ public sealed class TaskOrchestrator(
             ? JsonSerializer.Serialize(plan.ParameterValues)
             : null;
         store.AllowedOutputFormat = plan.AgentOutputFormat;
-        store.OnAgentOutput = async data => await EmitOutputAsync(instanceId, data, db);
+        store.RegisterBuiltInTools();
+        store.OnAgentOutput = async data => await EmitOutputAsync(instanceId, data, db, runtime);
         store.OnSharedDataChanged = async (description, lightSnapshot, bigSnapshotJson) =>
         {
             var instance = await db.TaskInstances.FindAsync(instanceId);
@@ -181,13 +168,13 @@ public sealed class TaskOrchestrator(
                 await db.SaveChangesAsync();
             }
             await taskService.AppendLogAsync(instanceId, $"SharedData: {description}");
-            await PushEventAsync(instanceId, TaskOutputEventType.Log, $"SharedData: {description}");
+            await runtime.WriteEventAsync(TaskOutputEventType.Log, $"SharedData: {description}");
         };
 
         // Register custom [ToolCall] hook callbacks
         foreach (var hook in plan.ToolCallHooks)
         {
-            store.RegisterToolHook(hook.Name, async (args, hookCt) =>
+            store.RegisterCustomToolHook(hook, async (args, hookCt) =>
             {
                 // Set hook parameters as variables for body execution
                 foreach (var param in hook.Parameters)
@@ -202,78 +189,79 @@ public sealed class TaskOrchestrator(
                 foreach (var step in hook.Body)
                 {
                     hookCt.ThrowIfCancellationRequested();
-                    await ExecuteStepAsync(step, context, db, taskService, chatService, agentJobService);
+                    var executionResult = await ExecuteStepAsync(step, context, db, taskService, chatService, agentJobService);
+                    if (executionResult == TaskStepExecutionResult.Return)
+                    {
+                        break;
+                    }
                 }
 
-                // Return the result variable
                 if (hook.ReturnVariable is not null && context.Variables.TryGetValue(hook.ReturnVariable, out var result))
-                    return result?.ToString() ?? "";
-                return "";
+                    return result?.ToString() ?? string.Empty;
+
+                return string.Empty;
             });
         }
-
-        // Build custom tool definitions for ChatService
-        store.CustomToolDefinitions = ChatService.BuildCustomToolDefinitions(plan.ToolCallHooks);
 
         try
         {
             foreach (var step in plan.ExecutionSteps)
             {
                 ct.ThrowIfCancellationRequested();
-                await ExecuteStepAsync(step, context, db, taskService, chatService, agentJobService);
+                await runtime.WaitIfPausedAsync(ct);
+                var executionResult = await ExecuteStepAsync(step, context, db, taskService, chatService, agentJobService);
+                if (executionResult == TaskStepExecutionResult.Return)
+                {
+                    break;
+                }
             }
 
-            await CompleteInstanceAsync(instanceId, TaskInstanceStatus.Completed, db, taskService);
+            await CompleteInstanceAsync(instanceId, TaskInstanceStatus.Completed, db, taskService, runtime);
         }
         catch (OperationCanceledException)
         {
-            await CompleteInstanceAsync(instanceId, TaskInstanceStatus.Cancelled, db, taskService);
+            await CompleteInstanceAsync(instanceId, TaskInstanceStatus.Cancelled, db, taskService, runtime);
         }
         catch (Exception ex)
         {
-            await FailInstanceAsync(instanceId, ex.Message, db, taskService);
+            await FailInstanceAsync(instanceId, ex.Message, db, taskService, runtime);
         }
         finally
         {
             TaskSharedData.Remove(instanceId);
-
-            if (_running.TryRemove(instanceId, out var cts))
-                cts.Dispose();
-
-            _sequenceCounters.TryRemove(instanceId, out _);
-
-            if (_outputChannels.TryRemove(instanceId, out var channel))
-                channel.Writer.TryComplete();
+            runtimeHost.Unregister(instanceId);
         }
     }
 
-    private async Task ExecuteStepAsync(
+    private async Task<TaskStepExecutionResult> ExecuteStepAsync(
         TaskStepDefinition step, TaskExecutionContext context,
         SharpClawDbContext db, TaskService taskService,
-        ChatService chatService, AgentJobService agentJobService)
+        ChatService? chatService, AgentJobService? agentJobService)
     {
         context.CancellationToken.ThrowIfCancellationRequested();
+        await WaitIfPausedAsync(context);
 
         switch (step.Kind)
         {
             case TaskStepKind.DeclareVariable:
                 context.Variables[step.VariableName ?? ""] = step.Expression;
-                break;
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Assign:
                 context.Variables[step.VariableName ?? ""] = step.Expression;
-                break;
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Log:
                 var logMessage = ResolveExpression(step.Expression, context);
                 await taskService.AppendLogAsync(context.InstanceId, logMessage, ct: context.CancellationToken);
-                await PushEventAsync(context.InstanceId, TaskOutputEventType.Log, logMessage);
-                break;
+                await context.Runtime.WriteEventAsync(TaskOutputEventType.Log, logMessage);
+                return TaskStepExecutionResult.Continue;
+
 
             case TaskStepKind.Delay:
                 if (int.TryParse(step.Expression, out var delayMs))
-                    await Task.Delay(delayMs, context.CancellationToken);
-                break;
+                    await DelayWithPauseAsync(delayMs, context);
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.WaitUntilStopped:
                 // Block until cancellation
@@ -285,15 +273,16 @@ public sealed class TaskOrchestrator(
                 {
                     // Expected — task was stopped
                 }
-                break;
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Emit:
                 var outputJson = ResolveExpression(step.Expression, context);
-                await EmitOutputAsync(context.InstanceId, outputJson, db);
-                break;
+                await EmitOutputAsync(context.InstanceId, outputJson, db, context.Runtime);
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Chat:
             {
+                var requiredChatService = chatService ?? throw new InvalidOperationException("ChatService is not available for task chat steps.");
                 var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
                 var message = ResolveExpression(step.Expression, context);
                 Guid? agentId = step.Arguments is { Count: > 0 }
@@ -301,7 +290,7 @@ public sealed class TaskOrchestrator(
                     : null;
 
                 var request = new ChatRequest(message, agentId, ChatClientType.API, TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
-                var response = await chatService.SendMessageAsync(
+                var response = await requiredChatService.SendMessageAsync(
                     channelId, request, ct: context.CancellationToken);
 
                 await taskService.AppendLogAsync(
@@ -310,11 +299,12 @@ public sealed class TaskOrchestrator(
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = response.AssistantMessage.Content;
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.ChatStream:
             {
+                var requiredChatService = chatService ?? throw new InvalidOperationException("ChatService is not available for task chat stream steps.");
                 var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
                 var message = ResolveExpression(step.Expression, context);
                 Guid? agentId = step.Arguments is { Count: > 0 }
@@ -324,7 +314,7 @@ public sealed class TaskOrchestrator(
                 var request = new ChatRequest(message, agentId, ChatClientType.API, TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
                 var sb = new StringBuilder();
 
-                await foreach (var evt in chatService.SendMessageStreamAsync(
+                await foreach (var evt in requiredChatService.SendMessageStreamAsync(
                     channelId, request, AutoApproveAsync, ct: context.CancellationToken))
                 {
                     if (evt.Type == ChatStreamEventType.TextDelta && evt.Delta is not null)
@@ -337,11 +327,12 @@ public sealed class TaskOrchestrator(
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = sb.ToString();
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.StartTranscription:
             {
+                var requiredAgentJobService = agentJobService ?? throw new InvalidOperationException("AgentJobService is not available for task transcription steps.");
                 var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
                 var deviceIdStr = step.Arguments is { Count: > 0 }
                     ? ResolveExpression(step.Arguments[0], context)
@@ -354,7 +345,7 @@ public sealed class TaskOrchestrator(
                     ActionKey: "transcribe_from_audio_device",
                     ResourceId: deviceId);
 
-                var jobResponse = await agentJobService.SubmitAsync(
+                var jobResponse = await requiredAgentJobService.SubmitAsync(
                     channelId, jobRequest, context.CancellationToken);
 
                 await taskService.AppendLogAsync(
@@ -366,22 +357,23 @@ public sealed class TaskOrchestrator(
                     context.Variables[step.ResultVariable] = jobResponse.Id.ToString();
 
                 StartTranscriptionEventLoop(context, jobResponse.Id);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.StopTranscription:
             {
+                var requiredAgentJobService = agentJobService ?? throw new InvalidOperationException("AgentJobService is not available for task transcription steps.");
                 var jobIdStr = ResolveExpression(step.Expression, context);
                 if (!Guid.TryParse(jobIdStr, out var jobId))
                     throw new InvalidOperationException($"Invalid transcription job ID: {jobIdStr}");
 
-                await agentJobService.StopTranscriptionAsync(jobId, context.CancellationToken);
+                await requiredAgentJobService.StopTranscriptionAsync(jobId, context.CancellationToken);
 
                 await taskService.AppendLogAsync(
                     context.InstanceId,
                     $"Stopped transcription job {jobId}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.GetDefaultInputAudio:
@@ -391,36 +383,17 @@ public sealed class TaskOrchestrator(
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = deviceId.ToString();
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.ParseResponse:
             {
                 var text = ResolveExpression(step.Expression, context);
-                string parsed;
-                try
-                {
-                    var jsonStart = text.IndexOf('{');
-                    var jsonEnd = text.LastIndexOf('}');
-                    if (jsonStart >= 0 && jsonEnd > jsonStart)
-                    {
-                        var jsonText = text[jsonStart..(jsonEnd + 1)];
-                        using var doc = JsonDocument.Parse(jsonText);
-                        parsed = JsonSerializer.Serialize(doc.RootElement);
-                    }
-                    else
-                    {
-                        parsed = "{}";
-                    }
-                }
-                catch (JsonException)
-                {
-                    parsed = "{}";
-                }
+                var parsed = ParseStructuredResponse(text, step.TypeName, context.Plan.Definition);
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = parsed;
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.HttpRequest:
@@ -429,21 +402,8 @@ public sealed class TaskOrchestrator(
                 var method = step.HttpMethod?.ToUpperInvariant() ?? "GET";
 
                 using var client = httpClientFactory.CreateClient("TaskOrchestrator");
-                HttpResponseMessage httpResponse;
-
-                if (method == "POST")
-                {
-                    var body = step.Arguments is { Count: > 0 }
-                        ? ResolveExpression(step.Arguments[0], context)
-                        : "";
-                    httpResponse = await client.PostAsync(url,
-                        new StringContent(body, Encoding.UTF8, "application/json"),
-                        context.CancellationToken);
-                }
-                else
-                {
-                    httpResponse = await client.GetAsync(url, context.CancellationToken);
-                }
+                using var request = CreateHttpRequestMessage(step, context, method, url);
+                using var httpResponse = await client.SendAsync(request, context.CancellationToken);
 
                 var content = await httpResponse.Content.ReadAsStringAsync(context.CancellationToken);
 
@@ -454,7 +414,7 @@ public sealed class TaskOrchestrator(
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = content;
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.FindModel:
@@ -467,7 +427,7 @@ public sealed class TaskOrchestrator(
                 await taskService.AppendLogAsync(
                     context.InstanceId, $"FindModel '{search}' → {(model is not null ? model.Id : "not found")}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.FindProvider:
@@ -480,7 +440,7 @@ public sealed class TaskOrchestrator(
                 await taskService.AppendLogAsync(
                     context.InstanceId, $"FindProvider '{search}' → {(provider is not null ? provider.Id : "not found")}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.FindAgent:
@@ -493,7 +453,7 @@ public sealed class TaskOrchestrator(
                 await taskService.AppendLogAsync(
                     context.InstanceId, $"FindAgent '{search}' → {(agent is not null ? agent.Id : "not found")}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.CreateAgent:
@@ -562,7 +522,7 @@ public sealed class TaskOrchestrator(
                 await taskService.AppendLogAsync(
                     context.InstanceId, $"CreateAgent '{name}' → {agentEntity.Id}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.CreateThread:
@@ -592,11 +552,12 @@ public sealed class TaskOrchestrator(
                 await taskService.AppendLogAsync(
                     context.InstanceId, $"CreateThread '{threadEntity.Name}' → {threadEntity.Id}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.ChatToThread:
             {
+                var requiredChatService = chatService ?? throw new InvalidOperationException("ChatService is not available for task thread chat steps.");
                 // Arguments: [0]=threadId, [1]=message (Expression), optional [2]=agentId
                 var threadIdStr = step.Arguments is { Count: > 0 }
                     ? ResolveExpression(step.Arguments[0], context) : null;
@@ -610,7 +571,7 @@ public sealed class TaskOrchestrator(
 
                 var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
                 var request = new ChatRequest(message, agentId, ChatClientType.API, TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
-                var response = await chatService.SendMessageAsync(
+                var response = await requiredChatService.SendMessageAsync(
                     channelId, request, threadId: threadId, ct: context.CancellationToken);
 
                 await taskService.AppendLogAsync(
@@ -620,7 +581,7 @@ public sealed class TaskOrchestrator(
 
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = response.AssistantMessage.Content;
-                break;
+                return TaskStepExecutionResult.Continue;
             }
 
             case TaskStepKind.Conditional:
@@ -631,25 +592,66 @@ public sealed class TaskOrchestrator(
                     foreach (var childStep in branch)
                     {
                         context.CancellationToken.ThrowIfCancellationRequested();
-                        await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
+                        var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
+                        if (childResult == TaskStepExecutionResult.Return)
+                        {
+                            return TaskStepExecutionResult.Return;
+                        }
                     }
                 }
-                break;
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Loop:
+                var loopKind = step.LoopKind ?? (step.VariableName is not null ? TaskLoopKind.ForEach : TaskLoopKind.While);
+                if (loopKind == TaskLoopKind.ForEach)
+                {
+                    foreach (var item in EnumerateLoopValues(step, context))
+                    {
+                        context.CancellationToken.ThrowIfCancellationRequested();
+                        await WaitIfPausedAsync(context);
+                        if (step.VariableName is not null)
+                        {
+                            context.Variables[step.VariableName] = item;
+                        }
+
+                        if (step.Body is null)
+                        {
+                            continue;
+                        }
+
+                        foreach (var childStep in step.Body)
+                        {
+                            context.CancellationToken.ThrowIfCancellationRequested();
+                            var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
+                            if (childResult == TaskStepExecutionResult.Return)
+                            {
+                                return TaskStepExecutionResult.Return;
+                            }
+                        }
+                    }
+
+                    return TaskStepExecutionResult.Continue;
+                }
+
                 while (EvaluateCondition(step.Expression, context))
                 {
                     context.CancellationToken.ThrowIfCancellationRequested();
+                    await WaitIfPausedAsync(context);
                     if (step.Body is not null)
                     {
                         foreach (var childStep in step.Body)
                         {
                             context.CancellationToken.ThrowIfCancellationRequested();
-                            await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
+                            var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
+                            if (childResult == TaskStepExecutionResult.Return)
+                            {
+                                return TaskStepExecutionResult.Return;
+                            }
                         }
                     }
                 }
-                break;
+
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.EventHandler:
                 context.EventHandlers.Add(new RegisteredEventHandler(
@@ -659,25 +661,222 @@ public sealed class TaskOrchestrator(
                     context.InstanceId,
                     $"Registered event handler: {step.TriggerKind}",
                     ct: context.CancellationToken);
-                break;
+                return TaskStepExecutionResult.Continue;
 
             case TaskStepKind.Return:
-                // Early exit — handled by the caller terminating iteration
-                return;
+                return TaskStepExecutionResult.Return;
 
             case TaskStepKind.Evaluate:
                 // Generic expression — log and store result
                 if (step.ResultVariable is not null)
                     context.Variables[step.ResultVariable] = step.Expression;
-                break;
+                return TaskStepExecutionResult.Continue;
         }
+
+        return TaskStepExecutionResult.Continue;
     }
 
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
 
-    private async Task EmitOutputAsync(Guid instanceId, string? outputJson, SharpClawDbContext db)
+    private static IEnumerable<object?> EnumerateLoopValues(TaskStepDefinition step, TaskExecutionContext context)
+    {
+        var resolved = ResolveExpression(step.Expression, context);
+        if (string.IsNullOrWhiteSpace(resolved))
+        {
+            yield break;
+        }
+
+        if (context.Variables.TryGetValue(resolved, out var variableValue))
+        {
+            foreach (var item in EnumerateValue(variableValue))
+            {
+                yield return item;
+            }
+
+            yield break;
+        }
+
+        foreach (var item in EnumerateValue(resolved))
+        {
+            yield return item;
+        }
+    }
+
+    private static IEnumerable<object?> EnumerateValue(object? value)
+    {
+        if (value is null)
+        {
+            yield break;
+        }
+
+        if (value is string text)
+        {
+            if (TryEnumerateJsonArray(text, out var items))
+            {
+                foreach (var item in items)
+                {
+                    yield return item;
+                }
+
+                yield break;
+            }
+
+            yield return text;
+            yield break;
+        }
+
+        if (value is System.Collections.IEnumerable enumerable and not string)
+        {
+            foreach (var item in enumerable)
+            {
+                yield return item;
+            }
+        }
+    }
+
+    private static bool TryEnumerateJsonArray(string text, out List<object?> values)
+    {
+        values = [];
+        try
+        {
+            using var doc = JsonDocument.Parse(text);
+            if (doc.RootElement.ValueKind != JsonValueKind.Array)
+            {
+                return false;
+            }
+
+            foreach (var item in doc.RootElement.EnumerateArray())
+            {
+                values.Add(item.ValueKind == JsonValueKind.String
+                    ? item.GetString()
+                    : item.GetRawText());
+            }
+
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    private static string ParseStructuredResponse(string text, string? typeName, TaskScriptDefinition definition)
+    {
+        var jsonText = ExtractJsonObject(text);
+        if (jsonText is null)
+        {
+            throw new InvalidOperationException("ParseResponse expected a JSON object in the source text.");
+        }
+
+        using var doc = JsonDocument.Parse(jsonText);
+        if (doc.RootElement.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException("ParseResponse expected a JSON object payload.");
+        }
+
+        ValidateParsedResponseShape(doc.RootElement, typeName, definition);
+        return JsonSerializer.Serialize(doc.RootElement);
+    }
+
+    private static string? ExtractJsonObject(string text)
+    {
+        var jsonStart = text.IndexOf('{');
+        var jsonEnd = text.LastIndexOf('}');
+        return jsonStart >= 0 && jsonEnd > jsonStart
+            ? text[jsonStart..(jsonEnd + 1)]
+            : null;
+    }
+
+    private static void ValidateParsedResponseShape(JsonElement element, string? typeName, TaskScriptDefinition definition)
+    {
+        if (string.IsNullOrWhiteSpace(typeName))
+        {
+            return;
+        }
+
+        var dataType = definition.DataTypes.FirstOrDefault(dt => dt.Name == typeName);
+        if (dataType is null)
+        {
+            return;
+        }
+
+        foreach (var property in dataType.Properties)
+        {
+            if (!element.TryGetProperty(property.Name, out var propertyElement))
+            {
+                throw new InvalidOperationException($"ParseResponse<{typeName}> missing property '{property.Name}'.");
+            }
+
+            ValidateParsedProperty(propertyElement, property);
+        }
+    }
+
+    private static void ValidateParsedProperty(JsonElement value, TaskPropertyDefinition property)
+    {
+        if (property.IsCollection)
+        {
+            if (value.ValueKind != JsonValueKind.Array)
+            {
+                throw new InvalidOperationException($"Property '{property.Name}' must be a JSON array.");
+            }
+
+            return;
+        }
+
+        if (!IsCompatibleJsonValue(value, property.TypeName))
+        {
+            throw new InvalidOperationException($"Property '{property.Name}' does not match declared type '{property.TypeName}'.");
+        }
+    }
+
+    private static bool IsCompatibleJsonValue(JsonElement value, string typeName)
+    {
+        var normalizedType = typeName.TrimEnd('?');
+        return normalizedType switch
+        {
+            "string" => value.ValueKind == JsonValueKind.String,
+            "int" or "long" or "double" or "decimal" => value.ValueKind == JsonValueKind.Number,
+            "bool" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
+            "Guid" or "DateTime" or "DateTimeOffset" or "TimeSpan" => value.ValueKind == JsonValueKind.String,
+            _ => value.ValueKind == JsonValueKind.Object
+        };
+    }
+
+    private static HttpRequestMessage CreateHttpRequestMessage(TaskStepDefinition step, TaskExecutionContext context, string method, string url)
+    {
+        var request = new HttpRequestMessage(new HttpMethod(method), url);
+        if (method is "POST" or "PUT")
+        {
+            var body = step.Arguments is { Count: > 1 }
+                ? ResolveExpression(step.Arguments[1], context)
+                : step.Arguments is { Count: > 0 }
+                    ? ResolveExpression(step.Arguments[0], context)
+                    : string.Empty;
+            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
+        }
+
+        return request;
+    }
+
+    private static Task WaitIfPausedAsync(TaskExecutionContext context)
+        => context.Runtime.WaitIfPausedAsync(context.CancellationToken);
+
+    private async Task DelayWithPauseAsync(int delayMs, TaskExecutionContext context)
+    {
+        const int chunkMs = 250;
+        var remaining = delayMs;
+        while (remaining > 0)
+        {
+            await WaitIfPausedAsync(context);
+            var nextDelay = Math.Min(chunkMs, remaining);
+            await Task.Delay(nextDelay, context.CancellationToken);
+            remaining -= nextDelay;
+        }
+    }
+
+    private async Task EmitOutputAsync(Guid instanceId, string? outputJson, SharpClawDbContext db, TaskRuntimeInstance runtime)
     {
         // Persist the latest output snapshot
         var instance = await db.TaskInstances.FindAsync(instanceId);
@@ -686,7 +885,7 @@ public sealed class TaskOrchestrator(
             instance.OutputSnapshotJson = outputJson;
 
             // Persist to output history table
-            var seq = _sequenceCounters.GetOrAdd(instanceId, 0) + 1;
+            var seq = runtime.IncrementSequence();
             db.TaskOutputEntries.Add(new TaskOutputEntryDB
             {
                 TaskInstanceId = instanceId,
@@ -698,10 +897,10 @@ public sealed class TaskOrchestrator(
         }
 
         // Push to streaming channel — the task controls content, format, frequency
-        await PushEventAsync(instanceId, TaskOutputEventType.Output, outputJson);
+        await runtime.WriteEventAsync(TaskOutputEventType.Output, outputJson);
     }
 
-    private async Task CompleteInstanceAsync(Guid instanceId, TaskInstanceStatus status, SharpClawDbContext db, TaskService taskService)
+    private async Task CompleteInstanceAsync(Guid instanceId, TaskInstanceStatus status, SharpClawDbContext db, TaskService taskService, TaskRuntimeInstance runtime)
     {
         var instance = await db.TaskInstances.FindAsync(instanceId);
         if (instance is not null)
@@ -712,11 +911,11 @@ public sealed class TaskOrchestrator(
         }
 
         await taskService.AppendLogAsync(instanceId, $"Task {status}.");
-        await PushEventAsync(instanceId, TaskOutputEventType.StatusChange, status.ToString());
-        await PushEventAsync(instanceId, TaskOutputEventType.Done, null);
+        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, status.ToString());
+        await runtime.WriteEventAsync(TaskOutputEventType.Done, null);
     }
 
-    private async Task FailInstanceAsync(Guid instanceId, string error, SharpClawDbContext db, TaskService taskService)
+    private async Task FailInstanceAsync(Guid instanceId, string error, SharpClawDbContext db, TaskService taskService, TaskRuntimeInstance runtime)
     {
         var instance = await db.TaskInstances.FindAsync(instanceId);
         if (instance is not null)
@@ -728,25 +927,11 @@ public sealed class TaskOrchestrator(
         }
 
         await taskService.AppendLogAsync(instanceId, $"Task failed: {error}", "Error");
-        await PushEventAsync(instanceId, TaskOutputEventType.StatusChange, $"Failed: {error}");
-        await PushEventAsync(instanceId, TaskOutputEventType.Done, null);
+        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, $"Failed: {error}");
+        await runtime.WriteEventAsync(TaskOutputEventType.Done, null);
     }
 
-    /// <summary>
-    /// Push a structured event to the instance's output channel.
-    /// The task script has full control over <see cref="TaskOutputEventType.Output"/>
-    /// events: it decides when to call <c>Emit</c>, with what data, and how often.
-    /// Lifecycle events (<c>StatusChange</c>, <c>Done</c>) are added by the orchestrator.
-    /// </summary>
-    private Task PushEventAsync(Guid instanceId, TaskOutputEventType type, string? data)
-    {
-        if (!_outputChannels.TryGetValue(instanceId, out var channel))
-            return Task.CompletedTask;
 
-        var seq = _sequenceCounters.AddOrUpdate(instanceId, 1, (_, prev) => prev + 1);
-        var evt = new TaskOutputEvent(type, seq, DateTimeOffset.UtcNow, data);
-        return channel.Writer.WriteAsync(evt).AsTask();
-    }
 
     private static string ResolveExpression(string? expression, TaskExecutionContext context)
     {
@@ -956,10 +1141,12 @@ public sealed class TaskOrchestrator(
     private sealed class TaskExecutionContext(
         Guid instanceId,
         CompiledTaskPlan plan,
+        TaskRuntimeInstance runtime,
         CancellationToken cancellationToken)
     {
         public Guid InstanceId { get; } = instanceId;
         public CompiledTaskPlan Plan { get; } = plan;
+        public TaskRuntimeInstance Runtime { get; } = runtime;
         public CancellationToken CancellationToken { get; } = cancellationToken;
         public Dictionary<string, object?> Variables { get; } = new(StringComparer.Ordinal);
         public List<RegisteredEventHandler> EventHandlers { get; } = [];
@@ -969,4 +1156,10 @@ public sealed class TaskOrchestrator(
         TaskTriggerKind TriggerKind,
         string? ParameterName,
         IReadOnlyList<TaskStepDefinition> Body);
+
+    private enum TaskStepExecutionResult
+    {
+        Continue,
+        Return,
+    }
 }

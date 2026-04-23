@@ -24,7 +24,14 @@ public sealed record UpdateTaskDefinitionRequest(
 public sealed record StartTaskInstanceRequest(
     Guid TaskDefinitionId,
     Guid? ChannelId = null,
-    Dictionary<string, string>? ParameterValues = null);
+    Dictionary<string, string>? ParameterValues = null,
+    bool StartImmediately = false);
+
+/// <summary>
+/// Validate task definition source without persisting it.
+/// </summary>
+public sealed record ValidateTaskDefinitionRequest(
+    string SourceText);
 
 // ── Responses ─────────────────────────────────────────────────────
 
@@ -79,6 +86,17 @@ public sealed record TaskOutputEntryResponse(
     long Sequence,
     string? Data,
     DateTimeOffset Timestamp);
+
+public sealed record TaskValidationResponse(
+    bool IsValid,
+    IReadOnlyList<TaskDiagnosticResponse> Diagnostics);
+
+public sealed record TaskDiagnosticResponse(
+    string Severity,
+    string Code,
+    string Message,
+    int Line,
+    int Column);
 
 // ── Streaming ─────────────────────────────────────────────────────
 

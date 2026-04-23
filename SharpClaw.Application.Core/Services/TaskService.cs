@@ -17,6 +17,30 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore)
 {
+    /// <summary>
+    /// Parse and validate a task definition without persisting it.
+    /// </summary>
+    public TaskValidationResponse ValidateDefinition(string sourceText)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(sourceText);
+
+        var parseResult = TaskScriptEngine.Parse(sourceText);
+        if (!parseResult.Success || parseResult.Definition is null)
+        {
+            return new TaskValidationResponse(
+                false,
+                parseResult.Diagnostics.Select(ToDiagnosticResponse).ToList());
+        }
+
+        var validation = TaskScriptEngine.Validate(parseResult.Definition);
+        var diagnostics = parseResult.Diagnostics
+            .Concat(validation.Diagnostics)
+            .Select(ToDiagnosticResponse)
+            .ToList();
+
+        return new TaskValidationResponse(validation.IsValid, diagnostics);
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Definitions
     // ═══════════════════════════════════════════════════════════════
@@ -175,6 +199,74 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
         return ToInstanceResponse(instance, definition.Name);
     }
 
+    /// <summary>
+    /// Move a queued instance into the paused state.
+    /// </summary>
+    public async Task<bool> PauseInstanceAsync(Guid id, CancellationToken ct = default)
+    {
+        var instance = await FindTrackedOrColdInstanceAsync(id, ct);
+        if (instance is null || instance.Status != TaskInstanceStatus.Running)
+        {
+            return false;
+        }
+
+        instance.Status = TaskInstanceStatus.Paused;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Move a paused instance back into the running state.
+    /// </summary>
+    public async Task<bool> ResumeInstanceAsync(Guid id, CancellationToken ct = default)
+    {
+        var instance = await FindTrackedOrColdInstanceAsync(id, ct);
+        if (instance is null || instance.Status != TaskInstanceStatus.Paused)
+        {
+            return false;
+        }
+
+        instance.Status = TaskInstanceStatus.Running;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Mark a queued instance as running before orchestration begins.
+    /// </summary>
+    public async Task<bool> TryMarkInstanceRunningAsync(Guid id, CancellationToken ct = default)
+    {
+        var instance = await FindTrackedOrColdInstanceAsync(id, ct);
+        if (instance is null || instance.Status != TaskInstanceStatus.Queued)
+        {
+            return false;
+        }
+
+        instance.Status = TaskInstanceStatus.Running;
+        instance.StartedAt = DateTimeOffset.UtcNow;
+        instance.CompletedAt = null;
+        instance.ErrorMessage = null;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
+    /// <summary>
+    /// Mark an instance as stopped through a graceful runtime stop request.
+    /// </summary>
+    public async Task<bool> StopInstanceAsync(Guid id, CancellationToken ct = default)
+    {
+        var instance = await FindTrackedOrColdInstanceAsync(id, ct);
+        if (instance is null || instance.Status is not (TaskInstanceStatus.Running or TaskInstanceStatus.Paused))
+        {
+            return false;
+        }
+
+        instance.Status = TaskInstanceStatus.Cancelled;
+        instance.CompletedAt = DateTimeOffset.UtcNow;
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     public async Task<TaskInstanceResponse?> GetInstanceAsync(
         Guid id, CancellationToken ct = default)
     {
@@ -239,14 +331,8 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
     /// </summary>
     public async Task<bool> CancelInstanceAsync(Guid id, CancellationToken ct = default)
     {
-        // Try EF first (current session), then cold store fallback
-        var instance = await db.TaskInstances.FindAsync([id], ct);
-        if (instance is null)
-        {
-            instance = (await coldStore.FindAsync<TaskInstanceDB>(id, ct)).ValueOrDefault;
-            if (instance is null) return false;
-            db.TaskInstances.Attach(instance);
-        }
+        var instance = await FindTrackedOrColdInstanceAsync(id, ct);
+        if (instance is null) return false;
 
         if (instance.Status is not (TaskInstanceStatus.Queued or TaskInstanceStatus.Running or TaskInstanceStatus.Paused))
             return false;
@@ -305,6 +391,14 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
     private static string FormatDiagnostic(TaskDiagnostic d)
         => d.Line > 0 ? $"[Line {d.Line}] {d.Message}" : d.Message;
 
+    private static TaskDiagnosticResponse ToDiagnosticResponse(TaskDiagnostic diagnostic)
+        => new(
+            diagnostic.Severity.ToString(),
+            diagnostic.Code,
+            diagnostic.Message,
+            diagnostic.Line,
+            diagnostic.Column);
+
     private static TaskDefinitionResponse ToDefinitionResponse(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskParameterDefinition> parameters)
@@ -340,6 +434,24 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
             instance.StartedAt,
             instance.CompletedAt,
             instance.ChannelId);
+    }
+
+    private async Task<TaskInstanceDB?> FindTrackedOrColdInstanceAsync(Guid id, CancellationToken ct)
+    {
+        var instance = await db.TaskInstances.FindAsync([id], ct);
+        if (instance is not null)
+        {
+            return instance;
+        }
+
+        instance = (await coldStore.FindAsync<TaskInstanceDB>(id, ct)).ValueOrDefault;
+        if (instance is null)
+        {
+            return null;
+        }
+
+        db.TaskInstances.Attach(instance);
+        return instance;
     }
 
     // ═══════════════════════════════════════════════════════════════

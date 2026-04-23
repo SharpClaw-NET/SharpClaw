@@ -1,8 +1,10 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -60,8 +62,29 @@ public sealed class ScheduledTaskService(
             {
                 logger.LogInformation("Executing task {TaskName} ({TaskId}).", task.Name, task.Id);
 
-                // TODO: dispatch actual task work here
-                await Task.CompletedTask;
+                if (task.TaskDefinitionId.HasValue)
+                {
+                    var taskSvc = scope.ServiceProvider.GetRequiredService<TaskService>();
+                    var orchestrator = scope.ServiceProvider.GetRequiredService<TaskOrchestrator>();
+
+                    Dictionary<string, string>? paramValues = null;
+                    if (!string.IsNullOrEmpty(task.ParameterValuesJson))
+                        paramValues = JsonSerializer.Deserialize<Dictionary<string, string>>(
+                            task.ParameterValuesJson);
+
+                    var instance = await taskSvc.CreateInstanceAsync(
+                        new StartTaskInstanceRequest(
+                            TaskDefinitionId: task.TaskDefinitionId.Value,
+                            ParameterValues: paramValues),
+                        callerAgentId: task.CallerAgentId,
+                        ct: ct);
+
+                    await orchestrator.StartAsync(instance.Id, ct);
+
+                    logger.LogInformation(
+                        "Scheduled job {TaskName} ({TaskId}) launched task instance {InstanceId}.",
+                        task.Name, task.Id, instance.Id);
+                }
 
                 task.Status = ScheduledTaskStatus.Completed;
                 task.RetryCount = 0;

@@ -642,6 +642,7 @@ public sealed class TaskScriptParser
             Kind = TaskStepKind.Loop,
             Line = GetLine(whileStmt),
             Column = GetColumn(whileStmt),
+            LoopKind = TaskLoopKind.While,
             Expression = whileStmt.Condition.ToString(),
             Body = ParseBlock(whileStmt.Statement, diagnostics)
         };
@@ -656,6 +657,7 @@ public sealed class TaskScriptParser
             Kind = TaskStepKind.Loop,
             Line = GetLine(forEachStmt),
             Column = GetColumn(forEachStmt),
+            LoopKind = TaskLoopKind.ForEach,
             VariableName = forEachStmt.Identifier.Text,
             TypeName = forEachStmt.Type.IsVar ? null : forEachStmt.Type.ToString(),
             Expression = forEachStmt.Expression.ToString(),

@@ -537,7 +537,7 @@ public sealed partial class MainPage
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
         try
         {
-            var body = JsonSerializer.Serialize(new { TaskDefinitionId = defId, ChannelId = _selectedChannelId }, Json);
+            var body = JsonSerializer.Serialize(new { TaskDefinitionId = defId, ChannelId = _selectedChannelId, StartImmediately = true }, Json);
             var createResp = await api.PostAsync($"/tasks/{defId}/instances", new StringContent(body, Encoding.UTF8, "application/json"));
             if (!createResp.IsSuccessStatusCode) { AppendTaskLog("error", $"Create instance failed: {(int)createResp.StatusCode} {createResp.ReasonPhrase}", DateTimeOffset.Now); return; }
 
@@ -545,11 +545,9 @@ public sealed partial class MainPage
             var created = await JsonSerializer.DeserializeAsync<TaskInstanceDetailDto>(createStream, Json);
             if (created is null) { AppendTaskLog("error", "Created instance response was null.", DateTimeOffset.Now); return; }
 
-            var startResp = await api.PostAsync($"/tasks/{defId}/instances/{created.Id}/start", null);
-            if (!startResp.IsSuccessStatusCode) { AppendTaskLog("error", $"Start failed: {(int)startResp.StatusCode} {startResp.ReasonPhrase}", DateTimeOffset.Now); return; }
-
             _selectedTaskInstanceId = created.Id;
             await LoadTaskInstancesAsync(defId);
+            await LoadAllTaskInstancesAsync();
             ShowTaskEditorOrLogs();
             await ShowTaskInstanceViewAsync(defId, created.Id);
         }
@@ -570,6 +568,22 @@ public sealed partial class MainPage
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
         try { var resp = await api.PostAsync($"/tasks/{defId}/instances/{instId}/cancel", null); if (resp.IsSuccessStatusCode) await ShowTaskInstanceViewAsync(defId, instId); else AppendTaskLog("error", $"Cancel failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now); }
         catch (Exception ex) { AppendTaskLog("error", $"Cancel failed: {ex.Message}", DateTimeOffset.Now); }
+    }
+
+    private async void OnTaskPauseClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedTaskDefinitionId is not { } defId || _selectedTaskInstanceId is not { } instId) return;
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try { var resp = await api.PostAsync($"/tasks/{defId}/instances/{instId}/pause", null); if (resp.IsSuccessStatusCode) await ShowTaskInstanceViewAsync(defId, instId); else AppendTaskLog("error", $"Pause failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now); }
+        catch (Exception ex) { AppendTaskLog("error", $"Pause failed: {ex.Message}", DateTimeOffset.Now); }
+    }
+
+    private async void OnTaskResumeClick(object sender, RoutedEventArgs e)
+    {
+        if (_selectedTaskDefinitionId is not { } defId || _selectedTaskInstanceId is not { } instId) return;
+        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        try { var resp = await api.PostAsync($"/tasks/{defId}/instances/{instId}/resume", null); if (resp.IsSuccessStatusCode) await ShowTaskInstanceViewAsync(defId, instId); else AppendTaskLog("error", $"Resume failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now); }
+        catch (Exception ex) { AppendTaskLog("error", $"Resume failed: {ex.Message}", DateTimeOffset.Now); }
     }
 
     private void OnTaskNewClick(object sender, RoutedEventArgs e)
@@ -601,8 +615,8 @@ public sealed partial class MainPage
     private void ShowTaskEditorOrLogs()
     {
         if (_selectedTaskInstanceId is not null) { TaskEditorPanel.Visibility = Visibility.Collapsed; TaskLogsScroller.Visibility = Visibility.Visible; TaskNoInstancePlaceholder.Visibility = Visibility.Collapsed; TaskSubmitButton.Visibility = Visibility.Collapsed; }
-        else if (_taskCreateNewMode) { TaskEditorPanel.Visibility = Visibility.Visible; TaskLogsScroller.Visibility = Visibility.Collapsed; TaskNoInstancePlaceholder.Visibility = Visibility.Collapsed; TaskSubmitButton.Visibility = Visibility.Visible; TaskStopButton.Visibility = Visibility.Collapsed; TaskCancelButton.Visibility = Visibility.Collapsed; TaskCopyLogsButton.Visibility = Visibility.Collapsed; TaskCopyResultButton.Visibility = Visibility.Collapsed; }
-        else { TaskEditorPanel.Visibility = Visibility.Collapsed; TaskLogsScroller.Visibility = Visibility.Collapsed; TaskNoInstancePlaceholder.Visibility = Visibility.Visible; TaskSubmitButton.Visibility = Visibility.Collapsed; TaskStopButton.Visibility = Visibility.Collapsed; TaskCancelButton.Visibility = Visibility.Collapsed; TaskCopyLogsButton.Visibility = Visibility.Collapsed; TaskCopyResultButton.Visibility = Visibility.Collapsed; }
+        else if (_taskCreateNewMode) { TaskEditorPanel.Visibility = Visibility.Visible; TaskLogsScroller.Visibility = Visibility.Collapsed; TaskNoInstancePlaceholder.Visibility = Visibility.Collapsed; TaskSubmitButton.Visibility = Visibility.Visible; TaskStopButton.Visibility = Visibility.Collapsed; TaskPauseButton.Visibility = Visibility.Collapsed; TaskResumeButton.Visibility = Visibility.Collapsed; TaskCancelButton.Visibility = Visibility.Collapsed; TaskCopyLogsButton.Visibility = Visibility.Collapsed; TaskCopyResultButton.Visibility = Visibility.Collapsed; }
+        else { TaskEditorPanel.Visibility = Visibility.Collapsed; TaskLogsScroller.Visibility = Visibility.Collapsed; TaskNoInstancePlaceholder.Visibility = Visibility.Visible; TaskSubmitButton.Visibility = Visibility.Collapsed; TaskStopButton.Visibility = Visibility.Collapsed; TaskPauseButton.Visibility = Visibility.Collapsed; TaskResumeButton.Visibility = Visibility.Collapsed; TaskCancelButton.Visibility = Visibility.Collapsed; TaskCopyLogsButton.Visibility = Visibility.Collapsed; TaskCopyResultButton.Visibility = Visibility.Collapsed; }
     }
 
     private void StopTaskStream()
@@ -617,15 +631,15 @@ public sealed partial class MainPage
         var source = TaskSourceEditor.Text?.Trim();
         if (string.IsNullOrEmpty(source)) { TaskStatusBlock.Text = "✗ Source text is empty"; TaskStatusBlock.Foreground = Brush(0xFF4444); return; }
 
-        var validationErrors = ValidateTaskSource(source);
-        if (validationErrors.Count > 0) { TaskStatusBlock.Text = "✗ " + string.Join("\n✗ ", validationErrors); TaskStatusBlock.Foreground = Brush(0xFF4444); return; }
-
         TaskStatusBlock.Text = "submitting...";
         TaskStatusBlock.Foreground = Brush(0x999999);
 
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
         try
         {
+            var validationErrors = await ValidateTaskSourceAsync(api, source);
+            if (validationErrors.Count > 0) { TaskStatusBlock.Text = "✗ " + string.Join("\n✗ ", validationErrors); TaskStatusBlock.Foreground = Brush(0xFF4444); return; }
+
             var body = JsonSerializer.Serialize(new { sourceText = source }, Json);
             var resp = await api.PostAsync("/tasks", new StringContent(body, Encoding.UTF8, "application/json"));
             if (resp.IsSuccessStatusCode)
@@ -675,6 +689,76 @@ public sealed partial class MainPage
         if (source.Contains("TaskContext", StringComparison.Ordinal)) errors.Add(FindLineRef(lines, "TaskContext") + "Use 'CancellationToken ct' parameter instead of 'TaskContext'");
         for (var i = 0; i < lines.Length; i++) { if (lines[i].Contains("ctx.", StringComparison.Ordinal)) errors.Add($"Line {i + 1}: Call methods directly (e.g. Log, Emit) — no 'ctx.' prefix needed"); }
         return errors;
+    }
+
+    private async Task<List<string>> ValidateTaskSourceAsync(SharpClawApiClient api, string source)
+    {
+        var errors = ValidateTaskSource(source);
+        if (errors.Count > 0)
+        {
+            return errors;
+        }
+
+        var body = JsonSerializer.Serialize(new { sourceText = source }, Json);
+        using var resp = await api.PostAsync("/tasks/validate", new StringContent(body, Encoding.UTF8, "application/json"));
+        if (!resp.IsSuccessStatusCode)
+        {
+            return [];
+        }
+
+        using var stream = await resp.Content.ReadAsStreamAsync();
+        using var doc = await JsonDocument.ParseAsync(stream);
+        if (!doc.RootElement.TryGetProperty("isValid", out var isValidElement) || isValidElement.GetBoolean())
+        {
+            return [];
+        }
+
+        var serverErrors = new List<string>();
+        if (doc.RootElement.TryGetProperty("diagnostics", out var diagnosticsElement) && diagnosticsElement.ValueKind == JsonValueKind.Array)
+        {
+            foreach (var diagnostic in diagnosticsElement.EnumerateArray())
+            {
+                var message = diagnostic.TryGetProperty("message", out var messageElement)
+                    ? messageElement.GetString()
+                    : null;
+                if (string.IsNullOrWhiteSpace(message))
+                {
+                    continue;
+                }
+
+                var linePrefix = diagnostic.TryGetProperty("line", out var lineElement) && lineElement.GetInt32() > 0
+                    ? $"Line {lineElement.GetInt32()}: "
+                    : string.Empty;
+                serverErrors.Add(linePrefix + message);
+            }
+        }
+
+        return serverErrors;
+    }
+
+    private void UpdateTaskActionButtons(string? status)
+    {
+        TaskStopButton.Visibility = Visibility.Collapsed;
+        TaskPauseButton.Visibility = Visibility.Collapsed;
+        TaskResumeButton.Visibility = Visibility.Collapsed;
+        TaskCancelButton.Visibility = Visibility.Collapsed;
+
+        switch (status)
+        {
+            case "Queued":
+                TaskCancelButton.Visibility = Visibility.Visible;
+                break;
+            case "Running":
+                TaskStopButton.Visibility = Visibility.Visible;
+                TaskPauseButton.Visibility = Visibility.Visible;
+                TaskCancelButton.Visibility = Visibility.Visible;
+                break;
+            case "Paused":
+                TaskStopButton.Visibility = Visibility.Visible;
+                TaskResumeButton.Visibility = Visibility.Visible;
+                TaskCancelButton.Visibility = Visibility.Visible;
+                break;
+        }
     }
 
     private static string FindLineRef(string[] lines, string token)

@@ -712,6 +712,24 @@
                        FontSize="12"
                        Foreground="#FFAA00" />
           </Button>
+          <Button x:Name="TaskPauseButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnTaskPauseClick"
+                  Visibility="Collapsed">
+            <TextBlock Text="⏸ Pause"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#FFAA00" />
+          </Button>
+          <Button x:Name="TaskResumeButton"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnTaskResumeClick"
+                  Visibility="Collapsed">
+            <TextBlock Text="▶ Resume"
+                       Style="{StaticResource TerminalText}"
+                       FontSize="12"
+                       Foreground="#00FF00" />
+          </Button>
           <Button x:Name="TaskCancelButton"
                   Style="{StaticResource TerminalButton}"
                   Click="OnTaskCancelClick"

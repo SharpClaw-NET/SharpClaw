@@ -270,6 +270,11 @@ public class SharpClawDbContext(
                 .WithMany()
                 .HasForeignKey(t => t.PermissionSetId)
                 .OnDelete(DeleteBehavior.SetNull);
+
+            e.HasOne(t => t.TaskDefinition)
+                .WithMany()
+                .HasForeignKey(t => t.TaskDefinitionId)
+                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ── PermissionSets ────────────────────────────────────────

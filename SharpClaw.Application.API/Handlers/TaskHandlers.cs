@@ -13,6 +13,12 @@ namespace SharpClaw.Application.API.Handlers;
 [RouteGroup("/tasks")]
 public static class TaskDefinitionHandlers
 {
+    [MapPost("/validate")]
+    public static IResult Validate(
+        ValidateTaskDefinitionRequest request,
+        TaskService svc)
+        => Results.Ok(svc.ValidateDefinition(request.SourceText));
+
     [MapPost]
     public static async Task<IResult> Create(
         CreateTaskDefinitionRequest request, TaskService svc)
@@ -50,14 +56,26 @@ public static class TaskDefinitionHandlers
 public static class TaskInstanceHandlers
 {
     [MapPost]
-    public static async Task<IResult> Start(
+    public static async Task<IResult> CreateInstance(
         Guid taskId,
         StartTaskInstanceRequest request,
         TaskService svc,
-        SessionService session)
-        => Results.Ok(await svc.CreateInstanceAsync(
+        SessionService session,
+        TaskOrchestrator orchestrator)
+    {
+        var created = await svc.CreateInstanceAsync(
             request with { TaskDefinitionId = taskId },
-            callerUserId: session.UserId));
+            callerUserId: session.UserId);
+
+        if ((request with { TaskDefinitionId = taskId }).StartImmediately)
+        {
+            await orchestrator.StartAsync(created.Id);
+            var started = await svc.GetInstanceAsync(created.Id);
+            return started is not null ? Results.Ok(started) : Results.Ok(created);
+        }
+
+        return Results.Ok(created);
+    }
 
     [MapGet]
     public static async Task<IResult> List(Guid taskId, TaskService svc)
@@ -90,6 +108,20 @@ public static class TaskInstanceHandlers
         return Results.NoContent();
     }
 
+    [MapPost("/{instanceId:guid}/pause")]
+    public static async Task<IResult> Pause(
+        Guid taskId,
+        Guid instanceId,
+        TaskOrchestrator orchestrator)
+        => await orchestrator.PauseAsync(instanceId) ? Results.NoContent() : Results.NotFound();
+
+    [MapPost("/{instanceId:guid}/resume")]
+    public static async Task<IResult> Resume(
+        Guid taskId,
+        Guid instanceId,
+        TaskOrchestrator orchestrator)
+        => await orchestrator.ResumeAsync(instanceId) ? Results.NoContent() : Results.NotFound();
+
     [MapPost("/{instanceId:guid}/start")]
     public static async Task<IResult> StartExecution(
         Guid taskId, Guid instanceId, TaskOrchestrator orchestrator)
@@ -107,35 +139,15 @@ public static class TaskInstanceHandlers
     public static async Task StreamEvents(
         Guid taskId, Guid instanceId,
         TaskOrchestrator orchestrator,
+        TaskService svc,
         HttpContext httpContext)
     {
-        var reader = orchestrator.GetOutputReader(instanceId);
-        if (reader is null)
+        if (await svc.GetInstanceAsync(instanceId) is null)
         {
             httpContext.Response.StatusCode = 404;
             return;
         }
 
-        httpContext.Response.ContentType = "text/event-stream";
-        httpContext.Response.Headers.CacheControl = "no-cache";
-        httpContext.Response.Headers.Connection = "keep-alive";
-
-        var ct = httpContext.RequestAborted;
-        try
-        {
-            await foreach (var evt in reader.ReadAllAsync(ct))
-            {
-                var json = JsonSerializer.Serialize(new
-                {
-                    type = evt.Type.ToString(),
-                    sequence = evt.Sequence,
-                    timestamp = evt.Timestamp,
-                    data = evt.Data,
-                });
-                await httpContext.Response.WriteAsync($"data:{json}\n\n", ct);
-                await httpContext.Response.Body.FlushAsync(ct);
-            }
-        }
-        catch (OperationCanceledException) { /* client disconnected */ }
+        await TaskStreamHandlers.Stream(httpContext, taskId, instanceId, orchestrator);
     }
 }

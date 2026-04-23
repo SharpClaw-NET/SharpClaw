@@ -426,7 +426,6 @@ Step 2 — Chat within the thread. Each message includes the previous history (u
 Step 3 — Stream within the thread.
 
     POST /channels/CHANNEL_ID/chat/threads/THREAD_ID/stream
-    { "message": "Now refactor that method" }
 
 Step 4 — Chat without a thread on the same channel is one-shot (no history).
 
@@ -569,3 +568,15 @@ CLI:
 Available tool names are dynamic — they depend on which modules are enabled.
 Query GET /modules for the authoritative list; each module entry includes a
 Tools array with the exact names to use as dictionary keys.
+
+────────────────────────────────────────
+TASKS
+────────────────────────────────────────
+Full task reference (endpoints, script language, step kinds, diagnostics, permissions,
+agent tool exposure, scheduling, SSE streaming): Tasks-skill.md
+
+Short summary: tasks are user-defined C# scripts that run as managed background
+processes. Register a definition with POST /tasks, launch an instance with
+POST /tasks/{id}/instances, stream output from GET /tasks/{id}/instances/{iid}/stream.
+Active definitions are exposed as task_invoke__{name} tools to agents with
+CanInvokeTasksAsTool permission.

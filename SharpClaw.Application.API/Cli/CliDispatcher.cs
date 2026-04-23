@@ -2416,14 +2416,21 @@ public static class CliDispatcher
                 "task activate <id>                       Activate a definition",
                 "task deactivate <id>                     Deactivate a definition",
                 "task delete <id>                         Delete a task definition",
+                "task create-queued <taskId> [channelId] [--param key=value ...]",
+                "                                         Create a queued instance without starting",
                 "task start <taskId> [channelId] [--param key=value ...]",
                 "                                         Start a new instance",
+                "task run <taskId> [channelId] [--param key=value ...]",
+                "                                         Alias for start",
+                "task start-instance <instanceId>         Start an existing queued instance",
                 "task instances <taskId>                  List instances of a definition",
                 "task instance <instanceId>               Show instance details",
                 "task outputs <instanceId> [--since <timestamp>]",
                 "                                         Get persisted output history",
                 "task cancel <instanceId>                 Cancel a running instance",
                 "task stop <instanceId>                   Stop a running instance",
+                "task pause <instanceId>                  Pause a running instance",
+                "task resume <instanceId>                 Resume a paused instance",
                 "task listen <instanceId>                 Stream live task output");
             return Results.Ok();
         }
@@ -2463,9 +2470,18 @@ public static class CliDispatcher
                 => await TaskDefinitionHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
             "delete" => UsageResult("task delete <id>"),
 
-            "start" when args.Length >= 3
-                => await HandleTaskStart(args, svc, sp),
+            "create-queued" when args.Length >= 3
+                => await HandleTaskStart(args, svc, sp, startImmediately: false),
+            "create-queued" => UsageResult("task create-queued <taskId> [channelId] [--param key=value ...]"),
+
+            "start" or "run" when args.Length >= 3
+                => await HandleTaskStart(args, svc, sp, startImmediately: true),
             "start" => UsageResult("task start <taskId> [channelId] [--param key=value ...]"),
+            "run" => UsageResult("task run <taskId> [channelId] [--param key=value ...]"),
+
+            "start-instance" when args.Length >= 3
+                => await HandleTaskStartExistingInstance(CliIdMap.Resolve(args[2]), sp),
+            "start-instance" => UsageResult("task start-instance <instanceId>"),
 
             "instances" when args.Length >= 3
                 => await TaskInstanceHandlers.List(CliIdMap.Resolve(args[2]), svc),
@@ -2489,6 +2505,14 @@ public static class CliDispatcher
                 => await HandleTaskStop(CliIdMap.Resolve(args[2]), sp),
             "stop" => UsageResult("task stop <instanceId>"),
 
+            "pause" when args.Length >= 3
+                => await HandleTaskPause(CliIdMap.Resolve(args[2]), sp),
+            "pause" => UsageResult("task pause <instanceId>"),
+
+            "resume" when args.Length >= 3
+                => await HandleTaskResume(CliIdMap.Resolve(args[2]), sp),
+            "resume" => UsageResult("task resume <instanceId>"),
+
             "listen" when args.Length >= 3
                 => await HandleTaskListen(CliIdMap.Resolve(args[2]), sp),
             "listen" => UsageResult("task listen <instanceId>"),
@@ -2506,6 +2530,20 @@ public static class CliDispatcher
         }
 
         var sourceText = await File.ReadAllTextAsync(sourceFilePath);
+        var validation = svc.ValidateDefinition(sourceText);
+        if (!validation.IsValid)
+        {
+            foreach (var diagnostic in validation.Diagnostics)
+            {
+                var location = diagnostic.Line > 0
+                    ? $"[Line {diagnostic.Line}:{diagnostic.Column}] "
+                    : string.Empty;
+                Console.Error.WriteLine($"{location}{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+            }
+
+            return Results.BadRequest(validation);
+        }
+
         return await TaskDefinitionHandlers.Create(
             new CreateTaskDefinitionRequest(sourceText), svc);
     }
@@ -2520,12 +2558,26 @@ public static class CliDispatcher
         }
 
         var sourceText = await File.ReadAllTextAsync(sourceFilePath);
+        var validation = svc.ValidateDefinition(sourceText);
+        if (!validation.IsValid)
+        {
+            foreach (var diagnostic in validation.Diagnostics)
+            {
+                var location = diagnostic.Line > 0
+                    ? $"[Line {diagnostic.Line}:{diagnostic.Column}] "
+                    : string.Empty;
+                Console.Error.WriteLine($"{location}{diagnostic.Severity} {diagnostic.Code}: {diagnostic.Message}");
+            }
+
+            return Results.BadRequest(validation);
+        }
+
         return await TaskDefinitionHandlers.Update(
             taskId, new UpdateTaskDefinitionRequest(SourceText: sourceText), svc);
     }
 
     private static async Task<IResult> HandleTaskStart(
-        string[] args, TaskService svc, IServiceProvider sp)
+        string[] args, TaskService svc, IServiceProvider sp, bool startImmediately)
     {
         var taskId = CliIdMap.Resolve(args[2]);
         Guid? channelId = args.Length > 3 && !args[3].StartsWith("--")
@@ -2551,18 +2603,17 @@ public static class CliDispatcher
         }
 
         var session = sp.GetRequiredService<SessionService>();
-        var request = new StartTaskInstanceRequest(taskId, channelId, paramValues);
-        var result = await TaskInstanceHandlers.Start(
-            taskId, request, svc, session);
+        var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
+        var request = new StartTaskInstanceRequest(taskId, channelId, paramValues, startImmediately);
+        return await TaskInstanceHandlers.CreateInstance(taskId, request, svc, session, orchestrator);
+    }
 
-        // Auto-start the orchestrator for the new instance.
-        if (result is IValueHttpResult { Value: TaskInstanceResponse resp })
-        {
-            var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
-            _ = orchestrator.StartAsync(resp.Id);
-        }
-
-        return result;
+    private static async Task<IResult> HandleTaskStartExistingInstance(Guid instanceId, IServiceProvider sp)
+    {
+        var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
+        await orchestrator.StartAsync(instanceId);
+        Console.WriteLine("Instance started.");
+        return Results.Ok();
     }
 
     private static async Task<IResult> HandleTaskStop(Guid instanceId, IServiceProvider sp)
@@ -2570,6 +2621,32 @@ public static class CliDispatcher
         var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
         await orchestrator.StopAsync(instanceId);
         Console.WriteLine("Instance stopped.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleTaskPause(Guid instanceId, IServiceProvider sp)
+    {
+        var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
+        if (!await orchestrator.PauseAsync(instanceId))
+        {
+            Console.Error.WriteLine("Instance could not be paused.");
+            return Results.NotFound();
+        }
+
+        Console.WriteLine("Instance paused.");
+        return Results.Ok();
+    }
+
+    private static async Task<IResult> HandleTaskResume(Guid instanceId, IServiceProvider sp)
+    {
+        var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
+        if (!await orchestrator.ResumeAsync(instanceId))
+        {
+            Console.Error.WriteLine("Instance could not be resumed.");
+            return Results.NotFound();
+        }
+
+        Console.WriteLine("Instance resumed.");
         return Results.Ok();
     }
 

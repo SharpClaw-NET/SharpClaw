@@ -256,8 +256,11 @@ try
     builder.Services.AddSingleton<ThreadActivitySignal>();
     builder.Services.AddScoped<RoleService>();
     builder.Services.AddScoped<TaskService>();
+    builder.Services.AddScoped<TaskToolProvider>();
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
+    builder.Services.AddSingleton<TaskRuntimeHost>();
+    builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskRuntimeHost>());
     // Module system
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();

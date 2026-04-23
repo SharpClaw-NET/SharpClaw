@@ -80,6 +80,11 @@ public sealed record TaskStepDefinition
     /// </summary>
     public IReadOnlyList<TaskStepDefinition>? ElseBody { get; init; }
 
+    /// <summary>
+    /// Specific loop shape for <see cref="TaskStepKind.Loop"/>.
+    /// </summary>
+    public TaskLoopKind? LoopKind { get; init; }
+
     // ── HTTP ──────────────────────────────────────────────────────
 
     /// <summary>
