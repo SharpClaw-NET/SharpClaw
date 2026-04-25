@@ -7,7 +7,7 @@ public sealed record DownloadModelRequest(
     string? Name = null,
     string? Quantization = null,
     int? GpuLayers = null,
-    ProviderType? ProviderType = null);
+    string? ProviderKey = null);
 
 public sealed record LoadModelRequest(
     int? GpuLayers = null,
@@ -30,7 +30,7 @@ public sealed record LocalModelFileResponse(
     LocalModelStatus Status,
     double DownloadProgress,
     bool IsLoaded,
-    ProviderType ProviderType,
+    string ProviderKey,
     string? MmprojPath);
 
 /// <summary>

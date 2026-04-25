@@ -1,5 +1,5 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -10,7 +10,7 @@ namespace SharpClaw.Application.Core.Clients;
 public sealed class GoogleGeminiOpenAiApiClient : OpenAiCompatibleApiClient
 {
     protected override string ApiEndpoint => "https://generativelanguage.googleapis.com/v1beta/openai";
-    public override ProviderType ProviderType => ProviderType.GoogleGeminiOpenAi;
+    public override string ProviderKey => WellKnownProviderKeys.GoogleGeminiOpenAi;
 
     /// <inheritdoc />
     protected override Dictionary<string, JsonElement>? TranslateProviderParameters(

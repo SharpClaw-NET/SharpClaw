@@ -1,5 +1,3 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Contracts.Modules;
 
 /// <summary>
@@ -34,9 +32,9 @@ public interface IModelInfoProvider
 /// Resolved model + provider information required for inference.
 /// </summary>
 /// <param name="ModelName">The model name / identifier string to pass to the API.</param>
-/// <param name="ProviderType">The provider type that owns the model.</param>
+/// <param name="ProviderKey">The provider key that owns the model.</param>
 /// <param name="DecryptedApiKey">Decrypted API key, or empty for local models.</param>
 public sealed record ModelProviderInfo(
     string ModelName,
-    ProviderType ProviderType,
+    string ProviderKey,
     string DecryptedApiKey);

@@ -1,7 +1,7 @@
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.DTOs.Models;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -20,7 +20,7 @@ public sealed class OllamaApiClient(string? apiEndpoint = null) : OpenAiCompatib
             ? DefaultEndpoint
             : apiEndpoint.TrimEnd('/');
 
-    public override ProviderType ProviderType => ProviderType.Ollama;
+    public override string ProviderKey => WellKnownProviderKeys.Ollama;
 
     public override async Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient,

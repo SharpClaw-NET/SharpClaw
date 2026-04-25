@@ -1,11 +1,9 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Contracts.DTOs.Providers;
 
 public sealed record ProviderCostResponse(
     Guid ProviderId,
     string ProviderName,
-    ProviderType ProviderType,
+    string ProviderKey,
     bool IsLocal,
     bool CostApiSupported,
     decimal TotalCost,

@@ -17,7 +17,7 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Tasks;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Persistence;
@@ -25,6 +25,7 @@ using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Security;
+using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Application.Services;
 
@@ -90,7 +91,7 @@ public sealed class ChatService(
             ?? throw new InvalidOperationException(
                 $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
-        var isLocal = provider.ProviderType == ProviderType.LlamaSharp;
+        var isLocal = provider.ProviderKey == WellKnownProviderKeys.LlamaSharp;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
@@ -124,9 +125,7 @@ public sealed class ChatService(
         history.Add(new ChatCompletionMessage("user", request.Message));
 
         var apiKey = isLocal ? "local" : ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key);
-        var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
-        if (client is LocalInferenceApiClient lic)
-            lic.CurrentModelId = model.Id;
+        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
         var useNativeTools = client.SupportsNativeToolCalling;
         var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
         var enableTools = !disableTools && useNativeTools;
@@ -137,12 +136,12 @@ public sealed class ChatService(
         // Resolve completion parameters early so they can feed the chat header
         // (reasoning-effort informational notice) as well as the wire payload.
         var completionParams = BuildCompletionParameters(agent);
-        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderKey);
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
             taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
-            completionParameters: completionParams, providerType: provider.ProviderType);
+            completionParameters: completionParams, providerKey: provider.ProviderKey);
         var messageForModel = chatHeader is not null
             ? chatHeader + request.Message
             : request.Message;
@@ -460,7 +459,7 @@ public sealed class ChatService(
         TaskChatContext? taskContext = null,
         string? externalUsername = null, string? externalDisplayName = null,
         CompletionParameters? completionParameters = null,
-        ProviderType providerType = default)
+        string providerKey = "")
     {
         // Channel-level flag takes precedence; fall back to context.
         var disabled = channel.DisableChatHeader
@@ -494,7 +493,7 @@ public sealed class ChatService(
             }
 
             await AppendAgentSuffixAsync(taskSb, agent.Id, channel.Id, ct,
-                completionParameters, providerType);
+                completionParameters, providerKey);
             return taskSb.ToString();
         }
 
@@ -505,7 +504,7 @@ public sealed class ChatService(
             var userId2 = jobService.GetSessionUserId();
             return await headerTagProcessor.ExpandAsync(
                 customTemplate, channel, agent, clientType, userId2, ct,
-                completionParameters, providerType);
+                completionParameters, providerKey);
         }
 
         var userId = jobService.GetSessionUserId();
@@ -521,7 +520,7 @@ public sealed class ChatService(
             extSb.Append(" | via: ").Append(clientType);
 
             await AppendAgentSuffixAsync(extSb, agent.Id, channel.Id, ct,
-                completionParameters, providerType);
+                completionParameters, providerKey);
             return extSb.ToString();
         }
 
@@ -568,7 +567,7 @@ public sealed class ChatService(
             sb.Append(" | bio: ").Append(user.Bio);
 
         await AppendAgentSuffixAsync(sb, agent.Id, channel.Id, ct,
-            completionParameters, providerType);
+            completionParameters, providerKey);
         return sb.ToString();
     }
 
@@ -581,7 +580,7 @@ public sealed class ChatService(
         StringBuilder sb, Guid agentId, Guid channelId,
         CancellationToken ct,
         CompletionParameters? completionParameters = null,
-        ProviderType providerType = default)
+        string providerKey = "")
     {
         var agentWithRole = await db.Agents
             .Include(a => a.Role)
@@ -628,7 +627,7 @@ public sealed class ChatService(
         // CompletionParameterSpec.ReasoningEffortInformationalOnly).
         if (completionParameters?.ReasoningEffort is { } effort)
         {
-            var spec = CompletionParameterSpec.For(providerType);
+            var spec = CompletionParameterSpec.For(providerKey);
             if (spec.ReasoningEffortInformationalOnly)
             {
                 var notice = ChatHeaderNotices.FormatReasoningEffortNotice(effort);
@@ -812,7 +811,7 @@ public sealed class ChatService(
             ?? throw new InvalidOperationException(
                 $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
 
-        var isLocal = provider.ProviderType == ProviderType.LlamaSharp;
+        var isLocal = provider.ProviderKey == WellKnownProviderKeys.LlamaSharp;
         if (!isLocal && string.IsNullOrEmpty(provider.EncryptedApiKey))
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
@@ -846,9 +845,7 @@ public sealed class ChatService(
         history.Add(new ChatCompletionMessage("user", request.Message));
 
         var apiKey = isLocal ? "local" : ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key);
-        var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
-        if (client is LocalInferenceApiClient streamLic)
-            streamLic.CurrentModelId = model.Id;
+        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
         var systemPrompt = channel.DisableToolSchemas || agent.DisableToolSchemas
             ? agent.SystemPrompt ?? ""
             : BuildSystemPrompt(agent.SystemPrompt);
@@ -856,12 +853,12 @@ public sealed class ChatService(
         // Resolve completion parameters early so they can feed the chat header
         // (reasoning-effort informational notice) as well as the wire payload.
         var completionParams = BuildCompletionParameters(agent);
-        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderType);
+        CompletionParameterValidator.ValidateOrThrow(completionParams, provider.ProviderKey);
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
             taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
-            completionParameters: completionParams, providerType: provider.ProviderType);
+            completionParameters: completionParams, providerKey: provider.ProviderKey);
         if (chatHeader is not null)
             history[^1] = new ChatCompletionMessage("user", chatHeader + request.Message);
 

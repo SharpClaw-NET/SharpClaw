@@ -2,7 +2,7 @@ using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -13,10 +13,10 @@ public sealed class AnthropicApiClient : IProviderApiClient
 
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
-        DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
     };
 
-    public ProviderType ProviderType => ProviderType.Anthropic;
+    public string ProviderKey => WellKnownProviderKeys.Anthropic;
     public bool SupportsNativeToolCalling => true;
 
     public async Task<IReadOnlyList<string>> ListModelIdsAsync(

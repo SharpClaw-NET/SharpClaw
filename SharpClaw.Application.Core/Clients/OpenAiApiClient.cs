@@ -1,13 +1,13 @@
 using System.Net.Http.Headers;
 using System.Text.Json;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
 public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostClient
 {
     protected override string ApiEndpoint => "https://api.openai.com/v1";
-    public override ProviderType ProviderType => ProviderType.OpenAI;
+    public override string ProviderKey => WellKnownProviderKeys.OpenAI;
 
     /// <summary>
     /// Prefer the Responses API for all models except legacy GPT-3.5/GPT-4

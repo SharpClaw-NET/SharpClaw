@@ -11,8 +11,8 @@ public static class LocalModelHandlers
     [MapPost("/download")]
     public static async Task<IResult> Download(DownloadModelRequest request, LocalModelService svc)
     {
-        if (request.ProviderType is null)
-            return Results.BadRequest("ProviderType is required. Specify a local provider (e.g. LlamaSharp).");
+        if (request.ProviderKey is null)
+            return Results.BadRequest("ProviderKey is required. Specify a local provider (e.g. llamasharp).");
 
         return Results.Ok(await svc.DownloadAndRegisterAsync(request));
     }

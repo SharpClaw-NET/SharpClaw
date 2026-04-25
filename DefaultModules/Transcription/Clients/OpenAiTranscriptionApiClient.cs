@@ -3,7 +3,7 @@ using System.Net.Http.Headers;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Modules.Transcription.Audio;
 
 namespace SharpClaw.Modules.Transcription.Clients;
@@ -16,7 +16,7 @@ public class OpenAiTranscriptionApiClient : ITranscriptionApiClient
 {
     protected virtual string ApiEndpoint => "https://api.openai.com/v1";
 
-    public virtual ProviderType ProviderType => ProviderType.OpenAI;
+    public virtual string ProviderKey => WellKnownProviderKeys.OpenAI;
 
     public virtual bool IsLocalInference => false;
 

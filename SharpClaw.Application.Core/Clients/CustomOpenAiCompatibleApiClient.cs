@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -9,5 +9,5 @@ namespace SharpClaw.Application.Core.Clients;
 public sealed class CustomOpenAiCompatibleApiClient(string apiEndpoint) : OpenAiCompatibleApiClient
 {
     protected override string ApiEndpoint { get; } = apiEndpoint.TrimEnd('/');
-    public override ProviderType ProviderType => ProviderType.Custom;
+    public override string ProviderKey => WellKnownProviderKeys.Custom;
 }

@@ -5,7 +5,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using System.Text.Json.Serialization;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -24,7 +24,7 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public ProviderType ProviderType => ProviderType.GoogleGemini;
+    public string ProviderKey => WellKnownProviderKeys.GoogleGemini;
     public bool SupportsNativeToolCalling => true;
 
     // ── Model listing ─────────────────────────────────────────────

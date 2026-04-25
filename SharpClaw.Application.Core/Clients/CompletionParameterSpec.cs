@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -107,10 +107,10 @@ public sealed record CompletionParameterSpec
     // ═════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Returns the constraint spec for the given <see cref="ProviderType"/>.
+    /// Returns the constraint spec for the given provider key.
     /// </summary>
-    public static CompletionParameterSpec For(ProviderType providerType)
-        => Specs.TryGetValue(providerType, out var spec)
+    public static CompletionParameterSpec For(string providerKey)
+        => Specs.TryGetValue(providerKey, out var spec)
             ? spec
             : Passthrough;
 
@@ -136,13 +136,13 @@ public sealed record CompletionParameterSpec
         SupportsToolChoice = true,
     };
 
-    private static readonly Dictionary<ProviderType, CompletionParameterSpec> Specs = new()
+    private static readonly Dictionary<string, CompletionParameterSpec> Specs = new()
     {
         // ─────────────────────────────────────────────────────────
         // OpenAI  (Chat Completions + Responses API)
         // https://platform.openai.com/docs/api-reference
         // ─────────────────────────────────────────────────────────
-        [ProviderType.OpenAI] = new()
+        [WellKnownProviderKeys.OpenAI] = new()
         {
             ProviderName = "OpenAI",
             SupportsTemperature = true,
@@ -171,7 +171,7 @@ public sealed record CompletionParameterSpec
         // Anthropic
         // https://docs.anthropic.com/en/api/messages
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Anthropic] = new()
+        [WellKnownProviderKeys.Anthropic] = new()
         {
             ProviderName = "Anthropic",
             SupportsTemperature = true,
@@ -196,7 +196,7 @@ public sealed record CompletionParameterSpec
         // OpenRouter  (multi-model gateway, OpenAI-compatible)
         // https://openrouter.ai/docs/parameters
         // ─────────────────────────────────────────────────────────
-        [ProviderType.OpenRouter] = new()
+        [WellKnownProviderKeys.OpenRouter] = new()
         {
             ProviderName = "OpenRouter",
             SupportsTemperature = true,
@@ -227,7 +227,7 @@ public sealed record CompletionParameterSpec
         // NOT YET IMPLEMENTED — stub mirrors GoogleGemini native
         // constraints for forward-compat.
         // ─────────────────────────────────────────────────────────
-        [ProviderType.GoogleVertexAI] = new()
+        [WellKnownProviderKeys.GoogleVertexAI] = new()
         {
             ProviderName = "Google Vertex AI",
             SupportsTemperature = true,
@@ -256,7 +256,7 @@ public sealed record CompletionParameterSpec
         // no top_k field and it is not serialised by the base client.
         // Use providerParameters to pass topK via extra_body if needed.
         // ─────────────────────────────────────────────────────────
-        [ProviderType.GoogleVertexAIOpenAi] = new()
+        [WellKnownProviderKeys.GoogleVertexAIOpenAi] = new()
         {
             ProviderName = "Google Vertex AI (OpenAI-compat)",
             SupportsTemperature = true,
@@ -289,7 +289,7 @@ public sealed record CompletionParameterSpec
         // fields (temperature, topP, topK, stopSequences, seed,
         // responseMimeType, maxOutputTokens, thinkingConfig).
         // ─────────────────────────────────────────────────────────
-        [ProviderType.GoogleGemini] = new()
+        [WellKnownProviderKeys.GoogleGemini] = new()
         {
             ProviderName = "Google Gemini",
             SupportsTemperature = true,
@@ -318,7 +318,7 @@ public sealed record CompletionParameterSpec
         // no top_k field and it is not serialised by the base client.
         // Use providerParameters to pass topK via extra_body if needed.
         // ─────────────────────────────────────────────────────────
-        [ProviderType.GoogleGeminiOpenAi] = new()
+        [WellKnownProviderKeys.GoogleGeminiOpenAi] = new()
         {
             ProviderName = "Google Gemini (OpenAI-compat)",
             SupportsTemperature = true,
@@ -347,7 +347,7 @@ public sealed record CompletionParameterSpec
         // xAI  (Grok — OpenAI-compatible)
         // https://docs.x.ai/docs
         // ─────────────────────────────────────────────────────────
-        [ProviderType.XAI] = new()
+        [WellKnownProviderKeys.XAI] = new()
         {
             ProviderName = "xAI (Grok)",
             SupportsTemperature = true,
@@ -374,7 +374,7 @@ public sealed record CompletionParameterSpec
         // Groq  (fast inference — OpenAI-compatible)
         // https://console.groq.com/docs/api-reference
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Groq] = new()
+        [WellKnownProviderKeys.Groq] = new()
         {
             ProviderName = "Groq",
             SupportsTemperature = true,
@@ -401,7 +401,7 @@ public sealed record CompletionParameterSpec
         // Cerebras  (fast inference — OpenAI-compatible)
         // https://inference-docs.cerebras.ai/api-reference
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Cerebras] = new()
+        [WellKnownProviderKeys.Cerebras] = new()
         {
             ProviderName = "Cerebras",
             SupportsTemperature = true,
@@ -424,7 +424,7 @@ public sealed record CompletionParameterSpec
         // Mistral
         // https://docs.mistral.ai/api/
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Mistral] = new()
+        [WellKnownProviderKeys.Mistral] = new()
         {
             ProviderName = "Mistral",
             SupportsTemperature = true,
@@ -446,7 +446,7 @@ public sealed record CompletionParameterSpec
         // ─────────────────────────────────────────────────────────
         // GitHub Copilot  (via GitHub Models API)
         // ─────────────────────────────────────────────────────────
-        [ProviderType.GitHubCopilot] = new()
+        [WellKnownProviderKeys.GitHubCopilot] = new()
         {
             ProviderName = "GitHub Copilot",
             SupportsTemperature = true,
@@ -473,7 +473,7 @@ public sealed record CompletionParameterSpec
         // ─────────────────────────────────────────────────────────
         // ZAI
         // ─────────────────────────────────────────────────────────
-        [ProviderType.ZAI] = new()
+        [WellKnownProviderKeys.ZAI] = new()
         {
             ProviderName = "ZAI",
             SupportsTemperature = true,
@@ -499,7 +499,7 @@ public sealed record CompletionParameterSpec
         // ─────────────────────────────────────────────────────────
         // Vercel AI Gateway  (OpenAI-compatible)
         // ─────────────────────────────────────────────────────────
-        [ProviderType.VercelAIGateway] = new()
+        [WellKnownProviderKeys.VercelAIGateway] = new()
         {
             ProviderName = "Vercel AI Gateway",
             SupportsTemperature = true,
@@ -526,7 +526,7 @@ public sealed record CompletionParameterSpec
         // Minimax  (OpenAI-compatible)
         // https://platform.minimaxi.com/document
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Minimax] = new()
+        [WellKnownProviderKeys.Minimax] = new()
         {
             ProviderName = "Minimax",
             SupportsTemperature = true,
@@ -564,7 +564,7 @@ public sealed record CompletionParameterSpec
         // surfaces it as an informational notice in the chat header
         // instead of the wire payload.
         // ─────────────────────────────────────────────────────────
-        [ProviderType.LlamaSharp] = new()
+        [WellKnownProviderKeys.LlamaSharp] = new()
         {
             ProviderName = "LlamaSharp (Local)",
             SupportsTemperature = true,
@@ -597,7 +597,7 @@ public sealed record CompletionParameterSpec
         // Ollama  (user-managed server — OpenAI-compatible)
         // https://github.com/ollama/ollama/blob/main/docs/api.md
         // ─────────────────────────────────────────────────────────
-        [ProviderType.Ollama] = new()
+        [WellKnownProviderKeys.Ollama] = new()
         {
             ProviderName = "Ollama",
             SupportsTemperature = true,

@@ -8,6 +8,7 @@ using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
@@ -231,11 +232,32 @@ public sealed class SeedingService(
     private async Task SeedWellKnownProvidersAsync(SharpClawDbContext db, CancellationToken ct)
     {
         var existing = await db.Providers
-            .Select(p => p.ProviderType)
+            .Select(p => p.ProviderKey)
             .ToHashSetAsync(ct);
 
-        var toSeed = Enum.GetValues<ProviderType>()
-            .Where(pt => pt != ProviderType.Custom && !existing.Contains(pt))
+        var allKeys = new[]
+        {
+            WellKnownProviderKeys.OpenAI,
+            WellKnownProviderKeys.Anthropic,
+            WellKnownProviderKeys.OpenRouter,
+            WellKnownProviderKeys.GoogleGemini,
+            WellKnownProviderKeys.GoogleGeminiOpenAi,
+            WellKnownProviderKeys.GoogleVertexAI,
+            WellKnownProviderKeys.GoogleVertexAIOpenAi,
+            WellKnownProviderKeys.ZAI,
+            WellKnownProviderKeys.VercelAIGateway,
+            WellKnownProviderKeys.XAI,
+            WellKnownProviderKeys.Groq,
+            WellKnownProviderKeys.Cerebras,
+            WellKnownProviderKeys.Mistral,
+            WellKnownProviderKeys.GitHubCopilot,
+            WellKnownProviderKeys.Minimax,
+            WellKnownProviderKeys.LlamaSharp,
+            WellKnownProviderKeys.Ollama,
+        };
+
+        var toSeed = allKeys
+            .Where(k => !existing.Contains(k))
             .ToList();
 
         if (toSeed.Count == 0)
@@ -244,22 +266,22 @@ public sealed class SeedingService(
         logger.LogInformation("Seeding {Count} well-known provider(s): {Types}.",
             toSeed.Count, string.Join(", ", toSeed));
 
-        foreach (var pt in toSeed)
+        foreach (var key in toSeed)
         {
             db.Providers.Add(new ProviderDB
             {
-                Name = DisplayNameFor(pt),
-                ProviderType = pt
+                Name = DisplayNameFor(key),
+                ProviderKey = key
             });
         }
 
         await db.SaveChangesAsync(ct);
     }
 
-    private static string DisplayNameFor(ProviderType pt) => pt switch
+    private static string DisplayNameFor(string key) => key switch
     {
-        ProviderType.LlamaSharp => "LlamaSharp (Local)",
-        _                       => pt.ToString(),
+        WellKnownProviderKeys.LlamaSharp => "LlamaSharp (Local)",
+        _                                => key,
     };
 
     }

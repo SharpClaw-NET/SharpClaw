@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -19,12 +19,12 @@ public static class CompletionParameterValidator
     /// </summary>
     public static List<string> Validate(
         CompletionParameters? parameters,
-        ProviderType providerType)
+        string providerKey)
     {
         if (parameters is null || parameters.IsEmpty)
             return [];
 
-        var spec = CompletionParameterSpec.For(providerType);
+        var spec = CompletionParameterSpec.For(providerKey);
         var errors = new List<string>();
 
         // ── Temperature ──────────────────────────────────────────
@@ -187,11 +187,11 @@ public static class CompletionParameterValidator
     /// </summary>
     public static void ValidateOrThrow(
         CompletionParameters? parameters,
-        ProviderType providerType)
+        string providerKey)
     {
-        var errors = Validate(parameters, providerType);
+        var errors = Validate(parameters, providerKey);
         if (errors.Count > 0)
-            throw new CompletionParameterValidationException(providerType, errors);
+            throw new CompletionParameterValidationException(providerKey, errors);
     }
 }
 
@@ -201,24 +201,24 @@ public static class CompletionParameterValidator
 /// </summary>
 public sealed class CompletionParameterValidationException : ArgumentException
 {
-    public ProviderType ProviderType { get; }
+    public string ProviderKey { get; }
     public IReadOnlyList<string> ValidationErrors { get; }
 
     public CompletionParameterValidationException(
-        ProviderType providerType,
+        string providerKey,
         IReadOnlyList<string> errors)
-        : base(FormatMessage(providerType, errors))
+        : base(FormatMessage(providerKey, errors))
     {
-        ProviderType = providerType;
+        ProviderKey = providerKey;
         ValidationErrors = errors;
     }
 
-    private static string FormatMessage(ProviderType providerType, IReadOnlyList<string> errors)
+    private static string FormatMessage(string providerKey, IReadOnlyList<string> errors)
     {
         if (errors.Count == 1)
-            return $"Invalid completion parameter for {providerType}: {errors[0]}";
+            return $"Invalid completion parameter for {providerKey}: {errors[0]}";
 
-        return $"Invalid completion parameters for {providerType}:\n" +
+        return $"Invalid completion parameters for {providerKey}:\n" +
                string.Join("\n", errors.Select(e => $"  • {e}"));
     }
 }

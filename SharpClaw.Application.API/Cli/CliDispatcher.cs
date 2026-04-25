@@ -28,6 +28,7 @@ using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Contracts.Tasks;
@@ -354,20 +355,20 @@ public static class CliDispatcher
 
         return sub switch
         {
-            "add" when args.Length >= 4 && Enum.TryParse<ProviderType>(args[3], true, out var pt)
+            "add" when args.Length >= 4 && WellKnownProviderKeys.All.Any(k => k.Equals(args[3], StringComparison.OrdinalIgnoreCase))
                 => await ProviderHandlers.Create(
                     new CreateProviderRequest(
-                        args[2], pt,
-                        pt == ProviderType.Custom && args.Length >= 5 ? args[4] : null),
+                        args[2], args[3],
+                        args[3].Equals(WellKnownProviderKeys.Custom, StringComparison.OrdinalIgnoreCase) && args.Length >= 5 ? args[4] : null),
                     svc),
             "add" when args.Length < 4
                 => UsageResult("provider add <name> <type>",
-                    "Types: OpenAI, Anthropic, OpenRouter, GoogleVertexAI,",
-                    "       GoogleVertexAIOpenAi, GoogleGemini, GoogleGeminiOpenAi,",
-                    "       ZAI, VercelAIGateway, XAI, Groq, Cerebras,",
-                    "       Mistral, GitHubCopilot, Minimax, Custom"),
-            "add" => UsageResult("Unknown provider type. Valid types: " +
-                     string.Join(", ", Enum.GetNames<ProviderType>())),
+                    "Types: openai, anthropic, openrouter, google-vertex-ai,",
+                    "       google-vertex-ai-openai, google-gemini, google-gemini-openai,",
+                    "       zai, vercel-ai-gateway, xai, groq, cerebras,",
+                    "       mistral, github-copilot, minimax, custom"),
+            "add" => UsageResult("Unknown provider key. Valid keys: " +
+                     string.Join(", ", WellKnownProviderKeys.All)),
 
             "get" when args.Length >= 3
                 => await ProviderHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
@@ -536,7 +537,7 @@ public static class CliDispatcher
         string? name = null;
         string? quant = null;
         int? gpuLayers = null;
-        ProviderType? providerType = null;
+        string? providerKey = null;
 
         for (var i = 3; i < args.Length; i++)
         {
@@ -550,9 +551,11 @@ public static class CliDispatcher
                     gpuLayers = gl; i++; break;
                 case "--provider" when i + 1 < args.Length:
                     var provStr = args[++i];
-                    if (!Enum.TryParse<ProviderType>(provStr, ignoreCase: true, out var pt))
+                    var matched = WellKnownProviderKeys.All.FirstOrDefault(k =>
+                        k.Equals(provStr, StringComparison.OrdinalIgnoreCase));
+                    if (matched is null)
                         return Results.BadRequest($"Unknown provider '{provStr}'.");
-                    providerType = pt;
+                    providerKey = matched;
                     break;
             }
         }
@@ -566,14 +569,14 @@ public static class CliDispatcher
 
         Console.WriteLine();
 
-        if (providerType is null)
+        if (providerKey is null)
         {
             Console.Error.WriteLine("error: --provider is required. Specify a local provider (e.g. llamasharp).");
-            return Results.BadRequest("ProviderType is required.");
+            return Results.BadRequest("ProviderKey is required.");
         }
 
         var result = await svc.DownloadAndRegisterAsync(
-            new DownloadModelRequest(url, name, quant, gpuLayers, providerType), progress);
+            new DownloadModelRequest(url, name, quant, gpuLayers, providerKey), progress);
         return Results.Ok(result);
     }
 

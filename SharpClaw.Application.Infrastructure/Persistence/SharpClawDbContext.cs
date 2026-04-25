@@ -104,7 +104,6 @@ public class SharpClawDbContext(
         modelBuilder.Entity<ProviderDB>(e =>
         {
             e.HasIndex(p => p.Name).IsUnique();
-            e.Property(p => p.ProviderType).HasConversion<string>();
             e.HasMany(p => p.Models)
                 .WithOne(m => m.Provider)
                 .HasForeignKey(m => m.ProviderId)

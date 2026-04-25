@@ -66,14 +66,14 @@ public sealed partial class HeaderTagProcessor(
         Guid? userId,
         CancellationToken ct,
         CompletionParameters? completionParameters = null,
-        ProviderType providerType = default)
+        string providerKey = "")
     {
         var matches = TagPattern().Matches(template);
         if (matches.Count == 0)
             return template;
 
         var context = await BuildContextAsync(channel, agent, clientType, userId, ct,
-            completionParameters, providerType);
+            completionParameters, providerKey);
 
         var sb = new StringBuilder(template.Length * 2);
         var lastIdx = 0;
@@ -102,7 +102,7 @@ public sealed partial class HeaderTagProcessor(
         ChannelDB channel, AgentDB agent, string clientType,
         Guid? userId, CancellationToken ct,
         CompletionParameters? completionParameters = null,
-        ProviderType providerType = default)
+        string providerKey = "")
     {
         UserDB? user = null;
         PermissionSetDB? userPs = null;
@@ -138,7 +138,7 @@ public sealed partial class HeaderTagProcessor(
         return new HeaderContext(
             channel, agent, clientType,
             user, userPs, agentWithRole?.Role, agentPs,
-            completionParameters, providerType);
+            completionParameters, providerKey);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -310,7 +310,7 @@ public sealed partial class HeaderTagProcessor(
         if (ctx.CompletionParameters?.ReasoningEffort is not { } effort)
             return "";
 
-        var spec = CompletionParameterSpec.For(ctx.ProviderType);
+        var spec = CompletionParameterSpec.For(ctx.ProviderKey);
         if (!spec.ReasoningEffortInformationalOnly)
             return "";
 
@@ -470,5 +470,5 @@ public sealed partial class HeaderTagProcessor(
         RoleDB? AgentRole,
         PermissionSetDB? AgentPs,
         CompletionParameters? CompletionParameters = null,
-        ProviderType ProviderType = default);
+        string ProviderKey = "");
 }

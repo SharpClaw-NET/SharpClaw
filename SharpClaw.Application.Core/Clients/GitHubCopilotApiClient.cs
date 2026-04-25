@@ -2,7 +2,7 @@ using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.DTOs.Providers;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -15,7 +15,7 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
     private const string UserAgent = "SharpClaw/1.0";
 
     protected override string ApiEndpoint => "https://api.githubcopilot.com";
-    public override ProviderType ProviderType => ProviderType.GitHubCopilot;
+    public override string ProviderKey => WellKnownProviderKeys.GitHubCopilot;
 
     // Cached Copilot API token and its expiry
     private string? _cachedToken;

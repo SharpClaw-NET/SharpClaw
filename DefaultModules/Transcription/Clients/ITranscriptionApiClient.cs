@@ -1,5 +1,3 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Modules.Transcription.Clients;
 
 /// <summary>
@@ -9,7 +7,7 @@ namespace SharpClaw.Modules.Transcription.Clients;
 /// </summary>
 public interface ITranscriptionApiClient
 {
-    ProviderType ProviderType { get; }
+    string ProviderKey { get; }
 
     /// <summary>
     /// True for clients that perform inference locally (e.g. Whisper.net),

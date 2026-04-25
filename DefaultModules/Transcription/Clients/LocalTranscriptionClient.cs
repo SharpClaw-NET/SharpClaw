@@ -26,10 +26,10 @@ namespace SharpClaw.Modules.Transcription.Clients;
 public sealed class LocalTranscriptionClient(
     WhisperModelManager whisperManager) : ITranscriptionApiClient
 {
-    // Local inference is not a network provider — ProviderType is not applicable.
-    // The factory routes this client via IsLocalInference rather than ProviderType.
-    ProviderType ITranscriptionApiClient.ProviderType =>
-        throw new NotSupportedException("LocalTranscriptionClient does not have a ProviderType.");
+    // Local inference is not a network provider — ProviderKey is not applicable.
+    // The factory routes this client via IsLocalInference rather than ProviderKey.
+    string ITranscriptionApiClient.ProviderKey =>
+        throw new NotSupportedException("LocalTranscriptionClient does not have a ProviderKey.");
 
     public bool IsLocalInference => true;
 

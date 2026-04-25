@@ -7,6 +7,8 @@ using Microsoft.EntityFrameworkCore.Metadata;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Contracts.Providers;
+using SharpClaw.Infrastructure.Models;
 
 namespace SharpClaw.Infrastructure.Persistence.JSON;
 
@@ -135,7 +137,11 @@ public sealed class JsonFilePersistenceService(
                             result.File, fileVersion, JsonSchemaVersion.Current);
                     }
 
-                    var entity = JsonSerializer.Deserialize(result.Json!, clrType, JsonOptions);
+                    var rawJson = result.Json!;
+                    if (clrType == typeof(ProviderDB))
+                        rawJson = MigrateProviderDbJson(rawJson);
+
+                    var entity = JsonSerializer.Deserialize(rawJson, clrType, JsonOptions);
 
                     if (entity is null)
                         continue;
@@ -835,6 +841,98 @@ public sealed class JsonFilePersistenceService(
     /// This allows old data files written before the <see cref="JsonStringEnumConverter"/>
     /// was introduced to be loaded without error.
     /// </summary>
+
+    // Maps the old ProviderType integer values to WellKnownProviderKeys string constants.
+    private static readonly Dictionary<int, string> ProviderTypeIntToKey = new()
+    {
+        [0]  = WellKnownProviderKeys.OpenAI,
+        [1]  = WellKnownProviderKeys.Anthropic,
+        [2]  = WellKnownProviderKeys.OpenRouter,
+        [3]  = WellKnownProviderKeys.GoogleVertexAI,
+        [4]  = WellKnownProviderKeys.GoogleGemini,
+        [5]  = WellKnownProviderKeys.ZAI,
+        [6]  = WellKnownProviderKeys.VercelAIGateway,
+        [7]  = WellKnownProviderKeys.XAI,
+        [8]  = WellKnownProviderKeys.Groq,
+        [9]  = WellKnownProviderKeys.Cerebras,
+        [10] = WellKnownProviderKeys.Mistral,
+        [11] = WellKnownProviderKeys.GitHubCopilot,
+        [12] = WellKnownProviderKeys.Custom,
+        [13] = WellKnownProviderKeys.LlamaSharp,
+        [14] = WellKnownProviderKeys.Minimax,
+        [15] = WellKnownProviderKeys.GoogleGeminiOpenAi,
+        [16] = WellKnownProviderKeys.GoogleVertexAIOpenAi,
+        [18] = WellKnownProviderKeys.Ollama,
+    };
+
+    /// <summary>
+    /// Migrates a <c>ProviderDB</c> JSON object that may have been written with the old
+    /// integer or string <c>providerType</c> field to the new <c>providerKey</c> field.
+    /// </summary>
+    private static string MigrateProviderDbJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+
+        // Already migrated — providerKey present and providerType absent.
+        if (root.TryGetProperty("providerKey", out _) && !root.TryGetProperty("providerType", out _))
+            return json;
+
+        using var ms = new System.IO.MemoryStream();
+        using var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true });
+
+        writer.WriteStartObject();
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.NameEquals("providerType"))
+            {
+                // Map integer or string enum value to the new string key.
+                string? resolvedKey = null;
+                if (prop.Value.ValueKind == JsonValueKind.Number
+                    && prop.Value.TryGetInt32(out var intVal)
+                    && ProviderTypeIntToKey.TryGetValue(intVal, out var keyFromInt))
+                {
+                    resolvedKey = keyFromInt;
+                }
+                else if (prop.Value.ValueKind == JsonValueKind.String)
+                {
+                    var str = prop.Value.GetString() ?? string.Empty;
+                    // Try to parse as integer string first (e.g. "13").
+                    if (int.TryParse(str, out var parsedInt)
+                        && ProviderTypeIntToKey.TryGetValue(parsedInt, out var keyFromParsed))
+                    {
+                        resolvedKey = keyFromParsed;
+                    }
+                    else
+                    {
+                        // Legacy name aliases ("Local" → "llamasharp", "Whisper" → "custom").
+                        resolvedKey = str.ToLowerInvariant() switch
+                        {
+                            "local"     => WellKnownProviderKeys.LlamaSharp,
+                            "whisper"   => WellKnownProviderKeys.Custom,
+                            // Enum member names match key names case-insensitively.
+                            var s       => ProviderTypeIntToKey.Values
+                                               .FirstOrDefault(k => string.Equals(k.Replace("-", ""), s.Replace("-", ""), StringComparison.OrdinalIgnoreCase))
+                                           ?? s.ToLowerInvariant()
+                        };
+                    }
+                }
+
+                if (resolvedKey is not null)
+                    writer.WriteString("providerKey", resolvedKey);
+                // Drop the old providerType property — do not emit it.
+            }
+            else
+            {
+                prop.WriteTo(writer);
+            }
+        }
+        writer.WriteEndObject();
+        writer.Flush();
+
+        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
+    }
+
     private sealed class NumericOrStringEnumConverterFactory : JsonConverterFactory
     {
         public override bool CanConvert(Type typeToConvert) =>

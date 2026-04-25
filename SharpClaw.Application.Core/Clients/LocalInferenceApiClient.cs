@@ -10,7 +10,7 @@ using LLama.Native;
 using LLama.Sampling;
 using LLama.Transformers;
 using SharpClaw.Application.Core.LocalInference;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -99,7 +99,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
     private static readonly TimeSpan ProbeTtl = TimeSpan.FromSeconds(30);
     private static readonly ConcurrentDictionary<Guid, DateTime> _lastProbeSuccess = new();
 
-    public ProviderType ProviderType => ProviderType.LlamaSharp;
+    public string ProviderKey => WellKnownProviderKeys.LlamaSharp;
 
     /// <summary>
     /// Always <see langword="true"/>: grammar-constrained inference is the only
