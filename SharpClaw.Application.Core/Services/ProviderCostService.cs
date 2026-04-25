@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Providers;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
@@ -32,10 +32,10 @@ public sealed class ProviderCostService(
         var (periodStart, periodEnd) = ResolvePeriod(days, startDate, endDate);
 
         // LlamaSharp providers have zero cloud cost
-        if (provider.ProviderType is ProviderType.LlamaSharp)
+        if (provider.ProviderKey == WellKnownProviderKeys.LlamaSharp)
         {
             return new ProviderCostResponse(
-                provider.Id, provider.Name, provider.ProviderType,
+                provider.Id, provider.Name, provider.ProviderKey,
                 IsLocal: true, CostApiSupported: false,
                 TotalCost: 0, Currency: "usd",
                 PeriodStart: periodStart, PeriodEnd: periodEnd,
@@ -44,7 +44,7 @@ public sealed class ProviderCostService(
         }
 
         // Try the provider's cost API (if implemented)
-        var client = GetClientSafe(provider.ProviderType, provider.ApiEndpoint);
+        var client = GetClientSafe(provider.ProviderKey, provider.ApiEndpoint);
         if (client is IProviderCostClient costClient
             && !string.IsNullOrEmpty(provider.EncryptedApiKey))
         {
@@ -55,7 +55,7 @@ public sealed class ProviderCostService(
             if (result is not null)
             {
                 return new ProviderCostResponse(
-                    provider.Id, provider.Name, provider.ProviderType,
+                    provider.Id, provider.Name, provider.ProviderKey,
                     IsLocal: false, CostApiSupported: true,
                     TotalCost: result.TotalAmount,
                     Currency: result.Currency,
@@ -68,7 +68,7 @@ public sealed class ProviderCostService(
 
             // API returned null — key likely lacks admin permissions
             return new ProviderCostResponse(
-                provider.Id, provider.Name, provider.ProviderType,
+                provider.Id, provider.Name, provider.ProviderKey,
                 IsLocal: false, CostApiSupported: true,
                 TotalCost: 0, Currency: "usd",
                 PeriodStart: periodStart, PeriodEnd: periodEnd,
@@ -80,12 +80,12 @@ public sealed class ProviderCostService(
 
         // Provider does not implement a cost API
         return new ProviderCostResponse(
-            provider.Id, provider.Name, provider.ProviderType,
+            provider.Id, provider.Name, provider.ProviderKey,
             IsLocal: false, CostApiSupported: false,
             TotalCost: 0, Currency: "usd",
             PeriodStart: periodStart, PeriodEnd: periodEnd,
             DailyBreakdown: null,
-            Note: $"Provider type '{provider.ProviderType}' does not expose a cost API. "
+            Note: $"Provider type '{provider.ProviderKey}' does not expose a cost API. "
                 + "Check the provider's dashboard for billing information.");
     }
 
@@ -138,11 +138,11 @@ public sealed class ProviderCostService(
         return (start, end);
     }
 
-    private IProviderApiClient? GetClientSafe(ProviderType providerType, string? apiEndpoint)
+    private IProviderApiClient? GetClientSafe(string providerKey, string? apiEndpoint)
     {
         try
         {
-            return clientFactory.GetClient(providerType, apiEndpoint);
+            return clientFactory.GetClient(providerKey, apiEndpoint);
         }
         catch
         {

@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -8,11 +8,10 @@ namespace SharpClaw.Application.Core.Clients;
 /// Native Google Vertex AI client (<c>generateContent</c> endpoint).
 /// <para>
 /// <b>Not yet implemented.</b> This stub exists to reserve the
-/// <see cref="ProviderType.GoogleVertexAI"/> enum value for the native
+/// <c>google-vertex-ai</c> provider key for the native
 /// Vertex AI protocol. All methods throw
 /// <see cref="NotSupportedException"/>.
-/// Use <see cref="GoogleVertexAIOpenAiApiClient"/>
-/// (<see cref="ProviderType.GoogleVertexAIOpenAi"/>) instead.
+/// Use <see cref="GoogleVertexAIOpenAiApiClient"/> instead.
 /// </para>
 /// </summary>
 public sealed class GoogleVertexAIApiClient : IProviderApiClient
@@ -21,7 +20,7 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
         "Native Google Vertex AI client is not yet implemented. " +
         "Use the 'GoogleVertexAIOpenAi' provider type instead.";
 
-    public ProviderType ProviderType => ProviderType.GoogleVertexAI;
+    public string ProviderKey => WellKnownProviderKeys.GoogleVertexAI;
     public bool SupportsNativeToolCalling => false;
 
     public Task<IReadOnlyList<string>> ListModelIdsAsync(

@@ -290,11 +290,9 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
             var modelInfo = await modelInfoProvider.GetModelProviderInfoAsync(modelId, ct)
                 ?? throw new InvalidOperationException($"Model {modelId} not found.");
 
-
-
-            if (!orchestrator.SupportsProvider(modelInfo.ProviderType))
+            if (!orchestrator.SupportsProvider(modelInfo.ProviderKey))
                 throw new InvalidOperationException(
-                    $"Provider ({modelInfo.ProviderType}) does not support transcription.");
+                    $"Provider ({modelInfo.ProviderKey}) does not support transcription.");
 
             // Read transcription parameters from the tool call.
             var language = parameters.TryGetProperty("language", out var langProp) ? langProp.GetString() : null;

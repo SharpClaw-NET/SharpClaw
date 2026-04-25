@@ -5,7 +5,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using NAudio.Wave;
-using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Modules.Transcription.Audio;
@@ -70,8 +69,8 @@ public sealed class LiveTranscriptionOrchestrator(
     /// registered <see cref="ITranscriptionApiClient"/>.
     /// Call before <see cref="Start"/> to fail early with a clear error.
     /// </summary>
-    public bool SupportsProvider(ProviderType providerType) =>
-        transcriptionClientFactory.Supports(providerType);
+    public bool SupportsProvider(string providerKey) =>
+        transcriptionClientFactory.Supports(providerKey);
 
     /// <summary>
     /// Starts live audio capture and transcription for a job.
@@ -165,19 +164,19 @@ public sealed class LiveTranscriptionOrchestrator(
         // Resolve model + provider once
         string apiKey = "";
         string modelName;
-        ProviderType providerType;
+        string providerKey;
 
         var modelInfo = await modelInfoProvider.GetModelProviderInfoAsync(modelId, ct)
             ?? throw new InvalidOperationException($"Model {modelId} not found.");
 
-        providerType = modelInfo.ProviderType;
+        providerKey = modelInfo.ProviderKey;
 
         var isLocal = transcriptionClientFactory.SupportsLocal()
-            && !transcriptionClientFactory.Supports(providerType);
+            && !transcriptionClientFactory.Supports(providerKey);
 
-        if (!isLocal && !transcriptionClientFactory.Supports(providerType))
+        if (!isLocal && !transcriptionClientFactory.Supports(providerKey))
             throw new InvalidOperationException(
-                $"Provider ({providerType}) does not support transcription.");
+                $"Provider ({providerKey}) does not support transcription.");
 
         if (isLocal)
         {
@@ -193,7 +192,7 @@ public sealed class LiveTranscriptionOrchestrator(
 
         var sttClient = isLocal
             ? transcriptionClientFactory.GetLocalClient()
-            : transcriptionClientFactory.GetClient(providerType);
+            : transcriptionClientFactory.GetClient(providerKey);
         var ringBuffer = sharedCapture.Acquire(deviceIdentifier, SampleRate, BufferCapacitySeconds);
         var lastSeenEnd = 0.0;
         var provisionals = new List<ProvisionalSegment>();

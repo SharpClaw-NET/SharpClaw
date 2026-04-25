@@ -1,10 +1,8 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Modules.Transcription.Contracts;
 
 internal interface ILiveTranscriptionOrchestrator
 {
-    bool SupportsProvider(ProviderType providerType);
+    bool SupportsProvider(string providerKey);
 
     void Start(
         Guid jobId,

@@ -3,7 +3,7 @@ using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Models;
@@ -21,20 +21,20 @@ public sealed class ProviderService(
 {
     public async Task<ProviderResponse> CreateAsync(CreateProviderRequest request, CancellationToken ct = default)
     {
-        if (request.ProviderType == ProviderType.Custom && string.IsNullOrWhiteSpace(request.ApiEndpoint))
+        if (request.ProviderKey == WellKnownProviderKeys.Custom && string.IsNullOrWhiteSpace(request.ApiEndpoint))
             throw new ArgumentException("ApiEndpoint is required for custom providers.");
 
         if (IsUniqueProviderNamesEnforced())
             await EnsureProviderNameUniqueAsync(request.Name, excludeId: null, ct);
 
-        var storeEndpoint = request.ProviderType is ProviderType.Custom or ProviderType.Ollama
+        var storeEndpoint = request.ProviderKey is WellKnownProviderKeys.Custom or WellKnownProviderKeys.Ollama
             ? request.ApiEndpoint
             : null;
 
         var provider = new ProviderDB
         {
             Name = request.Name,
-            ProviderType = request.ProviderType,
+            ProviderKey = request.ProviderKey,
             ApiEndpoint = storeEndpoint,
             EncryptedApiKey = request.ApiKey is not null
                 ? encryptionOptions.EncryptProviderKeys
@@ -46,20 +46,20 @@ public sealed class ProviderService(
         db.Providers.Add(provider);
         await db.SaveChangesAsync(ct);
 
-        return new ProviderResponse(provider.Id, provider.Name, provider.ProviderType, provider.ApiEndpoint, provider.EncryptedApiKey is not null);
+        return new ProviderResponse(provider.Id, provider.Name, provider.ProviderKey, provider.ApiEndpoint, provider.EncryptedApiKey is not null);
     }
 
     public async Task<IReadOnlyList<ProviderResponse>> ListAsync(CancellationToken ct = default)
     {
         return await db.Providers
-            .Select(p => new ProviderResponse(p.Id, p.Name, p.ProviderType, p.ApiEndpoint, p.EncryptedApiKey != null))
+            .Select(p => new ProviderResponse(p.Id, p.Name, p.ProviderKey, p.ApiEndpoint, p.EncryptedApiKey != null))
             .ToListAsync(ct);
     }
 
     public async Task<ProviderResponse?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var p = await db.Providers.FindAsync([id], ct);
-        return p is null ? null : new ProviderResponse(p.Id, p.Name, p.ProviderType, p.ApiEndpoint, p.EncryptedApiKey is not null);
+        return p is null ? null : new ProviderResponse(p.Id, p.Name, p.ProviderKey, p.ApiEndpoint, p.EncryptedApiKey is not null);
     }
 
     public async Task<ProviderResponse?> UpdateAsync(Guid id, UpdateProviderRequest request, CancellationToken ct = default)
@@ -76,7 +76,7 @@ public sealed class ProviderService(
         if (request.ApiEndpoint is not null) provider.ApiEndpoint = request.ApiEndpoint;
 
         await db.SaveChangesAsync(ct);
-        return new ProviderResponse(provider.Id, provider.Name, provider.ProviderType, provider.ApiEndpoint, provider.EncryptedApiKey is not null);
+        return new ProviderResponse(provider.Id, provider.Name, provider.ProviderKey, provider.ApiEndpoint, provider.EncryptedApiKey is not null);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -112,11 +112,11 @@ public sealed class ProviderService(
         var provider = await db.Providers.FindAsync([providerId], ct)
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
-        var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
+        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
 
         if (client is not IDeviceCodeAuthClient authClient)
             throw new InvalidOperationException(
-                $"Provider type '{provider.ProviderType}' does not support device code authentication.");
+                $"Provider type '{provider.ProviderKey}' does not support device code authentication.");
 
         using var httpClient = httpClientFactory.CreateClient();
         return await authClient.StartDeviceCodeFlowAsync(httpClient, ct);
@@ -148,11 +148,11 @@ public sealed class ProviderService(
         var provider = await db.Providers.FindAsync([providerId], ct)
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
-        var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
+        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
 
         if (client is not IDeviceCodeAuthClient authClient)
             throw new InvalidOperationException(
-                $"Provider type '{provider.ProviderType}' does not support device code authentication.");
+                $"Provider type '{provider.ProviderKey}' does not support device code authentication.");
 
         using var httpClient = httpClientFactory.CreateClient();
         var accessToken = await authClient.PollForAccessTokenAsync(httpClient, session, ct);
@@ -166,9 +166,9 @@ public sealed class ProviderService(
     /// <summary>
     /// Returns true if the given provider type supports device code authentication.
     /// </summary>
-    public bool SupportsDeviceCodeAuth(ProviderType providerType, string? apiEndpoint = null)
+    public bool SupportsDeviceCodeAuth(string providerKey, string? apiEndpoint = null)
     {
-        var client = clientFactory.GetClient(providerType, apiEndpoint);
+        var client = clientFactory.GetClient(providerKey, apiEndpoint);
         return client is IDeviceCodeAuthClient;
     }
 
@@ -213,13 +213,13 @@ public sealed class ProviderService(
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
         if (string.IsNullOrEmpty(provider.EncryptedApiKey)
-            && provider.ProviderType is not ProviderType.Ollama)
+            && provider.ProviderKey != WellKnownProviderKeys.Ollama)
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
         var apiKey = string.IsNullOrEmpty(provider.EncryptedApiKey)
             ? string.Empty
             : ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey, encryptionOptions.Key);
-        var client = clientFactory.GetClient(provider.ProviderType, provider.ApiEndpoint);
+        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
 
         using var httpClient = httpClientFactory.CreateClient();
         var modelIds = await client.ListModelIdsAsync(httpClient, apiKey, ct);

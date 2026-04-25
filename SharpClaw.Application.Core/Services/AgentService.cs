@@ -10,6 +10,7 @@ using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Models;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -28,7 +29,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             ?? throw new ArgumentException($"Model {request.ModelId} not found.");
 
         // Validate typed completion parameters against provider constraints
-        ValidateCompletionParameters(request, model.Provider.ProviderType);
+        ValidateCompletionParameters(request, model.Provider.ProviderKey);
 
         var agent = new AgentDB
         {
@@ -138,7 +139,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
         }
 
         // Validate the effective completion parameters against the (possibly updated) provider
-        ValidateCompletionParameters(agent, agent.Model.Provider.ProviderType);
+        ValidateCompletionParameters(agent, agent.Model.Provider.ProviderKey);
 
         await db.SaveChangesAsync(ct);
         return ToResponse(agent, agent.Model);
@@ -308,7 +309,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
         // Pre-load source URLs for local models so we can derive the suffix.
         var localModelIds = models
-            .Where(m => m.Provider.ProviderType == ProviderType.LlamaSharp)
+            .Where(m => m.Provider.ProviderKey == WellKnownProviderKeys.LlamaSharp)
             .Select(m => m.Id)
             .ToHashSet();
 
@@ -328,7 +329,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
         foreach (var model in models)
         {
             string providerSuffix;
-            if (model.Provider.ProviderType == ProviderType.LlamaSharp
+            if (model.Provider.ProviderKey == WellKnownProviderKeys.LlamaSharp
                 && localSourceUrls.TryGetValue(model.Id, out var sourceUrl))
             {
                 providerSuffix = ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant();
@@ -430,7 +431,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
     /// Validates the typed completion parameters from a create request
     /// against the target provider's constraints.
     /// </summary>
-    private static void ValidateCompletionParameters(CreateAgentRequest request, ProviderType providerType)
+    private static void ValidateCompletionParameters(CreateAgentRequest request, string providerKey)
     {
         var cp = new CompletionParameters
         {
@@ -444,14 +445,14 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             ResponseFormat = request.ResponseFormat,
             ReasoningEffort = request.ReasoningEffort,
         };
-        CompletionParameterValidator.ValidateOrThrow(cp, providerType);
+        CompletionParameterValidator.ValidateOrThrow(cp, providerKey);
     }
 
     /// <summary>
     /// Validates the effective completion parameters on an agent entity
     /// (after fields have been applied) against the target provider.
     /// </summary>
-    private static void ValidateCompletionParameters(AgentDB agent, ProviderType providerType)
+    private static void ValidateCompletionParameters(AgentDB agent, string providerKey)
     {
         var cp = new CompletionParameters
         {
@@ -465,7 +466,7 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             ResponseFormat = agent.ResponseFormat,
             ReasoningEffort = agent.ReasoningEffort,
         };
-        CompletionParameterValidator.ValidateOrThrow(cp, providerType);
+        CompletionParameterValidator.ValidateOrThrow(cp, providerKey);
     }
 
     private bool IsUniqueAgentNamesEnforced()

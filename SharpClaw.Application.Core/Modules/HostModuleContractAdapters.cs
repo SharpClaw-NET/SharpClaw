@@ -1,6 +1,5 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Context;
@@ -10,11 +9,11 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Threads;
-using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
+using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Application.Core.Modules;
 
@@ -102,7 +101,7 @@ public sealed class HostModelInfoProvider(
             ? string.Empty
             : ApiKeyEncryptor.DecryptOrPassthrough(model.Provider.EncryptedApiKey, encryptionOptions.Key);
 
-        return new ModelProviderInfo(model.Name, model.Provider.ProviderType, apiKey);
+        return new ModelProviderInfo(model.Name, model.Provider.ProviderKey, apiKey);
     }
 
     public async Task<string?> GetLocalModelFilePathAsync(Guid modelId, CancellationToken ct = default)

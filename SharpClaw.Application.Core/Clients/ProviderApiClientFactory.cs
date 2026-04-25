@@ -1,24 +1,24 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
 public sealed class ProviderApiClientFactory
 {
-    private readonly Dictionary<ProviderType, IProviderApiClient> _clients;
+    private readonly Dictionary<string, IProviderApiClient> _clients;
 
     public ProviderApiClientFactory(IEnumerable<IProviderApiClient> clients)
     {
-        _clients = clients.ToDictionary(c => c.ProviderType);
+        _clients = clients.ToDictionary(c => c.ProviderKey);
     }
 
     /// <summary>
-    /// Returns the API client for the given provider type.
-    /// For <see cref="ProviderType.Custom"/>, supply the <paramref name="apiEndpoint"/>
+    /// Returns the API client for the given provider key.
+    /// For <see cref="WellKnownProviderKeys.Custom"/>, supply the <paramref name="apiEndpoint"/>
     /// stored on the provider record.
     /// </summary>
-    public IProviderApiClient GetClient(ProviderType providerType, string? apiEndpoint = null)
+    public IProviderApiClient GetClient(string providerKey, string? apiEndpoint = null)
     {
-        if (providerType == ProviderType.Custom)
+        if (providerKey == WellKnownProviderKeys.Custom)
         {
             ArgumentException.ThrowIfNullOrWhiteSpace(apiEndpoint, nameof(apiEndpoint));
             return new CustomOpenAiCompatibleApiClient(apiEndpoint);
@@ -26,11 +26,11 @@ public sealed class ProviderApiClientFactory
 
         // Ollama: use stored endpoint if provided, otherwise fall back to
         // the default (http://localhost:11434) baked into OllamaApiClient.
-        if (providerType == ProviderType.Ollama)
+        if (providerKey == WellKnownProviderKeys.Ollama)
             return new OllamaApiClient(apiEndpoint);
 
-        return _clients.TryGetValue(providerType, out var client)
+        return _clients.TryGetValue(providerKey, out var client)
             ? client
-            : throw new NotSupportedException($"Provider type '{providerType}' is not supported.");
+            : throw new NotSupportedException($"Provider key '{providerKey}' is not supported.");
     }
 }

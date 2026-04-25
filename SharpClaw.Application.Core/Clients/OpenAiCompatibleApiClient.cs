@@ -3,7 +3,7 @@ using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
@@ -15,7 +15,7 @@ namespace SharpClaw.Application.Core.Clients;
 public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 {
     protected abstract string ApiEndpoint { get; }
-    public abstract ProviderType ProviderType { get; }
+    public abstract string ProviderKey { get; }
     public virtual bool SupportsNativeToolCalling => true;
 
     public virtual async Task<IReadOnlyList<string>> ListModelIdsAsync(

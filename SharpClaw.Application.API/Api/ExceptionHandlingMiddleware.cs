@@ -33,7 +33,7 @@ public sealed class ExceptionHandlingMiddleware(
                 await context.Response.WriteAsync(JsonSerializer.Serialize(new
                 {
                     error = "Invalid completion parameters",
-                    provider = ex.ProviderType.ToString(),
+                    provider = ex.ProviderKey,
                     validationErrors = ex.ValidationErrors,
                 }, JsonOptions));
             }

@@ -25,7 +25,7 @@ public sealed partial class FirstSetupPage : Page
     private bool _localOnly;
     private bool _switchToCloud;
     private List<ProviderDto>? _providers;
-    // When non-null, OnDownloadModelClick includes providerType in the POST body.
+    // When non-null, OnDownloadModelClick includes providerKey in the POST body.
     // Null = LlamaSharp (default). Set to "Whisper" for the opt-in transcription step.
     private string? _localDownloadProviderType;
 
@@ -545,7 +545,7 @@ public sealed partial class FirstSetupPage : Page
 
     // Known provider types that use device code auth instead of API keys
     private static readonly HashSet<string> DeviceCodeProviderTypes =
-        ["GitHubCopilot", "11"];
+        ["GitHubCopilot"];
 
     private bool IsDeviceCodeProvider(ProviderDto? provider)
     {
@@ -617,7 +617,7 @@ public sealed partial class FirstSetupPage : Page
 
         try
         {
-            var body = JsonSerializer.Serialize(new { name, providerType = typeStr, apiEndpoint = endpoint }, Json);
+            var body = JsonSerializer.Serialize(new { name, providerKey = typeStr, apiEndpoint = endpoint }, Json);
             var resp = await Api.PostAsync("/providers", new StringContent(body, Encoding.UTF8, "application/json"));
             _providerTcs?.TrySetResult(resp.IsSuccessStatusCode);
             if (!resp.IsSuccessStatusCode)
@@ -735,7 +735,7 @@ public sealed partial class FirstSetupPage : Page
         {
             var body = _localDownloadProviderType is null
                 ? JsonSerializer.Serialize(new { url = downloadUrl }, Json)
-                : JsonSerializer.Serialize(new { url = downloadUrl, providerType = _localDownloadProviderType }, Json);
+                : JsonSerializer.Serialize(new { url = downloadUrl, providerKey = _localDownloadProviderType }, Json);
             var resp = await Api.PostAsync("/models/local/download",
                 new StringContent(body, Encoding.UTF8, "application/json"));
 
@@ -1407,7 +1407,7 @@ public sealed partial class FirstSetupPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ProviderDto(Guid Id, string Name, JsonElement ProviderType, string? ApiEndpoint, bool HasApiKey)
     {
-        public bool IsLocal => ProviderType.ToString() is "LlamaSharp" or "13";
+        public bool IsLocal => ProviderType.ToString() is "LlamaSharp";
     }
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ModelDto(Guid Id, string Name, JsonElement Capabilities, Guid ProviderId, string ProviderName);

@@ -1,9 +1,9 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
 public sealed class OpenRouterApiClient : OpenAiCompatibleApiClient
 {
     protected override string ApiEndpoint => "https://openrouter.ai/api/v1";
-    public override ProviderType ProviderType => ProviderType.OpenRouter;
+    public override string ProviderKey => WellKnownProviderKeys.OpenRouter;
 }

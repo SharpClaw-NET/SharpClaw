@@ -1,4 +1,4 @@
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Modules.Transcription.Clients;
 
@@ -8,5 +8,5 @@ namespace SharpClaw.Modules.Transcription.Clients;
 public sealed class GroqTranscriptionApiClient : OpenAiTranscriptionApiClient
 {
     protected override string ApiEndpoint => "https://api.groq.com/openai/v1";
-    public override ProviderType ProviderType => ProviderType.Groq;
+    public override string ProviderKey => WellKnownProviderKeys.Groq;
 }

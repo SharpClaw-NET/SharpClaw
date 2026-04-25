@@ -1,10 +1,8 @@
-using SharpClaw.Contracts.Enums;
-
 namespace SharpClaw.Modules.Transcription.Clients;
 
 public sealed class TranscriptionApiClientFactory
 {
-    private readonly Dictionary<ProviderType, ITranscriptionApiClient> _clients;
+    private readonly Dictionary<string, ITranscriptionApiClient> _clients;
     private readonly ITranscriptionApiClient? _localClient;
 
     public TranscriptionApiClientFactory(IEnumerable<ITranscriptionApiClient> clients)
@@ -16,16 +14,16 @@ public sealed class TranscriptionApiClientFactory
             if (c.IsLocalInference)
                 _localClient = c;
             else
-                _clients[c.ProviderType] = c;
+                _clients[c.ProviderKey] = c;
         }
     }
 
-    public ITranscriptionApiClient GetClient(ProviderType providerType)
+    public ITranscriptionApiClient GetClient(string providerKey)
     {
-        return _clients.TryGetValue(providerType, out var client)
+        return _clients.TryGetValue(providerKey, out var client)
             ? client
             : throw new NotSupportedException(
-                $"Provider type '{providerType}' does not support transcription.");
+                $"Provider key '{providerKey}' does not support transcription.");
     }
 
     public ITranscriptionApiClient GetLocalClient()
@@ -34,8 +32,8 @@ public sealed class TranscriptionApiClientFactory
             ?? throw new NotSupportedException("No local transcription client is registered.");
     }
 
-    public bool Supports(ProviderType providerType) =>
-        _clients.ContainsKey(providerType);
+    public bool Supports(string providerKey) =>
+        _clients.ContainsKey(providerKey);
 
     public bool SupportsLocal() => _localClient is not null;
 }

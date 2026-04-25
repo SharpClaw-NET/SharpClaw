@@ -4,6 +4,7 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -91,13 +92,16 @@ public sealed class TaskPreflightChecker(
                 case TaskRequirementKind.RequiresProvider:
                 {
                     var value = req.Value ?? string.Empty;
-                    var passed = false;
+                    bool passed;
                     string message;
 
-                    if (Enum.TryParse<ProviderType>(value, ignoreCase: true, out var providerType))
+                    var knownKeys = WellKnownProviderKeys.All;
+                    if (knownKeys.Contains(value, StringComparer.OrdinalIgnoreCase))
                     {
+                        var normalised = knownKeys.First(k =>
+                            k.Equals(value, StringComparison.OrdinalIgnoreCase));
                         passed = await db.Providers
-                            .AnyAsync(p => p.ProviderType == providerType
+                            .AnyAsync(p => p.ProviderKey == normalised
                                           && p.EncryptedApiKey != null, ct);
                         message = passed
                             ? $"Provider '{value}' is configured."
@@ -105,7 +109,8 @@ public sealed class TaskPreflightChecker(
                     }
                     else
                     {
-                        message = $"'{value}' is not a recognised ProviderType.";
+                        passed = false;
+                        message = $"'{value}' is not a recognised provider key.";
                     }
 
                     findings.Add(new TaskPreflightFinding(

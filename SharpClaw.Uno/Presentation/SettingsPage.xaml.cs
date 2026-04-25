@@ -250,7 +250,7 @@ public sealed partial class SettingsPage : Page
             var type = typeBox.SelectedItem is ComboBoxItem { Tag: string t } ? t : "OpenAI";
             if (string.IsNullOrEmpty(name)) return;
             var ep = type == "Custom" ? epBox.Text.Trim() : null;
-            var body = JsonSerializer.Serialize(new { name, providerType = type, apiEndpoint = ep }, Json);
+            var body = JsonSerializer.Serialize(new { name, providerKey = type, apiEndpoint = ep }, Json);
             await Api.PostAsync("/providers", new StringContent(body, Encoding.UTF8, "application/json"));
             await LoadProvidersAsync();
         };

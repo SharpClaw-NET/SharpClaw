@@ -1,11 +1,11 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Clients;
 
 public interface IProviderApiClient
 {
-    ProviderType ProviderType { get; }
+    string ProviderKey { get; }
 
     /// <summary>
     /// Indicates whether this provider supports native tool/function calling.
@@ -45,7 +45,7 @@ public interface IProviderApiClient
         CancellationToken ct = default)
     {
         throw new NotSupportedException(
-            $"Provider '{ProviderType}' does not support native tool calling.");
+            $"Provider '{ProviderKey}' does not support native tool calling.");
     }
 
     /// <summary>
@@ -68,6 +68,6 @@ public interface IProviderApiClient
         CancellationToken ct = default)
     {
         throw new NotSupportedException(
-            $"Provider '{ProviderType}' does not support streaming.");
+            $"Provider '{ProviderKey}' does not support streaming.");
     }
 }

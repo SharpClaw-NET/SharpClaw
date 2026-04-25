@@ -4,6 +4,7 @@ using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Models;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
@@ -25,14 +26,14 @@ public sealed class LocalModelService(
         IProgress<double>? progress = null,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(request.ProviderType,
-            $"{nameof(request)}.{nameof(request.ProviderType)}");
+        ArgumentNullException.ThrowIfNull(request.ProviderKey,
+            $"{nameof(request)}.{nameof(request.ProviderKey)}");
 
-        var (provider, defaultCapability) = request.ProviderType switch
+        var (provider, defaultCapability) = request.ProviderKey switch
         {
-            ProviderType.LlamaSharp => (await EnsureLocalProviderAsync(ct), WellKnownCapabilityKeys.Chat),
+            WellKnownProviderKeys.LlamaSharp => (await EnsureLocalProviderAsync(ct), WellKnownCapabilityKeys.Chat),
             _ => throw new ArgumentException(
-                $"Provider type '{request.ProviderType}' does not support local file download. " +
+                $"Provider type '{request.ProviderKey}' does not support local file download. " +
                 "Only LlamaSharp is supported by the host; other local providers must register via a module.",
                 nameof(request))
         };
@@ -425,7 +426,7 @@ public sealed class LocalModelService(
                 f.Id, f.ModelId, f.Model.Name, f.SourceUrl,
                 f.FilePath, f.FileSizeBytes, f.Quantization,
                 f.Status, f.DownloadProgress, processManager.IsLoaded(f.ModelId),
-                f.Model.Provider.ProviderType, f.MmprojPath))
+                f.Model.Provider.ProviderKey, f.MmprojPath))
             .ToList();
     }
 
@@ -482,7 +483,7 @@ public sealed class LocalModelService(
     private async Task<ProviderDB> EnsureLocalProviderAsync(CancellationToken ct)
     {
         var existing = await db.Providers
-            .FirstOrDefaultAsync(p => p.ProviderType == ProviderType.LlamaSharp, ct);
+            .FirstOrDefaultAsync(p => p.ProviderKey == WellKnownProviderKeys.LlamaSharp, ct);
 
         if (existing is not null) return existing;
 
@@ -492,7 +493,7 @@ public sealed class LocalModelService(
         var provider = new ProviderDB
         {
             Name = "LlamaSharp (Local)",
-            ProviderType = ProviderType.LlamaSharp
+            ProviderKey = WellKnownProviderKeys.LlamaSharp
         };
         db.Providers.Add(provider);
         await db.SaveChangesAsync(ct);
