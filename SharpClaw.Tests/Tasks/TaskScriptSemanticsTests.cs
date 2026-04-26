@@ -35,7 +35,7 @@ public class LoopTask
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
         result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].Kind.Should().Be(TaskStepKind.Loop);
+        result.Plan.ExecutionSteps[0].StepKey.Should().Be(WellKnownTaskStepKeys.Loop);
         result.Plan.ExecutionSteps[0].LoopKind.Should().Be(TaskLoopKind.ForEach);
         result.Plan.ParameterValues["Items"].Should().BeAssignableTo<List<object?>>();
     }

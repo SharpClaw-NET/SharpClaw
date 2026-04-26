@@ -257,6 +257,8 @@ try
     builder.Services.AddScoped<ChannelService>();
     builder.Services.AddScoped<ThreadService>();
     builder.Services.AddScoped<ContextService>();
+    builder.Services.AddScoped<DefaultResourceSetService>();
+    builder.Services.AddScoped<ToolAwarenessSetService>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
     builder.Services.AddScoped<IAgentJobController, HostAgentJobController>();
@@ -567,6 +569,9 @@ try
     }
 
     // API mode
+#if DEBUG
+    app.UseMiddleware<DiagnosticMiddleware>();
+#endif
     app.UseMiddleware<ExceptionHandlingMiddleware>();
     if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
         app.UseSerilogRequestLogging();

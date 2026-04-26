@@ -145,8 +145,8 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { Kind = TaskStepKind.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
-                new TaskStepDefinition { Kind = TaskStepKind.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
             ]
         };
 
@@ -174,7 +174,7 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { Kind = TaskStepKind.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
+                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
             ]
         };
 
@@ -204,7 +204,7 @@ public class BadParamTask
             [
                 new TaskStepDefinition
                 {
-                    Kind = TaskStepKind.Loop,
+                    StepKey  = WellKnownTaskStepKeys.Loop,
                     Line = 1, Column = 0,
                     LoopKind = TaskLoopKind.ForEach,
                     VariableName = null,          // missing
@@ -240,7 +240,7 @@ public class BadParamTask
             [
                 new TaskStepDefinition
                 {
-                    Kind = TaskStepKind.Loop,
+                    StepKey  = WellKnownTaskStepKeys.Loop,
                     Line = 1, Column = 0,
                     LoopKind = TaskLoopKind.ForEach,
                     VariableName = "item",
@@ -302,7 +302,7 @@ public class ParseBadTask
             [
                 new TaskStepDefinition
                 {
-                    Kind = TaskStepKind.Loop,
+                    StepKey  = WellKnownTaskStepKeys.Loop,
                     Line = 1, Column = 0,
                     LoopKind = TaskLoopKind.While,
                     Expression = "true",
@@ -310,7 +310,7 @@ public class ParseBadTask
                     [
                         new TaskStepDefinition
                         {
-                            Kind = TaskStepKind.DeclareVariable,
+                            StepKey  = WellKnownTaskStepKeys.DeclareVariable,
                             Line = 2, Column = 4,
                             VariableName = "v",
                             TypeName = "UnknownNestedType"

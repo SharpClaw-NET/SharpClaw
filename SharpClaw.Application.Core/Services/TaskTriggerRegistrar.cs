@@ -32,7 +32,8 @@ public sealed class TaskTriggerRegistrar(
     /// After EF changes are staged this method signals the host service so it
     /// reloads active sources.
     /// </summary>
-    public async Task SyncTriggersAsync(
+    /// <returns><see langword="true"/> if any EF change-tracked rows were added or removed.</returns>
+    public async Task<bool> SyncTriggersAsync(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskTriggerDefinition> triggers,
         CancellationToken ct = default)
@@ -40,8 +41,9 @@ public sealed class TaskTriggerRegistrar(
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(triggers);
 
-        await SyncCronJobsAsync(entity, triggers, ct);
-        await SyncBindingRowsAsync(entity, triggers, ct);
+        var cronChanged = await SyncCronJobsAsync(entity, triggers, ct);
+        var bindingChanged = await SyncBindingRowsAsync(entity, triggers, ct);
+        return cronChanged || bindingChanged;
     }
 
     /// <summary>Remove all trigger bindings (cron jobs + binding rows) for a definition.</summary>
@@ -55,7 +57,7 @@ public sealed class TaskTriggerRegistrar(
     // Cron: ScheduledJobDB
     // ─────────────────────────────────────────────────────────────
 
-    private async Task SyncCronJobsAsync(
+    private async Task<bool> SyncCronJobsAsync(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskTriggerDefinition> triggers,
         CancellationToken ct)
@@ -72,10 +74,13 @@ public sealed class TaskTriggerRegistrar(
             .Select(t => t.CronExpression!)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
+        var changed = false;
+
         // Remove stale cron jobs
         foreach (var stale in existing.Where(j => !incomingExpressions.Contains(j.CronExpression!)))
         {
             db.ScheduledTasks.Remove(stale);
+            changed = true;
             logger.LogDebug(
                 "Removed stale cron job for definition {DefinitionId}, expression '{Expression}'.",
                 entity.Id, stale.CronExpression);
@@ -110,10 +115,13 @@ public sealed class TaskTriggerRegistrar(
                 NextRunAt        = nextRun.Value,
             });
 
+            changed = true;
             logger.LogDebug(
                 "Created cron job for definition {DefinitionId}, expression '{Expression}', next at {Next}.",
                 entity.Id, t.CronExpression, nextRun.Value);
         }
+
+        return changed;
     }
 
     private async Task RemoveCronJobsAsync(Guid definitionId, CancellationToken ct)
@@ -129,7 +137,7 @@ public sealed class TaskTriggerRegistrar(
     // Non-cron: TaskTriggerBindingDB
     // ─────────────────────────────────────────────────────────────
 
-    private async Task SyncBindingRowsAsync(
+    private async Task<bool> SyncBindingRowsAsync(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskTriggerDefinition> triggers,
         CancellationToken ct)
@@ -147,10 +155,13 @@ public sealed class TaskTriggerRegistrar(
             .Select(t => BindingKey(entity.Id, t))
             .ToHashSet();
 
+        var changed = false;
+
         // Remove stale bindings
         foreach (var stale in existing.Where(b => !incomingKeys.Contains(BindingKey(b))))
         {
             db.TaskTriggerBindings.Remove(stale);
+            changed = true;
             logger.LogDebug(
                 "Removed stale trigger binding for definition {DefinitionId}, kind {Kind}.",
                 entity.Id, stale.Kind);
@@ -176,6 +187,8 @@ public sealed class TaskTriggerRegistrar(
                 DefinitionJson   = System.Text.Json.JsonSerializer.Serialize(t),
             });
 
+            changed = true;
+
             if (t.TriggerKey == "OsShortcut" && shortcutLauncher is not null)
             {
                 var customId = entity.Name;
@@ -186,6 +199,8 @@ public sealed class TaskTriggerRegistrar(
                 "Created trigger binding for definition {DefinitionId}, kind {Kind}.",
                 entity.Id, kindColumn);
         }
+
+        return changed;
     }
 
     private async Task RemoveBindingRowsAsync(Guid definitionId, CancellationToken ct)

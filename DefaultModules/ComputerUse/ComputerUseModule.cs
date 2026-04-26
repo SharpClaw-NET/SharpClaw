@@ -23,8 +23,10 @@ namespace SharpClaw.Modules.ComputerUse;
 /// Default module: desktop awareness, window management, input simulation,
 /// clipboard access, and process control. Windows only.
 /// </summary>
-public sealed class ComputerUseModule : ISharpClawModule
+public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
 {
+    public ITaskParserModuleExtension ParserExtension => ComputerUseParserExtension.Instance;
+
     public string Id => "sharpclaw_computer_use";
     public string DisplayName => "Computer Use";
     public string ToolPrefix => "cu";
@@ -58,6 +60,8 @@ public sealed class ComputerUseModule : ISharpClawModule
         // OS-level metric providers
         services.AddSingleton<ITaskMetricProvider, SystemMemoryMetricProvider>();
         services.AddSingleton<ITaskMetricProvider, SystemCpuMetricProvider>();
+        // Task step executor
+        services.AddScoped<ITaskStepExecutorExtension, ComputerUseTaskStepExecutor>();
     }
 
     public void MapEndpoints(object app)

@@ -90,10 +90,13 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
 
         if (triggerRegistrar is not null)
         {
-            await triggerRegistrar.SyncTriggersAsync(entity, parseResult.Definition.TriggerDefinitions, ct);
-            await db.SaveChangesAsync(ct);
-            if (triggerRegistrar.HostService is { } host)
-                await host.NotifyBindingsChangedAsync();
+            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, parseResult.Definition.TriggerDefinitions, ct);
+            if (bindingsChanged)
+            {
+                await db.SaveChangesAsync(ct);
+                if (triggerRegistrar.HostService is { } host)
+                    await host.NotifyBindingsChangedAsync();
+            }
         }
 
         return ToDefinitionResponse(entity,
@@ -193,10 +196,13 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
 
         if (triggerRegistrar is not null && parsedTriggers is not null)
         {
-            await triggerRegistrar.SyncTriggersAsync(entity, parsedTriggers, ct);
-            await db.SaveChangesAsync(ct);
-            if (triggerRegistrar.HostService is { } host)
-                await host.NotifyBindingsChangedAsync();
+            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, parsedTriggers, ct);
+            if (bindingsChanged)
+            {
+                await db.SaveChangesAsync(ct);
+                if (triggerRegistrar.HostService is { } host)
+                    await host.NotifyBindingsChangedAsync();
+            }
         }
 
         return ToDefinitionResponse(entity,

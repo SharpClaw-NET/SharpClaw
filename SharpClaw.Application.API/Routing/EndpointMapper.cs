@@ -1,5 +1,6 @@
 using System.Reflection;
 using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -12,11 +13,16 @@ public static class EndpointMapper
     /// Scans all static handler classes decorated with <see cref="RouteGroupAttribute"/>
     /// in the calling assembly and registers their methods as minimal API endpoints.
     /// <para>
-    /// Each handler class is processed in isolation: failures in one class (e.g. a
-    /// method whose signature can't be bound) are logged and skipped so the rest of
-    /// the API remains operational. Within a handler class, each endpoint method is
-    /// likewise wrapped so that a single broken route does not take down the sibling
-    /// routes in the same group.
+    /// Uses <see cref="RequestDelegateFactory"/> so that ASP.NET correctly distinguishes
+    /// DI-injected services from route/body/query parameters. This prevents service
+    /// parameters (e.g. <c>MyService svc</c>) from being misidentified as HTTP body
+    /// parameters, which previously caused all POST requests in a group to return 400.
+    /// </para>
+    /// <para>
+    /// Each handler class is processed in isolation: failures in one class are logged
+    /// and skipped so the rest of the API remains operational. Within a handler class,
+    /// each endpoint method is likewise wrapped so that a single broken route does not
+    /// affect sibling routes in the same group.
     /// </para>
     /// </summary>
     public static IEndpointRouteBuilder MapHandlers(this IEndpointRouteBuilder routes, Assembly? assembly = null)
@@ -73,15 +79,26 @@ public static class EndpointMapper
                 var attr = method.GetCustomAttribute<MapMethodAttribute>()!;
                 try
                 {
-                    var handler = method.CreateDelegate(CreateDelegateType(method), null);
+                    // RequestDelegateFactory.Create understands which parameters are
+                    // services (resolved from DI) vs request-bound (route/body/query).
+                    // This is what the framework uses internally for lambda-based minimal
+                    // APIs and is the only safe way to register MethodInfo handlers that
+                    // mix service parameters with route/body parameters.
+                    var options = new RequestDelegateFactoryOptions
+                    {
+                        ServiceProvider = routes.ServiceProvider,
+                    };
+                    var requestDelegate = RequestDelegateFactory.Create(method, targetFactory: null, options).RequestDelegate;
 
                     _ = attr.HttpMethod switch
                     {
-                        "GET" => group.MapGet(attr.Pattern, handler),
-                        "POST" => group.MapPost(attr.Pattern, handler),
-                        "PUT" => group.MapPut(attr.Pattern, handler),
-                        "DELETE" => group.MapDelete(attr.Pattern, handler),
-                        _ => throw new NotSupportedException($"HTTP method '{attr.HttpMethod}' is not supported.")
+                        "GET"    => group.MapGet(attr.Pattern, requestDelegate),
+                        "POST"   => group.MapPost(attr.Pattern, requestDelegate),
+                        "PUT"    => group.MapPut(attr.Pattern, requestDelegate),
+                        "DELETE" => group.MapDelete(attr.Pattern, requestDelegate),
+                        "PATCH"  => group.MapPatch(attr.Pattern, requestDelegate),
+                        _ => throw new NotSupportedException(
+                            $"HTTP method '{attr.HttpMethod}' is not supported.")
                     };
 
                     totalMapped++;
@@ -109,25 +126,6 @@ public static class EndpointMapper
         }
 
         return routes;
-    }
-
-    private static Type CreateDelegateType(MethodInfo method)
-    {
-        var paramTypes = method.GetParameters().Select(p => p.ParameterType).ToArray();
-        var allTypes = paramTypes.Append(method.ReturnType).ToArray();
-
-        return allTypes.Length switch
-        {
-            1 => typeof(Func<>).MakeGenericType(allTypes),
-            2 => typeof(Func<,>).MakeGenericType(allTypes),
-            3 => typeof(Func<,,>).MakeGenericType(allTypes),
-            4 => typeof(Func<,,,>).MakeGenericType(allTypes),
-            5 => typeof(Func<,,,,>).MakeGenericType(allTypes),
-            6 => typeof(Func<,,,,,>).MakeGenericType(allTypes),
-            7 => typeof(Func<,,,,,,>).MakeGenericType(allTypes),
-            8 => typeof(Func<,,,,,,,>).MakeGenericType(allTypes),
-            _ => throw new NotSupportedException($"Handler '{method.Name}' has too many parameters.")
-        };
     }
 }
 

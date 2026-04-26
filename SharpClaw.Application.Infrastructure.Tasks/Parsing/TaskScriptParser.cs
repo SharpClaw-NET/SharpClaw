@@ -2,6 +2,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Application.Infrastructure.Tasks.Registry;
 using SharpClaw.Contracts.Tasks;
 namespace SharpClaw.Application.Infrastructure.Tasks.Parsing;
 
@@ -40,7 +41,20 @@ public sealed class TaskScriptParser
         lock (_registryLock)
         {
             foreach (var (method, entry) in extension.StepKeyMappings)
+            {
                 _moduleStepKeys.TryAdd(method, entry);
+
+                // Register a descriptor in the unified step registry so that
+                // TryParseContextApiCall resolves module steps through the same
+                // path as core steps.
+                TaskStepRegistry.Default.Register(new TaskStepDescriptor
+                {
+                    MethodName           = method,
+                    StepKey              = entry.StepKey,
+                    OwnerId              = entry.ModuleId,
+                    FirstArgIsExpression = extension.SingleArgExpressionMethods.Contains(method),
+                });
+            }
             foreach (var (method, entry) in extension.EventTriggerMappings)
                 _moduleEventTriggers.TryAdd(method, entry);
             foreach (var method in extension.SingleArgExpressionMethods)
@@ -1298,9 +1312,9 @@ public sealed class TaskScriptParser
         {
             return new TaskStepDefinition
             {
-                Kind = TaskStepKind.DeclareVariable,
-                Line = line,
-                Column = column,
+                StepKey  = WellKnownTaskStepKeys.DeclareVariable,
+                Line     = line,
+                Column   = column,
                 VariableName = variableName,
                 TypeName = typeName
             };
@@ -1327,12 +1341,12 @@ public sealed class TaskScriptParser
         // Plain declaration: var x = new Foo(), var x = expr, var x = a ?? await b()
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.DeclareVariable,
-            Line = line,
-            Column = column,
+            StepKey      = WellKnownTaskStepKeys.DeclareVariable,
+            Line         = line,
+            Column       = column,
             VariableName = variableName,
-            TypeName = typeName,
-            Expression = initializer.ToString()
+            TypeName     = typeName,
+            Expression   = initializer.ToString()
         };
     }
 
@@ -1376,11 +1390,11 @@ public sealed class TaskScriptParser
             {
                 return new TaskStepDefinition
                 {
-                    Kind = TaskStepKind.Log,
-                    Line = line,
-                    Column = column,
+                    StepKey    = WellKnownTaskStepKeys.Log,
+                    Line       = line,
+                    Column     = column,
                     Expression = ExtractFirstArgText(invocation),
-                    Arguments = ExtractArgumentTexts(invocation)
+                    Arguments  = ExtractArgumentTexts(invocation)
                 };
             }
 
@@ -1395,20 +1409,20 @@ public sealed class TaskScriptParser
         {
             return new TaskStepDefinition
             {
-                Kind = TaskStepKind.Assign,
-                Line = line,
-                Column = column,
+                StepKey      = WellKnownTaskStepKeys.Assign,
+                Line         = line,
+                Column       = column,
                 VariableName = assignment.Left.ToString(),
-                Expression = assignment.Right.ToString()
+                Expression   = assignment.Right.ToString()
             };
         }
 
         // Fallback: arbitrary expression (e.g. list.AddRange(...))
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.Evaluate,
-            Line = line,
-            Column = column,
+            StepKey    = WellKnownTaskStepKeys.Evaluate,
+            Line       = line,
+            Column     = column,
             Expression = expression.ToString()
         };
     }
@@ -1426,12 +1440,12 @@ public sealed class TaskScriptParser
 
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.Conditional,
-            Line = GetLine(ifStmt),
-            Column = GetColumn(ifStmt),
+            StepKey    = WellKnownTaskStepKeys.Conditional,
+            Line       = GetLine(ifStmt),
+            Column     = GetColumn(ifStmt),
             Expression = ifStmt.Condition.ToString(),
-            Body = thenBody,
-            ElseBody = elseBody
+            Body       = thenBody,
+            ElseBody   = elseBody
         };
     }
 
@@ -1441,12 +1455,12 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.Loop,
-            Line = GetLine(whileStmt),
-            Column = GetColumn(whileStmt),
-            LoopKind = TaskLoopKind.While,
+            StepKey    = WellKnownTaskStepKeys.Loop,
+            Line       = GetLine(whileStmt),
+            Column     = GetColumn(whileStmt),
+            LoopKind   = TaskLoopKind.While,
             Expression = whileStmt.Condition.ToString(),
-            Body = ParseBlock(whileStmt.Statement, diagnostics)
+            Body       = ParseBlock(whileStmt.Statement, diagnostics)
         };
     }
 
@@ -1456,14 +1470,14 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.Loop,
-            Line = GetLine(forEachStmt),
-            Column = GetColumn(forEachStmt),
-            LoopKind = TaskLoopKind.ForEach,
+            StepKey      = WellKnownTaskStepKeys.Loop,
+            Line         = GetLine(forEachStmt),
+            Column       = GetColumn(forEachStmt),
+            LoopKind     = TaskLoopKind.ForEach,
             VariableName = forEachStmt.Identifier.Text,
-            TypeName = forEachStmt.Type.IsVar ? null : forEachStmt.Type.ToString(),
-            Expression = forEachStmt.Expression.ToString(),
-            Body = ParseBlock(forEachStmt.Statement, diagnostics)
+            TypeName     = forEachStmt.Type.IsVar ? null : forEachStmt.Type.ToString(),
+            Expression   = forEachStmt.Expression.ToString(),
+            Body         = ParseBlock(forEachStmt.Statement, diagnostics)
         };
     }
 
@@ -1471,9 +1485,9 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.Return,
-            Line = GetLine(ret),
-            Column = GetColumn(ret)
+            StepKey = WellKnownTaskStepKeys.Return,
+            Line    = GetLine(ret),
+            Column  = GetColumn(ret)
         };
     }
 
@@ -1501,88 +1515,57 @@ public sealed class TaskScriptParser
         if (methodName is null)
             return null;
 
-        // Task.Delay(...)
+        // Task.Delay(...)  — member-access form; must be matched before registry lookup
+        // so that bare "Delay" calls to a context method are not confused with Task.Delay.
         if (methodName == "Delay" && IsTaskMemberAccess(invocation))
         {
             return new TaskStepDefinition
             {
-                Kind = TaskStepKind.Delay,
-                Line = line,
-                Column = column,
+                StepKey    = WellKnownTaskStepKeys.Delay,
+                Line       = line,
+                Column     = column,
                 Expression = ExtractFirstArgText(invocation),
-                Arguments = ExtractArgumentTexts(invocation)
+                Arguments  = ExtractArgumentTexts(invocation)
             };
         }
 
-        var kind = ResolveContextApiKind(methodName);
-        if (kind is null)
+        var descriptor = TaskStepRegistry.Default.FindByMethod(methodName);
+        if (descriptor is null)
             return null;
+
+        return BuildStepFromDescriptor(descriptor, invocation, line, column, methodName);
+    }
+
+    private static TaskStepDefinition BuildStepFromDescriptor(
+        TaskStepDescriptor descriptor,
+        InvocationExpressionSyntax invocation,
+        int line,
+        int column,
+        string methodName)
+    {
+        var args = invocation.ArgumentList.Arguments;
+
+        string? expression = null;
+        if (descriptor.ExpressionArgIndex > 0 && args.Count > descriptor.ExpressionArgIndex)
+            expression = args[descriptor.ExpressionArgIndex].Expression.ToString();
+        else if (descriptor.FirstArgIsExpression || descriptor.HttpMethod is not null)
+            expression = ExtractFirstArgText(invocation);
 
         var step = new TaskStepDefinition
         {
-            Kind = kind.Value,
-            Line = line,
-            Column = column,
-            ModuleStepKey = kind.Value is TaskStepKind.ModuleStep ? ResolveModuleStepKey(methodName) : null,
-            Arguments = ExtractArgumentTexts(invocation)
+            StepKey    = descriptor.StepKey,
+            Line       = line,
+            Column     = column,
+            HttpMethod = descriptor.HttpMethod,
+            Expression = expression,
+            Arguments  = ExtractArgumentTexts(invocation)
         };
 
-        // Chat / ChatStream: first arg = agentId, second arg = message text
-        if (kind is TaskStepKind.Chat or TaskStepKind.ChatStream &&
-            invocation.ArgumentList.Arguments.Count >= 2)
-        {
-            step = step with
-            {
-                Expression = invocation.ArgumentList.Arguments[1].Expression.ToString()
-            };
-        }
-
-        // ParseResponse<T>: capture the generic type argument
-        if (kind is TaskStepKind.ParseResponse)
+        if (descriptor.CapturesGenericType)
         {
             var typeArg = GetGenericTypeArgument(invocation);
             if (typeArg is not null)
                 step = step with { TypeName = typeArg };
-        }
-
-        // HttpGet/Post/Put/Delete: capture the HTTP verb + URL expression
-        if (kind is TaskStepKind.HttpRequest)
-        {
-            step = step with
-            {
-                HttpMethod = ResolveHttpMethod(methodName),
-                Expression = ExtractFirstArgText(invocation)
-            };
-        }
-
-        // Single-arg context methods: store first arg as Expression
-        if (kind is TaskStepKind.Emit or TaskStepKind.Log or
-            TaskStepKind.WaitUntilStopped or
-            TaskStepKind.FindModel or TaskStepKind.FindProvider or TaskStepKind.FindAgent or
-            TaskStepKind.CreateThread ||
-            _moduleSingleArgMethods.Contains(methodName))
-        {
-            step = step with { Expression = ExtractFirstArgText(invocation) };
-        }
-
-        // CreateAgent: first arg = name, second arg = modelId
-        if (kind is TaskStepKind.CreateAgent &&
-            invocation.ArgumentList.Arguments.Count >= 2)
-        {
-            step = step with
-            {
-                Expression = invocation.ArgumentList.Arguments[0].Expression.ToString()
-            };
-        }
-
-        // ChatToThread: first arg = threadId, second arg = message, optional third = agentId
-        if (kind is TaskStepKind.ChatToThread &&
-            invocation.ArgumentList.Arguments.Count >= 2)
-        {
-            step = step with
-            {
-                Expression = invocation.ArgumentList.Arguments[1].Expression.ToString()
-            };
         }
 
         return step;
@@ -1639,14 +1622,14 @@ public sealed class TaskScriptParser
 
         return new TaskStepDefinition
         {
-            Kind = TaskStepKind.EventHandler,
-            Line = line,
-            Column = column,
-            TriggerKind = triggerKind.Value,
+            StepKey          = WellKnownTaskStepKeys.EventHandler,
+            Line             = line,
+            Column           = column,
+            TriggerKind      = triggerKind.Value,
             ModuleTriggerKey = ResolveModuleTriggerKey(methodName),
             HandlerParameter = handlerParam,
-            Arguments = nonLambdaArgs,
-            Body = body ?? []
+            Arguments        = nonLambdaArgs,
+            Body             = body ?? []
         };
     }
 
@@ -1662,9 +1645,9 @@ public sealed class TaskScriptParser
         [
             new TaskStepDefinition
             {
-                Kind = TaskStepKind.Evaluate,
-                Line = GetLine(body),
-                Column = GetColumn(body),
+                StepKey    = WellKnownTaskStepKeys.Evaluate,
+                Line       = GetLine(body),
+                Column     = GetColumn(body),
                 Expression = body.ToString()
             }
         ];
@@ -1761,32 +1744,6 @@ public sealed class TaskScriptParser
 
     // ── Lookup tables ─────────────────────────────────────────────
 
-    private static TaskStepKind? ResolveContextApiKind(string methodName)
-    {
-        TaskStepKind? builtin = methodName switch
-        {
-            "Chat"         => TaskStepKind.Chat,
-            "ChatStream"   => TaskStepKind.ChatStream,
-            "Emit"         => TaskStepKind.Emit,
-            "ParseResponse" => TaskStepKind.ParseResponse,
-            "WaitUntilStopped" => TaskStepKind.WaitUntilStopped,
-            "Log"          => TaskStepKind.Log,
-            "HttpGet" or "HttpPost" or "HttpPut" or "HttpDelete"
-                           => TaskStepKind.HttpRequest,
-            "FindModel"    => TaskStepKind.FindModel,
-            "FindProvider" => TaskStepKind.FindProvider,
-            "FindAgent"    => TaskStepKind.FindAgent,
-            "CreateAgent"  => TaskStepKind.CreateAgent,
-            "CreateThread" => TaskStepKind.CreateThread,
-            "ChatToThread" => TaskStepKind.ChatToThread,
-            _              => null
-        };
-        if (builtin is not null) return builtin;
-        return _moduleStepKeys.ContainsKey(methodName) ? TaskStepKind.ModuleStep : null;
-    }
-
-    internal static string? ResolveModuleStepKey(string methodName)
-        => _moduleStepKeys.TryGetValue(methodName, out var entry) ? entry.StepKey : null;
 
     private static TaskTriggerKind? ResolveEventTrigger(string? methodName)
     {
@@ -1796,16 +1753,8 @@ public sealed class TaskScriptParser
     }
 
     internal static string? ResolveModuleTriggerKey(string? methodName)
-        => methodName is not null && _moduleEventTriggers.TryGetValue(methodName, out var entry) ? entry.TriggerKey : null;
-
-    private static string? ResolveHttpMethod(string methodName) => methodName switch
-    {
-        "HttpGet"    => "GET",
-        "HttpPost"   => "POST",
-        "HttpPut"    => "PUT",
-        "HttpDelete" => "DELETE",
-        _            => null
-    };
+        => methodName is not null && _moduleEventTriggers.TryGetValue(methodName, out var entry)
+            ? entry.TriggerKey : null;
 
     // ── Position helpers ──────────────────────────────────────────
 

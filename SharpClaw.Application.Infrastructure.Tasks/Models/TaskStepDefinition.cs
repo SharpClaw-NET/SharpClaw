@@ -3,15 +3,19 @@ using SharpClaw.Contracts.Tasks;
 namespace SharpClaw.Application.Infrastructure.Tasks.Models;
 
 /// <summary>
-/// A single step in a task script body.  The <see cref="Kind"/>
+/// A single step in a task script body.  The <see cref="StepKey"/>
 /// discriminator determines which properties are relevant.  Steps form
 /// a tree: event handlers, conditionals, and loops contain nested body
 /// steps.
 /// </summary>
 public sealed record TaskStepDefinition
 {
-    /// <summary>What this step does.</summary>
-    public required TaskStepKind Kind { get; init; }
+    /// <summary>
+    /// Stable string key identifying this step's operation (e.g. <c>core.chat</c>).
+    /// Use <see cref="SharpClaw.Contracts.Tasks.WellKnownTaskStepKeys"/> constants
+    /// for core steps.  Module steps use a module-namespaced key.
+    /// </summary>
+    public required string StepKey { get; init; }
 
     /// <summary>Source line number (1-based) for diagnostics.</summary>
     public required int Line { get; init; }
@@ -22,14 +26,12 @@ public sealed record TaskStepDefinition
     // ── Identifiers ───────────────────────────────────────────────
 
     /// <summary>
-    /// Variable name for <see cref="TaskStepKind.DeclareVariable"/>
-    /// and <see cref="TaskStepKind.Assign"/>.
+    /// Variable name for <c>core.declare_variable</c> and <c>core.assign</c> steps.
     /// </summary>
     public string? VariableName { get; init; }
 
     /// <summary>
-    /// Type name for <see cref="TaskStepKind.DeclareVariable"/>,
-    /// <see cref="TaskStepKind.ParseResponse"/>, and object creation.
+    /// Type name for declare-variable, parse-response, and object creation steps.
     /// </summary>
     public string? TypeName { get; init; }
 
@@ -42,7 +44,7 @@ public sealed record TaskStepDefinition
     // ── Expressions ───────────────────────────────────────────────
 
     /// <summary>
-    /// Expression text whose interpretation depends on <see cref="Kind"/>:
+    /// Expression text whose interpretation depends on <see cref="StepKey"/>:
     /// DeclareVariable (initialiser), Assign (value), Chat (message),
     /// Conditional (condition), Loop (condition), Delay (duration),
     /// Log (message), Evaluate (expression), HttpRequest (URL).
@@ -53,15 +55,13 @@ public sealed record TaskStepDefinition
 
     /// <summary>
     /// Positional arguments: variable references or literal values
-    /// passed to context-API steps (Chat, Emit, ModuleStep, etc.).
+    /// passed to context-API steps (Chat, Emit, module steps, etc.).
     /// </summary>
     public IReadOnlyList<string>? Arguments { get; init; }
 
     // ── Event handler ─────────────────────────────────────────────
 
-    /// <summary>
-    /// Trigger kind for <see cref="TaskStepKind.EventHandler"/>.
-    /// </summary>
+    /// <summary>Trigger kind for <c>core.event_handler</c> steps.</summary>
     public TaskTriggerKind? TriggerKind { get; init; }
 
     /// <summary>
@@ -69,12 +69,6 @@ public sealed record TaskStepDefinition
     /// <see cref="TaskTriggerKind.ModuleEvent"/>.
     /// </summary>
     public string? ModuleTriggerKey { get; init; }
-
-    /// <summary>
-    /// Module-owned step key when <see cref="Kind"/> is
-    /// <see cref="TaskStepKind.ModuleStep"/>.
-    /// </summary>
-    public string? ModuleStepKey { get; init; }
 
     /// <summary>
     /// Lambda parameter name for event-handler callbacks.
@@ -89,20 +83,16 @@ public sealed record TaskStepDefinition
     /// </summary>
     public IReadOnlyList<TaskStepDefinition>? Body { get; init; }
 
-    /// <summary>
-    /// Else branch for <see cref="TaskStepKind.Conditional"/>.
-    /// </summary>
+    /// <summary>Else branch for <c>core.conditional</c> steps.</summary>
     public IReadOnlyList<TaskStepDefinition>? ElseBody { get; init; }
 
-    /// <summary>
-    /// Specific loop shape for <see cref="TaskStepKind.Loop"/>.
-    /// </summary>
+    /// <summary>Specific loop shape for <c>core.loop</c> steps.</summary>
     public TaskLoopKind? LoopKind { get; init; }
 
     // ── HTTP ──────────────────────────────────────────────────────
 
     /// <summary>
-    /// HTTP verb for <see cref="TaskStepKind.HttpRequest"/>
+    /// HTTP verb for <c>core.http_request</c> steps
     /// ("GET", "POST", "PUT", "DELETE").
     /// </summary>
     public string? HttpMethod { get; init; }
