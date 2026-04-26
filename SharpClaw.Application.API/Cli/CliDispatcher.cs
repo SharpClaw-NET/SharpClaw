@@ -108,7 +108,7 @@ public static class CliDispatcher
 
         Console.WriteLine();
         Console.WriteLine("Type 'help' for available commands, 'exit' to quit.");
-        Console.WriteLine("Log in with: login <username> <password>");
+        Console.WriteLine("Log in with: login <username> <password> [--remember]  |  login <refreshToken>");
         Console.WriteLine();
 
         while (!ct.IsCancellationRequested)
@@ -159,7 +159,7 @@ public static class CliDispatcher
 
             if (!IsLoggedIn && !PublicCommands.Contains(args[0].ToLowerInvariant()))
             {
-                Console.Error.WriteLine("Please log in first: login <username> <password>");
+                Console.Error.WriteLine("Please log in first: login <username> <password>  or  login <refreshToken>");
                 DebugLog("Response: Not logged in, command rejected.");
                 Console.WriteLine();
                 continue;
@@ -323,9 +323,15 @@ public static class CliDispatcher
 
     private static async Task<IResult?> HandleLoginCommand(string[] args, IServiceProvider sp)
     {
+        // login <refreshToken>  — token-based login (no credentials required)
+        if (args.Length == 2)
+            return await HandleRefreshLoginAsync(args[1], sp);
+
         if (args.Length < 3)
         {
-            PrintUsage("login <username> <password>");
+            PrintUsage(
+                "login <username> <password> [--remember]",
+                "login <refreshToken>");
             return Results.Ok();
         }
 
@@ -339,6 +345,34 @@ public static class CliDispatcher
             var db = sp.GetRequiredService<SharpClawDbContext>();
             _currentUserId = (await db.Users.FirstOrDefaultAsync(u => u.Username == args[1]))?.Id;
         }
+
+        return result;
+    }
+
+    private static async Task<IResult> HandleRefreshLoginAsync(string refreshToken, IServiceProvider sp)
+    {
+        var auth = sp.GetRequiredService<AuthService>();
+        var tokenService = sp.GetRequiredService<TokenService>();
+
+        var result = await AuthHandlers.Refresh(new RefreshRequest(refreshToken), auth);
+
+        if (result is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status200OK } ||
+            result is not IValueHttpResult<LoginResponse> { Value: { } response })
+            return result;
+
+        var validation = await tokenService.ValidateAccessTokenAsync(response.AccessToken);
+        if (!validation.IsValid)
+            return result;
+
+        var username = validation.ClaimsIdentity.FindFirst(
+            System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.UniqueName)?.Value
+            ?? validation.ClaimsIdentity.FindFirst("unique_name")?.Value;
+
+        var userId = validation.ClaimsIdentity.FindFirst(
+            System.IdentityModel.Tokens.Jwt.JwtRegisteredClaimNames.Sub)?.Value;
+
+        _currentUser = username;
+        _currentUserId = userId is not null && Guid.TryParse(userId, out var id) ? id : null;
 
         return result;
     }
