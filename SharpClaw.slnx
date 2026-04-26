@@ -110,6 +110,10 @@
     <File Path="docs/providers/xAI.md" />
     <File Path="docs/providers/ZAI.md" />
   </Folder>
+  <Folder Name="/Solution Items/Docs/Tasks/">
+    <File Path="docs/tasks/DesktopReporterSetupTask.cs" />
+    <File Path="docs/tasks/DesktopReportTask.cs" />
+  </Folder>
   <Folder Name="/Solution Items/Git/">
     <File Path=".gitignore" />
   </Folder>

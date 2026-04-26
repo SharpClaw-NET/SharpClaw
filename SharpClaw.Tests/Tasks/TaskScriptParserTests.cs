@@ -145,7 +145,7 @@ public class LogTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.Kind == TaskStepKind.Log);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
     }
 
     [Test]
@@ -167,7 +167,7 @@ public class EarlyExitTask
 
         result.Success.Should().BeTrue();
         result.Definition!.Steps.Should().HaveCount(2);
-        result.Definition.Steps.Last().Kind.Should().Be(TaskStepKind.Return);
+        result.Definition.Steps.Last().StepKey.Should().Be(WellKnownTaskStepKeys.Return);
     }
 
     [Test]
@@ -190,7 +190,7 @@ public class BranchingTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.Kind == TaskStepKind.Conditional);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
     }
 
     [Test]
@@ -217,9 +217,9 @@ public class IfElseTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Definition!.Steps.Single(s => s.Kind == TaskStepKind.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.Kind == TaskStepKind.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.Kind == TaskStepKind.Log);
+        var conditional = result.Definition!.Steps.Single(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
     }
 
     [Test]
@@ -239,7 +239,7 @@ public class ChatTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.Kind == TaskStepKind.Chat);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Chat);
     }
 
     [Test]
@@ -259,7 +259,7 @@ public class HttpTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var step = result.Definition!.Steps.Single(s => s.Kind == TaskStepKind.HttpRequest);
+        var step = result.Definition!.Steps.Single(s => s.StepKey == WellKnownTaskStepKeys.HttpRequest);
         step.HttpMethod.Should().Be("GET");
         step.Expression.Should().Contain("example.com");
     }

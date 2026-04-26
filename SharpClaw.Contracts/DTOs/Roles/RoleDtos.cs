@@ -10,6 +10,11 @@ namespace SharpClaw.Contracts.DTOs.Roles;
 public sealed record CreateRoleRequest(string Name);
 
 /// <summary>
+/// Renames an existing role.
+/// </summary>
+public sealed record RenameRoleRequest(string Name);
+
+/// <summary>
 /// Replaces the entire permission set of a role. The calling user must
 /// hold every permission they are granting — you cannot give what you
 /// don't have.

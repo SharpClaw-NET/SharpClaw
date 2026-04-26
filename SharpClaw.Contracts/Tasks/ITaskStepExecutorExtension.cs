@@ -1,13 +1,12 @@
 namespace SharpClaw.Contracts.Tasks;
 
 /// <summary>
-/// Allows a module to handle <see cref="TaskStepKind.ModuleStep"/> steps
-/// that belong to its domain. Registered at startup via
+/// Allows a module to handle task steps whose <see cref="TaskStepDefinition"/>
+/// <c>StepKey</c> is owned by this module. Registered at startup via
 /// <c>TaskScriptParser.RegisterModule</c> and injected into the
 /// orchestrator as <c>IEnumerable&lt;ITaskStepExecutorExtension&gt;</c>.
-/// The orchestrator dispatches any <see cref="TaskStepKind.ModuleStep"/>
-/// to the extension that claims its key before falling through to its own
-/// built-in switch.
+/// The orchestrator routes any step whose key is not a well-known core key
+/// to the extension that claims it via <see cref="CanExecute"/>.
 /// </summary>
 public interface ITaskStepExecutorExtension
 {

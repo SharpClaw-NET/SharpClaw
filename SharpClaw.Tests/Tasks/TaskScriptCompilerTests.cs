@@ -184,7 +184,7 @@ public class RequiredParamTask
         var result = TaskScriptEngine.ProcessScript(SimpleSource);
 
         result.Success.Should().BeTrue();
-        result.Plan!.ExecutionSteps.Last().Kind.Should().Be(TaskStepKind.Return);
+        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(WellKnownTaskStepKeys.Return);
     }
 
     [Test]
@@ -211,9 +211,9 @@ public class ConditionalTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Plan!.ExecutionSteps.Single(s => s.Kind == TaskStepKind.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.Kind == TaskStepKind.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.Kind == TaskStepKind.Log);
+        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
     }
 
     [Test]
@@ -241,7 +241,7 @@ public class LoopTask
         });
 
         result.Success.Should().BeTrue();
-        var loop = result.Plan!.ExecutionSteps.Single(s => s.Kind == TaskStepKind.Loop);
+        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.Loop);
         loop.LoopKind.Should().Be(TaskLoopKind.ForEach);
     }
 
@@ -262,7 +262,7 @@ public class HttpGetTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var httpStep = result.Plan!.ExecutionSteps.Single(s => s.Kind == TaskStepKind.HttpRequest);
+        var httpStep = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.HttpRequest);
         httpStep.HttpMethod.Should().Be("GET");
     }
 }

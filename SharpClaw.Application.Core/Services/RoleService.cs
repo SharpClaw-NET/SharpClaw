@@ -241,6 +241,64 @@ public sealed class RoleService(SharpClawDbContext db, IConfiguration configurat
                             .Select(a => new ResourceGrant(a.ResourceId, a.Clearance))
                             .ToList()));
 
+    // ═══════════════════════════════════════════════════════════════
+    // Mutate
+    // ═══════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// Renames a role. Uniqueness is enforced when configured.
+    /// </summary>
+    public async Task<RoleResponse?> RenameAsync(
+        Guid roleId, string newName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(newName))
+            throw new ArgumentException("Role name cannot be empty.", nameof(newName));
+
+        var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct);
+        if (role is null)
+            return null;
+
+        if (IsUniqueRoleNamesEnforced())
+            await EnsureRoleNameUniqueAsync(newName, excludeId: roleId, ct);
+
+        role.Name = newName;
+        await db.SaveChangesAsync(ct);
+        return new RoleResponse(role.Id, role.Name, role.PermissionSetId);
+    }
+
+    /// <summary>
+    /// Deletes a role. The permission set owned by the role is also removed.
+    /// Users assigned to this role will have their RoleId cleared.
+    /// </summary>
+    public async Task<bool> DeleteAsync(Guid roleId, CancellationToken ct = default)
+    {
+        var role = await db.Roles
+            .Include(r => r.PermissionSet)
+                .ThenInclude(ps => ps!.GlobalFlags)
+            .Include(r => r.PermissionSet)
+                .ThenInclude(ps => ps!.ResourceAccesses)
+            .Include(r => r.Users)
+            .FirstOrDefaultAsync(r => r.Id == roleId, ct);
+
+        if (role is null)
+            return false;
+
+        // Detach users from this role before deleting it.
+        foreach (var user in role.Users)
+            user.RoleId = null;
+
+        if (role.PermissionSet is { } ps)
+        {
+            db.RemoveRange(ps.GlobalFlags);
+            db.RemoveRange(ps.ResourceAccesses);
+            db.PermissionSets.Remove(ps);
+        }
+
+        db.Roles.Remove(role);
+        await db.SaveChangesAsync(ct);
+        return true;
+    }
+
     private bool IsUniqueRoleNamesEnforced()
     {
         var value = configuration["UniqueNames:Roles"];

@@ -117,7 +117,7 @@ public sealed class TaskScriptValidator
         List<TaskDiagnostic> diagnostics)
     {
         // Track declared variables
-        if (step.Kind == TaskStepKind.DeclareVariable && step.VariableName is not null)
+        if (step.StepKey == WellKnownTaskStepKeys.DeclareVariable && step.VariableName is not null)
         {
             if (context.DeclaredVariables.Contains(step.VariableName))
             {
@@ -151,7 +151,7 @@ public sealed class TaskScriptValidator
             context.DeclaredVariables.Add(step.ResultVariable);
         }
 
-        if (step.Kind == TaskStepKind.Loop)
+        if (step.StepKey == WellKnownTaskStepKeys.Loop)
         {
             var loopKind = step.LoopKind ?? (step.VariableName is not null
                 ? TaskLoopKind.ForEach
@@ -181,7 +181,7 @@ public sealed class TaskScriptValidator
             }
         }
 
-        if (step.Kind == TaskStepKind.ParseResponse &&
+        if (step.StepKey == WellKnownTaskStepKeys.ParseResponse &&
             !string.IsNullOrWhiteSpace(step.TypeName) &&
             !IsValidType(step.TypeName, context.KnownTypes))
         {

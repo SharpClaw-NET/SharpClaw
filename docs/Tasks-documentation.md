@@ -44,6 +44,15 @@ runtime.
   - [Task trigger and shortcut endpoints](#task-trigger-and-shortcut-endpoints)
   - [SSE streaming](#sse-streaming)
   - [Response shapes](#response-shapes)
+- [Module authoring — extending the task step system](#module-authoring--extending-the-task-step-system)
+  - [Step keys and WellKnownTaskStepKeys](#step-keys-and-wellknowntaskstepkeys)
+  - [TaskStepRegistry](#taskstepregistry)
+  - [TaskStepDescriptor](#taskstepdescriptor)
+  - [Implementing ITaskParserModuleExtension](#implementing-itaskparsermoduleextension)
+  - [Implementing ITaskStepExecutorExtension](#implementing-itaskstepexecutorextension)
+  - [ITaskStepExecutionContext](#itaskstepexecutioncontext)
+  - [Event trigger extensions](#event-trigger-extensions)
+  - [Module step checklist](#module-step-checklist)
 - [Practical examples](#practical-examples)
 
 ---
@@ -301,60 +310,60 @@ method calls to outside types.
 
 ### Step reference
 
-Each construct in `RunAsync` maps to a `TaskStepKind`. The following built-in
-methods are available inside a task body:
+Each call in `RunAsync` maps to a registered step key (a `WellKnownTaskStepKeys` string
+constant). The following built-in methods are available inside a task body:
 
 #### Agent interaction
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await Chat(agent, message)` | `Chat` | Send a message to an agent and await the full text response. |
-| `await ChatStream(agent, message)` | `ChatStream` | Send a message and stream the response token by token to the task's SSE output channel. |
-| `await ChatToThread(agent, threadId, message)` | `ChatToThread` | Send a message into a specific thread and await the response. |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await Chat(agent, message)` | `core.chat` | Send a message to an agent and await the full text response. |
+| `await ChatStream(agent, message)` | `core.chat_stream` | Send a message and stream the response token by token to the task's SSE output channel. |
+| `await ChatToThread(agent, threadId, message)` | `core.chat_to_thread` | Send a message into a specific thread and await the response. |
 
 `agent` is a reference obtained from `FindAgent`. `message` is a string expression.
 
 #### Lookup and creation
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await FindModel(nameOrId)` | `FindModel` | Locate a model by display name or custom ID. |
-| `await FindProvider(nameOrId)` | `FindProvider` | Locate a provider by display name or custom ID. |
-| `await FindAgent(nameOrId)` | `FindAgent` | Locate an agent by display name or custom ID. |
-| `await CreateAgent(name, modelId)` | `CreateAgent` | Create a new agent at runtime. |
-| `await CreateThread(channelId, name)` | `CreateThread` | Create a new thread in a channel. |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await FindModel(nameOrId)` | `core.find_model` | Locate a model by display name or custom ID. |
+| `await FindProvider(nameOrId)` | `core.find_provider` | Locate a provider by display name or custom ID. |
+| `await FindAgent(nameOrId)` | `core.find_agent` | Locate an agent by display name or custom ID. |
+| `await CreateAgent(name, modelId)` | `core.create_agent` | Create a new agent at runtime. |
+| `await CreateThread(channelId, name)` | `core.create_thread` | Create a new thread in a channel. |
 
 #### Output and parsing
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await Emit(value)` | `Emit` | Push a result object to all SSE listeners. If `value` matches the `[Output]` type, `outputSnapshotJson` is updated. |
-| `await ParseResponse<T>(text)` | `ParseResponse` | Ask the runtime to parse a string into a typed `T` (must be a task-defined data type or primitive). |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await Emit(value)` | `core.emit` | Push a result object to all SSE listeners. If `value` matches the `[Output]` type, `outputSnapshotJson` is updated. |
+| `await ParseResponse<T>(text)` | `core.parse_response` | Ask the runtime to parse a string into a typed `T` (must be a task-defined data type or primitive). |
 
 #### HTTP
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await HttpGet(url)` | `HttpRequest` | GET request; returns the response body as a string. |
-| `await HttpPost(url, body)` | `HttpRequest` | POST with a JSON body string. |
-| `await HttpPut(url, body)` | `HttpRequest` | PUT with a JSON body string. |
-| `await HttpDelete(url)` | `HttpRequest` | DELETE request. |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await HttpGet(url)` | `core.http_request` | GET request; returns the response body as a string. |
+| `await HttpPost(url, body)` | `core.http_request` | POST with a JSON body string. |
+| `await HttpPut(url, body)` | `core.http_request` | PUT with a JSON body string. |
+| `await HttpDelete(url)` | `core.http_request` | DELETE request. |
 
 #### Control and state
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await Delay(ms)` | `Delay` | Pause execution for `ms` milliseconds, respecting cancellation. |
-| `await WaitUntilStopped()` | `WaitUntilStopped` | Block until the instance is cancelled. Use for daemon tasks. |
-| `await Log(message)` | `Log` | Write a log entry visible in instance logs and the SSE stream. |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await Delay(ms)` | `core.delay` | Pause execution for `ms` milliseconds, respecting cancellation. |
+| `await WaitUntilStopped()` | `core.wait_until_stopped` | Block until the instance is cancelled. Use for daemon tasks. |
+| `await Log(message)` | `core.log` | Write a log entry visible in instance logs and the SSE stream. |
 
 #### Transcription
 
-| Call | Step kind | Description |
-|------|-----------|-------------|
-| `await StartTranscription(deviceId, modelId)` | `StartTranscription` | Start a live transcription job on an audio device. Requires the Transcription module. |
-| `await StopTranscription(jobId)` | `StopTranscription` | Stop a running transcription job. |
-| `await GetDefaultInputAudio()` | `GetDefaultInputAudio` | Resolve the system-default audio input device ID. |
+| Call | Step key | Description |
+|------|----------|-------------|
+| `await StartTranscription(deviceId, modelId)` | `sharpclaw.transcription.start_transcription` | Start a live transcription job on an audio device. Requires the Transcription module. |
+| `await StopTranscription(jobId)` | `sharpclaw.transcription.stop_transcription` | Stop a running transcription job. |
+| `await GetDefaultInputAudio()` | `sharpclaw.transcription.get_default_input_audio` | Resolve the system-default audio input device ID. |
 
 ---
 
@@ -826,6 +835,367 @@ Enable all persisted trigger bindings for a task definition.
 
 #### `POST /tasks/{taskId}/triggers/disable`
 
+Disable all persisted trigger bindings for a task definition without deleting them.
+
+**Response `200`:** `{ "disabled": number }`
+
+---
+
+#### `POST /tasks/{taskId}/shortcuts/install`
+
+Install OS launcher shortcuts declared with `[OsShortcut]` in the task source.
+Requires the `sharpclaw_computer_use` module.
+
+**Response `200`:** `{ "installed": number }`
+
+---
+
+#### `DELETE /tasks/{taskId}/shortcuts`
+
+Remove all OS launcher shortcuts for a task definition.
+
+**Response `204`**
+
+---
+
+### SSE streaming
+
+Connect to the live output stream of a running instance:
+
+```
+GET /tasks/{taskId}/instances/{instanceId}/stream
+Accept: text/event-stream
+```
+
+Events are emitted as `data: <json>` lines. Each event has the shape:
+
+```json
+{
+  "type": "output | log | status",
+  "data": "string | null",
+  "timestamp": "datetime"
+}
+```
+
+---
+
+### Response shapes
+
+#### `TaskDefinitionResponse`
+
+```json
+{
+  "id": "guid",
+  "name": "string",
+  "description": "string | null",
+  "sourceText": "string",
+  "isActive": "bool",
+  "parameters": [
+    {
+      "name": "string",
+      "typeName": "string",
+      "description": "string | null",
+      "isRequired": "bool",
+      "defaultValue": "string | null"
+    }
+  ],
+  "requirements": [
+    {
+      "kind": "string",
+      "value": "string | null",
+      "severity": "Error | Warning",
+      "description": "string"
+    }
+  ],
+  "diagnostics": [
+    {
+      "code": "string",
+      "severity": "Error | Warning",
+      "message": "string"
+    }
+  ],
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+#### `TaskInstanceResponse`
+
+```json
+{
+  "id": "guid",
+  "taskDefinitionId": "guid",
+  "status": "Queued | Running | Paused | Completed | Failed | Cancelled",
+  "errorMessage": "string | null",
+  "outputSnapshotJson": "string | null",
+  "channelId": "guid | null",
+  "channelCost": { "promptTokens": 0, "completionTokens": 0 },
+  "createdAt": "datetime",
+  "updatedAt": "datetime"
+}
+```
+
+#### `TaskPreflightResponse`
+
+```json
+{
+  "isBlocked": "bool",
+  "findings": [
+    {
+      "kind": "string",
+      "value": "string | null",
+      "passed": "bool",
+      "severity": "Error | Warning",
+      "message": "string"
+    }
+  ]
+}
+```
+
+#### `TaskTriggerSourceResponse`
+
+```json
+{
+  "id": "string",
+  "displayName": "string",
+  "ownerModuleId": "string | null",
+  "isAvailable": "bool"
+}
+```
+
+---
+
+## Module authoring — extending the task step system
+
+This section is for authors building SharpClaw modules that need to add
+new callable steps to the task scripting language.
+
+---
+
+### Step keys and `WellKnownTaskStepKeys`
+
+Every parsed step carries a `StepKey` string stored in
+`TaskStepDefinition.StepKey`. The orchestrator switches on this value to
+route execution. Core steps use the string constants defined in
+`WellKnownTaskStepKeys` (e.g. `core.chat`, `core.http_request`). Module
+steps must use namespaced keys of the form `{moduleId}.{step_name}` to
+avoid collisions with core or other modules.
+
+```csharp
+// Recommended pattern — define your keys as constants in your module project.
+public static class TranscriptionStepKeys
+{
+    public const string StartTranscription   = "sharpclaw.transcription.start_transcription";
+    public const string StopTranscription    = "sharpclaw.transcription.stop_transcription";
+    public const string GetDefaultInputAudio = "sharpclaw.transcription.get_default_input_audio";
+}
+```
+
+Core step keys are not a closed set from a module's perspective: the
+`WellKnownTaskStepKeys` class lists every key the built-in orchestrator
+handles, but module authors should never reuse or shadow those values.
+
+---
+
+### `TaskStepRegistry`
+
+`TaskStepRegistry.Default` is a thread-safe singleton populated at startup.
+It maps script method names to `TaskStepDescriptor` records and supports
+lookup in both directions. The parser calls `FindByMethod` to translate a
+method call in a script body into a `StepKey`; tooling and diagnostics can
+call `FindByKey` to go the other way.
+
+```csharp
+// Reading — called internally by TaskScriptParser:
+TaskStepDescriptor? descriptor = TaskStepRegistry.Default.FindByMethod("StartTranscription");
+
+// Reading — useful in diagnostics or editors:
+TaskStepDescriptor? descriptor = TaskStepRegistry.Default.FindByKey(
+    TranscriptionStepKeys.StartTranscription);
+```
+
+You do not call `Register` directly. Descriptors are added when you return
+them from `ITaskParserModuleExtension.StepKeyMappings` and the parser calls
+`RegisterModule` with your extension.
+
+---
+
+### `TaskStepDescriptor`
+
+A `TaskStepDescriptor` fully describes one step operation to the parser and
+registry. The fields you need when building module steps are:
+
+| Property | Type | Purpose |
+|---|---|---|
+| `MethodName` | `string?` | Script method name (e.g. `"StartTranscription"`). `null` for non-method constructs. |
+| `StepKey` | `string` | Namespaced wire key (e.g. `"sharpclaw.transcription.start_transcription"`). |
+| `OwnerId` | `string` | Your module ID (e.g. `"sharpclaw_transcription"`). |
+| `FirstArgIsExpression` | `bool` | Capture the first argument as `Expression` on the step. Use when the first arg is a runtime string or variable reference. |
+| `ExpressionArgIndex` | `int` | If `Expression` is not the first arg, set the zero-based index here. |
+| `CapturesGenericType` | `bool` | Set `true` for methods like `ParseResponse<T>` where the generic type name should be captured as `TypeName`. |
+| `HttpMethod` | `string?` | HTTP verb string for HTTP-request variants; `null` for all other steps. |
+
+---
+
+### Implementing `ITaskParserModuleExtension`
+
+`ITaskParserModuleExtension` tells the parser which method names belong to
+your module and how to map them to step keys. Register one implementation
+per module. The parser calls `RegisterModule` once at startup with each
+implementation it receives from DI.
+
+```csharp
+public sealed class TranscriptionParserExtension : ITaskParserModuleExtension
+{
+    public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings
+        => new Dictionary<string, (string, string)>
+        {
+            ["StartTranscription"]   = (TranscriptionStepKeys.StartTranscription,   "sharpclaw_transcription"),
+            ["StopTranscription"]    = (TranscriptionStepKeys.StopTranscription,    "sharpclaw_transcription"),
+            ["GetDefaultInputAudio"] = (TranscriptionStepKeys.GetDefaultInputAudio, "sharpclaw_transcription"),
+        };
+
+    // Map event-handler method names to module-owned trigger keys.
+    // Leave empty if your module adds no event trigger types.
+    public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings
+        => new Dictionary<string, (string, string)>();
+
+    // Method names whose first argument should be captured as Expression.
+    public IReadOnlySet<string> SingleArgExpressionMethods
+        => new HashSet<string> { "StartTranscription" };
+}
+```
+
+Register the extension in your module's DI setup:
+
+```csharp
+services.AddSingleton<ITaskParserModuleExtension, TranscriptionParserExtension>();
+```
+
+The built-in `TaskScriptParser` resolves all registered
+`ITaskParserModuleExtension` instances from DI and calls `RegisterModule`
+for each one before any parsing takes place.
+
+---
+
+### Implementing `ITaskStepExecutorExtension`
+
+`ITaskStepExecutorExtension` handles execution of the steps your module
+declared in the parser extension. The orchestrator calls `CanExecute` on
+every registered extension for any step key that is not a built-in core key,
+then calls `ExecuteAsync` on the first matching extension.
+
+```csharp
+public sealed class TranscriptionExecutorExtension : ITaskStepExecutorExtension
+{
+    private readonly ILiveTranscriptionOrchestrator _transcription;
+
+    public TranscriptionExecutorExtension(ILiveTranscriptionOrchestrator transcription)
+        => _transcription = transcription;
+
+    public string ModuleId => "sharpclaw_transcription";
+
+    public bool CanExecute(string moduleStepKey)
+        => moduleStepKey.StartsWith("sharpclaw.transcription.", StringComparison.Ordinal);
+
+    public async Task<bool> ExecuteAsync(
+        string moduleStepKey,
+        ITaskStepExecutionContext context,
+        IReadOnlyList<string>? arguments,
+        string? expression,
+        string? resultVariable)
+    {
+        switch (moduleStepKey)
+        {
+            case TranscriptionStepKeys.StartTranscription:
+            {
+                var deviceId = expression ?? "";
+                var modelId  = arguments?.ElementAtOrDefault(1) ?? "";
+                var jobId    = await _transcription.StartAsync(deviceId, modelId, context.CancellationToken);
+                if (resultVariable is not null)
+                    context.SetVariable(resultVariable, jobId.ToString());
+                return true;
+            }
+
+            case TranscriptionStepKeys.StopTranscription:
+            {
+                var jobId = Guid.Parse(arguments?.FirstOrDefault() ?? "");
+                await _transcription.StopAsync(jobId, context.CancellationToken);
+                return true;
+            }
+
+            case TranscriptionStepKeys.GetDefaultInputAudio:
+            {
+                var deviceId = await _transcription.GetDefaultInputAudioAsync(context.CancellationToken);
+                if (resultVariable is not null)
+                    context.SetVariable(resultVariable, deviceId.ToString());
+                return true;
+            }
+
+            default:
+                throw new InvalidOperationException(
+                    $"TranscriptionExecutorExtension received unrecognised step key '{moduleStepKey}'.");
+        }
+    }
+}
+```
+
+Register the extension in DI:
+
+```csharp
+services.AddSingleton<ITaskStepExecutorExtension, TranscriptionExecutorExtension>();
+```
+
+`ExecuteAsync` returns `true` to continue task execution and `false` to
+signal an early exit from the task body. Throw any exception to propagate
+a step execution failure, which will transition the instance to `Failed`.
+
+---
+
+### `ITaskStepExecutionContext`
+
+The context object passed to `ExecuteAsync` provides access to the runtime
+state of the current task instance. Key members:
+
+| Member | Purpose |
+|---|---|
+| `CancellationToken` | Token signalled when the instance is cancelled. Always pass to async I/O. |
+| `SetVariable(name, value)` | Store a string result in the task's variable scope. |
+| `GetVariable(name)` | Read a previously set variable. |
+| `LogAsync(message, ct)` | Append a log entry to the instance log and SSE stream. |
+| `EmitAsync(obj, ct)` | Push a structured output object to SSE listeners. |
+
+---
+
+### Event trigger extensions
+
+If your module adds a new event trigger type (backed by
+`ITaskParserModuleExtension.EventTriggerMappings`), the trigger key is stored
+in `TaskStepDefinition.ModuleTriggerKey` for steps of kind
+`TaskTriggerKind.ModuleEvent`. You are responsible for firing those triggers
+through the `TaskTriggerHostService` extension point — typically by
+registering a custom `ITaskTriggerSource` implementation and including its
+source ID in the trigger key mapping.
+
+---
+
+### Module step checklist
+
+When adding a new step to a module:
+
+1. Add a string constant in your module's step-key class using the pattern
+   `{moduleId}.{step_name}`.
+2. Add an entry to `ITaskParserModuleExtension.StepKeyMappings` with the
+   method name and step key.
+3. If the first argument is a runtime expression, add the method name to
+   `SingleArgExpressionMethods`; if a different argument is the expression,
+   set `ExpressionArgIndex` in the descriptor.
+4. Handle the new step key in `ITaskStepExecutorExtension.ExecuteAsync`.
+5. Update `CanExecute` if you are using a prefix check — no change needed
+   if the new key already matches your existing prefix.
+6. Add the method call to the step reference table in `Tasks-documentation.md`
+   under the appropriate section heading (or create a new module section
+   if this is the first step from your module).
 Disable all persisted trigger bindings for a task definition.
 
 **Response `200`:** `{ "disabled": number }`

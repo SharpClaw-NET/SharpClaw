@@ -1,96 +1,110 @@
 namespace SharpClaw.Contracts.Tasks;
 
 /// <summary>
-/// Closed set of operations a task step can perform.  Every statement
-/// in a task script entry-point body maps to exactly one kind.
+/// Stable well-known string keys for all core task step operations.
+/// These constants are the authoritative discriminators in
+/// <see cref="TaskStepDefinition.StepKey"/> for steps owned by the core.
+/// Module authors should use namespaced keys of the form
+/// <c>moduleid.step_name</c> (e.g. <c>sharpclaw.transcription.start_transcription</c>).
 /// </summary>
-public enum TaskStepKind
+public static class WellKnownTaskStepKeys
 {
     // ── Agent interaction ──────────────────────────────────────────────────────
 
     /// <summary>Send a message to an agent and await the full response.</summary>
-    Chat,
+    public const string Chat           = "core.chat";
 
     /// <summary>Send a message to an agent and stream the response.</summary>
-    ChatStream,
-
-    // ── Module-owned steps ────────────────────────────────────────────────────
-
-    /// <summary>
-    /// A step owned by a module. The module step key is stored alongside
-    /// this discriminator in <c>TaskStepDefinition.ModuleStepKey</c>.
-    /// The module's <c>ITaskStepExecutorExtension</c> handles execution.
-    /// </summary>
-    ModuleStep,
+    public const string ChatStream     = "core.chat_stream";
 
     // ── Output ────────────────────────────────────────────────────────────────
 
     /// <summary>Push a result object to SSE / WebSocket listeners.</summary>
-    Emit,
+    public const string Emit           = "core.emit";
 
     /// <summary>Parse an agent text response into a typed data object.</summary>
-    ParseResponse,
+    public const string ParseResponse  = "core.parse_response";
 
     // ── State ─────────────────────────────────────────────────────────────────
 
     /// <summary>Declare a local variable, optionally with an initializer.</summary>
-    DeclareVariable,
+    public const string DeclareVariable = "core.declare_variable";
 
     /// <summary>Assign a value to an existing variable or property.</summary>
-    Assign,
+    public const string Assign         = "core.assign";
 
     // ── Control flow ──────────────────────────────────────────────────────────
 
     /// <summary>Register a callback for an event trigger.</summary>
-    EventHandler,
+    public const string EventHandler   = "core.event_handler";
 
     /// <summary>Conditional if/else branch.</summary>
-    Conditional,
+    public const string Conditional    = "core.conditional";
 
     /// <summary>Loop (while or foreach).</summary>
-    Loop,
+    public const string Loop           = "core.loop";
 
     /// <summary>Await a fixed delay.</summary>
-    Delay,
+    public const string Delay          = "core.delay";
 
     /// <summary>Block until the task is cancelled externally.</summary>
-    WaitUntilStopped,
+    public const string WaitUntilStopped = "core.wait_until_stopped";
 
     /// <summary>Return / exit from the task entry point.</summary>
-    Return,
+    public const string Return         = "core.return";
 
     // ── HTTP ──────────────────────────────────────────────────────────────────
 
     /// <summary>Make an HTTP request.</summary>
-    HttpRequest,
+    public const string HttpRequest    = "core.http_request";
 
     // ── Evaluation ────────────────────────────────────────────────────────────
 
     /// <summary>Evaluate a restricted C# expression.</summary>
-    Evaluate,
+    public const string Evaluate       = "core.evaluate";
 
     // ── Logging ───────────────────────────────────────────────────────────────
 
     /// <summary>Write a log message.</summary>
-    Log,
+    public const string Log            = "core.log";
 
     // ── Entity lookup / creation ──────────────────────────────────────────────
 
     /// <summary>Find a model by name or custom ID.</summary>
-    FindModel,
+    public const string FindModel      = "core.find_model";
 
     /// <summary>Find a provider by name or custom ID.</summary>
-    FindProvider,
+    public const string FindProvider   = "core.find_provider";
 
     /// <summary>Find an agent by name or custom ID.</summary>
-    FindAgent,
+    public const string FindAgent      = "core.find_agent";
 
     /// <summary>Create a new agent.</summary>
-    CreateAgent,
+    public const string CreateAgent    = "core.create_agent";
 
     /// <summary>Create a new thread in a channel.</summary>
-    CreateThread,
+    public const string CreateThread   = "core.create_thread";
 
     /// <summary>Send a chat message into a specific thread.</summary>
-    ChatToThread,
+    public const string ChatToThread   = "core.chat_to_thread";
+
+    // ── Role / permission / channel provisioning ──────────────────────────────
+
+    /// <summary>Create a new role (upsert by name).</summary>
+    public const string CreateRole     = "core.create_role";
+
+    /// <summary>Find a role by name or custom ID.</summary>
+    public const string FindRole       = "core.find_role";
+
+    /// <summary>Set the permission flags on an existing role.</summary>
+    public const string SetRolePermissions = "core.set_role_permissions";
+
+    /// <summary>Assign a role to an agent.</summary>
+    public const string AssignRole     = "core.assign_role";
+
+    /// <summary>Create a new channel (upsert by custom ID).</summary>
+    public const string CreateChannel  = "core.create_channel";
+
+    /// <summary>Find a channel by title or custom ID.</summary>
+    public const string FindChannel    = "core.find_channel";
 }

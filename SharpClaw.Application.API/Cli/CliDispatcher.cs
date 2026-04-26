@@ -24,6 +24,7 @@ using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.DTOs.Roles;
+using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
 using SharpClaw.Utils.Security;
@@ -1829,7 +1830,10 @@ public static class CliDispatcher
         {
             PrintUsage(
                 "role list                                 List all roles",
+                "role create <name>                        Create a new role",
                 "role get <roleId>                         Show a role",
+                "role rename <roleId> <name>               Rename a role",
+                "role delete <roleId>                      Delete a role",
                 "role permissions <roleId>                 Show role permissions",
                 "role permissions <roleId> set [flags...]  Set role permissions",
                 "",
@@ -1848,9 +1852,25 @@ public static class CliDispatcher
         {
             "list" => await HandleRoleList(svc),
 
+            "create" when args.Length >= 3
+                => await RoleHandlers.Create(
+                    new CreateRoleRequest(string.Join(' ', args[2..])), svc),
+            "create" => UsageResult("role create <name>"),
+
             "get" when args.Length >= 3
                 => await RoleHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
             "get" => UsageResult("role get <roleId>"),
+
+            "rename" when args.Length >= 4
+                => await RoleHandlers.Rename(
+                    CliIdMap.Resolve(args[2]),
+                    new RenameRoleRequest(string.Join(' ', args[3..])),
+                    svc),
+            "rename" => UsageResult("role rename <roleId> <name>"),
+
+            "delete" when args.Length >= 3
+                => await RoleHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
+            "delete" => UsageResult("role delete <roleId>"),
 
             "permissions" or "perms" when args.Length >= 3
                 => await HandleRolePermissions(args, svc),
@@ -2339,6 +2359,8 @@ public static class CliDispatcher
         return sub switch
         {
 
+            "create" when args.Length >= 3
+                => await HandleTaskCreate(args[2], svc),
             "create" => UsageResult("task create <sourceFilePath>"),
 
             "list" => await TaskDefinitionHandlers.List(svc),
@@ -2726,8 +2748,14 @@ public static class CliDispatcher
             ? CliIdMap.Resolve(args[3])
             : _currentChannelId;
 
-        var flagStart = channelId is not null && args.Length > 3 && !args[3].StartsWith("--")
-            ? 4 : 3;
+        if (channelId is null)
+        {
+            Console.Error.WriteLine("Error: a channel ID is required to start a task instance.");
+            Console.Error.WriteLine("Provide the channel ID as an argument or select a channel first with 'chan select <id>'.");
+            return Results.BadRequest("ChannelId is required.");
+        }
+
+        var flagStart = args.Length > 3 && !args[3].StartsWith("--") ? 4 : 3;
 
         Dictionary<string, string>? paramValues = null;
         for (var i = flagStart; i < args.Length; i++)

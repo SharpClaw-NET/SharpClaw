@@ -11,8 +11,7 @@ public interface ITaskParserModuleExtension
     /// <summary>
     /// Maps context-API method names (as they appear in task scripts) to a
     /// module-owned step key and the owning module ID.
-    /// The parser records <see cref="TaskStepKind.ModuleStep"/> on the step
-    /// and stores the key in <c>TaskStepDefinition.ModuleStepKey</c>.
+    /// The parser records the step key in <c>TaskStepDefinition.StepKey</c>.
     /// </summary>
     IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings { get; }
 

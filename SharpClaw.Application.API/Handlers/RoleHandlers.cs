@@ -60,4 +60,28 @@ public static class RoleHandlers
             return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
         }
     }
+
+    [MapPut("/{id:guid}/name")]
+    public static async Task<IResult> Rename(Guid id, RenameRoleRequest request, RoleService svc)
+    {
+        if (string.IsNullOrWhiteSpace(request.Name))
+            return Results.BadRequest("Role name is required.");
+
+        try
+        {
+            var result = await svc.RenameAsync(id, request.Name);
+            return result is not null ? Results.Ok(result) : Results.NotFound();
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Problem(ex.Message, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
+    [MapDelete("/{id:guid}")]
+    public static async Task<IResult> Delete(Guid id, RoleService svc)
+    {
+        var deleted = await svc.DeleteAsync(id);
+        return deleted ? Results.NoContent() : Results.NotFound();
+    }
 }
