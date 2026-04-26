@@ -79,11 +79,22 @@ public static class CliDispatcher
     /// </summary>
     public static async Task<bool> RunInteractiveAsync(IServiceProvider services, CancellationToken ct)
     {
-        if (Console.IsInputRedirected)
+        // SHARPCLAW_FORCE_REPL=1 allows piped/scripted CLI use (e.g. testing,
+        // batch scripting) even when stdin is redirected. The REPL loop already
+        // exits cleanly on EOF (ReadLine returns null), so this is safe.
+        // Without the flag, redirected stdin skips the REPL entirely to prevent
+        // a detached child process from reading EOF and triggering immediate shutdown
+        // (see bug #1 in docs/internal/local-inference-pipeline-debug-report.md).
+        var forceRepl = string.Equals(
+            Environment.GetEnvironmentVariable("SHARPCLAW_FORCE_REPL"), "1",
+            StringComparison.Ordinal);
+
+        if (Console.IsInputRedirected && !forceRepl)
         {
             Log.Information(
                 "stdin is redirected; skipping interactive REPL. " +
-                "API will run until cancelled (Ctrl+C or host shutdown).");
+                "API will run until cancelled (Ctrl+C or host shutdown). " +
+                "Set SHARPCLAW_FORCE_REPL=1 to run the REPL with piped input.");
             try
             {
                 await Task.Delay(Timeout.Infinite, ct);

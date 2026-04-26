@@ -660,7 +660,10 @@ try
     // logging must stay visible there — stdout is the only feedback channel
     // for containers, CI runs, systemd units, and detached child processes.
     // See bug #1 in docs/internal/local-inference-pipeline-debug-report.md.
-    var interactive = !Console.IsInputRedirected;
+    var forceRepl = string.Equals(
+        Environment.GetEnvironmentVariable("SHARPCLAW_FORCE_REPL"), "1",
+        StringComparison.Ordinal);
+    var interactive = !Console.IsInputRedirected || forceRepl;
     if (interactive)
         consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Fatal;
 

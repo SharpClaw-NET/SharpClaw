@@ -4,7 +4,14 @@ Interactive REPL embedded in the backend process. Dispatches directly to
 the same handlers as the REST API — no HTTP round-trip.
 
 Launch: run the backend binary in an interactive terminal (stdin not
-redirected). Headless/detached launches skip the REPL automatically.
+redirected). Headless/detached launches skip the REPL automatically and
+wait for cancellation instead — safe for containers, CI, and systemd units.
+
+Scripted / piped use: set SHARPCLAW_FORCE_REPL=1 before launching to
+activate the REPL even when stdin is redirected. The REPL exits cleanly on
+EOF, so piping a command file works as expected. Console log output is
+suppressed for the duration of the REPL in this mode, matching normal
+interactive behaviour.
 
 ────────────────────────────────────────
 SESSION STATE
