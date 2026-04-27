@@ -328,6 +328,11 @@ public sealed class ModuleJsonPersistenceService(
                         prop.SetValue(entity, null);
                 }
 
+                // Skip entities already present in the InMemory store (e.g. re-enabling a
+                // previously disabled module that was already loaded at startup).
+                if (entity is BaseEntity be && context.Find(clrType, be.Id) is not null)
+                    continue;
+
                 context.Add(entity);
                 loaded++;
             }

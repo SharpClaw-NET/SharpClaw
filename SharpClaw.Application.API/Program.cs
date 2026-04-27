@@ -286,7 +286,9 @@ try
     // Trigger host service + built-in sources
     builder.Services.AddSingleton<TaskTriggerHostService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskTriggerHostService>());
-    builder.Services.AddSingleton<ITaskTriggerSource, EventBusTriggerSource>();
+    builder.Services.AddSingleton<EventBusTriggerSource>();
+    builder.Services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<EventBusTriggerSource>());
+    builder.Services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<EventBusTriggerSource>());
     builder.Services.AddSingleton<ITaskTriggerSource, FileChangedTriggerSource>();
     builder.Services.AddSingleton<ITaskTriggerSource, HostProbeTriggerSource>();
     builder.Services.AddSingleton<ITaskTriggerSource, NetworkTriggerSource>();
@@ -297,8 +299,6 @@ try
     builder.Services.AddSingleton<ITaskMetricProvider, PendingJobCountMetricProvider>();
     builder.Services.AddSingleton<ITaskMetricProvider, PendingTaskCountMetricProvider>();
     builder.Services.AddSingleton<ITaskMetricProvider, SchedulerPendingJobCountMetricProvider>();
-    // Register EventBusTriggerSource as ISharpClawEventSink so the dispatcher picks it up
-    builder.Services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<EventBusTriggerSource>());
     // Module system
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
