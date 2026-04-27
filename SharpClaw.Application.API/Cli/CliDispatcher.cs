@@ -208,23 +208,35 @@ public static class CliDispatcher
 
         for (var i = 0; i <= span.Length; i++)
         {
-            if (i == span.Length || (!inQuotes && span[i] == ' ') || (span[i] == '"'))
-            {
-                if (span[i..].Length > 0 && span[i] == '"')
-                {
-                    inQuotes = !inQuotes;
-                    if (!inQuotes)
-                    {
-                        args.Add(span[(start + 1)..i].ToString());
-                        start = i + 1;
-                    }
-                    else
-                    {
-                        start = i;
-                    }
-                    continue;
-                }
+            var atEnd = i == span.Length;
+            var isQuote = !atEnd && span[i] == '"';
+            var isSpace = !atEnd && !inQuotes && span[i] == ' ';
 
+            // A quote only toggles quoted mode when it appears at the very
+            // start of a new token (i == start). A quote that appears
+            // mid-token (e.g. inside JSON like {"key":"val"}) is treated as
+            // a regular character so the full token is preserved intact.
+            var isTokenStart = i == start;
+
+            if (isQuote && isTokenStart)
+            {
+                inQuotes = !inQuotes;
+                if (!inQuotes)
+                {
+                    // Closing quote: emit the content captured between the quotes.
+                    args.Add(span[(start + 1)..i].ToString());
+                    start = i + 1;
+                }
+                else
+                {
+                    // Opening quote: mark start here (will be stripped on close).
+                    start = i;
+                }
+                continue;
+            }
+
+            if (atEnd || isSpace)
+            {
                 if (i > start)
                     args.Add(span[start..i].ToString());
 
@@ -737,10 +749,12 @@ public static class CliDispatcher
                 => await HandleAgentUpdate(args, svc),
             "update" => UsageResult("agent update <id> <name> [modelId] [system prompt] [--max-tokens <n>]"),
 
-            "role" when args.Length >= 4 && args[3].Equals("none", StringComparison.OrdinalIgnoreCase)
+            "role" when args.Length >= 4 && args[3].Equals("none", StringComparison.OrdinalIgnoreCase) && args.Length == 4
                 => await HandleAgentRoleAssign(CliIdMap.Resolve(args[2]), Guid.Empty, svc),
-            "role" when args.Length >= 4
+            "role" when args.Length >= 4 && !args[3].StartsWith("--") && args.Length == 4
                 => await HandleAgentRoleAssign(CliIdMap.Resolve(args[2]), CliIdMap.Resolve(args[3]), svc),
+            "role" when args.Length > 4
+                => UsageResult("agent role does not accept extra flags. To set permissions on a role use: role permissions <roleId> set --flag <FlagKey>"),
             "role" => UsageResult("agent role <agentId> <roleId>  (use 'role list' to find IDs)"),
 
             "sync-with-models" => await HandleAgentSyncWithModels(svc),
@@ -2079,6 +2093,7 @@ public static class CliDispatcher
         var flagStart = resourceId is not null ? nextArg + 1 : nextArg;
 
         Guid? agentId = null;
+        string? scriptJson = null;
 
         for (var i = flagStart; i < args.Length; i++)
         {
@@ -2086,6 +2101,9 @@ public static class CliDispatcher
             {
                 case "--agent" or "-a" when i + 1 < args.Length:
                     agentId = CliIdMap.Resolve(args[++i]);
+                    break;
+                case "--params" or "-p" when i + 1 < args.Length:
+                    scriptJson = args[++i];
                     break;
             }
         }
@@ -2095,7 +2113,8 @@ public static class CliDispatcher
             new SubmitAgentJobRequest(
                 ActionKey: actionKey,
                 ResourceId: resourceId,
-                AgentId: agentId),
+                AgentId: agentId,
+                ScriptJson: scriptJson),
             svc, chatSvc);
     }
 

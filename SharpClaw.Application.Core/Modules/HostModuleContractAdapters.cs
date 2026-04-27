@@ -31,6 +31,9 @@ public sealed class HostAgentManager(
     public async Task<string> UpdateAgentAsync(
         Guid agentId, string? name, string? systemPrompt, Guid? modelId, CancellationToken ct = default)
     {
+        if (name is null && systemPrompt is null && modelId is null)
+            return $"Agent (id={agentId}) — no changes applied.";
+
         var agent = await agents.UpdateAsync(agentId, new UpdateAgentRequest(
             Name: name,
             ModelId: modelId,

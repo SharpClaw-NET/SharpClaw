@@ -135,8 +135,11 @@ internal sealed class AgentOrchestrationService(
     public async Task<string> EditAgentHeaderAsync(
         Guid resourceId, JsonElement parameters, CancellationToken ct)
     {
-        var header = parameters.TryGetProperty("header", out var hProp)
-            ? hProp.GetString() : null;
+        if (!parameters.TryGetProperty("header", out var hProp))
+            return $"No changes applied to agent header (id={resourceId})."
+                + " Pass \"header\": \"<text>\" to set or \"header\": \"\" to clear.";
+
+        var header = hProp.GetString();
 
         await agentManager.SetAgentHeaderAsync(resourceId, header, ct);
 
@@ -152,8 +155,11 @@ internal sealed class AgentOrchestrationService(
     public async Task<string> EditChannelHeaderAsync(
         Guid resourceId, JsonElement parameters, CancellationToken ct)
     {
-        var header = parameters.TryGetProperty("header", out var hProp)
-            ? hProp.GetString() : null;
+        if (!parameters.TryGetProperty("header", out var hProp))
+            return $"No changes applied to channel header (id={resourceId})."
+                + " Pass \"header\": \"<text>\" to set or \"header\": \"\" to clear.";
+
+        var header = hProp.GetString();
 
         await agentManager.SetChannelHeaderAsync(resourceId, header, ct);
 
