@@ -257,6 +257,10 @@ public static class CliDispatcher
         if (args.Length == 0)
             return false;
 
+        var initializationGate = services.GetService<DatabaseInitializationGate>();
+        if (initializationGate is not null && !initializationGate.IsInitialized)
+            await initializationGate.WaitAsync();
+
         using var scope = services.CreateScope();
         var sp = scope.ServiceProvider;
 
@@ -2524,12 +2528,12 @@ public static class CliDispatcher
 
             "create-queued" when args.Length >= 3
                 => await HandleTaskStart(args, svc, sp, startImmediately: false),
-            "create-queued" => UsageResult("task create-queued <taskId> [channelId] [--param key=value ...]"),
+            "create-queued" => UsageResult("task create-queued <taskId> [channelId | --context <id>] [--param key=value ...]"),
 
             "start" or "run" when args.Length >= 3
                 => await HandleTaskStart(args, svc, sp, startImmediately: true),
-            "start" => UsageResult("task start <taskId> [channelId] [--param key=value ...]"),
-            "run" => UsageResult("task run <taskId> [channelId] [--param key=value ...]"),
+            "start" => UsageResult("task start <taskId> [channelId | --context <id>] [--param key=value ...]"),
+            "run" => UsageResult("task run <taskId> [channelId | --context <id>] [--param key=value ...]"),
 
             "start-instance" when args.Length >= 3
                 => await HandleTaskStartExistingInstance(CliIdMap.Resolve(args[2]), sp),
@@ -2873,18 +2877,17 @@ public static class CliDispatcher
         string[] args, TaskService svc, IServiceProvider sp, bool startImmediately)
     {
         var taskId = CliIdMap.Resolve(args[2]);
-        Guid? channelId = args.Length > 3 && !args[3].StartsWith("--")
-            ? CliIdMap.Resolve(args[3])
-            : _currentChannelId;
 
-        if (channelId is null)
+        Guid? channelId = null;
+        Guid? contextId = null;
+
+        // args[3] may be a positional channel/context ID or a flag — peek ahead.
+        int flagStart = 3;
+        if (args.Length > 3 && !args[3].StartsWith("--"))
         {
-            Console.Error.WriteLine("Error: a channel ID is required to start a task instance.");
-            Console.Error.WriteLine("Provide the channel ID as an argument or select a channel first with 'chan select <id>'.");
-            return Results.BadRequest("ChannelId is required.");
+            channelId = CliIdMap.Resolve(args[3]);
+            flagStart = 4;
         }
-
-        var flagStart = args.Length > 3 && !args[3].StartsWith("--") ? 4 : 3;
 
         Dictionary<string, string>? paramValues = null;
         for (var i = flagStart; i < args.Length; i++)
@@ -2899,11 +2902,27 @@ public static class CliDispatcher
                     paramValues[kv[..eq]] = kv[(eq + 1)..];
                 }
             }
+            else if (args[i] is "--context" or "-c" && i + 1 < args.Length)
+            {
+                contextId = CliIdMap.Resolve(args[++i]);
+            }
+        }
+
+        // Fall back to the currently-selected channel when no explicit ID or
+        // context flag was provided.
+        if (channelId is null && contextId is null)
+            channelId = _currentChannelId;
+
+        if (channelId is null && contextId is null)
+        {
+            Console.Error.WriteLine("Error: a channel ID or context ID is required to start a task instance.");
+            Console.Error.WriteLine("Provide the channel ID as an argument, use --context <id>, or select a channel first with 'chan select <id>'.");
+            return Results.BadRequest("ChannelId or ContextId is required.");
         }
 
         var session = sp.GetRequiredService<SessionService>();
         var orchestrator = sp.GetRequiredService<TaskOrchestrator>();
-        var request = new StartTaskInstanceRequest(taskId, channelId, paramValues, startImmediately);
+        var request = new StartTaskInstanceRequest(taskId, channelId, paramValues, startImmediately, contextId);
         return await TaskInstanceHandlers.CreateInstance(taskId, request, svc, session, orchestrator);
     }
 
@@ -2977,6 +2996,26 @@ public static class CliDispatcher
         var reader = orchestrator.GetOutputReader(instanceId);
         if (reader is null)
         {
+            // The task may have already completed (fast tasks finish before the next
+            // CLI command runs).  Fall back to persisted instance data so the caller
+            // sees proper status and log output rather than a silent "no stream" error.
+            var svc = sp.GetRequiredService<TaskService>();
+            var instance = await svc.GetInstanceAsync(instanceId);
+            if (instance is not null)
+            {
+                foreach (var log in instance.Logs)
+                    Console.WriteLine($"  [log] {log.Message}");
+
+                var outputs = await svc.GetOutputsAsync(instanceId);
+                foreach (var o in outputs)
+                    Console.WriteLine($"  [output] {o.Data}");
+
+                Console.WriteLine($"  [status] {instance.Status}");
+                Console.WriteLine();
+                Console.WriteLine("Task stream ended.");
+                return Results.Ok();
+            }
+
             Console.Error.WriteLine("No active output stream for this instance.");
             Console.Error.WriteLine("The instance may not be running or was started in a previous session.");
             return Results.Ok();
@@ -3600,8 +3639,8 @@ public static class CliDispatcher
 
             Task:      task <sub> [args]
               task create|update <sourceFilePath>   task list   task get|delete|activate|deactivate <id>
-              task start|run <taskId> [channelId] [--param key=value ...]
-              task create-queued <taskId> [channelId] [--param key=value ...]
+              task start|run <taskId> [channelId | --context <id>] [--param key=value ...]
+              task create-queued <taskId> [channelId | --context <id>] [--param key=value ...]
               task start-instance|instance|instances|cancel|stop|pause|resume|listen <instanceId>
               task outputs <instanceId> [--since <timestamp>]
               task preflight <taskId> [--param key=value ...]

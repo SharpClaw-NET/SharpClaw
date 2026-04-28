@@ -20,12 +20,17 @@ public sealed record UpdateTaskDefinitionRequest(
 
 /// <summary>
 /// Start a new instance of a task definition.
+/// Either <see cref="ChannelId"/> or <see cref="ContextId"/> must be supplied.
+/// When only <see cref="ContextId"/> is provided the task is expected to call
+/// <c>CreateChannel</c> early in its body to establish its own channel; that
+/// channel is automatically associated with the supplied context.
 /// </summary>
 public sealed record StartTaskInstanceRequest(
     Guid TaskDefinitionId,
     Guid? ChannelId = null,
     Dictionary<string, string>? ParameterValues = null,
-    bool StartImmediately = false);
+    bool StartImmediately = false,
+    Guid? ContextId = null);
 
 /// <summary>
 /// Validate task definition source without persisting it.
@@ -96,7 +101,8 @@ public sealed record TaskInstanceResponse(
     DateTimeOffset? StartedAt,
     DateTimeOffset? CompletedAt,
     Guid? ChannelId = null,
-    ChannelCostResponse? ChannelCost = null);
+    ChannelCostResponse? ChannelCost = null,
+    Guid? ContextId = null);
 
 public sealed record TaskInstanceSummaryResponse(
     Guid Id,

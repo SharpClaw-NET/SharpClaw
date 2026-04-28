@@ -7,6 +7,7 @@ using Microsoft.Extensions.Hosting;
 using LLama.Native;
 using Mk8.Shell.Models;
 using Serilog;
+using SharpClaw.Application.API;
 using SharpClaw.Application.API.Api;
 using SharpClaw.Application.API.Cli;
 using SharpClaw.Application.API.Handlers;
@@ -33,6 +34,7 @@ using SharpClaw.Utils.Security;
 using Serilog.Events;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Application.Core.Services.Triggers;
+using SharpClaw.Infrastructure.Persistence.JSON;
 
 var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
 var instanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");
@@ -196,6 +198,28 @@ try
             opts.DataDirectory = backendInstancePaths.DataDirectory;
         opts.EncryptAtRest = builder.Configuration
             .GetValue("Encryption:EncryptDatabase", defaultValue: true);
+        opts.FsyncOnWrite = builder.Configuration
+            .GetValue("Database:FsyncOnWrite", defaultValue: opts.FsyncOnWrite);
+        opts.IndexRescanIntervalMinutes = builder.Configuration
+            .GetValue("Database:IndexRescanIntervalMinutes", defaultValue: opts.IndexRescanIntervalMinutes);
+        opts.QuarantineMaxAgeDays = builder.Configuration
+            .GetValue("Database:QuarantineMaxAgeDays", defaultValue: opts.QuarantineMaxAgeDays);
+        opts.EnableChecksums = builder.Configuration
+            .GetValue("Database:EnableChecksums", defaultValue: opts.EnableChecksums);
+        opts.VerifyChecksumsOnRead = builder.Configuration
+            .GetValue("Database:VerifyChecksumsOnRead", defaultValue: opts.VerifyChecksumsOnRead);
+        opts.EnableEventLog = builder.Configuration
+            .GetValue("Database:EnableEventLog", defaultValue: opts.EnableEventLog);
+        opts.EventLogRetentionDays = builder.Configuration
+            .GetValue("Database:EventLogRetentionDays", defaultValue: opts.EventLogRetentionDays);
+        opts.EnableSnapshots = builder.Configuration
+            .GetValue("Database:EnableSnapshots", defaultValue: opts.EnableSnapshots);
+        opts.SnapshotIntervalHours = builder.Configuration
+            .GetValue("Database:SnapshotIntervalHours", defaultValue: opts.SnapshotIntervalHours);
+        opts.SnapshotRetentionCount = builder.Configuration
+            .GetValue("Database:SnapshotRetentionCount", defaultValue: opts.SnapshotRetentionCount);
+        opts.AsyncFlush = builder.Configuration
+            .GetValue("Database:AsyncFlush", defaultValue: opts.AsyncFlush);
     });
 
     // CORS
@@ -351,6 +375,8 @@ try
     // Background tasks
     builder.Services.AddHostedService<ScheduledTaskService>();
 
+    builder.Services.AddSingleton<DatabaseInitializationGate>();
+
     // Seeding
     builder.Services.AddHostedService<SeedingService>();
 
@@ -368,8 +394,19 @@ try
     app.Services.GetRequiredService<Microsoft.Extensions.Options.IOptions<Microsoft.AspNetCore.Http.Json.JsonOptions>>()
         .Value.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
 
-    // Initialize infrastructure (loads persisted data into InMemory DB)
-    await app.Services.InitializeInfrastructureAsync();
+    // Initialize infrastructure (loads persisted data into InMemory DB) before
+    // any command, hosted-service, or HTTP handler can execute against it.
+    var databaseInitializationGate = app.Services.GetRequiredService<DatabaseInitializationGate>();
+    try
+    {
+        await app.Services.InitializeInfrastructureAsync();
+        databaseInitializationGate.MarkInitialized();
+    }
+    catch (Exception ex)
+    {
+        databaseInitializationGate.MarkFailed(ex);
+        throw;
+    }
 
     // §8c: Check for pending EF Core migrations on relational providers and warn.
     if (storageMode != StorageMode.JsonFile)
@@ -555,6 +592,12 @@ try
     // Seed mk8.shell base env on first startup
     Mk8GlobalEnv.Load();
 
+    app.Lifetime.ApplicationStarted.Register(() =>
+    {
+        var flushWorker = app.Services.GetService<FlushWorker>();
+        flushWorker?.Start();
+    });
+
     // CLI mode: handle command and exit
     try
     {
@@ -572,6 +615,7 @@ try
 #if DEBUG
     app.UseMiddleware<DiagnosticMiddleware>();
 #endif
+    app.UseMiddleware<DatabaseInitializationGateMiddleware>();
     app.UseMiddleware<ExceptionHandlingMiddleware>();
     if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
         app.UseSerilogRequestLogging();
@@ -664,20 +708,20 @@ try
     // skips the REPL and just waits on the cancellation token. Console
     // logging must stay visible there — stdout is the only feedback channel
     // for containers, CI runs, systemd units, and detached child processes.
-    // See bug #1 in docs/internal/local-inference-pipeline-debug-report.md.
     var forceRepl = string.Equals(
         Environment.GetEnvironmentVariable("SHARPCLAW_FORCE_REPL"), "1",
         StringComparison.Ordinal);
     var interactive = !Console.IsInputRedirected || forceRepl;
     if (interactive)
-        consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Fatal;
+        consoleLevelSwitch.MinimumLevel = LogEventLevel.Fatal;
 
     await CliDispatcher.RunInteractiveAsync(app.Services, app.Lifetime.ApplicationStopping);
 
     if (interactive)
-        consoleLevelSwitch.MinimumLevel = Serilog.Events.LogEventLevel.Information;
+        consoleLevelSwitch.MinimumLevel = LogEventLevel.Information;
 
     discoveryLease?.Dispose();
+    await app.Services.ShutdownInfrastructureAsync();
     await app.StopAsync();
 }
 catch (Exception ex)

@@ -23,7 +23,6 @@ using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
 
@@ -32,7 +31,7 @@ namespace SharpClaw.Application.Services;
 public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
-    ColdEntityStore coldStore,
+    IPersistenceEntityResolver entities,
     ProviderApiClientFactory clientFactory,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
@@ -243,14 +242,17 @@ public sealed class ChatService(
     public async Task<IReadOnlyList<ChatMessageResponse>> GetHistoryAsync(
         Guid channelId, Guid? threadId = null, int limit = 50, CancellationToken ct = default)
     {
-        var indexFilter = threadId is not null
-            ? new ColdEntityStore.IndexFilter("ThreadId", threadId.Value)
-            : new ColdEntityStore.IndexFilter("ChannelId", channelId);
-        var messages = await coldStore.QueryAsync<ChatMessageDB>(
-            m => threadId is not null ? m.ThreadId == threadId : m.ChannelId == channelId,
+        var hint = threadId is not null
+            ? new PersistenceQueryHint("ThreadId", threadId.Value)
+            : new PersistenceQueryHint("ChannelId", channelId);
+
+        var hasThread = threadId is not null;
+        var messages = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => hasThread ? m.ThreadId == threadId : m.ChannelId == channelId,
             limit,
-            ct,
-            indexFilter);
+            hint,
+            ct);
 
         return messages
             .OrderBy(m => m.CreatedAt)
@@ -276,9 +278,11 @@ public sealed class ChatService(
     public async Task<ChannelCostResponse> GetChannelCostAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        var messages = await coldStore.QueryAllAsync<ChatMessageDB>(
-            m => m.ChannelId == channelId && m.PromptTokens != null, ct,
-            new ColdEntityStore.IndexFilter("ChannelId", channelId));
+        var messages = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => m.ChannelId == channelId && m.PromptTokens != null,
+            hint: new PersistenceQueryHint("ChannelId", channelId),
+            ct: ct);
 
         var breakdown = messages
             .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
@@ -307,9 +311,11 @@ public sealed class ChatService(
             .AnyAsync(t => t.Id == threadId && t.ChannelId == channelId, ct);
         if (!threadExists) return null;
 
-        var rows = await coldStore.QueryAllAsync<ChatMessageDB>(
-            m => m.ThreadId == threadId && m.PromptTokens != null, ct,
-            new ColdEntityStore.IndexFilter("ThreadId", threadId));
+        var rows = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => m.ThreadId == threadId && m.PromptTokens != null,
+            hint: new PersistenceQueryHint("ThreadId", threadId),
+            ct: ct);
 
         var breakdown = rows
             .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
@@ -341,9 +347,11 @@ public sealed class ChatService(
         var agent = await db.Agents.FindAsync([agentId], ct);
         if (agent is null) return null;
 
-        var messages = await coldStore.QueryAllAsync<ChatMessageDB>(
-            m => m.SenderAgentId == agentId && m.PromptTokens != null, ct,
-            new ColdEntityStore.IndexFilter("SenderAgentId", agentId));
+        var messages = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => m.SenderAgentId == agentId && m.PromptTokens != null,
+            hint: new PersistenceQueryHint("SenderAgentId", agentId),
+            ct: ct);
 
         var channelBreakdown = messages
             .GroupBy(m => m.ChannelId)
@@ -418,11 +426,12 @@ public sealed class ChatService(
         var maxMessages = thread?.MaxMessages ?? MaxHistoryMessages;
         var maxChars = thread?.MaxCharacters ?? MaxHistoryCharacters;
 
-        var cold = await coldStore.QueryAsync<ChatMessageDB>(
+        var cold = await entities.QueryAsync<ChatMessageDB>(
+            db,
             m => m.ThreadId == threadId,
-            maxMessages,
-            ct,
-            new ColdEntityStore.IndexFilter("ThreadId", threadId));
+            limit: maxMessages,
+            hint: new PersistenceQueryHint("ThreadId", threadId),
+            ct: ct);
 
         var messages = cold
             .OrderBy(m => m.CreatedAt)

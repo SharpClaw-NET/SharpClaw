@@ -21,7 +21,6 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 
 namespace SharpClaw.Application.Services;
 
@@ -31,7 +30,7 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class AgentJobService(
     SharpClawDbContext db,
-    ColdEntityStore coldStore,
+    IPersistenceEntityResolver entities,
     AgentActionService actions,
     SessionService session,
     ModuleRegistry moduleRegistry,
@@ -334,16 +333,22 @@ public sealed class AgentJobService(
     public async Task<IReadOnlyList<AgentJobResponse>> ListAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        var jobs = await coldStore.QueryAllAsync<AgentJobDB>(
-            j => j.ChannelId == channelId, ct,
-            new ColdEntityStore.IndexFilter("ChannelId", channelId));
+        var jobs = await entities.QueryAsync<AgentJobDB>(
+            db,
+            j => j.ChannelId == channelId,
+            hint: new PersistenceQueryHint("ChannelId", channelId),
+            ct: ct);
 
-        // Load related log entries from disk.
         foreach (var job in jobs)
         {
-            job.LogEntries = await coldStore.QueryAllAsync<AgentJobLogEntryDB>(
-                l => l.AgentJobId == job.Id, ct,
-                new ColdEntityStore.IndexFilter("AgentJobId", job.Id));
+            if (job.LogEntries.Count == 0)
+            {
+                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
+                    db,
+                    l => l.AgentJobId == job.Id,
+                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
+                    ct: ct)).ToList();
+            }
         }
 
         return jobs.OrderByDescending(j => j.CreatedAt).Select(ToResponse).ToList();
@@ -357,9 +362,11 @@ public sealed class AgentJobService(
     public async Task<IReadOnlyList<AgentJobSummaryResponse>> ListSummariesAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        var jobs = await coldStore.QueryAllAsync<AgentJobDB>(
-            j => j.ChannelId == channelId, ct,
-            new ColdEntityStore.IndexFilter("ChannelId", channelId));
+        var jobs = await entities.QueryAsync<AgentJobDB>(
+            db,
+            j => j.ChannelId == channelId,
+            hint: new PersistenceQueryHint("ChannelId", channelId),
+            ct: ct);
 
         return jobs
             .OrderByDescending(j => j.CreatedAt)
@@ -375,17 +382,23 @@ public sealed class AgentJobService(
         Guid? resourceId = null,
         CancellationToken ct = default)
     {
-        var jobs = await coldStore.QueryAllAsync<AgentJobDB>(
+        var jobs = await entities.QueryAsync<AgentJobDB>(
+            db,
             j => j.ActionKey != null
                  && j.ActionKey.StartsWith(actionKeyPrefix, StringComparison.OrdinalIgnoreCase)
-                 && (resourceId is null || j.ResourceId == resourceId),
-            ct);
+                 && (resourceId == null || j.ResourceId == resourceId),
+            ct: ct);
 
         foreach (var job in jobs)
         {
-            job.LogEntries = await coldStore.QueryAllAsync<AgentJobLogEntryDB>(
-                l => l.AgentJobId == job.Id, ct,
-                new ColdEntityStore.IndexFilter("AgentJobId", job.Id));
+            if (job.LogEntries.Count == 0)
+            {
+                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
+                    db,
+                    l => l.AgentJobId == job.Id,
+                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
+                    ct: ct)).ToList();
+            }
         }
 
         return jobs.OrderByDescending(j => j.CreatedAt).Select(ToResponse).ToList();
@@ -396,11 +409,12 @@ public sealed class AgentJobService(
         Guid? resourceId = null,
         CancellationToken ct = default)
     {
-        var jobs = await coldStore.QueryAllAsync<AgentJobDB>(
+        var jobs = await entities.QueryAsync<AgentJobDB>(
+            db,
             j => j.ActionKey != null
                  && j.ActionKey.StartsWith(actionKeyPrefix, StringComparison.OrdinalIgnoreCase)
-                 && (resourceId is null || j.ResourceId == resourceId),
-            ct);
+                 && (resourceId == null || j.ResourceId == resourceId),
+            ct: ct);
 
         return jobs
             .OrderByDescending(j => j.CreatedAt)
@@ -965,20 +979,17 @@ public sealed class AgentJobService(
 
     private async Task<AgentJobDB?> LoadJobAsync(Guid jobId, CancellationToken ct)
     {
-        // Try EF first (current-session entities still tracked).
-        var job = await db.AgentJobs
-            .Include(j => j.LogEntries)
-            .FirstOrDefaultAsync(j => j.Id == jobId, ct);
-        if (job is not null)
-            return job;
-
-        // Fall back to cold store for entities from previous sessions.
-        job = (await coldStore.FindAsync<AgentJobDB>(jobId, ct)).ValueOrDefault;
+        var job = await entities.FindAsync<AgentJobDB>(db, jobId, ct);
         if (job is not null)
         {
-            job.LogEntries = await coldStore.QueryAllAsync<AgentJobLogEntryDB>(
-                l => l.AgentJobId == jobId, ct,
-                new ColdEntityStore.IndexFilter("AgentJobId", jobId));
+            if (job.LogEntries.Count == 0)
+            {
+                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
+                    db,
+                    l => l.AgentJobId == jobId,
+                    hint: new PersistenceQueryHint("AgentJobId", jobId),
+                    ct: ct)).ToList();
+            }
         }
 
         return job;
@@ -1052,12 +1063,9 @@ public sealed class AgentJobService(
         {
             foreach (var id in jobIds)
             {
-                var cold = (await coldStore.FindAsync<AgentJobDB>(id, ct)).ValueOrDefault;
-                if (cold is not null)
-                {
-                    db.AgentJobs.Attach(cold);
-                    jobs.Add(cold);
-                }
+                var job = await entities.FindAsync<AgentJobDB>(db, id, ct);
+                if (job is not null)
+                    jobs.Add(job);
             }
         }
 

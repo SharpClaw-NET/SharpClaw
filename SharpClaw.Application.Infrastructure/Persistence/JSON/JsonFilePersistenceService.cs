@@ -305,6 +305,13 @@ public sealed class JsonFilePersistenceService(
         IReadOnlyList<(Type ClrType, Guid Id, EntityState State)> entityChanges,
         IReadOnlySet<string> joinTableChanges,
         CancellationToken ct = default)
+        => await FlushChangesAsync(entityChanges, joinTableChanges, serializedEntities: null, ct);
+
+    public async Task FlushChangesAsync(
+        IReadOnlyList<(Type ClrType, Guid Id, EntityState State)> entityChanges,
+        IReadOnlySet<string> joinTableChanges,
+        IReadOnlyDictionary<(Type ClrType, Guid Id), byte[]>? serializedEntities,
+        CancellationToken ct = default)
     {
         // Phase A′: Write transaction manifest BEFORE any entity files (RGAP-10).
         string? manifestPath = null;
@@ -315,7 +322,7 @@ public sealed class JsonFilePersistenceService(
 
         try
         {
-            await FlushChangesInternalAsync(entityChanges, joinTableChanges, ct);
+            await FlushChangesInternalAsync(entityChanges, joinTableChanges, serializedEntities, ct);
         }
         catch
         {
@@ -335,6 +342,13 @@ public sealed class JsonFilePersistenceService(
     internal async Task FlushChangesInternalAsync(
         IReadOnlyList<(Type ClrType, Guid Id, EntityState State)> entityChanges,
         IReadOnlySet<string> joinTableChanges,
+        CancellationToken ct = default)
+        => await FlushChangesInternalAsync(entityChanges, joinTableChanges, serializedEntities: null, ct);
+
+    internal async Task FlushChangesInternalAsync(
+        IReadOnlyList<(Type ClrType, Guid Id, EntityState State)> entityChanges,
+        IReadOnlySet<string> joinTableChanges,
+        IReadOnlyDictionary<(Type ClrType, Guid Id), byte[]>? serializedEntities,
         CancellationToken ct = default)
     {
         fs.CreateDirectory(options.DataDirectory);
@@ -381,8 +395,14 @@ public sealed class JsonFilePersistenceService(
                     }
                     else
                     {
-                        var entity = context.Find(clrType, id);
-                        if (entity is not null)
+                        if (serializedEntities is not null && serializedEntities.TryGetValue((clrType, id), out var serializedBytes))
+                        {
+                            var prepared = JsonFileEncryption.PrepareBytes(
+                                serializedBytes, encryptionOptions.Key, options.EncryptAtRest);
+                            await twoPhase.StageAsync(filePath, prepared, ct);
+                            checksumChanges?.GetOrAdd(dirPath).Add((fileName, prepared, Deleted: false));
+                        }
+                        else if (context.Find(clrType, id) is { } entity)
                         {
                             var navProps = GetNavigations().GetValueOrDefault(clrType);
                             var bytes = SerializeEntityToBytes(entity, clrType, navProps);
@@ -391,11 +411,21 @@ public sealed class JsonFilePersistenceService(
                             await twoPhase.StageAsync(filePath, prepared, ct);
                             checksumChanges?.GetOrAdd(dirPath).Add((fileName, prepared, Deleted: false));
 
-                            // Update on-disk index for cold entity types
-                            if (options.ColdEntityTypes.Contains(clrType))
+                        }
+
+                        // Update on-disk index for cold entity types
+                        if (options.ColdEntityTypes.Contains(clrType))
+                        {
+                            object? indexEntity = null;
+                            if (serializedEntities is not null && serializedEntities.TryGetValue((clrType, id), out var serializedBytesForIndex))
+                                indexEntity = JsonSerializer.Deserialize(serializedBytesForIndex, clrType, ColdEntityStore.JsonOptions);
+                            else
+                                indexEntity = context.Find(clrType, id);
+
+                            if (indexEntity is not null)
                             {
                                 await ColdEntityIndex.UpdateIndexAsync(
-                                    fs, dirPath, clrType.Name, id, entity,
+                                    fs, dirPath, clrType.Name, id, indexEntity,
                                     deleted: false, logger, ct,
                                     _coldIndexRegistry.GetIndexedProperties());
                             }

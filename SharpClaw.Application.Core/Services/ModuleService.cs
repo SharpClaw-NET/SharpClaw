@@ -9,6 +9,9 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
+// Infrastructure-facing: ModuleJsonPersistenceService coordinates module persistence
+// registration for JSON/InMemory mode.  This import does not introduce cold-entity
+// query coupling and is acceptable per the cold-storage-ef-query-integration-plan.
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Utils.Security;

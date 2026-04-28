@@ -73,6 +73,13 @@ public class TaskInstanceDB : BaseEntity
     public Guid? ChannelId { get; set; }
     public ChannelDB? Channel { get; set; }
 
+    /// <summary>
+    /// Optional context the task was started against.  When <see cref="ChannelId"/>
+    /// is absent the task must call <c>CreateChannel</c> to establish its own
+    /// channel; that channel is automatically linked to this context.
+    /// </summary>
+    public Guid? ContextId { get; set; }
+
     // ── Navigation ────────────────────────────────────────────────
 
     public ICollection<TaskExecutionLogDB> LogEntries { get; set; } = [];

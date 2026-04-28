@@ -29,7 +29,8 @@ public sealed class FlushQueue : IDisposable
         /// Pre-serialised entity bytes keyed by <c>(TypeName, Id)</c>.
         /// Written to the overlay immediately on enqueue.
         /// </summary>
-        IReadOnlyDictionary<(string TypeName, Guid Id), byte[]> SerializedEntities);
+        IReadOnlyDictionary<(string TypeName, Guid Id), byte[]> SerializedEntities,
+        IReadOnlyDictionary<(Type ClrType, Guid Id), byte[]> SerializedEntitiesByClrType);
 
     private readonly Channel<FlushIntent> _channel;
     private readonly ILogger<FlushQueue> _logger;
