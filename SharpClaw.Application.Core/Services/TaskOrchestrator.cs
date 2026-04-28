@@ -11,8 +11,12 @@ using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Compilation;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Infrastructure.Models.Access;
+using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Tasks;
@@ -33,6 +37,7 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class TaskOrchestrator(
     SharpClawDbContext db,
+    IPersistenceEntityResolver entities,
     TaskService taskService,
     ChatService chatService,
     AgentJobService agentJobService,
@@ -56,10 +61,20 @@ public sealed class TaskOrchestrator(
     /// </summary>
     public async Task StartAsync(Guid instanceId, CancellationToken ct = default)
     {
-        var instance = await db.TaskInstances
-            .Include(i => i.TaskDefinition)
-            .FirstOrDefaultAsync(i => i.Id == instanceId, ct)
+        using var startupScope = scopeFactory.CreateScope();
+        var startupDb = startupScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var startupTaskService = startupScope.ServiceProvider.GetRequiredService<TaskService>();
+        var startupResolver = startupScope.ServiceProvider.GetRequiredService<IPersistenceEntityResolver>();
+
+        var instance = await startupResolver.FindAsync<TaskInstanceDB>(startupDb, instanceId, ct)
             ?? throw new InvalidOperationException($"Task instance {instanceId} not found.");
+
+        if (instance.TaskDefinition is null)
+        {
+            instance.TaskDefinition = await startupResolver.FindAsync<TaskDefinitionDB>(startupDb, instance.TaskDefinitionId, ct)
+                ?? throw new InvalidOperationException(
+                    $"Task definition {instance.TaskDefinitionId} for instance {instanceId} not found.");
+        }
 
         if (instance.Status != TaskInstanceStatus.Queued)
             throw new InvalidOperationException(
@@ -83,20 +98,20 @@ public sealed class TaskOrchestrator(
             instance.Status = TaskInstanceStatus.Failed;
             instance.ErrorMessage = $"Compilation failed: {errors}";
             instance.CompletedAt = DateTimeOffset.UtcNow;
-            await db.SaveChangesAsync(ct);
+            await startupDb.SaveChangesAsync(ct);
             return;
         }
 
         // Prepare runtime entry in the host
         var runtime = runtimeHost.Register(instanceId, ct);
 
-        if (!await taskService.TryMarkInstanceRunningAsync(instanceId, ct))
+        if (!await startupTaskService.TryMarkInstanceRunningAsync(instanceId, ct))
         {
             runtimeHost.Unregister(instanceId);
             throw new InvalidOperationException($"Task instance {instanceId} could not transition to Running.");
         }
 
-        await taskService.AppendLogAsync(instanceId, "Task started.", ct: ct);
+        await startupTaskService.AppendLogAsync(instanceId, "Task started.", ct: ct);
         await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, "Running");
 
         // Execute in background so the caller returns immediately
@@ -210,8 +225,15 @@ public sealed class TaskOrchestrator(
 
         try
         {
-            // Resolve channel — required for all task instances by design contract.
-            context.ChannelId = await GetInstanceChannelIdAsync(instanceId, ct, db);
+            // Resolve channel — may be null when the task was started with a
+            // context instead of a direct channel.  In that case the task is
+            // expected to call CreateChannel early; channel-dependent steps
+            // (Chat, CreateThread, etc.) will throw if invoked before then.
+            var initialChannel = await db.TaskInstances
+                .Where(i => i.Id == instanceId)
+                .Select(i => i.ChannelId)
+                .FirstOrDefaultAsync(ct);
+            context.ChannelId = initialChannel ?? Guid.Empty;
 
             foreach (var step in plan.ExecutionSteps)
             {
@@ -293,6 +315,8 @@ public sealed class TaskOrchestrator(
                 => await ExecuteCreateChannelStepAsync(step, context, db, taskService),
             WellKnownTaskStepKeys.FindChannel
                 => await ExecuteFindChannelStepAsync(step, context, db, taskService),
+            WellKnownTaskStepKeys.AddAllowedAgent
+                => await ExecuteAddAllowedAgentStepAsync(step, context, db, taskService),
             WellKnownTaskStepKeys.Conditional
                 => await ExecuteConditionalStepAsync(step, context, db, taskService, chatService, agentJobService),
             WellKnownTaskStepKeys.Loop
@@ -537,17 +561,20 @@ public sealed class TaskOrchestrator(
         }
 
         // Auto-add the new agent to the task's channel AllowedAgents so subsequent
-        // Chat/ChatStream steps can use it.
-        var createAgentChannelId = await GetInstanceChannelIdAsync(
-            context.InstanceId, context.CancellationToken, db);
-        var createAgentChannel = await db.Channels
-            .Include(c => c.AllowedAgents)
-            .FirstOrDefaultAsync(c => c.Id == createAgentChannelId, context.CancellationToken);
-        if (createAgentChannel is not null &&
-            !createAgentChannel.AllowedAgents.Any(a => a.Id == agentEntity.Id))
+        // Chat/ChatStream steps can use it. Context-only setup tasks may create
+        // the agent before creating their channel, so this is only applicable once
+        // a channel exists.
+        if (await TryGetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db) is { } createAgentChannelId)
         {
-            createAgentChannel.AllowedAgents.Add(agentEntity);
-            await db.SaveChangesAsync(context.CancellationToken);
+            var createAgentChannel = await db.Channels
+                .Include(c => c.AllowedAgents)
+                .FirstOrDefaultAsync(c => c.Id == createAgentChannelId, context.CancellationToken);
+            if (createAgentChannel is not null &&
+                !createAgentChannel.AllowedAgents.Any(a => a.Id == agentEntity.Id))
+            {
+                createAgentChannel.AllowedAgents.Add(agentEntity);
+                await db.SaveChangesAsync(context.CancellationToken);
+            }
         }
 
         if (step.ResultVariable is not null)
@@ -687,14 +714,79 @@ public sealed class TaskOrchestrator(
         var adminUser = await db.Users.FirstOrDefaultAsync(u => u.IsUserAdmin, context.CancellationToken)
             ?? throw new InvalidOperationException("SetRolePermissions: no admin user found in database.");
 
-        using var setPermScope = _scopeFactory.CreateScope();
-        var roleService = setPermScope.ServiceProvider.GetRequiredService<RoleService>();
-        await roleService.SetPermissionsAsync(setPermRoleId, permRequest, adminUser.Id, context.CancellationToken);
+        await SetRolePermissionsAsync(db, setPermRoleId, permRequest, context.CancellationToken);
 
         await taskService.AppendLogAsync(
             context.InstanceId, $"SetRolePermissions {setPermRoleId}",
             ct: context.CancellationToken);
         return TaskStepExecutionResult.Continue;
+    }
+
+    private static async Task SetRolePermissionsAsync(
+        SharpClawDbContext db,
+        Guid roleId,
+        SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest request,
+        CancellationToken ct)
+    {
+        var role = await db.Roles
+            .Include(r => r.PermissionSet)
+            .FirstOrDefaultAsync(r => r.Id == roleId, ct)
+            ?? throw new InvalidOperationException($"SetRolePermissions: role '{roleId}' not found.");
+
+        var permissionSet = role.PermissionSet;
+        if (permissionSet is null)
+        {
+            permissionSet = new SharpClaw.Application.Infrastructure.Models.Clearance.PermissionSetDB();
+            db.PermissionSets.Add(permissionSet);
+            await db.SaveChangesAsync(ct);
+            role.PermissionSetId = permissionSet.Id;
+        }
+
+        await db.GlobalFlags
+            .Where(f => f.PermissionSetId == permissionSet.Id)
+            .ExecuteDeleteAsync(ct);
+        await db.ResourceAccesses
+            .Where(a => a.PermissionSetId == permissionSet.Id && a.ResourceId != WellKnownIds.AllResources)
+            .ExecuteDeleteAsync(ct);
+
+        foreach (var (flagKey, clearance) in request.GlobalFlags ?? new Dictionary<string, PermissionClearance>())
+        {
+            db.GlobalFlags.Add(new GlobalFlagDB
+            {
+                PermissionSetId = permissionSet.Id,
+                FlagKey = flagKey,
+                Clearance = clearance,
+            });
+        }
+
+        foreach (var (resourceType, grants) in request.ResourceGrants ?? new Dictionary<string, IReadOnlyList<ResourceGrant>>())
+        {
+            foreach (var grant in grants)
+            {
+                var existingWildcard = grant.ResourceId == WellKnownIds.AllResources
+                    ? await db.ResourceAccesses.FirstOrDefaultAsync(a =>
+                        a.PermissionSetId == permissionSet.Id &&
+                        a.ResourceType == resourceType &&
+                        a.ResourceId == WellKnownIds.AllResources, ct)
+                    : null;
+
+                if (existingWildcard is not null)
+                {
+                    existingWildcard.Clearance = grant.Clearance;
+                    continue;
+                }
+
+                db.ResourceAccesses.Add(new ResourceAccessDB
+                {
+                    PermissionSetId = permissionSet.Id,
+                    ResourceType = resourceType,
+                    ResourceId = grant.ResourceId,
+                    Clearance = grant.Clearance,
+                });
+            }
+        }
+
+        await db.SaveChangesAsync(ct);
     }
 
     private async Task<TaskStepExecutionResult> ExecuteAssignRoleStepAsync(
@@ -710,9 +802,14 @@ public sealed class TaskOrchestrator(
         if (!Guid.TryParse(roleIdStr, out var assignRoleId))
             throw new InvalidOperationException($"AssignRole: invalid role ID '{roleIdStr}'.");
 
-        using var assignRoleScope = _scopeFactory.CreateScope();
-        var agentService = assignRoleScope.ServiceProvider.GetRequiredService<AgentService>();
-        await agentService.AssignRoleAsync(assignAgentId, assignRoleId, context.CancellationToken);
+        var agentEntity = await db.Agents.FirstOrDefaultAsync(a => a.Id == assignAgentId, context.CancellationToken)
+            ?? throw new InvalidOperationException($"AssignRole: agent '{assignAgentId}' not found.");
+        var roleExists = await db.Roles.AnyAsync(r => r.Id == assignRoleId, context.CancellationToken);
+        if (!roleExists)
+            throw new InvalidOperationException($"AssignRole: role '{assignRoleId}' not found.");
+
+        agentEntity.RoleId = assignRoleId;
+        await db.SaveChangesAsync(context.CancellationToken);
 
         await taskService.AppendLogAsync(
             context.InstanceId, $"AssignRole agent={assignAgentId} role={assignRoleId}",
@@ -734,6 +831,13 @@ public sealed class TaskOrchestrator(
         if (!Guid.TryParse(channelAgentIdStr, out var channelAgentId))
             throw new InvalidOperationException($"CreateChannel: invalid agent ID '{channelAgentIdStr}'.");
 
+        // Inherit the context from the task instance when set, so the channel
+        // is linked to the same context the task was started against.
+        Guid? instanceContextId = await db.TaskInstances
+            .Where(i => i.Id == context.InstanceId)
+            .Select(i => i.ContextId)
+            .FirstOrDefaultAsync(context.CancellationToken);
+
         // Upsert by customId when provided; otherwise upsert by title.
         ChannelDB? existingChannel = !string.IsNullOrEmpty(channelCustomId)
             ? await db.Channels.FirstOrDefaultAsync(c => c.CustomId == channelCustomId, context.CancellationToken)
@@ -746,6 +850,8 @@ public sealed class TaskOrchestrator(
             existingChannel.AgentId = channelAgentId;
             if (!string.IsNullOrEmpty(channelCustomId))
                 existingChannel.CustomId = channelCustomId;
+            if (instanceContextId.HasValue)
+                existingChannel.AgentContextId = instanceContextId;
             await db.SaveChangesAsync(context.CancellationToken);
             channelResultId = existingChannel.Id;
         }
@@ -757,9 +863,23 @@ public sealed class TaskOrchestrator(
                 new SharpClaw.Contracts.DTOs.Channels.CreateChannelRequest(
                     AgentId: channelAgentId,
                     Title: channelTitle,
-                    CustomId: channelCustomId),
+                    CustomId: channelCustomId,
+                    ContextId: instanceContextId),
                 context.CancellationToken);
             channelResultId = channelResp.Id;
+        }
+
+        // When the task instance has no channel yet (context-mode start), adopt
+        // this channel as the instance channel so Chat and other steps work.
+        if (context.ChannelId == Guid.Empty)
+        {
+            var inst = await db.TaskInstances.FindAsync([context.InstanceId], context.CancellationToken);
+            if (inst is not null && inst.ChannelId is null)
+            {
+                inst.ChannelId = channelResultId;
+                await db.SaveChangesAsync(context.CancellationToken);
+            }
+            context.ChannelId = channelResultId;
         }
 
         if (step.ResultVariable is not null)
@@ -781,6 +901,45 @@ public sealed class TaskOrchestrator(
             context.Variables[step.ResultVariable] = channel?.Id.ToString();
         await taskService.AppendLogAsync(
             context.InstanceId, $"FindChannel '{search}' → {(channel is not null ? channel.Id : "not found")}",
+            ct: context.CancellationToken);
+        return TaskStepExecutionResult.Continue;
+    }
+
+    private async Task<TaskStepExecutionResult> ExecuteAddAllowedAgentStepAsync(
+        TaskStepDefinition step, TaskExecutionContext context,
+        SharpClawDbContext db, TaskService taskService)
+    {
+        // Arguments: [0]=agentId (Expression), optional [1]=channelId (Arguments[1])
+        // When channelId is omitted or not a valid Guid, the instance channel is used.
+        var agentIdStr = ResolveExpression(step.Expression, context);
+        var channelIdStr = step.Arguments is { Count: > 1 }
+            ? ResolveExpression(step.Arguments[1], context) : null;
+
+        if (!Guid.TryParse(agentIdStr, out var addAgentId))
+            throw new InvalidOperationException($"AddAllowedAgent: invalid agent ID '{agentIdStr}'.");
+
+        var agentEntity = await db.Agents
+            .FirstOrDefaultAsync(a => a.Id == addAgentId, context.CancellationToken)
+            ?? throw new InvalidOperationException($"AddAllowedAgent: agent '{addAgentId}' not found.");
+
+        Guid targetChannelId = Guid.TryParse(channelIdStr, out var cid)
+            ? cid
+            : await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
+
+        var targetChannel = await db.Channels
+            .Include(c => c.AllowedAgents)
+            .FirstOrDefaultAsync(c => c.Id == targetChannelId, context.CancellationToken);
+        if (targetChannel is null)
+            throw new InvalidOperationException($"AddAllowedAgent: channel '{targetChannelId}' not found.");
+
+        if (!targetChannel.AllowedAgents.Any(a => a.Id == agentEntity.Id))
+        {
+            targetChannel.AllowedAgents.Add(agentEntity);
+            await db.SaveChangesAsync(context.CancellationToken);
+        }
+
+        await taskService.AppendLogAsync(
+            context.InstanceId, $"AddAllowedAgent agent={addAgentId} → channel={targetChannelId}",
             ct: context.CancellationToken);
         return TaskStepExecutionResult.Continue;
     }
@@ -1267,21 +1426,27 @@ public sealed class TaskOrchestrator(
 
     /// <summary>
     /// Resolve the <see cref="TaskInstanceDB.ChannelId"/> for a running instance.
-    /// All task instances must be started with a ChannelId — it is a design contract.
+    /// When the instance was started with a context instead of a direct channel the
+    /// channel may not be set yet — the task is expected to call <c>CreateChannel</c>
+    /// first.  This method throws only when a step that truly requires a channel is
+    /// reached before one has been established.
     /// </summary>
     private async Task<Guid> GetInstanceChannelIdAsync(Guid instanceId, CancellationToken ct, SharpClawDbContext db)
     {
-        var channelId = await db.TaskInstances
-            .Where(i => i.Id == instanceId)
-            .Select(i => i.ChannelId)
-            .FirstOrDefaultAsync(ct);
+        var channelId = await TryGetInstanceChannelIdAsync(instanceId, ct, db);
 
         return channelId
             ?? throw new InvalidOperationException(
-                $"Task instance {instanceId} has no ChannelId. " +
-                "All task instances must be started with a channel. " +
-                "Provide a ChannelId in the start request.");
+                $"Task instance {instanceId} has no channel yet. " +
+                "Call CreateChannel before using Chat, CreateThread, or other channel-dependent steps. " +
+                "Alternatively, start the instance with a ChannelId instead of a ContextId.");
     }
+
+    private static async Task<Guid?> TryGetInstanceChannelIdAsync(Guid instanceId, CancellationToken ct, SharpClawDbContext db)
+        => await db.TaskInstances
+            .Where(i => i.Id == instanceId)
+            .Select(i => i.ChannelId)
+            .FirstOrDefaultAsync(ct);
 
     /// <summary>
     /// Auto-deny tool-call jobs that require approval during task execution.

@@ -3,6 +3,7 @@ using System.Threading.Channels;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SharpClaw.Application.Infrastructure.Models.Tasks;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Infrastructure.Persistence;
@@ -193,18 +194,18 @@ public sealed class TaskRuntimeHost(
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var svc = scope.ServiceProvider.GetRequiredService<TaskService>();
+        var entities = scope.ServiceProvider.GetRequiredService<IPersistenceEntityResolver>();
 
         // Find instances that were left in Running or Paused from a previous
         // process lifetime.  We cannot safely replay arbitrary side effects,
         // so the conservative policy is to mark them as Failed with a recovery
         // note.  A future phase may identify listener-style or idempotent tasks
         // and attempt rehydration.
-        var stale = await Microsoft.EntityFrameworkCore.EntityFrameworkQueryableExtensions
-            .ToListAsync(
-                db.TaskInstances.Where(i =>
-                    i.Status == TaskInstanceStatus.Running ||
-                    i.Status == TaskInstanceStatus.Paused),
-                ct);
+        var stale = await entities.QueryAsync<TaskInstanceDB>(
+            db,
+            i => i.Status == TaskInstanceStatus.Running || i.Status == TaskInstanceStatus.Paused,
+            hint: null,
+            ct);
 
         if (stale.Count == 0)
             return;

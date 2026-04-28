@@ -357,6 +357,10 @@ public class SharpClawDbContext(
                 .WithMany()
                 .HasForeignKey(i => i.ChannelId)
                 .OnDelete(DeleteBehavior.SetNull);
+            e.HasOne<ChannelContextDB>()
+                .WithMany()
+                .HasForeignKey(i => i.ContextId)
+                .OnDelete(DeleteBehavior.SetNull);
             e.HasMany(i => i.LogEntries)
                 .WithOne(l => l.TaskInstance)
                 .HasForeignKey(l => l.TaskInstanceId)
@@ -500,6 +504,7 @@ public class SharpClawDbContext(
                 {
                     var jsonSync = serviceProvider?.GetService<JsonFilePersistenceService>();
                     var serialized = new Dictionary<(string TypeName, Guid Id), byte[]>();
+                    var serializedByClrType = new Dictionary<(Type ClrType, Guid Id), byte[]>();
 
                     if (jsonSync is not null)
                     {
@@ -513,11 +518,12 @@ public class SharpClawDbContext(
                             {
                                 var bytes = JsonSerializer.SerializeToUtf8Bytes(entity, clrType, ColdEntityStore.JsonOptions);
                                 serialized[(clrType.Name, id)] = bytes;
+                                serializedByClrType[(clrType, id)] = bytes;
                             }
                         }
                     }
 
-                    var intent = new FlushQueue.FlushIntent(entityChanges, joinTableChanges, serialized);
+                    var intent = new FlushQueue.FlushIntent(entityChanges, joinTableChanges, serialized, serializedByClrType);
                     await flushQueue.EnqueueAsync(intent, cancellationToken);
                 }
                 else

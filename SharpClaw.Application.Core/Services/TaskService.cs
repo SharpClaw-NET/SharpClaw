@@ -7,7 +7,6 @@ using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 
 namespace SharpClaw.Application.Services;
 
@@ -16,7 +15,7 @@ namespace SharpClaw.Application.Services;
 /// Definitions are parsed on creation so validation errors surface
 /// immediately rather than at execution time.
 /// </summary>
-public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore, TaskPreflightChecker preflight, TaskTriggerRegistrar? triggerRegistrar = null)
+public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolver entities, TaskPreflightChecker preflight, TaskTriggerRegistrar? triggerRegistrar = null)
 {
     /// <summary>
     /// Parse and validate a task definition without persisting it.
@@ -295,6 +294,7 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
                 ? JsonSerializer.Serialize(request.ParameterValues)
                 : null,
             ChannelId = request.ChannelId,
+            ContextId = request.ContextId,
             CallerUserId = callerUserId,
             CallerAgentId = callerAgentId,
         };
@@ -376,42 +376,37 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
     public async Task<TaskInstanceResponse?> GetInstanceAsync(
         Guid id, CancellationToken ct = default)
     {
-        // Try EF first (current session), then cold store (previous sessions)
-        var instance = await db.TaskInstances
-            .Include(i => i.TaskDefinition)
-            .Include(i => i.LogEntries.OrderBy(l => l.CreatedAt))
-            .FirstOrDefaultAsync(i => i.Id == id, ct);
+        var instance = await entities.FindAsync<TaskInstanceDB>(db, id, ct);
+        if (instance is null)
+            return null;
 
-        if (instance is not null)
-            return ToInstanceResponse(instance, instance.TaskDefinition.Name);
-
-        // Cold store fallback — TaskDefinition is hot (in EF), load separately
-        var coldInstance = (await coldStore.FindAsync<TaskInstanceDB>(id, ct)).ValueOrDefault;
-        if (coldInstance is null) return null;
-
-        var definition = await db.TaskDefinitions.FindAsync([coldInstance.TaskDefinitionId], ct);
+        var definition = await db.TaskDefinitions.FindAsync([instance.TaskDefinitionId], ct);
         var defName = definition?.Name ?? "(unknown)";
 
-        coldInstance.LogEntries = (await coldStore.QueryAllAsync<TaskExecutionLogDB>(
-            l => l.TaskInstanceId == id, ct,
-            new ColdEntityStore.IndexFilter("TaskInstanceId", id))).ToList();
+        instance.LogEntries = (await entities.QueryAsync<TaskExecutionLogDB>(
+            db,
+            l => l.TaskInstanceId == id,
+            hint: new PersistenceQueryHint("TaskInstanceId", id),
+            ct: ct)).OrderBy(l => l.CreatedAt).ToList();
 
-        return ToInstanceResponse(coldInstance, defName);
+        return ToInstanceResponse(instance, defName);
     }
 
     public async Task<IReadOnlyList<TaskInstanceSummaryResponse>> ListInstancesAsync(
         Guid? taskDefinitionId = null,
         CancellationToken ct = default)
     {
-        // Cold store holds all previous-session instances
-        var instances = await coldStore.QueryAllAsync<TaskInstanceDB>(
+        var hint = taskDefinitionId is not null
+            ? new PersistenceQueryHint("TaskDefinitionId", taskDefinitionId.Value)
+            : null;
+
+        var instances = await entities.QueryAsync<TaskInstanceDB>(
+            db,
             taskDefinitionId is not null
                 ? i => i.TaskDefinitionId == taskDefinitionId.Value
                 : _ => true,
-            ct,
-            taskDefinitionId is not null
-                ? new ColdEntityStore.IndexFilter("TaskDefinitionId", taskDefinitionId.Value)
-                : null);
+            hint: hint,
+            ct: ct);
 
         // Build a lookup for task definition names (hot entities in EF)
         var defIds = instances.Select(i => i.TaskDefinitionId).Distinct().ToList();
@@ -477,12 +472,13 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
         DateTimeOffset? since = null,
         CancellationToken ct = default)
     {
-        var entries = await coldStore.QueryAllAsync<TaskOutputEntryDB>(
+        var entries = await entities.QueryAsync<TaskOutputEntryDB>(
+            db,
             since is not null
                 ? o => o.TaskInstanceId == instanceId && o.CreatedAt > since.Value
                 : o => o.TaskInstanceId == instanceId,
-            ct,
-            new ColdEntityStore.IndexFilter("TaskInstanceId", instanceId));
+            hint: new PersistenceQueryHint("TaskInstanceId", instanceId),
+            ct: ct);
 
         return entries
             .OrderBy(o => o.Sequence)
@@ -578,26 +574,12 @@ public sealed class TaskService(SharpClawDbContext db, ColdEntityStore coldStore
             instance.CreatedAt,
             instance.StartedAt,
             instance.CompletedAt,
-            instance.ChannelId);
+            instance.ChannelId,
+            ContextId: instance.ContextId);
     }
 
     private async Task<TaskInstanceDB?> FindTrackedOrColdInstanceAsync(Guid id, CancellationToken ct)
-    {
-        var instance = await db.TaskInstances.FindAsync([id], ct);
-        if (instance is not null)
-        {
-            return instance;
-        }
-
-        instance = (await coldStore.FindAsync<TaskInstanceDB>(id, ct)).ValueOrDefault;
-        if (instance is null)
-        {
-            return null;
-        }
-
-        db.TaskInstances.Attach(instance);
-        return instance;
-    }
+        => await entities.FindAsync<TaskInstanceDB>(db, id, ct);
 
     // ═══════════════════════════════════════════════════════════════
     // Parameter serialisation

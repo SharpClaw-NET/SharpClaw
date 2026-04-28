@@ -13,7 +13,7 @@ namespace SharpClaw.Infrastructure.Persistence.JSON;
 /// configured with <c>SingleReader = true</c>.
 /// </para>
 /// </summary>
-internal sealed class FlushWorker : IDisposable
+public sealed class FlushWorker : IDisposable
 {
     private readonly FlushQueue _queue;
     private readonly IServiceProvider _services;
@@ -27,7 +27,7 @@ internal sealed class FlushWorker : IDisposable
     /// <summary>Base delay between retries (exponential backoff).</summary>
     private static readonly TimeSpan RetryBaseDelay = TimeSpan.FromMilliseconds(200);
 
-    internal FlushWorker(
+    public FlushWorker(
         FlushQueue queue,
         IServiceProvider services,
         ILogger<FlushWorker> logger)
@@ -40,7 +40,7 @@ internal sealed class FlushWorker : IDisposable
     /// <summary>
     /// Starts the background consumer loop.
     /// </summary>
-    internal void Start()
+    public void Start()
     {
         _runTask = Task.Run(() => ExecuteAsync(_cts.Token));
         _logger.LogInformation("FlushWorker started");
@@ -51,7 +51,7 @@ internal sealed class FlushWorker : IDisposable
     /// </summary>
     internal async Task StopAsync()
     {
-        await _cts.CancelAsync();
+        _queue.Complete();
         if (_runTask is not null)
         {
             try { await _runTask; }
@@ -108,7 +108,8 @@ internal sealed class FlushWorker : IDisposable
                     .GetRequiredService<JsonFilePersistenceService>();
 
                 await persistence.FlushChangesAsync(
-                    intent.EntityChanges, intent.JoinTableChanges, ct);
+                    intent.EntityChanges, intent.JoinTableChanges,
+                    intent.SerializedEntitiesByClrType, ct);
 
                 _queue.RemoveOverlayEntries(intent);
                 return;
@@ -153,7 +154,8 @@ internal sealed class FlushWorker : IDisposable
                     .GetRequiredService<JsonFilePersistenceService>();
 
                 await persistence.FlushChangesAsync(
-                    intent.EntityChanges, intent.JoinTableChanges, CancellationToken.None);
+                    intent.EntityChanges, intent.JoinTableChanges,
+                    intent.SerializedEntitiesByClrType, CancellationToken.None);
 
                 _queue.RemoveOverlayEntries(intent);
             }

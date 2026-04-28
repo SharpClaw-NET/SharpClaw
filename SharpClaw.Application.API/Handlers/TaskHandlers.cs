@@ -108,8 +108,8 @@ public static class TaskInstanceHandlers
         SessionService session,
         TaskOrchestrator orchestrator)
     {
-        if (request.ChannelId is null)
-            return Results.BadRequest("A ChannelId is required to start a task instance.");
+        if (request.ChannelId is null && request.ContextId is null)
+            return Results.BadRequest("Either a ChannelId or a ContextId is required to start a task instance.");
 
         TaskInstanceResponse created;
         try

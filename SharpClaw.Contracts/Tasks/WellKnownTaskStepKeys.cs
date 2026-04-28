@@ -107,4 +107,7 @@ public static class WellKnownTaskStepKeys
 
     /// <summary>Find a channel by title or custom ID.</summary>
     public const string FindChannel    = "core.find_channel";
+
+    /// <summary>Add an agent to a channel's allowed agents list (idempotent).</summary>
+    public const string AddAllowedAgent = "core.add_allowed_agent";
 }

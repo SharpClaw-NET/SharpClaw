@@ -333,5 +333,13 @@ public sealed class TaskStepRegistry
             OwnerId              = core,
             FirstArgIsExpression = true,
         };
+        yield return new TaskStepDescriptor
+        {
+            MethodName           = "AddAllowedAgent",
+            StepKey              = WellKnownTaskStepKeys.AddAllowedAgent,
+            OwnerId              = core,
+            // first arg = agentId (Expression), second arg = channelId (Arguments[1])
+            FirstArgIsExpression = true,
+        };
     }
 }

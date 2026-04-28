@@ -227,5 +227,6 @@ public class JsonPersistenceHealthCheckTests
     private static FlushQueue.FlushIntent MakeIntent() => new(
         EntityChanges: [],
         JoinTableChanges: new HashSet<string>(),
-        SerializedEntities: new Dictionary<(string, Guid), byte[]>());
+        SerializedEntities: new Dictionary<(string, Guid), byte[]>(),
+        SerializedEntitiesByClrType: new Dictionary<(Type, Guid), byte[]>());
 }

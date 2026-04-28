@@ -42,6 +42,7 @@ public static class InfrastructureServiceExtensions
                 services.AddScoped<JsonFilePersistenceService>();
                 services.AddSingleton<ColdEntityStore>();
                 services.AddSingleton<ColdIndexMaintenanceService>();
+                services.AddScoped<IPersistenceEntityResolver, JsonPersistenceEntityResolver>();
 
                 services.AddSingleton<FlushQueue>(sp => 
                     new FlushQueue(sp.GetRequiredService<ILogger<FlushQueue>>(), capacity: 256));
@@ -78,6 +79,7 @@ public static class InfrastructureServiceExtensions
                     options.UseNpgsql(connectionString, npgsql =>
                         npgsql.MigrationsAssembly("SharpClaw.Migrations.Postgres"));
                 });
+                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
                 break;
 
             case StorageMode.SqlServer:
@@ -88,6 +90,7 @@ public static class InfrastructureServiceExtensions
                     options.UseSqlServer(connectionString, sqlServer =>
                         sqlServer.MigrationsAssembly("SharpClaw.Migrations.SqlServer"));
                 });
+                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
                 break;
 
             case StorageMode.SQLite:
@@ -98,6 +101,7 @@ public static class InfrastructureServiceExtensions
                     options.UseSqlite(connectionString, sqlite =>
                         sqlite.MigrationsAssembly("SharpClaw.Migrations.SQLite"));
                 });
+                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
                 break;
 
             case StorageMode.MySql:
@@ -246,13 +250,6 @@ public static class InfrastructureServiceExtensions
             // Phase E: Start periodic cold index maintenance.
             var maintenance = services.GetService<ColdIndexMaintenanceService>();
             maintenance?.Start(jsonOpts!.IndexRescanIntervalMinutes);
-
-            // Phase K: Start background flush worker when async flush is enabled.
-            if (jsonOpts.AsyncFlush)
-            {
-                var flushWorker = services.GetService<FlushWorker>();
-                flushWorker?.Start();
-            }
 
             // Phase M: Create unclean shutdown sentinel.
             JsonPersistenceHealthCheck.CreateSentinel(fsys!, jsonOpts);

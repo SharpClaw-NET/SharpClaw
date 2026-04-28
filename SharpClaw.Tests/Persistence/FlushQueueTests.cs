@@ -60,7 +60,8 @@ public class FlushQueueTests
         => new(
             entities ?? [],
             joins ?? new HashSet<string>(),
-            serialized ?? new Dictionary<(string, Guid), byte[]>());
+            serialized ?? new Dictionary<(string, Guid), byte[]>(),
+            new Dictionary<(Type, Guid), byte[]>());
 
     private IServiceProvider BuildServices(JsonFileOptions options)
     {

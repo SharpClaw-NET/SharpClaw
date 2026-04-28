@@ -4,6 +4,7 @@ using Microsoft.CodeAnalysis.CSharp.Syntax;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Application.Infrastructure.Tasks.Registry;
 using SharpClaw.Contracts.Tasks;
+
 namespace SharpClaw.Application.Infrastructure.Tasks.Parsing;
 
 /// <summary>
@@ -1733,14 +1734,20 @@ public sealed class TaskScriptParser
         return invocation.ArgumentList.Arguments
             .Where(a => a.Expression is not
                 (ParenthesizedLambdaExpressionSyntax or SimpleLambdaExpressionSyntax))
-            .Select(a => a.Expression.ToString())
+            .Select(a => ExtractExpressionText(a.Expression))
             .ToList();
     }
 
     private static string? ExtractFirstArgText(InvocationExpressionSyntax invocation)
     {
-        return invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression.ToString();
+        var expression = invocation.ArgumentList.Arguments.FirstOrDefault()?.Expression;
+        return expression is null ? null : ExtractExpressionText(expression);
     }
+
+    private static string ExtractExpressionText(ExpressionSyntax expression)
+        => expression is LiteralExpressionSyntax literal && literal.Token.Value is string value
+            ? value
+            : expression.ToString();
 
     // ── Lookup tables ─────────────────────────────────────────────
 
