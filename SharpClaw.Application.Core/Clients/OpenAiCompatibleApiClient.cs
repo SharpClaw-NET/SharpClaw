@@ -1,6 +1,7 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Runtime.CompilerServices;
+using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Providers;
@@ -180,27 +181,62 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         var response = await httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
-        var result = await response.Content.ReadFromJsonAsync<OaiToolCompletionResponse>(ct);
-        var choice = result?.Choices?.FirstOrDefault()
+        var rawBody = await response.Content.ReadAsStringAsync(ct);
+        if (Environment.GetEnvironmentVariable("SHARPCLAW_LOG_TOOL_HTTP") == "1")
+        {
+            try
+            {
+                var dbgPath = Path.Combine(Path.GetTempPath(), "sc_tool_http.log");
+                var preview = rawBody.Length > 16000 ? rawBody[..16000] + "...[truncated]" : rawBody;
+                File.AppendAllText(dbgPath,
+                    $"=== {DateTimeOffset.UtcNow:O} {ProviderKey} {model} tools={tools.Count} ===\n{preview}\n\n");
+            }
+            catch { /* ignore diagnostic failures */ }
+        }
+        var result = JsonSerializer.Deserialize<OaiToolCompletionResponse>(rawBody);
+        var choices = result?.Choices
             ?? throw new InvalidOperationException("No response from provider.");
+        if (choices.Count == 0)
+            throw new InvalidOperationException("No response from provider.");
 
-        var toolCalls = choice.Message?.ToolCalls?
-            .Where(tc => tc.Function is not null)
-            .Select(tc => new ChatToolCall(
-                tc.Id ?? Guid.NewGuid().ToString(),
-                tc.Function!.Name ?? "",
-                tc.Function.Arguments ?? "{}"))
-            .ToList()
-            ?? [];
+        // Some OpenAI-compatible gateways (notably GitHub Copilot's Claude
+        // bridge) split a single assistant turn across multiple `choices`
+        // entries — one for the text/reasoning preamble and one per tool
+        // call — instead of consolidating tool_calls inside choices[0].
+        // Aggregate content and tool calls across all choices so the
+        // tool-loop sees every dispatched call.
+        var aggregatedContent = new StringBuilder();
+        var aggregatedToolCalls = new List<ChatToolCall>();
+        string? lastFinishReason = null;
+        foreach (var ch in choices)
+        {
+            if (ch.Message?.Content is { Length: > 0 } text)
+            {
+                if (aggregatedContent.Length > 0) aggregatedContent.Append('\n');
+                aggregatedContent.Append(text);
+            }
+            if (ch.Message?.ToolCalls is { } calls)
+            {
+                foreach (var tc in calls)
+                {
+                    if (tc.Function is null) continue;
+                    aggregatedToolCalls.Add(new ChatToolCall(
+                        tc.Id ?? Guid.NewGuid().ToString(),
+                        tc.Function.Name ?? "",
+                        tc.Function.Arguments ?? "{}"));
+                }
+            }
+            if (ch.FinishReason is { } fr) lastFinishReason = fr;
+        }
 
         return new ChatCompletionResult
         {
-            Content = choice.Message?.Content,
-            ToolCalls = toolCalls,
+            Content = aggregatedContent.Length > 0 ? aggregatedContent.ToString() : null,
+            ToolCalls = aggregatedToolCalls,
             Usage = result?.Usage is { } u
                 ? new TokenUsage(u.PromptTokens, u.CompletionTokens)
                 : null,
-            FinishReason = MapOpenAiFinishReason(choice.FinishReason),
+            FinishReason = MapOpenAiFinishReason(lastFinishReason),
         };
     }
 
@@ -354,38 +390,50 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             if (streamChunk.Usage is { } su)
                 streamUsage = new TokenUsage(su.PromptTokens, su.CompletionTokens);
 
-            var choice = streamChunk.Choices?.FirstOrDefault();
-            if (choice?.FinishReason is { } fr) streamFinishReason = fr;
-            if (choice?.Delta is null) continue;
+            if (streamChunk.Choices is not { Count: > 0 } choices) continue;
 
-            // Accumulate text deltas
-            if (choice.Delta.Content is { } textDelta && textDelta.Length > 0)
+            // Iterate every choice (Copilot's Claude bridge splits a single
+            // assistant turn into separate choice entries — one for text and
+            // one per tool_call — rather than putting all tool_calls in
+            // choices[0]).
+            foreach (var choice in choices)
             {
-                contentBuilder.Append(textDelta);
-                yield return ChatStreamChunk.Text(textDelta);
-            }
+                if (choice.FinishReason is { } fr) streamFinishReason = fr;
+                if (choice.Delta is null) continue;
 
-            // Accumulate tool call deltas
-            if (choice.Delta.ToolCalls is { } tcDeltas)
-            {
-                foreach (var tcd in tcDeltas)
+                // Accumulate text deltas
+                if (choice.Delta.Content is { } textDelta && textDelta.Length > 0)
                 {
-                    var idx = tcd.Index ?? 0;
-                    if (!toolCallAccumulator.TryGetValue(idx, out var acc))
+                    contentBuilder.Append(textDelta);
+                    yield return ChatStreamChunk.Text(textDelta);
+                }
+
+                // Accumulate tool call deltas. When the gateway returns one
+                // tool call per choice, the per-choice index is usually 0,
+                // so disambiguate using the choice index plus the in-delta
+                // index.
+                if (choice.Delta.ToolCalls is { } tcDeltas)
+                {
+                    var choiceIdx = choice.Index ?? 0;
+                    foreach (var tcd in tcDeltas)
                     {
-                        acc = (tcd.Id ?? "", tcd.Function?.Name ?? "", new System.Text.StringBuilder());
+                        var idx = (choiceIdx << 16) | (tcd.Index ?? 0);
+                        if (!toolCallAccumulator.TryGetValue(idx, out var acc))
+                        {
+                            acc = (tcd.Id ?? "", tcd.Function?.Name ?? "", new System.Text.StringBuilder());
+                            toolCallAccumulator[idx] = acc;
+                        }
+                        else
+                        {
+                            if (tcd.Id is not null) acc.Id = tcd.Id;
+                            if (tcd.Function?.Name is not null) acc.Name = tcd.Function.Name;
+                        }
+
+                        if (tcd.Function?.Arguments is { } argDelta)
+                            acc.Args.Append(argDelta);
+
                         toolCallAccumulator[idx] = acc;
                     }
-                    else
-                    {
-                        if (tcd.Id is not null) acc.Id = tcd.Id;
-                        if (tcd.Function?.Name is not null) acc.Name = tcd.Function.Name;
-                    }
-
-                    if (tcd.Function?.Arguments is { } argDelta)
-                        acc.Args.Append(argDelta);
-
-                    toolCallAccumulator[idx] = acc;
                 }
             }
         }
@@ -772,6 +820,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 
     private sealed class OaiStreamChoice
     {
+        [JsonPropertyName("index")] public int? Index { get; set; }
         [JsonPropertyName("delta")] public OaiStreamDelta? Delta { get; set; }
         [JsonPropertyName("finish_reason")] public string? FinishReason { get; set; }
     }

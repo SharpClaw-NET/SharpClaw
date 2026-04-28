@@ -6,6 +6,8 @@
     <AssemblyName>SharpClaw.Modules.Mk8Shell</AssemblyName>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <!-- Copy NuGet runtime DLLs into bin so the API's CopyBundledModules target picks them up. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>

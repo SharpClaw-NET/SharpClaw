@@ -7,7 +7,7 @@ public class DesktopReporterSetupTask
     {
         await Log("Preparing the desktop reporter demo resources.");
 
-        var model = await FindModel("gpt-5.2");
+        var model = await FindModel("claude-sonnet-4.6");
         var role = await CreateRole("Desktop Reporter Demo Role");
         await SetRolePermissions(role, """
 {"globalFlags":{"CanEnumerateWindows":5,"CanFocusWindow":5,"CanResizeWindow":5,"CanSendHotkey":5,"CanReadClipboard":5,"CanWriteClipboard":5,"CanClickDesktop":5,"CanTypeOnDesktop":5,"CanInvokeTasksAsTool":5},"resourceGrants":{"CuDisplay":[{"resourceId":"ffffffff-ffff-ffff-ffff-ffffffffffff","clearance":5}],"CuNativeApp":[{"resourceId":"ffffffff-ffff-ffff-ffff-ffffffffffff","clearance":5}]}}

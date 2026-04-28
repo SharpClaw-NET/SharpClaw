@@ -4,6 +4,15 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <!--
+      Bundled-module class libraries don't normally copy their NuGet runtime
+      assets into bin (only the consuming exe does). The host references this
+      module with ReferenceOutputAssembly=false and mirrors its bin contents
+      into the API output via a Copy* target, so package DLLs (e.g.
+      System.Drawing.Common) must land in this project's bin first or they
+      will be missing at runtime when the module is hot-loaded.
+    -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
   </PropertyGroup>
 
   <ItemGroup>

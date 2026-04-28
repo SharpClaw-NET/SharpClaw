@@ -3023,29 +3023,44 @@ public static class CliDispatcher
 
         using var cts = new CancellationTokenSource();
 
-        var prevCtrlC = Console.TreatControlCAsInput;
-        Console.TreatControlCAsInput = true;
+        // When stdin is redirected (piped REPL, scripted use, no real console)
+        // Console.TreatControlCAsInput and Console.KeyAvailable both throw
+        // IOException("The handle is invalid"). In that mode we just stream
+        // events without a Ctrl+C key watcher — the caller controls cancellation
+        // by closing stdin or the host shutting down.
+        var interactiveConsole = !Console.IsInputRedirected;
 
-        Console.WriteLine("Listening for task output... (Ctrl+C to stop)");
+        var prevCtrlC = false;
+        if (interactiveConsole)
+        {
+            prevCtrlC = Console.TreatControlCAsInput;
+            Console.TreatControlCAsInput = true;
+        }
+
+        Console.WriteLine(interactiveConsole
+            ? "Listening for task output... (Ctrl+C to stop)"
+            : "Listening for task output...");
         Console.WriteLine();
 
-        var keyTask = Task.Run(() =>
-        {
-            while (!cts.IsCancellationRequested)
+        var keyTask = interactiveConsole
+            ? Task.Run(() =>
             {
-                if (Console.KeyAvailable)
+                while (!cts.IsCancellationRequested)
                 {
-                    var key = Console.ReadKey(intercept: true);
-                    if (key is { Modifiers: ConsoleModifiers.Control, Key: ConsoleKey.C })
+                    if (Console.KeyAvailable)
                     {
-                        cts.Cancel();
-                        return;
+                        var key = Console.ReadKey(intercept: true);
+                        if (key is { Modifiers: ConsoleModifiers.Control, Key: ConsoleKey.C })
+                        {
+                            cts.Cancel();
+                            return;
+                        }
                     }
-                }
 
-                Thread.Sleep(50);
-            }
-        });
+                    Thread.Sleep(50);
+                }
+            })
+            : Task.CompletedTask;
 
         try
         {
@@ -3081,7 +3096,8 @@ public static class CliDispatcher
         {
             await cts.CancelAsync();
             await keyTask;
-            Console.TreatControlCAsInput = prevCtrlC;
+            if (interactiveConsole)
+                Console.TreatControlCAsInput = prevCtrlC;
         }
 
         return Results.Ok();

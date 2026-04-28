@@ -59,11 +59,24 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
     }
 
     /// <summary>
-    /// Prefer the Responses API for all models except legacy GPT-3.5/GPT-4
-    /// families that predate it.
+    /// GitHub Copilot's gateway only exposes <c>/v1/responses</c> for OpenAI's
+    /// modern generations (gpt-5+, o-series, codex). Other hosted families
+    /// (Claude, Gemini, Grok, legacy gpt-3.5/gpt-4, MS routers, embeddings,
+    /// etc.) reject the Responses API with HTTP 400, so route them through
+    /// Chat Completions instead.
     /// </summary>
     protected override bool UseResponsesApi(string model)
-        => !RequiresLegacyChatCompletions(model);
+    {
+        if (RequiresLegacyChatCompletions(model))
+            return false;
+
+        var name = model.ToLowerInvariant();
+        return name.StartsWith("gpt-5")
+            || name.StartsWith("o1")
+            || name.StartsWith("o3")
+            || name.StartsWith("o4")
+            || name.StartsWith("codex");
+    }
 
     public async Task<DeviceCodeSession> StartDeviceCodeFlowAsync(HttpClient httpClient, CancellationToken ct = default)
     {

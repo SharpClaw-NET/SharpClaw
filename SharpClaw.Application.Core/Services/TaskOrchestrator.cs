@@ -310,7 +310,7 @@ public sealed class TaskOrchestrator(
             WellKnownTaskStepKeys.SetRolePermissions
                 => await ExecuteSetRolePermissionsStepAsync(step, context, db, taskService),
             WellKnownTaskStepKeys.AssignRole
-                => await ExecuteAssignRoleStepAsync(step, context, taskService),
+                => await ExecuteAssignRoleStepAsync(step, context, db, taskService),
             WellKnownTaskStepKeys.CreateChannel
                 => await ExecuteCreateChannelStepAsync(step, context, db, taskService),
             WellKnownTaskStepKeys.FindChannel
@@ -744,10 +744,11 @@ public sealed class TaskOrchestrator(
 
         await db.GlobalFlags
             .Where(f => f.PermissionSetId == permissionSet.Id)
-            .ExecuteDeleteAsync(ct);
+            .ExecuteDeleteCompatAsync(db, ct);
+
         await db.ResourceAccesses
             .Where(a => a.PermissionSetId == permissionSet.Id && a.ResourceId != WellKnownIds.AllResources)
-            .ExecuteDeleteAsync(ct);
+            .ExecuteDeleteCompatAsync(db, ct);
 
         foreach (var (flagKey, clearance) in request.GlobalFlags ?? new Dictionary<string, PermissionClearance>())
         {
@@ -790,7 +791,8 @@ public sealed class TaskOrchestrator(
     }
 
     private async Task<TaskStepExecutionResult> ExecuteAssignRoleStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, TaskService taskService)
+        TaskStepDefinition step, TaskExecutionContext context,
+        SharpClawDbContext db, TaskService taskService)
     {
         // Arguments: [1]=roleId; Expression=agentId
         var agentIdStr = ResolveExpression(step.Expression, context);
