@@ -2,11 +2,13 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using System.Text.Json;
 using SharpClaw.Application.API.Cli;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Application.Services;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
@@ -15,6 +17,94 @@ namespace SharpClaw.Tests.Cli;
 
 public sealed class ChannelCliCommandTests
 {
+    [Test]
+    public async Task WhenContextDefaultsSetUsesUnknownKeyAndInvalidResourceValueThenKeyErrorIsReported()
+    {
+        var services = CreateServices(registerDefaultResourceModule: true);
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (_, _, contextId, _) = await SeedChannelGraphAsync(db);
+
+        var error = await CaptureErrorAsync(() => CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString(), "set", "unknown", "all"],
+            services));
+
+        error.Should().Contain("Unknown key 'unknown'.");
+        error.Should().NotContain("Unrecognized Guid format");
+    }
+
+    [Test]
+    public async Task WhenChannelDefaultsSetUsesUnknownKeyAndInvalidResourceValueThenKeyErrorIsReported()
+    {
+        var services = CreateServices(registerDefaultResourceModule: true);
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (channelId, _, _, _) = await SeedChannelGraphAsync(db);
+
+        var error = await CaptureErrorAsync(() => CliDispatcher.TryHandleAsync(
+            ["channel", "defaults", channelId.ToString(), "set", "unknown", "all"],
+            services));
+
+        error.Should().Contain("Unknown key 'unknown'.");
+        error.Should().NotContain("Unrecognized Guid format");
+    }
+
+    [Test]
+    public async Task WhenContextDefaultsAreEmptyThenPlaceholderIdIsNotPrinted()
+    {
+        var services = CreateServices();
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (_, _, contextId, _) = await SeedChannelGraphAsync(db);
+
+        var output = await CaptureOutputAsync(() => CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString()],
+            services));
+
+        output.Should().Contain("(no defaults set)");
+        output.Should().NotContain(Guid.Empty.ToString());
+    }
+
+    [Test]
+    public async Task WhenChannelDefaultsAreEmptyThenPlaceholderIdIsNotPrinted()
+    {
+        var services = CreateServices();
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (channelId, _, _, _) = await SeedChannelGraphAsync(db);
+
+        var output = await CaptureOutputAsync(() => CliDispatcher.TryHandleAsync(
+            ["channel", "defaults", channelId.ToString()],
+            services));
+
+        output.Should().Contain("(no defaults set)");
+        output.Should().NotContain(Guid.Empty.ToString());
+    }
+
+    [Test]
+    public async Task WhenContextDefaultsSetUsesKnownKeyAndResourceIdThenDefaultIsStored()
+    {
+        var services = CreateServices(registerDefaultResourceModule: true);
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (_, agentId, contextId, _) = await SeedChannelGraphAsync(db);
+
+        var handled = await CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString(), "set", "agent", agentId.ToString()],
+            services);
+
+        handled.Should().BeTrue();
+        await using var assertScope = services.CreateAsyncScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var context = await assertDb.AgentContexts
+            .Include(c => c.DefaultResourceSet!).ThenInclude(d => d.Entries)
+            .SingleAsync(c => c.Id == contextId);
+        context.DefaultResourceSetId.Should().NotBeNull();
+        context.DefaultResourceSet!.Id.Should().NotBe(Guid.Empty);
+        context.DefaultResourceSet.Entries.Should().ContainSingle(e =>
+            e.ResourceKey == "agent" && e.ResourceId == agentId);
+    }
+
     [Test]
     public async Task WhenChannelUpdateSuppliesMutableFieldsThenChannelIsUpdated()
     {
@@ -94,7 +184,7 @@ public sealed class ChannelCliCommandTests
         channel.DisableToolSchemas.Should().BeFalse();
     }
 
-    private static ServiceProvider CreateServices()
+    private static ServiceProvider CreateServices(bool registerDefaultResourceModule = false)
     {
         var services = new ServiceCollection();
         var databaseRoot = new InMemoryDatabaseRoot();
@@ -104,8 +194,47 @@ public sealed class ChannelCliCommandTests
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddScoped<SessionService>();
         services.AddScoped<ChannelService>();
+        services.AddScoped<ContextService>();
+        services.AddScoped<DefaultResourceSetService>();
         services.AddSingleton<ModuleRegistry>();
-        return services.BuildServiceProvider();
+        var provider = services.BuildServiceProvider();
+
+        if (registerDefaultResourceModule)
+            provider.GetRequiredService<ModuleRegistry>().Register(new TestDefaultResourceModule());
+
+        return provider;
+    }
+
+    private static async Task<string> CaptureOutputAsync(Func<Task<bool>> action)
+    {
+        var originalOut = Console.Out;
+        await using var writer = new StringWriter();
+        Console.SetOut(writer);
+        try
+        {
+            await action();
+            return writer.ToString();
+        }
+        finally
+        {
+            Console.SetOut(originalOut);
+        }
+    }
+
+    private static async Task<string> CaptureErrorAsync(Func<Task<bool>> action)
+    {
+        var originalError = Console.Error;
+        await using var writer = new StringWriter();
+        Console.SetError(writer);
+        try
+        {
+            await action();
+            return writer.ToString();
+        }
+        finally
+        {
+            Console.SetError(originalError);
+        }
     }
 
     private static async Task<(Guid ChannelId, Guid AgentId, Guid ContextId, Guid ToolSetId)> SeedChannelGraphAsync(
@@ -161,5 +290,37 @@ public sealed class ChannelCliCommandTests
         await db.SaveChangesAsync();
 
         return (channel.Id, agent.Id, context.Id, toolSet.Id);
+    }
+
+    private sealed class TestDefaultResourceModule : ISharpClawModule
+    {
+        public string Id => "test_default_resources";
+
+        public string DisplayName => "Test Default Resources";
+
+        public string ToolPrefix => "testdefaults";
+
+        public void ConfigureServices(IServiceCollection services)
+        {
+        }
+
+        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
+
+        Task<string> ISharpClawModule.ExecuteToolAsync(
+            string toolName,
+            JsonElement parameters,
+            SharpClaw.Contracts.Modules.AgentJobContext job,
+            IServiceProvider scopedServices,
+            CancellationToken ct) => throw new NotSupportedException();
+
+        public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
+        [
+            new(
+                "TestAgent",
+                "TestAgent",
+                "TestAgentAsync",
+                static (_, _) => Task.FromResult(new List<Guid>()),
+                DefaultResourceKey: "agent"),
+        ];
     }
 }

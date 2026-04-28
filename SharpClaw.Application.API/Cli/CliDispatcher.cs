@@ -1157,6 +1157,12 @@ public static class CliDispatcher
                 : await svc.GetForContextAsync(entityId);
 
             if (result is null) return Results.NotFound();
+            if (result.Id == Guid.Empty && result.Entries.Count == 0)
+            {
+                Console.WriteLine("(no defaults set)");
+                return Results.Ok();
+            }
+
             PrintJsonWithShortIds(result);
             return Results.Ok();
         }
@@ -1166,6 +1172,9 @@ public static class CliDispatcher
         if (action == "set" && extra.Length >= 3)
         {
             var key = extra[1].ToLowerInvariant();
+            if (!svc.IsValidKey(key))
+                return UsageResult($"Unknown key '{extra[1]}'.");
+
             var value = CliIdMap.Resolve(extra[2]);
 
             // GET current, merge, PUT — API does a full replace.
