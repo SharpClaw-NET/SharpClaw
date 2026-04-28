@@ -1437,13 +1437,16 @@ public static class CliDispatcher
                 "channel select <id>                        Select active channel",
                 "channel get <id>                           Show channel details",
                 "channel cost <id>                          Show token usage by agent",
-                "channel attach <id> <contextId>            Attach to a context",
+                "channel update <id> [--title <title>] [--agent <agentId>] [--context <contextId|none>]",
+                "  [--permission <permissionSetId|none>] [--header <template|none>] [--custom-id <id|none>]",
+                "  [--tools <setId|none>] [--no-tools] [--enable-tools]",
+                "channel attach <id> <contextId>            Attach to a context (use 'context list')",
                 "channel detach <id>                        Detach from context",
                 "channel agents <id>                        List allowed agents",
-                "channel agents <id> add <agentId>          Allow an agent",
+                "channel agents <id> add <agentId>          Allow an agent (use 'agent list')",
                 "channel agents <id> remove <agentId>       Remove an allowed agent",
                 "channel defaults <id>                      Show default resources",
-                "channel defaults <id> set <key> <resId>    Set a default resource",
+                "channel defaults <id> set <key> <resId>    Set a default resource (use 'resource <type> list')",
                 "channel defaults <id> clear <key>          Clear a default resource",
                 "channel delete <id>                        Delete a channel");
             return Results.Ok();
@@ -1467,6 +1470,10 @@ public static class CliDispatcher
             "get" when args.Length >= 3
                 => await ChannelHandlers.GetById(CliIdMap.Resolve(args[2]), svc),
             "get" => UsageResult("channel get <id>"),
+
+            "update" when args.Length >= 3
+                => await HandleChannelUpdate(args, svc),
+            "update" => UsageResult("channel update <id> [--title <title>] [--agent <agentId>] [--context <contextId|none>] [--permission <permissionSetId|none>] [--header <template|none>] [--custom-id <id|none>] [--tools <setId|none>] [--no-tools] [--enable-tools]"),
 
             "cost" when args.Length >= 3
                 => await ChatHandlers.ChannelCost(CliIdMap.Resolve(args[2]), sp.GetRequiredService<ChatService>()),
@@ -1558,6 +1565,84 @@ public static class CliDispatcher
     {
         Guid? agentId = args.Length >= 3 ? CliIdMap.Resolve(args[2]) : null;
         return await ChannelHandlers.List(svc, agentId);
+    }
+
+    private static async Task<IResult> HandleChannelUpdate(string[] args, ChannelService svc)
+    {
+        var channelId = CliIdMap.Resolve(args[2]);
+        Guid? agentId = null;
+        string? title = null;
+        Guid? contextId = null;
+        Guid? permissionSetId = null;
+        bool? disableChatHeader = null;
+        string? customId = null;
+        string? customChatHeader = null;
+        Guid? toolAwarenessSetId = null;
+        bool? disableToolSchemas = null;
+
+        for (var i = 3; i < args.Length; i++)
+        {
+            switch (args[i])
+            {
+                case "--title" or "-t":
+                    title = ReadOptionValue(args, ref i, "--title");
+                    break;
+                case "--agent" or "-a":
+                    agentId = CliIdMap.Resolve(ReadOptionValue(args, ref i, "--agent"));
+                    break;
+                case "--context" or "-c":
+                    contextId = ResolveNullableIdOption(ReadOptionValue(args, ref i, "--context"));
+                    break;
+                case "--permission" or "--permissions":
+                    permissionSetId = ResolveNullableIdOption(ReadOptionValue(args, ref i, "--permission"));
+                    break;
+                case "--header":
+                    customChatHeader = ReadOptionValue(args, ref i, "--header");
+                    if (IsNoneValue(customChatHeader))
+                        customChatHeader = string.Empty;
+                    break;
+                case "--disable-header":
+                    disableChatHeader = true;
+                    break;
+                case "--enable-header":
+                    disableChatHeader = false;
+                    break;
+                case "--custom-id":
+                    customId = ReadOptionValue(args, ref i, "--custom-id");
+                    if (IsNoneValue(customId))
+                        customId = string.Empty;
+                    break;
+                case "--tools":
+                    toolAwarenessSetId = ResolveNullableIdOption(ReadOptionValue(args, ref i, "--tools"));
+                    break;
+                case "--no-tools":
+                    disableToolSchemas = true;
+                    break;
+                case "--enable-tools":
+                    disableToolSchemas = false;
+                    break;
+                default:
+                    return UsageResult("channel update <id> [--title <title>] [--agent <agentId>] [--context <contextId|none>] [--permission <permissionSetId|none>] [--header <template|none>] [--custom-id <id|none>] [--tools <setId|none>] [--no-tools] [--enable-tools]");
+            }
+        }
+
+        IResult result = await ChannelHandlers.Update(
+            channelId,
+            new UpdateChannelRequest(
+                title,
+                contextId,
+                permissionSetId,
+                DisableChatHeader: disableChatHeader,
+                CustomId: customId,
+                CustomChatHeader: customChatHeader,
+                ToolAwarenessSetId: toolAwarenessSetId,
+                DisableToolSchemas: disableToolSchemas),
+            svc);
+
+        if (agentId is not null && result is not IStatusCodeHttpResult { StatusCode: StatusCodes.Status404NotFound })
+            result = await ChannelHandlers.SetAgent(channelId, new SetChannelAgentRequest(agentId.Value), svc);
+
+        return result;
     }
 
     private static IResult HandleChannelSelect(string[] args)
@@ -2147,6 +2232,22 @@ public static class CliDispatcher
         try { return CliIdMap.Resolve(arg); }
         catch { return null; }
     }
+
+    private static string ReadOptionValue(string[] args, ref int index, string optionName)
+    {
+        if (index + 1 >= args.Length || args[index + 1].StartsWith('-'))
+            throw new ArgumentException($"{optionName} requires a value.");
+
+        return args[++index];
+    }
+
+    private static Guid ResolveNullableIdOption(string value)
+        => IsNoneValue(value) ? Guid.Empty : CliIdMap.Resolve(value);
+
+    private static bool IsNoneValue(string value)
+        => value.Equals("none", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("null", StringComparison.OrdinalIgnoreCase)
+            || value.Equals("clear", StringComparison.OrdinalIgnoreCase);
 
     private static async Task PrintResultAsync(IResult result)
     {

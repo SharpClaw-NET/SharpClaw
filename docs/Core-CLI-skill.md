@@ -141,13 +141,18 @@ CHANNEL  (alias: chan)
 channel add [--agent <id>] [--context <id>] [--header <template>]
             [--tools <setId>] [--no-tools] [title]
   Either --agent or --context required. Auto-selects on creation.
-channel get <id> | list [agentId] | update <id> … | delete <id>
+channel get <id> | list [agentId] | delete <id>
+channel update <id> [--title <title>] [--agent <agentId>]
+  [--context <contextId|none>] [--permission <permissionSetId|none>]
+  [--header <template|none>] [--custom-id <id|none>]
+  [--tools <setId|none>] [--no-tools] [--enable-tools]
 channel select <id>                    Set active channel; deselects thread.
 channel cost <id>                      Token usage by agent.
-channel attach <id> <contextId>
+channel attach <id> <contextId>        Use 'context list' for context IDs.
 channel detach <id>
-channel agents <id> [add|remove <agentId>]
+channel agents <id> [add|remove <agentId>]  Use 'agent list' for agent IDs.
 channel defaults <id> [set <key> <resId> | clear <key>]
+  Use 'resource <type> list' for resource IDs.
   Channel defaults override context defaults for this channel only.
 
 Cascade from context when unset: agent, permissions,

@@ -361,9 +361,20 @@ automatically selected as the active channel.
 ```
 channel get <id>
 channel list [agentId]
-channel update <id> ...
+channel update <id> [--title <title>] [--agent <agentId>]
+                    [--context <contextId|none>]
+                    [--permission <permissionSetId|none>]
+                    [--header <template|none>] [--custom-id <id|none>]
+                    [--tools <setId|none>] [--no-tools] [--enable-tools]
 channel delete <id>
 ```
+
+Updates channel-level settings after creation. Use `none`, `null`, or `clear`
+for nullable fields that support clearing. `--agent` changes the channel's
+default agent. `--context none` detaches from a context; this is equivalent to
+`channel detach <id>`. `--header none` clears a custom chat header.
+`--tools none` clears the channel tool-awareness override. `--no-tools` disables
+tool schemas for the channel, and `--enable-tools` re-enables them.
 
 ```
 channel select <id>
@@ -380,13 +391,16 @@ Shows token usage and cost broken down by agent for this channel.
 channel attach <id> <contextId>
 channel detach <id>
 ```
-Attaches or detaches the channel from a context.
+Attaches or detaches the channel from a context. Run `channel list` for the
+channel ID and `context list` for the context ID, or pass full GUIDs directly.
 
 ```
 channel agents <id>
 channel agents <id> add <agentId>
 channel agents <id> remove <agentId>
 ```
+Run `channel list` for the channel ID and `agent list` for the agent ID, or
+pass full GUIDs directly.
 
 ```
 channel defaults <id>
@@ -394,7 +408,9 @@ channel defaults <id> set <key> <resourceId>
 channel defaults <id> clear <key>
 ```
 Same keys as `context defaults`. Channel defaults override context defaults
-for this channel only. Other channels in the same context are unaffected.
+for this channel only. Other channels in the same context are unaffected. Run
+the relevant `resource <type> list` command for the resource ID required by the
+selected key, or pass a full GUID directly.
 
 ---
 
