@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.LocalInference;
+using SharpClaw.Application.Core.Providers;
 using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.Enums;
@@ -124,7 +125,7 @@ public sealed class LocalModelService(
             .FirstOrDefaultAsync(m => m.Name == modelName && m.ProviderId == provider.Id, ct);
         if (model is null)
         {
-            var tags = ProviderService.InferCapabilitiesAndTags(modelName);
+            var tags = ProviderCapabilityHeuristics.ForGeneric(modelName);
             if (tags.Count == 0)
                 tags = [defaultCapability];
             model = new ModelDB
@@ -315,7 +316,7 @@ public sealed class LocalModelService(
                 provider.Id, provider.Name, existingModel.CustomId, existingModel.CapabilityTags);
         }
 
-        var tags = ProviderService.InferCapabilitiesAndTags(modelName);
+        var tags = ProviderCapabilityHeuristics.ForGeneric(modelName);
         if (tags.Count == 0)
             tags = [defaultCapability];
 

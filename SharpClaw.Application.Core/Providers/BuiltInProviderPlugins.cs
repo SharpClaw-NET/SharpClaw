@@ -34,48 +34,55 @@ public static class BuiltInProviderPlugins
 {
     public static IEnumerable<IProviderPlugin> Build(LocalInferenceProcessManager localInferenceManager)
     {
-        var caps = new DelegateCapabilityResolver(ProviderService.InferCapabilitiesAndTags);
+        var openAiCaps    = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForOpenAI);
+        var anthropicCaps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForAnthropic);
+        var googleCaps    = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForGoogle);
+        var mistralCaps   = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForMistral);
+        var xaiCaps       = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForXai);
+        var minimaxCaps   = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForMinimax);
+        var genericCaps   = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForGeneric);
 
-        IProviderPlugin Stateless(string key, string name, Func<IProviderApiClient> ctor, IDeviceCodeFlow? flow = null)
+        IProviderPlugin Stateless(string key, string name, Func<IProviderApiClient> ctor,
+            IModelCapabilityResolver caps, IDeviceCodeFlow? flow = null)
             => new SimpleProviderPlugin(key, name, requiresEndpoint: false, _ => ctor(), caps, deviceCodeFlow: flow);
 
         var copilot = new GitHubCopilotApiClient();
 
         return
         [
-            Stateless(WellKnownProviderKeys.OpenAI,                 "OpenAI",                  () => new OpenAiApiClient()),
-            Stateless(WellKnownProviderKeys.Anthropic,              "Anthropic",               () => new AnthropicApiClient()),
-            Stateless(WellKnownProviderKeys.OpenRouter,             "OpenRouter",              () => new OpenRouterApiClient()),
-            Stateless(WellKnownProviderKeys.GoogleVertexAI,         "Google Vertex AI",        () => new GoogleVertexAIApiClient()),
-            Stateless(WellKnownProviderKeys.GoogleVertexAIOpenAi,   "Google Vertex AI (OpenAI)", () => new GoogleVertexAIOpenAiApiClient()),
-            Stateless(WellKnownProviderKeys.GoogleGemini,           "Google Gemini",           () => new GoogleGeminiApiClient()),
-            Stateless(WellKnownProviderKeys.GoogleGeminiOpenAi,     "Google Gemini (OpenAI)",  () => new GoogleGeminiOpenAiApiClient()),
-            Stateless(WellKnownProviderKeys.ZAI,                    "Z.AI",                    () => new ZAIApiClient()),
-            Stateless(WellKnownProviderKeys.VercelAIGateway,        "Vercel AI Gateway",       () => new VercelAIGatewayApiClient()),
-            Stateless(WellKnownProviderKeys.XAI,                    "xAI",                     () => new XAIApiClient()),
-            Stateless(WellKnownProviderKeys.Groq,                   "Groq",                    () => new GroqApiClient()),
-            Stateless(WellKnownProviderKeys.Cerebras,               "Cerebras",                () => new CerebrasApiClient()),
-            Stateless(WellKnownProviderKeys.Mistral,                "Mistral",                 () => new MistralApiClient()),
-            Stateless(WellKnownProviderKeys.GitHubCopilot,          "GitHub Copilot",          () => copilot, flow: new DeviceCodeAuthClientFlow(copilot)),
-            Stateless(WellKnownProviderKeys.Minimax,                "MiniMax",                 () => new MinimaxApiClient()),
+            Stateless(WellKnownProviderKeys.OpenAI,                 "OpenAI",                    () => new OpenAiApiClient(),                openAiCaps),
+            Stateless(WellKnownProviderKeys.Anthropic,              "Anthropic",                 () => new AnthropicApiClient(),             anthropicCaps),
+            Stateless(WellKnownProviderKeys.OpenRouter,             "OpenRouter",                () => new OpenRouterApiClient(),            genericCaps),
+            Stateless(WellKnownProviderKeys.GoogleVertexAI,         "Google Vertex AI",          () => new GoogleVertexAIApiClient(),        googleCaps),
+            Stateless(WellKnownProviderKeys.GoogleVertexAIOpenAi,   "Google Vertex AI (OpenAI)", () => new GoogleVertexAIOpenAiApiClient(),  googleCaps),
+            Stateless(WellKnownProviderKeys.GoogleGemini,           "Google Gemini",             () => new GoogleGeminiApiClient(),          googleCaps),
+            Stateless(WellKnownProviderKeys.GoogleGeminiOpenAi,     "Google Gemini (OpenAI)",    () => new GoogleGeminiOpenAiApiClient(),    googleCaps),
+            Stateless(WellKnownProviderKeys.ZAI,                    "Z.AI",                      () => new ZAIApiClient(),                   genericCaps),
+            Stateless(WellKnownProviderKeys.VercelAIGateway,        "Vercel AI Gateway",         () => new VercelAIGatewayApiClient(),       genericCaps),
+            Stateless(WellKnownProviderKeys.XAI,                    "xAI",                       () => new XAIApiClient(),                   xaiCaps),
+            Stateless(WellKnownProviderKeys.Groq,                   "Groq",                      () => new GroqApiClient(),                  genericCaps),
+            Stateless(WellKnownProviderKeys.Cerebras,               "Cerebras",                  () => new CerebrasApiClient(),              genericCaps),
+            Stateless(WellKnownProviderKeys.Mistral,                "Mistral",                   () => new MistralApiClient(),               mistralCaps),
+            Stateless(WellKnownProviderKeys.GitHubCopilot,          "GitHub Copilot",            () => copilot,                              genericCaps, flow: new DeviceCodeAuthClientFlow(copilot)),
+            Stateless(WellKnownProviderKeys.Minimax,                "MiniMax",                   () => new MinimaxApiClient(),               minimaxCaps),
             new SimpleProviderPlugin(
                 WellKnownProviderKeys.LlamaSharp,
                 "LlamaSharp (local)",
                 requiresEndpoint: false,
                 _ => new LocalInferenceApiClient(localInferenceManager),
-                caps),
+                genericCaps),
             new SimpleProviderPlugin(
                 WellKnownProviderKeys.Ollama,
                 "Ollama (local)",
                 requiresEndpoint: false,
                 endpoint => new OllamaApiClient(endpoint),
-                caps),
+                genericCaps),
             new SimpleProviderPlugin(
                 WellKnownProviderKeys.Custom,
                 "Custom (OpenAI-compatible)",
                 requiresEndpoint: true,
                 endpoint => new CustomOpenAiCompatibleApiClient(endpoint!),
-                caps),
+                genericCaps),
         ];
     }
 }
