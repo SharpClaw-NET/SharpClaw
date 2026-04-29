@@ -1,7 +1,6 @@
 using System.Text.Json;
-using SharpClaw.Application.Core.LocalInference;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Contracts.Providers;
 
 /// <summary>
 /// First-class typed completion parameters passed from the agent entity
@@ -17,7 +16,7 @@ public sealed record CompletionParameters
 {
     /// <summary>
     /// Sampling temperature. Valid ranges vary by provider — see
-    /// <see cref="CompletionParameterSpec"/> for per-provider constraints.
+    /// <c>CompletionParameterSpec</c> for per-provider constraints.
     /// </summary>
     public float? Temperature { get; init; }
 
@@ -59,15 +58,13 @@ public sealed record CompletionParameters
     /// <summary>
     /// Structured output format passed as-is to the provider.
     /// <para>
-    /// On <see cref="ProviderType.GoogleGemini"/> (native), this is mapped to
-    /// <c>responseMimeType</c> inside <c>generationConfig</c>.
-    /// On <see cref="ProviderType.GoogleGeminiOpenAi"/> and
-    /// <see cref="ProviderType.GoogleVertexAIOpenAi"/> (OpenAI-compat), only the full
-    /// <c>json_schema</c> variant is supported; the simplified
-    /// <c>{"type": "json_object"}</c> form is rejected —
-    /// see <see cref="CompletionParameterSpec.RejectsJsonObjectResponseFormat"/>.
+    /// On native Google Gemini, this is mapped to <c>responseMimeType</c>
+    /// inside <c>generationConfig</c>. On Google Gemini / Vertex AI
+    /// OpenAI-compat shims, only the full <c>json_schema</c> variant is
+    /// supported; the simplified <c>{"type": "json_object"}</c> form is
+    /// rejected — see <c>CompletionParameterSpec.RejectsJsonObjectResponseFormat</c>.
     /// </para>
-    /// See <see cref="CompletionParameterSpec"/> for per-provider support.
+    /// See <c>CompletionParameterSpec</c> for per-provider support.
     /// </summary>
     public JsonElement? ResponseFormat { get; init; }
 
@@ -91,8 +88,8 @@ public sealed record CompletionParameters
     /// <see cref="ToolChoiceMode.Named"/> with a function name.
     /// <para>
     /// LlamaSharp enforces this by compiling a tailored GBNF grammar
-    /// (<see cref="LlamaSharpToolGrammar"/>); OpenAI-compatible
-    /// providers forward it on the wire.
+    /// (see <c>SharpClaw.Application.Core.LocalInference.LlamaSharpToolGrammar</c>);
+    /// OpenAI-compatible providers forward it on the wire.
     /// </para>
     /// </summary>
     public ToolChoice? ToolChoice { get; init; }
@@ -108,7 +105,8 @@ public sealed record CompletionParameters
     /// When <see langword="true"/>, tool-call arguments must conform to
     /// each tool's <see cref="ChatToolDefinition.ParametersSchema"/>.
     /// LlamaSharp enforces this by composing per-tool GBNF fragments
-    /// derived from the schemas (<see cref="LlamaSharpJsonSchemaConverter"/>).
+    /// derived from the schemas (see
+    /// <c>SharpClaw.Application.Core.LocalInference.LlamaSharpJsonSchemaConverter</c>).
     /// OpenAI maps to <c>strict: true</c> on each tool. Providers that
     /// support only permissive tool calling ignore this field. Defaults
     /// to the provider's own default — LlamaSharp opts-in by default.

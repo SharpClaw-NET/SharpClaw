@@ -1,5 +1,6 @@
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
+using SharpClaw.Contracts.Providers;
 using System.Text.Json;
 
 namespace SharpClaw.Tests.LocalInference;

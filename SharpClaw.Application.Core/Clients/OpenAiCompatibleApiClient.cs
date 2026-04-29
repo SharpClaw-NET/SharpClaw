@@ -609,12 +609,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     /// nested object for a pinned function). Returns <see langword="null"/>
     /// when the field should be omitted (default auto).
     /// </summary>
-    private static object? MapToolChoice(LocalInference.ToolChoice? choice) => choice?.Mode switch
+    private static object? MapToolChoice(ToolChoice? choice) => choice?.Mode switch
     {
-        null or LocalInference.ToolChoiceMode.Auto => null,
-        LocalInference.ToolChoiceMode.None     => "none",
-        LocalInference.ToolChoiceMode.Required => "required",
-        LocalInference.ToolChoiceMode.Named    => new
+        null or ToolChoiceMode.Auto => null,
+        ToolChoiceMode.None     => "none",
+        ToolChoiceMode.Required => "required",
+        ToolChoiceMode.Named    => new
         {
             type = "function",
             function = new { name = choice.NamedFunction },

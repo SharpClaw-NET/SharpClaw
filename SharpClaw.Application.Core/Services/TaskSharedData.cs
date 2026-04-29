@@ -3,6 +3,7 @@ using System.Text;
 using System.Text.Json;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Services;
 
