@@ -14,10 +14,6 @@
     {
       "contractName": "transcription_stt",
       "serviceType": "SharpClaw.Modules.Transcription.Clients.ITranscriptionApiClient"
-    },
-    {
-      "contractName": "transcription_audio_capture",
-      "serviceType": "SharpClaw.Modules.Transcription.Clients.IAudioCaptureProvider"
     }
   ],
   "requires": []

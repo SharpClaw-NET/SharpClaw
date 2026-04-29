@@ -1,5 +1,4 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Contracts.Entities;
 using SharpClaw.Modules.Transcription.Models;
 
 namespace SharpClaw.Modules.Transcription;
@@ -14,7 +13,6 @@ namespace SharpClaw.Modules.Transcription;
 public sealed class TranscriptionDbContext(DbContextOptions<TranscriptionDbContext> options)
     : DbContext(options)
 {
-    public DbSet<InputAudioDB> InputAudios => Set<InputAudioDB>();
     public DbSet<TranscriptionSegmentDB> TranscriptionSegments => Set<TranscriptionSegmentDB>();
     public DbSet<TranscriptionJobDB> TranscriptionJobs => Set<TranscriptionJobDB>();
 }

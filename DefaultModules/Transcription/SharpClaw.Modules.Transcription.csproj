@@ -17,6 +17,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\SystemAudio\SharpClaw.Modules.SystemAudio.csproj" />
   </ItemGroup>
 
   <ItemGroup>
@@ -24,7 +25,6 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="NAudio" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
     <PackageReference Include="Whisper.net" />
     <PackageReference Include="Whisper.net.Runtime" />

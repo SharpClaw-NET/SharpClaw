@@ -1,7 +1,7 @@
 using System.Text;
 
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Modules.Transcription.Audio;
+using SharpClaw.Modules.SystemAudio.Audio;
 using SharpClaw.Modules.Transcription.LocalInference;
 
 namespace SharpClaw.Modules.Transcription.Clients;

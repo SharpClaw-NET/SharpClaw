@@ -1,4 +1,4 @@
-namespace SharpClaw.Modules.Transcription.Audio;
+namespace SharpClaw.Modules.SystemAudio.Audio;
 
 /// <summary>
 /// Thread-safe (single-writer, multi-reader) ring buffer of float PCM

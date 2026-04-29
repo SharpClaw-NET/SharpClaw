@@ -1,4 +1,4 @@
-namespace SharpClaw.Modules.Transcription.Clients;
+namespace SharpClaw.Modules.SystemAudio.Capture;
 
 /// <summary>
 /// Abstracts audio capture from a device. Implementations buffer

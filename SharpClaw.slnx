@@ -42,6 +42,7 @@
     <Project Path="DefaultModules/Providers/Google/SharpClaw.Modules.Providers.Google.csproj" />
     <Project Path="DefaultModules/Providers/Ollama/SharpClaw.Modules.Providers.Ollama.csproj" />
     <Project Path="DefaultModules/Providers/OpenAICompatible/SharpClaw.Modules.Providers.OpenAICompatible.csproj" />
+    <Project Path="DefaultModules/SystemAudio/SharpClaw.Modules.SystemAudio.csproj" />
     <Project Path="DefaultModules/Transcription/SharpClaw.Modules.Transcription.csproj" />
     <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
     <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
