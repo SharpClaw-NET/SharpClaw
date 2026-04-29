@@ -24,7 +24,6 @@ using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Providers.Common;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
 using SharpClaw.Utils.Logging;

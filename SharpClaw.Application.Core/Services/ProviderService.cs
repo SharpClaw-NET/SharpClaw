@@ -4,7 +4,6 @@ using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Providers.Common;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
@@ -112,14 +111,12 @@ public sealed class ProviderService(
         var provider = await db.Providers.FindAsync([providerId], ct)
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
-        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
-
-        if (client is not IDeviceCodeAuthClient authClient)
-            throw new InvalidOperationException(
+        var deviceCodeFlow = clientFactory.GetPlugin(provider.ProviderKey)?.DeviceCodeFlow
+            ?? throw new InvalidOperationException(
                 $"Provider type '{provider.ProviderKey}' does not support device code authentication.");
 
         using var httpClient = httpClientFactory.CreateClient();
-        return await authClient.StartDeviceCodeFlowAsync(httpClient, ct);
+        return await deviceCodeFlow.StartAsync(httpClient, ct);
     }
 
     private bool IsUniqueProviderNamesEnforced()
@@ -148,14 +145,14 @@ public sealed class ProviderService(
         var provider = await db.Providers.FindAsync([providerId], ct)
             ?? throw new ArgumentException($"Provider {providerId} not found.");
 
-        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
-
-        if (client is not IDeviceCodeAuthClient authClient)
-            throw new InvalidOperationException(
+        var deviceCodeFlow = clientFactory.GetPlugin(provider.ProviderKey)?.DeviceCodeFlow
+            ?? throw new InvalidOperationException(
                 $"Provider type '{provider.ProviderKey}' does not support device code authentication.");
 
         using var httpClient = httpClientFactory.CreateClient();
-        var accessToken = await authClient.PollForAccessTokenAsync(httpClient, session, ct);
+        var accessToken = await deviceCodeFlow.PollAsync(httpClient, session, ct)
+            ?? throw new InvalidOperationException(
+                $"Device code flow for provider '{provider.ProviderKey}' did not return an access token.");
 
         provider.EncryptedApiKey = encryptionOptions.EncryptProviderKeys
             ? ApiKeyEncryptor.Encrypt(accessToken, encryptionOptions.Key)
@@ -167,10 +164,7 @@ public sealed class ProviderService(
     /// Returns true if the given provider type supports device code authentication.
     /// </summary>
     public bool SupportsDeviceCodeAuth(string providerKey, string? apiEndpoint = null)
-    {
-        var client = clientFactory.GetClient(providerKey, apiEndpoint);
-        return client is IDeviceCodeAuthClient;
-    }
+        => clientFactory.GetPlugin(providerKey)?.DeviceCodeFlow is not null;
 
 
     /// <summary>

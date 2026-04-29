@@ -1,6 +1,6 @@
 using System.Diagnostics;
 
-namespace SharpClaw.Providers.Common;
+namespace SharpClaw.Utils.Logging;
 
 /// <summary>
 /// A <see cref="DelegatingHandler"/> that logs full HTTP request and

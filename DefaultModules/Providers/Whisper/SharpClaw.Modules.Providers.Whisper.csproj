@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- Force NuGet package DLLs (Whisper.net) to be physically copied to the output folder.
+         Without this the SDK leaves them as deps.json cache references, which the host's
+         AssemblyLoadContext cannot resolve when loading the module at runtime. -->
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <!-- Whisper consumes the ITranscriptionApiClient contract type that lives in the
+         Transcription module. Transcription does not depend on Whisper at compile time;
+         the runtime "optional" dependency goes the other way and is declared in the
+         module manifest only. -->
+    <ProjectReference Include="..\..\Transcription\SharpClaw.Modules.Transcription.csproj" />
+    <!-- AudioNormalizer lives in the SystemAudio module. The runtime requirement is
+         optional and declared in the module manifest. -->
+    <ProjectReference Include="..\..\SystemAudio\SharpClaw.Modules.SystemAudio.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Whisper.net" />
+    <PackageReference Include="Whisper.net.Runtime" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="module.json" Link="modules\sharpclaw_providers_whisper\module.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

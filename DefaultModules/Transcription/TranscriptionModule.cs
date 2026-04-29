@@ -10,7 +10,6 @@ using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.Transcription.Clients;
 using SharpClaw.Modules.Transcription.Contracts;
 using SharpClaw.Modules.Transcription.Handlers;
-using SharpClaw.Modules.Transcription.LocalInference;
 using SharpClaw.Modules.Transcription.Models;
 using SharpClaw.Modules.Transcription.Services;
 
@@ -35,11 +34,12 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
 
     public void ConfigureServices(IServiceCollection services)
     {
-        // Transcription API clients
+        // Cloud transcription API clients. The local Whisper backend lives in the
+        // sharpclaw_providers_whisper module; when that module is enabled it
+        // contributes another ITranscriptionApiClient via its own ConfigureServices,
+        // and the factory picks it up through IEnumerable<ITranscriptionApiClient>.
         services.AddSingleton<ITranscriptionApiClient, OpenAiTranscriptionApiClient>();
         services.AddSingleton<ITranscriptionApiClient, GroqTranscriptionApiClient>();
-        services.AddSingleton<WhisperModelManager>();
-        services.AddSingleton<ITranscriptionApiClient, LocalTranscriptionClient>();
         services.AddSingleton<TranscriptionApiClientFactory>();
 
         // Orchestrator + service

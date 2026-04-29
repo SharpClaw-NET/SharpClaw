@@ -16,5 +16,11 @@
       "serviceType": "SharpClaw.Modules.Transcription.Clients.ITranscriptionApiClient"
     }
   ],
-  "requires": []
+  "requires": [
+    {
+      "contractName": "transcription_stt_local",
+      "serviceType": "SharpClaw.Modules.Transcription.Clients.ITranscriptionApiClient",
+      "optional": true
+    }
+  ]
 }

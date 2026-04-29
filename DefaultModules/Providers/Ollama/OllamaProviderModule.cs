@@ -24,7 +24,8 @@ public sealed class OllamaProviderModule : ISharpClawModule
         var caps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForGeneric);
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
             WellKnownProviderKeys.Ollama, "Ollama (local)", false,
-            endpoint => new OllamaApiClient(endpoint), caps));
+            endpoint => new OllamaApiClient(endpoint), caps,
+            ownerModuleId: "sharpclaw_providers_ollama"));
     }
 
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];

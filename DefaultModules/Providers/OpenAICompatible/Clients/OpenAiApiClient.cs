@@ -5,7 +5,7 @@ using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Modules.Providers.OpenAICompatible.Clients;
 
-public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostClient
+public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostFeed
 {
     protected override string ApiEndpoint => "https://api.openai.com/v1";
     public override string ProviderKey => WellKnownProviderKeys.OpenAI;

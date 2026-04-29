@@ -1,0 +1,26 @@
+{
+  "id": "sharpclaw_providers_whisper",
+  "displayName": "Whisper (local STT)",
+  "version": "1.0.0",
+  "enabled": true,
+  "toolPrefix": "pw",
+  "entryAssembly": "SharpClaw.Modules.Providers.Whisper",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Local speech-to-text via Whisper.net (managed wrapper over whisper.cpp). Provides the local backend for the Transcription module's transcription_stt contract.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows" ],
+  "exports": [
+    {
+      "contractName": "transcription_stt_local",
+      "serviceType": "SharpClaw.Modules.Transcription.Clients.ITranscriptionApiClient"
+    }
+  ],
+  "requires": [
+    {
+      "contractName": "system_audio_capture",
+      "serviceType": "SharpClaw.Modules.SystemAudio.Capture.IAudioCaptureProvider",
+      "optional": true
+    }
+  ]
+}

@@ -24,8 +24,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
-    <ProjectReference Include="..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
-    <ProjectReference Include="..\SharpClaw.Providers.LocalCommon\SharpClaw.Providers.LocalCommon.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure.Tasks\SharpClaw.Application.Infrastructure.Tasks.csproj" />

@@ -26,8 +26,6 @@
 
   <ItemGroup>
     <PackageReference Include="System.Security.Cryptography.Xml" />
-    <PackageReference Include="Whisper.net" />
-    <PackageReference Include="Whisper.net.Runtime" />
   </ItemGroup>
 
   <ItemGroup>
@@ -36,6 +34,10 @@
 
   <ItemGroup>
     <EmbeddedResource Include="Resources\transcription-language-seeds.json" LogicalName="SharpClaw.Modules.Transcription.transcription-language-seeds.json" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Folder Include="LocalInference\" />
   </ItemGroup>
 
 </Project>

@@ -1,10 +1,10 @@
 using System.Text;
 
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Modules.Providers.Whisper.LocalInference;
 using SharpClaw.Modules.SystemAudio.Audio;
-using SharpClaw.Modules.Transcription.LocalInference;
+using SharpClaw.Modules.Transcription.Clients;
 
-namespace SharpClaw.Modules.Transcription.Clients;
+namespace SharpClaw.Modules.Providers.Whisper.Clients;
 
 /// <summary>
 /// Transcription client that runs Whisper inference locally via

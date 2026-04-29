@@ -15,14 +15,19 @@ public sealed class SimpleProviderPlugin(
     Func<string?, IProviderApiClient> clientFactory,
     IModelCapabilityResolver capabilities,
     IReadOnlyList<ProviderCostSeed>? costSeeds = null,
-    IDeviceCodeFlow? deviceCodeFlow = null) : IProviderPlugin
+    IDeviceCodeFlow? deviceCodeFlow = null,
+    IProviderCostFeed? costFeed = null,
+    Func<string, string?, string>? agentIdentifierSuffix = null,
+    string? ownerModuleId = null) : IProviderPlugin
 {
     public string ProviderKey { get; } = providerKey;
     public string DisplayName { get; } = displayName;
+    public string OwnerModuleId { get; } = ownerModuleId ?? string.Empty;
     public bool RequiresEndpoint { get; } = requiresEndpoint;
     public IModelCapabilityResolver Capabilities { get; } = capabilities;
     public IReadOnlyList<ProviderCostSeed> CostSeeds { get; } = costSeeds ?? [];
     public IDeviceCodeFlow? DeviceCodeFlow { get; } = deviceCodeFlow;
+    public IProviderCostFeed? CostFeed { get; } = costFeed;
 
     public IProviderApiClient CreateClient(string? endpoint)
     {
@@ -36,4 +41,9 @@ public sealed class SimpleProviderPlugin(
 
         return clientFactory(endpoint);
     }
+
+    public string GetAgentIdentifierSuffix(string providerName, string? sourceUrl)
+        => agentIdentifierSuffix is not null
+            ? agentIdentifierSuffix(providerName, sourceUrl)
+            : providerName.Replace(" ", "-").ToLowerInvariant();
 }

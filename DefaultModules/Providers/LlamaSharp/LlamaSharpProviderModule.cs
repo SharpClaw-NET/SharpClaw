@@ -92,7 +92,12 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
                 "LlamaSharp (local)",
                 requiresEndpoint: false,
                 _ => new LocalInferenceApiClient(pm),
-                caps);
+                caps,
+                agentIdentifierSuffix: (providerName, sourceUrl) =>
+                    string.IsNullOrEmpty(sourceUrl)
+                        ? providerName.Replace(" ", "-").ToLowerInvariant()
+                        : ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant(),
+                ownerModuleId: "sharpclaw_providers_llamasharp");
         });
     }
 

@@ -75,6 +75,9 @@
     <ProjectReference Include="..\DefaultModules\Transcription\SharpClaw.Modules.Transcription.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\Whisper\SharpClaw.Modules.Providers.Whisper.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
     <ProjectReference Include="..\DefaultModules\VS2026Editor\SharpClaw.Modules.VS2026Editor.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
@@ -90,10 +93,13 @@
     Copy all DLLs from every module's output folder, not just the module DLL itself.
     This ensures transitive dependencies unique to a module (e.g. Whisper.net, NAudio) are present
     at runtime. SkipUnchangedFiles avoids unnecessary copies on incremental builds.
+    Both top-level (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module
+    layouts are matched.
   -->
   <Target Name="CopyBundledModules" AfterTargets="Build">
     <ItemGroup>
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>

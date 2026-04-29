@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Providers.Common;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
@@ -45,14 +44,14 @@ public sealed class ProviderCostService(
         }
 
         // Try the provider's cost API (if implemented)
-        var client = GetClientSafe(provider.ProviderKey, provider.ApiEndpoint);
-        if (client is IProviderCostClient costClient
+        var costFeed = clientFactory.GetPlugin(provider.ProviderKey)?.CostFeed;
+        if (costFeed is not null
             && !string.IsNullOrEmpty(provider.EncryptedApiKey))
         {
             var apiKey = ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey, encryptionOptions.Key);
             using var httpClient = httpClientFactory.CreateClient();
 
-            var result = await costClient.GetCostsAsync(httpClient, apiKey, periodStart, periodEnd, ct);
+            var result = await costFeed.GetCostsAsync(httpClient, apiKey, periodStart, periodEnd, ct);
             if (result is not null)
             {
                 return new ProviderCostResponse(
@@ -137,17 +136,5 @@ public sealed class ProviderCostService(
         var end = endDate ?? DateTimeOffset.UtcNow;
         var start = startDate ?? end.AddDays(-days);
         return (start, end);
-    }
-
-    private IProviderApiClient? GetClientSafe(string providerKey, string? apiEndpoint)
-    {
-        try
-        {
-            return clientFactory.GetClient(providerKey, apiEndpoint);
-        }
-        catch
-        {
-            return null;
-        }
     }
 }

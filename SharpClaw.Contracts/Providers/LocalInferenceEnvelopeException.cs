@@ -1,12 +1,12 @@
-namespace SharpClaw.Providers.Common;
+namespace SharpClaw.Contracts.Providers;
 
 /// <summary>
-/// Thrown by <see cref="LocalInferenceApiClient"/> when the model emits
+/// Thrown by a local-inference provider client when the model emits
 /// output that the grammar-constrained envelope parser cannot decode —
 /// typically because the GBNF sampler was defeated on a heavily
-/// quantised checkpoint. Replaces the previous canned-apology string
-/// (finding L-017) so callers can surface the failure as an error
-/// rather than silently treating it as a successful empty response.
+/// quantised checkpoint. Lives in the contracts layer so the chat
+/// pipeline (Core) can catch it without referencing any provider
+/// shared library.
 /// </summary>
 public sealed class LocalInferenceEnvelopeException : Exception
 {

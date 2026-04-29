@@ -7,7 +7,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Providers.Common;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts.Modules;

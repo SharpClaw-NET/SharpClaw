@@ -2,7 +2,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Providers.LocalCommon;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts;
@@ -17,7 +16,7 @@ using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration, ILocalModelLookup? localModelLookup = null)
+public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration, ProviderApiClientFactory clientFactory, ILocalModelLookup? localModelLookup = null)
 {
     public async Task<AgentResponse> CreateAsync(CreateAgentRequest request, CancellationToken ct = default)
     {
@@ -327,18 +326,11 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
         foreach (var model in models)
         {
-            string providerSuffix;
-            if (model.Provider.ProviderKey == WellKnownProviderKeys.LlamaSharp
-                && localSourceUrls.TryGetValue(model.Id, out var sourceUrl))
-            {
-                providerSuffix = ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant();
-            }
-            else
-            {
-                providerSuffix = model.Provider.Name
-                    .Replace(" ", "-")
-                    .ToLowerInvariant();
-            }
+            localSourceUrls.TryGetValue(model.Id, out var sourceUrl);
+            var plugin = clientFactory.GetPlugin(model.Provider.ProviderKey);
+            var providerSuffix = plugin is not null
+                ? plugin.GetAgentIdentifierSuffix(model.Provider.Name, sourceUrl)
+                : model.Provider.Name.Replace(" ", "-").ToLowerInvariant();
 
             var agentName = $"default-{model.Name}-{providerSuffix}";
             if (nameSet.Contains(agentName)) continue;
