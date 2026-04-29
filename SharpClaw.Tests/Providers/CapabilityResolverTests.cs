@@ -1,4 +1,4 @@
-using SharpClaw.Application.Core.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Contracts.Models;
 
 namespace SharpClaw.Tests.Providers;

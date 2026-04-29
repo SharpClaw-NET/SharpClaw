@@ -1,7 +1,7 @@
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.Application.Core.Providers;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
 /// Centralised model-name heuristics shared by the per-provider
@@ -168,8 +168,7 @@ public static class ProviderCapabilityHeuristics
 /// <summary>
 /// Adapter exposing a <see cref="ProviderCapabilityHeuristics"/> family
 /// resolver as an <see cref="IModelCapabilityResolver"/>. Plugins use
-/// this in place of the transitional
-/// <see cref="DelegateCapabilityResolver"/> from Phase 3.
+/// this to plug a static-method resolver into the plugin contract.
 /// </summary>
 public sealed class HeuristicCapabilityResolver(Func<string, HashSet<string>> resolver)
     : IModelCapabilityResolver
