@@ -16,6 +16,7 @@ using SharpClaw.Application.API.Webhooks;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Providers;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Core.Services.Triggers.Sources;
 using SharpClaw.Application.Core.Services;
@@ -258,22 +259,9 @@ try
     builder.Services.AddTransient<HttpLoggingDelegatingHandler>();
     builder.Services.AddHttpClient()
         .ConfigureHttpClientDefaults(b => b.AddHttpMessageHandler<HttpLoggingDelegatingHandler>());
-    builder.Services.AddSingleton<IProviderApiClient, OpenAiApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, AnthropicApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, OpenRouterApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GoogleVertexAIApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GoogleVertexAIOpenAiApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GoogleGeminiApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GoogleGeminiOpenAiApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, ZAIApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, VercelAIGatewayApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, XAIApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GroqApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, CerebrasApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, MistralApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, GitHubCopilotApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, MinimaxApiClient>();
-    builder.Services.AddSingleton<IProviderApiClient, OllamaApiClient>();
+    // Provider plugins are registered via BuiltInProviderPlugins.Build below
+    // (after LocalInferenceProcessManager is constructed). The factory itself
+    // resolves over IEnumerable<IProviderPlugin>.
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
     builder.Services.AddScoped<ProviderService>();
@@ -369,7 +357,11 @@ try
         processManager.MaxCachedSessions = maxCachedSessions;
     builder.Services.AddSingleton(processManager);
     builder.Services.AddSingleton(sp => new LocalInferenceApiClient(sp.GetRequiredService<LocalInferenceProcessManager>()));
-    builder.Services.AddSingleton<IProviderApiClient>(sp => sp.GetRequiredService<LocalInferenceApiClient>());
+
+    // Register the seventeen built-in provider plugins. Phases 6-9 carve
+    // these into per-protocol modules; until then they live inside Core.
+    foreach (var plugin in BuiltInProviderPlugins.Build(processManager))
+        builder.Services.AddSingleton(plugin);
     builder.Services.AddSingleton<HuggingFaceUrlResolver>();
     builder.Services.AddSingleton<ModelDownloadManager>();
     builder.Services.AddScoped<LocalModelService>();
