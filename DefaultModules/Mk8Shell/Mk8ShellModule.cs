@@ -350,6 +350,17 @@ public sealed class Mk8ShellModule : ISharpClawModule
     }
 
     // ═══════════════════════════════════════════════════════════════
+    // Lifecycle
+    // ═══════════════════════════════════════════════════════════════
+
+    public Task InitializeAsync(IServiceProvider services, CancellationToken ct)
+    {
+        // Seed mk8.shell base env on first startup.
+        Mk8GlobalEnv.Load();
+        return Task.CompletedTask;
+    }
+
+    // ═══════════════════════════════════════════════════════════════
     // TOOL SCHEMAS
     // ═══════════════════════════════════════════════════════════════
 

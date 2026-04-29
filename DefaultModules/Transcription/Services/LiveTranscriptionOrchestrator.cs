@@ -32,7 +32,6 @@ public sealed class LiveTranscriptionOrchestrator(
     TranscriptionApiClientFactory transcriptionClientFactory,
     IHttpClientFactory httpClientFactory,
     IModelInfoProvider modelInfoProvider,
-    IInputAudioDeviceResolver deviceResolver,
     TranscriptionJobSink jobSink,
     EncryptionOptions encryptionOptions,
     ILogger<LiveTranscriptionOrchestrator> logger) : ILiveTranscriptionOrchestrator, ITranscriptionSegmentPublisher
@@ -151,9 +150,15 @@ public sealed class LiveTranscriptionOrchestrator(
         CancellationToken ct)
     {
         // Resolve device identifier via the SystemAudio module's resolver.
-        var resolved = await deviceResolver.GetDeviceAsync(deviceId, ct)
-            ?? throw new InvalidOperationException($"Audio device {deviceId} not found.");
-        var deviceIdentifier = resolved.DeviceIdentifier;
+        // Scoped service consumed from a singleton — must be acquired through a scope.
+        string deviceIdentifier;
+        using (var deviceScope = scopeFactory.CreateScope())
+        {
+            var deviceResolver = deviceScope.ServiceProvider.GetRequiredService<IInputAudioDeviceResolver>();
+            var resolved = await deviceResolver.GetDeviceAsync(deviceId, ct)
+                ?? throw new InvalidOperationException($"Audio device {deviceId} not found.");
+            deviceIdentifier = resolved.DeviceIdentifier;
+        }
 
         logger.LogInformation(
             "Starting sliding-window transcription for job {JobId} on device '{Device}'",

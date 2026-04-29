@@ -27,7 +27,6 @@
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure.Tasks\SharpClaw.Application.Infrastructure.Tasks.csproj" />
-    <ProjectReference Include="..\mk8.shell.startup\mk8.shell.startup.csproj" />
   </ItemGroup>
 
 </Project>

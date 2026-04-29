@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using Mk8.Shell.Models;
 using Serilog;
 using SharpClaw.Application.API;
 using SharpClaw.Application.API.Api;
@@ -385,6 +384,22 @@ try
     var registeredBundledCount = 0;
     var disabledBundledCount = 0;
 
+    // DbContext registry must be populated for ALL discovered bundled modules,
+    // not just enabled ones. ConfigureServices already ran for every bundled
+    // module (the DI container is immutable post-Build), so any scoped factory
+    // delegate registered by a disabled module — e.g. the LlamaSharp module's
+    // `sp => factory.CreateDbContext<LlamaSharpDbContext>()` — can still be
+    // resolved lazily through optional dependencies on other services. If the
+    // module's DbContext type is missing from the runtime registry that
+    // resolution throws InvalidOperationException at request time. Registering
+    // here is cheap (just type-table inserts) and does not load any JSON data.
+    using (var scope = app.Services.CreateScope())
+    {
+        var moduleSvc = scope.ServiceProvider.GetRequiredService<ModuleService>();
+        foreach (var bundledModule in allBundled)
+            moduleSvc.RegisterModulePersistence(bundledModule);
+    }
+
     foreach (var bundledModule in allBundled)
     {
         if (!enabledModuleIds.Contains(bundledModule.Id))
@@ -396,11 +411,6 @@ try
         }
 
         registry.Register(bundledModule);
-        using (var scope = app.Services.CreateScope())
-        {
-            var moduleSvc = scope.ServiceProvider.GetRequiredService<ModuleService>();
-            moduleSvc.RegisterModulePersistence(bundledModule);
-        }
         registeredBundledCount++;
 
         var manifest = moduleLoader.GetManifest(bundledModule.Id);
@@ -530,9 +540,6 @@ try
         "{FailedInit} failed, {Disabled} disabled, {Excluded} excluded",
         totalLoaded, initializedCount, externalLoadedCount, envExternalLoadedCount,
         failedInitCount, disabledBundledCount, excludedModules.Count);
-
-    // Seed mk8.shell base env on first startup
-    Mk8GlobalEnv.Load();
 
     app.Lifetime.ApplicationStarted.Register(() =>
     {
