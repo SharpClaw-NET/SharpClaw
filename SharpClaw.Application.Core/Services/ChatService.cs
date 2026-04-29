@@ -36,7 +36,7 @@ public sealed class ChatService(
     ProviderApiClientFactory clientFactory,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
-    LocalModelService localModelService,
+    IChatLocalModelGate? localModelGate,
     HeaderTagProcessor headerTagProcessor,
     ThreadActivitySignal threadActivity,
     ModuleRegistry moduleRegistry,
@@ -96,8 +96,8 @@ public sealed class ChatService(
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
         // Auto-load local model if not already loaded
-        if (isLocal)
-            await localModelService.EnsureReadyForChatAsync(model.Id, ct);
+        if (isLocal && localModelGate is not null)
+            await localModelGate.EnsureReadyForChatAsync(model.Id, ct);
 
         // Acquire per-thread lock for sequential processing
         IDisposable? threadLock = null;
@@ -236,7 +236,7 @@ public sealed class ChatService(
         {
             threadLock?.Dispose();
             if (isLocal)
-                localModelService.ReleaseAfterChat(model.Id);
+                localModelGate?.ReleaseAfterChat(model.Id);
         }
     }
 
@@ -826,8 +826,8 @@ public sealed class ChatService(
             throw new InvalidOperationException("Provider does not have an API key configured.");
 
         // Auto-load local model if not already loaded
-        if (isLocal)
-            await localModelService.EnsureReadyForChatAsync(model.Id, ct);
+        if (isLocal && localModelGate is not null)
+            await localModelGate.EnsureReadyForChatAsync(model.Id, ct);
 
         // Acquire per-thread lock for sequential processing
         IDisposable? threadLock = null;
@@ -1090,7 +1090,7 @@ public sealed class ChatService(
         {
             threadLock?.Dispose();
             if (isLocal)
-                localModelService.ReleaseAfterChat(model.Id);
+                localModelGate?.ReleaseAfterChat(model.Id);
         }
     }
 
@@ -1709,7 +1709,7 @@ public sealed class ChatService(
     /// notation lines) are preserved so the user can still see what happened
     /// before the local model lost the grammar and emitted invalid JSON.
     /// <para>
-    /// This preserves the L-017 contract: <see cref="LocalInferenceApiClient"/>
+    /// This preserves the L-017 contract: the local-inference API client
     /// still throws a typed exception on malformed envelopes, but the caller
     /// turns it into a user-facing error response instead of a transport-level
     /// failure.

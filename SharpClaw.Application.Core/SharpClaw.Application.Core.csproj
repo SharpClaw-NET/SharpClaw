@@ -15,27 +15,7 @@
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
-    <PackageReference Include="LLamaSharp" />
-    <PackageReference Include="LLamaSharp.Backend.Cpu" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
-  </ItemGroup>
-
-  <!--
-    Platform-specific LLamaSharp GPU backends. The cross-platform metapackages
-    (LLamaSharp.Backend.Cuda12 / .Vulkan) unconditionally pull BOTH .Windows
-    and .Linux sub-packages, adding ~530 MB of unused native libs per publish.
-    Using the platform-specific packages directly with RID conditions ensures
-    only the target platform's natives are restored/published.
-    When no RID is set (dev builds / dotnet build), both platforms are included
-    so IntelliSense and local F5 work on any OS.
-  -->
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('win'))">
-    <PackageReference Include="LLamaSharp.Backend.Cuda12.Windows" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan.Windows" />
-  </ItemGroup>
-  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('linux'))">
-    <PackageReference Include="LLamaSharp.Backend.Cuda12.Linux" />
-    <PackageReference Include="LLamaSharp.Backend.Vulkan.Linux" />
   </ItemGroup>
 
   <ItemGroup>

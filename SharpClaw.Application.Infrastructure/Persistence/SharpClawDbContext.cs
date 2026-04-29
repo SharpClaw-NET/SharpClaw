@@ -13,8 +13,8 @@ using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence.JSON;
+using SharpClaw.Infrastructure.Models;
 
 namespace SharpClaw.Infrastructure.Persistence;
 
@@ -49,7 +49,6 @@ public class SharpClawDbContext(
     public DbSet<DefaultResourceSetDB> DefaultResourceSets => Set<DefaultResourceSetDB>();
     public DbSet<DefaultResourceEntryDB> DefaultResourceEntries => Set<DefaultResourceEntryDB>();
     public DbSet<ToolAwarenessSetDB> ToolAwarenessSets => Set<ToolAwarenessSetDB>();
-    public DbSet<LocalModelFileDB> LocalModelFiles => Set<LocalModelFileDB>();
 
     // ── Generic resource access (§3.10)
     public DbSet<ResourceAccessDB> ResourceAccesses => Set<ResourceAccessDB>();
@@ -119,17 +118,7 @@ public class SharpClawDbContext(
                 .OnDelete(DeleteBehavior.Restrict);
         });
 
-        modelBuilder.Entity<LocalModelFileDB>(e =>
-        {
-            e.HasIndex(f => f.ModelId).IsUnique();
-            e.Property(f => f.Status).HasConversion<string>();
-            e.HasOne(f => f.Model)
-                .WithMany()
-                .HasForeignKey(f => f.ModelId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── Tool Awareness Sets ────────────────────────────────────
+        // ── Tool Awareness Sets ────────────────────────
         modelBuilder.Entity<ToolAwarenessSetDB>(e =>
         {
             e.HasIndex(t => t.Name).IsUnique();

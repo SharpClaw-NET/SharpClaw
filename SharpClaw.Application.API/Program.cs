@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
-using LLama.Native;
 using Mk8.Shell.Models;
 using Serilog;
 using SharpClaw.Application.API;
@@ -14,10 +13,7 @@ using SharpClaw.Application.API.Handlers;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.API.Webhooks;
 using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.LocalInference;
-using SharpClaw.Providers.LocalCommon;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Providers;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Core.Services.Triggers.Sources;
 using SharpClaw.Application.Core.Services;
@@ -109,29 +105,6 @@ else
         .MinimumLevel.Fatal()
         .CreateLogger();
 }
-
-// L-015: Configure the LLamaSharp native backend before *any* LLama API is touched.
-// NativeLibraryConfig is sticky — the first call to a LLama API freezes the backend
-// selection, so this must run prior to DI registration of LocalInferenceProcessManager
-// (and ahead of any code path that may probe llama.cpp). A startup diagnostic line is
-// emitted so operators can confirm which backend (CUDA/Vulkan/CPU) was chosen.
-NativeLibraryConfig.All
-    .WithCuda(true)
-    .WithVulkan(true)
-    .WithAutoFallback(true)
-    .WithLogCallback((level, message) =>
-    {
-        // Only surface warnings/errors through debug output; suppress the
-        // hundreds of info lines (tensor loads, layer assignments, etc.)
-        // that llama.cpp dumps to stderr during model loading.
-        if (level >= LLamaLogLevel.Warning)
-        {
-            System.Diagnostics.Debug.WriteLine($"[llama.cpp] {message?.TrimEnd()}", "SharpClaw.CLI");
-            sessionLogs.AppendDebug($"[llama.cpp] {message?.TrimEnd()}");
-        }
-    });
-Log.Information(
-    "LLamaSharp native backend configured (preference: CUDA > Vulkan > CPU, AutoFallback=true).");
 
 try
 {
@@ -260,9 +233,8 @@ try
     builder.Services.AddTransient<HttpLoggingDelegatingHandler>();
     builder.Services.AddHttpClient()
         .ConfigureHttpClientDefaults(b => b.AddHttpMessageHandler<HttpLoggingDelegatingHandler>());
-    // Provider plugins are registered via BuiltInProviderPlugins.Build below
-    // (after LocalInferenceProcessManager is constructed). The factory itself
-    // resolves over IEnumerable<IProviderPlugin>.
+    // Provider plugins are contributed by modules (e.g. LlamaSharp module).
+    // The factory resolves over IEnumerable<IProviderPlugin>.
     builder.Services.AddSingleton<ProviderApiClientFactory>();
 
     builder.Services.AddScoped<ProviderService>();
@@ -280,6 +252,7 @@ try
     builder.Services.AddScoped<IAgentManager, HostAgentManager>();
     builder.Services.AddScoped<IAgentJobReader, HostAgentJobReader>();
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
+    builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
     builder.Services.AddScoped<IContextDataReader, HostContextDataReader>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
@@ -341,31 +314,6 @@ try
 
     builder.Services.AddSingleton(moduleLoader);
     builder.Services.AddScoped<ModuleService>();
-
-    // Local inference
-    // Native library backend was configured before host build (see L-015 block above).
-
-    var processManager = new LocalInferenceProcessManager();
-    if (int.TryParse(builder.Configuration["Local:GpuLayerCount"], out var gpuLayers))
-        processManager.DefaultGpuLayerCount = gpuLayers;
-    if (uint.TryParse(builder.Configuration["Local:ContextSize"], out var ctxSize))
-        processManager.DefaultContextSize = ctxSize;
-    if (int.TryParse(builder.Configuration["Local:IdleCooldownMinutes"], out var cooldownMin))
-        processManager.IdleCooldown = TimeSpan.FromMinutes(cooldownMin);
-    if (bool.TryParse(builder.Configuration["Local:KeepLoaded"], out var keepLoaded))
-        processManager.KeepLoaded = keepLoaded;
-    if (int.TryParse(builder.Configuration["Local:MaxCachedSessions"], out var maxCachedSessions) && maxCachedSessions > 0)
-        processManager.MaxCachedSessions = maxCachedSessions;
-    builder.Services.AddSingleton(processManager);
-    builder.Services.AddSingleton(sp => new LocalInferenceApiClient(sp.GetRequiredService<LocalInferenceProcessManager>()));
-
-    // Register the seventeen built-in provider plugins. Phases 6-9 carve
-    // these into per-protocol modules; until then they live inside Core.
-    foreach (var plugin in BuiltInProviderPlugins.Build(processManager))
-        builder.Services.AddSingleton(plugin);
-    builder.Services.AddSingleton<HuggingFaceUrlResolver>();
-    builder.Services.AddSingleton<ModelDownloadManager>();
-    builder.Services.AddScoped<LocalModelService>();
 
     // Background tasks
     builder.Services.AddHostedService<ScheduledTaskService>();

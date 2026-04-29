@@ -27,5 +27,6 @@
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure.Tasks\SharpClaw.Application.Infrastructure.Tasks.csproj" />
     <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\DefaultModules\Providers\LlamaSharp\SharpClaw.Modules.Providers.LlamaSharp.csproj" />
   </ItemGroup>
 </Project>

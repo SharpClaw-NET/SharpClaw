@@ -40,6 +40,7 @@
     <Project Path="DefaultModules/OfficeApps/SharpClaw.Modules.OfficeApps.csproj" />
     <Project Path="DefaultModules/Providers/Anthropic/SharpClaw.Modules.Providers.Anthropic.csproj" />
     <Project Path="DefaultModules/Providers/Google/SharpClaw.Modules.Providers.Google.csproj" />
+    <Project Path="DefaultModules/Providers/LlamaSharp/SharpClaw.Modules.Providers.LlamaSharp.csproj" />
     <Project Path="DefaultModules/Providers/Ollama/SharpClaw.Modules.Providers.Ollama.csproj" />
     <Project Path="DefaultModules/Providers/OpenAICompatible/SharpClaw.Modules.Providers.OpenAICompatible.csproj" />
     <Project Path="DefaultModules/SystemAudio/SharpClaw.Modules.SystemAudio.csproj" />

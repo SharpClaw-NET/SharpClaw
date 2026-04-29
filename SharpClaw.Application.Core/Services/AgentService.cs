@@ -1,7 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.LocalInference;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Providers.LocalCommon;
 using SharpClaw.Application.Infrastructure.Models.Access;
@@ -11,13 +10,14 @@ using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Models;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Models;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration)
+public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration, ILocalModelLookup? localModelLookup = null)
 {
     public async Task<AgentResponse> CreateAsync(CreateAgentRequest request, CancellationToken ct = default)
     {
@@ -314,11 +314,9 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             .Select(m => m.Id)
             .ToHashSet();
 
-        var localSourceUrls = localModelIds.Count > 0
-            ? await db.LocalModelFiles
-                .Where(f => localModelIds.Contains(f.ModelId))
-                .ToDictionaryAsync(f => f.ModelId, f => f.SourceUrl, ct)
-            : [];
+        var localSourceUrls = localModelIds.Count > 0 && localModelLookup is not null
+            ? await localModelLookup.GetSourceUrlsForModelsAsync(localModelIds, ct)
+            : (IReadOnlyDictionary<Guid, string>)new Dictionary<Guid, string>();
 
         var existingNames = await db.Agents
             .Select(a => a.Name)

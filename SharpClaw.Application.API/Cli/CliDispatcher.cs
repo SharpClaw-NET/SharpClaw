@@ -22,8 +22,6 @@ using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.DTOs.DefaultResources;
-using SharpClaw.Contracts.DTOs.LocalModels;
-using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Contracts.DTOs.Users;
@@ -492,16 +490,7 @@ public static class CliDispatcher
                 "model get <id>",
                 "model list [--provider <id>]           List models (optionally by provider)",
                 "model update <id> <name> [--cap <capabilities>]",
-                "model delete <id>",
-                "",
-                "Local models:",
-                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp>]",
-                "model download list <url>",
-                "model load <id> [--gpu-layers <n>] [--ctx <size>]  Pin model (keep loaded)",
-                "model unload <id>                                  Unpin model",
-                "model local list",
-                "  Models auto-load on chat and auto-unload when idle.",
-                "  Use load/unload to keep frequently-used models resident.");
+                "model delete <id>");
             return Results.Ok();
         }
 
@@ -543,22 +532,6 @@ public static class CliDispatcher
                 => await ModelHandlers.Delete(CliIdMap.Resolve(args[2]), svc),
             "delete" => UsageResult("model delete <id>"),
 
-            // ── Local model commands ──────────────────────────────
-            "download" => await HandleModelDownload(args, sp),
-            "load" when args.Length >= 3 => await HandleModelLoad(args, sp),
-            "load" => UsageResult("model load <id> [--gpu-layers <n>] [--ctx <size>] [--mmproj <path>]",
-                "  Pins the model so it stays loaded between requests."),
-            "unload" when args.Length >= 3 => await HandleModelUnload(args, sp),
-            "unload" => UsageResult("model unload <id>",
-                "  Unpins the model. Stops immediately if no active requests."),
-            "mmproj" when args.Length >= 4 => await HandleModelSetMmproj(args, sp),
-            "mmproj" => UsageResult("model mmproj <id> <path>",
-                "  Sets the CLIP/mmproj file path for a registered LlamaSharp model.",
-                "  Use 'none' as path to clear it."),
-            "local" when args.Length >= 3 && args[2].ToLowerInvariant() == "list"
-                => await HandleLocalModelList(sp),
-            "local" => UsageResult("model local list"),
-
             _ => UsageResult($"Unknown sub-command: model {sub}. Try 'help' for usage.")
         };
     }
@@ -575,131 +548,6 @@ public static class CliDispatcher
             }
         }
         return await ModelHandlers.List(svc, providerId);
-    }
-
-    // ── Local model CLI handlers ─────────────────────────────────
-
-    private static async Task<IResult> HandleModelDownload(string[] args, IServiceProvider sp)
-    {
-        // model download list <url>
-        if (args.Length >= 4 && args[2].ToLowerInvariant() == "list")
-        {
-            var localSvc = sp.GetRequiredService<LocalModelService>();
-            var files = await localSvc.ListAvailableFilesAsync(args[3]);
-            return Results.Ok(files);
-        }
-
-        // model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp>]
-        if (args.Length < 3)
-            return UsageResult(
-                "model download <url> [--name <alias>] [--quant <Q4_K_M>] [--gpu-layers <n>] [--provider <LlamaSharp>]",
-                "model download list <url>");
-
-        var url = args[2];
-        string? name = null;
-        string? quant = null;
-        int? gpuLayers = null;
-        string? providerKey = null;
-
-        for (var i = 3; i < args.Length; i++)
-        {
-            switch (args[i])
-            {
-                case "--name" when i + 1 < args.Length:
-                    name = args[++i]; break;
-                case "--quant" when i + 1 < args.Length:
-                    quant = args[++i]; break;
-                case "--gpu-layers" when i + 1 < args.Length && int.TryParse(args[i + 1], out var gl):
-                    gpuLayers = gl; i++; break;
-                case "--provider" when i + 1 < args.Length:
-                    var provStr = args[++i];
-                    var matched = WellKnownProviderKeys.All.FirstOrDefault(k =>
-                        k.Equals(provStr, StringComparison.OrdinalIgnoreCase));
-                    if (matched is null)
-                        return Results.BadRequest($"Unknown provider '{provStr}'.");
-                    providerKey = matched;
-                    break;
-            }
-        }
-
-        var svc = sp.GetRequiredService<LocalModelService>();
-        var progress = new Progress<double>(p =>
-        {
-            var pct = (int)(p * 100);
-            Console.Write($"\rDownloading... {pct}%");
-        });
-
-        Console.WriteLine();
-
-        if (providerKey is null)
-        {
-            Console.Error.WriteLine("error: --provider is required. Specify a local provider (e.g. llamasharp).");
-            return Results.BadRequest("ProviderKey is required.");
-        }
-
-        var result = await svc.DownloadAndRegisterAsync(
-            new DownloadModelRequest(url, name, quant, gpuLayers, providerKey), progress);
-        return Results.Ok(result);
-    }
-
-    private static async Task<IResult> HandleModelLoad(string[] args, IServiceProvider sp)
-    {
-        var modelId = CliIdMap.Resolve(args[2]);
-        int? gpuLayers = null;
-        uint? contextSize = null;
-        string? mmprojPath = null;
-
-        for (var i = 3; i < args.Length; i++)
-        {
-            switch (args[i])
-            {
-                case "--gpu-layers" when i + 1 < args.Length && int.TryParse(args[i + 1], out var gl):
-                    gpuLayers = gl; i++; break;
-                case "--ctx" when i + 1 < args.Length && uint.TryParse(args[i + 1], out var cs):
-                    contextSize = cs; i++; break;
-                case "--mmproj" when i + 1 < args.Length:
-                    mmprojPath = args[++i]; break;
-            }
-        }
-
-        var svc = sp.GetRequiredService<LocalModelService>();
-        Console.Write("Pinning model (loading into memory)...");
-        await svc.LoadModelAsync(
-            modelId, new LoadModelRequest(gpuLayers, contextSize, mmprojPath));
-        Console.WriteLine(" ready. Model will stay loaded until 'model unload'.");
-        return Results.Ok(new { modelId, pinned = true });
-    }
-
-    private static async Task<IResult> HandleModelUnload(string[] args, IServiceProvider sp)
-    {
-        var modelId = CliIdMap.Resolve(args[2]);
-        var svc = sp.GetRequiredService<LocalModelService>();
-        await svc.UnloadModelAsync(modelId);
-        return Results.Ok(new { modelId, status = "unpinned" });
-    }
-
-    private static async Task<IResult> HandleLocalModelList(IServiceProvider sp)
-    {
-        var svc = sp.GetRequiredService<LocalModelService>();
-        return Results.Ok(await svc.ListLocalModelsAsync());
-    }
-
-    private static async Task<IResult> HandleModelSetMmproj(string[] args, IServiceProvider sp)
-    {
-        var modelId   = CliIdMap.Resolve(args[2]);
-        var rawPath   = args[3];
-        var mmproj    = string.Equals(rawPath, "none", StringComparison.OrdinalIgnoreCase)
-            ? null
-            : rawPath;
-
-        var svc = sp.GetRequiredService<LocalModelService>();
-        await svc.SetMmprojPathAsync(modelId, mmproj);
-
-        Console.WriteLine(mmproj is null
-            ? $"Cleared mmproj path for model {modelId}."
-            : $"Set mmproj path for model {modelId}: {mmproj}");
-
-        return Results.Ok(new { modelId, mmprojPath = mmproj });
     }
 
     private static IReadOnlySet<string>? ParseCapabilityTags(string[] args, int startIndex)
@@ -795,15 +643,6 @@ public static class CliDispatcher
         string[] args, IServiceProvider sp, AgentService svc)
     {
         var modelId = CliIdMap.Resolve(args[3]);
-
-        // Check if the ID is a local model file rather than a model
-        var db = sp.GetRequiredService<SharpClawDbContext>();
-        var localFile = await db.LocalModelFiles.FirstOrDefaultAsync(f => f.Id == modelId);
-        if (localFile is not null)
-        {
-            Console.WriteLine($"(Resolved local file #{CliIdMap.GetOrAssign(localFile.Id)} → model #{CliIdMap.GetOrAssign(localFile.ModelId)})");
-            modelId = localFile.ModelId;
-        }
 
         // Separate flags from positional args (system prompt)
         int? maxTokens = null;
@@ -3594,13 +3433,7 @@ public static class CliDispatcher
             Model:     model <sub> [args]
               model add <name> <providerId> [--cap Chat,Vision,...]   (exact provider model ID)
               model get|list|update|delete <id> [args]
-              model download <url> [--name <alias>] [--quant <Q>] [--gpu-layers <n>] [--provider <type>]
-              model download list <url>       List available GGUF files at a URL
-              model load <id> [--gpu-layers <n>] [--ctx <size>]       Pin model (keep loaded)
-              model unload <id>                                        Unpin model
-              model local list                                         List local models
               Tip: 'provider sync-models <id>' auto-imports models.
-              Models auto-load on chat and auto-unload when idle.
 
             Agent:     agent <sub> [args]
               agent add <name> <modelId> [system prompt] [--max-tokens <n>] [--tools <setId>]

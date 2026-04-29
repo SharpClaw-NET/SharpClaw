@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SharpClaw.Tests" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <ProjectReference Include="..\..\..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\..\..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
+    <ProjectReference Include="..\..\..\SharpClaw.Providers.LocalCommon\SharpClaw.Providers.LocalCommon.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore" />
+    <PackageReference Include="LLamaSharp" />
+    <PackageReference Include="LLamaSharp.Backend.Cpu" />
+  </ItemGroup>
+
+  <!--
+    Platform-specific LLamaSharp GPU backends. The cross-platform metapackages
+    (LLamaSharp.Backend.Cuda12 / .Vulkan) unconditionally pull BOTH .Windows
+    and .Linux sub-packages, adding ~530 MB of unused native libs per publish.
+    Using the platform-specific packages directly with RID conditions ensures
+    only the target platform's natives are restored/published.
+    When no RID is set (dev builds / dotnet build), both platforms are included
+    so IntelliSense and local F5 work on any OS.
+  -->
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('win'))">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Windows" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan.Windows" />
+  </ItemGroup>
+  <ItemGroup Condition="'$(RuntimeIdentifier)' == '' OR $(RuntimeIdentifier.StartsWith('linux'))">
+    <PackageReference Include="LLamaSharp.Backend.Cuda12.Linux" />
+    <PackageReference Include="LLamaSharp.Backend.Vulkan.Linux" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="module.json" Link="modules\sharpclaw_providers_llamasharp\module.json" CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+</Project>

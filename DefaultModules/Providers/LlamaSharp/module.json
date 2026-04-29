@@ -1,0 +1,15 @@
+{
+  "id": "sharpclaw_providers_llamasharp",
+  "displayName": "LlamaSharp Provider",
+  "version": "1.0.0",
+  "enabled": true,
+  "toolPrefix": "po3",
+  "entryAssembly": "SharpClaw.Modules.Providers.LlamaSharp",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Local GGUF inference via LLamaSharp (in-process llama.cpp). Owns LocalModelFile state, the LocalInferenceApiClient provider plugin, model download/load lifecycle, /models/local REST endpoints, and the `localmodel` CLI verb.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows", "linux" ],
+  "exports": [],
+  "requires": []
+}
