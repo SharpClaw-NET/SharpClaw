@@ -4,7 +4,7 @@ using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Modules.Providers.Ollama.Clients;
 
 /// <summary>
 /// OpenAI-compatible client for a user-managed Ollama server.

@@ -1,0 +1,7 @@
+{
+  "id": "sharpclaw_providers_ollama",
+  "displayName": "Ollama Provider",
+  "version": "1.0.0",
+  "enabled": true,
+  "toolPrefix": "po2"
+}
