@@ -3,6 +3,7 @@ using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
 

@@ -1,6 +1,6 @@
 using System.Text.Json;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Contracts.Providers;
 
 /// <summary>
 /// Describes a tool the model may invoke during a chat completion.
@@ -50,9 +50,9 @@ public sealed class ChatCompletionResult
     /// <see cref="FinishReason.ContentFilter"/>.
     /// <para>
     /// LlamaSharp surfaces this via the <c>"refusal"</c> envelope mode
-    /// (<see cref="LocalInference.LlamaSharpToolGrammar"/>). OpenAI
-    /// surfaces it via <c>message.refusal</c> on Chat Completions and a
-    /// <c>type: "refusal"</c> content item on the Responses API.
+    /// (see <c>SharpClaw.Application.Core.LocalInference.LlamaSharpToolGrammar</c>).
+    /// OpenAI surfaces it via <c>message.refusal</c> on Chat Completions
+    /// and a <c>type: "refusal"</c> content item on the Responses API.
     /// </para>
     /// </summary>
     public string? Refusal { get; init; }

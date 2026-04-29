@@ -8,6 +8,7 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Application.Infrastructure.Models.Context;
 using SharpClaw.Contracts;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;

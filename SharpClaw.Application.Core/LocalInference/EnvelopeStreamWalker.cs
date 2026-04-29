@@ -1,5 +1,6 @@
 using System.Text;
 using SharpClaw.Application.Core.Clients;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.LocalInference;
 

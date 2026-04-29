@@ -2,6 +2,7 @@ using System.Text.RegularExpressions;
 
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Application.Core.Modules;
 

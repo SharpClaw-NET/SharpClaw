@@ -1,4 +1,4 @@
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Contracts.Providers;
 
 /// <summary>
 /// A message in a simple (non-tool-aware) conversation history.

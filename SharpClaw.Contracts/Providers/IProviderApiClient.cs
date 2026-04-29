@@ -1,7 +1,6 @@
 using System.Text.Json;
-using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Contracts.Providers;
 
 public interface IProviderApiClient
 {
