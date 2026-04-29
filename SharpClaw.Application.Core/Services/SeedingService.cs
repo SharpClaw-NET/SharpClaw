@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Application.Infrastructure.Models.Clearance;
 using SharpClaw.Contracts;
@@ -39,10 +40,11 @@ public sealed class SeedingService(
     {
         using var scope = scopeFactory.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var clientFactory = scope.ServiceProvider.GetRequiredService<ProviderApiClientFactory>();
 
         var adminRole = await SeedAdminRoleAsync(db, ct);
         await SeedAdminUserAsync(db, adminRole, ct);
-        await SeedWellKnownProvidersAsync(db, ct);
+        await SeedWellKnownProvidersAsync(db, clientFactory, ct);
     }
 
     private async Task<RoleDB> SeedAdminRoleAsync(SharpClawDbContext db, CancellationToken ct)
@@ -229,60 +231,40 @@ public sealed class SeedingService(
         await db.SaveChangesAsync(ct);
     }
 
-    private async Task SeedWellKnownProvidersAsync(SharpClawDbContext db, CancellationToken ct)
+    private async Task SeedWellKnownProvidersAsync(
+        SharpClawDbContext db, ProviderApiClientFactory clientFactory, CancellationToken ct)
     {
         var existing = await db.Providers
             .Select(p => p.ProviderKey)
             .ToHashSetAsync(ct);
 
-        var allKeys = new[]
-        {
-            WellKnownProviderKeys.OpenAI,
-            WellKnownProviderKeys.Anthropic,
-            WellKnownProviderKeys.OpenRouter,
-            WellKnownProviderKeys.GoogleGemini,
-            WellKnownProviderKeys.GoogleGeminiOpenAi,
-            WellKnownProviderKeys.GoogleVertexAI,
-            WellKnownProviderKeys.GoogleVertexAIOpenAi,
-            WellKnownProviderKeys.ZAI,
-            WellKnownProviderKeys.VercelAIGateway,
-            WellKnownProviderKeys.XAI,
-            WellKnownProviderKeys.Groq,
-            WellKnownProviderKeys.Cerebras,
-            WellKnownProviderKeys.Mistral,
-            WellKnownProviderKeys.GitHubCopilot,
-            WellKnownProviderKeys.Minimax,
-            WellKnownProviderKeys.LlamaSharp,
-            WellKnownProviderKeys.Ollama,
-        };
-
-        var toSeed = allKeys
-            .Where(k => !existing.Contains(k))
+        // Plugins drive the seed list — disabling a provider module simply
+        // means its IProviderPlugin is no longer registered, so it won't be
+        // seeded. The previous hardcoded key list is gone in Phase 5.
+        // Custom is excluded: it requires an operator-supplied endpoint and
+        // is created on demand via the providers/add CLI/API.
+        var seedablePlugins = clientFactory.Plugins
+            .Where(p => p.ProviderKey != WellKnownProviderKeys.Custom
+                     && !existing.Contains(p.ProviderKey))
             .ToList();
 
-        if (toSeed.Count == 0)
+        if (seedablePlugins.Count == 0)
             return;
 
         logger.LogInformation("Seeding {Count} well-known provider(s): {Types}.",
-            toSeed.Count, string.Join(", ", toSeed));
+            seedablePlugins.Count,
+            string.Join(", ", seedablePlugins.Select(p => p.ProviderKey)));
 
-        foreach (var key in toSeed)
+        foreach (var plugin in seedablePlugins)
         {
             db.Providers.Add(new ProviderDB
             {
-                Name = DisplayNameFor(key),
-                ProviderKey = key
+                Name = plugin.DisplayName,
+                ProviderKey = plugin.ProviderKey
             });
         }
 
         await db.SaveChangesAsync(ct);
     }
-
-    private static string DisplayNameFor(string key) => key switch
-    {
-        WellKnownProviderKeys.LlamaSharp => "LlamaSharp (Local)",
-        _                                => key,
-    };
-
-    }
+}
 
