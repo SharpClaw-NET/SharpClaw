@@ -3,6 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Application.Core.Clients;
 

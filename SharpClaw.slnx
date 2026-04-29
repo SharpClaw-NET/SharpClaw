@@ -22,6 +22,7 @@
     <Project Path="mk8.shell.startup/mk8.shell.startup.csproj" Id="77f11c7c-0e3d-41a2-ab70-1ef0c037a928" />
     <Project Path="mk8.shell/mk8.shell.csproj" Id="b4c429fc-9022-4adc-8ab7-f35e9eb87e87" />
     <Project Path="SharpClaw.Contracts/SharpClaw.Contracts.csproj" />
+    <Project Path="SharpClaw.Providers.Common/SharpClaw.Providers.Common.csproj" />
     <Project Path="SharpClaw.Utils/SharpClaw.Utils.csproj" />
   </Folder>
   <Folder Name="/Solution Items/" />

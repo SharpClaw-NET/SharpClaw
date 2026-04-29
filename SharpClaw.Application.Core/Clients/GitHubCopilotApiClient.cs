@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Application.Core.Clients;
 

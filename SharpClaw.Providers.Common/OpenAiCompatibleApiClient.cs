@@ -6,7 +6,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
 /// Base class for providers that expose OpenAI-compatible

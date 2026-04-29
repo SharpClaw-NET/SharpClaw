@@ -1,13 +1,13 @@
 using System.Text.Json;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
 /// Shared helper for provider API clients that replaces bare
 /// <see cref="HttpResponseMessage.EnsureSuccessStatusCode"/> with
 /// a version that surfaces the upstream error body.
 /// </summary>
-internal static class ProviderHttpExtensions
+public static class ProviderHttpExtensions
 {
     /// <summary>
     /// Throws an <see cref="HttpRequestException"/> whose message includes
