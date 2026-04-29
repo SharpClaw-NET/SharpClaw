@@ -180,6 +180,11 @@ public sealed class ProviderService(
     /// </summary>
     public async Task<int> RefreshCapabilitiesAsync(Guid providerId, CancellationToken ct = default)
     {
+        var provider = await db.Providers.FindAsync([providerId], ct)
+            ?? throw new ArgumentException($"Provider {providerId} not found.");
+        var resolver = clientFactory.GetPlugin(provider.ProviderKey)?.Capabilities
+            ?? throw new ProviderUnavailableException(provider.ProviderKey);
+
         var models = await db.Models
             .Where(m => m.ProviderId == providerId)
             .ToListAsync(ct);
@@ -187,7 +192,7 @@ public sealed class ProviderService(
         var updated = 0;
         foreach (var model in models)
         {
-            var tags = InferCapabilitiesAndTags(model.Name);
+            var tags = resolver.Resolve(model.Name);
             var tagsRaw = tags.Count > 0 ? string.Join(',', tags) : null;
             if (model.CapabilityTagsRaw != tagsRaw)
             {
@@ -219,7 +224,9 @@ public sealed class ProviderService(
         var apiKey = string.IsNullOrEmpty(provider.EncryptedApiKey)
             ? string.Empty
             : ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey, encryptionOptions.Key);
-        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
+        var plugin = clientFactory.GetPlugin(provider.ProviderKey)
+            ?? throw new ProviderUnavailableException(provider.ProviderKey);
+        var client = plugin.CreateClient(provider.ApiEndpoint);
 
         using var httpClient = httpClientFactory.CreateClient();
         var modelIds = await client.ListModelIdsAsync(httpClient, apiKey, ct);
@@ -229,7 +236,7 @@ public sealed class ProviderService(
             .Where(id => !existingNames.Contains(id))
             .Select(id =>
             {
-                var tags = InferCapabilitiesAndTags(id);
+                var tags = plugin.Capabilities.Resolve(id);
                 return new ModelDB
                 {
                     Name = id,
@@ -250,149 +257,5 @@ public sealed class ProviderService(
             .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, provider.Name,
                 m.CustomId, m.CapabilityTags))
             .ToListAsync(ct);
-    }
-
-    /// <summary>
-    /// Infers capability tags from a model's name using well-known naming conventions.
-    /// Returns a set of <see cref="WellKnownCapabilityKeys"/> values.
-    /// </summary>
-    internal static HashSet<string> InferCapabilitiesAndTags(string modelName)
-    {
-        var name = modelName.ToLowerInvariant();
-
-        // ── Pure embedding models ─────────────────────────────────
-        if (name.Contains("embedding") || name.Contains("embed"))
-            return [WellKnownCapabilityKeys.Embedding];
-
-        // ── Pure TTS models ───────────────────────────────────────
-        if (name.StartsWith("tts-"))
-            return [WellKnownCapabilityKeys.Tts];
-
-        // ── Pure image generation models ──────────────────────────
-        if (name.StartsWith("dall-e") || name.StartsWith("gpt-image")
-            || name.StartsWith("chatgpt-image") || name.StartsWith("sora"))
-            return [WellKnownCapabilityKeys.ImageGeneration];
-
-        // ── Moderation / non-generative ───────────────────────────
-        if (name.Contains("moderation"))
-            return [];
-
-        // ── Legacy base / completions-only models ─────────────────
-        if (name.StartsWith("babbage") || name.StartsWith("davinci")
-            || name.EndsWith("-instruct"))
-            return [];
-
-        // ── Chat models with TTS suffix ───────────────────────────
-        if (name.Contains("-tts"))
-            return [WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Tts];
-
-        // ── Chat models with audio/realtime capabilities ──────────
-        // These models handle audio through the chat completions API.
-        if (name.Contains("audio") || name.Contains("realtime"))
-            return [WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Tts];
-
-        // ── Positive chat-family matching ─────────────────────────
-        // Only models from known chat-compatible families get chat.
-        // Unknown models get no tags to avoid sending them to the wrong
-        // endpoint (e.g. completions-only base models).
-        if (!IsChatCapable(name))
-            return [];
-
-        return IsVisionCapable(name)
-            ? [WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Vision]
-            : [WellKnownCapabilityKeys.Chat];
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when the model name matches a
-    /// known family that supports the chat completions API.
-    /// Conservative: models that don't match any pattern are assumed
-    /// NOT chat-capable (use <c>model add --cap Chat</c> to override).
-    /// </summary>
-    private static bool IsChatCapable(string name)
-    {
-        // OpenAI: gpt-3.5-turbo*, gpt-4*, gpt-5*, chatgpt-*, o1*, o3*, o4*
-        // gpt-5+ use the Responses API, not /chat/completions — but they ARE chat-capable.
-        if (name.StartsWith("gpt-3.5-turbo") || name.StartsWith("gpt-4")
-            || name.StartsWith("gpt-5")
-            || name.StartsWith("chatgpt-")
-            || name.StartsWith("o1") || name.StartsWith("o3") || name.StartsWith("o4"))
-            return true;
-
-        // Anthropic: claude-*
-        if (name.StartsWith("claude-"))
-            return true;
-
-        // Google: gemini-*
-        if (name.StartsWith("gemini-"))
-            return true;
-
-        // Mistral: mistral*, mixtral*, pixtral*, codestral*, ministral*
-        if (name.StartsWith("mistral") || name.StartsWith("mixtral")
-            || name.StartsWith("pixtral") || name.StartsWith("codestral")
-            || name.StartsWith("ministral"))
-            return true;
-
-        // Meta: llama-*, meta-llama*
-        if (name.StartsWith("llama-") || name.StartsWith("meta-llama"))
-            return true;
-
-        // xAI: grok-*
-        if (name.StartsWith("grok-"))
-            return true;
-
-        // Other common chat model families
-        if (name.StartsWith("deepseek") || name.StartsWith("qwen")
-            || name.StartsWith("phi-") || name.StartsWith("command")
-            || name.StartsWith("yi-") || name.StartsWith("jamba"))
-            return true;
-
-        // Minimax: MiniMax-Text-01, MiniMax-M1, abab6.5s, etc.
-        if (name.StartsWith("minimax") || name.StartsWith("abab"))
-            return true;
-
-        return false;
-    }
-
-    /// <summary>
-    /// Returns <see langword="true"/> when the model name matches a
-    /// well-known vision-capable family. Conservative: only names
-    /// that are documented to accept image inputs.
-    /// </summary>
-    private static bool IsVisionCapable(string name)
-    {
-        // OpenAI: gpt-4o*, gpt-4-turbo*, gpt-4-vision*, gpt-5*, o1*, o3*, o4*
-        if (name.StartsWith("gpt-4o") || name.StartsWith("gpt-4-turbo")
-            || name.StartsWith("gpt-4-vision") || name.StartsWith("gpt-5")
-            || name.StartsWith("o1") || name.StartsWith("o3") || name.StartsWith("o4"))
-            return true;
-
-        // Anthropic: claude-3*, claude-4*
-        if (name.StartsWith("claude-3") || name.StartsWith("claude-4"))
-            return true;
-
-        // Google: gemini-1.5*, gemini-2*, gemini-pro-vision
-        if (name.StartsWith("gemini-1.5") || name.StartsWith("gemini-2")
-            || name.StartsWith("gemini-pro-vision"))
-            return true;
-
-        // Mistral: pixtral*
-        if (name.StartsWith("pixtral"))
-            return true;
-
-        // Meta: llama-3.2-*vision*, llama-4*
-        if ((name.StartsWith("llama-3.2") && name.Contains("vision"))
-            || name.StartsWith("llama-4"))
-            return true;
-
-        // xAI: grok-2-vision*, grok-3*
-        if (name.StartsWith("grok-2-vision") || name.StartsWith("grok-3"))
-            return true;
-
-        // Minimax: MiniMax-VL-*
-        if (name.StartsWith("minimax-vl"))
-            return true;
-
-        return false;
     }
 }
