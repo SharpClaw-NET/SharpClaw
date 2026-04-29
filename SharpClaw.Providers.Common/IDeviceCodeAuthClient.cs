@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.DTOs.Providers;
 
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
 /// Implemented by provider API clients that authenticate via the

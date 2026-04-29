@@ -1,14 +1,12 @@
 using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.Application.Core.Providers;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
-/// Generic <see cref="IProviderPlugin"/> wrapper used while every plugin
-/// still lives inside Core. Each entry in
-/// <c>BuiltInProviderPlugins.Build</c> instantiates one of these with
-/// the provider-specific factory delegate, capability resolver, and
-/// (optional) device-code flow. Phase 6 onwards replaces each instance
-/// with a concrete plugin class inside its owning module.
+/// Generic <see cref="IProviderPlugin"/> wrapper used by both the in-Core
+/// transitional registrations and per-module plugin classes that don't need
+/// custom plugin logic. Each entry passes the provider-specific factory
+/// delegate, capability resolver, and (optional) device-code flow.
 /// </summary>
 public sealed class SimpleProviderPlugin(
     string providerKey,

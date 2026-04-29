@@ -1,4 +1,4 @@
-namespace SharpClaw.Application.Core.Clients;
+namespace SharpClaw.Providers.Common;
 
 /// <summary>
 /// Optional interface for provider API clients that expose a cost or usage

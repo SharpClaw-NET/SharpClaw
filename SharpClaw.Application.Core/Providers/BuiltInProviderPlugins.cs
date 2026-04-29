@@ -4,6 +4,7 @@ using SharpClaw.Application.Core.Services;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Application.Core.Providers;
 
