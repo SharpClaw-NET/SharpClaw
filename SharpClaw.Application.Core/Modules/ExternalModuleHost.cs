@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Persistence;
 using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Core.Modules;
@@ -85,6 +86,25 @@ public sealed class ExternalModuleHost : IAsyncDisposable
         var httpFactory = hostServices.GetService<IHttpClientFactory>();
         if (httpFactory is not null) services.AddSingleton(httpFactory);
 
+        // Forward host-side module-integration services so external modules
+        // can resolve them through their isolated DI container. These are
+        // required by transcription-style modules that interact with the
+        // host's job system, model registry, and module-owned EF persistence.
+        ForwardSingleton<IModuleDbContextFactory>(hostServices, services);
+        ForwardSingleton<IModelInfoProvider>(hostServices, services);
+        ForwardSingleton<EncryptionOptions>(hostServices, services);
+        ForwardSingleton<ICliIdResolver>(hostServices, services);
+
+        // Scoped host services must be forwarded through a scope-aware
+        // resolver so the external module's scope reaches into the host.
+        var hostScopeFactory = hostServices.GetService<IServiceScopeFactory>();
+        if (hostScopeFactory is not null)
+        {
+            services.AddScoped(_ => new HostScopeBridge(hostScopeFactory));
+            ForwardHostScoped<IAgentJobController>(services);
+            ForwardHostScoped<IAgentJobReader>(services);
+        }
+
         module.ConfigureServices(services);
         var moduleProvider = services.BuildServiceProvider();
 
@@ -167,5 +187,33 @@ public sealed class ExternalModuleHost : IAsyncDisposable
         }
 
         return false;
+    }
+
+    private static void ForwardSingleton<T>(IServiceProvider hostServices, IServiceCollection services)
+        where T : class
+    {
+        var instance = hostServices.GetService<T>();
+        if (instance is not null) services.AddSingleton(instance);
+    }
+
+    private static void ForwardHostScoped<T>(IServiceCollection services)
+        where T : class
+    {
+        // The HostScopeBridge is scoped, so each module scope owns exactly one
+        // host scope and disposes it together with the module scope. Resolves
+        // host-owned scoped services (e.g. agent-job controllers backed by the
+        // host DbContext) from the bridge's host scope.
+        services.AddScoped<T>(sp =>
+            sp.GetRequiredService<HostScopeBridge>().Resolve<T>());
+    }
+
+    private sealed class HostScopeBridge(IServiceScopeFactory hostScopeFactory) : IDisposable
+    {
+        private readonly IServiceScope _hostScope = hostScopeFactory.CreateScope();
+
+        public T Resolve<T>() where T : notnull =>
+            _hostScope.ServiceProvider.GetRequiredService<T>();
+
+        public void Dispose() => _hostScope.Dispose();
     }
 }

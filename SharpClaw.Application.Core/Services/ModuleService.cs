@@ -6,6 +6,7 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Models;
 using SharpClaw.Application.Infrastructure.Models.Access;
 using SharpClaw.Contracts;
+using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
@@ -327,6 +328,12 @@ public sealed class ModuleService(
             await LoadModulePersistenceAsync(host.Module, ct);
             await host.Module.InitializeAsync(host.Services, ct);
 
+            // Reconcile: backfill wildcard grants for newly registered
+            // resource types and global flags into existing permission sets.
+            // Mirrors EnableAsync. SeedingService cannot do this for external
+            // modules because it runs at StartingAsync, before module load.
+            await ReconcilePermissionsForModuleAsync(host.Module, ct);
+
             logger.LogInformation("External module '{ModuleId}' loaded from {Dir}",
                 PathGuard.SanitizeForLog(manifest.Id), PathGuard.SanitizeForLog(canonicalModuleDir));
             return ToResponse(host.Module, state: null, manifest, isExternal: true);
@@ -439,6 +446,12 @@ public sealed class ModuleService(
             registry.CacheManifest(manifest.Id, manifest);
             await LoadModulePersistenceAsync(host.Module, ct);
             await host.Module.InitializeAsync(host.Services, ct);
+
+            // Reconcile: backfill wildcard grants for newly registered
+            // resource types and global flags into existing permission sets.
+            // Mirrors EnableAsync. SeedingService cannot do this for external
+            // modules because it runs at StartingAsync, before module load.
+            await ReconcilePermissionsForModuleAsync(host.Module, ct);
 
             logger.LogInformation("External module '{ModuleId}' loaded from absolute path {Dir}",
                 PathGuard.SanitizeForLog(manifest.Id), PathGuard.SanitizeForLog(canonicalDir));
@@ -705,11 +718,16 @@ public sealed class ModuleService(
                 if (!ps.ResourceAccesses.Any(a =>
                         a.ResourceType == rt && a.ResourceId == WellKnownIds.AllResources))
                 {
+                    // Clearance MUST be Independent — Unset (the DB default)
+                    // is treated as "grant is inert, deny" by
+                    // EvaluateResourceAccessAsync. See the matching guard in
+                    // SeedingService.CreateAdminPermissions.
                     ps.ResourceAccesses.Add(new ResourceAccessDB
                     {
                         PermissionSetId = ps.Id,
                         ResourceType = rt,
                         ResourceId = WellKnownIds.AllResources,
+                        Clearance = PermissionClearance.Independent,
                     });
                     changed = true;
                 }
@@ -723,6 +741,7 @@ public sealed class ModuleService(
                     {
                         PermissionSetId = ps.Id,
                         FlagKey = flagKey,
+                        Clearance = PermissionClearance.Independent,
                     });
                     changed = true;
                 }

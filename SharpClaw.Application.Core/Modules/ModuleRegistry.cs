@@ -613,6 +613,20 @@ public sealed class ModuleRegistry
         }
     }
 
+    /// <summary>Try to resolve a top-level CLI command and the owning module id.</summary>
+    public (string ModuleId, ModuleCliCommand Command)? TryResolveTopLevelCommandWithModule(string verb)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _cliTopLevel.TryGetValue(verb, out var entry) ? entry : null;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
     /// <summary>Try to resolve a module-provided resource-type CLI command.</summary>
     public ModuleCliCommand? TryResolveResourceTypeCommand(string type)
     {
@@ -620,6 +634,20 @@ public sealed class ModuleRegistry
         try
         {
             return _cliResourceTypes.TryGetValue(type, out var entry) ? entry.Command : null;
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
+    /// <summary>Try to resolve a resource-type CLI command and the owning module id.</summary>
+    public (string ModuleId, ModuleCliCommand Command)? TryResolveResourceTypeCommandWithModule(string type)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _cliResourceTypes.TryGetValue(type, out var entry) ? entry : null;
         }
         finally
         {

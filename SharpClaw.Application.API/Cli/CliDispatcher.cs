@@ -301,10 +301,10 @@ public static class CliDispatcher
         {
             // Try module-provided top-level CLI commands.
             var registry = sp.GetRequiredService<ModuleRegistry>();
-            var moduleCmd = registry.TryResolveTopLevelCommand(command);
-            if (moduleCmd is not null)
+            var resolved = registry.TryResolveTopLevelCommandWithModule(command);
+            if (resolved is not null)
             {
-                await moduleCmd.Handler(args, sp, CancellationToken.None);
+                await InvokeModuleCliHandlerAsync(resolved.Value.ModuleId, resolved.Value.Command, args, sp, registry);
                 return true;
             }
             return false;
@@ -3248,11 +3248,43 @@ public static class CliDispatcher
         string type, string[] args, IServiceProvider sp)
     {
         var registry = sp.GetRequiredService<ModuleRegistry>();
-        var moduleCmd = registry.TryResolveResourceTypeCommand(type);
-        if (moduleCmd is null) return null;
+        var resolved = registry.TryResolveResourceTypeCommandWithModule(type);
+        if (resolved is null) return null;
 
-        await moduleCmd.Handler(args, sp, CancellationToken.None);
+        await InvokeModuleCliHandlerAsync(resolved.Value.ModuleId, resolved.Value.Command, args, sp, registry);
         return Results.Ok();
+    }
+
+    /// <summary>
+    /// Invokes a module-provided CLI handler. For external (hot-loaded) modules
+    /// the handler receives a service provider drawn from the module's own DI
+    /// container so module-internal services resolve correctly. The host's
+    /// service provider is passed through for bundled modules.
+    /// </summary>
+    private static async Task InvokeModuleCliHandlerAsync(
+        string moduleId, ModuleCliCommand cmd, string[] args,
+        IServiceProvider hostSp, ModuleRegistry registry)
+    {
+        var externalHost = registry.GetExternalHost(moduleId);
+        if (externalHost is null)
+        {
+            await cmd.Handler(args, hostSp, CancellationToken.None);
+            return;
+        }
+
+        if (!externalHost.TryAcquireExecution())
+            throw new InvalidOperationException(
+                $"Module '{moduleId}' is unloading \u2014 cannot execute CLI commands.");
+
+        try
+        {
+            using var scope = externalHost.CreateScope();
+            await cmd.Handler(args, scope.ServiceProvider, CancellationToken.None);
+        }
+        finally
+        {
+            externalHost.ReleaseExecution();
+        }
     }
 
     // ═══════════════════════════════════════════════════════════════
