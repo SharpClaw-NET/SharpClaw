@@ -75,6 +75,21 @@
     <ProjectReference Include="..\DefaultModules\Transcription\SharpClaw.Modules.Transcription.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\Anthropic\SharpClaw.Modules.Providers.Anthropic.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\Google\SharpClaw.Modules.Providers.Google.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\LlamaSharp\SharpClaw.Modules.Providers.LlamaSharp.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\Ollama\SharpClaw.Modules.Providers.Ollama.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+    <ProjectReference Include="..\DefaultModules\Providers\OpenAICompatible\SharpClaw.Modules.Providers.OpenAICompatible.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
     <ProjectReference Include="..\DefaultModules\Providers\Whisper\SharpClaw.Modules.Providers.Whisper.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
