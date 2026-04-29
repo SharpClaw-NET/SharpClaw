@@ -2,7 +2,6 @@ using System.Text.Json;
 
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
@@ -10,7 +9,6 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.Transcription.Clients;
 using SharpClaw.Modules.Transcription.Contracts;
-using SharpClaw.Modules.Transcription.DTOs;
 using SharpClaw.Modules.Transcription.Handlers;
 using SharpClaw.Modules.Transcription.LocalInference;
 using SharpClaw.Modules.Transcription.Models;
@@ -19,8 +17,9 @@ using SharpClaw.Modules.Transcription.Services;
 namespace SharpClaw.Modules.Transcription;
 
 /// <summary>
-/// Default module: live audio transcription, input audio device management,
-/// and STT provider integration. Windows only (WASAPI audio capture).
+/// Default module: live audio transcription and STT provider integration.
+/// Consumes the <c>system_audio_capture</c> contract from the SystemAudio
+/// module for input device CRUD and WASAPI capture. Windows only.
 /// </summary>
 public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
 {
@@ -43,10 +42,6 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
         services.AddSingleton<ITranscriptionApiClient, LocalTranscriptionClient>();
         services.AddSingleton<TranscriptionApiClientFactory>();
 
-        // Audio capture (WASAPI, Windows only)
-        services.AddSingleton<IAudioCaptureProvider, WasapiAudioCaptureProvider>();
-        services.AddSingleton<SharedAudioCaptureManager>();
-
         // Orchestrator + service
         services.AddSingleton<LiveTranscriptionOrchestrator>();
         services.AddSingleton<ILiveTranscriptionOrchestrator>(sp =>
@@ -59,8 +54,6 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
         services.AddScoped(sp => sp.GetRequiredService<IModuleDbContextFactory>()
             .CreateDbContext<TranscriptionDbContext>());
         services.AddScoped<ITaskStepExecutorExtension, TranscriptionTaskStepExecutor>();
-
-        // Shared services this module may also need
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -72,28 +65,13 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
         new("transcription_stt",
             typeof(ITranscriptionApiClient),
             "Speech-to-text transcription via provider APIs"),
-        new("transcription_audio_capture",
-            typeof(IAudioCaptureProvider),
-            "Audio capture from input devices"),
     ];
 
     // ═══════════════════════════════════════════════════════════════
     // Resource Type Descriptors
     // ═══════════════════════════════════════════════════════════════
 
-    public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
-    [
-        new("TrAudio", "InputAudio", "AccessInputAudioAsync", static async (sp, ct) =>
-        {
-            var db = sp.GetRequiredService<TranscriptionDbContext>();
-            return await db.InputAudios.Select(a => a.Id).ToListAsync(ct);
-        },
-        LoadLookupItems: static async (sp, ct) =>
-        {
-            var db = sp.GetRequiredService<TranscriptionDbContext>();
-            return await db.InputAudios.Select(a => new ValueTuple<Guid, string>(a.Id, a.Name)).ToListAsync(ct);
-        }, DefaultResourceKey: "inputaudio"),
-    ];
+    public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() => [];
 
     // ═══════════════════════════════════════════════════════════════
     // Tool Definitions
@@ -123,125 +101,7 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
     // CLI Commands
     // ═══════════════════════════════════════════════════════════════
 
-    public IReadOnlyList<ModuleCliCommand> GetCliCommands() =>
-    [
-        new(
-            Name: "inputaudio",
-            Aliases: ["ia"],
-            Scope: ModuleCliScope.ResourceType,
-            Description: "Input audio device management",
-            UsageLines:
-            [
-                "resource inputaudio add <name> [identifier] [description]",
-                "resource inputaudio get <id>                   Show an input audio",
-                "resource inputaudio list                       List all input audios",
-                "resource inputaudio update <id> [name] [id]    Update an input audio",
-                "resource inputaudio delete <id>                Delete an input audio",
-                "resource inputaudio sync                       Import system input audios",
-            ],
-            Handler: HandleResourceInputAudioCommandAsync),
-    ];
-
-    private static async Task HandleResourceInputAudioCommandAsync(
-        string[] args, IServiceProvider sp, CancellationToken ct)
-    {
-        var ids = sp.GetRequiredService<ICliIdResolver>();
-        var svc = sp.GetRequiredService<TranscriptionService>();
-
-        if (args.Length < 3)
-        {
-            PrintInputAudioUsage();
-            return;
-        }
-
-        var sub = args[2].ToLowerInvariant();
-        switch (sub)
-        {
-            case "add" when args.Length >= 4:
-            {
-                var result = await svc.CreateDeviceAsync(
-                    new CreateInputAudioRequest(
-                        args[3],
-                        args.Length >= 5 ? args[4] : null,
-                        args.Length >= 6 ? string.Join(' ', args[5..]) : null));
-                ids.PrintJson(result);
-                break;
-            }
-            case "add":
-                Console.Error.WriteLine("resource inputaudio add <name> [deviceIdentifier] [description]");
-                break;
-
-            case "get" when args.Length >= 4:
-            {
-                var result = await svc.GetDeviceByIdAsync(ids.Resolve(args[3]));
-                if (result is not null)
-                    ids.PrintJson(result);
-                else
-                    Console.Error.WriteLine("Not found.");
-                break;
-            }
-            case "get":
-                Console.Error.WriteLine("resource inputaudio get <id>");
-                break;
-
-            case "list":
-            {
-                var result = await svc.ListDevicesAsync();
-                ids.PrintJson(result);
-                break;
-            }
-
-            case "update" when args.Length >= 5:
-            {
-                var result = await svc.UpdateDeviceAsync(
-                    ids.Resolve(args[3]),
-                    new UpdateInputAudioRequest(
-                        args.Length >= 5 ? args[4] : null,
-                        args.Length >= 6 ? args[5] : null));
-                if (result is not null)
-                    ids.PrintJson(result);
-                else
-                    Console.Error.WriteLine("Not found.");
-                break;
-            }
-            case "update":
-                Console.Error.WriteLine("resource inputaudio update <id> [name] [deviceIdentifier]");
-                break;
-
-            case "delete" when args.Length >= 4:
-            {
-                var deleted = await svc.DeleteDeviceAsync(ids.Resolve(args[3]));
-                Console.WriteLine(deleted ? "Done." : "Not found.");
-                break;
-            }
-            case "delete":
-                Console.Error.WriteLine("resource inputaudio delete <id>");
-                break;
-
-            case "sync":
-            {
-                var result = await svc.SyncDevicesAsync();
-                ids.PrintJson(result);
-                break;
-            }
-
-            default:
-                Console.Error.WriteLine($"Unknown command: resource inputaudio {sub}");
-                PrintInputAudioUsage();
-                break;
-        }
-    }
-
-    private static void PrintInputAudioUsage()
-    {
-        Console.Error.WriteLine("Usage:");
-        Console.Error.WriteLine("  resource inputaudio add <name> [identifier] [description]");
-        Console.Error.WriteLine("  resource inputaudio get <id>                   Show an input audio");
-        Console.Error.WriteLine("  resource inputaudio list                       List all input audios");
-        Console.Error.WriteLine("  resource inputaudio update <id> [name] [id]    Update an input audio");
-        Console.Error.WriteLine("  resource inputaudio delete <id>                Delete an input audio");
-        Console.Error.WriteLine("  resource inputaudio sync                       Import system input audios");
-    }
+    public IReadOnlyList<ModuleCliCommand> GetCliCommands() => [];
 
     // ═══════════════════════════════════════════════════════════════
     // Endpoint Mapping
@@ -251,7 +111,6 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
     {
         var endpoints = (Microsoft.AspNetCore.Routing.IEndpointRouteBuilder)app;
         endpoints.MapTranscriptionStreaming();
-        endpoints.MapInputAudioEndpoints();
         endpoints.MapTranscriptionJobEndpoints();
     }
 
@@ -341,29 +200,6 @@ public sealed class TranscriptionModule : ISharpClawModule, ITaskParserAware
     // ═══════════════════════════════════════════════════════════════
     // Lifecycle
     // ═══════════════════════════════════════════════════════════════
-
-    public async Task SeedDataAsync(IServiceProvider services, CancellationToken ct)
-    {
-        using var scope = services.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<TranscriptionDbContext>();
-        var logger = scope.ServiceProvider.GetRequiredService<ILogger<TranscriptionModule>>();
-
-        var exists = await db.InputAudios
-            .AnyAsync(d => d.DeviceIdentifier == "default", ct);
-        if (exists)
-            return;
-
-        logger.LogInformation("Seeding default input audio.");
-
-        db.InputAudios.Add(new InputAudioDB
-        {
-            Name = "Default",
-            DeviceIdentifier = "default",
-            Description = "System default audio input device"
-        });
-
-        await db.SaveChangesAsync(ct);
-    }
 
     public async Task ShutdownAsync()
     {

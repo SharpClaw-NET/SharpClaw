@@ -7,7 +7,9 @@ using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Modules.Transcription.Audio;
+using SharpClaw.Modules.SystemAudio.Audio;
+using SharpClaw.Modules.SystemAudio.Capture;
+using SharpClaw.Modules.SystemAudio.Services;
 using SharpClaw.Modules.Transcription.Clients;
 using SharpClaw.Modules.Transcription.Contracts;
 using SharpClaw.Modules.Transcription.DTOs;
@@ -30,6 +32,7 @@ public sealed class LiveTranscriptionOrchestrator(
     TranscriptionApiClientFactory transcriptionClientFactory,
     IHttpClientFactory httpClientFactory,
     IModelInfoProvider modelInfoProvider,
+    IInputAudioDeviceResolver deviceResolver,
     TranscriptionJobSink jobSink,
     EncryptionOptions encryptionOptions,
     ILogger<LiveTranscriptionOrchestrator> logger) : ILiveTranscriptionOrchestrator, ITranscriptionSegmentPublisher
@@ -147,15 +150,10 @@ public sealed class LiveTranscriptionOrchestrator(
         int? windowSecondsOverride, int? stepSecondsOverride,
         CancellationToken ct)
     {
-        // Resolve device identifier from the module database.
-        string? deviceIdentifier;
-        using (var deviceScope = scopeFactory.CreateScope())
-        {
-            var db = deviceScope.ServiceProvider.GetRequiredService<TranscriptionDbContext>();
-            var device = await db.InputAudios.FirstOrDefaultAsync(d => d.Id == deviceId, ct)
-                ?? throw new InvalidOperationException($"Audio device {deviceId} not found.");
-            deviceIdentifier = device.DeviceIdentifier;
-        }
+        // Resolve device identifier via the SystemAudio module's resolver.
+        var resolved = await deviceResolver.GetDeviceAsync(deviceId, ct)
+            ?? throw new InvalidOperationException($"Audio device {deviceId} not found.");
+        var deviceIdentifier = resolved.DeviceIdentifier;
 
         logger.LogInformation(
             "Starting sliding-window transcription for job {JobId} on device '{Device}'",

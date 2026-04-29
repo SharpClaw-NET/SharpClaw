@@ -1,9 +1,9 @@
 using System.Text.Json;
 using System.Threading.Channels;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.SystemAudio.Services;
 using SharpClaw.Modules.Transcription.Contracts;
 using SharpClaw.Modules.Transcription.Services;
 
@@ -103,11 +103,9 @@ internal sealed class TranscriptionTaskStepExecutor(
         string? resultVariable)
     {
         await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<TranscriptionDbContext>();
+        var resolver = scope.ServiceProvider.GetRequiredService<IInputAudioDeviceResolver>();
 
-        var device = await db.InputAudios.FirstOrDefaultAsync(context.CancellationToken);
-
-        var deviceId = device?.Id ?? Guid.Empty;
+        var deviceId = await resolver.GetDefaultDeviceIdAsync(context.CancellationToken);
 
         if (resultVariable is not null)
             context.Variables[resultVariable] = deviceId.ToString();

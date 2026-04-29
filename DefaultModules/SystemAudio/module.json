@@ -1,0 +1,20 @@
+{
+  "id": "sharpclaw_systemaudio",
+  "displayName": "System Audio",
+  "version": "1.0.0",
+  "enabled": true,
+  "toolPrefix": "sa",
+  "entryAssembly": "SharpClaw.Modules.SystemAudio",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Input audio device management and WASAPI capture. Provides the system_audio_capture contract consumed by transcription and other audio-aware modules.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows" ],
+  "exports": [
+    {
+      "contractName": "system_audio_capture",
+      "serviceType": "SharpClaw.Modules.SystemAudio.Capture.IAudioCaptureProvider"
+    }
+  ],
+  "requires": []
+}

@@ -4,7 +4,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Modules.Transcription.Audio;
+using SharpClaw.Modules.SystemAudio.Audio;
 
 namespace SharpClaw.Modules.Transcription.Clients;
 

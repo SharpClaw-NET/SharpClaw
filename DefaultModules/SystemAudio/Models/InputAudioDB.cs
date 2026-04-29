@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Modules.Transcription.Models;
+namespace SharpClaw.Modules.SystemAudio.Models;
 
 /// <summary>
 /// A registered audio input source that agents can use for live transcription.
