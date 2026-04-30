@@ -34,6 +34,25 @@ public sealed class GatewayEndpointOptions
     public bool Cost { get; set; }
 
     /// <summary>
+    /// Per-module endpoint-group toggles, keyed by <c>{moduleId}/{groupId}</c>
+    /// (case-insensitive). A missing entry is treated as disabled, matching
+    /// the secure-by-default posture of the static toggles above.
+    /// </summary>
+    public Dictionary<string, bool> Modules { get; set; }
+        = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Resolves whether a given module endpoint group is active. Returns
+    /// <c>false</c> when the master switch is off or the group is missing /
+    /// explicitly disabled.
+    /// </summary>
+    public bool IsModuleGroupEnabled(string groupKey)
+    {
+        if (!Enabled) return false;
+        return Modules.TryGetValue(groupKey, out var v) && v;
+    }
+
+    /// <summary>
     /// Resolves whether a given endpoint group is active.
     /// Returns <c>false</c> if the master switch is off or the
     /// specific group is disabled.

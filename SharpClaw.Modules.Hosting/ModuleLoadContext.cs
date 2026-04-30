@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Runtime.Loader;
 
-namespace SharpClaw.Application.Core.Modules;
+namespace SharpClaw.Modules.Hosting;
 
 /// <summary>
 /// Collectible <see cref="AssemblyLoadContext"/> for external modules.
@@ -13,7 +13,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// (<c>SharpClaw.Contracts</c>, <c>Microsoft.Extensions.*</c>, etc.).
 /// </para>
 /// </summary>
-internal sealed class ModuleLoadContext : AssemblyLoadContext
+public sealed class ModuleLoadContext : AssemblyLoadContext
 {
     /// <summary>
     /// Names/prefixes that must always resolve from the default ALC so the host and
@@ -28,6 +28,8 @@ internal sealed class ModuleLoadContext : AssemblyLoadContext
         "SharpClaw.Utils",
         "SharpClaw.Application.Core",
         "SharpClaw.Application.Infrastructure",
+        "SharpClaw.Gateway.Abstractions",
+        "SharpClaw.Modules.Hosting",
         "Microsoft.Extensions.",
         "Microsoft.AspNetCore.",
         "Microsoft.EntityFrameworkCore",
@@ -38,12 +40,16 @@ internal sealed class ModuleLoadContext : AssemblyLoadContext
 
     private readonly AssemblyDependencyResolver _resolver;
 
+    /// <summary>
+    /// Creates a new collectible load context anchored at the module's main DLL path.
+    /// </summary>
     public ModuleLoadContext(string mainDllPath)
         : base(name: Path.GetFileNameWithoutExtension(mainDllPath), isCollectible: true)
     {
         _resolver = new AssemblyDependencyResolver(mainDllPath);
     }
 
+    /// <inheritdoc />
     protected override Assembly? Load(AssemblyName name)
     {
         // Always delegate host-shared assemblies to the default ALC. Without this
@@ -75,6 +81,7 @@ internal sealed class ModuleLoadContext : AssemblyLoadContext
         return null;
     }
 
+    /// <inheritdoc />
     protected override nint LoadUnmanagedDll(string unmanagedDllName)
     {
         var path = _resolver.ResolveUnmanagedDllToPath(unmanagedDllName);

@@ -1,4 +1,4 @@
-using System.Net;
+using SharpClaw.Gateway.Abstractions;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -41,19 +41,4 @@ public sealed class QueuedRequest
     /// Set by the processor when the core responds (or fails).
     /// </summary>
     public TaskCompletionSource<QueuedResponse> Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
-}
-
-/// <summary>
-/// The result of a processed <see cref="QueuedRequest"/>.
-/// </summary>
-public sealed class QueuedResponse
-{
-    public required HttpStatusCode StatusCode { get; init; }
-    public string? JsonBody { get; init; }
-    public string? Error { get; init; }
-
-    /// <summary>Queue metadata for response headers. Set by the processor.</summary>
-    public QueueResponseMeta? Meta { get; set; }
-
-    public bool IsSuccess => (int)StatusCode >= 200 && (int)StatusCode < 300;
 }

@@ -61,14 +61,3 @@ public sealed class QueueMetrics
             _completions.TryDequeue(out _);
     }
 }
-
-/// <summary>
-/// Snapshot of queue metadata attached to a processed request.
-/// Stored in <see cref="HttpContext.Items"/> by the dispatcher so the
-/// response-header middleware can emit <c>X-Queue-*</c> headers.
-/// </summary>
-public sealed record QueueResponseMeta(
-    Guid RequestId,
-    int Position,
-    double ProcessingMs,
-    double AverageMs);
