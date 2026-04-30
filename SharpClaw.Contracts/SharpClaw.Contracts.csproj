@@ -8,7 +8,7 @@
     <!-- NuGet package metadata -->
     <IsPackable>true</IsPackable>
     <PackageId>SharpClaw.Contracts</PackageId>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Authors>mkn8rn</Authors>
     <Description>Contracts and interfaces for building SharpClaw external modules. Provides ISharpClawModule, DTOs, and shared abstractions.</Description>
     <PackageTags>sharpclaw;modules;contracts;sdk</PackageTags>
