@@ -1,6 +1,8 @@
+using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
+using SharpClaw.Gateway.Modules;
 using SharpClaw.Gateway.Security;
 using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
@@ -139,6 +141,27 @@ builder.Services.AddHttpClient<InternalApiClient>(client =>
 // ── Gateway endpoint configuration ──────────────────────────────
 builder.Services.Configure<GatewayEndpointOptions>(
     builder.Configuration.GetSection(GatewayEndpointOptions.SectionName));
+
+// ── Gateway-side module discovery (Phase 2) ─────────────────────
+// Loader runs here so DI can hand the catalog/loader to middleware,
+// but MapEndpoints / ConfigureGatewayServices stays deferred to Phase 3.
+builder.Services.Configure<GatewayModuleOptions>(
+    builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
+
+var moduleDiscoveryLogger = LoggerFactory
+    .Create(b => b.AddSerilog(Log.Logger))
+    .CreateLogger("SharpClaw.Gateway.Modules");
+var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(moduleDiscoveryLogger);
+foreach (var ext in gatewayModuleLoader.All)
+{
+    Log.Information(
+        "Gateway module discovered: {ModuleId} ({DisplayName})",
+        ext.ModuleId,
+        ext.DisplayName);
+}
+
+builder.Services.AddSingleton(gatewayModuleLoader);
+builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
 
 // ── Request queue (sequential forwarding to core API) ────────────
 builder.Services.Configure<RequestQueueOptions>(

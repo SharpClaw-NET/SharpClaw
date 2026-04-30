@@ -1,5 +1,6 @@
 using System.Net;
 using System.Text.Json;
+using SharpClaw.Gateway.Abstractions;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -16,7 +17,7 @@ public sealed class GatewayRequestDispatcher(
     InternalApiClient coreApi,
     RequestQueueService queue,
     IHttpContextAccessor httpContextAccessor,
-    ILogger<GatewayRequestDispatcher> logger)
+    ILogger<GatewayRequestDispatcher> logger) : IGatewayDispatcher
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

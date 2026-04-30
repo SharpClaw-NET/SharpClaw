@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
 
@@ -18,7 +19,7 @@ public sealed class InternalApiClient(
     HttpClient httpClient,
     IOptions<InternalApiOptions> options,
     IHttpContextAccessor httpContextAccessor,
-    SessionLogWriter sessionLogWriter)
+    SessionLogWriter sessionLogWriter) : IGatewayInternalApi
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {

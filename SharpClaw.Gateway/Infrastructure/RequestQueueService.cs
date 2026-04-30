@@ -3,6 +3,7 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
 using Microsoft.Extensions.Options;
+using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Configuration;
 
 namespace SharpClaw.Gateway.Infrastructure;
