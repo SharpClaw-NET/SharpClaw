@@ -8,6 +8,8 @@ using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
 using Serilog;
 using Serilog.Events;
+using SharpClaw.Gateway.Modules.Routing;
+using SharpClaw.Gateway.Modules.Hosting;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -162,6 +164,8 @@ foreach (var ext in gatewayModuleLoader.All)
 
 builder.Services.AddSingleton(gatewayModuleLoader);
 builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
+builder.Services.AddSingleton<ModuleEndpointDataSource>();
+builder.Services.AddSingleton<GatewayModuleHostManager>();
 
 // ── Gateway-side module service registration (Phase 3) ─────────
 // Run ConfigureGatewayServices only for modules explicitly enabled in

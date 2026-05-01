@@ -4,6 +4,8 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Modules.Hosting;
+using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Security;
 using SharpClaw.Utils.Security;
 
@@ -17,6 +19,12 @@ namespace SharpClaw.Gateway.Modules;
 /// <see cref="GatewayEndpointGroupCatalog"/> so the endpoint gate and rate
 /// limiter can resolve incoming requests back to their module identity.
 /// </summary>
+/// <remarks>
+/// Phase 5a: mapping delegates to <see cref="GatewayModuleHostManager"/>
+/// which registers a single <see cref="ModuleEndpointDataSource"/> on the
+/// app and reconciles it whenever options change (when
+/// <see cref="GatewayModuleOptions.HotReloadEnabled"/> is true).
+/// </remarks>
 public static class GatewayModuleEndpointMapping
 {
     /// <summary>
@@ -40,60 +48,52 @@ public static class GatewayModuleEndpointMapping
 
         AssertRateLimiterRegistered(app);
 
-        var loader = app.Services.GetRequiredService<GatewayModuleLoader>();
-        var catalog = app.Services.GetRequiredService<GatewayEndpointGroupCatalog>();
-        var moduleOpts = app.Services.GetRequiredService<IOptions<GatewayModuleOptions>>().Value;
+        var manager = app.Services.GetRequiredService<GatewayModuleHostManager>();
+        var dataSource = app.Services.GetRequiredService<ModuleEndpointDataSource>();
+        var optionsMonitor = app.Services.GetRequiredService<IOptionsMonitor<GatewayModuleOptions>>();
         var logger = app.Services
             .GetRequiredService<ILoggerFactory>()
             .CreateLogger("SharpClaw.Gateway.Modules");
 
-        foreach (var ext in loader.All)
+        // Wire the dynamic data source into ASP.NET Core's endpoint routing.
+        // Adding twice is harmless (duplicate detection in EndpointDataSource
+        // composite is by reference); the assertion below guards against it.
+        var dataSources = ((IEndpointRouteBuilder)app).DataSources;
+        if (!dataSources.Contains(dataSource))
+            dataSources.Add(dataSource);
+
+        // Initial reconcile against the current options snapshot.
+        manager.ApplyDesiredStateAsync(optionsMonitor.CurrentValue).GetAwaiter().GetResult();
+
+        // Subscribe to .env reloads only when hot reload is opted in. The
+        // subscription is process-lifetime; the manager itself is the
+        // application's IOptionsMonitor sink.
+        if (optionsMonitor.CurrentValue.HotReloadEnabled)
         {
-            if (!moduleOpts.IsModuleEnabled(ext.ModuleId))
-                continue;
-
-            foreach (var group in ext.GetEndpointGroups())
+            optionsMonitor.OnChange(opts =>
             {
-                if (!moduleOpts.IsGroupEnabled(ext.ModuleId, group.GroupId))
-                    continue;
-
-                var prefix = $"/api/modules/{ext.ModuleId}/{group.GroupId}";
-
-                if (!catalog.TryRegister(ext.ModuleId, group))
-                {
-                    logger.LogError(
-                        "Gateway module group {Prefix} is already registered; skipping duplicate from {ModuleId}.",
-                        prefix,
-                        PathGuard.SanitizeForLog(ext.ModuleId));
-                    continue;
-                }
-
-                var routeGroup = app.MapGroup(prefix);
-                var policy = group.RateLimitPolicy ?? RateLimiterConfiguration.GlobalPolicy;
-                routeGroup.RequireRateLimiting(policy);
-
-                var builder = new GatewayEndpointGroupBuilder(routeGroup, group.GroupId, prefix);
-                try
-                {
-                    ext.MapEndpoints(builder);
-                    logger.LogInformation(
-                        "Gateway module endpoint group registered: {Prefix} ({DisplayName}) policy={Policy}",
-                        prefix,
-                        group.DisplayName,
-                        policy);
-                }
-                catch (Exception ex)
-                {
-                    logger.LogError(ex,
-                        "Gateway module {ModuleId} threw while mapping group {GroupId}; unregistering prefix.",
-                        PathGuard.SanitizeForLog(ext.ModuleId),
-                        PathGuard.SanitizeForLog(group.GroupId));
-                    catalog.Unregister(ext.ModuleId, group.GroupId);
-                }
-            }
+                if (!opts.HotReloadEnabled) return;
+                _ = ReconcileSafely(manager, opts, logger);
+            });
+            logger.LogInformation("Gateway module hot reload is enabled (IOptionsMonitor subscribed).");
         }
 
         return app;
+    }
+
+    private static async Task ReconcileSafely(
+        GatewayModuleHostManager manager,
+        GatewayModuleOptions opts,
+        ILogger logger)
+    {
+        try
+        {
+            await manager.ApplyDesiredStateAsync(opts).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Gateway module reconcile from options change failed.");
+        }
     }
 
     private static void AssertRateLimiterRegistered(WebApplication app)
