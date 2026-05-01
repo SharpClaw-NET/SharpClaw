@@ -9,6 +9,8 @@ using NUnit.Framework;
 using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Modules;
+using SharpClaw.Gateway.Modules.Hosting;
+using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Security;
 using SharpClaw.Modules.WebAccess.Gateway;
 
@@ -36,6 +38,8 @@ public sealed class WebAccessGatewayExtensionTests
         builder.Services.AddSingleton(
             GatewayModuleLoader.FromExtensions([new WebAccessGatewayExtension()]));
         builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
+        builder.Services.AddSingleton<ModuleEndpointDataSource>();
+        builder.Services.AddSingleton<GatewayModuleHostManager>();
         builder.Services.AddSingleton<IpBanService>();
         builder.Services.AddSharpClawRateLimiting();
         builder.Services.AddRouting();

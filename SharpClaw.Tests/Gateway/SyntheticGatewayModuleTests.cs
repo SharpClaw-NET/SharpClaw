@@ -9,6 +9,8 @@ using NUnit.Framework;
 using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Modules;
+using SharpClaw.Gateway.Modules.Hosting;
+using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Security;
 
 namespace SharpClaw.Tests.Gateway;
@@ -73,6 +75,8 @@ public sealed class SyntheticGatewayModuleTests
             builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
         builder.Services.AddSingleton(GatewayModuleLoader.FromExtensions([extension]));
         builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
+        builder.Services.AddSingleton<SharpClaw.Gateway.Modules.Routing.ModuleEndpointDataSource>();
+        builder.Services.AddSingleton<SharpClaw.Gateway.Modules.Hosting.GatewayModuleHostManager>();
         builder.Services.AddSingleton<IpBanService>();
         builder.Services.AddSharpClawRateLimiting();
         builder.Services.AddRouting();
@@ -236,6 +240,8 @@ public sealed class SyntheticGatewayModuleTests
             builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
         builder.Services.AddSingleton(GatewayModuleLoader.FromExtensions([new SyntheticExtension()]));
         builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
+        builder.Services.AddSingleton<ModuleEndpointDataSource>();
+        builder.Services.AddSingleton<GatewayModuleHostManager>();
         builder.Services.AddSingleton<IpBanService>();
         builder.Services.AddSharpClawRateLimiting();
         builder.Services.AddRouting();

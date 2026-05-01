@@ -26,6 +26,25 @@ public sealed class GatewayModuleOptions
     public Dictionary<string, bool> Groups { get; set; }
         = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>
+    /// Phase 5a flag. When <c>true</c>, the gateway subscribes to
+    /// <see cref="Microsoft.Extensions.Options.IOptionsMonitor{TOptions}"/>
+    /// changes and reconciles loaded module hosts at runtime — flipping a
+    /// module or group flag in <c>.env</c> enables/disables real endpoint
+    /// mappings without a process restart. When <c>false</c> (the default),
+    /// the manager loads modules at startup and never re-syncs; runtime
+    /// flag flips only affect the gate's 503 behaviour.
+    /// </summary>
+    public bool HotReloadEnabled { get; set; }
+
+    /// <summary>
+    /// How long, in seconds, the manager waits for in-flight requests
+    /// routed to a module's endpoints to complete before disposing the
+    /// host. Default 30. Phase 5a uses this for the route-count drain;
+    /// Phase 5b will use it for ALC unload as well.
+    /// </summary>
+    public int DrainTimeoutSeconds { get; set; } = 30;
+
     /// <summary>True when the module itself is explicitly enabled.</summary>
     public bool IsModuleEnabled(string moduleId)
         => Modules.TryGetValue(moduleId, out var enabled) && enabled;
