@@ -15,6 +15,7 @@
   <ItemGroup>
     <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Gateway.Abstractions\SharpClaw.Gateway.Abstractions.csproj" />
   </ItemGroup>
 
   <ItemGroup>

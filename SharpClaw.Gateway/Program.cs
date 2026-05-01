@@ -163,6 +163,30 @@ foreach (var ext in gatewayModuleLoader.All)
 builder.Services.AddSingleton(gatewayModuleLoader);
 builder.Services.AddSingleton<GatewayEndpointGroupCatalog>();
 
+// ── Gateway-side module service registration (Phase 3) ─────────
+// Run ConfigureGatewayServices only for modules explicitly enabled in
+// configuration so a disabled module's services don't leak into DI.
+var gatewayModuleOptionsSnapshot = builder.Configuration
+    .GetSection(GatewayModuleOptions.SectionName)
+    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
+foreach (var ext in gatewayModuleLoader.All)
+{
+    if (!gatewayModuleOptionsSnapshot.IsModuleEnabled(ext.ModuleId))
+        continue;
+
+    try
+    {
+        ext.ConfigureGatewayServices(builder.Services);
+        Log.Information("Gateway module services configured: {ModuleId}", ext.ModuleId);
+    }
+    catch (Exception ex)
+    {
+        Log.Error(ex,
+            "Gateway module {ModuleId} threw during ConfigureGatewayServices; module will not be mapped.",
+            ext.ModuleId);
+    }
+}
+
 // ── Request queue (sequential forwarding to core API) ────────────
 builder.Services.Configure<RequestQueueOptions>(
     builder.Configuration.GetSection(RequestQueueOptions.SectionName));
@@ -231,8 +255,9 @@ app.Use(async (context, next) =>
 
         // X-RateLimit-Limit — applicable rate limit for this path
         var path = context.Request.Path.Value ?? string.Empty;
+        var rateCatalog = context.RequestServices.GetService<GatewayEndpointGroupCatalog>();
         context.Response.Headers["X-RateLimit-Limit"] =
-            RateLimiterConfiguration.ResolveRateLimit(path).ToString();
+            RateLimiterConfiguration.ResolveRateLimit(path, rateCatalog).ToString();
 
         // Cache-Control — short cache for reads, no-store for mutations
         if (!context.Response.Headers.ContainsKey("Cache-Control"))
@@ -342,11 +367,17 @@ app.UseMiddleware<AntiSpamMiddleware>();
 
 // 4. Rate limiting
 app.UseRateLimiter();
+((IApplicationBuilder)app).Properties[GatewayModuleEndpointMapping.RateLimiterReadyKey] = true;
 
 app.UseAuthorization();
 
 app.MapControllers();
 app.MapChatStreamProxy();
+
+// ── Module-contributed endpoint groups (Phase 3) ────────────────
+// Must run AFTER UseRateLimiter so RequireRateLimiting on the route
+// groups attaches the limiter middleware in the correct order.
+app.MapGatewayModuleEndpoints();
 
 try
 {

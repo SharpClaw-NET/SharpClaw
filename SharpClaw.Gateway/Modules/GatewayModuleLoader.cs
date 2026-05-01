@@ -24,6 +24,18 @@ public sealed class GatewayModuleLoader
     }
 
     /// <summary>
+    /// Test-friendly factory that bypasses disk scanning and seeds the loader
+    /// with the supplied extensions. Production code uses
+    /// <see cref="DiscoverBundled"/>; tests use this overload to wire a
+    /// synthetic <see cref="IGatewayModuleExtension"/> into the pipeline.
+    /// </summary>
+    public static GatewayModuleLoader FromExtensions(IEnumerable<IGatewayModuleExtension> extensions)
+    {
+        ArgumentNullException.ThrowIfNull(extensions);
+        return new GatewayModuleLoader(extensions);
+    }
+
+    /// <summary>
     /// Scan the application base directory for <c>SharpClaw.Modules.*.dll</c>
     /// assemblies, load them through <see cref="PathGuard.EnsureContainedIn"/>,
     /// then enumerate concrete public-parameterless-constructor types that

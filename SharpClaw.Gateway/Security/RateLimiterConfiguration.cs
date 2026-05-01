@@ -22,7 +22,9 @@ public static class RateLimiterConfiguration
                 banService.RecordViolation(ip);
 
                 var path = context.HttpContext.Request.Path.Value ?? string.Empty;
-                var limit = ResolveRateLimit(path);
+                var catalog = context.HttpContext.RequestServices
+                    .GetService<Modules.GatewayEndpointGroupCatalog>();
+                var limit = ResolveRateLimit(path, catalog);
 
                 context.HttpContext.Response.Headers["X-RateLimit-Limit"] = limit.ToString();
                 context.HttpContext.Response.Headers["X-RateLimit-Remaining"] = "0";
@@ -84,9 +86,24 @@ public static class RateLimiterConfiguration
     /// <summary>
     /// Infers the per-minute rate limit for a given request path so the
     /// <c>X-RateLimit-Limit</c> header reflects the applicable policy.
+    /// Module-contributed paths are resolved through the
+    /// <see cref="Modules.GatewayEndpointGroupCatalog"/> when supplied so a
+    /// custom policy on a group is reported correctly.
     /// </summary>
-    public static int ResolveRateLimit(string path)
+    public static int ResolveRateLimit(string path, Modules.GatewayEndpointGroupCatalog? catalog = null)
     {
+        if (catalog is not null
+            && path.StartsWith("/api/modules/", StringComparison.OrdinalIgnoreCase)
+            && catalog.Resolve(path) is { } match)
+        {
+            return match.Group.RateLimitPolicy switch
+            {
+                AuthPolicy => 5,
+                ChatPolicy => 20,
+                _ => 60,
+            };
+        }
+
         var lower = path.ToLowerInvariant();
         if (lower.StartsWith("/api/auth")) return 5;
         if (lower.Contains("/chat")) return 20;

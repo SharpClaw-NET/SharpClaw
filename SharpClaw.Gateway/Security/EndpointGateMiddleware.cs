@@ -1,6 +1,7 @@
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Infrastructure;
+using SharpClaw.Gateway.Modules;
 
 namespace SharpClaw.Gateway.Security;
 
@@ -8,12 +9,18 @@ namespace SharpClaw.Gateway.Security;
 /// Middleware that checks whether the requested endpoint group is enabled
 /// in <see cref="GatewayEndpointOptions"/>. Returns <c>503 Service
 /// Unavailable</c> when the master switch or the specific group is off.
+/// Module-contributed paths under <c>/api/modules/</c> are resolved through
+/// the <see cref="GatewayEndpointGroupCatalog"/> so unknown module paths
+/// short-circuit to <c>404</c> rather than leaking 5xx.
 /// </summary>
 public sealed class EndpointGateMiddleware(
     RequestDelegate next,
     IOptionsMonitor<GatewayEndpointOptions> options,
+    GatewayEndpointGroupCatalog catalog,
     ILogger<EndpointGateMiddleware> logger)
 {
+    private const string ModulePathPrefix = "/api/modules/";
+
     public async Task InvokeAsync(HttpContext context)
     {
         var opts = options.CurrentValue;
@@ -26,6 +33,32 @@ public sealed class EndpointGateMiddleware(
         }
 
         var path = context.Request.Path.Value ?? string.Empty;
+
+        // Module-contributed paths own /api/modules/* exclusively.
+        if (path.StartsWith(ModulePathPrefix, StringComparison.OrdinalIgnoreCase))
+        {
+            var match = catalog.Resolve(path);
+            if (match is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status404NotFound;
+                return;
+            }
+
+            if (!catalog.IsEnabled(match.ModuleId, match.Group.GroupId))
+            {
+                logger.LogInformation(
+                    "Gateway module group '{ModuleId}/{GroupId}' is disabled. Rejecting {Path}.",
+                    match.ModuleId, match.Group.GroupId, path);
+                await GatewayErrors.WriteAsync(context, StatusCodes.Status503ServiceUnavailable,
+                    $"The '{match.ModuleId}/{match.Group.GroupId}' endpoint is disabled.",
+                    GatewayErrors.EndpointDisabled);
+                return;
+            }
+
+            await next(context);
+            return;
+        }
+
         var group = ResolveGroup(path);
 
         if (group is not null && !opts.IsEndpointEnabled(group))
