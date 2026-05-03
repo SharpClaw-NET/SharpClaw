@@ -4,14 +4,14 @@ using Microsoft.Extensions.Logging;
 
 using SharpClaw.Contracts.Tasks;
 
-namespace SharpClaw.Modules.NetworkTriggers;
+namespace SharpClaw.Modules.Http;
 
 /// <summary>
 /// Fires when network availability changes, matching the optional SSID and
 /// <see cref="NetworkState"/> declared on the binding.
 /// <para>
-/// Moved out of <c>SharpClaw.Application.Core</c> by the trigger-extraction
-/// plan; behavior is preserved verbatim.
+/// Owned by the HTTP module alongside the webhook and host-probe trigger
+/// sources.
 /// </para>
 /// </summary>
 public sealed class NetworkTriggerSource(

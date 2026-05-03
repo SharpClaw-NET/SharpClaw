@@ -9,7 +9,9 @@ namespace SharpClaw.Modules.Http;
 
 /// <summary>
 /// Default module that owns the task-script HTTP request step
-/// (HttpGet/HttpPost/HttpPut/HttpDelete → http_request).
+/// (HttpGet/HttpPost/HttpPut/HttpDelete → http_request) and the network
+/// trigger family absorbed from the legacy NetworkTriggers module
+/// (HostReachable, HostUnreachable, NetworkChanged).
 /// </summary>
 public sealed class HttpModule : ISharpClawModule, ITaskParserAware
 {
@@ -25,6 +27,8 @@ public sealed class HttpModule : ISharpClawModule, ITaskParserAware
         services.AddSingleton<WebhookTriggerSource>();
         services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<WebhookTriggerSource>());
         services.AddSingleton<IWebhookTriggerHost>(sp => sp.GetRequiredService<WebhookTriggerSource>());
+        services.AddSingleton<ITaskTriggerSource, HostProbeTriggerSource>();
+        services.AddSingleton<ITaskTriggerSource, NetworkTriggerSource>();
     }
 
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];

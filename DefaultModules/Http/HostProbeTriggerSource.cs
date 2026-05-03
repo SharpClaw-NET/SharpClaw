@@ -5,14 +5,13 @@ using Microsoft.Extensions.Logging;
 
 using SharpClaw.Contracts.Tasks;
 
-namespace SharpClaw.Modules.NetworkTriggers;
+namespace SharpClaw.Modules.Http;
 
 /// <summary>
 /// Fires when a monitored host becomes reachable or unreachable, checked via
 /// TCP connect or ICMP ping on a timer.
 /// <para>
-/// Moved out of <c>SharpClaw.Application.Core</c> by the trigger-extraction
-/// plan; behavior is preserved verbatim.
+/// Owned by the HTTP module alongside the webhook trigger source.
 /// </para>
 /// </summary>
 public sealed class HostProbeTriggerSource(

@@ -17,5 +17,15 @@ public sealed class HttpParserExtension : ITaskParserModuleExtension
         new HashSet<string>(StringComparer.Ordinal);
 
     public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers { get; } =
-        HttpTriggerAttributeHandlers.All;
+        Merge(HttpTriggerAttributeHandlers.All, NetworkTriggerAttributeHandlers.All);
+
+    private static IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> Merge(
+        params IReadOnlyDictionary<string, ITaskTriggerAttributeHandler>[] sources)
+    {
+        var merged = new Dictionary<string, ITaskTriggerAttributeHandler>(StringComparer.Ordinal);
+        foreach (var src in sources)
+            foreach (var kvp in src)
+                merged[kvp.Key] = kvp.Value;
+        return merged;
+    }
 }

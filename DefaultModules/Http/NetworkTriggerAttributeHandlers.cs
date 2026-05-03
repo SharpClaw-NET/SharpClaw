@@ -1,13 +1,13 @@
 using SharpClaw.Contracts.Tasks;
 
-namespace SharpClaw.Modules.NetworkTriggers;
+namespace SharpClaw.Modules.Http;
 
 /// <summary>
 /// Module-owned <see cref="ITaskTriggerAttributeHandler"/> implementations
-/// for the network trigger-attribute family:
+/// for the network trigger-attribute family (folded into the HTTP module):
 /// <c>[OnHostReachable]</c>, <c>[OnHostUnreachable]</c>,
 /// <c>[OnNetworkChanged]</c>. Behavior preserved verbatim from the legacy
-/// core parser switch.
+/// network-triggers module.
 /// </summary>
 internal static class NetworkTriggerAttributeHandlers
 {

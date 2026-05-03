@@ -1,7 +1,8 @@
-namespace SharpClaw.Modules.NetworkTriggers;
+namespace SharpClaw.Modules.Http;
 
 /// <summary>
-/// Trigger and parameter keys owned by the network-triggers module.
+/// Trigger and parameter keys owned by the HTTP module for the network
+/// trigger family (host reachability and availability changes).
 /// String values are persisted verbatim in binding rows and serialized
 /// scripts.
 /// </summary>

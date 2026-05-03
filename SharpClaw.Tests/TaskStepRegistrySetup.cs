@@ -9,7 +9,6 @@ using SharpClaw.Modules.DatabaseAccess;
 using SharpClaw.Modules.FilesystemTriggers;
 using SharpClaw.Modules.Http;
 using SharpClaw.Modules.Metrics;
-using SharpClaw.Modules.NetworkTriggers;
 
 namespace SharpClaw.Tests;
 
@@ -44,7 +43,6 @@ public sealed class TaskStepRegistrySetup
         TaskScriptParser.RegisterModule(FilesystemTriggersParserExtension.Instance);
         TaskScriptParser.RegisterModule(HttpParserExtension.Instance);
         TaskScriptParser.RegisterModule(MetricsParserExtension.Instance);
-        TaskScriptParser.RegisterModule(NetworkTriggersParserExtension.Instance);
         TaskScriptParser.RegisterModule(DatabaseAccessParserExtension.Instance);
     }
 }

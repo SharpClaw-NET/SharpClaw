@@ -6,7 +6,7 @@
   "entryAssembly": "SharpClaw.Modules.Http",
   "minHostVersion": "1.0.0",
   "author": "SharpClaw Team",
-  "description": "Owns the task-script HTTP request step (HttpGet/HttpPost/HttpPut/HttpDelete → http_request).",
+  "description": "Owns the task-script HTTP request step (HttpGet/HttpPost/HttpPut/HttpDelete → http_request) and the network trigger family (Webhook, HostReachable, HostUnreachable, NetworkChanged).",
   "license": "AGPL-3.0",
   "platforms": null,
   "enabled": true,

@@ -9,7 +9,6 @@ using SharpClaw.Modules.DatabaseAccess.Triggers;
 using SharpClaw.Modules.FilesystemTriggers;
 using SharpClaw.Modules.Http;
 using SharpClaw.Modules.Metrics;
-using SharpClaw.Modules.NetworkTriggers;
 
 namespace SharpClaw.Tests.Tasks;
 
