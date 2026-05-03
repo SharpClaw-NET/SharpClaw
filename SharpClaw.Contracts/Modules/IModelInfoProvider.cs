@@ -19,13 +19,6 @@ public interface IModelInfoProvider
     /// </returns>
     Task<ModelProviderInfo?> GetModelProviderInfoAsync(
         Guid modelId, CancellationToken ct = default);
-
-    /// <summary>
-    /// Returns the local file path for a ready Whisper model file,
-    /// or <see langword="null"/> if no ready file exists for the model.
-    /// </summary>
-    Task<string?> GetLocalModelFilePathAsync(
-        Guid modelId, CancellationToken ct = default);
 }
 
 /// <summary>

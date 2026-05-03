@@ -106,15 +106,6 @@ public sealed class HostModelInfoProvider(
 
         return new ModelProviderInfo(model.Name, model.Provider.ProviderKey, apiKey);
     }
-
-    public async Task<string?> GetLocalModelFilePathAsync(Guid modelId, CancellationToken ct = default)
-    {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var lookup = scope.ServiceProvider.GetService<ILocalModelLookup>();
-        if (lookup is null)
-            return null;
-        return await lookup.GetReadyFilePathAsync(modelId, ct);
-    }
 }
 
 /// <summary>

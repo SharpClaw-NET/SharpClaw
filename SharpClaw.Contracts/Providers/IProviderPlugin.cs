@@ -96,16 +96,15 @@ public interface IProviderPlugin
     /// <c>default-{model}-{suffix}</c> agent identifier. The default
     /// implementation slugifies the provider's display name; plugins
     /// that host models from external download sources (e.g. local
-    /// GGUFs from HuggingFace vs. direct URLs) override this to return
-    /// a stable identifier derived from <paramref name="sourceUrl"/>.
+    /// GGUFs from HuggingFace vs. direct URLs) override this to derive
+    /// a stable identifier from module-owned data keyed by the model.
     /// </summary>
     /// <param name="providerName">
     /// Display name of the provider record the model belongs to.
     /// </param>
-    /// <param name="sourceUrl">
-    /// Optional source URL recorded for the model (only meaningful for
-    /// providers that download model artifacts from a URL).
-    /// </param>
-    string GetAgentIdentifierSuffix(string providerName, string? sourceUrl)
-        => providerName.Replace(" ", "-").ToLowerInvariant();
+    /// <param name="modelId">The model identifier being assigned.</param>
+    /// <param name="ct">Cancellation token.</param>
+    Task<string> GetAgentIdentifierSuffixAsync(
+        string providerName, Guid modelId, CancellationToken ct = default)
+        => Task.FromResult(providerName.Replace(" ", "-").ToLowerInvariant());
 }

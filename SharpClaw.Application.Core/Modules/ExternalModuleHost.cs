@@ -3,7 +3,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Services;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Utils.Security;
 

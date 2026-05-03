@@ -1,6 +1,4 @@
-using SharpClaw.Contracts.Enums;
-
-namespace SharpClaw.Contracts.DTOs.Tasks;
+namespace SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 // ── Requests ──────────────────────────────────────────────────────
 

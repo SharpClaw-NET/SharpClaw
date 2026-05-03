@@ -1,6 +1,4 @@
-using SharpClaw.Contracts.Enums;
-
-namespace SharpClaw.Contracts.DTOs.LocalModels;
+namespace SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
 
 public sealed record DownloadModelRequest(
     string Url,

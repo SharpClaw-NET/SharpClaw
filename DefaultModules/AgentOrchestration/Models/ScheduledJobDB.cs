@@ -1,5 +1,5 @@
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 namespace SharpClaw.Modules.AgentOrchestration.Models;
 

@@ -79,13 +79,15 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
 
         // Module services.
         services.AddScoped<LocalModelService>();
-        services.AddScoped<ILocalModelLookup, LocalModelLookup>();
+        services.AddScoped<LocalModelLookup>();
+        services.AddScoped<ILocalModelFileLookup>(sp => sp.GetRequiredService<LocalModelLookup>());
 
         // Provider plugin — in-process LLamaSharp client.
         services.AddSingleton<IProviderPlugin>(sp =>
         {
             var pm = sp.GetRequiredService<LocalInferenceProcessManager>();
             var caps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForGeneric);
+            var scopeFactory = sp.GetRequiredService<IServiceScopeFactory>();
             return new SimpleProviderPlugin(
                 WellKnownProviderKeys.LlamaSharp,
                 "LlamaSharp (local)",
@@ -94,10 +96,15 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
                 caps,
                 parameterSpec: ProviderParameterSpecs.LlamaSharp,
                 costFeed: LocalProviderCostFeed.Instance,
-                agentIdentifierSuffix: (providerName, sourceUrl) =>
-                    string.IsNullOrEmpty(sourceUrl)
+                agentIdentifierSuffix: async (providerName, modelId, ct) =>
+                {
+                    await using var scope = scopeFactory.CreateAsyncScope();
+                    var lookup = scope.ServiceProvider.GetRequiredService<LocalModelLookup>();
+                    var sourceUrl = await lookup.GetSourceUrlAsync(modelId, ct);
+                    return string.IsNullOrEmpty(sourceUrl)
                         ? providerName.Replace(" ", "-").ToLowerInvariant()
-                        : ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant(),
+                        : ModelDownloadManager.ResolveSourceFolder(sourceUrl).ToLowerInvariant();
+                },
                 requiresApiKey: false,
                 ownerModuleId: "sharpclaw_providers_llamasharp");
         });

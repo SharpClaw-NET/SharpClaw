@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Contracts.DTOs.LocalModels;
+using SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;

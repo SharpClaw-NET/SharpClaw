@@ -1,12 +1,10 @@
-using SharpClaw.Contracts.DTOs.Tasks;
-
-namespace SharpClaw.Contracts.Services;
+namespace SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 /// <summary>
-/// Host-provided contract for scheduled-job CRUD, lifecycle, and cron
-/// preview operations. Exposed through <c>SharpClaw.Contracts</c> so that
-/// modules can map the <c>/scheduled-jobs</c> REST surface without taking
-/// a project reference on <c>SharpClaw.Application.Core</c>.
+/// Module-owned contract for scheduled-job CRUD, lifecycle, and cron
+/// preview operations. Defined by the AgentOrchestration module so that
+/// the host can register a single implementation while module endpoints
+/// and consumers reach the same type via this namespace.
 /// </summary>
 public interface IScheduledJobService
 {

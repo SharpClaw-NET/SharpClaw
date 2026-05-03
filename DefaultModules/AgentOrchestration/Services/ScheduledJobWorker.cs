@@ -1,13 +1,11 @@
 using System.Text.Json;
-
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-
-using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.AgentOrchestration.Models;
+using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 namespace SharpClaw.Modules.AgentOrchestration.Services;
 

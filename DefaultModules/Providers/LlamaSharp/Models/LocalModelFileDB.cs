@@ -1,5 +1,5 @@
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
 
 namespace SharpClaw.Modules.Providers.LlamaSharp.Models;
 

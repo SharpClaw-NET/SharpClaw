@@ -1,9 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-
-using SharpClaw.Contracts.DTOs.Tasks;
-using SharpClaw.Contracts.Services;
+using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 namespace SharpClaw.Modules.AgentOrchestration.Handlers;
 

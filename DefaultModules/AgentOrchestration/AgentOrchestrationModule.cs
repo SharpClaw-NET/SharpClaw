@@ -1,16 +1,12 @@
 using System.Text.Json;
-
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-
 using Microsoft.EntityFrameworkCore;
-
 using SharpClaw.Contracts.Chat;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Services;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 using SharpClaw.Modules.AgentOrchestration.Services;
 
 namespace SharpClaw.Modules.AgentOrchestration;

@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using NAudio.Wave;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Modules.Providers.LlamaSharp.Services;
 using SharpClaw.Modules.SystemAudio.Audio;
 using SharpClaw.Modules.SystemAudio.Capture;
 using SharpClaw.Modules.SystemAudio.Services;
@@ -183,7 +184,9 @@ public sealed class LiveTranscriptionOrchestrator(
 
         if (isLocal)
         {
-            modelName = await modelInfoProvider.GetLocalModelFilePathAsync(modelId, ct)
+            await using var scope = scopeFactory.CreateAsyncScope();
+            var localFiles = scope.ServiceProvider.GetRequiredService<ILocalModelFileLookup>();
+            modelName = await localFiles.GetReadyFilePathAsync(modelId, ct)
                 ?? throw new InvalidOperationException(
                     $"No ready local model file found for model {modelId}.");
         }

@@ -47,33 +47,11 @@ public sealed class TaskChainTriggerSource(
 
     // ── ISharpClawEventSink ───────────────────────────────────────
 
-    public SharpClawEventType SubscribedEvents =>
-        SharpClawEventType.JobCompleted | SharpClawEventType.JobFailed;
+    // TODO: JobCompleted / JobFailed flags were removed from
+    // SharpClawEventType because the host never raised them. Pick a real
+    // signal (or a module-defined event source) for task-chain triggers.
+    public SharpClawEventType SubscribedEvents => SharpClawEventType.None;
 
-    public async Task OnEventAsync(SharpClawEvent evt, CancellationToken ct)
-    {
-        foreach (var ctx in _contexts)
-        {
-            if (!MatchesContext(ctx, evt)) continue;
-
-            try
-            {
-                await ctx.FireAsync(ct: ct);
-            }
-            catch (Exception ex)
-            {
-                logger.LogWarning(ex,
-                    "TaskChainTriggerSource failed to fire context for definition {Id}.",
-                    ctx.TaskDefinitionId);
-            }
-        }
-    }
-
-    private static bool MatchesContext(ITaskTriggerSourceContext ctx, SharpClawEvent evt) =>
-        ctx.Definition.TriggerKey switch
-        {
-            TaskScriptingTriggerKeys.TaskCompleted => evt.Type.HasFlag(SharpClawEventType.JobCompleted),
-            TaskScriptingTriggerKeys.TaskFailed    => evt.Type.HasFlag(SharpClawEventType.JobFailed),
-            _ => false,
-        };
+    public Task OnEventAsync(SharpClawEvent evt, CancellationToken ct) =>
+        Task.CompletedTask;
 }

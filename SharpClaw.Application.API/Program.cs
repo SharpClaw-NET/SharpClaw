@@ -35,7 +35,6 @@ using SharpClaw.Utils.Security;
 using Serilog.Events;
 using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Contracts.Services;
 
 var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
 var instanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");

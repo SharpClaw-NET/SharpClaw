@@ -1,7 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
-using SharpClaw.Contracts.DTOs.LocalModels;
+using SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
 using SharpClaw.Modules.Providers.LlamaSharp.Services;
 
 namespace SharpClaw.Modules.Providers.LlamaSharp.Handlers;

@@ -18,7 +18,7 @@ public sealed class SimpleProviderPlugin(
     ICompletionParameterSpec? parameterSpec = null,
     IDeviceCodeFlow? deviceCodeFlow = null,
     IProviderCostFeed? costFeed = null,
-    Func<string, string?, string>? agentIdentifierSuffix = null,
+    Func<string, Guid, CancellationToken, Task<string>>? agentIdentifierSuffix = null,
     bool supportsAutomaticEndpointDiscovery = false,
     bool isSeedable = true,
     bool requiresApiKey = true,
@@ -51,8 +51,9 @@ public sealed class SimpleProviderPlugin(
         return clientFactory(endpoint);
     }
 
-    public string GetAgentIdentifierSuffix(string providerName, string? sourceUrl)
+    public Task<string> GetAgentIdentifierSuffixAsync(
+        string providerName, Guid modelId, CancellationToken ct = default)
         => agentIdentifierSuffix is not null
-            ? agentIdentifierSuffix(providerName, sourceUrl)
-            : providerName.Replace(" ", "-").ToLowerInvariant();
+            ? agentIdentifierSuffix(providerName, modelId, ct)
+            : Task.FromResult(providerName.Replace(" ", "-").ToLowerInvariant());
 }

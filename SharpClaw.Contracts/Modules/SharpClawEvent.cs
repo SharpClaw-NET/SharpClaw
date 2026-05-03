@@ -10,41 +10,12 @@ public enum SharpClawEventType : long
 {
     None = 0,
 
-    // Agent lifecycle
-    AgentCreated        = 1L << 0,
-    AgentDeleted        = 1L << 1,
-    AgentUpdated        = 1L << 2,
-
-    // Channel lifecycle
-    ChannelOpened       = 1L << 3,
-    ChannelClosed       = 1L << 4,
-
-    // Job lifecycle
-    JobSubmitted        = 1L << 5,
-    JobCompleted        = 1L << 6,
-    JobFailed           = 1L << 7,
-    JobTimedOut         = 1L << 8,
-    JobApproved         = 1L << 9,
-    JobDenied           = 1L << 10,
-
-    // Chat
-    MessageSent         = 1L << 11,
-    ChatStarted         = 1L << 12,
-    ChatCompleted       = 1L << 13,
-
-    // Module lifecycle
+    // Module lifecycle — the only events the host actually raises today.
     ModuleEnabled       = 1L << 14,
     ModuleDisabled      = 1L << 15,
     ModuleHealthFailed  = 1L << 16,
 
-    // Auth
-    UserLoggedIn        = 1L << 17,
-    UserLoggedOut       = 1L << 18,
-
     // Convenience groups
-    AllAgentEvents      = AgentCreated | AgentDeleted | AgentUpdated,
-    AllJobEvents        = JobSubmitted | JobCompleted | JobFailed | JobTimedOut
-                        | JobApproved | JobDenied,
     AllModuleEvents     = ModuleEnabled | ModuleDisabled | ModuleHealthFailed,
     All                 = ~None,
 }

@@ -16,7 +16,7 @@ using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration, ProviderApiClientFactory clientFactory, ILocalModelLookup? localModelLookup = null)
+public sealed class AgentService(SharpClawDbContext db, SessionService session, ModuleRegistry moduleRegistry, IConfiguration configuration, ProviderApiClientFactory clientFactory)
 {
     public async Task<AgentResponse> CreateAsync(CreateAgentRequest request, CancellationToken ct = default)
     {
@@ -308,12 +308,6 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
             .Where(m => m.CapabilityTagsRaw != null && m.CapabilityTagsRaw.Contains(WellKnownCapabilityKeys.Chat))
             .ToListAsync(ct);
 
-        // Pre-load source URLs (plugin decides whether to use them in the suffix).
-        var allModelIds = models.Select(m => m.Id).ToHashSet();
-        var localSourceUrls = allModelIds.Count > 0 && localModelLookup is not null
-            ? await localModelLookup.GetSourceUrlsForModelsAsync(allModelIds, ct)
-            : (IReadOnlyDictionary<Guid, string>)new Dictionary<Guid, string>();
-
         var existingNames = await db.Agents
             .Select(a => a.Name)
             .ToListAsync(ct);
@@ -323,10 +317,9 @@ public sealed class AgentService(SharpClawDbContext db, SessionService session, 
 
         foreach (var model in models)
         {
-            localSourceUrls.TryGetValue(model.Id, out var sourceUrl);
             var plugin = clientFactory.GetPlugin(model.Provider.ProviderKey);
             var providerSuffix = plugin is not null
-                ? plugin.GetAgentIdentifierSuffix(model.Provider.Name, sourceUrl)
+                ? await plugin.GetAgentIdentifierSuffixAsync(model.Provider.Name, model.Id, ct)
                 : model.Provider.Name.Replace(" ", "-").ToLowerInvariant();
 
             var agentName = $"default-{model.Name}-{providerSuffix}";

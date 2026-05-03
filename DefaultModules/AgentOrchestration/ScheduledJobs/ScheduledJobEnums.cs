@@ -1,4 +1,4 @@
-namespace SharpClaw.Contracts.Enums;
+namespace SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 
 /// <summary>Current lifecycle state of a scheduled job.</summary>
 public enum ScheduledTaskStatus

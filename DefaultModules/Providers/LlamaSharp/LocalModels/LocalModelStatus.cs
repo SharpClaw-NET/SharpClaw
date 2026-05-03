@@ -1,4 +1,4 @@
-namespace SharpClaw.Contracts.Enums;
+namespace SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
 
 public enum LocalModelStatus
 {
