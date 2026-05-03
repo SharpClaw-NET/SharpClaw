@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 /// <summary>
 /// Persistent key-value configuration entry for a module.

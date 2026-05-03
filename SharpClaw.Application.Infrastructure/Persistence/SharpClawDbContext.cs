@@ -2,26 +2,35 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Infrastructure.Models;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Context;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
-using SharpClaw.Application.Infrastructure.Models.Messages;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence.JSON;
-using SharpClaw.Infrastructure.Models;
 
 namespace SharpClaw.Infrastructure.Persistence;
 
 public class SharpClawDbContext(
     DbContextOptions<SharpClawDbContext> options,
-    IServiceProvider? serviceProvider = null) : DbContext(options)
+    IServiceProvider? serviceProvider = null) : DbContext(options), ISharpClawDataContext
 {
+    IQueryable<AgentDB> ISharpClawDataContext.Agents => Agents;
+    IQueryable<ChannelDB> ISharpClawDataContext.Channels => Channels;
+    IQueryable<ChannelContextDB> ISharpClawDataContext.AgentContexts => AgentContexts;
+    IQueryable<ChatThreadDB> ISharpClawDataContext.ChatThreads => ChatThreads;
+    IQueryable<ChatMessageDB> ISharpClawDataContext.ChatMessages => ChatMessages;
+    IQueryable<PermissionSetDB> ISharpClawDataContext.PermissionSets => PermissionSets;
+    IQueryable<GlobalFlagDB> ISharpClawDataContext.GlobalFlags => GlobalFlags;
+    IQueryable<RoleDB> ISharpClawDataContext.Roles => Roles;
+
     /// <summary>
     /// When <c>true</c>, <see cref="SaveChangesAsync"/> skips the JSON
     /// flush. Set by <see cref="JsonFilePersistenceService.LoadAsync"/>
@@ -40,7 +49,6 @@ public class SharpClawDbContext(
     public DbSet<ChannelDB> Channels => Set<ChannelDB>();
     public DbSet<ChatThreadDB> ChatThreads => Set<ChatThreadDB>();
     public DbSet<ChatMessageDB> ChatMessages => Set<ChatMessageDB>();
-    public DbSet<ScheduledJobDB> ScheduledTasks => Set<ScheduledJobDB>();
 
     public DbSet<ClearanceUserWhitelistEntryDB> ClearanceUserWhitelistEntries => Set<ClearanceUserWhitelistEntryDB>();
     public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
@@ -169,10 +177,6 @@ public class SharpClawDbContext(
                 .WithOne(conv => conv.AgentContext!)
                 .HasForeignKey(conv => conv.AgentContextId)
                 .OnDelete(DeleteBehavior.SetNull);
-            e.HasMany(c => c.Tasks)
-                .WithOne(t => t.AgentContext!)
-                .HasForeignKey(t => t.AgentContextId)
-                .OnDelete(DeleteBehavior.SetNull);
             e.HasOne(c => c.PermissionSet)
                 .WithMany()
                 .HasForeignKey(c => c.PermissionSetId)
@@ -221,20 +225,6 @@ public class SharpClawDbContext(
                 .WithOne(m => m.Thread!)
                 .HasForeignKey(m => m.ThreadId)
                 .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── Scheduled Tasks ───────────────────────────────────────
-        modelBuilder.Entity<ScheduledJobDB>(e =>
-        {
-            e.HasOne(t => t.PermissionSet)
-                .WithMany()
-                .HasForeignKey(t => t.PermissionSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-
-            e.HasOne(t => t.TaskDefinition)
-                .WithMany()
-                .HasForeignKey(t => t.TaskDefinitionId)
-                .OnDelete(DeleteBehavior.SetNull);
         });
 
         // ── PermissionSets ────────────────────────────────────────

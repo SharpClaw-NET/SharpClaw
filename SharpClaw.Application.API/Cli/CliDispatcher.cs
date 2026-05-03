@@ -28,6 +28,7 @@ using SharpClaw.Contracts.DTOs.Users;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Contracts.Tasks;
@@ -2309,9 +2310,7 @@ public static class CliDispatcher
                 "task schedule <sub> ...                  Manage cron scheduled jobs (see: task schedule)",
                 "task trigger-sources                     List registered task trigger sources",
                 "task triggers enable <taskId>            Enable all trigger bindings for a task",
-                "task triggers disable <taskId>           Disable all trigger bindings for a task",
-                "task shortcuts install <id>              Create or refresh OS shortcut for a task",
-                "task shortcuts remove <id>               Remove OS shortcut files for a task");
+                "task triggers disable <taskId>           Disable all trigger bindings for a task");
             return Results.Ok();
         }
 
@@ -2320,10 +2319,24 @@ public static class CliDispatcher
         var chatSvc = sp.GetRequiredService<ChatService>();
 
         if (sub == "schedule")
-            return await HandleTaskScheduleCommand(args, sp);
+        {
+            // Forward "task schedule …" to the module-owned top-level
+            // "schedule" command (registered by the AgentOrchestration
+            // module). The legacy "task schedule" alias is preserved for
+            // back-compat; the handler is module code.
+            var registry = sp.GetRequiredService<ModuleRegistry>();
+            var resolved = registry.TryResolveTopLevelCommandWithModule("schedule");
+            if (resolved is null)
+            {
+                Console.Error.WriteLine("Scheduled-job CLI not registered. Is the AgentOrchestration module loaded?");
+                return Results.Ok();
+            }
 
-        if (sub == "shortcuts")
-            return await HandleTaskShortcutsCommand(args, sp);
+            // Drop the leading "task" verb so the module sees args[0] = "schedule".
+            var forwarded = args.AsSpan(1).ToArray();
+            await InvokeModuleCliHandlerAsync(resolved.Value.ModuleId, resolved.Value.Command, forwarded, sp, registry);
+            return Results.Ok();
+        }
 
         if (sub == "triggers")
             return await HandleTaskTriggersCommand(args, sp);
@@ -2451,166 +2464,6 @@ public static class CliDispatcher
     {
         var sources = sp.GetServices<ITaskTriggerSource>();
         return TaskTriggerHandlers.ListTriggerSources(sources);
-    }
-
-    private static async Task<IResult?> HandleTaskShortcutsCommand(
-        string[] args, IServiceProvider sp)
-    {
-        // args[0] = "task", args[1] = "shortcuts", args[2] = sub-command
-        if (args.Length < 3)
-        {
-            PrintUsage(
-                "task shortcuts install <taskId>   Create or refresh OS shortcut for a task",
-                "task shortcuts remove <taskId>    Remove OS shortcut files for a task");
-            return Results.Ok();
-        }
-
-        var sub = args[2].ToLowerInvariant();
-        var svc = sp.GetRequiredService<TaskService>();
-        var shortcuts = sp.GetRequiredService<IShortcutLauncherService>();
-
-        switch (sub)
-        {
-            case "install" when args.Length >= 4:
-            {
-                var taskId = CliIdMap.Resolve(args[3]);
-                var result = await TaskShortcutHandlers.Install(taskId, svc, shortcuts, default);
-                if (result is Microsoft.AspNetCore.Http.HttpResults.NotFound)
-                    Console.Error.WriteLine("Task not found.");
-                else if (result is Microsoft.AspNetCore.Http.HttpResults.UnprocessableEntity<string> ue)
-                    Console.Error.WriteLine(ue.Value);
-                else
-                    Console.WriteLine("Shortcut installed.");
-                return Results.Ok();
-            }
-
-            case "install":
-                return UsageResult("task shortcuts install <taskId>");
-
-            case "remove" when args.Length >= 4:
-            {
-                var taskId = CliIdMap.Resolve(args[3]);
-                var result = await TaskShortcutHandlers.Remove(taskId, svc, shortcuts, default);
-                if (result is Microsoft.AspNetCore.Http.HttpResults.NotFound)
-                    Console.Error.WriteLine("Task not found.");
-                else
-                    Console.WriteLine("Shortcut removed.");
-                return Results.Ok();
-            }
-
-            case "remove":
-                return UsageResult("task shortcuts remove <taskId>");
-
-            default:
-                return UsageResult($"Unknown sub-command: task shortcuts {sub}. Try 'task shortcuts' for usage.");
-        }
-    }
-
-    private static async Task<IResult?> HandleTaskScheduleCommand(
-        string[] args, IServiceProvider sp)
-    {
-        // args[0] = "task", args[1] = "schedule", args[2] = sub-command
-        var svc = sp.GetRequiredService<ScheduledJobService>();
-
-        if (args.Length < 3)
-        {
-            PrintUsage(
-                "task schedule list                        List all scheduled jobs",
-                "task schedule get <jobId>                 Show a scheduled job",
-                "task schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]",
-                "                                          Create a cron scheduled job",
-                "task schedule update <jobId> --cron <expr> [--timezone <tz>]",
-                "                                          Update cron expression / timezone",
-                "task schedule pause <jobId>               Pause a scheduled job",
-                "task schedule resume <jobId>              Resume a paused job",
-                "task schedule delete <jobId>              Delete a scheduled job",
-                "task schedule preview <expr> [--timezone <tz>] [--count N]",
-                "                                          Preview next occurrences of a cron expression");
-            return Results.Ok();
-        }
-
-        var sub = args[2].ToLowerInvariant();
-
-        switch (sub)
-        {
-            case "list":
-                return Results.Ok(await svc.ListAsync());
-
-            case "get" when args.Length >= 4:
-                return await ScheduledJobHandlers.GetById(CliIdMap.Resolve(args[3]), svc, default);
-
-            case "get":
-                return UsageResult("task schedule get <jobId>");
-
-            case "create":
-            {
-                var flags = ParseFlags(args, 3);
-                if (!flags.TryGetValue("cron", out var cronExpr))
-                    return UsageResult("task schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]");
-
-                Guid? taskId = args.Length >= 4 && Guid.TryParse(args[3], out var tid) ? tid : null;
-                flags.TryGetValue("timezone", out var tz);
-                flags.TryGetValue("name", out var name);
-
-                var request = new CreateScheduledJobRequest(
-                    Name: name ?? cronExpr,
-                    TaskDefinitionId: taskId,
-                    CronExpression: cronExpr,
-                    CronTimezone: tz);
-
-                return await ScheduledJobHandlers.Create(request, svc, default);
-            }
-
-            case "update" when args.Length >= 4:
-            {
-                var jobId = CliIdMap.Resolve(args[3]);
-                var flags = ParseFlags(args, 4);
-                flags.TryGetValue("cron", out var cronExpr);
-                flags.TryGetValue("timezone", out var tz);
-
-                var request = new UpdateScheduledJobRequest(
-                    CronExpression: cronExpr,
-                    CronTimezone: tz);
-
-                return await ScheduledJobHandlers.Update(jobId, request, svc, default);
-            }
-
-            case "update":
-                return UsageResult("task schedule update <jobId> --cron <expr> [--timezone <tz>]");
-
-            case "pause" when args.Length >= 4:
-                return await ScheduledJobHandlers.Pause(CliIdMap.Resolve(args[3]), svc, default);
-
-            case "pause":
-                return UsageResult("task schedule pause <jobId>");
-
-            case "resume" when args.Length >= 4:
-                return await ScheduledJobHandlers.Resume(CliIdMap.Resolve(args[3]), svc, default);
-
-            case "resume":
-                return UsageResult("task schedule resume <jobId>");
-
-            case "delete" when args.Length >= 4:
-                return await ScheduledJobHandlers.Delete(CliIdMap.Resolve(args[3]), svc, default);
-
-            case "delete":
-                return UsageResult("task schedule delete <jobId>");
-
-            case "preview" when args.Length >= 4:
-            {
-                var expr = args[3];
-                var flags = ParseFlags(args, 4);
-                flags.TryGetValue("timezone", out var tz);
-                int count = flags.TryGetValue("count", out var cStr) && int.TryParse(cStr, out var c) ? c : 10;
-                return ScheduledJobHandlers.PreviewExpression(expr, tz, count);
-            }
-
-            case "preview":
-                return UsageResult("task schedule preview <expr> [--timezone <tz>] [--count N]");
-
-            default:
-                return UsageResult($"Unknown sub-command: task schedule {sub}. Try 'task schedule' for usage.");
-        }
     }
 
     private static async Task<IResult> HandleTaskCreate(string sourceFilePath, TaskService svc)
@@ -3527,7 +3380,6 @@ public static class CliDispatcher
               task preflight <taskId> [--param key=value ...]
               task schedule list|get|create|update|pause|resume|delete|preview [args]
               task triggers enable|disable <taskId>
-              task shortcuts install|remove <taskId>
               task trigger-sources
 
             Resource:  resource <type> <sub>    (add, get, list, update, delete, sync)

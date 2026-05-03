@@ -37,8 +37,12 @@
     <Project Path="DefaultModules/DangerousShell/SharpClaw.Modules.DangerousShell.csproj" />
     <Project Path="DefaultModules/DatabaseAccess/SharpClaw.Modules.DatabaseAccess.csproj" />
     <Project Path="DefaultModules/EditorCommon/SharpClaw.Modules.EditorCommon.csproj" />
+    <Project Path="DefaultModules/FilesystemTriggers/SharpClaw.Modules.FilesystemTriggers.csproj" />
+    <Project Path="DefaultModules/Http/SharpClaw.Modules.Http.csproj" />
+    <Project Path="DefaultModules/Metrics/SharpClaw.Modules.Metrics.csproj" />
     <Project Path="DefaultModules/Mk8Shell/SharpClaw.Modules.Mk8Shell.csproj" />
     <Project Path="DefaultModules/ModuleDev/SharpClaw.Modules.ModuleDev.csproj" />
+    <Project Path="DefaultModules/NetworkTriggers/SharpClaw.Modules.NetworkTriggers.csproj" />
     <Project Path="DefaultModules/OfficeApps/SharpClaw.Modules.OfficeApps.csproj" />
     <Project Path="DefaultModules/Providers/Anthropic/SharpClaw.Modules.Providers.Anthropic.csproj" />
     <Project Path="DefaultModules/Providers/Google/SharpClaw.Modules.Providers.Google.csproj" />
@@ -147,3 +151,4 @@
     </Project>
   </Folder>
 </Solution>
+

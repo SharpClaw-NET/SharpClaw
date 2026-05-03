@@ -1,0 +1,17 @@
+{
+  "id": "sharpclaw_network_triggers",
+  "displayName": "Network Triggers",
+  "version": "1.0.0",
+  "toolPrefix": "nettrigger",
+  "entryAssembly": "SharpClaw.Modules.NetworkTriggers",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Owns the HostReachable, HostUnreachable, and NetworkChanged task triggers.",
+  "license": "AGPL-3.0",
+  "platforms": null,
+  "enabled": true,
+  "defaultEnabled": true,
+  "executionTimeoutSeconds": 60,
+  "exports": [],
+  "requires": []
+}

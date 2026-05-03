@@ -155,7 +155,7 @@ public sealed class DeviceTriggerSource(
     {
         foreach (var ctx in _contexts.Where(c => c.Definition.TriggerKey == triggerKey))
         {
-            var pattern = ctx.Definition.DeviceNamePattern;
+            var pattern = ctx.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.DeviceNamePattern);
             if (!string.IsNullOrWhiteSpace(pattern) &&
                 !deviceId.Contains(pattern, StringComparison.OrdinalIgnoreCase))
                 continue;

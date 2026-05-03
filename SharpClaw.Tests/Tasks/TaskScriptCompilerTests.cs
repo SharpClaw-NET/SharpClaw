@@ -4,6 +4,8 @@ using NUnit.Framework;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.Http;
+using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -184,7 +186,7 @@ public class RequiredParamTask
         var result = TaskScriptEngine.ProcessScript(SimpleSource);
 
         result.Success.Should().BeTrue();
-        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(WellKnownTaskStepKeys.Return);
+        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(TaskScriptingStepKeys.Return);
     }
 
     [Test]
@@ -211,9 +213,9 @@ public class ConditionalTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
+        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
     }
 
     [Test]
@@ -241,8 +243,8 @@ public class LoopTask
         });
 
         result.Success.Should().BeTrue();
-        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.Loop);
-        loop.LoopKind.Should().Be(TaskLoopKind.ForEach);
+        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Loop);
+        loop.VariableName.Should().NotBeNull();
     }
 
     [Test]
@@ -262,7 +264,9 @@ public class HttpGetTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var httpStep = result.Plan!.ExecutionSteps.Single(s => s.StepKey == WellKnownTaskStepKeys.HttpRequest);
-        httpStep.HttpMethod.Should().Be("GET");
+        var httpStep = result.Plan!.ExecutionSteps.Single(s => s.StepKey == HttpStepKeys.HttpRequest);
+        httpStep.Arguments.Should().NotBeNull();
+        httpStep.Arguments![0].Should().Be("GET");
     }
 }
+

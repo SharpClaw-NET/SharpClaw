@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Context;
+namespace SharpClaw.Contracts.Entities.Core.Context;
 
 /// <summary>
 /// A single keyed default-resource entry within a <see cref="DefaultResourceSetDB"/>.

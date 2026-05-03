@@ -1,29 +1,26 @@
 using SharpClaw.Application.Infrastructure.Tasks;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Application.Core.Services.Triggers;
 
 namespace SharpClaw.Application.Services;
 
 /// <summary>
 /// Translates parsed <see cref="TaskTriggerDefinition"/> entries into
-/// <see cref="ScheduledJobDB"/> rows (for Cron) and
-/// <see cref="TaskTriggerBindingDB"/> rows (for all other kinds), keeping
-/// both tables in sync whenever a task definition is created, updated, or
-/// deleted.
+/// <see cref="TaskTriggerBindingDB"/> rows, delegating per-kind ownership
+/// (cron scheduled jobs, OS shortcut files, etc.) to module-owned
+/// <see cref="ITaskTriggerSource"/> implementations that opt into
+/// <see cref="ITaskTriggerSource.OwnsBindingPersistence"/> or attach a
+/// matching <see cref="ITaskTriggerBindingSideEffect"/>.
 /// </summary>
 public sealed class TaskTriggerRegistrar(
     SharpClawDbContext db,
     ILogger<TaskTriggerRegistrar> logger,
-    TaskTriggerHostService? hostService = null,
-    IShortcutLauncherService? shortcutLauncher = null)
+    ITaskTriggerSourceRegistry? sourceRegistry = null)
 {
-    /// <summary>The host service that reloads trigger sources, if registered.</summary>
-    public TaskTriggerHostService? HostService => hostService;
     /// <summary>
     /// Upsert all trigger bindings derived from <paramref name="triggers"/>.
     /// Stale rows (present in the DB but absent from the new list) are removed.
@@ -41,100 +38,62 @@ public sealed class TaskTriggerRegistrar(
         ArgumentNullException.ThrowIfNull(entity);
         ArgumentNullException.ThrowIfNull(triggers);
 
-        var cronChanged = await SyncCronJobsAsync(entity, triggers, ct);
+        var ownedChanged   = await DispatchOwnedBindingsAsync(entity, triggers, ct);
         var bindingChanged = await SyncBindingRowsAsync(entity, triggers, ct);
-        return cronChanged || bindingChanged;
+        return ownedChanged || bindingChanged;
     }
 
-    /// <summary>Remove all trigger bindings (cron jobs + binding rows) for a definition.</summary>
+    /// <summary>Remove all trigger bindings for a definition, including any
+    /// owned-persistence state contributed by module-owned sources.</summary>
     public async Task RemoveTriggersAsync(Guid definitionId, CancellationToken ct = default)
     {
-        await RemoveCronJobsAsync(definitionId, ct);
         await RemoveBindingRowsAsync(definitionId, ct);
+        await RemoveOwnedBindingsAsync(definitionId, ct);
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Cron: ScheduledJobDB
+    // Module-owned persistence dispatch
     // ─────────────────────────────────────────────────────────────
 
-    private async Task<bool> SyncCronJobsAsync(
+    private async Task<bool> DispatchOwnedBindingsAsync(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskTriggerDefinition> triggers,
         CancellationToken ct)
     {
-        var incomingCron = triggers
-            .Where(t => t.TriggerKey == WellKnownTriggerKeys.Cron && !string.IsNullOrWhiteSpace(t.CronExpression))
-            .ToList();
-
-        var existing = await db.ScheduledTasks
-            .Where(j => j.TaskDefinitionId == entity.Id && j.CronExpression != null)
-            .ToListAsync(ct);
-
-        var incomingExpressions = incomingCron
-            .Select(t => t.CronExpression!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+        if (sourceRegistry is null) return false;
 
         var changed = false;
+        var grouped = triggers
+            .Where(t => !string.IsNullOrWhiteSpace(t.TriggerKey))
+            .GroupBy(t => sourceRegistry.ResolveByKey(t.TriggerKey))
+            .Where(g => g.Key is not null && g.Key.OwnsBindingPersistence);
 
-        // Remove stale cron jobs
-        foreach (var stale in existing.Where(j => !incomingExpressions.Contains(j.CronExpression!)))
+        var descriptor = new TaskDefinitionDescriptor(entity.Id, entity.Name);
+
+        foreach (var group in grouped)
         {
-            db.ScheduledTasks.Remove(stale);
-            changed = true;
-            logger.LogDebug(
-                "Removed stale cron job for definition {DefinitionId}, expression '{Expression}'.",
-                entity.Id, stale.CronExpression);
-        }
-
-        // Add new cron jobs
-        var existingExpressions = existing
-            .Select(j => j.CronExpression!)
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var t in incomingCron.Where(t => !existingExpressions.Contains(t.CronExpression!)))
-        {
-            var nextRun = CronEvaluator.GetNextOccurrence(
-                t.CronExpression!,
-                DateTimeOffset.UtcNow,
-                t.CronTimezone);
-
-            if (nextRun is null)
-            {
-                logger.LogWarning(
-                    "Cron expression '{Expression}' for definition {DefinitionId} has no future occurrences; skipping.",
-                    t.CronExpression, entity.Id);
-                continue;
-            }
-
-            db.ScheduledTasks.Add(new ScheduledJobDB
-            {
-                Name             = entity.Name,
-                TaskDefinitionId = entity.Id,
-                CronExpression   = t.CronExpression,
-                CronTimezone     = t.CronTimezone,
-                NextRunAt        = nextRun.Value,
-            });
-
-            changed = true;
-            logger.LogDebug(
-                "Created cron job for definition {DefinitionId}, expression '{Expression}', next at {Next}.",
-                entity.Id, t.CronExpression, nextRun.Value);
+            var source = group.Key!;
+            var owned = group.ToList();
+            var sourceChanged = await source.SyncBindingsAsync(descriptor, owned, ct);
+            if (sourceChanged) changed = true;
         }
 
         return changed;
     }
 
-    private async Task RemoveCronJobsAsync(Guid definitionId, CancellationToken ct)
+    private async Task RemoveOwnedBindingsAsync(Guid definitionId, CancellationToken ct)
     {
-        var jobs = await db.ScheduledTasks
-            .Where(j => j.TaskDefinitionId == definitionId && j.CronExpression != null)
-            .ToListAsync(ct);
+        if (sourceRegistry is null) return;
 
-        db.ScheduledTasks.RemoveRange(jobs);
+        foreach (var source in sourceRegistry.Sources)
+        {
+            if (!source.OwnsBindingPersistence) continue;
+            await source.RemoveBindingsAsync(definitionId, ct);
+        }
     }
 
     // ─────────────────────────────────────────────────────────────
-    // Non-cron: TaskTriggerBindingDB
+    // Default binding-row CRUD
     // ─────────────────────────────────────────────────────────────
 
     private async Task<bool> SyncBindingRowsAsync(
@@ -142,8 +101,9 @@ public sealed class TaskTriggerRegistrar(
         IReadOnlyList<TaskTriggerDefinition> triggers,
         CancellationToken ct)
     {
-        var nonCron = triggers
-            .Where(t => t.TriggerKey != WellKnownTriggerKeys.Cron)
+        // Skip triggers whose owning source manages persistence itself.
+        var defaultPath = triggers
+            .Where(t => !IsOwnedBySource(t.TriggerKey))
             .ToList();
 
         var existing = await db.TaskTriggerBindings
@@ -151,15 +111,17 @@ public sealed class TaskTriggerRegistrar(
             .ToListAsync(ct);
 
         // Build a lookup key for each incoming trigger
-        var incomingKeys = nonCron
+        var incomingKeys = defaultPath
             .Select(t => BindingKey(entity.Id, t))
             .ToHashSet();
 
         var changed = false;
 
-        // Remove stale bindings
-        foreach (var stale in existing.Where(b => !incomingKeys.Contains(BindingKey(b))))
+        // Remove stale bindings (default-path rows only; owned-source state
+        // is reconciled by the source itself in SyncBindingsAsync).
+        foreach (var stale in existing.Where(b => !IsOwnedBySource(b.Kind) && !incomingKeys.Contains(BindingKey(b))))
         {
+            await FireRemovedSideEffectAsync(stale, ct);
             db.TaskTriggerBindings.Remove(stale);
             changed = true;
             logger.LogDebug(
@@ -171,29 +133,25 @@ public sealed class TaskTriggerRegistrar(
         var existingKeys = existing
             .ToDictionary(b => BindingKey(b));
 
-        foreach (var t in nonCron)
+        foreach (var t in defaultPath)
         {
             var key = BindingKey(entity.Id, t);
             if (existingKeys.ContainsKey(key))
                 continue; // already present
 
             var kindColumn = t.TriggerKey ?? string.Empty;
-            db.TaskTriggerBindings.Add(new TaskTriggerBindingDB
+            var binding = new TaskTriggerBindingDB
             {
                 TaskDefinitionId = entity.Id,
                 Kind             = kindColumn,
                 TriggerValue     = TriggerValueFor(t),
                 Filter           = TriggerFilterFor(t),
                 DefinitionJson   = System.Text.Json.JsonSerializer.Serialize(t),
-            });
-
+            };
+            db.TaskTriggerBindings.Add(binding);
             changed = true;
 
-            if (t.TriggerKey == "OsShortcut" && shortcutLauncher is not null)
-            {
-                var customId = entity.Name;
-                await shortcutLauncher.WriteShortcutAsync(t, customId, ct);
-            }
+            await FireCreatedSideEffectAsync(entity, t, binding, ct);
 
             logger.LogDebug(
                 "Created trigger binding for definition {DefinitionId}, kind {Kind}.",
@@ -209,50 +167,74 @@ public sealed class TaskTriggerRegistrar(
             .Where(b => b.TaskDefinitionId == definitionId)
             .ToListAsync(ct);
 
-        if (shortcutLauncher is not null)
-        {
-            foreach (var b in bindings.Where(b => b.Kind == "OsShortcut"))
-            {
-                var customId = b.TriggerValue ?? b.TaskDefinitionId.ToString();
-                await shortcutLauncher.RemoveShortcutsAsync(customId, ct);
-            }
-        }
+        foreach (var b in bindings)
+            await FireRemovedSideEffectAsync(b, ct);
 
         db.TaskTriggerBindings.RemoveRange(bindings);
+    }
+
+    private bool IsOwnedBySource(string? triggerKey)
+    {
+        if (string.IsNullOrWhiteSpace(triggerKey)) return false;
+        var source = sourceRegistry?.ResolveByKey(triggerKey);
+        return source is { OwnsBindingPersistence: true };
+    }
+
+    private async Task FireCreatedSideEffectAsync(
+        TaskDefinitionDB entity,
+        TaskTriggerDefinition trigger,
+        TaskTriggerBindingDB binding,
+        CancellationToken ct)
+    {
+        var sideEffect = sourceRegistry?.ResolveSideEffect(binding.Kind);
+        if (sideEffect is null) return;
+
+        await sideEffect.OnBindingCreatedAsync(
+            new TaskDefinitionDescriptor(entity.Id, entity.Name),
+            trigger,
+            new TaskTriggerBindingDescriptor(
+                binding.TaskDefinitionId,
+                binding.Kind,
+                binding.TriggerValue,
+                binding.Filter),
+            ct);
+    }
+
+    private async Task FireRemovedSideEffectAsync(
+        TaskTriggerBindingDB binding,
+        CancellationToken ct)
+    {
+        var sideEffect = sourceRegistry?.ResolveSideEffect(binding.Kind);
+        if (sideEffect is null) return;
+
+        await sideEffect.OnBindingRemovedAsync(
+            new TaskTriggerBindingDescriptor(
+                binding.TaskDefinitionId,
+                binding.Kind,
+                binding.TriggerValue,
+                binding.Filter),
+            ct);
     }
 
     // ─────────────────────────────────────────────────────────────
     // Helpers
     // ─────────────────────────────────────────────────────────────
 
-    private static string BindingKey(Guid definitionId, TaskTriggerDefinition t) =>
+    private string BindingKey(Guid definitionId, TaskTriggerDefinition t) =>
         $"{definitionId}|{t.TriggerKey}|{TriggerValueFor(t)}";
 
     private static string BindingKey(TaskTriggerBindingDB b) =>
         $"{b.TaskDefinitionId}|{b.Kind}|{b.TriggerValue}";
 
-    private static string? TriggerValueFor(TaskTriggerDefinition t)
-    {
-        return t.TriggerKey switch
-        {
-            WellKnownTriggerKeys.Event           => t.EventType,
-            WellKnownTriggerKeys.FileChanged     => t.WatchPath,
-            WellKnownTriggerKeys.Webhook         => t.WebhookRoute,
-            WellKnownTriggerKeys.HostReachable
-                or WellKnownTriggerKeys.HostUnreachable => t.HostName,
-            WellKnownTriggerKeys.TaskCompleted
-                or WellKnownTriggerKeys.TaskFailed => t.SourceTaskName,
-            WellKnownTriggerKeys.NetworkChanged  => t.NetworkSsid,
-            WellKnownTriggerKeys.MetricThreshold => t.MetricSource,
-            // Module-owned: use the filter field the module source understands
-            _ => t.CustomSourceFilter ?? t.ProcessName ?? t.HotkeyCombo
-                 ?? t.SqlQuery ?? t.ShortcutLabel ?? t.DeviceClass,
-        };
-    }
+    /// <summary>
+    /// Computes the <c>TriggerValue</c> column for a binding by delegating to
+    /// the owning <see cref="ITaskTriggerSource"/>. Returns <see langword="null"/>
+    /// when no source is registered for the key (the binding row will then
+    /// carry a null discriminator).
+    /// </summary>
+    private string? TriggerValueFor(TaskTriggerDefinition t) =>
+        sourceRegistry?.ResolveByKey(t.TriggerKey)?.GetBindingValue(t);
 
-    private static string? TriggerFilterFor(TaskTriggerDefinition t)
-    {
-        if (t.TriggerKey == WellKnownTriggerKeys.Event) return t.EventFilter;
-        return t.CustomSourceFilter;
-    }
+    private string? TriggerFilterFor(TaskTriggerDefinition t) =>
+        sourceRegistry?.ResolveByKey(t.TriggerKey)?.GetBindingFilter(t);
 }

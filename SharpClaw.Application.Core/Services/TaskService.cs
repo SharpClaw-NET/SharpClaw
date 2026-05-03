@@ -1,8 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Application.Infrastructure.Tasks;
+using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Tasks;
@@ -15,7 +16,13 @@ namespace SharpClaw.Application.Services;
 /// Definitions are parsed on creation so validation errors surface
 /// immediately rather than at execution time.
 /// </summary>
-public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolver entities, TaskPreflightChecker preflight, TaskTriggerRegistrar? triggerRegistrar = null)
+public sealed class TaskService(
+    SharpClawDbContext db,
+    IPersistenceEntityResolver entities,
+    TaskPreflightChecker preflight,
+    TaskTriggerRegistrar? triggerRegistrar = null,
+    TaskTriggerHostService? triggerHostService = null,
+    ITaskTriggerSourceRegistry? triggerSourceRegistry = null)
 {
     /// <summary>
     /// Parse and validate a task definition without persisting it.
@@ -93,8 +100,8 @@ public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolve
             if (bindingsChanged)
             {
                 await db.SaveChangesAsync(ct);
-                if (triggerRegistrar.HostService is { } host)
-                    await host.NotifyBindingsChangedAsync();
+                if (triggerHostService is not null)
+                    await triggerHostService.NotifyBindingsChangedAsync();
             }
         }
 
@@ -199,8 +206,8 @@ public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolve
             if (bindingsChanged)
             {
                 await db.SaveChangesAsync(ct);
-                if (triggerRegistrar.HostService is { } host)
-                    await host.NotifyBindingsChangedAsync();
+                if (triggerHostService is not null)
+                    await triggerHostService.NotifyBindingsChangedAsync();
             }
         }
 
@@ -219,8 +226,8 @@ public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolve
         {
             await triggerRegistrar.RemoveTriggersAsync(id, ct);
             await db.SaveChangesAsync(ct);
-            if (triggerRegistrar.HostService is { } host)
-                await host.NotifyBindingsChangedAsync();
+            if (triggerHostService is not null)
+                await triggerHostService.NotifyBindingsChangedAsync();
         }
 
         db.TaskDefinitions.Remove(entity);
@@ -501,7 +508,7 @@ public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolve
             diagnostic.Line,
             diagnostic.Column);
 
-    private static TaskDefinitionResponse ToDefinitionResponse(
+    private TaskDefinitionResponse ToDefinitionResponse(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskParameterDefinition> parameters,
         IReadOnlyList<TaskRequirementDefinition> requirements,
@@ -531,31 +538,19 @@ public sealed class TaskService(SharpClawDbContext db, IPersistenceEntityResolve
             entity.CustomId);
     }
 
-    private static string? TriggerValueFor(TaskTriggerDefinition t)
-    {
-        return t.TriggerKey switch
-        {
-            WellKnownTriggerKeys.Cron            => t.CronExpression,
-            WellKnownTriggerKeys.Event           => t.EventType,
-            WellKnownTriggerKeys.FileChanged     => t.WatchPath,
-            WellKnownTriggerKeys.Webhook         => t.WebhookRoute,
-            WellKnownTriggerKeys.HostReachable
-                or WellKnownTriggerKeys.HostUnreachable => t.HostName,
-            WellKnownTriggerKeys.TaskCompleted
-                or WellKnownTriggerKeys.TaskFailed     => t.SourceTaskName,
-            WellKnownTriggerKeys.NetworkChanged  => t.NetworkSsid,
-            WellKnownTriggerKeys.MetricThreshold => t.MetricSource,
-            // Module-owned: use the filter field the module source understands
-            _ => t.CustomSourceFilter ?? t.ProcessName ?? t.HotkeyCombo
-                 ?? t.SqlQuery ?? t.ShortcutLabel ?? t.DeviceClass,
-        };
-    }
+    /// <summary>
+    /// Computes the response-shaped <c>TriggerValue</c> by delegating to the
+    /// owning <see cref="ITaskTriggerSource"/> via
+    /// <see cref="ITaskTriggerSourceRegistry"/>. Mirrors the path used by
+    /// <c>TaskTriggerRegistrar</c> so binding rows and API responses agree.
+    /// Returns <see langword="null"/> when no registry is wired (test
+    /// scenarios) or no source claims the key.
+    /// </summary>
+    private string? TriggerValueFor(TaskTriggerDefinition t) =>
+        triggerSourceRegistry?.ResolveByKey(t.TriggerKey)?.GetBindingValue(t);
 
-    private static string? TriggerFilterFor(TaskTriggerDefinition t)
-    {
-        if (t.TriggerKey == WellKnownTriggerKeys.Event) return t.EventFilter;
-        return t.CustomSourceFilter;
-    }
+    private string? TriggerFilterFor(TaskTriggerDefinition t) =>
+        triggerSourceRegistry?.ResolveByKey(t.TriggerKey)?.GetBindingFilter(t);
 
     private static TaskInstanceResponse ToInstanceResponse(
         TaskInstanceDB instance,

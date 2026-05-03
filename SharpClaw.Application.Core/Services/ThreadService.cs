@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.Threads;
 using SharpClaw.Infrastructure.Persistence;
 

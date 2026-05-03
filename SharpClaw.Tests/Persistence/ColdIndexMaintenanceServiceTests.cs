@@ -47,7 +47,7 @@ public class ColdIndexMaintenanceServiceTests
         var entityDir = _fs.CombinePath(_options.DataDirectory, "ChatMessageDB");
         _fs.CreateDirectory(entityDir);
 
-        var msg = new SharpClaw.Application.Infrastructure.Models.Messages.ChatMessageDB
+        var msg = new SharpClaw.Contracts.Entities.Core.Messages.ChatMessageDB
         {
             Id = Guid.NewGuid(),
             ChannelId = Guid.NewGuid(),
@@ -111,7 +111,7 @@ public class ColdIndexMaintenanceServiceTests
         // Create many entity files to make rebuild take time
         for (var i = 0; i < 5; i++)
         {
-            var msg = new SharpClaw.Application.Infrastructure.Models.Messages.ChatMessageDB
+            var msg = new SharpClaw.Contracts.Entities.Core.Messages.ChatMessageDB
             {
                 Id = Guid.NewGuid(),
                 ChannelId = Guid.NewGuid(),

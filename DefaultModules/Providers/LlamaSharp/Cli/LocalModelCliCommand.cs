@@ -2,6 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.LocalModels;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Modules.Providers.LlamaSharp.Services;
 
 namespace SharpClaw.Modules.Providers.LlamaSharp.Cli;

@@ -4,6 +4,7 @@ using SharpClaw.Application.Core.Clients;
 using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 

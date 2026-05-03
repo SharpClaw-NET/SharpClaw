@@ -1,11 +1,12 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Infrastructure.Models.Access;
+using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 
 namespace SharpClaw.Application.Services;
 
@@ -20,16 +21,21 @@ namespace SharpClaw.Application.Services;
 /// hooks only available while a task is executing).
 /// </para>
 /// </summary>
-public sealed class TaskToolProvider(SharpClawDbContext db)
+public sealed class TaskToolProvider(SharpClawDbContext db) : ITaskToolCatalog
 {
     // Prefix all task tool names so callers can identify them as a family.
     internal const string ToolPrefix = "task_invoke__";
 
     /// <summary>
-    /// Build tool definitions for all active task definitions.  The caller
-    /// is responsible for checking agent permissions before adding these to
-    /// a chat request — use <see cref="AgentActionService.EvaluateGlobalFlagByKeyAsync"/>
-    /// with <see cref="TaskPermissionKeys.CanInvokeTasksAsTool"/>.
+    /// Build tool definitions for all active task definitions.
+    /// <para>
+    /// This provider produces the schema unconditionally; the policy gate
+    /// (whether tasks should surface as agent tools at all) lives in the
+    /// chat-processing bridge contributor owned by the agent-orchestration
+    /// module, not here. Callers in core must invoke
+    /// <see cref="SharpClaw.Contracts.Chat.IChatProcessingBridge.GetExtraToolsAsync"/>
+    /// rather than calling this method directly.
+    /// </para>
     /// </summary>
     public async Task<IReadOnlyList<ChatToolDefinition>> GetToolDefinitionsAsync(
         CancellationToken ct = default)
@@ -52,7 +58,7 @@ public sealed class TaskToolProvider(SharpClawDbContext db)
             : null;
 
     private static ChatToolDefinition BuildToolDefinition(
-        Infrastructure.Models.Tasks.TaskDefinitionDB definition)
+        TaskDefinitionDB definition)
     {
         var parameters = DeserializeParameters(definition.ParametersJson);
         var schema = BuildSchema(parameters);

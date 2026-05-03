@@ -1,5 +1,6 @@
 using System.Runtime.InteropServices;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Application.Infrastructure.Tasks.Parsing;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Infrastructure.Tasks.Validation;
@@ -117,7 +118,7 @@ public sealed class TaskScriptValidator
         List<TaskDiagnostic> diagnostics)
     {
         // Track declared variables
-        if (step.StepKey == WellKnownTaskStepKeys.DeclareVariable && step.VariableName is not null)
+        if (step.StepKey == TaskScriptParser.Primitives.DeclareVariable && step.VariableName is not null)
         {
             if (context.DeclaredVariables.Contains(step.VariableName))
             {
@@ -151,37 +152,20 @@ public sealed class TaskScriptValidator
             context.DeclaredVariables.Add(step.ResultVariable);
         }
 
-        if (step.StepKey == WellKnownTaskStepKeys.Loop)
+        if (step.StepKey == TaskScriptParser.Primitives.Loop && step.VariableName is not null)
         {
-            var loopKind = step.LoopKind ?? (step.VariableName is not null
-                ? TaskLoopKind.ForEach
-                : TaskLoopKind.While);
-
-            if (loopKind == TaskLoopKind.ForEach)
+            if (string.IsNullOrWhiteSpace(step.Expression))
             {
-                if (string.IsNullOrWhiteSpace(step.VariableName))
-                {
-                    diagnostics.Add(new TaskDiagnostic(
-                        TaskDiagnosticSeverity.Error,
-                        "TASK106",
-                        "Foreach loops must declare an iteration variable.",
-                        step.Line,
-                        step.Column));
-                }
-
-                if (string.IsNullOrWhiteSpace(step.Expression))
-                {
-                    diagnostics.Add(new TaskDiagnostic(
-                        TaskDiagnosticSeverity.Error,
-                        "TASK107",
-                        "Foreach loops must declare a source expression.",
-                        step.Line,
-                        step.Column));
-                }
+                diagnostics.Add(new TaskDiagnostic(
+                    TaskDiagnosticSeverity.Error,
+                    "TASK107",
+                    "Foreach loops must declare a source expression.",
+                    step.Line,
+                    step.Column));
             }
         }
 
-        if (step.StepKey == WellKnownTaskStepKeys.ParseResponse &&
+        if (step.StepKey == TaskScriptParser.Primitives.ParseResponse &&
             !string.IsNullOrWhiteSpace(step.TypeName) &&
             !IsValidType(step.TypeName, context.KnownTypes))
         {

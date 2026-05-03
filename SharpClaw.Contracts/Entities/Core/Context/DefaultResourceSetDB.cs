@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Context;
+namespace SharpClaw.Contracts.Entities.Core.Context;
 
 /// <summary>
 /// Stores default resource IDs for per-resource action types, indexed by

@@ -45,7 +45,7 @@ runtime.
   - [SSE streaming](#sse-streaming)
   - [Response shapes](#response-shapes)
 - [Module authoring — extending the task step system](#module-authoring--extending-the-task-step-system)
-  - [Step keys and WellKnownTaskStepKeys](#step-keys-and-wellknowntaskstepkeys)
+  - [Step keys](#step-keys)
   - [TaskStepRegistry](#taskstepregistry)
   - [TaskStepDescriptor](#taskstepdescriptor)
   - [Implementing ITaskParserModuleExtension](#implementing-itaskparsermoduleextension)
@@ -166,7 +166,6 @@ trigger host service.
 [Schedule("0 */15 * * *", Timezone = "UTC")]
 [OnFileChanged("C:\\watch", Pattern = "*.pdf")]
 [OnTrigger("MyCustomSource", Filter = "important")]
-[ConcurrencyPolicy(TriggerConcurrency.SkipIfRunning)]
 public class NotifyOnChangeTask
 {
     public async Task RunAsync(CancellationToken ct) { }
@@ -185,7 +184,6 @@ Common trigger attributes:
 | `[OnStartup]` / `[OnShutdown]` | Fire on application lifecycle transitions. |
 | `[OsShortcut("Label")]` | Install an OS launcher shortcut for the task. |
 | `[OnTrigger("SourceName")]` | Bind to a custom module-provided trigger source. |
-| `[ConcurrencyPolicy(...)]` | Control what happens when a trigger fires while a prior instance is still running. |
 
 ---
 
@@ -310,8 +308,9 @@ method calls to outside types.
 
 ### Step reference
 
-Each call in `RunAsync` maps to a registered step key (a `WellKnownTaskStepKeys` string
-constant). The following built-in methods are available inside a task body:
+Each call in `RunAsync` maps to a registered step key (a stable
+`{moduleId}.{step_name}` wire-format string contributed by a module). The
+following built-in methods are available inside a task body:
 
 #### Agent interaction
 
@@ -972,14 +971,23 @@ new callable steps to the task scripting language.
 
 ---
 
-### Step keys and `WellKnownTaskStepKeys`
+### Step keys
 
 Every parsed step carries a `StepKey` string stored in
-`TaskStepDefinition.StepKey`. The orchestrator switches on this value to
-route execution. Core steps use the string constants defined in
-`WellKnownTaskStepKeys` (e.g. `core.chat`, `core.http_request`). Module
-steps must use namespaced keys of the form `{moduleId}.{step_name}` to
-avoid collisions with core or other modules.
+`TaskStepDefinition.StepKey`. The orchestrator routes execution by looking
+the key up in `TaskStepRegistry.Default`, where every descriptor is owned
+by a module. There are no core-owned step keys; the built-in step set is
+contributed by the bundled modules `sharpclaw_task_scripting`,
+`sharpclaw_agent_orchestration`, and `sharpclaw_http`, which expose their
+keys through the module-local constant classes `TaskScriptingStepKeys`,
+`AgentOrchestrationStepKeys`, and `HttpStepKeys` respectively. The literal
+string values (for example `core.chat`, `core.http_request`,
+`core.declare_variable`) are kept stable for backward compatibility with
+serialized task scripts; only the C# location of the constants changed.
+
+New modules should use namespaced keys of the form
+`{moduleId}.{step_name}` to avoid collisions with the bundled modules or
+with other third-party modules.
 
 ```csharp
 // Recommended pattern — define your keys as constants in your module project.
@@ -990,10 +998,6 @@ public static class TranscriptionStepKeys
     public const string GetDefaultInputAudio = "sharpclaw.transcription.get_default_input_audio";
 }
 ```
-
-Core step keys are not a closed set from a module's perspective: the
-`WellKnownTaskStepKeys` class lists every key the built-in orchestrator
-handles, but module authors should never reuse or shadow those values.
 
 ---
 
@@ -1171,8 +1175,7 @@ state of the current task instance. Key members:
 
 If your module adds a new event trigger type (backed by
 `ITaskParserModuleExtension.EventTriggerMappings`), the trigger key is stored
-in `TaskStepDefinition.ModuleTriggerKey` for steps of kind
-`TaskTriggerKind.ModuleEvent`. You are responsible for firing those triggers
+in `TaskStepDefinition.ModuleTriggerKey`. You are responsible for firing those triggers
 through the `TaskTriggerHostService` extension point — typically by
 registering a custom `ITaskTriggerSource` implementation and including its
 source ID in the trigger key mapping.

@@ -14,25 +14,28 @@ using SharpClaw.Application.API.Webhooks;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Infrastructure.Tasks;
-using SharpClaw.Application.Core.Services.Triggers.Sources;
+using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Application.Core.Services;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Infrastructure.Logging;
 using SharpClaw.Application.Infrastructure.Tasks.Parsing;
+using SharpClaw.Application.Infrastructure.Tasks.Registry;
 using SharpClaw.Application.Services.Auth;
+using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
+using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Utils.Security;
 using Serilog.Events;
+using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Application.Core.Services.Triggers;
-using SharpClaw.Infrastructure.Persistence.JSON;
+using SharpClaw.Contracts.Services;
 
 var dataDir = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
 var instanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");
@@ -251,7 +254,7 @@ try
     builder.Services.AddScoped<IAgentJobReader, HostAgentJobReader>();
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
     builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
-    builder.Services.AddScoped<IContextDataReader, HostContextDataReader>();
+    builder.Services.AddScoped<IChatProcessingBridge, ChatProcessingBridge>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
@@ -263,32 +266,26 @@ try
     builder.Services.AddScoped<TaskPreflightChecker>();
     builder.Services.AddScoped<TaskTriggerRegistrar>();
     builder.Services.AddScoped<TaskService>();
-    builder.Services.AddScoped<ScheduledJobService>();
+    builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
     builder.Services.AddScoped<TaskToolProvider>();
+    builder.Services.AddScoped<ITaskToolCatalog>(sp => sp.GetRequiredService<TaskToolProvider>());
+    builder.Services.AddScoped<IGlobalFlagEvaluator, GlobalFlagEvaluator>();
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();
+    builder.Services.AddScoped<IHostAgentBridge, HostAgentBridge>();
     builder.Services.AddSingleton<TaskRuntimeHost>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskRuntimeHost>());
     // Trigger host service + built-in sources
     builder.Services.AddSingleton<TaskTriggerHostService>();
     builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskTriggerHostService>());
-    builder.Services.AddSingleton<EventBusTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<EventBusTriggerSource>());
-    builder.Services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<EventBusTriggerSource>());
-    builder.Services.AddSingleton<ITaskTriggerSource, FileChangedTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource, HostProbeTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource, NetworkTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource, MetricTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource, LifecycleTriggerSource>();
-    builder.Services.AddSingleton<WebhookTriggerSource>();
-    builder.Services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<WebhookTriggerSource>());
-    builder.Services.AddSingleton<ITaskMetricProvider, PendingJobCountMetricProvider>();
-    builder.Services.AddSingleton<ITaskMetricProvider, PendingTaskCountMetricProvider>();
-    builder.Services.AddSingleton<ITaskMetricProvider, SchedulerPendingJobCountMetricProvider>();
+    builder.Services.AddSingleton<ITaskTriggerSourceRegistry, TaskTriggerSourceRegistry>();
+    // Host-side metric probes consumed by the Metrics module's built-in providers.
+    builder.Services.AddSingleton<IHostQueueMetrics, HostQueueMetrics>();
     // Module system
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
     builder.Services.AddSingleton<ModuleEventDispatcher>();
+    builder.Services.AddSingleton<ISharpClawEventSinkRegistry>(sp => sp.GetRequiredService<ModuleEventDispatcher>());
     builder.Services.AddScoped<ModuleExecutionContext>();
     builder.Services.AddScoped<IModuleConfigStore>(sp =>
     {
@@ -308,13 +305,29 @@ try
         bundledModule.ConfigureServices(builder.Services);
         if (bundledModule is ITaskParserAware parserAware)
             TaskScriptParser.RegisterModule(parserAware.ParserExtension);
+
+        // Discover and register task-step descriptor providers from the
+        // module's assembly so the central registry is populated before
+        // any task script is parsed.
+        var providerTypes = bundledModule.GetType().Assembly.GetTypes()
+            .Where(t => !t.IsAbstract
+                     && !t.IsInterface
+                     && typeof(ITaskStepDescriptorProvider).IsAssignableFrom(t)
+                     && t.GetConstructor(Type.EmptyTypes) is not null);
+        foreach (var providerType in providerTypes)
+        {
+            var provider = (ITaskStepDescriptorProvider)Activator.CreateInstance(providerType)!;
+            foreach (var descriptor in provider.Descriptors)
+                TaskStepRegistry.Default.Register(descriptor);
+        }
     }
 
     builder.Services.AddSingleton(moduleLoader);
     builder.Services.AddScoped<ModuleService>();
 
     // Background tasks
-    builder.Services.AddHostedService<ScheduledTaskService>();
+    // (Scheduled-job loop now lives in DefaultModules/AgentOrchestration as
+    // ScheduledJobWorker, started from the module's InitializeAsync.)
 
     builder.Services.AddSingleton<DatabaseInitializationGate>();
 
@@ -602,7 +615,7 @@ try
 
     // Webhook trigger routes — registered lazily after ApplicationStarted so
     // that TaskTriggerHostService has loaded its first binding set.
-    var webhookSource = app.Services.GetRequiredService<WebhookTriggerSource>();
+    var webhookSource = app.Services.GetRequiredService<IWebhookTriggerHost>();
     var webhookRegistry = new WebhookRouteRegistry(
         app,
         webhookSource,

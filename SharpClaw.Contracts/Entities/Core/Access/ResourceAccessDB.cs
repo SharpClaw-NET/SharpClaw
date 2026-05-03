@@ -1,8 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Infrastructure.Models.Access;
+namespace SharpClaw.Contracts.Entities.Core.Access;
 
 /// <summary>
 /// A unified per-resource permission grant. Each row grants an agent (via its

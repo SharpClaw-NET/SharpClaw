@@ -3,6 +3,7 @@ using NUnit.Framework;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -145,8 +146,8 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
-                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
             ]
         };
 
@@ -174,7 +175,7 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { StepKey = WellKnownTaskStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
+                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
             ]
         };
 
@@ -182,42 +183,6 @@ public class BadParamTask
 
         result.IsValid.Should().BeFalse();
         result.Diagnostics.Should().Contain(d => d.Code == "TASK105");
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // TASK106 — foreach loop missing iteration variable
-    // ─────────────────────────────────────────────────────────────
-
-    [Test]
-    public void Validate_ForEachLoopWithNoIterationVariable_ProducesTASK106()
-    {
-        var definition = new TaskScriptDefinition
-        {
-            Name = "no-iter-var",
-            SourceText = "",
-            ClassName = "NoIterVarTask",
-            EntryPointMethod = "RunAsync",
-            Parameters = [],
-            DataTypes = [],
-            ToolCallHooks = [],
-            Steps =
-            [
-                new TaskStepDefinition
-                {
-                    StepKey  = WellKnownTaskStepKeys.Loop,
-                    Line = 1, Column = 0,
-                    LoopKind = TaskLoopKind.ForEach,
-                    VariableName = null,          // missing
-                    Expression = "items",
-                    Body = []
-                }
-            ]
-        };
-
-        var result = TaskScriptEngine.Validate(definition);
-
-        result.IsValid.Should().BeFalse();
-        result.Diagnostics.Should().Contain(d => d.Code == "TASK106");
     }
 
     // ─────────────────────────────────────────────────────────────
@@ -240,9 +205,8 @@ public class BadParamTask
             [
                 new TaskStepDefinition
                 {
-                    StepKey  = WellKnownTaskStepKeys.Loop,
+                    StepKey  = TaskScriptingStepKeys.Loop,
                     Line = 1, Column = 0,
-                    LoopKind = TaskLoopKind.ForEach,
                     VariableName = "item",
                     Expression = null,            // missing
                     Body = []
@@ -302,15 +266,14 @@ public class ParseBadTask
             [
                 new TaskStepDefinition
                 {
-                    StepKey  = WellKnownTaskStepKeys.Loop,
+                    StepKey  = TaskScriptingStepKeys.Loop,
                     Line = 1, Column = 0,
-                    LoopKind = TaskLoopKind.While,
                     Expression = "true",
                     Body =
                     [
                         new TaskStepDefinition
                         {
-                            StepKey  = WellKnownTaskStepKeys.DeclareVariable,
+                            StepKey  = TaskScriptingStepKeys.DeclareVariable,
                             Line = 2, Column = 4,
                             VariableName = "v",
                             TypeName = "UnknownNestedType"
@@ -326,3 +289,4 @@ public class ParseBadTask
         result.Diagnostics.Should().Contain(d => d.Code == "TASK105");
     }
 }
+

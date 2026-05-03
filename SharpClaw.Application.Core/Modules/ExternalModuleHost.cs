@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Contracts.Services;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Utils.Security;
 
@@ -95,6 +96,7 @@ public sealed class ExternalModuleHost : IAsyncDisposable
         ForwardSingleton<IModelInfoProvider>(hostServices, services);
         ForwardSingleton<EncryptionOptions>(hostServices, services);
         ForwardSingleton<ICliIdResolver>(hostServices, services);
+        ForwardSingleton<SharpClaw.Contracts.Tasks.IHostQueueMetrics>(hostServices, services);
 
         // Scoped host services must be forwarded through a scope-aware
         // resolver so the external module's scope reaches into the host.

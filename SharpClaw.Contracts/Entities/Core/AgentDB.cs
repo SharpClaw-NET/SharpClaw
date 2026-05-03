@@ -1,10 +1,10 @@
 using System.Text.Json;
-using SharpClaw.Application.Infrastructure.Models;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 public class AgentDB : BaseEntity
 {

@@ -209,56 +209,6 @@ public static class TaskInstanceHandlers
 }
 
 // ═══════════════════════════════════════════════════════════════════
-// Task shortcuts   /tasks/{taskId}/shortcuts
-// ═══════════════════════════════════════════════════════════════════
-
-[RouteGroup("/tasks/{taskId:guid}/shortcuts")]
-public static class TaskShortcutHandlers
-{
-    /// <summary>
-    /// Refreshes (or creates) the OS shortcut for the given task's first
-    /// OsShortcut trigger definition.
-    /// </summary>
-    [MapPost("/install")]
-    public static async Task<IResult> Install(
-        Guid taskId,
-        TaskService svc,
-        IShortcutLauncherService shortcuts,
-        CancellationToken ct)
-    {
-        var definition = await svc.GetDefinitionAsync(taskId, ct);
-        if (definition is null) return Results.NotFound();
-
-        var triggers = await svc.GetTriggersAsync(taskId, ct);
-        var shortcutTrigger = triggers?.FirstOrDefault(
-            t => t.TriggerKey == "OsShortcut");
-
-        if (shortcutTrigger is null)
-            return Results.UnprocessableEntity("Task has no OsShortcut trigger defined.");
-
-        await shortcuts.RefreshShortcutsAsync(shortcutTrigger, definition.Name, ct);
-        return Results.NoContent();
-    }
-
-    /// <summary>
-    /// Removes the OS shortcut files for the given task.
-    /// </summary>
-    [MapDelete]
-    public static async Task<IResult> Remove(
-        Guid taskId,
-        TaskService svc,
-        IShortcutLauncherService shortcuts,
-        CancellationToken ct)
-    {
-        var definition = await svc.GetDefinitionAsync(taskId, ct);
-        if (definition is null) return Results.NotFound();
-
-        await shortcuts.RemoveShortcutsAsync(definition.Name, ct);
-        return Results.NoContent();
-    }
-}
-
-// ═══════════════════════════════════════════════════════════════════
 // Trigger sources   /tasks/trigger-sources
 // ═══════════════════════════════════════════════════════════════════
 

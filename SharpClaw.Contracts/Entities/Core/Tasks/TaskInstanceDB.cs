@@ -1,8 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Infrastructure.Models.Tasks;
+namespace SharpClaw.Contracts.Entities.Core.Tasks;
 
 /// <summary>
 /// A single execution of a <see cref="TaskDefinitionDB"/>.  Tracks

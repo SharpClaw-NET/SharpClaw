@@ -5,14 +5,14 @@ using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Infrastructure.Models.Context;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Compilation;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -39,16 +39,10 @@ public sealed class TaskOrchestrator(
     SharpClawDbContext db,
     IPersistenceEntityResolver entities,
     TaskService taskService,
-    ChatService chatService,
-    AgentJobService agentJobService,
-    IHttpClientFactory httpClientFactory,
     IServiceScopeFactory scopeFactory,
     TaskRuntimeHost runtimeHost,
-    ModuleRegistry moduleRegistry,
     IEnumerable<ITaskStepExecutorExtension> stepExtensions)
 {
-    private readonly ChatService _chatService = chatService;
-    private readonly AgentJobService _agentJobService = agentJobService;
     private readonly IReadOnlyList<ITaskStepExecutorExtension> _stepExtensions = [.. stepExtensions];
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
 
@@ -165,7 +159,10 @@ public sealed class TaskOrchestrator(
         var chatService = scope.ServiceProvider.GetService<ChatService>();
         var agentJobService = scope.ServiceProvider.GetService<AgentJobService>();
 
-        var context = new TaskExecutionContext(instanceId, plan, runtime, ct);
+        var context = new TaskExecutionContext(instanceId, plan, runtime, ct)
+        {
+            Services = scope.ServiceProvider,
+        };
 
         // ── Set up shared data store for inter-agent communication ──
         var store = TaskSharedData.GetOrCreate(instanceId);
@@ -271,984 +268,38 @@ public sealed class TaskOrchestrator(
         context.CancellationToken.ThrowIfCancellationRequested();
         await WaitIfPausedAsync(context);
 
-        return (step.StepKey ?? "") switch
-        {
-            WellKnownTaskStepKeys.DeclareVariable or WellKnownTaskStepKeys.Assign
-                => ExecuteDeclareOrAssignStep(step, context),
-            WellKnownTaskStepKeys.Log
-                => await ExecuteLogStepAsync(step, context, taskService),
-            WellKnownTaskStepKeys.Delay
-                => await ExecuteDelayStepAsync(step, context),
-            WellKnownTaskStepKeys.WaitUntilStopped
-                => await ExecuteWaitUntilStoppedStepAsync(context),
-            WellKnownTaskStepKeys.Emit
-                => await ExecuteEmitStepAsync(step, context, db),
-            WellKnownTaskStepKeys.Chat
-                => await ExecuteChatStepAsync(step, context, db, taskService, chatService),
-            WellKnownTaskStepKeys.ChatStream
-                => await ExecuteChatStreamStepAsync(step, context, db, taskService, chatService),
-            WellKnownTaskStepKeys.ParseResponse
-                => ExecuteParseResponseStep(step, context),
-            WellKnownTaskStepKeys.HttpRequest
-                => await ExecuteHttpRequestStepAsync(step, context, taskService),
-            WellKnownTaskStepKeys.FindModel
-                => await ExecuteFindModelStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.FindProvider
-                => await ExecuteFindProviderStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.FindAgent
-                => await ExecuteFindAgentStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.CreateAgent
-                => await ExecuteCreateAgentStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.CreateThread
-                => await ExecuteCreateThreadStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.ChatToThread
-                => await ExecuteChatToThreadStepAsync(step, context, db, taskService, chatService),
-            WellKnownTaskStepKeys.CreateRole
-                => await ExecuteCreateRoleStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.FindRole
-                => await ExecuteFindRoleStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.SetRolePermissions
-                => await ExecuteSetRolePermissionsStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.AssignRole
-                => await ExecuteAssignRoleStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.CreateChannel
-                => await ExecuteCreateChannelStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.FindChannel
-                => await ExecuteFindChannelStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.AddAllowedAgent
-                => await ExecuteAddAllowedAgentStepAsync(step, context, db, taskService),
-            WellKnownTaskStepKeys.Conditional
-                => await ExecuteConditionalStepAsync(step, context, db, taskService, chatService, agentJobService),
-            WellKnownTaskStepKeys.Loop
-                => await ExecuteLoopStepAsync(step, context, db, taskService, chatService, agentJobService),
-            WellKnownTaskStepKeys.EventHandler
-                => await ExecuteEventHandlerStepAsync(step, context, taskService),
-            WellKnownTaskStepKeys.Return
-                => TaskStepExecutionResult.Return,
-            WellKnownTaskStepKeys.Evaluate
-                => ExecuteEvaluateStep(step, context),
-            _   => await ExecuteModuleStepAsync(step, context, taskService),
-        };
-    }
-
-    // ── Core step executors ─────────────────────────────────────────
-
-    private static TaskStepExecutionResult ExecuteDeclareOrAssignStep(
-        TaskStepDefinition step, TaskExecutionContext context)
-    {
-        context.Variables[step.VariableName ?? ""] = step.Expression;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteLogStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, TaskService taskService)
-    {
-        var logMessage = ResolveExpression(step.Expression, context);
-        await taskService.AppendLogAsync(context.InstanceId, logMessage, ct: context.CancellationToken);
-        await context.Runtime.WriteEventAsync(TaskOutputEventType.Log, logMessage);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteDelayStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context)
-    {
-        if (int.TryParse(step.Expression, out var delayMs))
-            await DelayWithPauseAsync(delayMs, context);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteWaitUntilStoppedStepAsync(
-        TaskExecutionContext context)
-    {
-        try
-        {
-            await Task.Delay(Timeout.Infinite, context.CancellationToken);
-        }
-        catch (OperationCanceledException)
-        {
-            // Expected — task was stopped
-        }
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteEmitStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, SharpClawDbContext db)
-    {
-        var outputJson = ResolveExpression(step.Expression, context);
-        await EmitOutputAsync(context.InstanceId, outputJson, db, context.Runtime);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteChatStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService, ChatService? chatService)
-    {
-        var requiredChatService = chatService
-            ?? throw new InvalidOperationException("ChatService is not available for task chat steps.");
-        var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
-        var message = ResolveExpression(step.Expression, context);
-        Guid? agentId = step.Arguments is { Count: > 0 }
-            ? Guid.TryParse(ResolveExpression(step.Arguments[0], context), out var aid) ? aid : null
-            : null;
-
-        var request = new ChatRequest(message, agentId, WellKnownClientKeys.Api,
-            TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
-        var response = await requiredChatService.SendMessageAsync(channelId, request, ct: context.CancellationToken);
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"Chat → {response.AssistantMessage.Content?.Length ?? 0} chars",
-            ct: context.CancellationToken);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = response.AssistantMessage.Content;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteChatStreamStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService, ChatService? chatService)
-    {
-        var requiredChatService = chatService
-            ?? throw new InvalidOperationException("ChatService is not available for task chat stream steps.");
-        var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
-        var message = ResolveExpression(step.Expression, context);
-        Guid? agentId = step.Arguments is { Count: > 0 }
-            ? Guid.TryParse(ResolveExpression(step.Arguments[0], context), out var aid) ? aid : null
-            : null;
-
-        var request = new ChatRequest(message, agentId, WellKnownClientKeys.Api,
-            TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
-        var sb = new StringBuilder();
-
-        await foreach (var evt in requiredChatService.SendMessageStreamAsync(
-            channelId, request, AutoApproveAsync, ct: context.CancellationToken))
-        {
-            if (evt.Type == ChatStreamEventType.TextDelta && evt.Delta is not null)
-                sb.Append(evt.Delta);
-        }
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"ChatStream → {sb.Length} chars",
-            ct: context.CancellationToken);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = sb.ToString();
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private static TaskStepExecutionResult ExecuteParseResponseStep(
-        TaskStepDefinition step, TaskExecutionContext context)
-    {
-        var text = ResolveExpression(step.Expression, context);
-        var parsed = ParseStructuredResponse(text, step.TypeName, context.Plan.Definition);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = parsed;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteHttpRequestStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, TaskService taskService)
-    {
-        var url = ResolveExpression(step.Expression, context);
-        var method = step.HttpMethod?.ToUpperInvariant() ?? "GET";
-
-        using var client = httpClientFactory.CreateClient("TaskOrchestrator");
-        using var request = CreateHttpRequestMessage(step, context, method, url);
-        using var httpResponse = await client.SendAsync(request, context.CancellationToken);
-
-        var content = await httpResponse.Content.ReadAsStringAsync(context.CancellationToken);
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"HTTP {method} {url} → {(int)httpResponse.StatusCode}",
-            ct: context.CancellationToken);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = content;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteFindModelStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var search = ResolveExpression(step.Expression, context);
-        var model = await db.Models
-            .FirstOrDefaultAsync(m => m.CustomId == search || m.Name == search, context.CancellationToken);
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = model?.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"FindModel '{search}' → {(model is not null ? model.Id : "not found")}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteFindProviderStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var search = ResolveExpression(step.Expression, context);
-        var provider = await db.Providers
-            .FirstOrDefaultAsync(p => p.CustomId == search || p.Name == search, context.CancellationToken);
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = provider?.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"FindProvider '{search}' → {(provider is not null ? provider.Id : "not found")}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteFindAgentStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var search = ResolveExpression(step.Expression, context);
-        var agent = await db.Agents
-            .FirstOrDefaultAsync(a => a.CustomId == search || a.Name == search, context.CancellationToken);
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = agent?.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"FindAgent '{search}' → {(agent is not null ? agent.Id : "not found")}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteCreateAgentStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [0]=name, [1]=modelId, optional [2]=systemPrompt, optional [3]=customId
-        var name = step.Arguments is { Count: > 0 }
-            ? ResolveExpression(step.Arguments[0], context) : "Task Agent";
-        var modelIdStr = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-        var systemPrompt = step.Arguments is { Count: > 2 }
-            ? ResolveExpression(step.Arguments[2], context) : null;
-        var customId = step.Arguments is { Count: > 3 }
-            ? ResolveExpression(step.Arguments[3], context) : null;
-
-        Guid modelId = Guid.TryParse(modelIdStr, out var mid) ? mid : Guid.Empty;
-
-        // Upsert: if a customId is provided and an agent with that customId already
-        // exists, update it instead of creating a duplicate.
-        SharpClaw.Infrastructure.Models.AgentDB? agentEntity = null;
-        if (!string.IsNullOrEmpty(customId))
-        {
-            agentEntity = await db.Agents
-                .Where(a => a.CustomId == customId)
-                .OrderByDescending(a => a.CreatedAt)
-                .FirstOrDefaultAsync(context.CancellationToken);
-        }
-
-        if (agentEntity is not null)
-        {
-            agentEntity.Name = name;
-            agentEntity.ModelId = modelId;
-            agentEntity.SystemPrompt = systemPrompt;
-            await db.SaveChangesAsync(context.CancellationToken);
-        }
-        else
-        {
-            agentEntity = new SharpClaw.Infrastructure.Models.AgentDB
-            {
-                Name = name,
-                ModelId = modelId,
-                SystemPrompt = systemPrompt,
-                CustomId = customId,
-            };
-            db.Agents.Add(agentEntity);
-            await db.SaveChangesAsync(context.CancellationToken);
-        }
-
-        // Auto-add the new agent to the task's channel AllowedAgents so subsequent
-        // Chat/ChatStream steps can use it. Context-only setup tasks may create
-        // the agent before creating their channel, so this is only applicable once
-        // a channel exists.
-        if (await TryGetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db) is { } createAgentChannelId)
-        {
-            var createAgentChannel = await db.Channels
-                .Include(c => c.AllowedAgents)
-                .FirstOrDefaultAsync(c => c.Id == createAgentChannelId, context.CancellationToken);
-            if (createAgentChannel is not null &&
-                !createAgentChannel.AllowedAgents.Any(a => a.Id == agentEntity.Id))
-            {
-                createAgentChannel.AllowedAgents.Add(agentEntity);
-                await db.SaveChangesAsync(context.CancellationToken);
-            }
-        }
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = agentEntity.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"CreateAgent '{name}' → {agentEntity.Id}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteCreateThreadStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [0]=channelId (or any non-Guid string to use instance channel), optional [1]=name
-        var channelIdStr = step.Arguments is { Count: > 0 }
-            ? ResolveExpression(step.Arguments[0], context) : null;
-        var threadName = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-
-        Guid threadChannelId = Guid.TryParse(channelIdStr, out var cid)
-            ? cid
-            : await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
-
-        var threadEntity = new ChatThreadDB
-        {
-            Name = threadName ?? $"Task Thread {DateTimeOffset.UtcNow:HH:mm}",
-            ChannelId = threadChannelId,
-        };
-        db.ChatThreads.Add(threadEntity);
-        await db.SaveChangesAsync(context.CancellationToken);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = threadEntity.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"CreateThread '{threadEntity.Name}' → {threadEntity.Id}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteChatToThreadStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService, ChatService? chatService)
-    {
-        var requiredChatService = chatService
-            ?? throw new InvalidOperationException("ChatService is not available for task thread chat steps.");
-        // Arguments: [0]=threadId, optional [2]=agentId; Expression=message
-        var threadIdStr = step.Arguments is { Count: > 0 }
-            ? ResolveExpression(step.Arguments[0], context) : null;
-        var message = ResolveExpression(step.Expression, context);
-        Guid? agentId = step.Arguments is { Count: > 2 }
-            ? Guid.TryParse(ResolveExpression(step.Arguments[2], context), out var aid) ? aid : null
-            : null;
-
-        if (!Guid.TryParse(threadIdStr, out var threadId))
-            throw new InvalidOperationException($"Invalid thread ID: {threadIdStr}");
-
-        var channelId = await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
-        var request = new ChatRequest(message, agentId, WellKnownClientKeys.Api,
-            TaskContext: new TaskChatContext(context.InstanceId, context.Plan.TaskName));
-        var response = await requiredChatService.SendMessageAsync(
-            channelId, request, threadId: threadId, ct: context.CancellationToken);
-
-        await taskService.AppendLogAsync(
-            context.InstanceId,
-            $"ChatToThread {threadId} → {response.AssistantMessage.Content?.Length ?? 0} chars",
-            ct: context.CancellationToken);
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = response.AssistantMessage.Content;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteCreateRoleStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var roleName = ResolveExpression(step.Expression, context);
-
-        // Upsert by name: reuse if a role with this name already exists.
-        var existing = await db.Roles.FirstOrDefaultAsync(
-            r => r.Name == roleName, context.CancellationToken);
-        Guid roleId;
-        if (existing is not null)
-        {
-            roleId = existing.Id;
-        }
-        else
-        {
-            using var roleScope = _scopeFactory.CreateScope();
-            var roleService = roleScope.ServiceProvider.GetRequiredService<RoleService>();
-            var created = await roleService.CreateAsync(roleName, context.CancellationToken);
-            roleId = created.Id;
-        }
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = roleId.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"CreateRole '{roleName}' → {roleId}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteFindRoleStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var search = ResolveExpression(step.Expression, context);
-        var role = await db.Roles.FirstOrDefaultAsync(
-            r => r.Name == search, context.CancellationToken);
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = role?.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"FindRole '{search}' → {(role is not null ? role.Id : "not found")}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteSetRolePermissionsStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [1]=flags json (SetRolePermissionsRequest serialized); Expression=roleId
-        var roleIdStr = ResolveExpression(step.Expression, context);
-        var flagsJson = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-
-        if (!Guid.TryParse(roleIdStr, out var setPermRoleId))
-            throw new InvalidOperationException($"SetRolePermissions: invalid role ID '{roleIdStr}'.");
-
-        SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest permRequest = !string.IsNullOrWhiteSpace(flagsJson)
-            ? JsonSerializer.Deserialize<SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest>(
-                  flagsJson, new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
-              ?? new SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest()
-            : new SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest();
-
-        var adminUser = await db.Users.FirstOrDefaultAsync(u => u.IsUserAdmin, context.CancellationToken)
-            ?? throw new InvalidOperationException("SetRolePermissions: no admin user found in database.");
-
-        await SetRolePermissionsAsync(db, setPermRoleId, permRequest, context.CancellationToken);
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"SetRolePermissions {setPermRoleId}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private static async Task SetRolePermissionsAsync(
-        SharpClawDbContext db,
-        Guid roleId,
-        SharpClaw.Contracts.DTOs.Roles.SetRolePermissionsRequest request,
-        CancellationToken ct)
-    {
-        var role = await db.Roles
-            .Include(r => r.PermissionSet)
-            .FirstOrDefaultAsync(r => r.Id == roleId, ct)
-            ?? throw new InvalidOperationException($"SetRolePermissions: role '{roleId}' not found.");
-
-        var permissionSet = role.PermissionSet;
-        if (permissionSet is null)
-        {
-            permissionSet = new SharpClaw.Application.Infrastructure.Models.Clearance.PermissionSetDB();
-            db.PermissionSets.Add(permissionSet);
-            await db.SaveChangesAsync(ct);
-            role.PermissionSetId = permissionSet.Id;
-        }
-
-        await db.GlobalFlags
-            .Where(f => f.PermissionSetId == permissionSet.Id)
-            .ExecuteDeleteCompatAsync(db, ct);
-
-        await db.ResourceAccesses
-            .Where(a => a.PermissionSetId == permissionSet.Id && a.ResourceId != WellKnownIds.AllResources)
-            .ExecuteDeleteCompatAsync(db, ct);
-
-        foreach (var (flagKey, clearance) in request.GlobalFlags ?? new Dictionary<string, PermissionClearance>())
-        {
-            db.GlobalFlags.Add(new GlobalFlagDB
-            {
-                PermissionSetId = permissionSet.Id,
-                FlagKey = flagKey,
-                Clearance = clearance,
-            });
-        }
-
-        foreach (var (resourceType, grants) in request.ResourceGrants ?? new Dictionary<string, IReadOnlyList<ResourceGrant>>())
-        {
-            foreach (var grant in grants)
-            {
-                var existingWildcard = grant.ResourceId == WellKnownIds.AllResources
-                    ? await db.ResourceAccesses.FirstOrDefaultAsync(a =>
-                        a.PermissionSetId == permissionSet.Id &&
-                        a.ResourceType == resourceType &&
-                        a.ResourceId == WellKnownIds.AllResources, ct)
-                    : null;
-
-                if (existingWildcard is not null)
-                {
-                    existingWildcard.Clearance = grant.Clearance;
-                    continue;
-                }
-
-                db.ResourceAccesses.Add(new ResourceAccessDB
-                {
-                    PermissionSetId = permissionSet.Id,
-                    ResourceType = resourceType,
-                    ResourceId = grant.ResourceId,
-                    Clearance = grant.Clearance,
-                });
-            }
-        }
-
-        await db.SaveChangesAsync(ct);
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteAssignRoleStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [1]=roleId; Expression=agentId
-        var agentIdStr = ResolveExpression(step.Expression, context);
-        var roleIdStr = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-
-        if (!Guid.TryParse(agentIdStr, out var assignAgentId))
-            throw new InvalidOperationException($"AssignRole: invalid agent ID '{agentIdStr}'.");
-        if (!Guid.TryParse(roleIdStr, out var assignRoleId))
-            throw new InvalidOperationException($"AssignRole: invalid role ID '{roleIdStr}'.");
-
-        var agentEntity = await db.Agents.FirstOrDefaultAsync(a => a.Id == assignAgentId, context.CancellationToken)
-            ?? throw new InvalidOperationException($"AssignRole: agent '{assignAgentId}' not found.");
-        var roleExists = await db.Roles.AnyAsync(r => r.Id == assignRoleId, context.CancellationToken);
-        if (!roleExists)
-            throw new InvalidOperationException($"AssignRole: role '{assignRoleId}' not found.");
-
-        agentEntity.RoleId = assignRoleId;
-        await db.SaveChangesAsync(context.CancellationToken);
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"AssignRole agent={assignAgentId} role={assignRoleId}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteCreateChannelStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [1]=agentId, optional [2]=customId; Expression=title
-        var channelTitle = ResolveExpression(step.Expression, context);
-        var channelAgentIdStr = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-        var channelCustomId = step.Arguments is { Count: > 2 }
-            ? ResolveExpression(step.Arguments[2], context) : null;
-
-        if (!Guid.TryParse(channelAgentIdStr, out var channelAgentId))
-            throw new InvalidOperationException($"CreateChannel: invalid agent ID '{channelAgentIdStr}'.");
-
-        // Inherit the context from the task instance when set, so the channel
-        // is linked to the same context the task was started against.
-        Guid? instanceContextId = await db.TaskInstances
-            .Where(i => i.Id == context.InstanceId)
-            .Select(i => i.ContextId)
-            .FirstOrDefaultAsync(context.CancellationToken);
-
-        // Upsert by customId when provided; otherwise upsert by title.
-        ChannelDB? existingChannel = !string.IsNullOrEmpty(channelCustomId)
-            ? await db.Channels.FirstOrDefaultAsync(c => c.CustomId == channelCustomId, context.CancellationToken)
-            : await db.Channels.FirstOrDefaultAsync(c => c.Title == channelTitle, context.CancellationToken);
-
-        Guid channelResultId;
-        if (existingChannel is not null)
-        {
-            existingChannel.Title = channelTitle;
-            existingChannel.AgentId = channelAgentId;
-            if (!string.IsNullOrEmpty(channelCustomId))
-                existingChannel.CustomId = channelCustomId;
-            if (instanceContextId.HasValue)
-                existingChannel.AgentContextId = instanceContextId;
-            await db.SaveChangesAsync(context.CancellationToken);
-            channelResultId = existingChannel.Id;
-        }
-        else
-        {
-            using var channelScope = _scopeFactory.CreateScope();
-            var channelService = channelScope.ServiceProvider.GetRequiredService<ChannelService>();
-            var channelResp = await channelService.CreateAsync(
-                new SharpClaw.Contracts.DTOs.Channels.CreateChannelRequest(
-                    AgentId: channelAgentId,
-                    Title: channelTitle,
-                    CustomId: channelCustomId,
-                    ContextId: instanceContextId),
-                context.CancellationToken);
-            channelResultId = channelResp.Id;
-        }
-
-        // When the task instance has no channel yet (context-mode start), adopt
-        // this channel as the instance channel so Chat and other steps work.
-        if (context.ChannelId == Guid.Empty)
-        {
-            var inst = await db.TaskInstances.FindAsync([context.InstanceId], context.CancellationToken);
-            if (inst is not null && inst.ChannelId is null)
-            {
-                inst.ChannelId = channelResultId;
-                await db.SaveChangesAsync(context.CancellationToken);
-            }
-            context.ChannelId = channelResultId;
-        }
-
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = channelResultId.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"CreateChannel '{channelTitle}' → {channelResultId}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteFindChannelStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        var search = ResolveExpression(step.Expression, context);
-        var channel = await db.Channels.FirstOrDefaultAsync(
-            c => c.CustomId == search || c.Title == search, context.CancellationToken);
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = channel?.Id.ToString();
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"FindChannel '{search}' → {(channel is not null ? channel.Id : "not found")}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteAddAllowedAgentStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService)
-    {
-        // Arguments: [0]=agentId (Expression), optional [1]=channelId (Arguments[1])
-        // When channelId is omitted or not a valid Guid, the instance channel is used.
-        var agentIdStr = ResolveExpression(step.Expression, context);
-        var channelIdStr = step.Arguments is { Count: > 1 }
-            ? ResolveExpression(step.Arguments[1], context) : null;
-
-        if (!Guid.TryParse(agentIdStr, out var addAgentId))
-            throw new InvalidOperationException($"AddAllowedAgent: invalid agent ID '{agentIdStr}'.");
-
-        var agentEntity = await db.Agents
-            .FirstOrDefaultAsync(a => a.Id == addAgentId, context.CancellationToken)
-            ?? throw new InvalidOperationException($"AddAllowedAgent: agent '{addAgentId}' not found.");
-
-        Guid targetChannelId = Guid.TryParse(channelIdStr, out var cid)
-            ? cid
-            : await GetInstanceChannelIdAsync(context.InstanceId, context.CancellationToken, db);
-
-        var targetChannel = await db.Channels
-            .Include(c => c.AllowedAgents)
-            .FirstOrDefaultAsync(c => c.Id == targetChannelId, context.CancellationToken);
-        if (targetChannel is null)
-            throw new InvalidOperationException($"AddAllowedAgent: channel '{targetChannelId}' not found.");
-
-        if (!targetChannel.AllowedAgents.Any(a => a.Id == agentEntity.Id))
-        {
-            targetChannel.AllowedAgents.Add(agentEntity);
-            await db.SaveChangesAsync(context.CancellationToken);
-        }
-
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"AddAllowedAgent agent={addAgentId} → channel={targetChannelId}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteConditionalStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService,
-        ChatService? chatService, AgentJobService? agentJobService)
-    {
-        var branch = EvaluateCondition(step.Expression, context) ? step.Body : step.ElseBody;
-        if (branch is not null)
-        {
-            foreach (var childStep in branch)
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
-                if (childResult == TaskStepExecutionResult.Return)
-                    return TaskStepExecutionResult.Return;
-            }
-        }
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteLoopStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context,
-        SharpClawDbContext db, TaskService taskService,
-        ChatService? chatService, AgentJobService? agentJobService)
-    {
-        var loopKind = step.LoopKind ?? (step.VariableName is not null ? TaskLoopKind.ForEach : TaskLoopKind.While);
-        if (loopKind == TaskLoopKind.ForEach)
-        {
-            foreach (var item in EnumerateLoopValues(step, context))
-            {
-                context.CancellationToken.ThrowIfCancellationRequested();
-                await WaitIfPausedAsync(context);
-                if (step.VariableName is not null)
-                    context.Variables[step.VariableName] = item;
-
-                if (step.Body is null) continue;
-
-                foreach (var childStep in step.Body)
-                {
-                    context.CancellationToken.ThrowIfCancellationRequested();
-                    var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
-                    if (childResult == TaskStepExecutionResult.Return)
-                        return TaskStepExecutionResult.Return;
-                }
-            }
-            return TaskStepExecutionResult.Continue;
-        }
-
-        while (EvaluateCondition(step.Expression, context))
-        {
-            context.CancellationToken.ThrowIfCancellationRequested();
-            await WaitIfPausedAsync(context);
-            if (step.Body is not null)
-            {
-                foreach (var childStep in step.Body)
-                {
-                    context.CancellationToken.ThrowIfCancellationRequested();
-                    var childResult = await ExecuteStepAsync(childStep, context, db, taskService, chatService, agentJobService);
-                    if (childResult == TaskStepExecutionResult.Return)
-                        return TaskStepExecutionResult.Return;
-                }
-            }
-        }
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteEventHandlerStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, TaskService taskService)
-    {
-        if (step.TriggerKind is null)
-            throw new InvalidOperationException("EventHandler step requires an explicit TriggerKind.");
-        context.EventHandlers.Add(new RegisteredEventHandler(
-            step.TriggerKind.Value,
-            step.ModuleTriggerKey,
-            step.HandlerParameter,
-            step.Body ?? []));
-        await taskService.AppendLogAsync(
-            context.InstanceId, $"Registered event handler: {step.TriggerKind}",
-            ct: context.CancellationToken);
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private static TaskStepExecutionResult ExecuteEvaluateStep(
-        TaskStepDefinition step, TaskExecutionContext context)
-    {
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = step.Expression;
-        return TaskStepExecutionResult.Continue;
-    }
-
-    private async Task<TaskStepExecutionResult> ExecuteModuleStepAsync(
-        TaskStepDefinition step, TaskExecutionContext context, TaskService taskService)
-    {
         var stepKey = step.StepKey ?? "";
         var executor = _stepExtensions.FirstOrDefault(e => e.CanExecute(stepKey));
-        if (executor is not null)
+        if (executor is null)
+            return TaskStepExecutionResult.Continue;
+
+        var moduleCtx = new TaskStepContextAdapter(context, this, taskService);
+
+        // Invocation-aware path: raw step access for control-flow primitives.
+        if (executor is ITaskStepInvocationExecutor invocationExecutor)
         {
-            var moduleCtx = new TaskStepContextAdapter(context, this, taskService);
-            var resolvedArgs = step.Arguments?.Select(a => ResolveExpression(a, context)).ToList();
-            var resolvedExpr = step.Expression is not null ? ResolveExpression(step.Expression, context) : null;
-            await executor.ExecuteAsync(stepKey, moduleCtx, resolvedArgs, resolvedExpr, step.ResultVariable);
+            var result = await invocationExecutor.ExecuteInvocationAsync(step, moduleCtx);
+            return result == TaskStepResult.Return
+                ? TaskStepExecutionResult.Return
+                : TaskStepExecutionResult.Continue;
         }
-        return TaskStepExecutionResult.Continue;
+
+        // Resolved-argument path: traditional module steps that consume runtime values.
+        var resolvedArgs = step.Arguments?.Select(a => ResolveExpression(a, context)).ToList();
+        if (step.TypeName is not null)
+        {
+            resolvedArgs ??= [];
+            resolvedArgs.Insert(0, step.TypeName);
+        }
+        var resolvedExpr = step.Expression is not null ? ResolveExpression(step.Expression, context) : null;
+        var keepGoing = await executor.ExecuteAsync(stepKey, moduleCtx, resolvedArgs, resolvedExpr, step.ResultVariable);
+        return keepGoing ? TaskStepExecutionResult.Continue : TaskStepExecutionResult.Return;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    private static IEnumerable<object?> EnumerateLoopValues(TaskStepDefinition step, TaskExecutionContext context)
-    {
-        var resolved = ResolveExpression(step.Expression, context);
-        if (string.IsNullOrWhiteSpace(resolved))
-        {
-            yield break;
-        }
-
-        if (context.Variables.TryGetValue(resolved, out var variableValue))
-        {
-            foreach (var item in EnumerateValue(variableValue))
-            {
-                yield return item;
-            }
-
-            yield break;
-        }
-
-        foreach (var item in EnumerateValue(resolved))
-        {
-            yield return item;
-        }
-    }
-
-    private static IEnumerable<object?> EnumerateValue(object? value)
-    {
-        if (value is null)
-        {
-            yield break;
-        }
-
-        if (value is string text)
-        {
-            if (TryEnumerateJsonArray(text, out var items))
-            {
-                foreach (var item in items)
-                {
-                    yield return item;
-                }
-
-                yield break;
-            }
-
-            yield return text;
-            yield break;
-        }
-
-        if (value is System.Collections.IEnumerable enumerable and not string)
-        {
-            foreach (var item in enumerable)
-            {
-                yield return item;
-            }
-        }
-    }
-
-    private static bool TryEnumerateJsonArray(string text, out List<object?> values)
-    {
-        values = [];
-        try
-        {
-            using var doc = JsonDocument.Parse(text);
-            if (doc.RootElement.ValueKind != JsonValueKind.Array)
-            {
-                return false;
-            }
-
-            foreach (var item in doc.RootElement.EnumerateArray())
-            {
-                values.Add(item.ValueKind == JsonValueKind.String
-                    ? item.GetString()
-                    : item.GetRawText());
-            }
-
-            return true;
-        }
-        catch (JsonException)
-        {
-            return false;
-        }
-    }
-
-    private static string ParseStructuredResponse(string text, string? typeName, TaskScriptDefinition definition)
-    {
-        var jsonText = ExtractJsonObject(text);
-        if (jsonText is null)
-        {
-            throw new InvalidOperationException("ParseResponse expected a JSON object in the source text.");
-        }
-
-        using var doc = JsonDocument.Parse(jsonText);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object)
-        {
-            throw new InvalidOperationException("ParseResponse expected a JSON object payload.");
-        }
-
-        ValidateParsedResponseShape(doc.RootElement, typeName, definition);
-        return JsonSerializer.Serialize(doc.RootElement);
-    }
-
-    private static string? ExtractJsonObject(string text)
-    {
-        var jsonStart = text.IndexOf('{');
-        var jsonEnd = text.LastIndexOf('}');
-        return jsonStart >= 0 && jsonEnd > jsonStart
-            ? text[jsonStart..(jsonEnd + 1)]
-            : null;
-    }
-
-    private static void ValidateParsedResponseShape(JsonElement element, string? typeName, TaskScriptDefinition definition)
-    {
-        if (string.IsNullOrWhiteSpace(typeName))
-        {
-            return;
-        }
-
-        var dataType = definition.DataTypes.FirstOrDefault(dt => dt.Name == typeName);
-        if (dataType is null)
-        {
-            return;
-        }
-
-        foreach (var property in dataType.Properties)
-        {
-            if (!element.TryGetProperty(property.Name, out var propertyElement))
-            {
-                throw new InvalidOperationException($"ParseResponse<{typeName}> missing property '{property.Name}'.");
-            }
-
-            ValidateParsedProperty(propertyElement, property);
-        }
-    }
-
-    private static void ValidateParsedProperty(JsonElement value, TaskPropertyDefinition property)
-    {
-        if (property.IsCollection)
-        {
-            if (value.ValueKind != JsonValueKind.Array)
-            {
-                throw new InvalidOperationException($"Property '{property.Name}' must be a JSON array.");
-            }
-
-            return;
-        }
-
-        if (!IsCompatibleJsonValue(value, property.TypeName))
-        {
-            throw new InvalidOperationException($"Property '{property.Name}' does not match declared type '{property.TypeName}'.");
-        }
-    }
-
-    private static bool IsCompatibleJsonValue(JsonElement value, string typeName)
-    {
-        var normalizedType = typeName.TrimEnd('?');
-        return normalizedType switch
-        {
-            "string" => value.ValueKind == JsonValueKind.String,
-            "int" or "long" or "double" or "decimal" => value.ValueKind == JsonValueKind.Number,
-            "bool" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
-            "Guid" or "DateTime" or "DateTimeOffset" or "TimeSpan" => value.ValueKind == JsonValueKind.String,
-            _ => value.ValueKind == JsonValueKind.Object
-        };
-    }
-
-    private static HttpRequestMessage CreateHttpRequestMessage(TaskStepDefinition step, TaskExecutionContext context, string method, string url)
-    {
-        var request = new HttpRequestMessage(new HttpMethod(method), url);
-        if (method is "POST" or "PUT")
-        {
-            var body = step.Arguments is { Count: > 1 }
-                ? ResolveExpression(step.Arguments[1], context)
-                : step.Arguments is { Count: > 0 }
-                    ? ResolveExpression(step.Arguments[0], context)
-                    : string.Empty;
-            request.Content = new StringContent(body, Encoding.UTF8, "application/json");
-        }
-
-        return request;
-    }
+    // ── Helpers ─────────────────────────────────────────────────────
 
     private static Task WaitIfPausedAsync(TaskExecutionContext context)
         => context.Runtime.WaitIfPausedAsync(context.CancellationToken);
-
-    private async Task DelayWithPauseAsync(int delayMs, TaskExecutionContext context)
-    {
-        const int chunkMs = 250;
-        var remaining = delayMs;
-        while (remaining > 0)
-        {
-            await WaitIfPausedAsync(context);
-            var nextDelay = Math.Min(chunkMs, remaining);
-            await Task.Delay(nextDelay, context.CancellationToken);
-            remaining -= nextDelay;
-        }
-    }
 
     private async Task EmitOutputAsync(Guid instanceId, string? outputJson, SharpClawDbContext db, TaskRuntimeInstance runtime)
     {
@@ -1423,45 +474,6 @@ public sealed class TaskOrchestrator(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // Instance helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Resolve the <see cref="TaskInstanceDB.ChannelId"/> for a running instance.
-    /// When the instance was started with a context instead of a direct channel the
-    /// channel may not be set yet — the task is expected to call <c>CreateChannel</c>
-    /// first.  This method throws only when a step that truly requires a channel is
-    /// reached before one has been established.
-    /// </summary>
-    private async Task<Guid> GetInstanceChannelIdAsync(Guid instanceId, CancellationToken ct, SharpClawDbContext db)
-    {
-        var channelId = await TryGetInstanceChannelIdAsync(instanceId, ct, db);
-
-        return channelId
-            ?? throw new InvalidOperationException(
-                $"Task instance {instanceId} has no channel yet. " +
-                "Call CreateChannel before using Chat, CreateThread, or other channel-dependent steps. " +
-                "Alternatively, start the instance with a ChannelId instead of a ContextId.");
-    }
-
-    private static async Task<Guid?> TryGetInstanceChannelIdAsync(Guid instanceId, CancellationToken ct, SharpClawDbContext db)
-        => await db.TaskInstances
-            .Where(i => i.Id == instanceId)
-            .Select(i => i.ChannelId)
-            .FirstOrDefaultAsync(ct);
-
-    /// <summary>
-    /// Auto-deny tool-call jobs that require approval during task execution.
-    /// Tasks only use permissions pre-granted in the channel; when a job
-    /// needs additional approval it is automatically cancelled.  The
-    /// cancelled status propagates as a tool-result error — if the task
-    /// script does not handle it the orchestrator marks the instance as
-    /// failed.
-    /// </summary>
-    private static Task<bool> AutoApproveAsync(AgentJobResponse _, CancellationToken __) =>
-        Task.FromResult(false);
-
-    // ═══════════════════════════════════════════════════════════════
     // Execution context
     // ═══════════════════════════════════════════════════════════════
 
@@ -1478,13 +490,20 @@ public sealed class TaskOrchestrator(
         public CancellationToken CancellationToken { get; } = cancellationToken;
         public Dictionary<string, object?> Variables { get; } = new(StringComparer.Ordinal);
         public List<RegisteredEventHandler> EventHandlers { get; } = [];
+
+        /// <summary>
+        /// Scoped service provider for the running execution scope.  Set by
+        /// the orchestrator before stepping begins; module step executors
+        /// resolve services from this provider via
+        /// <see cref="ITaskStepExecutionContext.Services"/>.
+        /// </summary>
+        public IServiceProvider Services { get; set; } = default!;
     }
 
     private sealed record RegisteredEventHandler(
-        TaskTriggerKind TriggerKind,
-        string? ModuleTriggerKey,
+        string ModuleTriggerKey,
         string? ParameterName,
-        IReadOnlyList<TaskStepDefinition> Body);
+        IReadOnlyList<ITaskStepInvocation> Body);
 
     // ── Module extension adapters ────────────────────────────────────
 
@@ -1500,6 +519,7 @@ public sealed class TaskOrchestrator(
         public Guid InstanceId => ctx.InstanceId;
         public Guid ChannelId => ctx.ChannelId;
         public CancellationToken CancellationToken => ctx.CancellationToken;
+        public IServiceProvider Services => ctx.Services;
         public IDictionary<string, object?> Variables => ctx.Variables;
 
         public IReadOnlyList<ITaskEventHandler> EventHandlers =>
@@ -1512,6 +532,53 @@ public sealed class TaskOrchestrator(
 
         public Task AppendLogAsync(string message) =>
             taskService.AppendLogAsync(ctx.InstanceId, message, ct: ctx.CancellationToken);
+
+        public async Task WriteOutputAsync(string? outputJson)
+        {
+            using var scope = orchestrator._scopeFactory.CreateScope();
+            var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            await orchestrator.EmitOutputAsync(ctx.InstanceId, outputJson, db, ctx.Runtime);
+        }
+
+        public void SetChannelId(Guid channelId) => ctx.ChannelId = channelId;
+
+        public Task WaitIfPausedAsync() =>
+            ctx.Runtime.WaitIfPausedAsync(ctx.CancellationToken);
+
+        public bool EvaluateCondition(string? expression) =>
+            TaskOrchestrator.EvaluateCondition(expression, ctx);
+
+        public void RegisterEventHandler(
+            string moduleTriggerKey,
+            string? parameterName,
+            IReadOnlyList<ITaskStepInvocation> body)
+        {
+            ctx.EventHandlers.Add(new RegisteredEventHandler(
+                moduleTriggerKey, parameterName, body));
+        }
+
+        public async Task<TaskStepResult> ExecuteStepsAsync(
+            IReadOnlyList<ITaskStepInvocation> steps,
+            CancellationToken cancellationToken)
+        {
+            using var scope = orchestrator._scopeFactory.CreateScope();
+            var db   = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            var ts   = scope.ServiceProvider.GetRequiredService<TaskService>();
+            var chat = scope.ServiceProvider.GetService<ChatService>();
+            var jobs = scope.ServiceProvider.GetService<AgentJobService>();
+
+            foreach (var step in steps)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (step is not TaskStepDefinition tsd)
+                    throw new InvalidOperationException(
+                        $"Unsupported step invocation type: {step.GetType().FullName}");
+                var result = await orchestrator.ExecuteStepAsync(tsd, ctx, db, ts, chat, jobs);
+                if (result == TaskStepExecutionResult.Return)
+                    return TaskStepResult.Return;
+            }
+            return TaskStepResult.Continue;
+        }
     }
 
     /// <summary>
@@ -1525,7 +592,6 @@ public sealed class TaskOrchestrator(
         TaskOrchestrator orchestrator,
         TaskService taskService) : ITaskEventHandler
     {
-        public TaskTriggerKind TriggerKind => handler.TriggerKind;
         public string? ModuleTriggerKey => handler.ModuleTriggerKey;
         public string? ParameterName => handler.ParameterName;
 
@@ -1542,7 +608,8 @@ public sealed class TaskOrchestrator(
             foreach (var step in handler.Body)
             {
                 ct.ThrowIfCancellationRequested();
-                var result = await orchestrator.ExecuteStepAsync(step, ctx, db, ts, chat, jobs);
+                if (step is not TaskStepDefinition tsd) continue;
+                var result = await orchestrator.ExecuteStepAsync(tsd, ctx, db, ts, chat, jobs);
                 if (result == TaskStepExecutionResult.Return) break;
             }
         }

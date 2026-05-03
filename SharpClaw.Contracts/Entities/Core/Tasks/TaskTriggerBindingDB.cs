@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Tasks;
+namespace SharpClaw.Contracts.Entities.Core.Tasks;
 
 /// <summary>
 /// Persisted binding for a self-registration trigger defined via a class-level

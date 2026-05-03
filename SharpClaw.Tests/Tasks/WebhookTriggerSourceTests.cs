@@ -5,8 +5,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using SharpClaw.Application.Core.Services.Triggers;
-using SharpClaw.Application.Core.Services.Triggers.Sources;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.Http;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -33,7 +33,7 @@ public class WebhookTriggerSourceTests
     [Test]
     public void TriggerKey_IsWebhook()
     {
-        _source.TriggerKey.Should().Be(WellKnownTriggerKeys.Webhook);
+        _source.TriggerKey.Should().Be(HttpTriggerKeys.Webhook);
     }
 
     // ── StartAsync ────────────────────────────────────────────────
@@ -293,12 +293,19 @@ public class WebhookTriggerSourceTests
         string? secretEnvVar = null,
         string? signatureHeader = null)
     {
+        var parameters = new Dictionary<string, string?>(StringComparer.Ordinal)
+        {
+            [HttpTriggerKeys.WebhookRoute] = route,
+        };
+        if (secretEnvVar is not null)
+            parameters[HttpTriggerKeys.WebhookSecretEnvVar] = secretEnvVar;
+        if (signatureHeader is not null)
+            parameters[HttpTriggerKeys.WebhookSignatureHeader] = signatureHeader;
+
         var def = new TaskTriggerDefinition
         {
-            TriggerKey             = WellKnownTriggerKeys.Webhook,
-            WebhookRoute           = route,
-            WebhookSecretEnvVar    = secretEnvVar,
-            WebhookSignatureHeader = signatureHeader,
+            TriggerKey = HttpTriggerKeys.Webhook,
+            Parameters = parameters,
         };
         return new StubTriggerSourceContext(def);
     }
@@ -347,8 +354,11 @@ public class WebhookTriggerSourceTests
     {
         public TaskTriggerDefinition Definition { get; } = new TaskTriggerDefinition
         {
-            TriggerKey   = WellKnownTriggerKeys.Webhook,
-            WebhookRoute = route,
+            TriggerKey = HttpTriggerKeys.Webhook,
+            Parameters = new Dictionary<string, string?>(StringComparer.Ordinal)
+            {
+                [HttpTriggerKeys.WebhookRoute] = route,
+            },
         };
         public Guid TaskDefinitionId { get; } = Guid.NewGuid();
         public int FireCount { get; private set; }

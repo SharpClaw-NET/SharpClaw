@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Modules.Providers.Google.Clients;
 

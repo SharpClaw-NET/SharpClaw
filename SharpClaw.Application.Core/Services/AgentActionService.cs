@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
@@ -90,7 +90,7 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
 
     /// <summary>
     /// Check whether a permission set has a grant for a specific resource
-    /// in the unified <see cref="Infrastructure.Models.Access.ResourceAccessDB"/> collection.
+    /// in the unified <see cref="ResourceAccessDB"/> collection.
     /// Replaces 18 typed GrantCheckMap lambdas with a single method.
     /// See Module-System-Design §3.10.5.
     /// </summary>
@@ -102,7 +102,7 @@ public sealed class AgentActionService(SharpClawDbContext db, ModuleRegistry reg
 
     /// <summary>
     /// Evaluate a per-resource grant using the unified
-    /// <see cref="Infrastructure.Models.Access.ResourceAccessDB"/> collection.
+    /// <see cref="ResourceAccessDB"/> collection.
     /// See Module-System-Design §3.10.5.
     /// </summary>
     private async Task<AgentActionResult> EvaluateResourceAccessAsync(

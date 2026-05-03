@@ -1,10 +1,10 @@
-using SharpClaw.Application.Infrastructure.Models;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Messages;
+using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 
-namespace SharpClaw.Application.Infrastructure.Models.Context;
+namespace SharpClaw.Contracts.Entities.Core.Context;
 
 /// <summary>
 /// A channel that optionally belongs to an agent context.  Each

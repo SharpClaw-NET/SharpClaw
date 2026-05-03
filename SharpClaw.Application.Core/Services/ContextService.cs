@@ -1,8 +1,8 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.Contexts;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;

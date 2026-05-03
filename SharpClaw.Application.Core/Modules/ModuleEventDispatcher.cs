@@ -11,7 +11,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// </summary>
 public sealed class ModuleEventDispatcher(
     IServiceProvider rootServices,
-    ILogger<ModuleEventDispatcher> logger)
+    ILogger<ModuleEventDispatcher> logger) : ISharpClawEventSinkRegistry
 {
     /// <summary>Cached sink list — rebuilt when modules are enabled/disabled.</summary>
     private IReadOnlyList<ISharpClawEventSink>? _sinks;
@@ -55,6 +55,9 @@ public sealed class ModuleEventDispatcher(
     {
         lock (_sinkLock) { _sinks = null; }
     }
+
+    /// <inheritdoc />
+    void ISharpClawEventSinkRegistry.InvalidateCache() => InvalidateSinkCache();
 
     private IReadOnlyList<ISharpClawEventSink> GetSinks()
     {

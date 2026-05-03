@@ -53,7 +53,7 @@ public sealed class QueryRowsTriggerSource(
             try
             {
                 var minInterval = _contexts
-                    .Select(c => c.Definition.QueryPollIntervalSecs ?? 60)
+                    .Select(c => TryParseInt(c.Definition.Parameters.GetValueOrDefault(DatabaseAccessTriggerKeys.QueryPollIntervalSecs)) ?? 60)
                     .DefaultIfEmpty(60)
                     .Min();
 
@@ -61,7 +61,7 @@ public sealed class QueryRowsTriggerSource(
 
                 foreach (var ctx in _contexts)
                 {
-                    var sql = ctx.Definition.SqlQuery;
+                    var sql = ctx.Definition.Parameters.GetValueOrDefault(DatabaseAccessTriggerKeys.SqlQuery);
                     if (string.IsNullOrWhiteSpace(sql)) continue;
 
                     try
@@ -93,4 +93,8 @@ public sealed class QueryRowsTriggerSource(
                 "QueryRowsTriggerSource failed to fire context for definition {Id}.", ctx.TaskDefinitionId);
         }
     }
+
+    private static int? TryParseInt(string? value) =>
+        int.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
 }

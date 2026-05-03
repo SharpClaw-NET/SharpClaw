@@ -1,8 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 public class UserDB : BaseEntity
 {

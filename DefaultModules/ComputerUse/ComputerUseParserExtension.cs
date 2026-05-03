@@ -1,4 +1,5 @@
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.ComputerUse.Triggers;
 
 namespace SharpClaw.Modules.ComputerUse;
 
@@ -6,7 +7,7 @@ namespace SharpClaw.Modules.ComputerUse;
 /// Registers the Computer Use module's task-script API methods with
 /// <see cref="TaskScriptParser"/>.
 /// </summary>
-internal sealed class ComputerUseParserExtension : ITaskParserModuleExtension
+public sealed class ComputerUseParserExtension : ITaskParserModuleExtension
 {
     public static readonly ComputerUseParserExtension Instance = new();
 
@@ -21,4 +22,7 @@ internal sealed class ComputerUseParserExtension : ITaskParserModuleExtension
 
     public IReadOnlySet<string> SingleArgExpressionMethods { get; } =
         new HashSet<string>();
+
+    public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers { get; } =
+        ComputerUseTriggerAttributeHandlers.All;
 }

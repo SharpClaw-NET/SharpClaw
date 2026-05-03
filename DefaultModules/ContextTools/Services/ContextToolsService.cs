@@ -1,14 +1,12 @@
 using System.Text.Json;
 
-using SharpClaw.Contracts.Modules;
-
 namespace SharpClaw.Modules.ContextTools.Services;
 
 /// <summary>
 /// Wraps cross-thread context and utility operations for the
 /// Context Tools module (inline tools).
 /// </summary>
-internal sealed class ContextToolsService(IContextDataReader dataReader)
+internal sealed class ContextToolsService(ContextDataReader dataReader)
 {
     public static async Task<string> WaitAsync(
         JsonElement parameters, CancellationToken ct)

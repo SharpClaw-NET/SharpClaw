@@ -3,6 +3,8 @@ using System.Runtime.InteropServices;
 using System.Text;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.ComputerUse.Contracts;
+using SharpClaw.Modules.ComputerUse.Triggers;
 
 namespace SharpClaw.Modules.ComputerUse.Services;
 
@@ -21,7 +23,7 @@ namespace SharpClaw.Modules.ComputerUse.Services;
 /// macOS is not supported. When called on macOS a <c>TASK441</c> warning is
 /// logged and the method returns without throwing.
 /// </summary>
-public sealed class ShortcutLauncherService(ILogger<ShortcutLauncherService> logger) : IShortcutLauncherService
+public sealed class ShortcutLauncherService(ILogger<ShortcutLauncherService> logger) : IShortcutLauncher
 {
     // ── Directory layout ─────────────────────────────────────────
     // All files are placed under %LOCALAPPDATA%\SharpClaw\Shortcuts on Windows
@@ -213,15 +215,16 @@ public sealed class ShortcutLauncherService(ILogger<ShortcutLauncherService> log
                 System.Reflection.BindingFlags.SetProperty, null, shortcut,
                 [stubPath]);
 
-            var label = definition.ShortcutLabel ?? customId;
+            var label = ReadParam(definition, OsShortcutTriggerKeys.ShortcutLabel) ?? customId;
             shortcutType.InvokeMember("Description",
                 System.Reflection.BindingFlags.SetProperty, null, shortcut,
                 [label]);
 
-            if (!string.IsNullOrWhiteSpace(definition.ShortcutIcon))
+            var icon = ReadParam(definition, OsShortcutTriggerKeys.ShortcutIcon);
+            if (!string.IsNullOrWhiteSpace(icon))
                 shortcutType.InvokeMember("IconLocation",
                     System.Reflection.BindingFlags.SetProperty, null, shortcut,
-                    [definition.ShortcutIcon]);
+                    [icon]);
 
             shortcutType.InvokeMember("Save",
                 System.Reflection.BindingFlags.InvokeMethod, null, shortcut, null);
@@ -260,11 +263,12 @@ public sealed class ShortcutLauncherService(ILogger<ShortcutLauncherService> log
         Directory.CreateDirectory(DesktopApplicationsDirectory);
         var desktopPath = Path.Combine(DesktopApplicationsDirectory, $"sharpclaw-{safe}.desktop");
 
-        var label = definition.ShortcutLabel ?? customId;
-        var icon = definition.ShortcutIcon ?? "utilities-terminal";
-        var category = string.IsNullOrWhiteSpace(definition.ShortcutCategory)
+        var label = ReadParam(definition, OsShortcutTriggerKeys.ShortcutLabel) ?? customId;
+        var icon = ReadParam(definition, OsShortcutTriggerKeys.ShortcutIcon) ?? "utilities-terminal";
+        var rawCategory = ReadParam(definition, OsShortcutTriggerKeys.ShortcutCategory);
+        var category = string.IsNullOrWhiteSpace(rawCategory)
             ? "Utility;"
-            : $"{definition.ShortcutCategory};";
+            : $"{rawCategory};";
 
         var sb = new StringBuilder();
         sb.AppendLine("[Desktop Entry]");
@@ -351,6 +355,24 @@ public sealed class ShortcutLauncherService(ILogger<ShortcutLauncherService> log
         {
             // chmod may not be available in all environments.
         }
+    }
+
+    /// <summary>
+    /// Reads a shortcut parameter from <see cref="TaskTriggerDefinition.Parameters"/>.
+    /// Returns <see langword="null"/> when the key is absent or the value is
+    /// blank. The launcher reads exclusively from <c>Parameters</c> so the
+    /// shim typed properties on <see cref="TaskTriggerDefinition"/> can be
+    /// removed in a later phase.
+    /// </summary>
+    private static string? ReadParam(TaskTriggerDefinition definition, string key)
+    {
+        if (definition.Parameters.TryGetValue(key, out var value)
+            && !string.IsNullOrWhiteSpace(value))
+        {
+            return value;
+        }
+
+        return null;
     }
 
     /// <summary>Sanitizes a custom ID for use as a file name.</summary>

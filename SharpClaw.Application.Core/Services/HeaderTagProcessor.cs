@@ -5,14 +5,14 @@ using System.Text.RegularExpressions;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts;
+using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Contracts.Enums;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -39,6 +39,7 @@ namespace SharpClaw.Application.Services;
 public sealed partial class HeaderTagProcessor(
     SharpClawDbContext db,
     ModuleRegistry moduleRegistry,
+    IChatProcessingBridge chatProcessingBridge,
     IServiceProvider serviceProvider)
 {
     // ── Tag regex ────────────────────────────────────────────────
@@ -320,46 +321,17 @@ public sealed partial class HeaderTagProcessor(
 
     private async Task<string> FormatAccessibleThreadsAsync(HeaderContext ctx, CancellationToken ct)
     {
-        if (ctx.AgentPs is null || !ctx.AgentPs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory"))
+        var threads = await chatProcessingBridge.GetAccessibleThreadsAsync(
+            ctx.Agent.Id, ctx.Channel.Id, ct);
+
+        if (threads.Count == 0)
             return "(none)";
 
-        var isIndependent = ctx.AgentPs.GlobalFlags
-            .FirstOrDefault(f => f.FlagKey == "CanReadCrossThreadHistory")
-            ?.Clearance == PermissionClearance.Independent;
+        var entries = threads
+            .Select(t => $"{t.ThreadName} [{t.ChannelTitle}] ({t.ThreadId:D})")
+            .ToList();
 
-        var agentId = ctx.Agent.Id;
-        var currentChannelId = ctx.Channel.Id;
-
-        var accessibleChannels = await db.Channels
-            .Include(c => c.Threads)
-            .Include(c => c.PermissionSet).ThenInclude(ps => ps!.GlobalFlags)
-            .Include(c => c.AgentContext).ThenInclude(ctx2 => ctx2!.PermissionSet)
-                .ThenInclude(ps => ps!.GlobalFlags)
-            .Where(c => c.Id != currentChannelId
-                && (c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId)))
-            .ToListAsync(ct);
-
-        // When not Independent, only include channels that opt in.
-        if (!isIndependent)
-        {
-            accessibleChannels = accessibleChannels
-                .Where(c =>
-                {
-                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
-                    return effectivePs is not null
-                        && effectivePs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory");
-                })
-                .ToList();
-        }
-
-        var entries = new List<string>();
-        foreach (var ch in accessibleChannels)
-        {
-            foreach (var thread in ch.Threads)
-                entries.Add($"{thread.Name} [{ch.Title}] ({thread.Id:D})");
-        }
-
-        return entries.Count > 0 ? string.Join(", ", entries) : "(none)";
+        return string.Join(", ", entries);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -429,7 +401,6 @@ public sealed partial class HeaderTagProcessor(
             "threads" => Cast(await db.ChatThreads.ToListAsync(ct)),
             "roles" => Cast(await db.Roles.ToListAsync(ct)),
             "users" => Cast(await db.Users.ToListAsync(ct)),
-            "scheduledtasks" or "scheduledjobs" => Cast(await db.ScheduledTasks.ToListAsync(ct)),
             "tasks" or "taskdefinitions" => Cast(await db.TaskDefinitions.ToListAsync(ct)),
             _ => null
         };

@@ -1,9 +1,9 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
-using SharpClaw.Application.Infrastructure.Models.Messages;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Persistence;

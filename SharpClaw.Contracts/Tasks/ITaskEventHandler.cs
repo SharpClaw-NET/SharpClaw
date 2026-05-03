@@ -7,12 +7,9 @@ namespace SharpClaw.Contracts.Tasks;
 /// </summary>
 public interface ITaskEventHandler
 {
-    TaskTriggerKind TriggerKind { get; }
-
     /// <summary>
-    /// Module-owned trigger key, set when <see cref="TriggerKind"/> is
-    /// <see cref="TaskTriggerKind.ModuleEvent"/>. Used by module event
-    /// loops to match handlers without referencing host enum values.
+    /// Module-owned trigger key. Used by module event loops to match
+    /// handlers without referencing host-side discriminators.
     /// </summary>
     string? ModuleTriggerKey { get; }
 

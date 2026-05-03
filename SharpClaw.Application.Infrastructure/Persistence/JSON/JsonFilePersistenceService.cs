@@ -8,7 +8,8 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Providers.Common;
+using SharpClaw.Contracts.Entities.Core;
 
 namespace SharpClaw.Infrastructure.Persistence.JSON;
 

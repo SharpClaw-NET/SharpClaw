@@ -63,7 +63,7 @@ public sealed class HotkeyTriggerSource(
 
         foreach (var ctx in _contexts)
         {
-            var combo = ctx.Definition.HotkeyCombo;
+            var combo = ctx.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.HotkeyCombo);
             if (string.IsNullOrWhiteSpace(combo)) continue;
 
             if (!TryParseHotkey(combo, out var modifiers, out var vk))

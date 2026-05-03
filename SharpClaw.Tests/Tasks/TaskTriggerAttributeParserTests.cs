@@ -3,20 +3,27 @@ using NUnit.Framework;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.AgentOrchestration;
+using SharpClaw.Modules.ComputerUse.Triggers;
+using SharpClaw.Modules.DatabaseAccess.Triggers;
+using SharpClaw.Modules.FilesystemTriggers;
+using SharpClaw.Modules.Http;
+using SharpClaw.Modules.Metrics;
+using SharpClaw.Modules.NetworkTriggers;
 
 namespace SharpClaw.Tests.Tasks;
 
 /// <summary>
-/// Tests for trigger-definition attribute extraction by <see cref="TaskScriptEngine.Parse"/>.
-/// Covers all self-registration trigger attributes, concurrency policy, and diagnostic codes.
+/// Parser tests for trigger-attribute extraction. After the
+/// trigger-extraction cleanup the parser no longer populates
+/// typed properties on <see cref="TaskTriggerDefinition"/>; module
+/// handlers write directly into the opaque
+/// <see cref="TaskTriggerDefinition.Parameters"/> map. These tests
+/// assert that surface.
 /// </summary>
 [TestFixture]
 public class TaskTriggerAttributeParserTests
 {
-    // ─────────────────────────────────────────────────────────────
-    // Helpers
-    // ─────────────────────────────────────────────────────────────
-
     private static TaskScriptDefinition ParseOk(string source)
     {
         var result = TaskScriptEngine.Parse(source);
@@ -38,250 +45,170 @@ public class TriggerTask
 }
 """;
 
-    // ─────────────────────────────────────────────────────────────
-    // No triggers
-    // ─────────────────────────────────────────────────────────────
+    private static TaskTriggerDefinition Single(string source) =>
+        ParseOk(source).TriggerDefinitions.Should().ContainSingle().Subject;
 
     [Test]
     public void Parse_NoTriggerAttributes_ReturnsEmptyTriggerDefinitions()
     {
-        var def = ParseOk(Wrap(""));
-        def.TriggerDefinitions.Should().BeEmpty();
+        ParseOk(Wrap("")).TriggerDefinitions.Should().BeEmpty();
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [Schedule] → Cron
-    // ─────────────────────────────────────────────────────────────
+    // ── [Schedule] ────────────────────────────────────────────────
 
     [Test]
     public void Parse_Schedule_PopulatesCronTriggerKeyAndExpression()
     {
-        var def = ParseOk(Wrap("", """[Schedule("0 9 * * MON-FRI")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey     = WellKnownTriggerKeys.Cron,
-                CronExpression = "0 9 * * MON-FRI",
-                CronTimezone   = (string?)null,
-            });
+        var t = Single(Wrap("", """[Schedule("0 9 * * MON-FRI")]"""));
+        t.TriggerKey.Should().Be(TaskScriptingTriggerKeys.Cron);
+        t.Parameters[TaskScriptingTriggerKeys.CronExpression].Should().Be("0 9 * * MON-FRI");
+        t.Parameters.ContainsKey(TaskScriptingTriggerKeys.CronTimezone).Should().BeFalse();
     }
 
     [Test]
     public void Parse_ScheduleWithTimezone_ExtractsCronTimezone()
     {
-        var def = ParseOk(Wrap("", """[Schedule("0 9 * * *", Timezone = "America/New_York")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey     = WellKnownTriggerKeys.Cron,
-                CronExpression = "0 9 * * *",
-                CronTimezone   = "America/New_York",
-            });
+        var t = Single(Wrap("", """[Schedule("0 9 * * *", Timezone = "America/New_York")]"""));
+        t.TriggerKey.Should().Be(TaskScriptingTriggerKeys.Cron);
+        t.Parameters[TaskScriptingTriggerKeys.CronExpression].Should().Be("0 9 * * *");
+        t.Parameters[TaskScriptingTriggerKeys.CronTimezone].Should().Be("America/New_York");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnEvent] → Event
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnEvent] ─────────────────────────────────────────────────
 
     [Test]
     public void Parse_OnEvent_PopulatesEventTriggerKeyAndType()
     {
-        var def = ParseOk(Wrap("", """[OnEvent("ModelAdded")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey = WellKnownTriggerKeys.Event,
-                EventType  = "ModelAdded",
-            });
+        var t = Single(Wrap("", """[OnEvent("ModelAdded")]"""));
+        t.TriggerKey.Should().Be(AgentOrchestrationTriggerKeys.Event);
+        t.Parameters[AgentOrchestrationTriggerKeys.EventType].Should().Be("ModelAdded");
     }
 
     [Test]
     public void Parse_OnEventWithFilter_ExtractsFilter()
     {
-        var def = ParseOk(Wrap("", """[OnEvent("ModelAdded", Filter = "provider=openai")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = WellKnownTriggerKeys.Event,
-                EventType   = "ModelAdded",
-                EventFilter = "provider=openai",
-            });
+        var t = Single(Wrap("", """[OnEvent("ModelAdded", Filter = "provider=openai")]"""));
+        t.Parameters[AgentOrchestrationTriggerKeys.EventType].Should().Be("ModelAdded");
+        t.Parameters[AgentOrchestrationTriggerKeys.EventFilter].Should().Be("provider=openai");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnFileChanged] → FileChanged
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnFileChanged] ───────────────────────────────────────────
 
     [Test]
     public void Parse_OnFileChanged_PopulatesFileChangedTriggerKeyAndPath()
     {
-        var def = ParseOk(Wrap("", """[OnFileChanged("/tmp/data")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey = WellKnownTriggerKeys.FileChanged,
-                WatchPath  = "/tmp/data",
-                FileEvents = FileWatchEvent.Any,
-            });
+        var t = Single(Wrap("", """[OnFileChanged("/tmp/data")]"""));
+        t.TriggerKey.Should().Be(FilesystemTriggerKeys.FileChanged);
+        t.Parameters[FilesystemTriggerKeys.WatchPath].Should().Be("/tmp/data");
+        t.Parameters[FilesystemTriggerKeys.FileEvents].Should().Be(FileWatchEvent.Any.ToString());
     }
 
     [Test]
     public void Parse_OnFileChangedWithPatternAndEvents_ExtractsNamedArgs()
     {
-        var def = ParseOk(Wrap("", """[OnFileChanged("/tmp/data", Pattern = "*.json", Events = FileWatchEvent.Created | FileWatchEvent.Deleted)]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.FilePattern.Should().Be("*.json");
-        t.FileEvents.Should().Be(FileWatchEvent.Created | FileWatchEvent.Deleted);
+        var t = Single(Wrap("", """[OnFileChanged("/tmp/data", Pattern = "*.json", Events = FileWatchEvent.Created | FileWatchEvent.Deleted)]"""));
+        t.Parameters[FilesystemTriggerKeys.FilePattern].Should().Be("*.json");
+        t.Parameters[FilesystemTriggerKeys.FileEvents].Should().Be((FileWatchEvent.Created | FileWatchEvent.Deleted).ToString());
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnProcessStarted] / [OnProcessStopped] → Process*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnProcessStarted] / [OnProcessStopped] ───────────────────
 
     [Test]
     public void Parse_OnProcessStarted_PopulatesProcessStartedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnProcessStarted("chrome")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "ProcessStarted",
-                ProcessName = "chrome",
-            });
+        var t = Single(Wrap("", """[OnProcessStarted("chrome")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.ProcessStarted);
+        t.Parameters[ComputerUseTriggerKeys.ProcessName].Should().Be("chrome");
     }
 
     [Test]
     public void Parse_OnProcessStopped_PopulatesProcessStoppedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnProcessStopped("chrome")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "ProcessStopped",
-                ProcessName = "chrome",
-            });
+        var t = Single(Wrap("", """[OnProcessStopped("chrome")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.ProcessStopped);
+        t.Parameters[ComputerUseTriggerKeys.ProcessName].Should().Be("chrome");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnWebhook] → Webhook
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnWebhook] ───────────────────────────────────────────────
 
     [Test]
     public void Parse_OnWebhook_PopulatesWebhookTriggerKeyAndRoute()
     {
-        var def = ParseOk(Wrap("", """[OnWebhook("/hook/deploy")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey   = WellKnownTriggerKeys.Webhook,
-                WebhookRoute = "/hook/deploy",
-            });
+        var t = Single(Wrap("", """[OnWebhook("/hook/deploy")]"""));
+        t.TriggerKey.Should().Be(HttpTriggerKeys.Webhook);
+        t.Parameters[HttpTriggerKeys.WebhookRoute].Should().Be("/hook/deploy");
     }
 
     [Test]
     public void Parse_OnWebhookWithSecret_ExtractsSecretAndSignatureHeader()
     {
-        var def = ParseOk(Wrap("", """[OnWebhook("/hook/deploy", Secret = "GH_SECRET", SignatureHeader = "X-Hub-Signature-256")]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.WebhookSecretEnvVar.Should().Be("GH_SECRET");
-        t.WebhookSignatureHeader.Should().Be("X-Hub-Signature-256");
+        var t = Single(Wrap("", """[OnWebhook("/hook/deploy", Secret = "GH_SECRET", SignatureHeader = "X-Hub-Signature-256")]"""));
+        t.Parameters[HttpTriggerKeys.WebhookSecretEnvVar].Should().Be("GH_SECRET");
+        t.Parameters[HttpTriggerKeys.WebhookSignatureHeader].Should().Be("X-Hub-Signature-256");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnHostReachable] / [OnHostUnreachable] → Host*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnHostReachable] / [OnHostUnreachable] ───────────────────
 
     [Test]
     public void Parse_OnHostReachable_PopulatesHostReachableTriggerKeyAndName()
     {
-        var def = ParseOk(Wrap("", """[OnHostReachable("db.internal")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey = WellKnownTriggerKeys.HostReachable,
-                HostName   = "db.internal",
-            });
+        var t = Single(Wrap("", """[OnHostReachable("db.internal")]"""));
+        t.TriggerKey.Should().Be(NetworkTriggerKeys.HostReachable);
+        t.Parameters[NetworkTriggerKeys.HostName].Should().Be("db.internal");
     }
 
     [Test]
     public void Parse_OnHostUnreachableWithPort_ExtractsPort()
     {
-        var def = ParseOk(Wrap("", """[OnHostUnreachable("db.internal", Port = 5432)]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.TriggerKey.Should().Be(WellKnownTriggerKeys.HostUnreachable);
-        t.HostPort.Should().Be(5432);
+        var t = Single(Wrap("", """[OnHostUnreachable("db.internal", Port = 5432)]"""));
+        t.TriggerKey.Should().Be(NetworkTriggerKeys.HostUnreachable);
+        t.Parameters[NetworkTriggerKeys.HostPort].Should().Be("5432");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnTaskCompleted] / [OnTaskFailed] → Task*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnTaskCompleted] / [OnTaskFailed] ────────────────────────
 
     [Test]
     public void Parse_OnTaskCompleted_PopulatesSourceTaskName()
     {
-        var def = ParseOk(Wrap("", """[OnTaskCompleted("IngestData")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey     = WellKnownTriggerKeys.TaskCompleted,
-                SourceTaskName = "IngestData",
-            });
+        var t = Single(Wrap("", """[OnTaskCompleted("IngestData")]"""));
+        t.TriggerKey.Should().Be(TaskScriptingTriggerKeys.TaskCompleted);
+        t.Parameters[TaskScriptingTriggerKeys.SourceTaskName].Should().Be("IngestData");
     }
 
     [Test]
     public void Parse_OnTaskFailed_PopulatesSourceTaskName()
     {
-        var def = ParseOk(Wrap("", """[OnTaskFailed("IngestData")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey     = WellKnownTriggerKeys.TaskFailed,
-                SourceTaskName = "IngestData",
-            });
+        var t = Single(Wrap("", """[OnTaskFailed("IngestData")]"""));
+        t.TriggerKey.Should().Be(TaskScriptingTriggerKeys.TaskFailed);
+        t.Parameters[TaskScriptingTriggerKeys.SourceTaskName].Should().Be("IngestData");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnWindowFocused] / [OnWindowBlurred] → Window*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnWindowFocused] / [OnWindowBlurred] ─────────────────────
 
     [Test]
     public void Parse_OnWindowFocused_PopulatesWindowFocusedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnWindowFocused("notepad")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "WindowFocused",
-                ProcessName = "notepad",
-            });
+        var t = Single(Wrap("", """[OnWindowFocused("notepad")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.WindowFocused);
+        t.Parameters[ComputerUseTriggerKeys.ProcessName].Should().Be("notepad");
     }
 
     [Test]
     public void Parse_OnWindowBlurred_PopulatesWindowBlurredTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnWindowBlurred("notepad")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "WindowBlurred",
-                ProcessName = "notepad",
-            });
+        var t = Single(Wrap("", """[OnWindowBlurred("notepad")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.WindowBlurred);
+        t.Parameters[ComputerUseTriggerKeys.ProcessName].Should().Be("notepad");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnHotkey] → Hotkey + TASK429
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnHotkey] ────────────────────────────────────────────────
 
     [Test]
     public void Parse_OnHotkeyValidCombo_PopulatesHotkeyTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnHotkey("Ctrl+Shift+F10")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "Hotkey",
-                HotkeyCombo = "Ctrl+Shift+F10",
-            });
+        var t = Single(Wrap("", """[OnHotkey("Ctrl+Shift+F10")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.Hotkey);
+        t.Parameters[ComputerUseTriggerKeys.HotkeyCombo].Should().Be("Ctrl+Shift+F10");
     }
 
     [Test]
@@ -298,103 +225,81 @@ public class TriggerTask
         result.Diagnostics.Should().Contain(d => d.Code == "TASK429");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnSystemIdle] / [OnSystemActive] → Idle/Active
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnSystemIdle] / [OnSystemActive] ─────────────────────────
 
     [Test]
     public void Parse_OnSystemIdle_PopulatesIdleMinutesWithSystemIdleTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnSystemIdle(Minutes = 15)]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey  = "SystemIdle",
-                IdleMinutes = 15,
-            });
+        var t = Single(Wrap("", """[OnSystemIdle(Minutes = 15)]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.SystemIdle);
+        t.Parameters[ComputerUseTriggerKeys.IdleMinutes].Should().Be("15");
     }
 
     [Test]
     public void Parse_OnSystemActive_PopulatesSystemActiveTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnSystemActive]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be("SystemActive");
+        Single(Wrap("", """[OnSystemActive]""")).TriggerKey
+            .Should().Be(ComputerUseTriggerKeys.SystemActive);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnScreenLocked] / [OnScreenUnlocked] → Screen*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnScreenLocked] / [OnScreenUnlocked] ─────────────────────
 
     [Test]
     public void Parse_OnScreenLocked_PopulatesScreenLockedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnScreenLocked]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be("ScreenLocked");
+        Single(Wrap("", """[OnScreenLocked]""")).TriggerKey
+            .Should().Be(ComputerUseTriggerKeys.ScreenLocked);
     }
 
     [Test]
     public void Parse_OnScreenUnlocked_PopulatesScreenUnlockedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnScreenUnlocked]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be("ScreenUnlocked");
+        Single(Wrap("", """[OnScreenUnlocked]""")).TriggerKey
+            .Should().Be(ComputerUseTriggerKeys.ScreenUnlocked);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnNetworkChanged] → NetworkChanged
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnNetworkChanged] ────────────────────────────────────────
 
     [Test]
     public void Parse_OnNetworkChanged_PopulatesNetworkChangedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnNetworkChanged]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be(WellKnownTriggerKeys.NetworkChanged);
+        Single(Wrap("", """[OnNetworkChanged]""")).TriggerKey
+            .Should().Be(NetworkTriggerKeys.NetworkChanged);
     }
 
     [Test]
     public void Parse_OnNetworkChangedWithSsidAndState_ExtractsNamedArgs()
     {
-        var def = ParseOk(Wrap("", """[OnNetworkChanged(Ssid = "HomeNet", State = NetworkState.Connected)]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.NetworkSsid.Should().Be("HomeNet");
-        t.NetworkState.Should().Be(NetworkState.Connected);
+        var t = Single(Wrap("", """[OnNetworkChanged(Ssid = "HomeNet", State = NetworkState.Connected)]"""));
+        t.Parameters[NetworkTriggerKeys.NetworkSsid].Should().Be("HomeNet");
+        t.Parameters[NetworkTriggerKeys.NetworkState].Should().Be(NetworkState.Connected.ToString());
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnDeviceConnected] / [OnDeviceDisconnected] → Device*
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnDeviceConnected] / [OnDeviceDisconnected] ──────────────
 
     [Test]
     public void Parse_OnDeviceConnected_PopulatesDeviceConnectedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnDeviceConnected(Class = "USB", Pattern = "YubiKey*")]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.TriggerKey.Should().Be("DeviceConnected");
-        t.DeviceClass.Should().Be("USB");
-        t.DeviceNamePattern.Should().Be("YubiKey*");
+        var t = Single(Wrap("", """[OnDeviceConnected(Class = "USB", Pattern = "YubiKey*")]"""));
+        t.TriggerKey.Should().Be(ComputerUseTriggerKeys.DeviceConnected);
+        t.Parameters[ComputerUseTriggerKeys.DeviceClass].Should().Be("USB");
+        t.Parameters[ComputerUseTriggerKeys.DeviceNamePattern].Should().Be("YubiKey*");
     }
 
     [Test]
     public void Parse_OnDeviceDisconnected_PopulatesDeviceDisconnectedTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnDeviceDisconnected(Class = "USB")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be("DeviceDisconnected");
+        Single(Wrap("", """[OnDeviceDisconnected(Class = "USB")]""")).TriggerKey
+            .Should().Be(ComputerUseTriggerKeys.DeviceDisconnected);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnQueryReturnsRows] → QueryReturnsRows + TASK431
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnQueryReturnsRows] ──────────────────────────────────────
 
     [Test]
     public void Parse_OnQueryReturnsRowsWithSelectCount_PopulatesQueryReturnsRowsTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnQueryReturnsRows("SELECT COUNT(*) FROM PendingItems WHERE Done = 0")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be("QueryReturnsRows");
+        Single(Wrap("", """[OnQueryReturnsRows("SELECT COUNT(*) FROM PendingItems WHERE Done = 0")]""")).TriggerKey
+            .Should().Be(DatabaseAccessTriggerKeys.QueryReturnsRows);
     }
 
     [Test]
@@ -407,128 +312,67 @@ public class TriggerTask
     [Test]
     public void Parse_OnQueryReturnsRowsWithPollInterval_ExtractsPollInterval()
     {
-        var def = ParseOk(Wrap("", """[OnQueryReturnsRows("SELECT COUNT(*) FROM Q", PollInterval = 30)]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.QueryPollIntervalSecs.Should().Be(30);
+        var t = Single(Wrap("", """[OnQueryReturnsRows("SELECT COUNT(*) FROM Q", PollInterval = 30)]"""));
+        t.Parameters[DatabaseAccessTriggerKeys.QueryPollIntervalSecs].Should().Be("30");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnMetricThreshold] → MetricThreshold
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnMetricThreshold] ───────────────────────────────────────
 
     [Test]
     public void Parse_OnMetricThreshold_PopulatesMetricFields()
     {
-        var def = ParseOk(Wrap("", """[OnMetricThreshold("System.CpuPercent", Threshold = 90.0, Direction = ThresholdDirection.Above)]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.TriggerKey.Should().Be(WellKnownTriggerKeys.MetricThreshold);
-        t.MetricSource.Should().Be("System.CpuPercent");
-        t.MetricThreshold.Should().Be(90.0);
-        t.MetricDirection.Should().Be(ThresholdDirection.Above);
+        var t = Single(Wrap("", """[OnMetricThreshold("System.CpuPercent", Threshold = 90.0, Direction = ThresholdDirection.Above)]"""));
+        t.TriggerKey.Should().Be(MetricTriggerKeys.MetricThreshold);
+        t.Parameters[MetricTriggerKeys.Source].Should().Be("System.CpuPercent");
+        t.Parameters[MetricTriggerKeys.Threshold].Should().Be("90");
+        t.Parameters[MetricTriggerKeys.Direction].Should().Be(ThresholdDirection.Above.ToString());
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnStartup] / [OnShutdown] → Startup/Shutdown
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnStartup] / [OnShutdown] ────────────────────────────────
 
     [Test]
     public void Parse_OnStartup_PopulatesStartupTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnStartup]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be(WellKnownTriggerKeys.Startup);
+        Single(Wrap("", """[OnStartup]""")).TriggerKey
+            .Should().Be(TaskScriptingTriggerKeys.Startup);
     }
 
     [Test]
     public void Parse_OnShutdown_PopulatesShutdownTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnShutdown]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.TriggerKey.Should().Be(WellKnownTriggerKeys.Shutdown);
+        Single(Wrap("", """[OnShutdown]""")).TriggerKey
+            .Should().Be(TaskScriptingTriggerKeys.Shutdown);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OsShortcut] → OsShortcut
-    // ─────────────────────────────────────────────────────────────
+    // ── [OsShortcut] ──────────────────────────────────────────────
 
     [Test]
     public void Parse_OsShortcut_PopulatesShortcutFieldsWithOsShortcutTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OsShortcut("Run Ingest", Icon = "ingest.ico", Category = "Data")]"""));
-        var t = def.TriggerDefinitions.Should().ContainSingle().Subject;
-        t.TriggerKey.Should().Be("OsShortcut");
-        t.ShortcutLabel.Should().Be("Run Ingest");
-        t.ShortcutIcon.Should().Be("ingest.ico");
-        t.ShortcutCategory.Should().Be("Data");
+        var t = Single(Wrap("", """[OsShortcut("Run Ingest", Icon = "ingest.ico", Category = "Data")]"""));
+        t.TriggerKey.Should().Be(OsShortcutTriggerKeys.OsShortcut);
+        t.Parameters[OsShortcutTriggerKeys.ShortcutLabel].Should().Be("Run Ingest");
+        t.Parameters[OsShortcutTriggerKeys.ShortcutIcon].Should().Be("ingest.ico");
+        t.Parameters[OsShortcutTriggerKeys.ShortcutCategory].Should().Be("Data");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [OnTrigger] → Custom
-    // ─────────────────────────────────────────────────────────────
+    // ── [OnTrigger] ───────────────────────────────────────────────
 
     [Test]
     public void Parse_OnTrigger_PopulatesTriggerKey()
     {
-        var def = ParseOk(Wrap("", """[OnTrigger("MyCustomSource")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Should().BeEquivalentTo(new
-            {
-                TriggerKey = "MyCustomSource",
-            });
+        Single(Wrap("", """[OnTrigger("MyCustomSource")]""")).TriggerKey
+            .Should().Be("MyCustomSource");
     }
 
     [Test]
     public void Parse_OnTriggerWithFilter_ExtractsFilter()
     {
-        var def = ParseOk(Wrap("", """[OnTrigger("MyCustomSource", Filter = "type=foo")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.CustomSourceFilter.Should().Be("type=foo");
+        var t = Single(Wrap("", """[OnTrigger("MyCustomSource", Filter = "type=foo")]"""));
+        t.Parameters[TaskScriptingTriggerKeys.CustomSourceFilter].Should().Be("type=foo");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // [ConcurrencyPolicy] propagation
-    // ─────────────────────────────────────────────────────────────
-
-    [Test]
-    public void Parse_ConcurrencyPolicy_PropagatedToAllTriggers()
-    {
-        var source = Wrap("", """
-[Schedule("0 9 * * *")]
-[OnEvent("ModelAdded")]
-[ConcurrencyPolicy(Policy = TriggerConcurrency.Queue)]
-""");
-        var def = ParseOk(source);
-        def.TriggerDefinitions.Should().HaveCount(2);
-        def.TriggerDefinitions.Should().AllSatisfy(t => t.Concurrency.Should().Be(TriggerConcurrency.Queue));
-    }
-
-    [Test]
-    public void Parse_NoConcurrencyPolicy_DefaultsToSkipIfRunning()
-    {
-        var def = ParseOk(Wrap("", """[Schedule("0 9 * * *")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Concurrency.Should().Be(TriggerConcurrency.SkipIfRunning);
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // TASK421 — multiple [ConcurrencyPolicy]
-    // ─────────────────────────────────────────────────────────────
-
-    [Test]
-    public void Parse_MultipleConcurrencyPolicyAttributes_EmitsTask421()
-    {
-        var source = Wrap("", """
-[Schedule("0 9 * * *")]
-[ConcurrencyPolicy(Policy = TriggerConcurrency.Queue)]
-[ConcurrencyPolicy(Policy = TriggerConcurrency.Parallel)]
-""");
-        var result = TaskScriptEngine.Parse(source);
-        result.Diagnostics.Should().Contain(d => d.Code == "TASK421");
-    }
-
-    // ─────────────────────────────────────────────────────────────
-    // TASK428 — [WebhookSecret] without [OnWebhook]
-    // ─────────────────────────────────────────────────────────────
+    // ── TASK428 — [WebhookSecret] without [OnWebhook] ─────────────
 
     [Test]
     public void Parse_WebhookSecretWithoutOnWebhook_EmitsTask428()
@@ -547,9 +391,7 @@ public class TriggerTask
         result.Diagnostics.Should().NotContain(d => d.Code == "TASK428");
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Multiple triggers on same class
-    // ─────────────────────────────────────────────────────────────
+    // ── Multiple triggers on same class ──────────────────────────
 
     [Test]
     public void Parse_MultipleTriggerAttributes_AllExtracted()
@@ -562,18 +404,18 @@ public class TriggerTask
         var def = ParseOk(source);
         def.TriggerDefinitions.Should().HaveCount(3);
         def.TriggerDefinitions.Select(t => t.TriggerKey)
-            .Should().BeEquivalentTo([WellKnownTriggerKeys.Cron, WellKnownTriggerKeys.Event, WellKnownTriggerKeys.Startup]);
+            .Should().BeEquivalentTo([
+                TaskScriptingTriggerKeys.Cron,
+                AgentOrchestrationTriggerKeys.Event,
+                TaskScriptingTriggerKeys.Startup,
+            ]);
     }
 
-    // ─────────────────────────────────────────────────────────────
-    // Line numbers are captured
-    // ─────────────────────────────────────────────────────────────
+    // ── Line numbers are captured ─────────────────────────────────
 
     [Test]
     public void Parse_TriggerDefinition_RecordsNonZeroLineNumber()
     {
-        var def = ParseOk(Wrap("", """[Schedule("0 9 * * *")]"""));
-        def.TriggerDefinitions.Should().ContainSingle()
-            .Which.Line.Should().BeGreaterThan(0);
+        Single(Wrap("", """[Schedule("0 9 * * *")]""")).Line.Should().BeGreaterThan(0);
     }
 }

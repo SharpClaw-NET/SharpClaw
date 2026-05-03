@@ -1,7 +1,7 @@
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 
-namespace SharpClaw.Application.Infrastructure.Models.Clearance;
+namespace SharpClaw.Contracts.Entities.Core.Clearance;
 
 public class RoleDB : BaseEntity
 {

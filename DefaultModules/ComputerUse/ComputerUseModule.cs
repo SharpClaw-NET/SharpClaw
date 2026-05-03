@@ -56,7 +56,10 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
         services.AddSingleton<ITaskTriggerSource, DeviceTriggerSource>();
         services.AddSingleton<ITaskTriggerSource, ProcessTriggerSource>();
         services.AddSingleton<ShortcutLauncherService>();
-        services.AddSingleton<IShortcutLauncherService>(sp => sp.GetRequiredService<ShortcutLauncherService>());
+        services.AddSingleton<IShortcutLauncher>(sp => sp.GetRequiredService<ShortcutLauncherService>());
+        services.AddSingleton<OsShortcutTriggerSource>();
+        services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<OsShortcutTriggerSource>());
+        services.AddSingleton<ITaskTriggerBindingSideEffect>(sp => sp.GetRequiredService<OsShortcutTriggerSource>());
         // OS-level metric providers
         services.AddSingleton<ITaskMetricProvider, SystemMemoryMetricProvider>();
         services.AddSingleton<ITaskMetricProvider, SystemCpuMetricProvider>();

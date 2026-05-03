@@ -67,7 +67,7 @@ public sealed class WindowFocusTriggerSource(
 
                 foreach (var ctx in _contexts)
                 {
-                    var processName = ctx.Definition.ProcessName;
+                    var processName = ctx.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.ProcessName);
                     if (string.IsNullOrWhiteSpace(processName)) continue;
 
                     var isFocused = !string.IsNullOrEmpty(activeTitle) &&
@@ -76,10 +76,10 @@ public sealed class WindowFocusTriggerSource(
                     var wasFocused = lastFocused.GetValueOrDefault(processName, false);
                     lastFocused[processName] = isFocused;
 
-                    if (ctx.Definition.TriggerKey == "WindowFocused" && !wasFocused && isFocused)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.WindowFocused && !wasFocused && isFocused)
                         await FireAsync(ctx);
 
-                    if (ctx.Definition.TriggerKey == "WindowBlurred" && wasFocused && !isFocused)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.WindowBlurred && wasFocused && !isFocused)
                         await FireAsync(ctx);
                 }
             }
