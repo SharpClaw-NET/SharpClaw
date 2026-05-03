@@ -37,7 +37,7 @@
     <PackageVersion Include="Serilog" Version="4.3.0" />
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="NAudio" Version="2.3.0" />
-    <PackageVersion Include="LLamaSharp" Version="0.26.0" />
+    <PackageVersion Include="LLamaSharp" Version="0.27.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12.Windows" Version="0.26.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12.Linux" Version="0.26.0" />
