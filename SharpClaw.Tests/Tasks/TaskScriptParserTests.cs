@@ -3,6 +3,8 @@ using NUnit.Framework;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.AgentOrchestration;
+using SharpClaw.Modules.Http;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -145,7 +147,7 @@ public class LogTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
     }
 
     [Test]
@@ -167,7 +169,7 @@ public class EarlyExitTask
 
         result.Success.Should().BeTrue();
         result.Definition!.Steps.Should().HaveCount(2);
-        result.Definition.Steps.Last().StepKey.Should().Be(WellKnownTaskStepKeys.Return);
+        result.Definition.Steps.Last().StepKey.Should().Be(TaskScriptingStepKeys.Return);
     }
 
     [Test]
@@ -190,7 +192,7 @@ public class BranchingTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Conditional);
     }
 
     [Test]
@@ -217,9 +219,9 @@ public class IfElseTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Definition!.Steps.Single(s => s.StepKey == WellKnownTaskStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Log);
+        var conditional = result.Definition!.Steps.Single(s => s.StepKey == TaskScriptingStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
     }
 
     [Test]
@@ -239,7 +241,7 @@ public class ChatTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == WellKnownTaskStepKeys.Chat);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == AgentOrchestrationStepKeys.Chat);
     }
 
     [Test]
@@ -259,8 +261,9 @@ public class HttpTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var step = result.Definition!.Steps.Single(s => s.StepKey == WellKnownTaskStepKeys.HttpRequest);
-        step.HttpMethod.Should().Be("GET");
+        var step = result.Definition!.Steps.Single(s => s.StepKey == HttpStepKeys.HttpRequest);
+        step.Arguments.Should().NotBeNull();
+        step.Arguments![0].Should().Be("GET");
         step.Expression.Should().Contain("example.com");
     }
 
@@ -373,3 +376,4 @@ public class EmptyNameTask
         result.Diagnostics.Should().Contain(d => d.Code == "TASK002");
     }
 }
+

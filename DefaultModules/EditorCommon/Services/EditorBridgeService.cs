@@ -15,7 +15,7 @@ namespace SharpClaw.Modules.EditorCommon.Services;
 /// connected editor and waits for responses.
 /// <para>
 /// On connect the service auto-creates (or reuses) an
-/// <see cref="SharpClaw.Application.Infrastructure.Models.Resources.EditorSessionDB"/>
+/// <see cref="SharpClaw.Contracts.Entities.Core.Resources.EditorSessionDB"/>
 /// resource so agents can reference it immediately. On disconnect the
 /// <c>ConnectionId</c> is cleared but the resource persists for
 /// permission/default references.

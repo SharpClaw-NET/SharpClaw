@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Tasks;
+namespace SharpClaw.Contracts.Entities.Core.Tasks;
 
 /// <summary>
 /// A single persisted output emitted by a task instance via <c>Emit()</c>.

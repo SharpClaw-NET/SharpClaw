@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;

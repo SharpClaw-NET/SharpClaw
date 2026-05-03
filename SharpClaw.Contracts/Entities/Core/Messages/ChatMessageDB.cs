@@ -1,8 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Infrastructure.Models.Messages;
+namespace SharpClaw.Contracts.Entities.Core.Messages;
 
 public class ChatMessageDB : BaseEntity
 {

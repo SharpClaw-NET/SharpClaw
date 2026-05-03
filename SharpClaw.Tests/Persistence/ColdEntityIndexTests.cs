@@ -1,6 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Infrastructure.Models.Messages;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Security;
 

@@ -1,8 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Access;
+using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
 
-namespace SharpClaw.Application.Infrastructure.Models.Clearance;
+namespace SharpClaw.Contracts.Entities.Core.Clearance;
 
 /// <summary>
 /// A reusable set of permissions that can be attached to a role, context,

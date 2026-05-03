@@ -1,5 +1,6 @@
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Application.Core.Clients;
 

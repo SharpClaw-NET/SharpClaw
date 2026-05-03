@@ -8,12 +8,15 @@ namespace SharpClaw.Application.Infrastructure.Tasks.Models;
 /// a tree: event handlers, conditionals, and loops contain nested body
 /// steps.
 /// </summary>
-public sealed record TaskStepDefinition
+public sealed record TaskStepDefinition : ITaskStepInvocation
 {
     /// <summary>
-    /// Stable string key identifying this step's operation (e.g. <c>core.chat</c>).
-    /// Use <see cref="SharpClaw.Contracts.Tasks.WellKnownTaskStepKeys"/> constants
-    /// for core steps.  Module steps use a module-namespaced key.
+    /// Stable wire-format string key identifying this step's operation
+    /// (e.g. <c>core.chat</c>). Step keys are owned by modules and exposed
+    /// through module-local constant classes (for example
+    /// <c>TaskScriptingStepKeys</c>, <c>AgentOrchestrationStepKeys</c>, and
+    /// <c>HttpStepKeys</c>); the literal values are stable across versions
+    /// for backward compatibility with serialized task scripts.
     /// </summary>
     public required string StepKey { get; init; }
 
@@ -61,12 +64,9 @@ public sealed record TaskStepDefinition
 
     // ── Event handler ─────────────────────────────────────────────
 
-    /// <summary>Trigger kind for <c>core.event_handler</c> steps.</summary>
-    public TaskTriggerKind? TriggerKind { get; init; }
-
     /// <summary>
-    /// Module-owned trigger key when <see cref="TriggerKind"/> is
-    /// <see cref="TaskTriggerKind.ModuleEvent"/>.
+    /// Module-owned trigger key for <c>core.event_handler</c> steps.
+    /// Identifies which module trigger the handler is bound to.
     /// </summary>
     public string? ModuleTriggerKey { get; init; }
 
@@ -86,14 +86,9 @@ public sealed record TaskStepDefinition
     /// <summary>Else branch for <c>core.conditional</c> steps.</summary>
     public IReadOnlyList<TaskStepDefinition>? ElseBody { get; init; }
 
-    /// <summary>Specific loop shape for <c>core.loop</c> steps.</summary>
-    public TaskLoopKind? LoopKind { get; init; }
+    // ── ITaskStepInvocation projection ────────────────────────────
 
-    // ── HTTP ──────────────────────────────────────────────────────
-
-    /// <summary>
-    /// HTTP verb for <c>core.http_request</c> steps
-    /// ("GET", "POST", "PUT", "DELETE").
-    /// </summary>
-    public string? HttpMethod { get; init; }
+    string? ITaskStepInvocation.RawExpression => Expression;
+    IReadOnlyList<ITaskStepInvocation>? ITaskStepInvocation.Body => Body;
+    IReadOnlyList<ITaskStepInvocation>? ITaskStepInvocation.ElseBody => ElseBody;
 }

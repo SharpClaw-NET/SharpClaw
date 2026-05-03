@@ -23,8 +23,10 @@ namespace SharpClaw.Modules.DatabaseAccess;
 /// Supports PostgreSQL, MySQL, SQLite, and MSSQL with read-only
 /// safety by default.
 /// </summary>
-public sealed class DatabaseAccessModule : ISharpClawModule
+public sealed class DatabaseAccessModule : ISharpClawModule, ITaskParserAware
 {
+    public ITaskParserModuleExtension ParserExtension => DatabaseAccessParserExtension.Instance;
+
     public string Id => "sharpclaw_database_access";
     public string DisplayName => "Database Access";
     public string ToolPrefix => "db";

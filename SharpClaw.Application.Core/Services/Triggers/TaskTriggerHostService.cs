@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Tasks;

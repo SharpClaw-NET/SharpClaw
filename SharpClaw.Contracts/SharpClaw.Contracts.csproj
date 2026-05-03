@@ -32,7 +32,6 @@
 
   <ItemGroup>
     <Folder Include="DTOs\Bots\" />
-    <Folder Include="Modules\Contracts\" />
   </ItemGroup>
 
 </Project>

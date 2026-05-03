@@ -1,9 +1,8 @@
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 
-namespace SharpClaw.Application.Infrastructure.Models.Context;
+namespace SharpClaw.Contracts.Entities.Core.Context;
 
 /// <summary>
 /// Groups channels and tasks under a shared set of pre-authorised
@@ -47,5 +46,4 @@ public class ChannelContextDB : BaseEntity
     public ICollection<AgentDB> AllowedAgents { get; set; } = [];
 
     public ICollection<ChannelDB> Channels { get; set; } = [];
-    public ICollection<ScheduledJobDB> Tasks { get; set; } = [];
 }

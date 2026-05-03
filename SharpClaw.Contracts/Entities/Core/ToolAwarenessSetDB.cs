@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 /// <summary>
 /// A named, reusable set of booleans controlling which tool-call schemas

@@ -3,6 +3,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
+using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.ContextTools.Services;
 
@@ -25,7 +26,9 @@ public sealed class ContextToolsModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
+        services.TryAddScoped<ContextDataReader>();
         services.TryAddScoped<ContextToolsService>();
+        services.AddScoped<IChatProcessingContributor, ContextToolsChatContributor>();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -40,7 +43,7 @@ public sealed class ContextToolsModule : ISharpClawModule
 
     public IReadOnlyList<ModuleGlobalFlagDescriptor> GetGlobalFlagDescriptors() =>
     [
-        new("CanReadCrossThreadHistory", "Read Cross-Thread History", "Read conversation history from other threads/channels.", "ReadCrossThreadHistoryAsync"),
+        new(ContextToolsPermissionKeys.CanReadCrossThreadHistory, "Read Cross-Thread History", "Read conversation history from other threads/channels.", "ReadCrossThreadHistoryAsync"),
     ];
 
     // ═══════════════════════════════════════════════════════════════

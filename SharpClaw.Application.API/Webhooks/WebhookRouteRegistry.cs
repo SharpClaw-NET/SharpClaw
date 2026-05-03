@@ -4,8 +4,7 @@ using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Infrastructure.Tasks;
-using SharpClaw.Application.Core.Services.Triggers.Sources;
-using SharpClaw.Application.Core.Services.Triggers;
+using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.API.Webhooks;
 
@@ -15,14 +14,14 @@ namespace SharpClaw.Application.API.Webhooks;
 /// <see cref="WebApplication"/> so that tasks can receive webhook calls.
 ///
 /// Routes are registered at most once per path; active/inactive state is
-/// managed by <see cref="WebhookTriggerSource"/> via its internal route map.
-/// The registry is populated during
+/// managed by the module-owned webhook trigger source via its internal
+/// route map. The registry is populated during
 /// <see cref="IHostApplicationLifetime.ApplicationStarted"/> after
 /// <see cref="TaskTriggerHostService"/> has loaded its first set of bindings.
 /// </summary>
 public sealed class WebhookRouteRegistry(
     WebApplication app,
-    WebhookTriggerSource triggerSource,
+    IWebhookTriggerHost triggerSource,
     ILogger<WebhookRouteRegistry> logger) : IWebhookRouteRegistrar
 {
     private readonly ConcurrentDictionary<string, bool> _registered = new(

@@ -16,6 +16,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
     <ProjectReference Include="..\..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SystemAudio\SharpClaw.Modules.SystemAudio.csproj" />
   </ItemGroup>

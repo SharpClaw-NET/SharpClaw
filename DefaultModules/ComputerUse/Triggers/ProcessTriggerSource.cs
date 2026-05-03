@@ -67,16 +67,16 @@ public sealed class ProcessTriggerSource(
 
                 foreach (var ctx in _contexts)
                 {
-                    var name = ctx.Definition.ProcessName;
+                    var name = ctx.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.ProcessName);
                     if (string.IsNullOrWhiteSpace(name)) continue;
 
                     var wasRunning = seen.Contains(name);
                     var isRunning  = runningSet.Contains(name);
 
-                    if (ctx.Definition.TriggerKey == "ProcessStarted" && !wasRunning && isRunning)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.ProcessStarted && !wasRunning && isRunning)
                         await FireAsync(ctx);
 
-                    if (ctx.Definition.TriggerKey == "ProcessStopped" && wasRunning && !isRunning)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.ProcessStopped && wasRunning && !isRunning)
                         await FireAsync(ctx);
                 }
 

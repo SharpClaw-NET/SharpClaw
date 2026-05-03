@@ -1,16 +1,16 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Context;
-using SharpClaw.Application.Infrastructure.Models.Jobs;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Threads;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
@@ -217,80 +217,6 @@ public sealed class HostThreadResolver(ThreadService threads) : IThreadResolver
     }
 }
 
-public sealed class HostContextDataReader(SharpClawDbContext db) : IContextDataReader
-{
-    public Task<bool> ThreadExistsAsync(Guid threadId, Guid channelId, CancellationToken ct = default) =>
-        db.ChatThreads.AnyAsync(t => t.Id == threadId && t.ChannelId == channelId, ct);
-
-    public async Task<IReadOnlyList<ChatMessageSummary>> GetThreadMessagesAsync(
-        Guid threadId, int maxMessages, CancellationToken ct = default)
-    {
-        return await db.ChatMessages
-            .Where(m => m.ThreadId == threadId)
-            .OrderByDescending(m => m.CreatedAt)
-            .Take(maxMessages)
-            .OrderBy(m => m.CreatedAt)
-            .Select(m => new ChatMessageSummary(
-                m.Role,
-                m.Content,
-                m.SenderUsername ?? m.SenderAgentName ?? "unknown",
-                m.CreatedAt))
-            .ToListAsync(ct);
-    }
-
-    public async Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
-        Guid agentId, Guid currentChannelId, CancellationToken ct = default)
-    {
-        var agentWithRole = await db.Agents
-            .Include(a => a.Role)
-                .ThenInclude(r => r!.PermissionSet)
-                    .ThenInclude(ps => ps!.GlobalFlags)
-            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
-
-        var agentPs = agentWithRole?.Role?.PermissionSet;
-        if (agentPs is null || !agentPs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory"))
-            return [];
-
-        var isIndependent = (agentPs.GlobalFlags
-            .FirstOrDefault(f => f.FlagKey == "CanReadCrossThreadHistory")
-            ?.Clearance ?? PermissionClearance.Unset) == PermissionClearance.Independent;
-
-        var channels = await db.Channels
-            .Include(c => c.AllowedAgents)
-            .Include(c => c.PermissionSet)
-                .ThenInclude(ps => ps!.GlobalFlags)
-            .Include(c => c.AgentContext)
-                .ThenInclude(ctx => ctx!.PermissionSet)
-                    .ThenInclude(ps => ps!.GlobalFlags)
-            .Where(c => c.Id != currentChannelId)
-            .Where(c => c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId))
-            .ToListAsync(ct);
-
-        if (!isIndependent)
-        {
-            channels = channels
-                .Where(c =>
-                {
-                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
-                    return effectivePs?.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory") == true;
-                })
-                .ToList();
-        }
-
-        if (channels.Count == 0)
-            return [];
-
-        var channelIds = channels.Select(c => c.Id).ToList();
-        var channelTitles = channels.ToDictionary(c => c.Id, c => c.Title);
-
-        return await db.ChatThreads
-            .Where(t => channelIds.Contains(t.ChannelId))
-            .OrderByDescending(t => t.UpdatedAt)
-            .Select(t => new ThreadSummary(t.Id, t.Name, t.ChannelId, channelTitles[t.ChannelId]))
-            .ToListAsync(ct);
-    }
-}
-
 public sealed class HostContainerProvisioner(SharpClawDbContext db) : IContainerProvisioner
 {
     public async Task CreateOwnerRoleAsync(
@@ -326,7 +252,7 @@ public sealed class HostContainerProvisioner(SharpClawDbContext db) : IContainer
             IsDefault = true,
         });
 
-        var role = new Application.Infrastructure.Models.Clearance.RoleDB
+        var role = new RoleDB
         {
             Name = $"Container Owner: {containerName}",
             PermissionSet = permissionSet,

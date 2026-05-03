@@ -7,21 +7,23 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Infrastructure.Models.Context;
-using SharpClaw.Application.Infrastructure.Models.Messages;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
@@ -43,6 +45,7 @@ public sealed class ChatService(
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
     IServiceProvider serviceProvider,
+    IChatProcessingBridge chatProcessingBridge,
     IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
@@ -623,7 +626,8 @@ public sealed class ChatService(
 
         sb.Append(" | policy: unlisted-resource/GUID=denied; disclose gaps to user");
 
-        var accessibleThreads = await GetAccessibleThreadsAsync(agentId, channelId, ct);
+        var accessibleThreads = await chatProcessingBridge.GetAccessibleThreadsAsync(
+            agentId, channelId, ct);
         if (accessibleThreads.Count > 0)
         {
             sb.Append(" | accessible-threads: ");
@@ -646,67 +650,6 @@ public sealed class ChatService(
         }
 
         sb.AppendLine("]");
-    }
-
-    /// <summary>
-    /// Finds threads on other channels that the agent can read via
-    /// cross-thread history.  Used by the chat header to populate the
-    /// <c>accessible-threads</c> section.
-    /// </summary>
-    private async Task<List<(Guid ThreadId, string ThreadName, Guid ChannelId, string ChannelTitle)>>
-        GetAccessibleThreadsAsync(Guid agentId, Guid currentChannelId, CancellationToken ct)
-    {
-        var agentWithRole = await db.Agents
-            .Include(a => a.Role)
-                .ThenInclude(r => r!.PermissionSet)
-                    .ThenInclude(ps => ps!.GlobalFlags)
-            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
-
-        var agentPs = agentWithRole?.Role?.PermissionSet;
-        if (agentPs is null || !agentPs.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory"))
-            return [];
-
-        var isIndependent = (agentPs.GlobalFlags
-            .FirstOrDefault(f => f.FlagKey == "CanReadCrossThreadHistory")
-            ?.Clearance ?? PermissionClearance.Unset) == PermissionClearance.Independent;
-
-        var channels = await db.Channels
-            .Include(c => c.AllowedAgents)
-            .Include(c => c.PermissionSet)
-                .ThenInclude(ps => ps!.GlobalFlags)
-            .Include(c => c.AgentContext)
-                .ThenInclude(ctx => ctx!.PermissionSet)
-                    .ThenInclude(ps => ps!.GlobalFlags)
-            .Where(c => c.Id != currentChannelId)
-            .Where(c => c.AgentId == agentId || c.AllowedAgents.Any(a => a.Id == agentId))
-            .ToListAsync(ct);
-
-        if (!isIndependent)
-        {
-            channels = channels
-                .Where(c =>
-                {
-                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
-                    return effectivePs?.GlobalFlags.Any(f => f.FlagKey == "CanReadCrossThreadHistory") == true;
-                })
-                .ToList();
-        }
-
-        if (channels.Count == 0)
-            return [];
-
-        var channelIds = channels.Select(c => c.Id).ToList();
-        var threads = await db.ChatThreads
-            .Where(t => channelIds.Contains(t.ChannelId))
-            .OrderByDescending(t => t.UpdatedAt)
-            .Select(t => new { t.Id, t.Name, t.ChannelId })
-            .ToListAsync(ct);
-
-        var channelTitles = channels.ToDictionary(c => c.Id, c => c.Title);
-
-        return threads
-            .Select(t => (t.Id, t.Name, t.ChannelId, channelTitles[t.ChannelId]))
-            .ToList();
     }
 
     /// <summary>
@@ -1227,7 +1170,8 @@ public sealed class ChatService(
     /// <summary>
     /// Returns the effective tool list for a chat call.  When a task context is
     /// present, task-scoped tools (shared data, output, custom hooks) are appended.
-    /// When the agent has <see cref="TaskPermissionKeys.CanInvokeTasksAsTool"/>, active
+    /// When the agent has the <c>CanInvokeTasksAsTool</c> global flag (owned by
+    /// the agent-orchestration module), active
     /// task definitions are exposed as platform-level tools.
     /// The tool-awareness filter is applied last so it can suppress any tool by name.
     /// </summary>
@@ -1247,20 +1191,15 @@ public sealed class ChatService(
                 baseTools.AddRange(store.GetToolDefinitions());
         }
 
-        // Platform-level task tools: expose active task definitions when the agent
-        // has CanInvokeTasksAsTool and we are not already inside a task context.
+        // Platform-level extra tools contributed by modules through
+        // IChatProcessingBridge. Each contributor evaluates its own policy
+        // (e.g. agent-orchestration's CanInvokeTasksAsTool) so this method
+        // never names a module-owned permission key inline.
         if (agentId.HasValue && taskContext is null)
         {
-            var actionSvc = serviceProvider.GetService<AgentActionService>();
-            var taskToolProvider = serviceProvider.GetService<TaskToolProvider>();
-            if (actionSvc is not null && taskToolProvider is not null)
-            {
-                var caller = new ActionCaller(AgentId: agentId.Value);
-                var result = await actionSvc.EvaluateGlobalFlagByKeyAsync(
-                    TaskPermissionKeys.CanInvokeTasksAsTool, agentId.Value, caller, ct: ct);
-                if (result.Verdict == ClearanceVerdict.Approved)
-                    baseTools.AddRange(await taskToolProvider.GetToolDefinitionsAsync(ct));
-            }
+            var extraTools = await chatProcessingBridge.GetExtraToolsAsync(agentId.Value, ct);
+            if (extraTools.Count > 0)
+                baseTools.AddRange(extraTools);
         }
 
         if (toolAwareness is null or { Count: 0 })
@@ -1441,12 +1380,6 @@ public sealed class ChatService(
         {
             externalHost?.ReleaseExecution();
         }
-    }
-
-    private static JsonElement BuildJsonSchema(string json)
-    {
-        using var doc = JsonDocument.Parse(json);
-        return doc.RootElement.Clone();
     }
 
     /// <summary>
@@ -1951,14 +1884,6 @@ public sealed class ChatService(
     /// </summary>
     private static string FormatToolNotation(AgentJobResponse job)
         => $"\n⚙ [{job.ActionKey ?? "unknown"}] → {job.Status}";
-
-    /// <summary>
-    /// Formats a tool call notation line for a job that required
-    /// approval, showing the final outcome.
-    /// Format: <c>\n⏳ [ActionKey] awaiting approval → Status</c>
-    /// </summary>
-    private static string FormatApprovalNotation(AgentJobResponse job)
-        => $"\n⏳ [{job.ActionKey ?? "unknown"}] awaiting approval → {job.Status}";
 
     /// <summary>
     /// Formats a tool call notation line for an inline tool (wait,

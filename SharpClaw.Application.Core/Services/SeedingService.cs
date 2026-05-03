@@ -5,12 +5,13 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Infrastructure.Models.Access;
-using SharpClaw.Application.Infrastructure.Models.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Providers.Common;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 

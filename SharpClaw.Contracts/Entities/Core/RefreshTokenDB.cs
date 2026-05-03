@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 public class RefreshTokenDB : BaseEntity
 {

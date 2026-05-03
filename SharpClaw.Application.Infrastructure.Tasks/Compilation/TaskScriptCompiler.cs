@@ -95,9 +95,6 @@ public sealed class TaskScriptCompiler
         return steps
             .Select(step => step with
             {
-                LoopKind = step.StepKey == WellKnownTaskStepKeys.Loop
-                    ? step.LoopKind ?? (step.VariableName is not null ? TaskLoopKind.ForEach : TaskLoopKind.While)
-                    : step.LoopKind,
                 Body = step.Body is not null ? NormalizeSteps(step.Body) : step.Body,
                 ElseBody = step.ElseBody is not null ? NormalizeSteps(step.ElseBody) : step.ElseBody,
             })

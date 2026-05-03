@@ -5,12 +5,13 @@ using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
 using SharpClaw.Application.API.Cli;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Infrastructure.Models;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Providers.Common;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Tests.Cli;

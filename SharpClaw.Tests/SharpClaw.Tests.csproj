@@ -27,7 +27,15 @@
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure.Tasks\SharpClaw.Application.Infrastructure.Tasks.csproj" />
     <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
     <ProjectReference Include="..\DefaultModules\Providers\LlamaSharp\SharpClaw.Modules.Providers.LlamaSharp.csproj" />
     <ProjectReference Include="..\DefaultModules\WebAccess\SharpClaw.Modules.WebAccess.csproj" />
+    <ProjectReference Include="..\DefaultModules\Http\SharpClaw.Modules.Http.csproj" />
+    <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />
+    <ProjectReference Include="..\DefaultModules\ComputerUse\SharpClaw.Modules.ComputerUse.csproj" />
+    <ProjectReference Include="..\DefaultModules\FilesystemTriggers\SharpClaw.Modules.FilesystemTriggers.csproj" />
+    <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj" />
+    <ProjectReference Include="..\DefaultModules\NetworkTriggers\SharpClaw.Modules.NetworkTriggers.csproj" />
+    <ProjectReference Include="..\DefaultModules\DatabaseAccess\SharpClaw.Modules.DatabaseAccess.csproj" />
   </ItemGroup>
 </Project>

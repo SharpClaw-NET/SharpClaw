@@ -5,8 +5,12 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 
 using Microsoft.EntityFrameworkCore;
 
+using SharpClaw.Contracts.Chat;
+using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Contracts.Services;
+using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.AgentOrchestration.Services;
 
 namespace SharpClaw.Modules.AgentOrchestration;
@@ -15,11 +19,20 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// Default module: agent lifecycle (create sub-agent, manage agent),
 /// task editing, and skill access. All tools flow through the job pipeline.
 /// </summary>
-public sealed class AgentOrchestrationModule : ISharpClawModule
+public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAware
 {
-    public string Id => "sharpclaw_agent_orchestration";
+    public const string ModuleIdValue = "sharpclaw_agent_orchestration";
+
+    public string Id => ModuleIdValue;
     public string DisplayName => "Agent Orchestration";
     public string ToolPrefix => "ao";
+
+    /// <summary>
+    /// Parser extension contributed by the merged Task Scripting subsystem
+    /// (folded into Agent Orchestration). Registers the <c>OnTimer</c>
+    /// event-handler name and the scripting-language primitives.
+    /// </summary>
+    public ITaskParserModuleExtension ParserExtension => TaskScriptingParserExtension.Instance;
 
     // ═══════════════════════════════════════════════════════════════
     // DI Registration
@@ -30,6 +43,42 @@ public sealed class AgentOrchestrationModule : ISharpClawModule
         services.AddScoped(sp => sp.GetRequiredService<IModuleDbContextFactory>()
             .CreateDbContext<AgentOrchestrationDbContext>());
         services.TryAddScoped<AgentOrchestrationService>();
+        services.AddScoped<ITaskStepExecutorExtension, AgentOrchestrationTaskStepExecutor>();
+
+        // Module-owned chat contributor: surfaces task definitions as agent
+        // tools when the agent has CanInvokeTasksAsTool. The flag key is read
+        // directly from AgentOrchestrationPermissionKeys; the policy decision
+        // and the data fetch both live in the module.
+        services.AddScoped<IChatProcessingContributor, AgentOrchestrationChatContributor>();
+
+        // Event-bus triggers (Event / TaskCompleted / TaskFailed) — moved here
+        // from core by the trigger-extraction plan. The same instance is
+        // exposed both as a trigger source and as a host event sink.
+        services.AddSingleton<EventBusTriggerSource>();
+        services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<EventBusTriggerSource>());
+        services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<EventBusTriggerSource>());
+
+        // ── Merged from sharpclaw_task_scripting ───────────────────
+        // Task scripting primitives (declare/assign/conditional/loop/return/
+        // event_handler/evaluate) and runtime control (delay/wait_until_stopped/log).
+        services.AddScoped<ITaskStepExecutorExtension, TaskScriptingStepExecutor>();
+
+        // Lifecycle triggers (Startup / Shutdown).
+        services.AddSingleton<ITaskTriggerSource, LifecycleTriggerSource>();
+
+        // Task-chain triggers (TaskCompleted / TaskFailed). Same instance is
+        // exposed as a trigger source and as a host event sink so it observes
+        // orchestrator completion events.
+        services.AddSingleton<TaskChainTriggerSource>();
+        services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<TaskChainTriggerSource>());
+        services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<TaskChainTriggerSource>());
+
+        // ── Scheduled jobs (relocated from core) ───────────────────
+        // Module owns the scheduling logic; the host only exposes
+        // ITaskInstanceLauncher to actually start a task instance.
+        services.AddScoped<ScheduledJobService>();
+        services.AddScoped<IScheduledJobService>(sp => sp.GetRequiredService<ScheduledJobService>());
+        services.AddSingleton<ScheduledJobWorker>();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -106,6 +155,26 @@ public sealed class AgentOrchestrationModule : ISharpClawModule
     public IReadOnlyList<ModuleCliCommand> GetCliCommands() =>
     [
         new(
+            Name: "schedule",
+            Aliases: [],
+            Scope: ModuleCliScope.TopLevel,
+            Description: "Manage cron scheduled jobs",
+            UsageLines:
+            [
+                "schedule list                             List all scheduled jobs",
+                "schedule get <jobId>                      Show a scheduled job",
+                "schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]",
+                "                                          Create a cron scheduled job",
+                "schedule update <jobId> --cron <expr> [--timezone <tz>]",
+                "                                          Update cron expression / timezone",
+                "schedule pause <jobId>                    Pause a scheduled job",
+                "schedule resume <jobId>                   Resume a paused job",
+                "schedule delete <jobId>                   Delete a scheduled job",
+                "schedule preview <expr> [--timezone <tz>] [--count N]",
+                "                                          Preview next occurrences of a cron expression",
+            ],
+            Handler: HandleScheduleCommandAsync),
+        new(
             Name: "aotask",
             Aliases: ["aot"],
             Scope: ModuleCliScope.ResourceType,
@@ -134,6 +203,166 @@ public sealed class AgentOrchestrationModule : ISharpClawModule
             ],
             Handler: HandleResourceAoSkillCommandAsync),
     ];
+
+    private static async Task HandleScheduleCommandAsync(
+        string[] args, IServiceProvider sp, CancellationToken ct)
+    {
+        // args[0] = "schedule" (top-level), args[1] = sub-command.
+        // When forwarded from the legacy "task schedule …" alias the host
+        // dispatcher rewrites args so args[0] is still "schedule".
+        var ids = sp.GetRequiredService<ICliIdResolver>();
+        var svc = sp.GetRequiredService<IScheduledJobService>();
+
+        if (args.Length < 2)
+        {
+            PrintScheduleUsage();
+            return;
+        }
+
+        var sub = args[1].ToLowerInvariant();
+        switch (sub)
+        {
+            case "list":
+                ids.PrintJson(await svc.ListAsync(ct));
+                break;
+
+            case "get" when args.Length >= 3:
+            {
+                var job = await svc.GetByIdAsync(ids.Resolve(args[2]), ct);
+                if (job is not null) ids.PrintJson(job);
+                else Console.Error.WriteLine("Not found.");
+                break;
+            }
+            case "get":
+                Console.Error.WriteLine("schedule get <jobId>");
+                break;
+
+            case "create":
+            {
+                var flags = ParseFlags(args, 2);
+                if (!flags.TryGetValue("cron", out var cronExpr) || string.IsNullOrWhiteSpace(cronExpr))
+                {
+                    Console.Error.WriteLine("schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]");
+                    break;
+                }
+
+                Guid? taskId = args.Length >= 3 && Guid.TryParse(args[2], out var tid) ? tid : null;
+                flags.TryGetValue("timezone", out var tz);
+                flags.TryGetValue("name", out var name);
+
+                try
+                {
+                    var result = await svc.CreateAsync(new CreateScheduledJobRequest(
+                        Name: name ?? cronExpr,
+                        TaskDefinitionId: taskId,
+                        CronExpression: cronExpr,
+                        CronTimezone: tz), ct);
+                    ids.PrintJson(result);
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.Error.WriteLine(ex.Message);
+                }
+                break;
+            }
+
+            case "update" when args.Length >= 3:
+            {
+                var jobId = ids.Resolve(args[2]);
+                var flags = ParseFlags(args, 3);
+                flags.TryGetValue("cron", out var cronExpr);
+                flags.TryGetValue("timezone", out var tz);
+
+                try
+                {
+                    var result = await svc.UpdateAsync(jobId, new UpdateScheduledJobRequest(
+                        CronExpression: cronExpr,
+                        CronTimezone: tz), ct);
+                    if (result is not null) ids.PrintJson(result);
+                    else Console.Error.WriteLine("Not found.");
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.Error.WriteLine(ex.Message);
+                }
+                break;
+            }
+            case "update":
+                Console.Error.WriteLine("schedule update <jobId> --cron <expr> [--timezone <tz>]");
+                break;
+
+            case "pause" when args.Length >= 3:
+            {
+                var result = await svc.PauseAsync(ids.Resolve(args[2]), ct);
+                if (result is not null) ids.PrintJson(result);
+                else Console.Error.WriteLine("Not found.");
+                break;
+            }
+            case "pause":
+                Console.Error.WriteLine("schedule pause <jobId>");
+                break;
+
+            case "resume" when args.Length >= 3:
+            {
+                var result = await svc.ResumeAsync(ids.Resolve(args[2]), ct);
+                if (result is not null) ids.PrintJson(result);
+                else Console.Error.WriteLine("Not found.");
+                break;
+            }
+            case "resume":
+                Console.Error.WriteLine("schedule resume <jobId>");
+                break;
+
+            case "delete" when args.Length >= 3:
+            {
+                var ok = await svc.DeleteAsync(ids.Resolve(args[2]), ct);
+                Console.WriteLine(ok ? "Done." : "Not found.");
+                break;
+            }
+            case "delete":
+                Console.Error.WriteLine("schedule delete <jobId>");
+                break;
+
+            case "preview" when args.Length >= 3:
+            {
+                var expr = args[2];
+                var flags = ParseFlags(args, 3);
+                flags.TryGetValue("timezone", out var tz);
+                var count = flags.TryGetValue("count", out var cStr) && int.TryParse(cStr, out var c) ? c : 10;
+                count = count <= 0 ? 10 : Math.Min(count, 100);
+                try
+                {
+                    ids.PrintJson(svc.PreviewExpression(expr, tz, count));
+                }
+                catch (InvalidOperationException ex)
+                {
+                    Console.Error.WriteLine(ex.Message);
+                }
+                break;
+            }
+            case "preview":
+                Console.Error.WriteLine("schedule preview <expr> [--timezone <tz>] [--count N]");
+                break;
+
+            default:
+                Console.Error.WriteLine($"Unknown command: schedule {sub}");
+                PrintScheduleUsage();
+                break;
+        }
+    }
+
+    private static void PrintScheduleUsage()
+    {
+        Console.Error.WriteLine("Usage:");
+        Console.Error.WriteLine("  schedule list                             List all scheduled jobs");
+        Console.Error.WriteLine("  schedule get <jobId>                      Show a scheduled job");
+        Console.Error.WriteLine("  schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]");
+        Console.Error.WriteLine("  schedule update <jobId> --cron <expr> [--timezone <tz>]");
+        Console.Error.WriteLine("  schedule pause <jobId>                    Pause a scheduled job");
+        Console.Error.WriteLine("  schedule resume <jobId>                   Resume a paused job");
+        Console.Error.WriteLine("  schedule delete <jobId>                   Delete a scheduled job");
+        Console.Error.WriteLine("  schedule preview <expr> [--timezone <tz>] [--count N]");
+    }
 
     private static async Task HandleResourceAoTaskCommandAsync(
         string[] args, IServiceProvider sp, CancellationToken ct)
@@ -461,6 +690,8 @@ public sealed class AgentOrchestrationModule : ISharpClawModule
         new("CanCreateSubAgents", "Create Sub-Agents", "Create sub-agents with permissions ≤ the creator's.", "CreateSubAgentAsync"),
         new("CanEditAgentHeader", "Edit Agent Header", "Edit the custom chat header of specific agents.", "CanEditAgentHeaderAsync"),
         new("CanEditChannelHeader", "Edit Channel Header", "Edit the custom chat header of specific channels.", "CanEditChannelHeaderAsync"),
+        new(AgentOrchestrationPermissionKeys.CanInvokeTasksAsTool, "Invoke Tasks As Tool",
+            "Expose active task definitions in the agent tool list.", "InvokeTaskAsToolAsync"),
     ];
 
     // ═══════════════════════════════════════════════════════════════
@@ -580,10 +811,30 @@ public sealed class AgentOrchestrationModule : ISharpClawModule
     // Lifecycle
     // ═══════════════════════════════════════════════════════════════
 
-    public Task InitializeAsync(IServiceProvider services, CancellationToken ct)
-        => Task.CompletedTask;
+    private ScheduledJobWorker? _scheduledJobWorker;
 
-    public Task ShutdownAsync() => Task.CompletedTask;
+    public Task InitializeAsync(IServiceProvider services, CancellationToken ct)
+    {
+        _scheduledJobWorker = services.GetService<ScheduledJobWorker>();
+        _scheduledJobWorker?.Start();
+        return Task.CompletedTask;
+    }
+
+    public async Task ShutdownAsync()
+    {
+        if (_scheduledJobWorker is not null)
+            await _scheduledJobWorker.StopAsync();
+    }
+
+    // ═══════════════════════════════════════════════════════════════
+    // Endpoint Mapping
+    // ═══════════════════════════════════════════════════════════════
+
+    public void MapEndpoints(object app)
+    {
+        var endpoints = (Microsoft.AspNetCore.Routing.IEndpointRouteBuilder)app;
+        Handlers.ScheduledJobEndpoints.MapScheduledJobEndpoints(endpoints);
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Schema builders

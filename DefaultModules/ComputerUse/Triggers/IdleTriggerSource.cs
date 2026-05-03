@@ -66,17 +66,22 @@ public sealed class IdleTriggerSource(
 
                 foreach (var ctx in _contexts)
                 {
-                    var threshold = (ctx.Definition.IdleMinutes ?? 5) * 60;
+                    var minutes = TryParseInt(ctx.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.IdleMinutes)) ?? 5;
+                    var threshold = minutes * 60;
                     var isIdle    = idleSeconds >= threshold;
 
-                    if (ctx.Definition.TriggerKey == "SystemIdle" && !wasIdle && isIdle)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.SystemIdle && !wasIdle && isIdle)
                         await FireAsync(ctx);
 
-                    if (ctx.Definition.TriggerKey == "SystemActive" && wasIdle && !isIdle)
+                    if (ctx.Definition.TriggerKey == ComputerUseTriggerKeys.SystemActive && wasIdle && !isIdle)
                         await FireAsync(ctx);
                 }
 
-                wasIdle = _contexts.Any(c => GetIdleSeconds() >= (c.Definition.IdleMinutes ?? 5) * 60);
+                wasIdle = _contexts.Any(c =>
+                {
+                    var m = TryParseInt(c.Definition.Parameters.GetValueOrDefault(ComputerUseTriggerKeys.IdleMinutes)) ?? 5;
+                    return GetIdleSeconds() >= m * 60;
+                });
             }
             catch (OperationCanceledException) { break; }
             catch (Exception ex)
@@ -136,6 +141,10 @@ public sealed class IdleTriggerSource(
                 "IdleTriggerSource failed to fire context for definition {Id}.", ctx.TaskDefinitionId);
         }
     }
+
+    private static int? TryParseInt(string? value) =>
+        int.TryParse(value, System.Globalization.NumberStyles.Integer,
+            System.Globalization.CultureInfo.InvariantCulture, out var n) ? n : null;
 
     [StructLayout(LayoutKind.Sequential)]
     private struct LASTINPUTINFO

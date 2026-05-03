@@ -2,6 +2,7 @@ using System.Text.Json;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -35,8 +36,8 @@ public class LoopTask
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
         result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].StepKey.Should().Be(WellKnownTaskStepKeys.Loop);
-        result.Plan.ExecutionSteps[0].LoopKind.Should().Be(TaskLoopKind.ForEach);
+        result.Plan.ExecutionSteps[0].StepKey.Should().Be(TaskScriptingStepKeys.Loop);
+        result.Plan.ExecutionSteps[0].VariableName.Should().Be("item");
         result.Plan.ParameterValues["Items"].Should().BeAssignableTo<List<object?>>();
     }
 
@@ -62,7 +63,7 @@ public class WhileTask
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
         result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].LoopKind.Should().Be(TaskLoopKind.While);
+        result.Plan.ExecutionSteps[0].VariableName.Should().BeNull();
     }
 
     [Test]
@@ -119,3 +120,4 @@ public class ParameterTask
         result.Plan.ParameterValues["Enabled"].Should().Be(true);
     }
 }
+

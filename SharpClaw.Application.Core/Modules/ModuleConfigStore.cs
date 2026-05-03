@@ -2,7 +2,7 @@ using System.Globalization;
 
 using Microsoft.EntityFrameworkCore;
 
-using SharpClaw.Application.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
 

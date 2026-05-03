@@ -1,9 +1,9 @@
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 
-namespace SharpClaw.Application.Infrastructure.Models.Jobs;
+namespace SharpClaw.Contracts.Entities.Core.Jobs;
 
 /// <summary>
 /// Persisted record of an agent action job.  Tracks the full lifecycle

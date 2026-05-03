@@ -1,7 +1,7 @@
-using SharpClaw.Application.Infrastructure.Models.Messages;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Context;
+namespace SharpClaw.Contracts.Entities.Core.Context;
 
 /// <summary>
 /// A conversation thread within a channel.  Threads enable persistent

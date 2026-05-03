@@ -4,8 +4,9 @@ using SharpClaw.Application.Core.Clients;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 

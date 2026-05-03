@@ -126,6 +126,9 @@ public static class InfrastructureServiceExtensions
 
         services.AddScoped<ICoreEntityIdProvider, CoreEntityIdProvider>();
 
+        services.AddScoped<ISharpClawDataContext>(
+            sp => sp.GetRequiredService<SharpClawDbContext>());
+
         return services;
     }
 

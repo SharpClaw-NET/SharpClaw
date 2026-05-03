@@ -1,8 +1,7 @@
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
-using SharpClaw.Contracts.Providers;
 
-namespace SharpClaw.Infrastructure.Models;
+namespace SharpClaw.Contracts.Entities.Core;
 
 public class ProviderDB : BaseEntity
 {
@@ -10,7 +9,7 @@ public class ProviderDB : BaseEntity
     public string ProviderKey { get; set; } = string.Empty;
 
     /// <summary>
-    /// Base URL for the provider API. Only used for <see cref="WellKnownProviderKeys.Custom"/> providers.
+    /// Base URL for the provider API. Only used for <c>custom</c> providers.
     /// </summary>
     public string? ApiEndpoint { get; set; }
 

@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Infrastructure.Persistence;
 

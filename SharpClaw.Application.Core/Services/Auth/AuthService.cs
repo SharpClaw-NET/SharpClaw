@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.DTOs.Users;
-using SharpClaw.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 

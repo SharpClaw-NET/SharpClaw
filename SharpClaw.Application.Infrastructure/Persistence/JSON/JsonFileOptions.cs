@@ -1,6 +1,6 @@
-using SharpClaw.Application.Infrastructure.Models.Jobs;
-using SharpClaw.Application.Infrastructure.Models.Messages;
-using SharpClaw.Application.Infrastructure.Models.Tasks;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Tasks;
 
 namespace SharpClaw.Infrastructure.Persistence.JSON;
 

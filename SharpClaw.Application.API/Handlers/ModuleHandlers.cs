@@ -5,7 +5,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Infrastructure.Logging;
-using SharpClaw.Application.Infrastructure.Models;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Application.Services;
 using SharpClaw.Infrastructure.Persistence;
 

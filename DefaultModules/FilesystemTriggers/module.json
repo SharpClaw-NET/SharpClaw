@@ -1,0 +1,17 @@
+{
+  "id": "sharpclaw_filesystem_triggers",
+  "displayName": "Filesystem Triggers",
+  "version": "1.0.0",
+  "toolPrefix": "fstrigger",
+  "entryAssembly": "SharpClaw.Modules.FilesystemTriggers",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Owns the FileChanged task trigger and the underlying FileSystemWatcher-based trigger source.",
+  "license": "AGPL-3.0",
+  "platforms": null,
+  "enabled": true,
+  "defaultEnabled": true,
+  "executionTimeoutSeconds": 60,
+  "exports": [],
+  "requires": []
+}

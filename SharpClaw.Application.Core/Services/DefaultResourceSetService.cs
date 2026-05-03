@@ -1,6 +1,6 @@
-﻿using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Infrastructure.Models.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -14,7 +14,7 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegistry moduleRegistry)
 {
-    // ── Reads ──────────────────────────────────────────────────────
+    // -- Reads ------------------------------------------------------
 
     /// <summary>
     /// Gets the default resources for a channel.  Falls through to the
@@ -50,7 +50,7 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegis
             : EmptyResponse(Guid.Empty);
     }
 
-    // ── Bulk writes ────────────────────────────────────────────────
+    // -- Bulk writes ------------------------------------------------
 
     /// <summary>
     /// Sets the default resources for a channel (creates or replaces).
@@ -96,7 +96,7 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegis
         return ToResponse(ctx.DefaultResourceSet);
     }
 
-    // ── Per-key operations ─────────────────────────────────────────
+    // -- Per-key operations -----------------------------------------
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="key"/> is a
@@ -179,7 +179,7 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegis
         return ToResponse(ctx.DefaultResourceSet);
     }
 
-    // ── Helpers ────────────────────────────────────────────────────
+    // -- Helpers ----------------------------------------------------
 
     private async Task<DefaultResourceSetDB> CreateAndAttachAsync(
         Action<Guid> assignId, CancellationToken ct)

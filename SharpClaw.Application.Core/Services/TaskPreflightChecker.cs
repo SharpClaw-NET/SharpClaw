@@ -5,6 +5,7 @@ using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Providers.Common;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;

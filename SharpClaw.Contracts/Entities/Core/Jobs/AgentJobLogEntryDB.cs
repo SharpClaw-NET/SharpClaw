@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Jobs;
+namespace SharpClaw.Contracts.Entities.Core.Jobs;
 
 /// <summary>
 /// A single timestamped log entry within an <see cref="AgentJobDB"/>.

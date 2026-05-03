@@ -1,0 +1,17 @@
+{
+  "id": "sharpclaw_http",
+  "displayName": "HTTP",
+  "version": "1.0.0",
+  "toolPrefix": "http",
+  "entryAssembly": "SharpClaw.Modules.Http",
+  "minHostVersion": "1.0.0",
+  "author": "SharpClaw Team",
+  "description": "Owns the task-script HTTP request step (HttpGet/HttpPost/HttpPut/HttpDelete → http_request).",
+  "license": "AGPL-3.0",
+  "platforms": null,
+  "enabled": true,
+  "defaultEnabled": true,
+  "executionTimeoutSeconds": 60,
+  "exports": [],
+  "requires": []
+}

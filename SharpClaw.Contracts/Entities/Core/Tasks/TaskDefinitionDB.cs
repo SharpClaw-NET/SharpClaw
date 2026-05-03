@@ -1,6 +1,6 @@
 using SharpClaw.Contracts.Entities;
 
-namespace SharpClaw.Application.Infrastructure.Models.Tasks;
+namespace SharpClaw.Contracts.Entities.Core.Tasks;
 
 /// <summary>
 /// Persisted task script definition.  Stores the raw C# source together

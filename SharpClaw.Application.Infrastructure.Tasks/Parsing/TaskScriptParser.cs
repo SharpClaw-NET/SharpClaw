@@ -29,7 +29,22 @@ public sealed class TaskScriptParser
     private static readonly Dictionary<string, (string StepKey, string ModuleId)> _moduleStepKeys = [];
     private static readonly Dictionary<string, (string TriggerKey, string ModuleId)> _moduleEventTriggers = [];
     private static readonly HashSet<string> _moduleSingleArgMethods = [];
+    private static readonly Dictionary<string, ITaskTriggerAttributeHandler> _moduleTriggerAttributeHandlers
+        = new(StringComparer.Ordinal);
     private static readonly Lock _registryLock = new();
+    private static TaskParserPrimitives? _primitives;
+
+    /// <summary>
+    /// Wire-format step keys for statement-shaped primitives, supplied by
+    /// the registering scripting module. Core defines no step-name
+    /// constants; the parser refuses to emit statement steps until a
+    /// module contributes them.
+    /// </summary>
+    internal static TaskParserPrimitives Primitives =>
+        _primitives ?? throw new InvalidOperationException(
+            "Task script parser primitives have not been registered. " +
+            "A module implementing ITaskParserModuleExtension must supply " +
+            "TaskParserPrimitives via Primitives before parsing.");
 
     /// <summary>
     /// Register a module's parser extension. Safe to call multiple times
@@ -60,7 +75,44 @@ public sealed class TaskScriptParser
                 _moduleEventTriggers.TryAdd(method, entry);
             foreach (var method in extension.SingleArgExpressionMethods)
                 _moduleSingleArgMethods.Add(method);
+
+            foreach (var (attrName, handler) in extension.TriggerAttributeHandlers)
+            {
+                // Accept both short ("Schedule") and long ("ScheduleAttribute")
+                // forms for the same handler, matching how the legacy switch
+                // already pattern-matches attribute names.
+                RegisterTriggerAttributeHandler(attrName, handler);
+                if (!attrName.EndsWith("Attribute", StringComparison.Ordinal))
+                    RegisterTriggerAttributeHandler(attrName + "Attribute", handler);
+            }
+
+            if (extension.Primitives is { } primitives)
+            {
+                if (_primitives is not null && !_primitives.Equals(primitives))
+                {
+                    throw new InvalidOperationException(
+                        "Task script parser primitives have already been registered " +
+                        "by another module. Only one module may own the scripting-language " +
+                        "statement step keys.");
+                }
+                _primitives = primitives;
+            }
         }
+    }
+
+    private static void RegisterTriggerAttributeHandler(string attrName, ITaskTriggerAttributeHandler handler)
+    {
+        if (_moduleTriggerAttributeHandlers.TryGetValue(attrName, out var existing))
+        {
+            if (!ReferenceEquals(existing, handler))
+            {
+                throw new InvalidOperationException(
+                    $"Task trigger attribute '{attrName}' is already claimed by another " +
+                    "module-registered handler. Trigger attribute ownership is exclusive.");
+            }
+            return;
+        }
+        _moduleTriggerAttributeHandlers[attrName] = handler;
     }
 
     /// <summary>
@@ -453,8 +505,6 @@ public sealed class TaskScriptParser
         List<TaskDiagnostic> diagnostics)
     {
         var triggers = new List<TaskTriggerDefinition>();
-        TriggerConcurrency? concurrencyOverride = null;
-        int concurrencyCount = 0;
         bool hasWebhook = false;
 
         // First pass: detect [OnWebhook] presence for TASK428 check
@@ -482,375 +532,19 @@ public sealed class TaskScriptParser
             var attrName = attr.Name.ToString();
             var line = GetLine(attr);
 
-            switch (attrName)
+            // Module-owned trigger-attribute handlers take precedence over
+            // the built-in switch. A handler returning null declines the
+            // attribute and lets the legacy switch run.
+            if (_moduleTriggerAttributeHandlers.TryGetValue(attrName, out var moduleHandler))
             {
-                case "Schedule" or "ScheduleAttribute":
+                var ctx = new RoslynTriggerAttributeContext(attr, attrName, line, diagnostics);
+                var moduleTrigger = moduleHandler.Handle(ctx);
+                if (moduleTrigger is not null)
                 {
-                    var cron = ExtractFirstStringArg(attr);
-                    var tz   = GetNamedStringArg(attr, "Timezone");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey     = WellKnownTriggerKeys.Cron,
-                        CronExpression = cron,
-                        CronTimezone   = tz,
-                        Line           = line,
-                    });
-                    break;
-                }
-
-                case "OnEvent" or "OnEventAttribute":
-                {
-                    var eventType = ExtractFirstStringArg(attr);
-                    var filter    = GetNamedStringArg(attr, "Filter");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = WellKnownTriggerKeys.Event,
-                        EventType   = eventType,
-                        EventFilter = filter,
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnFileChanged" or "OnFileChangedAttribute":
-                {
-                    var path    = ExtractFirstStringArg(attr);
-                    var pattern = GetNamedStringArg(attr, "Pattern");
-                    var events  = GetNamedEnumArg<FileWatchEvent>(attr, "Events") ?? FileWatchEvent.Any;
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = WellKnownTriggerKeys.FileChanged,
-                        WatchPath   = path,
-                        FilePattern = pattern,
-                        FileEvents  = events,
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnProcessStarted" or "OnProcessStartedAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "ProcessStarted",
-                        ProcessName = ExtractFirstStringArg(attr),
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnProcessStopped" or "OnProcessStoppedAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "ProcessStopped",
-                        ProcessName = ExtractFirstStringArg(attr),
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnWebhook" or "OnWebhookAttribute":
-                {
-                    var route   = ExtractFirstStringArg(attr);
-                    var secret  = GetNamedStringArg(attr, "Secret");
-                    var sigHdr  = GetNamedStringArg(attr, "SignatureHeader");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey             = WellKnownTriggerKeys.Webhook,
-                        WebhookRoute           = route,
-                        WebhookSecretEnvVar    = secret,
-                        WebhookSignatureHeader = sigHdr,
-                        Line                   = line,
-                    });
-                    break;
-                }
-
-                case "OnHostReachable" or "OnHostReachableAttribute":
-                {
-                    var host = ExtractFirstStringArg(attr);
-                    var port = GetNamedIntArg(attr, "Port");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey = WellKnownTriggerKeys.HostReachable,
-                        HostName = host,
-                        HostPort = port,
-                        Line     = line,
-                    });
-                    break;
-                }
-
-                case "OnHostUnreachable" or "OnHostUnreachableAttribute":
-                {
-                    var host = ExtractFirstStringArg(attr);
-                    var port = GetNamedIntArg(attr, "Port");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey = WellKnownTriggerKeys.HostUnreachable,
-                        HostName = host,
-                        HostPort = port,
-                        Line     = line,
-                    });
-                    break;
-                }
-
-                case "OnTaskCompleted" or "OnTaskCompletedAttribute":
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey     = WellKnownTriggerKeys.TaskCompleted,
-                        SourceTaskName = ExtractFirstStringArg(attr),
-                        Line           = line,
-                    });
-                    break;
-
-                case "OnTaskFailed" or "OnTaskFailedAttribute":
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey     = WellKnownTriggerKeys.TaskFailed,
-                        SourceTaskName = ExtractFirstStringArg(attr),
-                        Line           = line,
-                    });
-                    break;
-
-                case "OnWindowFocused" or "OnWindowFocusedAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "WindowFocused",
-                        ProcessName = ExtractFirstStringArg(attr),
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnWindowBlurred" or "OnWindowBlurredAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "WindowBlurred",
-                        ProcessName = ExtractFirstStringArg(attr),
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnHotkey" or "OnHotkeyAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    var combo = ExtractFirstStringArg(attr);
-                    if (!IsHotkeyComboValid(combo))
-                    {
-                        diagnostics.Add(new TaskDiagnostic(
-                            TaskDiagnosticSeverity.Error,
-                            "TASK429",
-                            $"[OnHotkey] key combination \"{combo}\" could not be parsed. " +
-                            "Expected format: \"Modifier+Key\" (e.g. \"Ctrl+Shift+F10\").",
-                            line));
-                    }
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "Hotkey",
-                        HotkeyCombo = combo,
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnSystemIdle" or "OnSystemIdleAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey  = "SystemIdle",
-                        IdleMinutes = GetNamedIntArg(attr, "Minutes") ?? ExtractFirstIntArg(attr),
-                        Line        = line,
-                    });
-                    break;
-                }
-
-                case "OnSystemActive" or "OnSystemActiveAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey = "SystemActive",
-                        Line       = line,
-                    });
-                    break;
-                }
-
-                case "OnScreenLocked" or "OnScreenLockedAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey = "ScreenLocked",
-                        Line       = line,
-                    });
-                    break;
-                }
-
-                case "OnScreenUnlocked" or "OnScreenUnlockedAttribute":
-                {
-                    EmitPlatformWarningIfNeeded(attrName, line, diagnostics);
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey = "ScreenUnlocked",
-                        Line       = line,
-                    });
-                    break;
-                }
-
-                case "OnNetworkChanged" or "OnNetworkChangedAttribute":
-                {
-                    var ssid  = GetNamedStringArg(attr, "Ssid");
-                    var state = GetNamedEnumArg<NetworkState>(attr, "State") ?? NetworkState.Any;
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey   = WellKnownTriggerKeys.NetworkChanged,
-                        NetworkSsid  = ssid,
-                        NetworkState = state,
-                        Line         = line,
-                    });
-                    break;
-                }
-
-                case "OnDeviceConnected" or "OnDeviceConnectedAttribute":
-                {
-                    var devClass   = GetNamedStringArg(attr, "Class");
-                    var devPattern = GetNamedStringArg(attr, "Pattern");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey        = "DeviceConnected",
-                        DeviceClass       = devClass,
-                        DeviceNamePattern = devPattern,
-                        Line              = line,
-                    });
-                    break;
-                }
-
-                case "OnDeviceDisconnected" or "OnDeviceDisconnectedAttribute":
-                {
-                    var devClass   = GetNamedStringArg(attr, "Class");
-                    var devPattern = GetNamedStringArg(attr, "Pattern");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey        = "DeviceDisconnected",
-                        DeviceClass       = devClass,
-                        DeviceNamePattern = devPattern,
-                        Line              = line,
-                    });
-                    break;
-                }
-
-                case "OnQueryReturnsRows" or "OnQueryReturnsRowsAttribute":
-                {
-                    var query    = ExtractFirstStringArg(attr);
-                    var interval = GetNamedIntArg(attr, "PollInterval");
-                    if (!IsSelectCountQuery(query))
-                    {
-                        diagnostics.Add(new TaskDiagnostic(
-                            TaskDiagnosticSeverity.Warning,
-                            "TASK431",
-                            "[OnQueryReturnsRows] query should be a SELECT COUNT(*) expression " +
-                            "to avoid unintended side-effects.",
-                            line));
-                    }
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey            = "QueryReturnsRows",
-                        SqlQuery              = query,
-                        QueryPollIntervalSecs = interval,
-                        Line                  = line,
-                    });
-                    break;
-                }
-
-                case "OnMetricThreshold" or "OnMetricThresholdAttribute":
-                {
-                    var source    = ExtractFirstStringArg(attr);
-                    var threshold = GetNamedDoubleArg(attr, "Threshold");
-                    var direction = GetNamedEnumArg<ThresholdDirection>(attr, "Direction") ?? ThresholdDirection.Either;
-                    var interval  = GetNamedIntArg(attr, "PollInterval");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey             = WellKnownTriggerKeys.MetricThreshold,
-                        MetricSource           = source,
-                        MetricThreshold        = threshold,
-                        MetricDirection        = direction,
-                        MetricPollIntervalSecs = interval,
-                        Line                   = line,
-                    });
-                    break;
-                }
-
-                case "OnStartup" or "OnStartupAttribute":
-                    triggers.Add(new TaskTriggerDefinition { TriggerKey = WellKnownTriggerKeys.Startup, Line = line });
-                    break;
-
-                case "OnShutdown" or "OnShutdownAttribute":
-                    triggers.Add(new TaskTriggerDefinition { TriggerKey = WellKnownTriggerKeys.Shutdown, Line = line });
-                    break;
-
-                case "OsShortcut" or "OsShortcutAttribute":
-                {
-                    var label    = ExtractFirstStringArg(attr);
-                    var icon     = GetNamedStringArg(attr, "Icon");
-                    var category = GetNamedStringArg(attr, "Category");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey       = "OsShortcut",
-                        ShortcutLabel    = label,
-                        ShortcutIcon     = icon,
-                        ShortcutCategory = category,
-                        Line             = line,
-                    });
-                    break;
-                }
-
-                case "OnTrigger" or "OnTriggerAttribute":
-                {
-                    var sourceName = ExtractFirstStringArg(attr);
-                    var filter     = GetNamedStringArg(attr, "Filter");
-                    triggers.Add(new TaskTriggerDefinition
-                    {
-                        TriggerKey         = sourceName,
-                        CustomSourceFilter = filter,
-                        Line               = line,
-                    });
-                    break;
-                }
-
-                case "ConcurrencyPolicy" or "ConcurrencyPolicyAttribute":
-                {
-                    concurrencyCount++;
-                    if (concurrencyCount > 1)
-                    {
-                        diagnostics.Add(new TaskDiagnostic(
-                            TaskDiagnosticSeverity.Error,
-                            "TASK421",
-                            "More than one [ConcurrencyPolicy] attribute found on the same class.",
-                            line));
-                    }
-                    else
-                    {
-                        concurrencyOverride = GetNamedEnumArg<TriggerConcurrency>(attr, "Policy")
-                                           ?? ExtractFirstEnumArg<TriggerConcurrency>(attr);
-                    }
-                    break;
+                    triggers.Add(moduleTrigger with { Line = line });
+                    continue;
                 }
             }
-        }
-
-        // Apply concurrency override to all collected triggers
-        if (concurrencyOverride.HasValue)
-        {
-            for (var i = 0; i < triggers.Count; i++)
-                triggers[i] = triggers[i] with { Concurrency = concurrencyOverride.Value };
         }
 
         return triggers;
@@ -978,32 +672,16 @@ public sealed class TaskScriptParser
         return ParseEnumExpression<T>(arg.Expression);
     }
 
-    private static T? ExtractFirstEnumArg<T>(AttributeSyntax attr) where T : struct, Enum
-    {
-        var arg = attr.ArgumentList?.Arguments.FirstOrDefault();
-        if (arg is null)
-            return null;
-        return ParseEnumExpression<T>(arg.Expression);
-    }
-
-    private static int? ExtractFirstIntArg(AttributeSyntax attr)
-    {
-        var arg = attr.ArgumentList?.Arguments.FirstOrDefault();
-        if (arg?.Expression is LiteralExpressionSyntax lit && lit.Token.Value is int i)
-            return i;
-        return null;
-    }
-
     private static T? ParseEnumExpression<T>(ExpressionSyntax expr) where T : struct, Enum
     {
-        // Handle string literal: [ConcurrencyPolicy("Queue")]
+        // Handle string literal: e.g. ["Queue"]
         if (expr is LiteralExpressionSyntax lit && lit.Token.Value is string s)
         {
             if (Enum.TryParse<T>(s, ignoreCase: true, out var v)) return v;
             return null;
         }
 
-        // Handle member access: TriggerConcurrency.Queue or just Queue
+        // Handle member access: EnumType.Member or just Member
         var text = expr.ToString();
         var memberName = text.Contains('.') ? text[(text.LastIndexOf('.') + 1)..] : text;
 
@@ -1313,7 +991,7 @@ public sealed class TaskScriptParser
         {
             return new TaskStepDefinition
             {
-                StepKey  = WellKnownTaskStepKeys.DeclareVariable,
+                StepKey  = Primitives.DeclareVariable,
                 Line     = line,
                 Column   = column,
                 VariableName = variableName,
@@ -1342,7 +1020,7 @@ public sealed class TaskScriptParser
         // Plain declaration: var x = new Foo(), var x = expr, var x = a ?? await b()
         return new TaskStepDefinition
         {
-            StepKey      = WellKnownTaskStepKeys.DeclareVariable,
+            StepKey      = Primitives.DeclareVariable,
             Line         = line,
             Column       = column,
             VariableName = variableName,
@@ -1391,7 +1069,7 @@ public sealed class TaskScriptParser
             {
                 return new TaskStepDefinition
                 {
-                    StepKey    = WellKnownTaskStepKeys.Log,
+                    StepKey    = Primitives.Log,
                     Line       = line,
                     Column     = column,
                     Expression = ExtractFirstArgText(invocation),
@@ -1410,7 +1088,7 @@ public sealed class TaskScriptParser
         {
             return new TaskStepDefinition
             {
-                StepKey      = WellKnownTaskStepKeys.Assign,
+                StepKey      = Primitives.Assign,
                 Line         = line,
                 Column       = column,
                 VariableName = assignment.Left.ToString(),
@@ -1421,7 +1099,7 @@ public sealed class TaskScriptParser
         // Fallback: arbitrary expression (e.g. list.AddRange(...))
         return new TaskStepDefinition
         {
-            StepKey    = WellKnownTaskStepKeys.Evaluate,
+            StepKey    = Primitives.Evaluate,
             Line       = line,
             Column     = column,
             Expression = expression.ToString()
@@ -1441,7 +1119,7 @@ public sealed class TaskScriptParser
 
         return new TaskStepDefinition
         {
-            StepKey    = WellKnownTaskStepKeys.Conditional,
+            StepKey    = Primitives.Conditional,
             Line       = GetLine(ifStmt),
             Column     = GetColumn(ifStmt),
             Expression = ifStmt.Condition.ToString(),
@@ -1456,10 +1134,9 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            StepKey    = WellKnownTaskStepKeys.Loop,
+            StepKey    = Primitives.Loop,
             Line       = GetLine(whileStmt),
             Column     = GetColumn(whileStmt),
-            LoopKind   = TaskLoopKind.While,
             Expression = whileStmt.Condition.ToString(),
             Body       = ParseBlock(whileStmt.Statement, diagnostics)
         };
@@ -1471,10 +1148,9 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            StepKey      = WellKnownTaskStepKeys.Loop,
+            StepKey      = Primitives.Loop,
             Line         = GetLine(forEachStmt),
             Column       = GetColumn(forEachStmt),
-            LoopKind     = TaskLoopKind.ForEach,
             VariableName = forEachStmt.Identifier.Text,
             TypeName     = forEachStmt.Type.IsVar ? null : forEachStmt.Type.ToString(),
             Expression   = forEachStmt.Expression.ToString(),
@@ -1486,7 +1162,7 @@ public sealed class TaskScriptParser
     {
         return new TaskStepDefinition
         {
-            StepKey = WellKnownTaskStepKeys.Return,
+            StepKey = Primitives.Return,
             Line    = GetLine(ret),
             Column  = GetColumn(ret)
         };
@@ -1522,7 +1198,7 @@ public sealed class TaskScriptParser
         {
             return new TaskStepDefinition
             {
-                StepKey    = WellKnownTaskStepKeys.Delay,
+                StepKey    = Primitives.Delay,
                 Line       = line,
                 Column     = column,
                 Expression = ExtractFirstArgText(invocation),
@@ -1549,17 +1225,25 @@ public sealed class TaskScriptParser
         string? expression = null;
         if (descriptor.ExpressionArgIndex > 0 && args.Count > descriptor.ExpressionArgIndex)
             expression = args[descriptor.ExpressionArgIndex].Expression.ToString();
-        else if (descriptor.FirstArgIsExpression || descriptor.HttpMethod is not null)
+        else if (descriptor.FirstArgIsExpression)
             expression = ExtractFirstArgText(invocation);
+
+        var arguments = ExtractArgumentTexts(invocation);
+        if (descriptor.PrefixArgument is { } prefix)
+        {
+            var prefixed = new List<string>(arguments?.Count + 1 ?? 1) { prefix };
+            if (arguments is not null)
+                prefixed.AddRange(arguments);
+            arguments = prefixed;
+        }
 
         var step = new TaskStepDefinition
         {
             StepKey    = descriptor.StepKey,
             Line       = line,
             Column     = column,
-            HttpMethod = descriptor.HttpMethod,
             Expression = expression,
-            Arguments  = ExtractArgumentTexts(invocation)
+            Arguments  = arguments
         };
 
         if (descriptor.CapturesGenericType)
@@ -1581,8 +1265,8 @@ public sealed class TaskScriptParser
         List<TaskDiagnostic> diagnostics)
     {
         var methodName = GetMethodName(invocation);
-        var triggerKind = ResolveEventTrigger(methodName);
-        if (triggerKind is null)
+        var moduleTriggerKey = ResolveModuleTriggerKey(methodName);
+        if (moduleTriggerKey is null)
             return null;
 
         // Non-lambda arguments (e.g. the job variable reference)
@@ -1623,11 +1307,10 @@ public sealed class TaskScriptParser
 
         return new TaskStepDefinition
         {
-            StepKey          = WellKnownTaskStepKeys.EventHandler,
+            StepKey          = Primitives.EventHandler,
             Line             = line,
             Column           = column,
-            TriggerKind      = triggerKind.Value,
-            ModuleTriggerKey = ResolveModuleTriggerKey(methodName),
+            ModuleTriggerKey = moduleTriggerKey,
             HandlerParameter = handlerParam,
             Arguments        = nonLambdaArgs,
             Body             = body ?? []
@@ -1646,7 +1329,7 @@ public sealed class TaskScriptParser
         [
             new TaskStepDefinition
             {
-                StepKey    = WellKnownTaskStepKeys.Evaluate,
+                StepKey    = Primitives.Evaluate,
                 Line       = GetLine(body),
                 Column     = GetColumn(body),
                 Expression = body.ToString()
@@ -1752,13 +1435,6 @@ public sealed class TaskScriptParser
     // ── Lookup tables ─────────────────────────────────────────────
 
 
-    private static TaskTriggerKind? ResolveEventTrigger(string? methodName)
-    {
-        if (methodName is null) return null;
-        if (methodName == "OnTimer") return TaskTriggerKind.Timer;
-        return _moduleEventTriggers.ContainsKey(methodName) ? TaskTriggerKind.ModuleEvent : null;
-    }
-
     internal static string? ResolveModuleTriggerKey(string? methodName)
         => methodName is not null && _moduleEventTriggers.TryGetValue(methodName, out var entry)
             ? entry.TriggerKey : null;
@@ -1775,5 +1451,83 @@ public sealed class TaskScriptParser
     {
         var lineSpan = node.GetLocation().GetLineSpan();
         return lineSpan.StartLinePosition.Character;
+    }
+
+    // ── Module trigger-attribute context ──────────────────────────
+
+    /// <summary>
+    /// Roslyn-backed adapter handed to module-registered
+    /// <see cref="ITaskTriggerAttributeHandler"/>s. Reuses the parser's
+    /// existing argument-extraction helpers so handler behaviour matches the
+    /// legacy switch byte-for-byte.
+    /// </summary>
+    private sealed class RoslynTriggerAttributeContext : TaskTriggerAttributeContext
+    {
+        private readonly AttributeSyntax _attr;
+        private readonly List<TaskDiagnostic> _diagnostics;
+        private readonly int _line;
+        private readonly string _attrName;
+
+        public RoslynTriggerAttributeContext(
+            AttributeSyntax attr,
+            string attrName,
+            int line,
+            List<TaskDiagnostic> diagnostics)
+        {
+            _attr = attr;
+            _attrName = attrName.EndsWith("Attribute", StringComparison.Ordinal)
+                ? attrName[..^"Attribute".Length]
+                : attrName;
+            _line = line;
+            _diagnostics = diagnostics;
+        }
+
+        public override string AttributeName => _attrName;
+        public override int Line => _line;
+        public override int ArgumentCount => _attr.ArgumentList?.Arguments.Count ?? 0;
+
+        public override string? GetStringArg(int index)
+        {
+            var args = _attr.ArgumentList?.Arguments;
+            if (args is null || index < 0 || index >= args.Value.Count) return null;
+            if (args.Value[index].Expression is LiteralExpressionSyntax lit && lit.Token.Value is string s)
+                return s;
+            return null;
+        }
+
+        public override int? GetIntArg(int index)
+        {
+            var args = _attr.ArgumentList?.Arguments;
+            if (args is null || index < 0 || index >= args.Value.Count) return null;
+            if (args.Value[index].Expression is LiteralExpressionSyntax lit && lit.Token.Value is int i)
+                return i;
+            return null;
+        }
+
+        public override string? GetNamedStringArg(string name) => TaskScriptParser.GetNamedStringArg(_attr, name);
+        public override int?    GetNamedIntArg(string name)    => TaskScriptParser.GetNamedIntArg(_attr, name);
+        public override double? GetNamedDoubleArg(string name) => TaskScriptParser.GetNamedDoubleArg(_attr, name);
+        public override T?      GetNamedEnumArg<T>(string name) where T : struct => TaskScriptParser.GetNamedEnumArg<T>(_attr, name);
+
+        public override string? GetRawArgText(int index)
+        {
+            var args = _attr.ArgumentList?.Arguments;
+            if (args is null || index < 0 || index >= args.Value.Count) return null;
+            return args.Value[index].Expression.ToString();
+        }
+
+        public override void Report(
+            TaskTriggerAttributeDiagnosticSeverity severity,
+            string code,
+            string message)
+        {
+            var mapped = severity switch
+            {
+                TaskTriggerAttributeDiagnosticSeverity.Error   => TaskDiagnosticSeverity.Error,
+                TaskTriggerAttributeDiagnosticSeverity.Warning => TaskDiagnosticSeverity.Warning,
+                _                                              => TaskDiagnosticSeverity.Info,
+            };
+            _diagnostics.Add(new TaskDiagnostic(mapped, code, message, _line));
+        }
     }
 }

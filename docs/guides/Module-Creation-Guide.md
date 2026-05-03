@@ -441,16 +441,14 @@ Guard with an existence check so re-seeding manually doesn't produce duplicates.
 ## Owning task trigger sources
 
 A module can fire tasks in response to external events by implementing
-`ITaskTriggerSourceProvider`. The task system routes activation for the declared
-`TaskTriggerKind` values to your module.
+`ITaskTriggerSource`. The task system routes activation for the declared
+module-owned trigger keys to your module.
 
 ```csharp
-public sealed class MyTriggerSource : ITaskTriggerSourceProvider
+public sealed class MyTriggerSource : ITaskTriggerSource
 {
-    public string SourceName => "my_module";
-
-    public IReadOnlyList<TaskTriggerKind> SupportedKinds =>
-        [TaskTriggerKind.OnHotkey, TaskTriggerKind.OnProcessStarted];
+    public IReadOnlyList<string> TriggerKeys =>
+        ["my_module.on_hotkey", "my_module.on_process_started"];
 
     public Task EnableTriggerAsync(TaskDefinition def, CancellationToken ct)
     {
