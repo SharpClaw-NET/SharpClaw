@@ -106,9 +106,19 @@ public sealed class TaskScriptParser
         {
             if (!ReferenceEquals(existing, handler))
             {
+                // Surface both claimants so this is diagnosable from the
+                // crash log alone (e.g. when a stale module DLL is left in
+                // the host's base directory and gets glob-loaded by
+                // ModuleLoader.DiscoverBundled alongside a refactored owner).
+                var existingAsm = existing.GetType().Assembly.GetName().Name ?? "<unknown>";
+                var newAsm      = handler.GetType().Assembly.GetName().Name ?? "<unknown>";
                 throw new InvalidOperationException(
-                    $"Task trigger attribute '{attrName}' is already claimed by another " +
-                    "module-registered handler. Trigger attribute ownership is exclusive.");
+                    $"Task trigger attribute '{attrName}' is already claimed by " +
+                    $"'{existing.GetType().FullName}' (from '{existingAsm}'); a " +
+                    $"second handler '{handler.GetType().FullName}' (from '{newAsm}') " +
+                    "tried to register. Trigger attribute ownership is exclusive — " +
+                    "check for stale module DLLs in the host's base directory or " +
+                    "two modules exporting the same attribute name.");
             }
             return;
         }
