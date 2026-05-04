@@ -342,6 +342,7 @@ try
     builder.Services.AddScoped<TaskPreflightChecker>();
     builder.Services.AddScoped<TaskTriggerRegistrar>();
     builder.Services.AddScoped<TaskService>();
+    builder.Services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
     builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
     builder.Services.AddScoped<TaskToolProvider>();
     builder.Services.AddScoped<ITaskToolCatalog>(sp => sp.GetRequiredService<TaskToolProvider>());

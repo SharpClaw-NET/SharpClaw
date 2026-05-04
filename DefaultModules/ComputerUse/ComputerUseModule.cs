@@ -44,6 +44,7 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
         services.AddSingleton<DesktopAwarenessService>();
         services.AddSingleton<DisplayCaptureService>();
         services.AddSingleton<DesktopInputService>();
+        services.AddSingleton<FilesystemInspectionService>();
         services.AddSingleton<IWindowManager>(sp =>
             sp.GetRequiredService<DesktopAwarenessService>());
         services.AddSingleton<IDesktopInput>(sp =>
@@ -131,6 +132,7 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
         new("CanSendHotkey", "Send Hotkey", "Send keyboard shortcuts (Ctrl+S, Alt+Tab, etc.).", "SendHotkeyAsync"),
         new("CanReadClipboard", "Read Clipboard", "Read clipboard contents (text, files, images).", "ReadClipboardAsync"),
         new("CanWriteClipboard", "Write Clipboard", "Set clipboard contents (text or file paths).", "WriteClipboardAsync"),
+        new("CanInspectFiles", "Inspect Files", "Read-only filesystem inspection: list directories, stat paths, read text files. Cannot write, delete, or execute.", "InspectFilesAsync"),
     ];
 
     // ═══════════════════════════════════════════════════════════════
@@ -427,6 +429,8 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
             IsPerResource: true, Check: null, DelegateTo: "TypeOnDesktopAsync");
         var app = new ModuleToolPermission(
             IsPerResource: true, Check: null, DelegateTo: "LaunchNativeApplicationAsync");
+        var inspectFiles = new ModuleToolPermission(
+            IsPerResource: false, Check: null, DelegateTo: "InspectFilesAsync");
 
         return
         [
@@ -469,6 +473,18 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
             new("stop_process",
                 "Stop a process launched via launch_application. Must match a registered native app.",
                 StopProcessSchema(), app),
+            new("list_directory",
+                "Read-only: list the entries of a directory. Optionally recursive (depth-capped) and glob-filtered. Returns paths, sizes, and modified timestamps. Cannot modify the filesystem.",
+                ListDirectorySchema(), inspectFiles),
+            new("stat_path",
+                "Read-only: report whether a path exists and, if so, whether it is a file or directory plus its size, timestamps, and attributes.",
+                StatPathSchema(), inspectFiles),
+            new("find_files",
+                "Read-only: search a directory for files matching a glob (e.g. '*.cs', 'Foo*.json'). Optional recursion. Returns matching paths with sizes and timestamps.",
+                FindFilesSchema(), inspectFiles),
+            new("read_file_text",
+                "Read-only: read a text file's contents (UTF-8 / BOM-detected). Capped in bytes; supports an optional [start_line, end_line] slice. Cannot write or modify.",
+                ReadFileTextSchema(), inspectFiles),
         ];
     }
 
@@ -509,6 +525,27 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
             "read_clipboard" => await desktop.ReadClipboardAsync(Str(parameters, "format")),
             "write_clipboard" => await WriteClipboardAsync(parameters, desktop),
             "stop_process" => await StopProcessAsync(parameters, job, desktop, sp, ct),
+            "list_directory" => sp.GetRequiredService<FilesystemInspectionService>()
+                .ListDirectory(
+                    Str(parameters, "path") ?? throw new InvalidOperationException("list_directory requires 'path'."),
+                    Bool(parameters, "recursive") ?? false,
+                    Int(parameters, "max_entries"),
+                    Int(parameters, "max_depth"),
+                    Str(parameters, "include_glob")),
+            "stat_path" => sp.GetRequiredService<FilesystemInspectionService>()
+                .Stat(Str(parameters, "path") ?? throw new InvalidOperationException("stat_path requires 'path'.")),
+            "find_files" => sp.GetRequiredService<FilesystemInspectionService>()
+                .FindFiles(
+                    Str(parameters, "root") ?? throw new InvalidOperationException("find_files requires 'root'."),
+                    Str(parameters, "glob") ?? throw new InvalidOperationException("find_files requires 'glob'."),
+                    Bool(parameters, "recursive") ?? false,
+                    Int(parameters, "max_results")),
+            "read_file_text" => sp.GetRequiredService<FilesystemInspectionService>()
+                .ReadFileText(
+                    Str(parameters, "path") ?? throw new InvalidOperationException("read_file_text requires 'path'."),
+                    Int(parameters, "max_bytes"),
+                    Int(parameters, "start_line"),
+                    Int(parameters, "end_line")),
             _ => throw new InvalidOperationException($"Unknown Computer Use tool: {toolName}"),
         };
     }
@@ -962,6 +999,72 @@ public sealed class ComputerUseModule : ISharpClawModule, ITaskParserAware
                     }
                 },
                 "required": ["processId"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement ListDirectorySchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "path":          { "type": "string",  "description": "Absolute or env-expanded directory path." },
+                    "recursive":     { "type": "boolean", "description": "Recurse into subdirectories. Default false." },
+                    "max_entries":   { "type": "integer", "description": "Cap on total entries returned. Default 500, max 5000." },
+                    "max_depth":     { "type": "integer", "description": "Recursion depth cap. Default 3, max 16." },
+                    "include_glob":  { "type": "string",  "description": "Optional glob filter (e.g. '*.cs', '**/*.json')." }
+                },
+                "required": ["path"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement StatPathSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "path": { "type": "string", "description": "Absolute or env-expanded path to inspect." }
+                },
+                "required": ["path"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement FindFilesSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "root":        { "type": "string",  "description": "Directory to search under." },
+                    "glob":        { "type": "string",  "description": "Search pattern, e.g. '*.cs' or 'Foo*.json'." },
+                    "recursive":   { "type": "boolean", "description": "Recurse into subdirectories. Default false." },
+                    "max_results": { "type": "integer", "description": "Cap on results. Default 200, max 2000." }
+                },
+                "required": ["root", "glob"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement ReadFileTextSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "path":       { "type": "string",  "description": "Absolute or env-expanded file path." },
+                    "max_bytes":  { "type": "integer", "description": "Byte cap for reading. Default 262144, max 4194304." },
+                    "start_line": { "type": "integer", "description": "Optional 1-based start line." },
+                    "end_line":   { "type": "integer", "description": "Optional 1-based inclusive end line." }
+                },
+                "required": ["path"]
             }
             """);
         return doc.RootElement.Clone();

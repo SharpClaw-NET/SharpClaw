@@ -22,7 +22,7 @@ public sealed class TaskService(
     TaskPreflightChecker preflight,
     TaskTriggerRegistrar? triggerRegistrar = null,
     TaskTriggerHostService? triggerHostService = null,
-    ITaskTriggerSourceRegistry? triggerSourceRegistry = null)
+    ITaskTriggerSourceRegistry? triggerSourceRegistry = null) : ITaskAuthoring
 {
     /// <summary>
     /// Parse and validate a task definition without persisting it.
