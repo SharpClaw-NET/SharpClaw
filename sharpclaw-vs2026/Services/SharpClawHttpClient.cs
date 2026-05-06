@@ -95,9 +95,9 @@ internal sealed class SharpClawHttpClient : IDisposable
 
     public async Task<T?> GetAsync<T>(string path, CancellationToken ct = default)
     {
-        using var resp = await _http.GetAsync(path, ct);
+        using var resp = await _http.GetAsync(path, ct).ConfigureAwait(false);
         resp.EnsureSuccessStatusCode();
-        var json = await resp.Content.ReadAsStringAsync();
+        var json = await resp.Content.ReadAsStringAsync(ct).ConfigureAwait(false);
         return JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 
@@ -115,7 +115,7 @@ internal sealed class SharpClawHttpClient : IDisposable
             Content = new StringContent(json, Encoding.UTF8, "application/json")
         };
 
-        return await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct);
+        return await _http.SendAsync(req, HttpCompletionOption.ResponseHeadersRead, ct).ConfigureAwait(false);
     }
 
     public void Dispose() => _http.Dispose();

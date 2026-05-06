@@ -3,6 +3,7 @@ using System.Threading.Tasks;
 using Microsoft.VisualStudio.Extensibility;
 using Microsoft.VisualStudio.Extensibility.Commands;
 using Microsoft.VisualStudio.Extensibility.ToolWindows;
+using SharpClaw.VS2026Extension.Services;
 using SharpClaw.VS2026Extension.ToolWindows;
 
 namespace SharpClaw.VS2026Extension.Commands;
@@ -14,6 +15,13 @@ namespace SharpClaw.VS2026Extension.Commands;
 [VisualStudioContribution]
 internal sealed class ShowChatToolWindowCommand : Command
 {
+    private readonly SharpClawOutputLog _log;
+
+    public ShowChatToolWindowCommand(SharpClawOutputLog log)
+    {
+        _log = log;
+    }
+
     /// <inheritdoc />
     public override CommandConfiguration CommandConfiguration => new("%SharpClaw.ShowChatToolWindowCommand.DisplayName%")
     {
@@ -24,6 +32,13 @@ internal sealed class ShowChatToolWindowCommand : Command
         ],
         Icon = new(ImageMoniker.KnownValues.Comment, IconSettings.IconAndText),
     };
+
+    /// <inheritdoc />
+    public override async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        await _log.EnsureInitializedAsync(Extensibility, cancellationToken).ConfigureAwait(false);
+        await base.InitializeAsync(cancellationToken).ConfigureAwait(false);
+    }
 
     /// <inheritdoc />
     public override Task ExecuteCommandAsync(IClientContext context, CancellationToken cancellationToken)

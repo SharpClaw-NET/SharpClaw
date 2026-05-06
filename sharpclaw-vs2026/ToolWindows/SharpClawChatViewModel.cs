@@ -1,6 +1,7 @@
 using System;
 using System.Collections.ObjectModel;
 using System.IO;
+using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
 using System.Text;
 using System.Threading;
@@ -11,21 +12,63 @@ using SharpClaw.VS2026Extension.Services;
 namespace SharpClaw.VS2026Extension.ToolWindows;
 
 /// <summary>
+/// Awaitable that, when awaited, resumes the continuation on the captured
+/// <see cref="SynchronizationContext"/> (the sticky
+/// <c>NonConcurrentSynchronizationContext</c> owned by
+/// <see cref="SharpClawChatControl"/>). Used by the view model to guarantee
+/// that every mutation of an <c>ObservableList</c>, <c>SelectedXxx</c>, or
+/// <c>Status</c> property happens on a single, strictly serialized execution
+/// context — even when the work was spawned from a thread-pool callback
+/// (periodic refresh, SSE watch, reconnect notification).
+/// </summary>
+internal readonly struct SyncContextAwaitable : INotifyCompletion
+{
+    private readonly SynchronizationContext? _ctx;
+    public SyncContextAwaitable(SynchronizationContext? ctx) { _ctx = ctx; }
+    public SyncContextAwaitable GetAwaiter() => this;
+    public bool IsCompleted => _ctx is null || ReferenceEquals(SynchronizationContext.Current, _ctx);
+    public void OnCompleted(Action continuation)
+    {
+        if (_ctx is null) continuation();
+#pragma warning disable VSTHRD001 // _ctx is the Remote UI NonConcurrentSynchronizationContext, not the VS main thread.
+        else _ctx.Post(static s => ((Action)s!)(), continuation);
+#pragma warning restore VSTHRD001
+    }
+    public void GetResult() { }
+}
+
+/// <summary>
 /// Selectable item in the Context / Channel / Thread strip. Wraps an optional
-/// backend identifier; <see cref="Id"/> is <see langword="null"/> for sentinel
-/// rows like <c>[No Context]</c> or <c>[No Thread]</c>.
+/// backend identifier; the view model uses <see cref="Guid.Empty"/> for
+/// sentinel rows like <c>[No Context]</c> or <c>[No Thread]</c> so WPF
+/// <c>SelectedValue</c> can distinguish an explicit sentinel selection from
+/// a missing selection.
+///
+/// <para><see cref="DisplayName"/> is mutable + INPC so periodic refreshes
+/// can update a renamed channel/thread label in place without replacing the
+/// item instance. Replacing instances would invalidate the WPF ComboBox's
+/// reference-based <c>SelectedItem</c> and cause the picker to render blank
+/// after every refresh.</para>
 /// </summary>
 [DataContract]
-internal sealed class SharpClawSelectorItem
+internal sealed class SharpClawSelectorItem : NotifyPropertyChangedObject
 {
+    private string _displayName;
+
     public SharpClawSelectorItem(Guid? id, string displayName)
     {
         Id = id;
-        DisplayName = displayName;
+        _displayName = displayName ?? string.Empty;
     }
 
     [DataMember] public Guid? Id { get; }
-    [DataMember] public string DisplayName { get; }
+
+    [DataMember]
+    public string DisplayName
+    {
+        get => _displayName;
+        set => SetProperty(ref _displayName, value ?? string.Empty);
+    }
 
     public override string ToString() => DisplayName;
 }
@@ -104,51 +147,62 @@ internal static class SharpClawClientType
 [DataContract]
 internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 {
-    private static readonly SharpClawSelectorItem NoContext = new(null, "[No Context]");
-    private static readonly SharpClawSelectorItem NoChannels = new(null, "[No Channel]");
-    private static readonly SharpClawSelectorItem NoThread = new(null, "[No Thread]");
+    private static readonly Guid SentinelId = Guid.Empty;
+    private static readonly SharpClawSelectorItem NoContext = new(SentinelId, "[No Context]");
+    private static readonly SharpClawSelectorItem NoChannels = new(SentinelId, "[No Channel]");
+    private static readonly SharpClawSelectorItem NoThread = new(SentinelId, "[No Thread]");
 
     private readonly SharpClawBackend _backend;
     private readonly SharpClawOutputLog _log;
+    private readonly SynchronizationContext? _uiContext;
 
     private SharpClawSelectorItem? _selectedContext;
     private SharpClawSelectorItem? _selectedChannel;
     private SharpClawSelectorItem? _selectedThread;
+    private Guid? _selectedContextId = SentinelId;
+    private Guid? _selectedChannelId = SentinelId;
+    private Guid? _selectedThreadId = SentinelId;
     private string _composer = string.Empty;
     private string _status = "Idle";
     private bool _isBusy;
     private string _newThreadName = string.Empty;
     private CancellationTokenSource? _periodicCts;
     private CancellationTokenSource? _watchCts;
+    private CancellationTokenSource? _threadActivationCts;
     private Guid? _watchedChannelId;
     private Guid? _watchedThreadId;
     private bool _isThreadBusy;
     private bool _isSending;
     private bool _historyStaleAfterSend;
     private bool _initialized;
+    private long _selectionVersion;
 
-    // Serializes all selector loads (Refresh + cascading Reload*). Without
-    // this, a periodic refresh racing with a user-triggered selection change
-    // mutates the same ObservableList from two threads → ComboBox virtualization
-    // crashes Visual Studio (notably opening the Thread dropdown after a
-    // channel changes).
-    private readonly SemaphoreSlim _loadGate = new(1, 1);
-
-    // When >0, the SelectedContext/Channel/Thread setters skip their cascading
-    // reload. We bump this around programmatic re-selection (e.g. after
-    // Clear()+restore in RefreshAllAsync) so WPF's automatic SelectedItem=null
-    // (raised when the bound item leaves the collection) doesn't trigger a
-    // second, racing reload that fights the one we're already inside of —
-    // which is what was leaving "[No X]" rendered as a blank entry and
-    // crashing the thread dropdown.
+    // Re-entrancy guard for the cascading reload chain. Because every state
+    // mutation is now serialized on the sticky NonConcurrentSynchronizationContext
+    // (see SharpClawChatControl), races between periodic refresh / reconnect /
+    // user selection are no longer possible. We only need to suppress the
+    // automatic "SelectedItem became null because the previous instance left
+    // the collection" callback that WPF raises mid-merge — otherwise it would
+    // queue a second cascading reload that fights the one already in flight.
     private int _suppressCascade;
 
+    // True while a refresh chain is executing on the sync context. Subsequent
+    // refresh requests collapse into a single "do another pass when done"
+    // signal so we never queue an unbounded backlog of background reloads.
+    private bool _refreshInFlight;
+    private bool _refreshPending;
+    private bool _refreshPendingPreserve;
+
     public SharpClawChatViewModel(SharpClawBackend backend, SharpClawOutputLog log)
+        : this(backend, log, ui: null) { }
+
+    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawOutputLog log, SynchronizationContext? ui)
     {
         _backend = backend;
         _log = log;
+        _uiContext = ui;
 
-        RefreshCommand = new AsyncCommand(async (_, ct) => await RefreshAllAsync(preserveSelection: false, ct).ConfigureAwait(false));
+        RefreshCommand = new AsyncCommand(async (_, ct) => await RefreshAllAsync(preserveSelection: true, ct).ConfigureAwait(false));
         SendCommand = new AsyncCommand(async (_, ct) => await SendAsync(ct).ConfigureAwait(false));
         CreateThreadCommand = new AsyncCommand(async (_, ct) => await CreateThreadAsync(ct).ConfigureAwait(false));
 
@@ -156,6 +210,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         Contexts.Add(NoContext);
         _selectedContext = NoContext;
         Channels.Add(NoChannels);
+        _selectedChannel = NoChannels;
         Threads.Add(NoThread);
         _selectedThread = NoThread;
 
@@ -169,18 +224,120 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     private void OnBackendConnected(object? sender, EventArgs e)
     {
+        // Hop onto the serialized UI context before touching VM state. This
+        // is what makes a successful reconnect authoritatively overwrite a
+        // stale "Error: …" subtitle: we set Status synchronously on the same
+        // context that the XAML binding reads from, then trigger a refresh
+        // that will re-confirm "Connected" once data has loaded.
         _ = Task.Run(async () =>
         {
             try
             {
-                await _log.WriteLineAsync("Backend connected â€” refreshing chat selectors.").ConfigureAwait(false);
+                await SwitchToUi();
+                Status = "Connected — refreshing…";
+                await _log.WriteLineAsync("Backend connected — refreshing chat selectors.").ConfigureAwait(false);
                 await RefreshAllAsync(preserveSelection: true, CancellationToken.None).ConfigureAwait(false);
+                // RefreshAllAsync only sets "Connected" when preserveSelection
+                // is false (initial load). For a reconnect we still want to
+                // visibly clear any stale error text, so do it here.
+                await SwitchToUi();
+                if (_status.StartsWith("Error", StringComparison.Ordinal)
+                    || _status.StartsWith("Connected — refreshing", StringComparison.Ordinal))
+                {
+                    Status = "Connected";
+                }
             }
             catch (Exception ex)
             {
                 await _log.WriteLineAsync($"Connected-refresh failed: {ex.Message}").ConfigureAwait(false);
             }
         });
+    }
+
+    /// <summary>
+    /// Awaits a hop onto the sticky UI synchronization context. After this
+    /// awaits returns, every subsequent statement up to the next true
+    /// <c>await</c> on a different context runs serialized with the rest of
+    /// the VM's UI work — selector mutations, property setters, command
+    /// CanExecute toggles, etc. This is the single primitive that replaces
+    /// the old <c>SemaphoreSlim</c>-based load gate.
+    /// </summary>
+    private SyncContextAwaitable SwitchToUi() => new(_uiContext);
+
+    private static Guid? NormalizeSelectorId(Guid? id)
+        => id is Guid value ? value : SentinelId;
+
+    private static bool IsRealId(Guid? id)
+        => id is Guid value && value != SentinelId;
+
+    private static Guid? RealIdOrNull(Guid? id)
+        => IsRealId(id) ? id : null;
+
+    private bool SetSelectorId(ref Guid? field, Guid? value, string propertyName, bool forceNotify = false)
+    {
+        value = NormalizeSelectorId(value);
+        if (field == value)
+        {
+            if (forceNotify)
+                RaiseNotifyPropertyChangedEvent(propertyName);
+            return false;
+        }
+
+        field = value;
+        RaiseNotifyPropertyChangedEvent(propertyName);
+        return true;
+    }
+
+    private void SyncSelectedItemFromId(
+        ref SharpClawSelectorItem? field,
+        ObservableList<SharpClawSelectorItem> list,
+        Guid? id,
+        SharpClawSelectorItem sentinel,
+        string propertyName)
+    {
+        var item = IsRealId(id) ? FindById(list, id!.Value) ?? sentinel : sentinel;
+        if (!ReferenceEquals(field, item))
+        {
+            field = item;
+            RaiseNotifyPropertyChangedEvent(propertyName);
+        }
+    }
+
+    private void ResetChannelAndThreadSelection()
+    {
+        _suppressCascade++;
+        try
+        {
+            SetSelectorId(ref _selectedChannelId, SentinelId, nameof(SelectedChannelId), forceNotify: true);
+            SyncSelectedItemFromId(ref _selectedChannel, Channels, SentinelId, NoChannels, nameof(SelectedChannel));
+            ResetThreadSelection(clearThreads: true);
+            CancelThreadActivation();
+            Transcript.Clear();
+            DisconnectThreadWatch();
+        }
+        finally
+        {
+            _suppressCascade--;
+        }
+    }
+
+    private void ResetThreadSelection(bool clearThreads)
+    {
+        _suppressCascade++;
+        try
+        {
+            SetSelectorId(ref _selectedThreadId, SentinelId, nameof(SelectedThreadId), forceNotify: true);
+            SyncSelectedItemFromId(ref _selectedThread, Threads, SentinelId, NoThread, nameof(SelectedThread));
+            CancelThreadActivation();
+            if (clearThreads)
+            {
+                MergeById(Threads, new (Guid? Id, string Label)[] { (NoThread.Id, NoThread.DisplayName) }, NoThread);
+            }
+        }
+        finally
+        {
+            _suppressCascade--;
+        }
     }
 
     [DataMember] public ObservableList<SharpClawSelectorItem> Contexts { get; } = new();
@@ -203,8 +360,37 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         get => _selectedContext;
         set
         {
-            if (SetProperty(ref _selectedContext, value) && _suppressCascade == 0)
-                _ = ReloadChannelsAsync(CancellationToken.None);
+            // Remote UI/WPF can transiently push null while ItemsSource is
+            // being reshuffled by an in-place MergeById (the ComboBox sees
+            // its SelectedItem reference momentarily leave the collection
+            // during an Insert/RemoveAt sequence). A real "no selection"
+            // is represented by the sentinel item (NoContext), never by a
+            // literal null. Drop the spurious null so it doesn't clobber a
+            // valid selection and silently desync SelectedContextId from
+            // the visible dropdown state.
+            if (value is null) return;
+            if (SetProperty(ref _selectedContext, value))
+                SelectedContextId = value.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
+    public Guid? SelectedContextId
+    {
+        get => _selectedContextId;
+        set
+        {
+            var normalized = NormalizeSelectorId(value);
+            if (!SetSelectorId(ref _selectedContextId, normalized, nameof(SelectedContextId)))
+                return;
+
+            SyncSelectedItemFromId(ref _selectedContext, Contexts, normalized, NoContext, nameof(SelectedContext));
+            if (_suppressCascade != 0)
+                return;
+
+            unchecked { _selectionVersion++; }
+            ResetChannelAndThreadSelection();
+            _ = ReloadChannelsAsync(CancellationToken.None);
         }
     }
 
@@ -214,8 +400,39 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         get => _selectedChannel;
         set
         {
-            if (SetProperty(ref _selectedChannel, value) && _suppressCascade == 0)
-                _ = ReloadThreadsAsync(CancellationToken.None);
+            // See SelectedContext: ignore transient null pushes from WPF
+            // mid-merge. A real "no channel" goes through the NoChannels
+            // sentinel item, not literal null. Without this guard, a
+            // periodic refresh racing the user's channel selection would
+            // null SelectedChannelId out — leaving the thread dropdown
+            // empty and CreateThread reporting "Select a channel before
+            // creating a thread." even though the visible ComboBox still
+            // shows the chosen channel.
+            if (value is null) return;
+            if (SetProperty(ref _selectedChannel, value))
+                SelectedChannelId = value.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
+    public Guid? SelectedChannelId
+    {
+        get => _selectedChannelId;
+        set
+        {
+            var normalized = NormalizeSelectorId(value);
+            if (!SetSelectorId(ref _selectedChannelId, normalized, nameof(SelectedChannelId)))
+                return;
+
+            SyncSelectedItemFromId(ref _selectedChannel, Channels, normalized, NoChannels, nameof(SelectedChannel));
+            if (_suppressCascade != 0)
+                return;
+
+            unchecked { _selectionVersion++; }
+            ResetThreadSelection(clearThreads: false);
+            Transcript.Clear();
+            DisconnectThreadWatch();
+            _ = ReloadThreadsAsync(CancellationToken.None);
         }
     }
 
@@ -225,10 +442,39 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         get => _selectedThread;
         set
         {
-            if (SetProperty(ref _selectedThread, value) && _suppressCascade == 0)
+            // See SelectedContext: ignore transient null pushes from WPF
+            // mid-merge. A real "no thread" goes through the NoThread
+            // sentinel item.
+            if (value is null) return;
+            if (SetProperty(ref _selectedThread, value))
+                SelectedThreadId = value.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
+    public Guid? SelectedThreadId
+    {
+        get => _selectedThreadId;
+        set
+        {
+            var normalized = NormalizeSelectorId(value);
+            if (!SetSelectorId(ref _selectedThreadId, normalized, nameof(SelectedThreadId)))
+                return;
+
+            SyncSelectedItemFromId(ref _selectedThread, Threads, normalized, NoThread, nameof(SelectedThread));
+            if (_suppressCascade != 0)
+                return;
+
+            unchecked { _selectionVersion++; }
+            if (IsRealId(normalized))
             {
-                _ = ReloadHistoryAsync(CancellationToken.None);
-                ReconnectThreadWatch();
+                QueueThreadActivation();
+            }
+            else
+            {
+                CancelThreadActivation();
+                Transcript.Clear();
+                DisconnectThreadWatch();
             }
         }
     }
@@ -332,6 +578,90 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     // ── Thread activity watch ────────────────────────────────────
 
+    private void QueueThreadActivation()
+    {
+        CancelThreadActivation();
+
+        var channelId = RealIdOrNull(SelectedChannelId);
+        var threadId = RealIdOrNull(SelectedThreadId);
+        if (channelId is not Guid chId || threadId is not Guid thId)
+        {
+            Transcript.Clear();
+            DisconnectThreadWatch();
+            return;
+        }
+
+        var version = _selectionVersion;
+        var cts = new CancellationTokenSource();
+        _threadActivationCts = cts;
+        _ = Task.Run(() => ActivateThreadAsync(chId, thId, version, cts));
+    }
+
+    private void CancelThreadActivation()
+    {
+        var cts = _threadActivationCts;
+        if (cts is null)
+            return;
+
+        _threadActivationCts = null;
+        try { cts.Cancel(); } catch { /* best effort */ }
+    }
+
+    private async Task ActivateThreadAsync(Guid channelId, Guid threadId, long version, CancellationTokenSource cts)
+    {
+        var ct = cts.Token;
+        try
+        {
+            // Let the ComboBox finish committing/closing before we touch the
+            // transcript or open the watch stream. This keeps selection UI
+            // work tiny and prevents heavy Remote UI updates from running
+            // inside the selection-change delivery path.
+            await Task.Delay(150, ct).ConfigureAwait(false);
+
+            await SwitchToUi();
+            if (ct.IsCancellationRequested
+                || version != _selectionVersion
+                || RealIdOrNull(SelectedChannelId) != channelId
+                || RealIdOrNull(SelectedThreadId) != threadId)
+                return;
+
+            IsBusy = true;
+            Status = "Loading thread...";
+            Transcript.Clear();
+
+            var history = await _backend.GetHistoryAsync(channelId, threadId, ct).ConfigureAwait(false);
+
+            await SwitchToUi();
+            if (ct.IsCancellationRequested
+                || version != _selectionVersion
+                || RealIdOrNull(SelectedChannelId) != channelId
+                || RealIdOrNull(SelectedThreadId) != threadId)
+                return;
+
+            ReplaceTranscript(history);
+            Status = "Thread loaded.";
+            ReconnectThreadWatch();
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await SwitchToUi();
+            if (!ct.IsCancellationRequested)
+                Status = $"Error: {ex.Message}";
+            await _log.WriteLineAsync($"ActivateThread failed: {ex}").ConfigureAwait(false);
+        }
+        finally
+        {
+            await SwitchToUi();
+            if (ReferenceEquals(_threadActivationCts, cts))
+            {
+                _threadActivationCts = null;
+                IsBusy = false;
+            }
+            cts.Dispose();
+        }
+    }
+
     /// <summary>
     /// Connects (or reconnects) the SSE watch for the currently-selected
     /// channel + thread pair. The watch surfaces <c>Processing</c> /
@@ -342,8 +672,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     /// </summary>
     private void ReconnectThreadWatch()
     {
-        var channelId = SelectedChannel?.Id;
-        var threadId = SelectedThread?.Id;
+        var channelId = RealIdOrNull(SelectedChannelId);
+        var threadId = RealIdOrNull(SelectedThreadId);
 
         // No-op when the (channel, thread) pair is unchanged — avoids tearing
         // down a working watch on an unrelated property setter.
@@ -407,10 +737,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 {
                     if (eventName == "Processing")
                     {
+                        await SwitchToUi();
                         IsThreadBusy = true;
                     }
                     else if (eventName == "NewMessages")
                     {
+                        await SwitchToUi();
                         IsThreadBusy = false;
                         if (_isSending)
                         {
@@ -441,146 +773,267 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     public async Task RefreshAllAsync(bool preserveSelection, CancellationToken ct)
     {
-        var prevContextId = preserveSelection ? SelectedContext?.Id : null;
-        var prevChannelId = preserveSelection ? SelectedChannel?.Id : null;
-        var prevThreadId = preserveSelection ? SelectedThread?.Id : null;
+        // Coalesce overlapping refresh requests. Periodic refresh ticks,
+        // reconnect notifications, and the user clicking "Refresh" can all
+        // race; we only ever want one refresh chain executing on the UI
+        // context at a time, with at most one queued follow-up pass.
+        await SwitchToUi();
+        if (_refreshInFlight)
+        {
+            _refreshPending = true;
+            // If any caller wants a fresh wipe, the queued pass should honor
+            // that. Otherwise the queued pass preserves selection.
+            _refreshPendingPreserve = _refreshPendingPreserve && preserveSelection;
+            return;
+        }
+        _refreshInFlight = true;
+        _refreshPendingPreserve = true;
 
-        await _loadGate.WaitAsync(ct).ConfigureAwait(false);
-        _suppressCascade++;
         try
         {
-            IsBusy = true;
-            if (!preserveSelection)
-                Status = "Loading contexts…";
+            await RefreshAllCoreAsync(preserveSelection, ct).ConfigureAwait(false);
 
+            await SwitchToUi();
+            while (_refreshPending && !ct.IsCancellationRequested)
+            {
+                _refreshPending = false;
+                var preserve = _refreshPendingPreserve;
+                _refreshPendingPreserve = true;
+                await RefreshAllCoreAsync(preserve, ct).ConfigureAwait(false);
+                await SwitchToUi();
+            }
+        }
+        finally
+        {
+            await SwitchToUi();
+            _refreshInFlight = false;
+        }
+    }
+
+    private async Task RefreshAllCoreAsync(bool preserveSelection, CancellationToken ct)
+    {
+        await SwitchToUi();
+        var version = _selectionVersion;
+        var prevContextId = preserveSelection ? RealIdOrNull(SelectedContextId) : null;
+        var prevChannelId = preserveSelection ? RealIdOrNull(SelectedChannelId) : null;
+        var prevThreadId = preserveSelection ? RealIdOrNull(SelectedThreadId) : null;
+
+        IsBusy = true;
+        if (!preserveSelection)
+            Status = "Loading contexts…";
+
+        try
+        {
+            // HTTP runs off-context (it's "free thread") so we don't block
+            // the UI sync context while waiting for the network.
             var contexts = await _backend.GetContextsAsync(ct).ConfigureAwait(false);
-            Contexts.Clear();
-            Contexts.Add(NoContext);
-            foreach (var c in contexts)
-                Contexts.Add(new SharpClawSelectorItem(c.Id, c.Name ?? c.Id.ToString()));
 
-            // Restore previously-selected context if it still exists; otherwise
-            // fall back to the sentinel so the channels list re-evaluates.
-            var restoredContext = prevContextId is Guid cid
-                ? FindById(Contexts, cid) ?? NoContext
-                : NoContext;
-            ForceSelect(ref _selectedContext, restoredContext, nameof(SelectedContext));
+            await SwitchToUi();
+            if (version != _selectionVersion)
+                return;
+
+            _suppressCascade++;
+            try
+            {
+                var desired = new System.Collections.Generic.List<(Guid? Id, string Label)>(contexts.Count + 1)
+                {
+                    (NoContext.Id, NoContext.DisplayName),
+                };
+                foreach (var c in contexts)
+                    desired.Add((c.Id, c.Name ?? c.Id.ToString()));
+                MergeById(Contexts, desired, NoContext);
+
+                if (prevContextId is Guid cid)
+                {
+                    var restoredContext = FindById(Contexts, cid);
+                    if (restoredContext is null)
+                        ForceSelect(ref _selectedContext, NoContext, nameof(SelectedContext));
+                    else if (!ReferenceEquals(_selectedContext, restoredContext))
+                        ForceSelect(ref _selectedContext, restoredContext, nameof(SelectedContext));
+                }
+                else
+                {
+                    ForceSelect(ref _selectedContext, NoContext, nameof(SelectedContext));
+                }
+            }
+            finally
+            {
+                _suppressCascade--;
+            }
 
             await ReloadChannelsCoreAsync(prevChannelId, prevThreadId, ct).ConfigureAwait(false);
 
-            if (!preserveSelection)
+            await SwitchToUi();
+            // Always overwrite stale error text on a successful refresh so a
+            // reconnect can clear an "API error" subtitle without waiting for
+            // the user to interact again.
+            if (!preserveSelection || _status.StartsWith("Error", StringComparison.Ordinal))
                 Status = "Connected";
+
             await _log.WriteLineAsync(
                 $"Refresh: {contexts.Count} context(s), preserveSelection={preserveSelection}.")
                 .ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { /* shutdown / cancellation */ }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Error: {ex.Message}";
             await _log.WriteLineAsync($"Refresh failed: {ex.Message}").ConfigureAwait(false);
         }
         finally
         {
+            await SwitchToUi();
             IsBusy = false;
-            _suppressCascade--;
-            _loadGate.Release();
         }
     }
 
     private async Task ReloadChannelsAsync(Guid? preserveChannelId, Guid? preserveThreadId, CancellationToken ct)
     {
-        await _loadGate.WaitAsync(ct).ConfigureAwait(false);
-        _suppressCascade++;
         try
         {
             await ReloadChannelsCoreAsync(preserveChannelId, preserveThreadId, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Error: {ex.Message}";
             await _log.WriteLineAsync($"ReloadChannels failed: {ex.Message}").ConfigureAwait(false);
-        }
-        finally
-        {
-            _suppressCascade--;
-            _loadGate.Release();
         }
     }
 
     /// <summary>
-    /// Channel reload body. Caller MUST hold <see cref="_loadGate"/> and have
-    /// incremented <see cref="_suppressCascade"/> — this lets RefreshAll chain
-    /// into channel/thread reloads without releasing/reacquiring the gate
-    /// (which would let a periodic refresh tick race in between).
+    /// Channel reload body. All collection / selector mutations happen on the
+    /// UI sync context (via <see cref="SwitchToUi"/>); the network call runs
+    /// off-context so we never freeze Visual Studio while fetching.
     /// </summary>
     private async Task ReloadChannelsCoreAsync(Guid? preserveChannelId, Guid? preserveThreadId, CancellationToken ct)
     {
+        // Capture filter on UI context (avoid reading SelectedContext from
+        // a background thread).
+        await SwitchToUi();
+        var contextFilter = RealIdOrNull(SelectedContextId);
+        var version = _selectionVersion;
+
         var all = await _backend.GetChannelsAsync(ct).ConfigureAwait(false);
 
-        Channels.Clear();
-        Channels.Add(NoChannels);
-        foreach (var ch in all)
-        {
-            if (SelectedContext?.Id is Guid ctxId && ch.ContextId != ctxId)
-                continue;
-            var label = string.IsNullOrWhiteSpace(ch.Title) ? ch.Id.ToString() : ch.Title;
-            Channels.Add(new SharpClawSelectorItem(ch.Id, label));
-        }
+        await SwitchToUi();
+        if (version != _selectionVersion || contextFilter != RealIdOrNull(SelectedContextId))
+            return;
 
-        var restored = preserveChannelId is Guid cid
-            ? FindById(Channels, cid) ?? NoChannels
-            : NoChannels;
-        ForceSelect(ref _selectedChannel, restored, nameof(SelectedChannel));
+        _suppressCascade++;
+        try
+        {
+            var desired = new System.Collections.Generic.List<(Guid? Id, string Label)>(all.Count + 1)
+            {
+                (NoChannels.Id, NoChannels.DisplayName),
+            };
+            foreach (var ch in all)
+            {
+                if (contextFilter is Guid ctxId && ch.ContextId != ctxId)
+                    continue;
+                var label = string.IsNullOrWhiteSpace(ch.Title) ? ch.Id.ToString() : ch.Title;
+                desired.Add((ch.Id, label));
+            }
+
+            MergeById(Channels, desired, NoChannels);
+
+            if (preserveChannelId is Guid cid)
+            {
+                var restored = FindById(Channels, cid);
+                if (restored is null)
+                    ForceSelect(ref _selectedChannel, NoChannels, nameof(SelectedChannel));
+                else if (!ReferenceEquals(_selectedChannel, restored))
+                    ForceSelect(ref _selectedChannel, restored, nameof(SelectedChannel));
+            }
+            else
+            {
+                ForceSelect(ref _selectedChannel, NoChannels, nameof(SelectedChannel));
+            }
+        }
+        finally
+        {
+            _suppressCascade--;
+        }
 
         await ReloadThreadsCoreAsync(preserveThreadId, ct).ConfigureAwait(false);
     }
 
     private async Task ReloadThreadsAsync(Guid? preserveThreadId, CancellationToken ct)
     {
-        await _loadGate.WaitAsync(ct).ConfigureAwait(false);
-        _suppressCascade++;
         try
         {
             await ReloadThreadsCoreAsync(preserveThreadId, ct).ConfigureAwait(false);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Error: {ex.Message}";
             await _log.WriteLineAsync($"ReloadThreads failed: {ex.Message}").ConfigureAwait(false);
+        }
+
+        await SwitchToUi();
+        if (IsRealId(SelectedThreadId))
+        {
+            QueueThreadActivation();
+        }
+        else
+        {
+            CancelThreadActivation();
+            Transcript.Clear();
+            DisconnectThreadWatch();
+        }
+    }
+
+    /// <summary>
+    /// Thread reload body. UI-affinity rules identical to
+    /// <see cref="ReloadChannelsCoreAsync"/>.
+    /// </summary>
+    private async Task ReloadThreadsCoreAsync(Guid? preserveThreadId, CancellationToken ct)
+    {
+        await SwitchToUi();
+        var channelId = RealIdOrNull(SelectedChannelId);
+        var version = _selectionVersion;
+
+        var threads = channelId is Guid chId
+            ? await _backend.GetThreadsAsync(chId, ct).ConfigureAwait(false)
+            : (System.Collections.Generic.IReadOnlyList<ThreadDto>)Array.Empty<ThreadDto>();
+
+        await SwitchToUi();
+        if (version != _selectionVersion || channelId != RealIdOrNull(SelectedChannelId))
+            return;
+
+        _suppressCascade++;
+        try
+        {
+            var desired = new System.Collections.Generic.List<(Guid? Id, string Label)>(threads.Count + 1)
+            {
+                (NoThread.Id, NoThread.DisplayName),
+            };
+            foreach (var t in threads)
+                desired.Add((t.Id, t.Name ?? t.Id.ToString()));
+
+            MergeById(Threads, desired, NoThread);
+
+            if (preserveThreadId is Guid tid)
+            {
+                var restored = FindById(Threads, tid);
+                if (restored is null)
+                    ForceSelect(ref _selectedThread, NoThread, nameof(SelectedThread));
+                else if (!ReferenceEquals(_selectedThread, restored))
+                    ForceSelect(ref _selectedThread, restored, nameof(SelectedThread));
+            }
+            else
+            {
+                ForceSelect(ref _selectedThread, NoThread, nameof(SelectedThread));
+            }
         }
         finally
         {
             _suppressCascade--;
-            _loadGate.Release();
         }
-
-        // History/watch reconnect happen outside the gate so a slow history
-        // fetch doesn't block subsequent selector refreshes.
-        await ReloadHistoryAsync(ct).ConfigureAwait(false);
-        ReconnectThreadWatch();
-    }
-
-    /// <summary>
-    /// Thread reload body. Same locking contract as
-    /// <see cref="ReloadChannelsCoreAsync"/>: caller holds the load gate and
-    /// has bumped <see cref="_suppressCascade"/>.
-    /// </summary>
-    private async Task ReloadThreadsCoreAsync(Guid? preserveThreadId, CancellationToken ct)
-    {
-        Threads.Clear();
-        Threads.Add(NoThread);
-
-        if (SelectedChannel?.Id is Guid channelId)
-        {
-            var threads = await _backend.GetThreadsAsync(channelId, ct).ConfigureAwait(false);
-            foreach (var t in threads)
-                Threads.Add(new SharpClawSelectorItem(t.Id, t.Name ?? t.Id.ToString()));
-        }
-
-        var restored = preserveThreadId is Guid tid
-            ? FindById(Threads, tid) ?? NoThread
-            : NoThread;
-        ForceSelect(ref _selectedThread, restored, nameof(SelectedThread));
     }
 
     /// <summary>
@@ -594,6 +1047,19 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     {
         field = value;
         RaiseNotifyPropertyChangedEvent(propertyName);
+
+        if (propertyName == nameof(SelectedContext))
+        {
+            SetSelectorId(ref _selectedContextId, value?.Id ?? SentinelId, nameof(SelectedContextId), forceNotify: true);
+        }
+        else if (propertyName == nameof(SelectedChannel))
+        {
+            SetSelectorId(ref _selectedChannelId, value?.Id ?? SentinelId, nameof(SelectedChannelId), forceNotify: true);
+        }
+        else if (propertyName == nameof(SelectedThread))
+        {
+            SetSelectorId(ref _selectedThreadId, value?.Id ?? SentinelId, nameof(SelectedThreadId), forceNotify: true);
+        }
     }
 
     private static SharpClawSelectorItem? FindById(ObservableList<SharpClawSelectorItem> list, Guid id)
@@ -601,6 +1067,87 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         foreach (var item in list)
             if (item.Id == id) return item;
         return null;
+    }
+
+    /// <summary>
+    /// Reconciles <paramref name="list"/> against <paramref name="desired"/>
+    /// in place: the sentinel is kept at index 0, surviving items keep their
+    /// reference identity (and only get a DisplayName update if it changed),
+    /// new items are added, and removed items are deleted. The single
+    /// sentinel reference (<paramref name="sentinel"/>) is reused so it never
+    /// turns into a "blank" entry after a refresh.
+    ///
+    /// <para>This replaces the previous Clear()+repopulate pattern, which
+    /// (a) raised a Reset notification that crashed the WPF virtualizing
+    /// ComboBox when its dropdown was being realized concurrently, and
+    /// (b) replaced item instances every refresh — invalidating WPF's
+    /// reference-based <c>SelectedItem</c> and leaving the picker visually
+    /// blank even though the bound view-model field had been re-pinned.</para>
+    /// </summary>
+    private static void MergeById(
+        ObservableList<SharpClawSelectorItem> list,
+        System.Collections.Generic.IList<(Guid? Id, string Label)> desired,
+        SharpClawSelectorItem sentinel)
+    {
+        // Pass 1: ensure each desired item exists at the right slot,
+        // reusing existing references by Id whenever possible.
+        for (int i = 0; i < desired.Count; i++)
+        {
+            var (id, label) = desired[i];
+            SharpClawSelectorItem item;
+
+            if (!IsRealId(id))
+            {
+                item = sentinel;
+                item.DisplayName = label;
+            }
+            else
+            {
+                var existing = FindById(list, id!.Value);
+                if (existing is not null)
+                {
+                    existing.DisplayName = label;
+                    item = existing;
+                }
+                else
+                {
+                    item = new SharpClawSelectorItem(id, label);
+                }
+            }
+
+            if (i < list.Count)
+            {
+                if (!ReferenceEquals(list[i], item))
+                {
+                    // Find the item in the tail and move it into position
+                    // instead of removing+inserting, to keep notifications
+                    // minimal and preserve SelectedItem identity.
+                    var currentIndex = -1;
+                    for (int j = i + 1; j < list.Count; j++)
+                    {
+                        if (ReferenceEquals(list[j], item)) { currentIndex = j; break; }
+                    }
+
+                    if (currentIndex >= 0)
+                    {
+                        list.RemoveAt(currentIndex);
+                        list.Insert(i, item);
+                    }
+                    else
+                    {
+                        list.Insert(i, item);
+                    }
+                }
+            }
+            else
+            {
+                list.Add(item);
+            }
+        }
+
+        // Pass 2: trim any leftovers from the tail.
+        while (list.Count > desired.Count)
+            list.RemoveAt(list.Count - 1);
     }
 
     // ── Selector-driven loaders (manual changes) ─────────────────
@@ -615,7 +1162,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     public async Task CreateThreadAsync(CancellationToken ct)
     {
-        if (SelectedChannel?.Id is not Guid channelId)
+        if (RealIdOrNull(SelectedChannelId) is not Guid channelId)
         {
             Status = "Select a channel before creating a thread.";
             return;
@@ -635,19 +1182,23 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             await _log.WriteLineAsync($"Creating thread '{name}' on channel {channelId}…").ConfigureAwait(false);
 
             var created = await _backend.CreateThreadAsync(channelId, name!, ct).ConfigureAwait(false);
+            await SwitchToUi();
             NewThreadName = string.Empty;
 
             // Reload the thread list and select the new one if we got an id back.
             await ReloadThreadsAsync(created?.Id, ct).ConfigureAwait(false);
+            await SwitchToUi();
             Status = created is null ? "Thread created." : $"Thread '{name}' created.";
         }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Create thread failed: {ex.Message}";
             await _log.WriteLineAsync($"CreateThread failed: {ex}").ConfigureAwait(false);
         }
         finally
         {
+            await SwitchToUi();
             IsBusy = false;
         }
     }
@@ -656,22 +1207,34 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     {
         try
         {
-            Transcript.Clear();
-            if (SelectedChannel?.Id is not Guid channelId)
+            await SwitchToUi();
+            var channelId = RealIdOrNull(SelectedChannelId);
+            var threadId = RealIdOrNull(SelectedThreadId);
+            var version = _selectionVersion;
+            if (channelId is not Guid chId || threadId is not Guid thId)
                 return;
 
             IsBusy = true;
-            var history = await _backend.GetHistoryAsync(channelId, SelectedThread?.Id, ct).ConfigureAwait(false);
-            foreach (var m in history)
-                Transcript.Add(BuildTurnFromHistory(m));
+            var history = await _backend.GetHistoryAsync(chId, thId, ct).ConfigureAwait(false);
+
+            await SwitchToUi();
+            if (version != _selectionVersion
+                || RealIdOrNull(SelectedChannelId) != channelId
+                || RealIdOrNull(SelectedThreadId) != threadId)
+                return;
+
+            ReplaceTranscript(history);
         }
+        catch (OperationCanceledException) { }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Error: {ex.Message}";
             await _log.WriteLineAsync($"ReloadHistory failed: {ex}").ConfigureAwait(false);
         }
         finally
         {
+            await SwitchToUi();
             IsBusy = false;
         }
     }
@@ -704,11 +1267,22 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         return new SharpClawChatTurn(kind, sender, m.Content ?? string.Empty, ts, isRemoteUser);
     }
 
+    private void ReplaceTranscript(System.Collections.Generic.IReadOnlyList<ChatMessageDto> history)
+    {
+        // Already on the UI sync context (callers ensure that). Direct, simple
+        // rebuild — no caps, no truncation, no batched yields. The earlier
+        // cosmetic mitigations were hiding the real cause (selector cascade
+        // re-entry from object-reference SelectedItem bindings).
+        Transcript.Clear();
+        for (var i = 0; i < history.Count; i++)
+            Transcript.Add(BuildTurnFromHistory(history[i]));
+    }
+
     // â”€â”€ Send â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public async Task SendAsync(CancellationToken ct)
     {
-        if (SelectedChannel?.Id is not Guid channelId)
+        if (RealIdOrNull(SelectedChannelId) is not Guid channelId)
         {
             Status = "Select a channel before sending.";
             return;
@@ -747,7 +1321,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             Status = "Sendingâ€¦";
 
             using var response = await _backend
-                .StartChatStreamAsync(channelId, SelectedThread?.Id, text!, ct)
+                .StartChatStreamAsync(channelId, RealIdOrNull(SelectedThreadId), text!, ct)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)

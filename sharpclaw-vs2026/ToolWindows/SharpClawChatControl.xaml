@@ -156,21 +156,29 @@
                     <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
+                <!-- Bind SelectedValue to the stable Guid Id (not the item reference)
+                     so a Remote UI IPC re-push during MergeById can't replay a
+                     stale item reference and re-enter the cascading reload.
+                     Reference-based SelectedItem binding is what was crashing
+                     VS when a refresh / watch event landed mid-selection. -->
                 <ComboBox Grid.Row="0" Grid.Column="0" Margin="0,0,4,0"
                           ItemsSource="{Binding Contexts}"
-                          SelectedItem="{Binding SelectedContext, Mode=TwoWay}"
+                          SelectedValuePath="Id"
+                          SelectedValue="{Binding SelectedContextId, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName"
                           ToolTip="Context" />
 
                 <ComboBox Grid.Row="0" Grid.Column="1" Margin="4,0"
                           ItemsSource="{Binding Channels}"
-                          SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                          SelectedValuePath="Id"
+                          SelectedValue="{Binding SelectedChannelId, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName"
                           ToolTip="Channel" />
 
                 <ComboBox Grid.Row="0" Grid.Column="2" Margin="4,0"
                           ItemsSource="{Binding Threads}"
-                          SelectedItem="{Binding SelectedThread, Mode=TwoWay}"
+                          SelectedValuePath="Id"
+                          SelectedValue="{Binding SelectedThreadId, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName"
                           ToolTip="Thread" />
 

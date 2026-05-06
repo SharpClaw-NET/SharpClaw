@@ -15,8 +15,9 @@ and agent-based workflows without leaving Visual Studio.
 
 1. Install the SharpClaw backend from [github.com/mkn8rn/SharpClaw](https://github.com/mkn8rn/SharpClaw).
 2. Start the SharpClaw Core API service (`SharpClaw.Application`).
-3. Open Visual Studio 2026 then connect **Tools → Options → SharpClaw**
-4. Configure the API endpoint under **Tools → Options → SharpClaw**.
+3. Open Visual Studio 2026 then connect **Tools → SharpClaw → Connect**
+4. Configure settings under **Tools → Options → SharpClaw**.
+5. Open SharpClaw Chat window with **Tools → SharpClaw → SharpClaw Chat**.
 
 ## Source & Issues
 

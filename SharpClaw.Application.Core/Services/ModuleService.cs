@@ -432,9 +432,15 @@ public sealed class ModuleService(
     /// <c>external-modules/</c> directory). Used for .env-configured external modules.
     /// </summary>
     public async Task<ModuleStateResponse> LoadExternalFromAbsolutePathAsync(
-        string absoluteDir, IServiceProvider hostServices, CancellationToken ct = default)
+        string absoluteDir,
+        IServiceProvider hostServices,
+        CancellationToken ct = default,
+        bool persistDisabledEnvEntry = true)
     {
         var canonicalDir = Path.GetFullPath(absoluteDir);
+        if (persistDisabledEnvEntry)
+            AddExternalModuleToEnv(canonicalDir);
+
         if (!Directory.Exists(canonicalDir))
             throw new DirectoryNotFoundException($"External module directory not found: '{canonicalDir}'.");
 
@@ -446,8 +452,23 @@ public sealed class ModuleService(
         var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
             ?? throw new InvalidOperationException($"Failed to parse manifest in '{canonicalDir}'.");
 
-        if (registry.GetModule(manifest.Id) is not null)
+        if (registry.GetModule(manifest.Id) is { } existingModule)
+        {
+            var existingHost = registry.GetExternalHost(manifest.Id);
+            if (existingHost is not null
+                && string.Equals(
+                    Path.GetFullPath(existingHost.SourceDirectory),
+                    canonicalDir,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                logger.LogInformation(
+                    "External module '{ModuleId}' from absolute path {Dir} is already loaded - skipping duplicate .env entry",
+                    PathGuard.SanitizeForLog(manifest.Id), PathGuard.SanitizeForLog(canonicalDir));
+                return ToResponse(existingModule, state: null, manifest, isExternal: true);
+            }
+
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
+        }
 
         var host = ExternalModuleHost.Load(canonicalDir, manifest, hostServices, loggerFactory);
         try
@@ -466,8 +487,6 @@ public sealed class ModuleService(
 
             logger.LogInformation("External module '{ModuleId}' loaded from absolute path {Dir}",
                 PathGuard.SanitizeForLog(manifest.Id), PathGuard.SanitizeForLog(canonicalDir));
-
-            AddExternalModuleToEnv(canonicalDir);
 
             return ToResponse(host.Module, state: null, manifest, isExternal: true);
         }
@@ -509,6 +528,8 @@ public sealed class ModuleService(
     /// <summary>
     /// Load external modules defined in the <c>ExternalModules</c> configuration section.
     /// Each entry must have a <c>Path</c>; optional <c>Enabled</c> (default <c>true</c>).
+    /// Failed enabled entries crash startup by default; set
+    /// <c>Modules:CrashOnExternalModuleLoadFailure</c> to <c>false</c> to keep warning-only behavior.
     /// </summary>
     public async Task<IReadOnlyList<ModuleStateResponse>> LoadExternalModulesFromConfigAsync(
         IConfiguration config, IServiceProvider hostServices, CancellationToken ct = default)
@@ -516,6 +537,7 @@ public sealed class ModuleService(
         var section = config.GetSection("ExternalModules");
         if (!section.Exists()) return [];
 
+        var crashOnFailure = config.GetValue("Modules:CrashOnExternalModuleLoadFailure", defaultValue: true);
         var loaded = new List<ModuleStateResponse>();
         foreach (var entry in section.GetChildren())
         {
@@ -539,13 +561,26 @@ public sealed class ModuleService(
 
             try
             {
-                var result = await LoadExternalFromAbsolutePathAsync(path, hostServices, ct);
+                var result = await LoadExternalFromAbsolutePathAsync(
+                    path,
+                    hostServices,
+                    ct,
+                    persistDisabledEnvEntry: false);
                 loaded.Add(result);
             }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Failed to load .env external module from '{Path}'",
                     PathGuard.SanitizeForLog(path));
+
+                if (crashOnFailure)
+                {
+                    throw new InvalidOperationException(
+                        $"Failed to load enabled external module configured at ExternalModules:{entry.Key}:Path. " +
+                        "Fix the module path or set ExternalModules entry Enabled=false. " +
+                        "Set Modules:CrashOnExternalModuleLoadFailure=false to allow startup to continue.",
+                        ex);
+                }
             }
         }
 
@@ -583,7 +618,7 @@ public sealed class ModuleService(
                 return;
 
             var normalised = canonical.Replace("\\", "\\\\");
-            var entry = $"    {{ \"Path\": \"{normalised}\", \"Enabled\": true }}";
+            var entry = $"    {{ \"Path\": \"{normalised}\", \"Enabled\": false }}";
 
             // Case 1: ExternalModules array already exists (commented-out or active).
             //   – Active array: insert before the closing ']'.

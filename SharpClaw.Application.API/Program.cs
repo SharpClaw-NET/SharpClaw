@@ -648,7 +648,8 @@ try
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "Env-configured external module load failed — continuing");
+        Log.Error(ex, "Env-configured external module load failed - aborting startup");
+        throw;
     }
 
     // Module startup summary

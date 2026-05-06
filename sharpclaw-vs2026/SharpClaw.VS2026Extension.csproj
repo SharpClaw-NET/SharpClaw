@@ -11,9 +11,9 @@
     <!-- Marketplace version. Bump for every publish.
          AssemblyVersion drives ExtensionAssemblyVersion which is embedded
          in the generated extension.vsixmanifest. -->
-    <Version>1.1.0.9</Version>
-    <AssemblyVersion>1.1.0.9</AssemblyVersion>
-    <FileVersion>1.1.0.9</FileVersion>
+    <Version>1.1.0.16</Version>
+    <AssemblyVersion>1.1.0.16</AssemblyVersion>
+    <FileVersion>1.1.0.16</FileVersion>
 
     <!-- VisualStudio.Extensibility out-of-process extension -->
     <TargetVsixContainerName>SharpClaw.VS2026Extension.vsix</TargetVsixContainerName>

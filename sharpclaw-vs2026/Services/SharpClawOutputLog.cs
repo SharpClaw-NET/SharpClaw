@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.VisualStudio.Extensibility;
@@ -19,6 +20,9 @@ namespace SharpClaw.VS2026Extension.Services;
 internal sealed class SharpClawOutputLog : IExtensionInitializer
 {
 #pragma warning disable VSEXTPREVIEW_OUTPUTWINDOW
+    private readonly SemaphoreSlim _initGate = new(1, 1);
+    private readonly object _pendingGate = new();
+    private readonly List<string> _pending = new();
     private OutputChannel? _channel;
 
     public async Task InitializeAsync(
@@ -26,20 +30,63 @@ internal sealed class SharpClawOutputLog : IExtensionInitializer
         IServiceProvider serviceProvider,
         VisualStudioExtensibility extensibility,
         CancellationToken cancellationToken)
-    {
-        _channel = await extensibility.Views().Output
-            .CreateOutputChannelAsync("SharpClaw", cancellationToken)
-            .ConfigureAwait(false);
+        => await EnsureInitializedAsync(extensibility, cancellationToken).ConfigureAwait(false);
 
-        await WriteLineAsync("SharpClaw extension loaded.").ConfigureAwait(false);
+    public async Task EnsureInitializedAsync(
+        VisualStudioExtensibility extensibility,
+        CancellationToken cancellationToken)
+    {
+        if (_channel is not null)
+            return;
+
+        await _initGate.WaitAsync(cancellationToken).ConfigureAwait(false);
+        try
+        {
+            if (_channel is not null)
+                return;
+
+            var channel = await extensibility.Views().Output
+                .CreateOutputChannelAsync("SharpClaw", cancellationToken)
+                .ConfigureAwait(false);
+
+            _channel = channel;
+
+            List<string> pending;
+            lock (_pendingGate)
+            {
+                pending = new List<string>(_pending);
+                _pending.Clear();
+            }
+
+            foreach (var line in pending)
+                await channel.WriteLineAsync(line).ConfigureAwait(false);
+
+            await channel.WriteLineAsync(FormatLine("SharpClaw extension loaded.")).ConfigureAwait(false);
+        }
+        finally
+        {
+            _initGate.Release();
+        }
     }
 
     public Task WriteLineAsync(string text)
     {
+        var line = FormatLine(text);
         var channel = _channel;
-        if (channel is null)
-            return Task.CompletedTask;
-        return channel.WriteLineAsync($"[{DateTime.Now:HH:mm:ss}] {text}");
+        if (channel is not null)
+            return channel.WriteLineAsync(line);
+
+        lock (_pendingGate)
+        {
+            _pending.Add(line);
+            if (_pending.Count > 200)
+                _pending.RemoveAt(0);
+        }
+
+        return Task.CompletedTask;
     }
+
+    private static string FormatLine(string text)
+        => $"[{DateTime.Now:HH:mm:ss}] {text}";
 #pragma warning restore VSEXTPREVIEW_OUTPUTWINDOW
 }

@@ -30,6 +30,13 @@ internal sealed class DisconnectCommand : Command
     };
 
     /// <inheritdoc />
+    public override async Task InitializeAsync(CancellationToken cancellationToken)
+    {
+        await _log.EnsureInitializedAsync(Extensibility, cancellationToken).ConfigureAwait(false);
+        await base.InitializeAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <inheritdoc />
     public override async Task ExecuteCommandAsync(IClientContext context, CancellationToken cancellationToken)
     {
         _backend.Reset();
