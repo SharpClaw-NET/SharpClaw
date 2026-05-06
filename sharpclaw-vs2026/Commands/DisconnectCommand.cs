@@ -1,63 +1,38 @@
-using System;
-using System.ComponentModel.Design;
-using Microsoft.VisualStudio.Shell;
-using Task = System.Threading.Tasks.Task;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.VisualStudio.Extensibility;
+using Microsoft.VisualStudio.Extensibility.Commands;
+using SharpClaw.VS2026Extension.Services;
 
-namespace SharpClaw.VS2026Extension;
+namespace SharpClaw.VS2026Extension.Commands;
 
-internal sealed class DisconnectCommand
+/// <summary>
+/// Drops the cached <see cref="SharpClawHttpClient"/> so the next backend
+/// call rediscovers the running SharpClaw process. Mirrors the legacy
+/// <c>Tools &gt; SharpClaw &gt; Disconnect</c> command.
+/// </summary>
+[VisualStudioContribution]
+internal sealed class DisconnectCommand : Command
 {
-    public const int CommandId = 0x0101;
-    public static readonly Guid CommandSet = new("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private readonly SharpClawBackend _backend;
+    private readonly SharpClawOutputLog _log;
 
-    private readonly SharpClawPackage _package;
-
-    private DisconnectCommand(SharpClawPackage package, OleMenuCommandService commandService)
+    public DisconnectCommand(SharpClawBackend backend, SharpClawOutputLog log)
     {
-        _package = package ?? throw new ArgumentNullException(nameof(package));
-        commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
-
-        var menuCommandID = new CommandID(CommandSet, CommandId);
-        var menuItem = new MenuCommand(Execute, menuCommandID);
-        commandService.AddCommand(menuItem);
+        _backend = backend;
+        _log = log;
     }
 
-    public static DisconnectCommand? Instance { get; private set; }
-
-    public static async Task InitializeAsync(SharpClawPackage package, OleMenuCommandService commandService)
+    /// <inheritdoc />
+    public override CommandConfiguration CommandConfiguration => new("%SharpClaw.DisconnectCommand.DisplayName%")
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+        Icon = new(ImageMoniker.KnownValues.Unlink, IconSettings.IconAndText),
+    };
 
-        Instance = new DisconnectCommand(package, commandService);
-    }
-
-    private void Execute(object? sender, EventArgs e)
+    /// <inheritdoc />
+    public override async Task ExecuteCommandAsync(IClientContext context, CancellationToken cancellationToken)
     {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        _ = _package.JoinableTaskFactory.RunAsync(async () =>
-        {
-            try
-            {
-                if (!_package.IsConnected)
-                {
-                    await _package.SetStatusBarTextAsync("SharpClaw: Not connected");
-                    await _package.WriteOutputAsync("Disconnect requested but not connected.");
-                    return;
-                }
-
-                await _package.SetStatusBarTextAsync("SharpClaw: Disconnecting…");
-                await _package.WriteOutputAsync("Disconnecting from SharpClaw backend…");
-
-                await _package.DisconnectAsync();
-
-                await _package.SetStatusBarTextAsync("SharpClaw: Disconnected");
-                await _package.WriteOutputAsync("Disconnected from SharpClaw backend.");
-            }
-            catch (Exception ex)
-            {
-                await _package.SetStatusBarTextAsync("SharpClaw: Disconnect failed");
-                await _package.WriteOutputAsync($"Disconnect failed: {ex.Message}");
-            }
-        });
+        _backend.Reset();
+        await _log.WriteLineAsync("Disconnected from SharpClaw backend.").ConfigureAwait(false);
     }
 }

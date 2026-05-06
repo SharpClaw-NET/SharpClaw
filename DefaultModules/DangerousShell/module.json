@@ -5,7 +5,7 @@
   "toolPrefix": "ds",
   "entryAssembly": "SharpClaw.Modules.DangerousShell",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Unrestricted system shell access for advanced agent operations. Bypasses mk8.shell sandboxing constraints.",
   "license": "AGPL-3.0",
   "platforms": [ "windows", "linux", "macos" ],

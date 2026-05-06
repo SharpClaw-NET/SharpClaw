@@ -5,7 +5,7 @@
   "toolPrefix": "oa",
   "entryAssembly": "SharpClaw.Modules.OfficeApps",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "COM interop with Microsoft Office applications (Excel, Word, PowerPoint) for document automation and data extraction.",
   "license": "AGPL-3.0",
   "platforms": [ "windows", "linux", "macos" ],

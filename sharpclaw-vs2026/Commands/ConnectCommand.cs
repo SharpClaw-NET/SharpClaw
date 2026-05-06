@@ -1,65 +1,45 @@
 using System;
-using System.ComponentModel.Design;
-using Microsoft.VisualStudio.Shell;
-using Task = System.Threading.Tasks.Task;
+using System.Threading;
+using System.Threading.Tasks;
+using Microsoft.VisualStudio.Extensibility;
+using Microsoft.VisualStudio.Extensibility.Commands;
+using SharpClaw.VS2026Extension.Services;
 
-namespace SharpClaw.VS2026Extension;
+namespace SharpClaw.VS2026Extension.Commands;
 
-internal sealed class ConnectCommand
+/// <summary>
+/// Forces a fresh discovery of the SharpClaw backend and verifies that the
+/// API is reachable. Mirrors the legacy <c>Tools &gt; SharpClaw &gt; Connect</c>
+/// command from the in-process VSPackage.
+/// </summary>
+[VisualStudioContribution]
+internal sealed class ConnectCommand : Command
 {
-    public const int CommandId = 0x0100;
-    public static readonly Guid CommandSet = new("a1b2c3d4-e5f6-7890-abcd-ef1234567890");
+    private readonly SharpClawConnector _connector;
+    private readonly SharpClawOutputLog _log;
 
-    private readonly SharpClawPackage _package;
-
-    private ConnectCommand(SharpClawPackage package, OleMenuCommandService commandService)
+    public ConnectCommand(SharpClawConnector connector, SharpClawOutputLog log)
     {
-        _package = package ?? throw new ArgumentNullException(nameof(package));
-        commandService = commandService ?? throw new ArgumentNullException(nameof(commandService));
-
-        var menuCommandID = new CommandID(CommandSet, CommandId);
-        var menuItem = new MenuCommand(Execute, menuCommandID);
-        commandService.AddCommand(menuItem);
+        _connector = connector;
+        _log = log;
     }
 
-    public static ConnectCommand? Instance { get; private set; }
-
-    public static async Task InitializeAsync(SharpClawPackage package, OleMenuCommandService commandService)
+    /// <inheritdoc />
+    public override CommandConfiguration CommandConfiguration => new("%SharpClaw.ConnectCommand.DisplayName%")
     {
-        await ThreadHelper.JoinableTaskFactory.SwitchToMainThreadAsync(package.DisposalToken);
+        Icon = new(ImageMoniker.KnownValues.Link, IconSettings.IconAndText),
+    };
 
-        Instance = new ConnectCommand(package, commandService);
-    }
-
-    private void Execute(object? sender, EventArgs e)
+    /// <inheritdoc />
+    public override async Task ExecuteCommandAsync(IClientContext context, CancellationToken cancellationToken)
     {
-        ThreadHelper.ThrowIfNotOnUIThread();
-        _ = _package.JoinableTaskFactory.RunAsync(async () =>
+        try
         {
-            try
-            {
-                if (_package.IsConnected)
-                {
-                    await _package.SetStatusBarTextAsync("SharpClaw: Already connected");
-                    await _package.WriteOutputAsync("Connect requested but already connected.");
-                    return;
-                }
-
-                await _package.SetStatusBarTextAsync("SharpClaw: Connecting…");
-                await _package.WriteOutputAsync("Connecting to SharpClaw backend…");
-
-                await _package.ConnectAsync();
-
-                await _package.SetStatusBarTextAsync("SharpClaw: Connected ✓");
-                await _package.WriteOutputAsync("Connected to SharpClaw backend.");
-            }
-            catch (Exception ex)
-            {
-                var detail = ex.InnerException?.Message ?? ex.Message;
-                await _package.SetStatusBarTextAsync("SharpClaw: Connection failed");
-                await _package.WriteOutputAsync(
-                    $"Connection failed: {detail} — is the SharpClaw backend running?");
-            }
-        });
+            await _connector.ConnectAsync("Tools menu", cancellationToken).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            await _log.WriteLineAsync($"Connect threw: {ex}").ConfigureAwait(false);
+        }
     }
 }

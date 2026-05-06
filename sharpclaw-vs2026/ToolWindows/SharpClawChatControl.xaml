@@ -1,0 +1,342 @@
+﻿<DataTemplate xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+              xmlns:styles="clr-namespace:Microsoft.VisualStudio.Shell;assembly=Microsoft.VisualStudio.Shell.15.0">
+    <Grid Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}"
+          TextElement.Foreground="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}">
+        <Grid.Resources>
+            <!-- Remote UI XAML can't load Microsoft.VisualStudio.Shell.UI.Internal's
+                 CommonControls.xaml via pack URI, so we apply VsBrushes directly to
+                 default control templates. This keeps controls aligned with the
+                 active VS theme without depending on internal style keys. -->
+            <!-- VsBrushes does not expose ComboBox*Key entries, so we reuse the
+                 tool-window surface/text/border keys, which are guaranteed to be
+                 present in every VS theme. -->
+            <!-- The default WPF ComboBox template ignores Background setters because
+                 its inner ToggleButton paints native ComboBoxChrome. In Remote UI
+                 we don't get VS's auto theme-replacement for combo boxes either,
+                 so a minimal explicit template is required to get a dark surface
+                 (closed control, drop arrow, popup, and items) instead of the
+                 white system default. -->
+            <Style x:Key="SharpClawComboBoxItemStyle" TargetType="ComboBoxItem">
+                <Setter Property="Background" Value="Transparent" />
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                <Setter Property="Padding" Value="6,3" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBoxItem">
+                            <Border x:Name="Bd"
+                                    Background="{TemplateBinding Background}"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter />
+                            </Border>
+                            <ControlTemplate.Triggers>
+                                <Trigger Property="IsHighlighted" Value="True">
+                                    <Setter TargetName="Bd" Property="Background"
+                                            Value="{DynamicResource {x:Static styles:VsBrushes.CommandBarMouseOverBackgroundBeginKey}}" />
+                                </Trigger>
+                            </ControlTemplate.Triggers>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="ComboBox">
+                <Setter Property="Background" Value="{DynamicResource {x:Static styles:VsBrushes.ComboBoxBackgroundKey}}" />
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static styles:VsBrushes.ComboBoxBorderKey}}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="6,2" />
+                <Setter Property="MinHeight" Value="24" />
+                <Setter Property="ItemContainerStyle" Value="{StaticResource SharpClawComboBoxItemStyle}" />
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="ComboBox">
+                            <Grid>
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="*" />
+                                    <ColumnDefinition Width="20" />
+                                </Grid.ColumnDefinitions>
+
+                                <Border Grid.ColumnSpan="2"
+                                        Background="{TemplateBinding Background}"
+                                        BorderBrush="{TemplateBinding BorderBrush}"
+                                        BorderThickness="{TemplateBinding BorderThickness}" />
+
+                                <ContentPresenter Grid.Column="0"
+                                                  Margin="{TemplateBinding Padding}"
+                                                  Content="{TemplateBinding SelectionBoxItem}"
+                                                  ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
+                                                  ContentTemplateSelector="{TemplateBinding ItemTemplateSelector}"
+                                                  ContentStringFormat="{TemplateBinding SelectionBoxItemStringFormat}"
+                                                  IsHitTestVisible="False"
+                                                  HorizontalAlignment="Left"
+                                                  VerticalAlignment="Center" />
+
+                                <ToggleButton Grid.Column="1"
+                                              Focusable="False"
+                                              ClickMode="Press"
+                                              Background="Transparent"
+                                              BorderThickness="0"
+                                              IsChecked="{Binding IsDropDownOpen, Mode=TwoWay, RelativeSource={RelativeSource TemplatedParent}}">
+                                    <ToggleButton.Template>
+                                        <ControlTemplate TargetType="ToggleButton">
+                                            <Border Background="{TemplateBinding Background}">
+                                                <Path HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      Data="M 0 0 L 4 4 L 8 0 Z"
+                                                      Fill="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                                            </Border>
+                                        </ControlTemplate>
+                                    </ToggleButton.Template>
+                                </ToggleButton>
+
+                                <Popup x:Name="PART_Popup"
+                                       Placement="Bottom"
+                                       IsOpen="{TemplateBinding IsDropDownOpen}"
+                                       AllowsTransparency="True"
+                                       Focusable="False"
+                                       PopupAnimation="Slide">
+                                    <Border MinWidth="{TemplateBinding ActualWidth}"
+                                            MaxHeight="{TemplateBinding MaxDropDownHeight}"
+                                            Background="{DynamicResource {x:Static styles:VsBrushes.ComboBoxPopupBackgroundBeginKey}}"
+                                            BorderBrush="{TemplateBinding BorderBrush}"
+                                            BorderThickness="1">
+                                        <ScrollViewer>
+                                            <ItemsPresenter KeyboardNavigation.DirectionalNavigation="Contained" />
+                                        </ScrollViewer>
+                                    </Border>
+                                </Popup>
+                            </Grid>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <Style TargetType="TextBox">
+                <Setter Property="Background" Value="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}" />
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="6,4" />
+                <Setter Property="CaretBrush" Value="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+            </Style>
+
+            <Style TargetType="Button">
+                <Setter Property="Background" Value="{DynamicResource {x:Static styles:VsBrushes.ButtonFaceKey}}" />
+                <Setter Property="Foreground" Value="{DynamicResource {x:Static styles:VsBrushes.ButtonTextKey}}" />
+                <Setter Property="BorderBrush" Value="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}" />
+                <Setter Property="BorderThickness" Value="1" />
+                <Setter Property="Padding" Value="12,4" />
+                <Setter Property="MinHeight" Value="24" />
+            </Style>
+        </Grid.Resources>
+
+        <Grid.RowDefinitions>
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="*" />
+            <RowDefinition Height="Auto" />
+            <RowDefinition Height="Auto" />
+        </Grid.RowDefinitions>
+
+        <!-- Selector strip -->
+        <Border Grid.Row="0" Padding="8"
+                Background="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientBeginKey}}"
+                BorderBrush="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}"
+                BorderThickness="0,0,0,1">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                    <RowDefinition Height="Auto" />
+                </Grid.RowDefinitions>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="*" />
+                    <ColumnDefinition Width="Auto" />
+                </Grid.ColumnDefinitions>
+
+                <ComboBox Grid.Row="0" Grid.Column="0" Margin="0,0,4,0"
+                          ItemsSource="{Binding Contexts}"
+                          SelectedItem="{Binding SelectedContext, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"
+                          ToolTip="Context" />
+
+                <ComboBox Grid.Row="0" Grid.Column="1" Margin="4,0"
+                          ItemsSource="{Binding Channels}"
+                          SelectedItem="{Binding SelectedChannel, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"
+                          ToolTip="Channel" />
+
+                <ComboBox Grid.Row="0" Grid.Column="2" Margin="4,0"
+                          ItemsSource="{Binding Threads}"
+                          SelectedItem="{Binding SelectedThread, Mode=TwoWay}"
+                          DisplayMemberPath="DisplayName"
+                          ToolTip="Thread" />
+
+                <Button Grid.Row="0" Grid.Column="3" Margin="8,0,0,0"
+                        Padding="12,4"
+                        Content="Refresh"
+                        Command="{Binding RefreshCommand}" />
+
+                <!-- Explanatory subtitles so users know which selectors require
+                     creating the resource in SharpClaw vs. inline here. -->
+                <TextBlock Grid.Row="1" Grid.Column="0" Margin="0,2,4,0"
+                           FontSize="10" TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
+                           Text="{Binding ContextHint}" />
+                <TextBlock Grid.Row="1" Grid.Column="1" Margin="4,2"
+                           FontSize="10" TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
+                           Text="{Binding ChannelHint}" />
+                <TextBlock Grid.Row="1" Grid.Column="2" Margin="4,2,0,0"
+                           FontSize="10" TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
+                           Text="{Binding ThreadHint}" />
+
+                <!-- Inline thread creation: name + "+" button. Channels and
+                     contexts must be created in SharpClaw because their
+                     permissions can only be configured there. -->
+                <Grid Grid.Row="2" Grid.Column="2" Margin="4,6,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
+
+                    <TextBox Grid.Column="0"
+                             Text="{Binding NewThreadName, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                             ToolTip="New thread name" />
+
+                    <Button Grid.Column="1" Margin="4,0,0,0"
+                            Padding="10,2" MinWidth="28"
+                            Content="+"
+                            ToolTip="Create thread on the selected channel"
+                            Command="{Binding CreateThreadCommand}" />
+                </Grid>
+            </Grid>
+        </Border>
+
+        <!-- Transcript: bubble per turn, right-aligned for user, left-aligned
+             for assistant, with role-aware accent colors driven by the
+             SharpClawChatTurn.IsXxx flags so converters aren't needed. -->
+        <ListBox Grid.Row="1"
+                 ItemsSource="{Binding Transcript}"
+                 BorderThickness="0"
+                 HorizontalContentAlignment="Stretch"
+                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
+                 ScrollViewer.VerticalScrollBarVisibility="Auto"
+                 Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
+            <ListBox.ItemContainerStyle>
+                <Style TargetType="ListBoxItem">
+                    <Setter Property="Focusable" Value="False" />
+                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
+                    <Setter Property="Padding" Value="0" />
+                    <Setter Property="Background" Value="Transparent" />
+                </Style>
+            </ListBox.ItemContainerStyle>
+            <ListBox.ItemTemplate>
+                <DataTemplate>
+                    <Grid Margin="8,4">
+                        <Grid.Resources>
+                            <!-- Sender-aware bubble palette. We use semi-transparent
+                                 overlays (~0x35 alpha) on top of the tool-window
+                                 background so the same brushes look pale on a light
+                                 VS theme and dark on a dark VS theme without us
+                                 having to write per-theme dictionaries.
+                                   â€¢ Local user (you, in this VS2026)  â†’ purple
+                                   â€¢ Remote user (other client/CLI/Uno) â†’ blue
+                                   â€¢ Assistant / agent                 â†’ green -->
+                            <SolidColorBrush x:Key="SharpClawUserBubble"        Color="#358B5CF6" />
+                            <SolidColorBrush x:Key="SharpClawUserBubbleBorder"  Color="#808B5CF6" />
+                            <SolidColorBrush x:Key="SharpClawRemoteUserBubble"       Color="#353B82F6" />
+                            <SolidColorBrush x:Key="SharpClawRemoteUserBubbleBorder" Color="#803B82F6" />
+                            <SolidColorBrush x:Key="SharpClawAgentBubble"       Color="#3522C55E" />
+                            <SolidColorBrush x:Key="SharpClawAgentBubbleBorder" Color="#8022C55E" />
+                        </Grid.Resources>
+                        <Border x:Name="Bubble"
+                                Padding="10,6"
+                                CornerRadius="6"
+                                MaxWidth="640"
+                                HorizontalAlignment="Left"
+                                Background="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientBeginKey}}"
+                                BorderBrush="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}"
+                                BorderThickness="1">
+                            <StackPanel>
+                                <TextBlock x:Name="Sender"
+                                           Text="{Binding Sender}"
+                                           FontWeight="SemiBold"
+                                           FontSize="11"
+                                           Margin="0,0,0,2"
+                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}" />
+                                <TextBlock Text="{Binding Body}"
+                                           TextWrapping="Wrap"
+                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                                <TextBlock Text="{Binding Timestamp}"
+                                           FontSize="10"
+                                           Margin="0,2,0,0"
+                                           HorizontalAlignment="Right"
+                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}" />
+                            </StackPanel>
+                        </Border>
+                    </Grid>
+                    <DataTemplate.Triggers>
+                        <DataTrigger Binding="{Binding IsLocalUser}" Value="True">
+                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawUserBubble}" />
+                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawUserBubbleBorder}" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsRemoteUser}" Value="True">
+                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
+                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawRemoteUserBubble}" />
+                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawRemoteUserBubbleBorder}" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsAssistant}" Value="True">
+                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawAgentBubble}" />
+                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawAgentBubbleBorder}" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsSystem}" Value="True">
+                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Stretch" />
+                            <Setter TargetName="Bubble" Property="Background" Value="Transparent" />
+                            <Setter TargetName="Bubble" Property="BorderThickness" Value="0" />
+                        </DataTrigger>
+                        <DataTrigger Binding="{Binding IsTool}" Value="True">
+                            <Setter TargetName="Bubble" Property="Background"
+                                    Value="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientMiddleKey}}" />
+                        </DataTrigger>
+                    </DataTemplate.Triggers>
+                </DataTemplate>
+            </ListBox.ItemTemplate>
+        </ListBox>
+
+        <!-- Composer -->
+        <Grid Grid.Row="2" Margin="8">
+            <Grid.ColumnDefinitions>
+                <ColumnDefinition Width="*" />
+                <ColumnDefinition Width="Auto" />
+            </Grid.ColumnDefinitions>
+
+            <TextBox Grid.Column="0"
+                     Text="{Binding Composer, Mode=TwoWay, UpdateSourceTrigger=PropertyChanged}"
+                     AcceptsReturn="True"
+                     TextWrapping="Wrap"
+                     MinHeight="60"
+                     MaxHeight="160"
+                     VerticalScrollBarVisibility="Auto" />
+
+            <Button Grid.Column="1" Margin="8,0,0,0"
+                    Padding="16,4"
+                    VerticalAlignment="Bottom"
+                    Content="Send"
+                    Command="{Binding SendCommand}" />
+        </Grid>
+
+        <!-- Status bar -->
+        <Border Grid.Row="3" Padding="8,4"
+                Background="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientBeginKey}}"
+                BorderBrush="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}"
+                BorderThickness="0,1,0,0">
+            <TextBlock Text="{Binding Status}"
+                       Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}" />
+        </Border>
+    </Grid>
+</DataTemplate>

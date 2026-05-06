@@ -5,7 +5,7 @@
   "toolPrefix": "wa",
   "entryAssembly": "SharpClaw.Modules.WebAccess",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Web browsing, localhost access, search engine queries, and URL content retrieval for information gathering.",
   "license": "AGPL-3.0",
   "platforms": null,

@@ -5,7 +5,7 @@
   "toolPrefix": "ao",
   "entryAssembly": "SharpClaw.Modules.AgentOrchestration.dll",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Agent lifecycle and orchestration tools: sub-agent creation, agent management, task editing, skill access.",
   "license": "AGPL-3.0",
   "platforms": null,

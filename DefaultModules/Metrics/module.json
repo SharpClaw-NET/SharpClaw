@@ -5,7 +5,7 @@
   "toolPrefix": "metric",
   "entryAssembly": "SharpClaw.Modules.Metrics",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Owns the MetricThreshold task trigger and the built-in metric providers.",
   "license": "AGPL-3.0",
   "platforms": null,

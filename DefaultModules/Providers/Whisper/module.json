@@ -6,7 +6,7 @@
   "toolPrefix": "pw",
   "entryAssembly": "SharpClaw.Modules.Providers.Whisper",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Local speech-to-text via Whisper.net (managed wrapper over whisper.cpp). Provides the local backend for the Transcription module's transcription_stt contract.",
   "license": "AGPL-3.0",
   "platforms": [ "windows" ],

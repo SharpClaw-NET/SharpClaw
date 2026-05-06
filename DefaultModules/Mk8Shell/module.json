@@ -5,7 +5,7 @@
   "toolPrefix": "mk8",
   "entryAssembly": "SharpClaw.Modules.Mk8Shell",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Sandboxed shell execution via the mk8.shell scripting engine with safety constraints, workspace isolation, and container support.",
   "license": "AGPL-3.0",
   "platforms": ["windows", "linux", "macos"],

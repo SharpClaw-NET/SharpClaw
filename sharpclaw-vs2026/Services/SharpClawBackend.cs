@@ -1,0 +1,166 @@
+using System;
+using System.Collections.Generic;
+using System.Net.Http;
+using System.Threading;
+using System.Threading.Tasks;
+
+namespace SharpClaw.VS2026Extension.Services;
+
+/// <summary>
+/// Lazily resolves and shares a single <see cref="SharpClawHttpClient"/> across
+/// the extension's commands and tool windows. The backend is rediscovered on demand
+/// so the extension remains usable across SharpClaw process restarts.
+/// </summary>
+internal sealed class SharpClawBackend : IDisposable
+{
+    private readonly SemaphoreSlim _gate = new(1, 1);
+    private SharpClawHttpClient? _client;
+
+    public async Task<SharpClawHttpClient> GetClientAsync(CancellationToken ct = default)
+    {
+        await _gate.WaitAsync(ct).ConfigureAwait(false);
+        try
+        {
+            return _client ??= SharpClawHttpClient.FromDiscovery();
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    public void Reset()
+    {
+        _gate.Wait();
+        try
+        {
+            _client?.Dispose();
+            _client = null;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+    }
+
+    /// <summary>
+    /// Installs an already-built client (used by the verbose connector so it
+    /// can narrate every discovery step before publishing the client).
+    /// </summary>
+    public SharpClawHttpClient SetClient(SharpClawHttpClient client)
+    {
+        _gate.Wait();
+        try
+        {
+            _client?.Dispose();
+            _client = client;
+        }
+        finally
+        {
+            _gate.Release();
+        }
+
+        // Notify subscribers (chat tool window) outside the lock so the
+        // chat view model can refresh its selectors immediately when the
+        // verbose Connect flow finishes â€” without waiting on its own
+        // periodic refresh tick or a manual Refresh click.
+        try { Connected?.Invoke(this, EventArgs.Empty); }
+        catch { /* never let a UI handler break connect */ }
+
+        return client;
+    }
+
+    /// <summary>True when a client has been resolved (not necessarily reachable).</summary>
+    public bool IsConnected => _client is not null;
+
+    /// <summary>
+    /// Raised on the thread that completed <see cref="SetClient"/> after a new
+    /// HTTP client has been installed (i.e. after a successful Connect).
+    /// Subscribers are expected to be cheap â€” heavy work should be queued
+    /// onto a background task by the handler.
+    /// </summary>
+    public event EventHandler? Connected;
+
+    // ── High-level chat operations ────────────────────────────────
+
+    public async Task<IReadOnlyList<ContextDto>> GetContextsAsync(CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        return await c.GetAsync<List<ContextDto>>("channel-contexts", ct).ConfigureAwait(false)
+            ?? new List<ContextDto>();
+    }
+
+    public async Task<IReadOnlyList<ChannelDto>> GetChannelsAsync(CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        return await c.GetAsync<List<ChannelDto>>("channels", ct).ConfigureAwait(false)
+            ?? new List<ChannelDto>();
+    }
+
+    public async Task<IReadOnlyList<ThreadDto>> GetThreadsAsync(Guid channelId, CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        return await c.GetAsync<List<ThreadDto>>($"channels/{channelId}/threads", ct).ConfigureAwait(false)
+            ?? new List<ThreadDto>();
+    }
+
+    /// <summary>Creates a new thread on the given channel. Only a name is required.</summary>
+    public async Task<ThreadDto?> CreateThreadAsync(Guid channelId, string name, CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        // Backend's CreateThreadRequest uses { Name, MaxMessages?, MaxCharacters?, CustomId? }.
+        return await c.PostJsonAsync<ThreadDto>(
+            $"channels/{channelId}/threads",
+            new { name },
+            ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyList<ChatMessageDto>> GetHistoryAsync(
+        Guid channelId, Guid? threadId, CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        // Backend route group is /channels/{id}/chat with [MapGet] returning
+        // the channel-level history, and a thread-scoped variant under
+        // /channels/{id}/chat/threads/{threadId}.
+        var path = threadId is null
+            ? $"channels/{channelId}/chat"
+            : $"channels/{channelId}/chat/threads/{threadId}";
+        return await c.GetAsync<List<ChatMessageDto>>(path, ct).ConfigureAwait(false)
+            ?? new List<ChatMessageDto>();
+    }
+
+    public async Task<HttpResponseMessage> StartChatStreamAsync(
+        Guid channelId, Guid? threadId, string message, CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        // SSE endpoints live under the /chat route group:
+        //   POST /channels/{id}/chat/stream
+        //   POST /channels/{id}/chat/threads/{threadId}/stream
+        var path = threadId is null
+            ? $"channels/{channelId}/chat/stream"
+            : $"channels/{channelId}/chat/threads/{threadId}/stream";
+        var body = new ChatRequestDto { Message = message };
+        return await c.PostStreamAsync(path, body, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Opens the SSE thread-activity watch. Emits <c>Processing</c> when any
+    /// client (including this one) acquires the per-thread send lock, and
+    /// <c>NewMessages</c> when new messages have been persisted. Used to
+    /// keep the active thread in sync with edits coming from other clients
+    /// and to gate Send while another client is mid-stream.
+    /// </summary>
+    public async Task<HttpResponseMessage> StartThreadWatchAsync(
+        Guid channelId, Guid threadId, CancellationToken ct)
+    {
+        var c = await GetClientAsync(ct).ConfigureAwait(false);
+        return await c.GetStreamAsync(
+            $"channels/{channelId}/chat/threads/{threadId}/watch", ct).ConfigureAwait(false);
+    }
+
+    public void Dispose()
+    {
+        _client?.Dispose();
+        _gate.Dispose();
+    }
+}

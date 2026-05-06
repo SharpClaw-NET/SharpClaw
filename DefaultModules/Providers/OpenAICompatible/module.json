@@ -5,7 +5,7 @@
   "toolPrefix": "po",
   "entryAssembly": "SharpClaw.Modules.Providers.OpenAICompatible",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Provides OpenAI-protocol API clients: OpenAI, OpenRouter, ZAI, Vercel AI Gateway, xAI, Groq, Cerebras, Mistral, GitHub Copilot, Minimax, Custom, Google Gemini (OpenAI shim), Google Vertex AI (OpenAI shim).",
   "license": "AGPL-3.0",
   "platforms": [ "windows", "linux", "macos" ],

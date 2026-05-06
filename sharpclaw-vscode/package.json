@@ -3,7 +3,11 @@
   "displayName": "SharpClaw",
   "description": "SharpClaw editor bridge for VS Code — connects to the SharpClaw backend and handles AI agent tool calls.",
   "version": "0.1.0",
-  "publisher": "sharpclaw",
+  "publisher": "mkn8rn",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/mkn8rn/SharpClaw"
+  },
   "engines": {
     "vscode": "^1.85.0"
   },

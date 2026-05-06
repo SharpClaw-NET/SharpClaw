@@ -1,69 +1,35 @@
-<Project>
-  <!-- Explicit SDK imports so that VSSDK targets are imported AFTER Sdk.targets.
-       The Sdk attribute pattern implicitly puts Sdk.targets at the very end,
-       which means any explicit Import in the csproj body evaluates its
-       PropertyGroups before TargetPath, IntermediateOutputPath (TFM-qualified),
-       and PrepareForRunDependsOn are set. Splitting into Sdk.props / Sdk.targets
-       lets us slot the VSSDK import after all .NET SDK properties are resolved.
-       Ref: https://learn.microsoft.com/dotnet/core/project-sdk/overview -->
-  <Import Project="Sdk.props" Sdk="Microsoft.NET.Sdk" />
+<Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net472</TargetFramework>
+    <TargetFramework>net8.0-windows</TargetFramework>
     <LangVersion>latest</LangVersion>
     <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+    <RootNamespace>SharpClaw.VS2026Extension</RootNamespace>
 
-    <!-- VSSDK standard properties -->
-    <GeneratePkgDefFile>true</GeneratePkgDefFile>
-    <IncludeAssemblyInVSIXContainer>true</IncludeAssemblyInVSIXContainer>
-    <IncludeDebugSymbolsInVSIXContainer>true</IncludeDebugSymbolsInVSIXContainer>
-    <IncludeDebugSymbolsInLocalVSIXDeployment>true</IncludeDebugSymbolsInLocalVSIXDeployment>
-    <CopyBuildOutputToOutputDirectory>true</CopyBuildOutputToOutputDirectory>
-    <CopyOutputSymbolsToOutputDirectory>true</CopyOutputSymbolsToOutputDirectory>
+    <!-- Marketplace version. Bump for every publish.
+         AssemblyVersion drives ExtensionAssemblyVersion which is embedded
+         in the generated extension.vsixmanifest. -->
+    <Version>1.1.0.9</Version>
+    <AssemblyVersion>1.1.0.9</AssemblyVersion>
+    <FileVersion>1.1.0.9</FileVersion>
 
-    <!-- F5 debugging: launch the experimental hive -->
+    <!-- VisualStudio.Extensibility out-of-process extension -->
+    <TargetVsixContainerName>SharpClaw.VS2026Extension.vsix</TargetVsixContainerName>
+
+    <!-- F5 debugging launches the experimental hive of Visual Studio -->
     <StartAction>Program</StartAction>
     <StartProgram Condition="'$(DevEnvDir)' != ''">$(DevEnvDir)devenv.exe</StartProgram>
     <StartArguments>/rootsuffix Exp</StartArguments>
 
     <!-- Don't include in solution-wide publish -->
     <IsPublishable>false</IsPublishable>
-
-    <!-- VSSDK deploy: disabled by default; install-test.ps1 enables via CLI -->
-    <CreateVsixContainer>false</CreateVsixContainer>
-    <DeployExtension>false</DeployExtension>
-
-    <!-- Tell CreatePkgDef to emit "CodeBase"="$PackageFolder$\assembly.dll"
-         so the CLR fusion loader can find our DLL in the extension folder.
-         Without this, VS only has the assembly strong name and fails to load
-         because our unsigned assembly isn't in the GAC or devenv.exe's probing path. -->
-    <UseCodebase>true</UseCodebase>
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="Microsoft.VisualStudio.SDK" ExcludeAssets="runtime" />
-    <PackageReference Include="Microsoft.VSSDK.BuildTools" GeneratePathProperty="true" />
-    <PackageReference Include="System.Text.Json" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <Reference Include="System.ComponentModel.Composition" />
-    <Reference Include="System.Design" />
-  </ItemGroup>
-
-  <!-- VSCT: official approach per Microsoft docs.
-       The VSSDK targets compile .vsct → .cto and embed as Menus.ctmenu resource.
-       Ref: https://learn.microsoft.com/visualstudio/extensibility/internals/how-to-create-a-dot-vsct-file -->
-  <ItemGroup>
-    <VSCTCompile Include="SharpClawPackage.vsct">
-      <ResourceName>Menus.ctmenu</ResourceName>
-    </VSCTCompile>
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="source.extension.vsixmanifest">
-      <SubType>Designer</SubType>
-    </None>
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Sdk" />
+    <PackageReference Include="Microsoft.VisualStudio.Extensibility.Build" />
   </ItemGroup>
 
   <ItemGroup>
@@ -71,19 +37,19 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
-    <None Include="Resources\CommandIcons.bmp" />
+    <Content Include="overview.md">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
   </ItemGroup>
 
-  <!-- .NET SDK targets — must precede VSSDK import so TargetPath,
-       IntermediateOutputPath, and PrepareForRunDependsOn are resolved. -->
-  <Import Project="Sdk.targets" Sdk="Microsoft.NET.Sdk" />
-
-  <!-- VSSDK targets: now evaluates after Sdk.targets.
-       • CreatePkgDefAssemblyToProcess resolves to $(TargetPath)
-       • TemplateOutputDirectory resolves to $(IntermediateOutputPath)
-       • PrepareForRunDependsOn chains GeneratePkgDef → CopyPkgDef →
-         CreateVsixContainer → DeployVsixExtensionFiles naturally -->
-  <Import Project="$(VSToolsPath)\VSSDK\Microsoft.VsSDK.targets"
-          Condition="'$(VSToolsPath)' != ''" />
+  <!-- Remote UI XAML must be an embedded resource so RemoteUserControl can find it
+       by the matching type name; exclude it from WPF Page processing. -->
+  <ItemGroup>
+    <Page Remove="ToolWindows\SharpClawChatControl.xaml" />
+    <EmbeddedResource Include="ToolWindows\SharpClawChatControl.xaml">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+  </ItemGroup>
 
 </Project>

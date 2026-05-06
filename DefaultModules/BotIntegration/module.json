@@ -5,7 +5,7 @@
   "toolPrefix": "bi",
   "entryAssembly": "SharpClaw.Modules.BotIntegration",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "External chat platform and messaging service integration for forwarding agent conversations to third-party bots.",
   "license": "AGPL-3.0",
   "platforms": null,

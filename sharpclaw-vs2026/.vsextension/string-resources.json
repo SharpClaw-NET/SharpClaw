@@ -1,0 +1,10 @@
+{
+  "$schema": "https://json.schemastore.org/vsextensibility-string-resources.0.5.0.schema.json",
+  "SharpClaw.DisplayName": "SharpClaw for Visual Studio 2026",
+  "SharpClaw.Description": "SharpClaw AI agent integration for Visual Studio 2026.",
+  "SharpClaw.ShowChatToolWindowCommand.DisplayName": "SharpClaw Chat",
+  "SharpClaw.ChatToolWindow.Title": "SharpClaw Chat",
+  "SharpClaw.ToolsMenu.DisplayName": "SharpClaw",
+  "SharpClaw.ConnectCommand.DisplayName": "Connect",
+  "SharpClaw.DisconnectCommand.DisplayName": "Disconnect"
+}

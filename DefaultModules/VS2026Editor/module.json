@@ -5,7 +5,7 @@
   "toolPrefix": "vs26",
   "entryAssembly": "SharpClaw.Modules.VS2026Editor",
   "minHostVersion": "1.0.0",
-  "author": "SharpClaw Team",
+  "author": "mkn8rn",
   "description": "Visual Studio 2026 editor integration via WebSocket bridge for code editing, navigation, and solution management.",
   "license": "AGPL-3.0",
   "platforms": [ "windows" ],

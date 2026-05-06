@@ -49,12 +49,10 @@
     <PackageVersion Include="System.Drawing.Common" Version="10.0.6" />
     <PackageVersion Include="System.Management" Version="10.0.5" />
     <PackageVersion Include="System.ServiceProcess.ServiceController" Version="10.0.6" />
-    <!-- VS 2026 VSIX extension (classic in-proc model) -->
-    <PackageVersion Include="Microsoft.VisualStudio.SDK" Version="17.12.40392" />
-    <PackageVersion Include="Microsoft.VSSDK.BuildTools" Version="17.12.2069" />
     <PackageVersion Include="System.Text.Json" Version="9.0.5" />
-    <!-- VS 2026 VSIX extension (new out-of-proc model, SharpClaw.VisualStudio2026) -->
-    <PackageVersion Include="Microsoft.VisualStudio.Extensibility" Version="17.14.54" />
+    <!-- VS 2026 extension (out-of-process VisualStudio.Extensibility SDK) -->
+    <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Sdk" Version="17.14.40608" />
+    <PackageVersion Include="Microsoft.VisualStudio.Extensibility.Build" Version="17.14.40608" />
     <PackageVersion Include="Cronos" Version="0.12.0" />
     <!-- Document tools (Open XML spreadsheet + CSV) -->
     <PackageVersion Include="ClosedXML" Version="0.105.0" />
