@@ -181,8 +181,8 @@
 
                     <Button Grid.Column="1" Margin="4,0,0,0"
                             Padding="10,2" MinWidth="72"
-                            Content="Load"
-                            ToolTip="Load the selected thread"
+                            Content="Reload"
+                            ToolTip="Reload the selected thread"
                             IsEnabled="{Binding OpenThreadCommand.RunningCommandsCount.IsZero}"
                             Command="{Binding OpenThreadCommand}" />
                 </Grid>
@@ -224,19 +224,16 @@
             </Grid>
         </Border>
 
-        <!-- Transcript. Keep this as a single text payload rather than a
-             remote observable collection: loading a thread should produce
-             one Remote UI property update, not a burst of item/container
-             realization work inside the Visual Studio process. -->
+        <!-- Transcript. Keep this as a single XamlFragment payload rather
+             than a remote observable collection: loading a thread should
+             produce one Remote UI property update, not a burst of item
+             container realization work inside the Visual Studio process. -->
         <Border Grid.Row="1"
                 Padding="8"
                 Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
                           VerticalScrollBarVisibility="Auto">
-                <TextBlock Text="{Binding TranscriptText}"
-                           TextWrapping="Wrap"
-                           FontFamily="Consolas"
-                           Foreground="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+                <ContentControl Content="{Binding TranscriptContent}" />
             </ScrollViewer>
         </Border>
 

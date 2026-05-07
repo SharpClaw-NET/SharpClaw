@@ -3,6 +3,7 @@ using System.Collections.ObjectModel;
 using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.Serialization;
+using System.Security;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
@@ -166,9 +167,11 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private int _selectedContextIndex;
     private int _selectedChannelIndex;
     private int _selectedThreadIndex;
+    private readonly System.Collections.Generic.List<SharpClawChatTurn> _transcriptBlocks = new();
     private string _composer = string.Empty;
     private string _status = "Idle";
     private string _transcriptText = string.Empty;
+    private XamlFragment _transcriptContent = EmptyTranscriptFragment();
     private bool _isBusy;
     private string _newThreadName = string.Empty;
     private CancellationTokenSource? _periodicCts;
@@ -651,7 +654,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             }
             else
             {
-                Status = "Thread selected. Click Open to load.";
+                QueueSelectedThreadActivation("thread selection");
             }
         }
     }
@@ -675,6 +678,13 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     {
         get => _transcriptText;
         private set => SetProperty(ref _transcriptText, value ?? string.Empty);
+    }
+
+    [DataMember]
+    public XamlFragment TranscriptContent
+    {
+        get => _transcriptContent;
+        private set => SetProperty(ref _transcriptContent, value ?? EmptyTranscriptFragment());
     }
 
     [DataMember]
@@ -814,6 +824,22 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         _threadActivationCts = cts;
         _ = LogVmAsync($"QueueThreadActivation: channel={channelId} thread={threadId} version={version}.");
         _ = Task.Run(() => ActivateThreadAsync(channelId, threadId, version, cts));
+    }
+
+    private void QueueSelectedThreadActivation(string reason)
+    {
+        var channelId = RealIdOrNull(SelectedChannelId);
+        var threadId = RealIdOrNull(SelectedThreadId);
+        var version = _selectionVersion;
+
+        if (channelId is not Guid chId || threadId is not Guid thId)
+        {
+            Status = "Select a channel and thread before opening.";
+            return;
+        }
+
+        _ = LogVmAsync($"QueueSelectedThreadActivation: reason={reason} channel={chId} thread={thId} version={version}.");
+        QueueThreadActivation(chId, thId, version);
     }
 
     private void CancelThreadActivation()
@@ -1521,6 +1547,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             await ReloadThreadsAsync(created?.Id, ct).ConfigureAwait(false);
             await SwitchToUi();
             Status = created is null ? "Thread created." : $"Thread '{name}' created.";
+            if (created?.Id is Guid createdThreadId
+                && RealIdOrNull(SelectedChannelId) == channelId
+                && RealIdOrNull(SelectedThreadId) == createdThreadId)
+            {
+                QueueSelectedThreadActivation("created thread");
+            }
         }
         catch (Exception ex)
         {
@@ -1601,61 +1633,362 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
     private void ClearTranscript()
     {
+        _transcriptBlocks.Clear();
         TranscriptText = string.Empty;
+        TranscriptContent = EmptyTranscriptFragment();
     }
 
     private void ReplaceTranscript(System.Collections.Generic.IReadOnlyList<ChatMessageDto> history)
     {
-        // Already on the UI sync context (callers ensure that). The load
-        // path deliberately updates a single serialized string instead of
-        // mutating an ObservableList of rich objects. That keeps the Remote
-        // UI transaction bounded to one property change and avoids forcing
-        // the VS-side WPF host to realize item containers while the command
-        // callback is still unwinding.
-        TranscriptText = BuildTranscriptText(history);
-    }
+        // Already on the UI sync context (callers ensure that). Keep the
+        // Remote UI transaction bounded to one property change: we render
+        // all chat bubbles into a single XamlFragment instead of mutating a
+        // remote ObservableList and asking the VS host to realize item
+        // containers while the command callback is unwinding.
+        _transcriptBlocks.Clear();
 
-    private static string BuildTranscriptText(System.Collections.Generic.IReadOnlyList<ChatMessageDto> history)
-    {
-        if (history.Count == 0)
-            return "No messages in this thread.";
-
-        var sb = new StringBuilder();
         var start = 0;
         if (history.Count > MaxRenderedHistoryMessages)
         {
             start = history.Count - MaxRenderedHistoryMessages;
-            AppendTranscriptBlock(
-                sb,
+            _transcriptBlocks.Add(new SharpClawChatTurn(
+                SharpClawTurnKind.System,
                 "system",
-                DateTimeOffset.Now.LocalDateTime.ToString("HH:mm"),
                 $"Showing the last {MaxRenderedHistoryMessages} of {history.Count} messages.",
-                addSeparator: false);
+                DateTimeOffset.Now.LocalDateTime.ToString("HH:mm")));
         }
 
         for (var i = start; i < history.Count; i++)
+            _transcriptBlocks.Add(BuildTurnFromHistory(history[i]));
+
+        RenderTranscriptBlocks();
+    }
+
+    private void RenderTranscriptBlocks()
+    {
+        TranscriptText = BuildTranscriptText(_transcriptBlocks);
+        TranscriptContent = BuildTranscriptFragment(_transcriptBlocks);
+    }
+
+    private static string BuildTranscriptText(System.Collections.Generic.IReadOnlyList<SharpClawChatTurn> turns)
+    {
+        if (turns.Count == 0)
+            return string.Empty;
+
+        var sb = new StringBuilder();
+        foreach (var turn in turns)
         {
-            var turn = BuildTurnFromHistory(history[i]);
             AppendTranscriptBlock(sb, turn.Sender, turn.Timestamp, turn.Body, addSeparator: sb.Length > 0);
         }
 
         return sb.ToString();
     }
 
-    private static string FormatTranscriptBlock(string sender, string timestamp, string body)
+    private static XamlFragment EmptyTranscriptFragment()
+        => new("<TextBlock xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" />");
+
+    private static XamlFragment BuildTranscriptFragment(System.Collections.Generic.IReadOnlyList<SharpClawChatTurn> turns)
     {
-        var sb = new StringBuilder();
-        AppendTranscriptBlock(sb, sender, timestamp, body, addSeparator: false);
-        return sb.ToString();
+        if (turns.Count == 0)
+            return EmptyTranscriptFragment();
+
+        var xaml = new StringBuilder();
+        xaml.Append("<StackPanel xmlns=\"http://schemas.microsoft.com/winfx/2006/xaml/presentation\" ")
+            .Append("xmlns:x=\"http://schemas.microsoft.com/winfx/2006/xaml\" ")
+            .Append("xmlns:styles=\"clr-namespace:Microsoft.VisualStudio.Shell;assembly=Microsoft.VisualStudio.Shell.15.0\" ")
+            .Append("TextElement.Foreground=\"{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}\">");
+
+        foreach (var turn in turns)
+            AppendBubbleXaml(xaml, turn);
+
+        xaml.Append("</StackPanel>");
+        return new XamlFragment(xaml.ToString());
     }
 
-    private static string AppendTranscriptText(string current, string block)
+    private static void AppendBubbleXaml(StringBuilder xaml, SharpClawChatTurn turn)
     {
-        if (string.IsNullOrEmpty(current))
-            return block;
+        var background = "#5022C55E";
+        var border = "#AA22C55E";
+        var align = "Left";
+        var textAlign = "Left";
+        var foreground = "{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}";
 
-        return current + Environment.NewLine + Environment.NewLine + block;
+        if (turn.IsLocalUser)
+        {
+            background = "#508B5CF6";
+            border = "#AA8B5CF6";
+            align = "Right";
+        }
+        else if (turn.IsRemoteUser)
+        {
+            background = "#503B82F6";
+            border = "#AA3B82F6";
+            align = "Right";
+        }
+        else if (turn.IsSystem)
+        {
+            background = "Transparent";
+            border = "Transparent";
+            align = "Stretch";
+            textAlign = "Center";
+            foreground = "{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}";
+        }
+
+        xaml.Append("<Grid Margin=\"8,5\" HorizontalAlignment=\"Stretch\">")
+            .Append("<Border Padding=\"10,7\" CornerRadius=\"6\" HorizontalAlignment=\"")
+            .Append(align)
+            .Append("\" Background=\"")
+            .Append(background)
+            .Append("\" BorderBrush=\"")
+            .Append(border)
+            .Append("\" BorderThickness=\"1\" MinWidth=\"240\" MaxWidth=\"980\">")
+            .Append("<StackPanel>");
+
+        if (!string.IsNullOrWhiteSpace(turn.Sender) || !string.IsNullOrWhiteSpace(turn.Timestamp))
+        {
+            xaml.Append("<TextBlock FontWeight=\"SemiBold\" FontSize=\"11\" Margin=\"0,0,0,3\" TextAlignment=\"")
+                .Append(textAlign)
+                .Append("\" Foreground=\"{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}\" Text=\"")
+                .Append(XmlEscape(BuildBubbleHeader(turn)))
+                .Append("\" />");
+        }
+
+        AppendMarkdownBodyXaml(xaml, turn.Body, foreground, textAlign);
+        xaml.Append("</StackPanel></Border></Grid>");
     }
+
+    private static void AppendMarkdownBodyXaml(StringBuilder xaml, string? body, string foreground, string textAlign)
+    {
+        var text = NormalizeMarkdownText(body);
+        if (string.IsNullOrEmpty(text))
+        {
+            xaml.Append("<TextBlock />");
+            return;
+        }
+
+        var paragraph = new System.Collections.Generic.List<string>();
+        var code = new StringBuilder();
+        var inCodeFence = false;
+        var lines = text.Split('\n');
+
+        void FlushParagraph()
+        {
+            if (paragraph.Count == 0)
+                return;
+
+            AppendMarkdownParagraphXaml(xaml, paragraph, foreground, textAlign);
+            paragraph.Clear();
+        }
+
+        void FlushCodeBlock()
+        {
+            AppendCodeBlockXaml(xaml, code.ToString(), foreground);
+            code.Clear();
+        }
+
+        foreach (var line in lines)
+        {
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                if (inCodeFence)
+                {
+                    FlushCodeBlock();
+                    inCodeFence = false;
+                }
+                else
+                {
+                    FlushParagraph();
+                    inCodeFence = true;
+                }
+
+                continue;
+            }
+
+            if (inCodeFence)
+            {
+                code.AppendLine(line);
+                continue;
+            }
+
+            if (string.IsNullOrWhiteSpace(line))
+            {
+                FlushParagraph();
+                continue;
+            }
+
+            paragraph.Add(line);
+        }
+
+        if (inCodeFence)
+            FlushCodeBlock();
+        FlushParagraph();
+    }
+
+    private static void AppendMarkdownParagraphXaml(
+        StringBuilder xaml,
+        System.Collections.Generic.IReadOnlyList<string> lines,
+        string foreground,
+        string textAlign)
+    {
+        var heading = TryParseHeading(lines);
+        var fontSize = heading.Level switch
+        {
+            1 => "15",
+            2 => "13",
+            3 => "12",
+            _ => string.Empty,
+        };
+
+        xaml.Append("<TextBlock TextWrapping=\"Wrap\" FontFamily=\"Consolas\" Margin=\"0,")
+            .Append(heading.IsHeading ? "6,0,3" : "2,0,2")
+            .Append("\" TextAlignment=\"")
+            .Append(textAlign)
+            .Append("\" Foreground=\"")
+            .Append(foreground)
+            .Append("\"");
+
+        if (heading.IsHeading)
+        {
+            xaml.Append(" FontWeight=\"SemiBold\" FontSize=\"")
+                .Append(fontSize)
+                .Append("\"");
+        }
+
+        xaml.Append(">");
+
+        for (var i = 0; i < lines.Count; i++)
+        {
+            if (i > 0)
+                xaml.Append("<LineBreak />");
+
+            var line = heading.IsHeading ? heading.Text : lines[i];
+            AppendInlineMarkdownXaml(xaml, line);
+        }
+
+        xaml.Append("</TextBlock>");
+    }
+
+    private static (bool IsHeading, int Level, string Text) TryParseHeading(System.Collections.Generic.IReadOnlyList<string> lines)
+    {
+        if (lines.Count != 1)
+            return (false, 0, string.Empty);
+
+        var trimmed = lines[0].TrimStart();
+        var level = 0;
+        while (level < trimmed.Length && level < 3 && trimmed[level] == '#')
+            level++;
+
+        if (level == 0 || level >= trimmed.Length || trimmed[level] != ' ')
+            return (false, 0, string.Empty);
+
+        return (true, level, trimmed[(level + 1)..]);
+    }
+
+    private static void AppendCodeBlockXaml(StringBuilder xaml, string code, string foreground)
+    {
+        xaml.Append("<Border Margin=\"0,6,0,6\" Padding=\"8\" CornerRadius=\"4\" ")
+            .Append("Background=\"#26000000\" BorderBrush=\"#50808080\" BorderThickness=\"1\">")
+            .Append("<TextBlock TextWrapping=\"Wrap\" FontFamily=\"Consolas\" Foreground=\"")
+            .Append(foreground)
+            .Append("\" Text=\"")
+            .Append(XmlEscape(code.TrimEnd('\r', '\n')))
+            .Append("\" /></Border>");
+    }
+
+    private static void AppendInlineMarkdownXaml(StringBuilder xaml, string text)
+    {
+        var i = 0;
+        while (i < text.Length)
+        {
+            if (text[i] == '`')
+            {
+                var end = text.IndexOf('`', i + 1);
+                if (end > i + 1)
+                {
+                    AppendInlineRunXaml(xaml, text[(i + 1)..end], " FontFamily=\"Consolas\" FontWeight=\"SemiBold\"");
+                    i = end + 1;
+                    continue;
+                }
+            }
+
+            if (i + 1 < text.Length && text[i] == '*' && text[i + 1] == '*')
+            {
+                var end = text.IndexOf("**", i + 2, StringComparison.Ordinal);
+                if (end > i + 2)
+                {
+                    xaml.Append("<Bold>");
+                    AppendInlineRunXaml(xaml, text[(i + 2)..end], string.Empty);
+                    xaml.Append("</Bold>");
+                    i = end + 2;
+                    continue;
+                }
+            }
+
+            if (text[i] == '*')
+            {
+                var end = text.IndexOf('*', i + 1);
+                if (end > i + 1)
+                {
+                    xaml.Append("<Italic>");
+                    AppendInlineRunXaml(xaml, text[(i + 1)..end], string.Empty);
+                    xaml.Append("</Italic>");
+                    i = end + 1;
+                    continue;
+                }
+            }
+
+            var next = FindNextMarkdownMarker(text, i + 1);
+            AppendInlineRunXaml(xaml, text[i..next], string.Empty);
+            i = next;
+        }
+    }
+
+    private static int FindNextMarkdownMarker(string text, int start)
+    {
+        for (var i = start; i < text.Length; i++)
+        {
+            if (text[i] is '`' or '*')
+                return i;
+        }
+
+        return text.Length;
+    }
+
+    private static void AppendInlineRunXaml(StringBuilder xaml, string text, string attributes)
+    {
+        if (string.IsNullOrEmpty(text))
+            return;
+
+        xaml.Append("<Run")
+            .Append(attributes)
+            .Append(" Text=\"")
+            .Append(XmlEscape(text))
+            .Append("\" />");
+    }
+
+    private static string BuildBubbleHeader(SharpClawChatTurn turn)
+    {
+        if (string.IsNullOrWhiteSpace(turn.Timestamp))
+            return turn.Sender;
+        if (string.IsNullOrWhiteSpace(turn.Sender))
+            return turn.Timestamp;
+        return $"[{turn.Timestamp}] {turn.Sender}";
+    }
+
+    private static string XmlEscape(string? text)
+    {
+        var escaped = SecurityElement.Escape(text ?? string.Empty) ?? string.Empty;
+        return escaped
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal)
+            .Replace("\n", "&#x0A;", StringComparison.Ordinal)
+            .Replace("\t", "&#x09;", StringComparison.Ordinal);
+    }
+
+    private static string NormalizeMarkdownText(string? text)
+        => (text ?? string.Empty)
+            .Replace("\r\n", "\n", StringComparison.Ordinal)
+            .Replace("\r", "\n", StringComparison.Ordinal);
 
     private static void AppendTranscriptBlock(
         StringBuilder sb,
@@ -1701,15 +2034,16 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         var threadId = RealIdOrNull(SelectedThreadId);
         Composer = string.Empty;
         var nowStamp = DateTimeOffset.Now.LocalDateTime.ToString("HH:mm");
-        var transcriptBeforeSend = TranscriptText;
-        var userBlock = FormatTranscriptBlock("you (VS2026)", nowStamp, text!);
-        var prefixWithUser = AppendTranscriptText(transcriptBeforeSend, userBlock);
+        _transcriptBlocks.Add(new SharpClawChatTurn(SharpClawTurnKind.User, "you (VS2026)", text!, nowStamp));
+        var assistant = new SharpClawChatTurn(SharpClawTurnKind.Assistant, "assistant", "|", nowStamp);
+        _transcriptBlocks.Add(assistant);
         void SetAssistantText(string body)
         {
-            TranscriptText = AppendTranscriptText(prefixWithUser, FormatTranscriptBlock("assistant", nowStamp, body));
+            assistant.Body = body;
+            RenderTranscriptBlocks();
         }
 
-        SetAssistantText("|");
+        RenderTranscriptBlocks();
 
         var streamed = new StringBuilder();
         var needsNewline = false;
