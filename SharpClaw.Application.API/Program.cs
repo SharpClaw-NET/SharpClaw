@@ -742,12 +742,18 @@ try
     // that TaskTriggerHostService has loaded its first binding set.  The
     // WebhookRouteRegistry holds an IRouteBuilder reference and rebinds
     // routes whenever a webhook trigger source's binding set changes.
-    var webhookSource = app.Services.GetRequiredService<IWebhookTriggerHost>();
-    var webhookRegistry = new WebhookRouteRegistry(
-        app,
-        webhookSource,
-        app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRouteRegistry>>());
-    webhookSource.SetRouteRegistrar(webhookRegistry);
+    if (app.Services.GetService<IWebhookTriggerHost>() is { } webhookSource)
+    {
+        var webhookRegistry = new WebhookRouteRegistry(
+            app,
+            webhookSource,
+            app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRouteRegistry>>());
+        webhookSource.SetRouteRegistrar(webhookRegistry);
+    }
+    else
+    {
+        Log.Information("No webhook trigger host registered - dynamic webhook routes disabled");
+    }
 
     // ──────── PHASE 22 ─── Shutdown registrations ─────────────────────────
     // Two ApplicationStopping hooks: one for host-side cleanup (api key,
