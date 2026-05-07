@@ -16,6 +16,7 @@ internal static class SharpClawMenu
         Children =
         [
             MenuChild.Command<ShowChatToolWindowCommand>(),
+            MenuChild.Command<ShowOptionsToolWindowCommand>(),
             MenuChild.Separator,
             MenuChild.Command<RefreshChatCommand>(),
             MenuChild.Command<ConnectCommand>(),

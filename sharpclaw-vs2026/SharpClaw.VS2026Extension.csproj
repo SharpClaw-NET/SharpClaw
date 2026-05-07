@@ -41,6 +41,10 @@
       <CopyToOutputDirectory>Always</CopyToOutputDirectory>
       <IncludeInVSIX>true</IncludeInVSIX>
     </Content>
+    <Content Include="LICENSE">
+      <CopyToOutputDirectory>Always</CopyToOutputDirectory>
+      <IncludeInVSIX>true</IncludeInVSIX>
+    </Content>
   </ItemGroup>
 
   <!-- Remote UI XAML must be an embedded resource so RemoteUserControl can find it
@@ -48,6 +52,10 @@
   <ItemGroup>
     <Page Remove="ToolWindows\SharpClawChatControl.xaml" />
     <EmbeddedResource Include="ToolWindows\SharpClawChatControl.xaml">
+      <SubType>Designer</SubType>
+    </EmbeddedResource>
+    <Page Remove="ToolWindows\SharpClawOptionsControl.xaml" />
+    <EmbeddedResource Include="ToolWindows\SharpClawOptionsControl.xaml">
       <SubType>Designer</SubType>
     </EmbeddedResource>
   </ItemGroup>

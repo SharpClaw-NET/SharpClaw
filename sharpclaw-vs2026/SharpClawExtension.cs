@@ -33,6 +33,7 @@ internal sealed class SharpClawExtension : Extension
         base.InitializeServices(serviceCollection);
 
         // Backend connectivity is shared across commands and tool windows.
+        serviceCollection.AddSingleton<SharpClawConnectionOptionsStore>();
         serviceCollection.AddSingleton<SharpClawBackend>();
         serviceCollection.AddSingleton<SharpClawConnector>();
         serviceCollection.AddSingleton<SharpClawChatSession>();

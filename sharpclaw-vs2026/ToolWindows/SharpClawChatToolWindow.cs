@@ -38,7 +38,13 @@ internal sealed class SharpClawChatToolWindow : ToolWindow
     /// <inheritdoc />
     public override Task<IRemoteUserControl> GetContentAsync(CancellationToken cancellationToken)
     {
-        var control = new SharpClawChatControl(_backend, _connector, _log);
+        var control = new SharpClawChatControl(
+            _backend,
+            _connector,
+            _log,
+            ct => Extensibility.Shell().ShowToolWindowAsync<SharpClawOptionsToolWindow>(
+                activate: true,
+                cancellationToken: ct));
         _chatSession.Register(control.ViewModel);
         // Kick off the initial load + periodic refresh so newly created
         // contexts/channels/threads in SharpClaw show up without requiring a

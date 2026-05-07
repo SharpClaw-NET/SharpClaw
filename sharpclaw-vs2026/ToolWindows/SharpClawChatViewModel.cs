@@ -158,6 +158,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private readonly SharpClawConnector _connector;
     private readonly SharpClawOutputLog _log;
     private readonly SynchronizationContext? _uiContext;
+    private readonly Func<CancellationToken, Task>? _openOptionsAsync;
 
     private SharpClawSelectorItem? _selectedContext;
     private SharpClawSelectorItem? _selectedChannel;
@@ -207,14 +208,20 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private bool _disposed;
 
     public SharpClawChatViewModel(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
-        : this(backend, connector, log, ui: null) { }
+        : this(backend, connector, log, ui: null, openOptionsAsync: null) { }
 
-    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log, SynchronizationContext? ui)
+    public SharpClawChatViewModel(
+        SharpClawBackend backend,
+        SharpClawConnector connector,
+        SharpClawOutputLog log,
+        SynchronizationContext? ui,
+        Func<CancellationToken, Task>? openOptionsAsync = null)
     {
         _backend = backend;
         _connector = connector;
         _log = log;
         _uiContext = ui;
+        _openOptionsAsync = openOptionsAsync;
         _isConnected = backend.IsConnected;
 
         SendCommand = new AsyncCommand(async (_, ct) => await SendAsync(ct).ConfigureAwait(false));
@@ -889,7 +896,28 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         if (_disposed || ct.IsCancellationRequested)
             return;
 
-        Status = "Connection options can be managed from Tools > Options > SharpClaw when the options page is available.";
+        if (_openOptionsAsync is null)
+        {
+            Status = "Connection options can be managed from Tools > SharpClaw > Options.";
+            return;
+        }
+
+        try
+        {
+            Status = "Opening SharpClaw options...";
+            await _openOptionsAsync(ct).ConfigureAwait(false);
+            await SwitchToUi();
+            if (!_disposed && !ct.IsCancellationRequested)
+                Status = "Options opened.";
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await SwitchToUi();
+            if (!_disposed)
+                Status = $"Could not open options: {ex.Message}";
+            await _log.WriteLineAsync($"Open options failed: {ex}").ConfigureAwait(false);
+        }
     }
 
     private void StartPeriodicRefresh()
@@ -1877,8 +1905,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
     private static void AppendBubbleXaml(StringBuilder xaml, SharpClawChatTurn turn)
     {
-        var background = "#3022C55E";
-        var border = "#8822C55E";
+        var background = "#204ADE80";
+        var border = "#664ADE80";
         var align = "Left";
         var textAlign = "Left";
         var foreground = "{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}";
@@ -1887,20 +1915,20 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
         if (turn.IsLocalUser)
         {
-            background = "#308B5CF6";
-            border = "#888B5CF6";
+            background = "#20A78BFA";
+            border = "#66A78BFA";
             align = "Right";
         }
         else if (turn.IsRemoteUser)
         {
-            background = "#303B82F6";
-            border = "#883B82F6";
+            background = "#2060A5FA";
+            border = "#6660A5FA";
             align = "Right";
         }
         else if (isSystem)
         {
-            background = isSystemError ? "#30EF4444" : "#30F59E0B";
-            border = isSystemError ? "#AAEF4444" : "#AAF59E0B";
+            background = isSystemError ? "#20F87171" : "#20FBBF24";
+            border = isSystemError ? "#88F87171" : "#88FBBF24";
             align = "Center";
             textAlign = "Center";
         }

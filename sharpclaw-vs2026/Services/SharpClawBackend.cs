@@ -15,13 +15,15 @@ internal sealed class SharpClawBackend : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
     private readonly SharpClawOutputLog _log;
+    private readonly SharpClawConnectionOptionsStore _optionsStore;
     private readonly List<SharpClawHttpClient> _retiredClients = new();
     private SharpClawHttpClient? _client;
     private bool _validatedConnection;
 
-    public SharpClawBackend(SharpClawOutputLog log)
+    public SharpClawBackend(SharpClawOutputLog log, SharpClawConnectionOptionsStore optionsStore)
     {
         _log = log;
+        _optionsStore = optionsStore;
     }
 
     public async Task<SharpClawHttpClient> GetClientAsync(CancellationToken ct = default)
@@ -36,9 +38,15 @@ internal sealed class SharpClawBackend : IDisposable
                 return _client;
             }
 
-            await _log.WriteLineAsync("Backend.GetClientAsync: discovering backend client.").ConfigureAwait(false);
-            _client = SharpClawHttpClient.FromDiscovery();
-            await _log.WriteLineAsync($"Backend.GetClientAsync: discovered BaseAddress={_client.BaseAddress}.").ConfigureAwait(false);
+            await _log.WriteLineAsync("Backend.GetClientAsync: resolving backend client from saved options/discovery.").ConfigureAwait(false);
+            var options = _optionsStore.Load();
+            var entries = _optionsStore.EnumerateDetectedInstances(options.PreferAliveInstances);
+            var entry = _optionsStore.SelectEntry(options, entries);
+            var resolved = _optionsStore.BuildClient(options, entry);
+            _client = resolved.Client;
+            await _log.WriteLineAsync(
+                $"Backend.GetClientAsync: resolved BaseAddress={_client.BaseAddress} ({resolved.SelectionSummary}).")
+                .ConfigureAwait(false);
             return _client;
         }
         finally

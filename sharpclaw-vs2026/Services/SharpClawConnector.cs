@@ -1,6 +1,5 @@
 using System;
 using System.Collections.Generic;
-using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Threading;
@@ -22,33 +21,42 @@ internal sealed class SharpClawConnectionResult
 /// <summary>
 /// Performs and narrates every step of connecting to the SharpClaw backend.
 ///
-/// The same routine is used by the manual <c>Tools &gt; SharpClaw &gt; Connect</c>
+/// The same routine is used by the manual Tools &gt; SharpClaw &gt; Connect
 /// command and by the auto-connect path that runs at extension startup, so the
-/// "SharpClaw" Output pane always tells the same story.
+/// SharpClaw Output pane always tells the same story.
 /// </summary>
 internal sealed class SharpClawConnector
 {
     private readonly SharpClawBackend _backend;
     private readonly SharpClawOutputLog _log;
+    private readonly SharpClawConnectionOptionsStore _optionsStore;
 
-    public SharpClawConnector(SharpClawBackend backend, SharpClawOutputLog log)
+    public SharpClawConnector(
+        SharpClawBackend backend,
+        SharpClawOutputLog log,
+        SharpClawConnectionOptionsStore optionsStore)
     {
         _backend = backend;
         _log = log;
+        _optionsStore = optionsStore;
     }
 
     /// <summary>
     /// Connects to SharpClaw and verifies authentication. Every step is logged
     /// to the SharpClaw output pane with descriptive interpretation of failures.
     /// </summary>
-    /// <param name="trigger">Where the connect was initiated from (e.g. "auto-connect", "Tools menu").</param>
+    /// <param name="trigger">Where the connect was initiated from.</param>
     public async Task<SharpClawConnectionResult> ConnectAsync(string trigger, CancellationToken ct)
     {
         await _log.WriteLineAsync($"---------- Connect started ({trigger}) ----------").ConfigureAwait(false);
 
+        var options = _optionsStore.Load();
+        await _log.WriteLineAsync($"Connection options: {_optionsStore.DescribeOverrides(options)}").ConfigureAwait(false);
+        await _log.WriteLineAsync($"Connection options file: {_optionsStore.OptionsPath}").ConfigureAwait(false);
+
         await _log.WriteLineAsync($"[1/5] Scanning discovery directory: {SharpClawDiscovery.DiscoveryDirectory}").ConfigureAwait(false);
-        var ranked = SharpClawDiscovery.EnumerateRanked();
-        if (ranked.Count == 0)
+        var ranked = _optionsStore.EnumerateDetectedInstances(options.PreferAliveInstances);
+        if (ranked.Count == 0 && !_optionsStore.HasManualEndpoint(options))
         {
             const string msg = "No SharpClaw backend was found. Looked for backend-*.json under %LOCALAPPDATA%\\SharpClaw\\discovery. Is the SharpClaw API service running?";
             await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
@@ -67,32 +75,39 @@ internal sealed class SharpClawConnector
                 .ConfigureAwait(false);
         }
 
-        var chosen = ranked[0];
-        await _log.WriteLineAsync(
-            $"   Selected entry [0]: instance={Short(chosen.InstanceId)} baseUrl={chosen.BaseUrl}")
-            .ConfigureAwait(false);
-
-        if (!chosen.IsAlive)
+        var chosen = _optionsStore.SelectEntry(options, ranked);
+        if (chosen is not null)
+        {
+            var chosenIndex = FindIndex(ranked, chosen);
             await _log.WriteLineAsync(
-                $"   ! Selected backend's process (pid={chosen.ProcessId}) does not appear to be alive. Probes will likely fail; proceeding so we can confirm the failure mode.")
+                $"   Selected entry [{chosenIndex}]: instance={Short(chosen.InstanceId)} baseUrl={chosen.BaseUrl}")
                 .ConfigureAwait(false);
 
-        if (!chosen.HasApiKeyOnDisk)
-            await _log.WriteLineAsync(
-                $"   ! API key file is missing at {chosen.ApiKeyFilePath}. The backend may not have finished writing its runtime files yet, or this discovery entry is stale.")
-                .ConfigureAwait(false);
+            if (!chosen.IsAlive)
+                await _log.WriteLineAsync(
+                    $"   ! Selected backend's process (pid={chosen.ProcessId}) does not appear to be alive. Probes will likely fail; proceeding so we can confirm the failure mode.")
+                    .ConfigureAwait(false);
+
+            if (!chosen.HasApiKeyOnDisk)
+                await _log.WriteLineAsync(
+                    $"   ! API key file is missing at {chosen.ApiKeyFilePath}. The backend may not have finished writing its runtime files yet, or this discovery entry is stale.")
+                    .ConfigureAwait(false);
+        }
+        else
+        {
+            await _log.WriteLineAsync("   No discovery entry selected; using manual endpoint overrides.").ConfigureAwait(false);
+        }
 
         SharpClawHttpClient? client = null;
         var published = false;
         try
         {
-            await _log.WriteLineAsync($"[2/5] Reading API key from: {chosen.ApiKeyFilePath}").ConfigureAwait(false);
-            if (chosen.HasGatewayTokenOnDisk)
-                await _log.WriteLineAsync($"      Reading gateway token from: {chosen.GatewayTokenFilePath}").ConfigureAwait(false);
-            else
-                await _log.WriteLineAsync("      No gateway token on disk; the backend may reject requests with 401 if it requires the X-Gateway-Token header for trusted local processes.").ConfigureAwait(false);
-
-            client = SharpClawHttpClient.FromEntry(chosen);
+            await _log.WriteLineAsync("[2/5] Resolving endpoint and authentication material...").ConfigureAwait(false);
+            var resolved = _optionsStore.BuildClient(options, chosen);
+            client = resolved.Client;
+            await _log.WriteLineAsync($"      Endpoint: {resolved.BaseUrl} ({resolved.SelectionSummary})").ConfigureAwait(false);
+            await _log.WriteLineAsync($"      API key source: {resolved.ApiKeySource}").ConfigureAwait(false);
+            await _log.WriteLineAsync($"      Gateway token source: {resolved.GatewayTokenSource}").ConfigureAwait(false);
             await _log.WriteLineAsync($"      OK HTTP client built. BaseAddress={client.BaseAddress}").ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -177,23 +192,32 @@ internal sealed class SharpClawConnector
         Error = ex,
     };
 
-    private static string Short(string? id) =>
-        string.IsNullOrEmpty(id) ? "?" : (id!.Length > 8 ? id[..8] : id);
+    private static int FindIndex(IReadOnlyList<SharpClawDiscoveryEntry> entries, SharpClawDiscoveryEntry chosen)
+    {
+        for (var i = 0; i < entries.Count; i++)
+        {
+            if (ReferenceEquals(entries[i], chosen))
+                return i;
+        }
 
-    private static string InterpretAuthFailure(HttpStatusCode status, SharpClawDiscoveryEntry entry) => status switch
+        return -1;
+    }
+
+    private static string Short(string? id) =>
+        SharpClawConnectionOptionsStore.Short(id);
+
+    private static string InterpretAuthFailure(HttpStatusCode status, SharpClawDiscoveryEntry? entry) => status switch
     {
         HttpStatusCode.Unauthorized =>
-            "The X-Api-Key was rejected (401). The discovery entry's API key may not match what the " +
-            "running backend currently considers valid — usually because a stale discovery file points at " +
-            "an older instance, or the backend was restarted and rotated its key. Try restarting SharpClaw " +
-            $"and reconnecting. (instance={Short(entry.InstanceId)}, key file={entry.ApiKeyFilePath})",
+            "The X-Api-Key was rejected (401). The selected API key may not match what the " +
+            "running backend currently considers valid. Try reconnecting or checking the options-page key overrides. " +
+            $"(instance={Short(entry?.InstanceId)}, key file={entry?.ApiKeyFilePath ?? "<override/manual>"})",
         HttpStatusCode.Forbidden =>
             "The API key was accepted but the request was forbidden (403). Check whether the gateway token " +
-            $"on disk ({entry.GatewayTokenFilePath ?? "<none>"}) matches what the backend expects.",
+            $"({entry?.GatewayTokenFilePath ?? "<override/manual/none>"}) matches what the backend expects.",
         HttpStatusCode.Locked =>
             "The endpoint returned 423 Locked. Your instance id may not have saved the correct API key, or " +
-            "the wrong backend instance was selected — verify the chosen discovery entry above is the one " +
-            "you expect.",
+            "the wrong backend instance was selected. Verify the selected discovery entry or manual overrides.",
         HttpStatusCode.TooManyRequests =>
             "The endpoint returned 429 Too Many Requests. The local rate limiter tripped; wait a minute and retry.",
         HttpStatusCode.ServiceUnavailable =>

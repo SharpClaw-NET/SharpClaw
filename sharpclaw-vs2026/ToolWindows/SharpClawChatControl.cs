@@ -1,4 +1,6 @@
+using System;
 using System.Threading;
+using System.Threading.Tasks;
 using Microsoft.VisualStudio.Extensibility.UI;
 using Microsoft.VisualStudio.Threading;
 using SharpClaw.VS2026Extension.Services;
@@ -24,11 +26,20 @@ internal sealed class SharpClawChatControl : RemoteUserControl
 {
     public SharpClawChatViewModel ViewModel { get; }
 
-    public SharpClawChatControl(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
-        : this(new NonConcurrentSynchronizationContext(sticky: true), backend, connector, log) { }
+    public SharpClawChatControl(
+        SharpClawBackend backend,
+        SharpClawConnector connector,
+        SharpClawOutputLog log,
+        Func<CancellationToken, Task>? openOptionsAsync = null)
+        : this(new NonConcurrentSynchronizationContext(sticky: true), backend, connector, log, openOptionsAsync) { }
 
-    private SharpClawChatControl(NonConcurrentSynchronizationContext ctx, SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
-        : this(ctx, new SharpClawChatViewModel(backend, connector, log, ctx)) { }
+    private SharpClawChatControl(
+        NonConcurrentSynchronizationContext ctx,
+        SharpClawBackend backend,
+        SharpClawConnector connector,
+        SharpClawOutputLog log,
+        Func<CancellationToken, Task>? openOptionsAsync)
+        : this(ctx, new SharpClawChatViewModel(backend, connector, log, ctx, openOptionsAsync)) { }
 
     private SharpClawChatControl(SynchronizationContext ctx, SharpClawChatViewModel vm)
         : base(vm, ctx)

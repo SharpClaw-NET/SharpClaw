@@ -91,6 +91,25 @@ internal sealed class SharpClawHttpClient : IDisposable
         return client;
     }
 
+    /// <summary>
+    /// Creates a client from options-page-resolved values. Discovery metadata
+    /// is retained when the resolved endpoint originated from a detected
+    /// instance, but direct Base URL / secret overrides can replace any part
+    /// of the connection.
+    /// </summary>
+    public static SharpClawHttpClient FromResolved(
+        string baseUrl,
+        string apiKey,
+        string? gatewayToken,
+        SharpClawDiscoveryEntry? entry)
+    {
+        var client = new SharpClawHttpClient(baseUrl, apiKey, gatewayToken)
+        {
+            DiscoveryEntry = entry,
+        };
+        return client;
+    }
+
     // ── HTTP helpers ──────────────────────────────────────────────
 
     public async Task<T?> GetAsync<T>(string path, CancellationToken ct = default)

@@ -185,7 +185,7 @@
                            TextWrapping="Wrap"
                            Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
                            Margin="0,0,0,6" />
-                <TextBlock Text="The current out-of-process VS2026 SDK does not expose a reliable API for opening this extension's Tools > Options page from Remote UI; connection options can be managed from Tools > Options > SharpClaw when that page is available."
+                <TextBlock Text="Connection options can be managed from Tools > SharpClaw > Options."
                            TextAlignment="Center"
                            TextWrapping="Wrap"
                            FontSize="10"

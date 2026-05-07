@@ -3,6 +3,7 @@
   "SharpClaw.DisplayName": "SharpClaw for Visual Studio 2026",
   "SharpClaw.Description": "SharpClaw AI agent integration for Visual Studio 2026.",
   "SharpClaw.ShowChatToolWindowCommand.DisplayName": "SharpClaw Chat",
+  "SharpClaw.ShowOptionsToolWindowCommand.DisplayName": "Options",
   "SharpClaw.ChatToolWindow.Title": "SharpClaw Chat",
   "SharpClaw.ToolsMenu.DisplayName": "SharpClaw",
   "SharpClaw.RefreshChatCommand.DisplayName": "Refresh",
