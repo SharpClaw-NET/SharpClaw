@@ -17,6 +17,7 @@ internal sealed class SharpClawBackend : IDisposable
     private readonly SharpClawOutputLog _log;
     private readonly List<SharpClawHttpClient> _retiredClients = new();
     private SharpClawHttpClient? _client;
+    private bool _validatedConnection;
 
     public SharpClawBackend(SharpClawOutputLog log)
     {
@@ -49,16 +50,24 @@ internal sealed class SharpClawBackend : IDisposable
     public void Reset()
     {
         _ = _log.WriteLineAsync("Backend.Reset: resetting cached client.");
+        var wasConnected = IsConnected;
         _gate.Wait();
         try
         {
             if (_client is not null)
                 _retiredClients.Add(_client);
             _client = null;
+            _validatedConnection = false;
         }
         finally
         {
             _gate.Release();
+        }
+
+        if (wasConnected)
+        {
+            try { Disconnected?.Invoke(this, EventArgs.Empty); }
+            catch { /* never let a UI handler break disconnect */ }
         }
     }
 
@@ -75,6 +84,7 @@ internal sealed class SharpClawBackend : IDisposable
             if (_client is not null)
                 _retiredClients.Add(_client);
             _client = client;
+            _validatedConnection = true;
         }
         finally
         {
@@ -91,8 +101,8 @@ internal sealed class SharpClawBackend : IDisposable
         return client;
     }
 
-    /// <summary>True when a client has been resolved (not necessarily reachable).</summary>
-    public bool IsConnected => _client is not null;
+    /// <summary>True after the verbose connector has successfully validated and published a client.</summary>
+    public bool IsConnected => _validatedConnection && _client is not null;
 
     /// <summary>
     /// Raised on the thread that completed <see cref="SetClient"/> after a new
@@ -101,6 +111,9 @@ internal sealed class SharpClawBackend : IDisposable
     /// onto a background task by the handler.
     /// </summary>
     public event EventHandler? Connected;
+
+    /// <summary>Raised after the cached validated client has been cleared.</summary>
+    public event EventHandler? Disconnected;
 
     // ── High-level chat operations ────────────────────────────────
 

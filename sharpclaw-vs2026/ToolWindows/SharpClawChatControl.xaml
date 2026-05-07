@@ -129,6 +129,33 @@
                 <Setter Property="Padding" Value="12,4" />
                 <Setter Property="MinHeight" Value="24" />
             </Style>
+
+            <Style x:Key="ConnectedOnlyBorderStyle" TargetType="Border">
+                <Setter Property="Visibility" Value="Visible" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="False">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="ConnectedOnlyGridStyle" TargetType="Grid">
+                <Setter Property="Visibility" Value="Visible" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="False">
+                        <Setter Property="Visibility" Value="Collapsed" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
+
+            <Style x:Key="DisconnectedOnlyBorderStyle" TargetType="Border">
+                <Setter Property="Visibility" Value="Collapsed" />
+                <Style.Triggers>
+                    <DataTrigger Binding="{Binding IsConnected}" Value="False">
+                        <Setter Property="Visibility" Value="Visible" />
+                    </DataTrigger>
+                </Style.Triggers>
+            </Style>
         </Grid.Resources>
 
         <Grid.RowDefinitions>
@@ -138,8 +165,48 @@
             <RowDefinition Height="Auto" />
         </Grid.RowDefinitions>
 
+        <!-- Disconnected state. Do not show selectors/transcript/composer
+             until the backend has been successfully validated by Connect. -->
+        <Border Grid.Row="0" Grid.RowSpan="3"
+                Style="{StaticResource DisconnectedOnlyBorderStyle}"
+                Padding="28"
+                Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
+            <StackPanel HorizontalAlignment="Center"
+                        VerticalAlignment="Center"
+                        MaxWidth="540">
+                <TextBlock Text="{Binding Status}"
+                           FontSize="14"
+                           FontWeight="SemiBold"
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Margin="0,0,0,10" />
+                <TextBlock Text="To see SharpClaw chat, first connect to a running SharpClaw backend."
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
+                           Margin="0,0,0,6" />
+                <TextBlock Text="The current out-of-process VS2026 SDK does not expose a reliable API for opening this extension's Tools > Options page from Remote UI; connection options can be managed from Tools > Options > SharpClaw when that page is available."
+                           TextAlignment="Center"
+                           TextWrapping="Wrap"
+                           FontSize="10"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}"
+                           Margin="0,0,0,18" />
+                <StackPanel Orientation="Horizontal"
+                            HorizontalAlignment="Center">
+                    <Button Content="Connect"
+                            MinWidth="96"
+                            Margin="0,0,8,0"
+                            Command="{Binding ConnectCommand}" />
+                    <Button Content="Open options"
+                            MinWidth="112"
+                            Command="{Binding OpenOptionsCommand}" />
+                </StackPanel>
+            </StackPanel>
+        </Border>
+
         <!-- Selector strip -->
         <Border Grid.Row="0" Padding="8"
+                Style="{StaticResource ConnectedOnlyBorderStyle}"
                 Background="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientBeginKey}}"
                 BorderBrush="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}"
                 BorderThickness="0,0,0,1">
@@ -229,6 +296,7 @@
              produce one Remote UI property update, not a burst of item
              container realization work inside the Visual Studio process. -->
         <Border Grid.Row="1"
+                Style="{StaticResource ConnectedOnlyBorderStyle}"
                 Padding="8"
                 Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
             <ScrollViewer HorizontalScrollBarVisibility="Disabled"
@@ -238,7 +306,8 @@
         </Border>
 
         <!-- Composer -->
-        <Grid Grid.Row="2" Margin="8">
+        <Grid Grid.Row="2" Margin="8"
+              Style="{StaticResource ConnectedOnlyGridStyle}">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="*" />
                 <ColumnDefinition Width="Auto" />
@@ -257,7 +326,7 @@
                     VerticalAlignment="Stretch"
                     MinHeight="60"
                     Content="Send"
-                    IsEnabled="{Binding SendCommand.RunningCommandsCount.IsZero}"
+                    IsEnabled="{Binding CanSend}"
                     Command="{Binding SendCommand}" />
         </Grid>
 

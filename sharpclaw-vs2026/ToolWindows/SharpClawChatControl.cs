@@ -24,11 +24,11 @@ internal sealed class SharpClawChatControl : RemoteUserControl
 {
     public SharpClawChatViewModel ViewModel { get; }
 
-    public SharpClawChatControl(SharpClawBackend backend, SharpClawOutputLog log)
-        : this(new NonConcurrentSynchronizationContext(sticky: true), backend, log) { }
+    public SharpClawChatControl(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
+        : this(new NonConcurrentSynchronizationContext(sticky: true), backend, connector, log) { }
 
-    private SharpClawChatControl(NonConcurrentSynchronizationContext ctx, SharpClawBackend backend, SharpClawOutputLog log)
-        : this(ctx, new SharpClawChatViewModel(backend, log, ctx)) { }
+    private SharpClawChatControl(NonConcurrentSynchronizationContext ctx, SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
+        : this(ctx, new SharpClawChatViewModel(backend, connector, log, ctx)) { }
 
     private SharpClawChatControl(SynchronizationContext ctx, SharpClawChatViewModel vm)
         : base(vm, ctx)

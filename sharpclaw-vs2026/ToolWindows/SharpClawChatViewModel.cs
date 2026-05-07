@@ -155,6 +155,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private const int MaxRenderedHistoryMessages = 200;
 
     private readonly SharpClawBackend _backend;
+    private readonly SharpClawConnector _connector;
     private readonly SharpClawOutputLog _log;
     private readonly SynchronizationContext? _uiContext;
 
@@ -173,6 +174,9 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private string _transcriptText = string.Empty;
     private XamlFragment _transcriptContent = EmptyTranscriptFragment();
     private bool _isBusy;
+    private bool _isConnected;
+    private bool _isThreadLoaded;
+    private bool _canSend;
     private string _newThreadName = string.Empty;
     private CancellationTokenSource? _periodicCts;
     private CancellationTokenSource? _watchCts;
@@ -202,18 +206,23 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     private bool _refreshPendingPreserve;
     private bool _disposed;
 
-    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawOutputLog log)
-        : this(backend, log, ui: null) { }
+    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log)
+        : this(backend, connector, log, ui: null) { }
 
-    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawOutputLog log, SynchronizationContext? ui)
+    public SharpClawChatViewModel(SharpClawBackend backend, SharpClawConnector connector, SharpClawOutputLog log, SynchronizationContext? ui)
     {
         _backend = backend;
+        _connector = connector;
         _log = log;
         _uiContext = ui;
+        _isConnected = backend.IsConnected;
 
         SendCommand = new AsyncCommand(async (_, ct) => await SendAsync(ct).ConfigureAwait(false));
         CreateThreadCommand = new AsyncCommand(async (_, ct) => await CreateThreadAsync(ct).ConfigureAwait(false));
         OpenThreadCommand = new AsyncCommand(async (_, ct) => await OpenSelectedThreadAsync(ct).ConfigureAwait(false));
+        ConnectCommand = new AsyncCommand(async (_, ct) => await ConnectAsync(ct).ConfigureAwait(false));
+        OpenOptionsCommand = new AsyncCommand(async (_, ct) => await OpenOptionsAsync(ct).ConfigureAwait(false));
+        RefreshCanSend();
 
         // Seed sentinel-only state so the picker is populated on first paint.
         Contexts.Add(NoContext);
@@ -229,6 +238,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         // Refresh. Without this, the chat tool window and the connect
         // command effectively maintain two independent connection states.
         _backend.Connected += OnBackendConnected;
+        _backend.Disconnected += OnBackendDisconnected;
     }
 
     private void OnBackendConnected(object? sender, EventArgs e)
@@ -249,6 +259,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
                 if (_disposed)
                     return;
 
+                IsConnected = true;
+                RefreshCanSend();
                 Status = "Connected - refreshing...";
                 await _log.WriteLineAsync("Backend connected — refreshing chat selectors.").ConfigureAwait(false);
                 await RefreshAllAsync(preserveSelection: true, CancellationToken.None).ConfigureAwait(false);
@@ -272,6 +284,28 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         });
     }
 
+    private void OnBackendDisconnected(object? sender, EventArgs e)
+    {
+        if (_disposed)
+            return;
+
+        _ = Task.Run(async () =>
+        {
+            try
+            {
+                await SwitchToUi();
+                if (_disposed)
+                    return;
+
+                ApplyDisconnectedState("Disconnected from SharpClaw.");
+            }
+            catch (Exception ex)
+            {
+                await _log.WriteLineAsync($"Disconnected handler failed: {ex.Message}").ConfigureAwait(false);
+            }
+        });
+    }
+
     public bool IsDisposed => _disposed;
 
     private Task LogVmAsync(string message)
@@ -288,6 +322,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         _ = LogVmAsync("Dispose: tearing down chat view model.");
         _disposed = true;
         _backend.Connected -= OnBackendConnected;
+        _backend.Disconnected -= OnBackendDisconnected;
 
         try { _periodicCts?.Cancel(); } catch { }
         _periodicCts?.Dispose();
@@ -401,6 +436,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             CancelThreadActivation();
             ClearTranscript();
             DisconnectThreadWatch();
+            _isThreadLoaded = false;
+            RefreshCanSend();
         }
         finally
         {
@@ -417,6 +454,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             SyncSelectedItemFromId(ref _selectedThread, Threads, SentinelId, NoThread, nameof(SelectedThread));
             SyncSelectedIndexFromId(Threads, SentinelId, ref _selectedThreadIndex, nameof(SelectedThreadIndex));
             CancelThreadActivation();
+            _isThreadLoaded = false;
+            RefreshCanSend();
             if (clearThreads)
             {
                 MergeById(Threads, new (Guid? Id, string Label)[] { (NoThread.Id, NoThread.DisplayName) }, NoThread);
@@ -426,6 +465,31 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         {
             _suppressCascade--;
         }
+    }
+
+    private void ApplyDisconnectedState(string status)
+    {
+        IsConnected = false;
+        IsBusy = false;
+        ResetChannelAndThreadSelection();
+        _suppressCascade++;
+        try
+        {
+            SetSelectorId(ref _selectedContextId, SentinelId, nameof(SelectedContextId), forceNotify: true);
+            SyncSelectedItemFromId(ref _selectedContext, Contexts, SentinelId, NoContext, nameof(SelectedContext));
+            SyncSelectedIndexFromId(Contexts, SentinelId, ref _selectedContextIndex, nameof(SelectedContextIndex));
+            MergeById(Contexts, new (Guid? Id, string Label)[] { (NoContext.Id, NoContext.DisplayName) }, NoContext);
+            MergeById(Channels, new (Guid? Id, string Label)[] { (NoChannels.Id, NoChannels.DisplayName) }, NoChannels);
+            MergeById(Threads, new (Guid? Id, string Label)[] { (NoThread.Id, NoThread.DisplayName) }, NoThread);
+        }
+        finally
+        {
+            _suppressCascade--;
+        }
+
+        ClearTranscript();
+        Status = status;
+        RefreshCanSend();
     }
 
     [DataMember] public ObservableList<SharpClawSelectorItem> Contexts { get; } = new();
@@ -646,6 +710,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
             unchecked { _selectionVersion++; }
             _ = LogVmAsync($"SelectedThreadId: changed to {normalized?.ToString() ?? "<null>"} version={_selectionVersion}.");
+            _isThreadLoaded = false;
+            RefreshCanSend();
             CancelThreadActivation();
             DisconnectThreadWatch();
             if (!IsRealId(normalized))
@@ -671,6 +737,24 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     {
         get => _status;
         set => SetProperty(ref _status, value ?? string.Empty);
+    }
+
+    [DataMember]
+    public bool IsConnected
+    {
+        get => _isConnected;
+        private set
+        {
+            if (SetProperty(ref _isConnected, value))
+                RefreshCanSend();
+        }
+    }
+
+    [DataMember]
+    public bool CanSend
+    {
+        get => _canSend;
+        private set => SetProperty(ref _canSend, value);
     }
 
     [DataMember]
@@ -707,7 +791,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         private set
         {
             if (SetProperty(ref _isThreadBusy, value))
-                SendCommand.CanExecute = ComputeCanSend();
+                RefreshCanSend();
         }
     }
 
@@ -717,6 +801,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     [DataMember] public AsyncCommand SendCommand { get; }
     [DataMember] public IAsyncCommand CreateThreadCommand { get; }
     [DataMember] public AsyncCommand OpenThreadCommand { get; }
+    [DataMember] public AsyncCommand ConnectCommand { get; }
+    [DataMember] public AsyncCommand OpenOptionsCommand { get; }
 
     [DataMember]
     public string NewThreadName
@@ -743,9 +829,67 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
         _ = Task.Run(async () =>
         {
-            await RefreshAllAsync(preserveSelection: false, CancellationToken.None).ConfigureAwait(false);
+            await SwitchToUi();
+            if (_disposed)
+                return;
+
+            if (IsConnected)
+                await RefreshAllAsync(preserveSelection: false, CancellationToken.None).ConfigureAwait(false);
+            else
+                ApplyDisconnectedState("Not connected.");
+
             StartPeriodicRefresh();
         });
+    }
+
+    private async Task ConnectAsync(CancellationToken ct)
+    {
+        await SwitchToUi();
+        if (_disposed || ct.IsCancellationRequested)
+            return;
+
+        try
+        {
+            IsBusy = true;
+            Status = "Connecting...";
+            var result = await _connector.ConnectAsync("chat window", ct).ConfigureAwait(false);
+            await SwitchToUi();
+            if (_disposed || ct.IsCancellationRequested)
+                return;
+
+            if (result.Success)
+            {
+                IsConnected = true;
+                Status = "Connected - refreshing...";
+            }
+            else
+            {
+                ApplyDisconnectedState($"Connect failed: {result.Summary}");
+            }
+        }
+        catch (OperationCanceledException) { }
+        catch (Exception ex)
+        {
+            await SwitchToUi();
+            if (!_disposed)
+                ApplyDisconnectedState($"Connect failed: {ex.Message}");
+            await _log.WriteLineAsync($"Chat Connect failed: {ex}").ConfigureAwait(false);
+        }
+        finally
+        {
+            await SwitchToUi();
+            if (!_disposed)
+                IsBusy = false;
+        }
+    }
+
+    private async Task OpenOptionsAsync(CancellationToken ct)
+    {
+        await SwitchToUi();
+        if (_disposed || ct.IsCancellationRequested)
+            return;
+
+        Status = "Connection options can be managed from Tools > Options > SharpClaw when the options page is available.";
     }
 
     private void StartPeriodicRefresh()
@@ -873,6 +1017,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
 
             LogVmImmediate("CRASHMARK ActivateThread BEFORE IsBusy=true.");
             IsBusy = true;
+            _isThreadLoaded = false;
+            RefreshCanSend();
             LogVmImmediate("CRASHMARK ActivateThread AFTER IsBusy=true BEFORE Status=Loading.");
             Status = "Loading thread...";
             DisconnectThreadWatch();
@@ -897,6 +1043,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             LogVmImmediate($"CRASHMARK ActivateThread BEFORE ReplaceTranscript count={history.Count}.");
             ReplaceTranscript(history);
             LogVmImmediate($"CRASHMARK ActivateThread AFTER ReplaceTranscript chars={TranscriptText.Length} BEFORE Status=ThreadLoaded.");
+            _isThreadLoaded = true;
+            RefreshCanSend();
             Status = "Thread loaded.";
             LogVmImmediate("CRASHMARK ActivateThread COMPLETED without starting thread watch.");
         }
@@ -1055,7 +1203,20 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         }
     }
 
-    private bool ComputeCanSend() => !_isSending && !_isThreadBusy;
+    private bool ComputeCanSend()
+        => IsConnected
+            && _isThreadLoaded
+            && IsRealId(SelectedChannelId)
+            && IsRealId(SelectedThreadId)
+            && !_isSending
+            && !_isThreadBusy;
+
+    private void RefreshCanSend()
+    {
+        var canSend = ComputeCanSend();
+        SendCommand.CanExecute = canSend;
+        CanSend = canSend;
+    }
 
     // ── Loaders ──────────────────────────────────────────────────
 
@@ -1069,6 +1230,15 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         await SwitchToUi();
         if (_disposed)
             return;
+
+        if (!IsConnected)
+        {
+            ApplyDisconnectedState(Status.StartsWith("Connect failed", StringComparison.Ordinal)
+                ? Status
+                : "Not connected.");
+            _ = LogVmAsync("RefreshAll: skipped because SharpClaw is not connected.");
+            return;
+        }
 
         if (_refreshInFlight)
         {
@@ -2053,9 +2223,21 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
     public async Task SendAsync(CancellationToken ct)
     {
         await SwitchToUi();
+        if (!IsConnected)
+        {
+            Status = "Connect to SharpClaw before sending.";
+            return;
+        }
+
         if (RealIdOrNull(SelectedChannelId) is not Guid channelId)
         {
             Status = "Select a channel before sending.";
+            return;
+        }
+
+        if (RealIdOrNull(SelectedThreadId) is not Guid selectedThreadId || !_isThreadLoaded)
+        {
+            Status = "Select and load a thread before sending.";
             return;
         }
 
@@ -2071,7 +2253,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
         if (string.IsNullOrEmpty(text))
             return;
 
-        var threadId = RealIdOrNull(SelectedThreadId);
+        var threadId = selectedThreadId;
         Composer = string.Empty;
         var nowStamp = DateTimeOffset.Now.LocalDateTime.ToString("HH:mm");
         _transcriptBlocks.Add(new SharpClawChatTurn(SharpClawTurnKind.User, "you (VS2026)", text!, nowStamp));
@@ -2094,6 +2276,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             _isSending = true;
             _historyStaleAfterSend = false;
             SendCommand.CanExecute = false;
+            CanSend = false;
             Status = "Sending...";
 
             using var response = await _backend
@@ -2198,7 +2381,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDis
             await SwitchToUi();
             IsBusy = false;
             _isSending = false;
-            SendCommand.CanExecute = ComputeCanSend();
+            RefreshCanSend();
 
             if (_historyStaleAfterSend)
             {
