@@ -5,6 +5,7 @@
   "SharpClaw.ShowChatToolWindowCommand.DisplayName": "SharpClaw Chat",
   "SharpClaw.ChatToolWindow.Title": "SharpClaw Chat",
   "SharpClaw.ToolsMenu.DisplayName": "SharpClaw",
+  "SharpClaw.RefreshChatCommand.DisplayName": "Refresh",
   "SharpClaw.ConnectCommand.DisplayName": "Connect",
   "SharpClaw.DisconnectCommand.DisplayName": "Disconnect"
 }

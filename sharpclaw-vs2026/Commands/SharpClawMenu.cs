@@ -17,6 +17,7 @@ internal static class SharpClawMenu
         [
             MenuChild.Command<ShowChatToolWindowCommand>(),
             MenuChild.Separator,
+            MenuChild.Command<RefreshChatCommand>(),
             MenuChild.Command<ConnectCommand>(),
             MenuChild.Command<DisconnectCommand>(),
         ],

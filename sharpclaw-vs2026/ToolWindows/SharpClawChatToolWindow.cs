@@ -16,11 +16,13 @@ internal sealed class SharpClawChatToolWindow : ToolWindow
 {
     private readonly SharpClawBackend _backend;
     private readonly SharpClawOutputLog _log;
+    private readonly SharpClawChatSession _chatSession;
 
-    public SharpClawChatToolWindow(SharpClawBackend backend, SharpClawOutputLog log)
+    public SharpClawChatToolWindow(SharpClawBackend backend, SharpClawOutputLog log, SharpClawChatSession chatSession)
     {
         _backend = backend;
         _log = log;
+        _chatSession = chatSession;
         Title = "SharpClaw Chat";
     }
 
@@ -35,6 +37,7 @@ internal sealed class SharpClawChatToolWindow : ToolWindow
     public override Task<IRemoteUserControl> GetContentAsync(CancellationToken cancellationToken)
     {
         var control = new SharpClawChatControl(_backend, _log);
+        _chatSession.Register(control.ViewModel);
         // Kick off the initial load + periodic refresh so newly created
         // contexts/channels/threads in SharpClaw show up without requiring a
         // manual click on Refresh.

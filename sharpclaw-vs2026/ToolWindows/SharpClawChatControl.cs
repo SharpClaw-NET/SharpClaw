@@ -35,4 +35,12 @@ internal sealed class SharpClawChatControl : RemoteUserControl
     {
         ViewModel = vm;
     }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+            ViewModel.Dispose();
+
+        base.Dispose(disposing);
+    }
 }

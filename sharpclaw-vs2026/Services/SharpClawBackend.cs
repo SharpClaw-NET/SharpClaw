@@ -14,14 +14,31 @@ namespace SharpClaw.VS2026Extension.Services;
 internal sealed class SharpClawBackend : IDisposable
 {
     private readonly SemaphoreSlim _gate = new(1, 1);
+    private readonly SharpClawOutputLog _log;
+    private readonly List<SharpClawHttpClient> _retiredClients = new();
     private SharpClawHttpClient? _client;
+
+    public SharpClawBackend(SharpClawOutputLog log)
+    {
+        _log = log;
+    }
 
     public async Task<SharpClawHttpClient> GetClientAsync(CancellationToken ct = default)
     {
+        await _log.WriteLineAsync("Backend.GetClientAsync: acquiring client.").ConfigureAwait(false);
         await _gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            return _client ??= SharpClawHttpClient.FromDiscovery();
+            if (_client is not null)
+            {
+                await _log.WriteLineAsync($"Backend.GetClientAsync: using cached client BaseAddress={_client.BaseAddress}.").ConfigureAwait(false);
+                return _client;
+            }
+
+            await _log.WriteLineAsync("Backend.GetClientAsync: discovering backend client.").ConfigureAwait(false);
+            _client = SharpClawHttpClient.FromDiscovery();
+            await _log.WriteLineAsync($"Backend.GetClientAsync: discovered BaseAddress={_client.BaseAddress}.").ConfigureAwait(false);
+            return _client;
         }
         finally
         {
@@ -31,10 +48,12 @@ internal sealed class SharpClawBackend : IDisposable
 
     public void Reset()
     {
+        _ = _log.WriteLineAsync("Backend.Reset: resetting cached client.");
         _gate.Wait();
         try
         {
-            _client?.Dispose();
+            if (_client is not null)
+                _retiredClients.Add(_client);
             _client = null;
         }
         finally
@@ -49,10 +68,12 @@ internal sealed class SharpClawBackend : IDisposable
     /// </summary>
     public SharpClawHttpClient SetClient(SharpClawHttpClient client)
     {
+        _ = _log.WriteLineAsync($"Backend.SetClient: publishing client BaseAddress={client.BaseAddress}.");
         _gate.Wait();
         try
         {
-            _client?.Dispose();
+            if (_client is not null)
+                _retiredClients.Add(_client);
             _client = client;
         }
         finally
@@ -85,39 +106,52 @@ internal sealed class SharpClawBackend : IDisposable
 
     public async Task<IReadOnlyList<ContextDto>> GetContextsAsync(CancellationToken ct)
     {
+        await _log.WriteLineAsync("Backend.GetContextsAsync: GET channel-contexts.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
-        return await c.GetAsync<List<ContextDto>>("channel-contexts", ct).ConfigureAwait(false)
+        var result = await c.GetAsync<List<ContextDto>>("channel-contexts", ct).ConfigureAwait(false)
             ?? new List<ContextDto>();
+        await _log.WriteLineAsync($"Backend.GetContextsAsync: returned {result.Count}.").ConfigureAwait(false);
+        return result;
     }
 
     public async Task<IReadOnlyList<ChannelDto>> GetChannelsAsync(CancellationToken ct)
     {
+        await _log.WriteLineAsync("Backend.GetChannelsAsync: GET channels.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
-        return await c.GetAsync<List<ChannelDto>>("channels", ct).ConfigureAwait(false)
+        var result = await c.GetAsync<List<ChannelDto>>("channels", ct).ConfigureAwait(false)
             ?? new List<ChannelDto>();
+        await _log.WriteLineAsync($"Backend.GetChannelsAsync: returned {result.Count}.").ConfigureAwait(false);
+        return result;
     }
 
     public async Task<IReadOnlyList<ThreadDto>> GetThreadsAsync(Guid channelId, CancellationToken ct)
     {
+        await _log.WriteLineAsync($"Backend.GetThreadsAsync: GET channels/{channelId}/threads.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
-        return await c.GetAsync<List<ThreadDto>>($"channels/{channelId}/threads", ct).ConfigureAwait(false)
+        var result = await c.GetAsync<List<ThreadDto>>($"channels/{channelId}/threads", ct).ConfigureAwait(false)
             ?? new List<ThreadDto>();
+        await _log.WriteLineAsync($"Backend.GetThreadsAsync: returned {result.Count} for channel={channelId}.").ConfigureAwait(false);
+        return result;
     }
 
     /// <summary>Creates a new thread on the given channel. Only a name is required.</summary>
     public async Task<ThreadDto?> CreateThreadAsync(Guid channelId, string name, CancellationToken ct)
     {
+        await _log.WriteLineAsync($"Backend.CreateThreadAsync: POST channels/{channelId}/threads name='{name}'.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
         // Backend's CreateThreadRequest uses { Name, MaxMessages?, MaxCharacters?, CustomId? }.
-        return await c.PostJsonAsync<ThreadDto>(
+        var result = await c.PostJsonAsync<ThreadDto>(
             $"channels/{channelId}/threads",
             new { name },
             ct).ConfigureAwait(false);
+        await _log.WriteLineAsync($"Backend.CreateThreadAsync: returned id={result?.Id.ToString() ?? "<null>"}.").ConfigureAwait(false);
+        return result;
     }
 
     public async Task<IReadOnlyList<ChatMessageDto>> GetHistoryAsync(
         Guid channelId, Guid? threadId, CancellationToken ct)
     {
+        await _log.WriteLineAsync($"Backend.GetHistoryAsync: GET history channel={channelId} thread={threadId?.ToString() ?? "<none>"}.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
         // Backend route group is /channels/{id}/chat with [MapGet] returning
         // the channel-level history, and a thread-scoped variant under
@@ -125,13 +159,16 @@ internal sealed class SharpClawBackend : IDisposable
         var path = threadId is null
             ? $"channels/{channelId}/chat"
             : $"channels/{channelId}/chat/threads/{threadId}";
-        return await c.GetAsync<List<ChatMessageDto>>(path, ct).ConfigureAwait(false)
+        var result = await c.GetAsync<List<ChatMessageDto>>(path, ct).ConfigureAwait(false)
             ?? new List<ChatMessageDto>();
+        await _log.WriteLineAsync($"Backend.GetHistoryAsync: returned {result.Count} from {path}.").ConfigureAwait(false);
+        return result;
     }
 
     public async Task<HttpResponseMessage> StartChatStreamAsync(
         Guid channelId, Guid? threadId, string message, CancellationToken ct)
     {
+        await _log.WriteLineAsync($"Backend.StartChatStreamAsync: POST stream channel={channelId} thread={threadId?.ToString() ?? "<none>"} messageLength={message?.Length ?? 0}.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
         // SSE endpoints live under the /chat route group:
         //   POST /channels/{id}/chat/stream
@@ -139,7 +176,7 @@ internal sealed class SharpClawBackend : IDisposable
         var path = threadId is null
             ? $"channels/{channelId}/chat/stream"
             : $"channels/{channelId}/chat/threads/{threadId}/stream";
-        var body = new ChatRequestDto { Message = message };
+        var body = new ChatRequestDto { Message = message ?? string.Empty };
         return await c.PostStreamAsync(path, body, ct).ConfigureAwait(false);
     }
 
@@ -153,6 +190,7 @@ internal sealed class SharpClawBackend : IDisposable
     public async Task<HttpResponseMessage> StartThreadWatchAsync(
         Guid channelId, Guid threadId, CancellationToken ct)
     {
+        await _log.WriteLineAsync($"Backend.StartThreadWatchAsync: GET watch channel={channelId} thread={threadId}.").ConfigureAwait(false);
         var c = await GetClientAsync(ct).ConfigureAwait(false);
         return await c.GetStreamAsync(
             $"channels/{channelId}/chat/threads/{threadId}/watch", ct).ConfigureAwait(false);
@@ -161,6 +199,9 @@ internal sealed class SharpClawBackend : IDisposable
     public void Dispose()
     {
         _client?.Dispose();
+        foreach (var client in _retiredClients)
+            client.Dispose();
+        _retiredClients.Clear();
         _gate.Dispose();
     }
 }

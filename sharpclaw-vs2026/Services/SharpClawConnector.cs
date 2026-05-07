@@ -1,4 +1,5 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
@@ -43,16 +44,14 @@ internal sealed class SharpClawConnector
     /// <param name="trigger">Where the connect was initiated from (e.g. "auto-connect", "Tools menu").</param>
     public async Task<SharpClawConnectionResult> ConnectAsync(string trigger, CancellationToken ct)
     {
-        await _log.WriteLineAsync($"────────── Connect started ({trigger}) ──────────").ConfigureAwait(false);
+        await _log.WriteLineAsync($"---------- Connect started ({trigger}) ----------").ConfigureAwait(false);
 
-        // ── Step 1: Discovery ─────────────────────────────────────
         await _log.WriteLineAsync($"[1/5] Scanning discovery directory: {SharpClawDiscovery.DiscoveryDirectory}").ConfigureAwait(false);
         var ranked = SharpClawDiscovery.EnumerateRanked();
         if (ranked.Count == 0)
         {
-            const string msg = "No SharpClaw backend was found. Looked for backend-*.json under " +
-                               "%LOCALAPPDATA%\\SharpClaw\\discovery. Is the SharpClaw API service running?";
-            await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
+            const string msg = "No SharpClaw backend was found. Looked for backend-*.json under %LOCALAPPDATA%\\SharpClaw\\discovery. Is the SharpClaw API service running?";
+            await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
             return Fail(msg);
         }
 
@@ -75,107 +74,100 @@ internal sealed class SharpClawConnector
 
         if (!chosen.IsAlive)
             await _log.WriteLineAsync(
-                $"   ⚠ Selected backend's process (pid={chosen.ProcessId}) does not appear to be alive. " +
-                "Probes will likely fail; proceeding so we can confirm the failure mode.").ConfigureAwait(false);
+                $"   ! Selected backend's process (pid={chosen.ProcessId}) does not appear to be alive. Probes will likely fail; proceeding so we can confirm the failure mode.")
+                .ConfigureAwait(false);
 
         if (!chosen.HasApiKeyOnDisk)
             await _log.WriteLineAsync(
-                $"   ⚠ API key file is missing at {chosen.ApiKeyFilePath}. The backend may not have finished " +
-                "writing its runtime files yet, or this discovery entry is stale.").ConfigureAwait(false);
+                $"   ! API key file is missing at {chosen.ApiKeyFilePath}. The backend may not have finished writing its runtime files yet, or this discovery entry is stale.")
+                .ConfigureAwait(false);
 
-        // ── Step 2: Build client (reads API key + gateway token) ──
-        SharpClawHttpClient client;
+        SharpClawHttpClient? client = null;
+        var published = false;
         try
         {
-            await _log.WriteLineAsync(
-                $"[2/5] Reading API key from: {chosen.ApiKeyFilePath}").ConfigureAwait(false);
+            await _log.WriteLineAsync($"[2/5] Reading API key from: {chosen.ApiKeyFilePath}").ConfigureAwait(false);
             if (chosen.HasGatewayTokenOnDisk)
-                await _log.WriteLineAsync(
-                    $"      Reading gateway token from: {chosen.GatewayTokenFilePath}").ConfigureAwait(false);
+                await _log.WriteLineAsync($"      Reading gateway token from: {chosen.GatewayTokenFilePath}").ConfigureAwait(false);
             else
-                await _log.WriteLineAsync(
-                    "      No gateway token on disk; the backend may reject requests with 401 " +
-                    "if it requires the X-Gateway-Token header for trusted local processes.").ConfigureAwait(false);
+                await _log.WriteLineAsync("      No gateway token on disk; the backend may reject requests with 401 if it requires the X-Gateway-Token header for trusted local processes.").ConfigureAwait(false);
 
-            _backend.Reset();
-            client = _backend.SetClient(SharpClawHttpClient.FromEntry(chosen));
-            await _log.WriteLineAsync($"      ✓ HTTP client built. BaseAddress={client.BaseAddress}").ConfigureAwait(false);
+            client = SharpClawHttpClient.FromEntry(chosen);
+            await _log.WriteLineAsync($"      OK HTTP client built. BaseAddress={client.BaseAddress}").ConfigureAwait(false);
         }
         catch (Exception ex)
         {
             var msg = $"Failed to build HTTP client: {ex.Message}";
-            await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
+            await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
             return Fail(msg, ex);
         }
 
-        // ── Step 3: /echo ─────────────────────────────────────────
-        await _log.WriteLineAsync("[3/5] Probing /echo (no auth required)…").ConfigureAwait(false);
         try
         {
-            using var echoResp = await client.GetRawAsync("echo", ct).ConfigureAwait(false);
-            var status = (int)echoResp.StatusCode;
-            await _log.WriteLineAsync($"      ← HTTP {status} {echoResp.ReasonPhrase}").ConfigureAwait(false);
-            if (!echoResp.IsSuccessStatusCode)
+            await _log.WriteLineAsync("[3/5] Probing /echo (no auth required)...").ConfigureAwait(false);
+            using (var echoResp = await client.GetRawAsync("echo", ct).ConfigureAwait(false))
             {
-                var msg = $"/echo returned HTTP {status}. The backend is reachable but not healthy. " +
-                          "This usually means the API process started but hasn't finished initializing.";
-                await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
-                return Fail(msg);
+                var status = (int)echoResp.StatusCode;
+                await _log.WriteLineAsync($"      <- HTTP {status} {echoResp.ReasonPhrase}").ConfigureAwait(false);
+                if (!echoResp.IsSuccessStatusCode)
+                {
+                    var msg = $"/echo returned HTTP {status}. The backend is reachable but not healthy. This usually means the API process started but hasn't finished initializing.";
+                    await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
+                    return Fail(msg);
+                }
             }
-        }
-        catch (Exception ex)
-        {
-            var msg = $"/echo unreachable: {ex.Message}. The backend URL ({chosen.BaseUrl}) is not " +
-                      "responding. Confirm the SharpClaw API service is actually listening on this port.";
-            await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
-            return Fail(msg, ex);
-        }
 
-        // ── Step 4: /ping (validates X-Api-Key + gateway token) ───
-        await _log.WriteLineAsync("[4/5] Probing /ping (validates X-Api-Key + X-Gateway-Token)…").ConfigureAwait(false);
-        try
-        {
-            using var pingResp = await client.GetRawAsync("ping", ct).ConfigureAwait(false);
-            var status = (int)pingResp.StatusCode;
-            await _log.WriteLineAsync($"      ← HTTP {status} {pingResp.ReasonPhrase}").ConfigureAwait(false);
-            if (!pingResp.IsSuccessStatusCode)
+            await _log.WriteLineAsync("[4/5] Probing /ping (validates X-Api-Key + X-Gateway-Token)...").ConfigureAwait(false);
+            using (var pingResp = await client.GetRawAsync("ping", ct).ConfigureAwait(false))
             {
-                var hint = InterpretAuthFailure(pingResp.StatusCode, chosen);
-                var msg = $"/ping failed with HTTP {status}. {hint}";
-                await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
-                return Fail(msg);
+                var status = (int)pingResp.StatusCode;
+                await _log.WriteLineAsync($"      <- HTTP {status} {pingResp.ReasonPhrase}").ConfigureAwait(false);
+                if (!pingResp.IsSuccessStatusCode)
+                {
+                    var hint = InterpretAuthFailure(pingResp.StatusCode, chosen);
+                    var msg = $"/ping failed with HTTP {status}. {hint}";
+                    await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
+                    return Fail(msg);
+                }
             }
+
+            await _log.WriteLineAsync("[5/5] Loading /channel-contexts to confirm session is usable...").ConfigureAwait(false);
+            try
+            {
+                var contexts = await client.GetAsync<List<ContextDto>>("channel-contexts", ct).ConfigureAwait(false)
+                    ?? new List<ContextDto>();
+                await _log.WriteLineAsync($"      OK Loaded {contexts.Count} context(s).").ConfigureAwait(false);
+            }
+            catch (HttpRequestException ex)
+            {
+                var msg = $"Loading contexts failed: {ex.Message}. Authentication succeeded but a domain endpoint is failing - the backend may be in a partially-initialized state.";
+                await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
+                return Fail(msg, ex);
+            }
+            catch (Exception ex)
+            {
+                await _log.WriteLineAsync($"   x {ex.Message}").ConfigureAwait(false);
+                return Fail(ex.Message, ex);
+            }
+
+            _backend.SetClient(client);
+            published = true;
+
+            await _log.WriteLineAsync("OK Connected. SharpClaw backend is reachable and authenticated.").ConfigureAwait(false);
+            await _log.WriteLineAsync("------------------------------------------------").ConfigureAwait(false);
+            return new SharpClawConnectionResult { Success = true, Summary = "Connected" };
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            var msg = $"/ping threw an exception: {ex.Message}";
-            await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
+            var msg = $"Connect probe threw an exception: {ex.Message}";
+            await _log.WriteLineAsync($"   x {msg}").ConfigureAwait(false);
             return Fail(msg, ex);
         }
-
-        // ── Step 5: First domain call (contexts) ──────────────────
-        await _log.WriteLineAsync("[5/5] Loading /channel-contexts to confirm session is usable…").ConfigureAwait(false);
-        try
+        finally
         {
-            var contexts = await _backend.GetContextsAsync(ct).ConfigureAwait(false);
-            await _log.WriteLineAsync($"      ✓ Loaded {contexts.Count} context(s).").ConfigureAwait(false);
+            if (!published)
+                client?.Dispose();
         }
-        catch (HttpRequestException ex)
-        {
-            var msg = $"Loading contexts failed: {ex.Message}. Authentication succeeded but a domain " +
-                      "endpoint is failing — the backend may be in a partially-initialized state.";
-            await _log.WriteLineAsync($"   ✗ {msg}").ConfigureAwait(false);
-            return Fail(msg, ex);
-        }
-        catch (Exception ex)
-        {
-            await _log.WriteLineAsync($"   ✗ {ex.Message}").ConfigureAwait(false);
-            return Fail(ex.Message, ex);
-        }
-
-        await _log.WriteLineAsync("✓ Connected. SharpClaw backend is reachable and authenticated.").ConfigureAwait(false);
-        await _log.WriteLineAsync("───────────────────────────────────────────────").ConfigureAwait(false);
-        return new SharpClawConnectionResult { Success = true, Summary = "Connected" };
     }
 
     private SharpClawConnectionResult Fail(string summary, Exception? ex = null) => new()

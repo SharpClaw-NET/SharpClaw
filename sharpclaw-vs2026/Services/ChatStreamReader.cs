@@ -24,14 +24,14 @@ internal static class ChatStreamReader
         HttpResponseMessage response,
         [EnumeratorCancellation] CancellationToken ct)
     {
-        using var stream = await response.Content.ReadAsStreamAsync();
+        using var stream = await response.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
         using var reader = new StreamReader(stream);
 
         string? eventName = null;
 
         while (!ct.IsCancellationRequested)
         {
-            var line = await reader.ReadLineAsync();
+            var line = await reader.ReadLineAsync(ct).ConfigureAwait(false);
             if (line is null) break;            // stream ended
 
             if (line.Length == 0)

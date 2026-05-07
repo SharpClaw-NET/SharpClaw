@@ -145,12 +145,13 @@ internal static class SharpClawClientType
 /// and the async commands the XAML binds to.
 /// </summary>
 [DataContract]
-internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
+internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject, IDisposable
 {
     private static readonly Guid SentinelId = Guid.Empty;
     private static readonly SharpClawSelectorItem NoContext = new(SentinelId, "[No Context]");
     private static readonly SharpClawSelectorItem NoChannels = new(SentinelId, "[No Channel]");
     private static readonly SharpClawSelectorItem NoThread = new(SentinelId, "[No Thread]");
+    private const int MaxRenderedHistoryMessages = 200;
 
     private readonly SharpClawBackend _backend;
     private readonly SharpClawOutputLog _log;
@@ -162,8 +163,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     private Guid? _selectedContextId = SentinelId;
     private Guid? _selectedChannelId = SentinelId;
     private Guid? _selectedThreadId = SentinelId;
+    private int _selectedContextIndex;
+    private int _selectedChannelIndex;
+    private int _selectedThreadIndex;
     private string _composer = string.Empty;
     private string _status = "Idle";
+    private string _transcriptText = string.Empty;
     private bool _isBusy;
     private string _newThreadName = string.Empty;
     private CancellationTokenSource? _periodicCts;
@@ -192,6 +197,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     private bool _refreshInFlight;
     private bool _refreshPending;
     private bool _refreshPendingPreserve;
+    private bool _disposed;
 
     public SharpClawChatViewModel(SharpClawBackend backend, SharpClawOutputLog log)
         : this(backend, log, ui: null) { }
@@ -202,9 +208,9 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         _log = log;
         _uiContext = ui;
 
-        RefreshCommand = new AsyncCommand(async (_, ct) => await RefreshAllAsync(preserveSelection: true, ct).ConfigureAwait(false));
         SendCommand = new AsyncCommand(async (_, ct) => await SendAsync(ct).ConfigureAwait(false));
         CreateThreadCommand = new AsyncCommand(async (_, ct) => await CreateThreadAsync(ct).ConfigureAwait(false));
+        OpenThreadCommand = new AsyncCommand(async (_, ct) => await OpenSelectedThreadAsync(ct).ConfigureAwait(false));
 
         // Seed sentinel-only state so the picker is populated on first paint.
         Contexts.Add(NoContext);
@@ -224,6 +230,9 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     private void OnBackendConnected(object? sender, EventArgs e)
     {
+        if (_disposed)
+            return;
+
         // Hop onto the serialized UI context before touching VM state. This
         // is what makes a successful reconnect authoritatively overwrite a
         // stale "Error: …" subtitle: we set Status synchronously on the same
@@ -234,15 +243,21 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             try
             {
                 await SwitchToUi();
-                Status = "Connected — refreshing…";
+                if (_disposed)
+                    return;
+
+                Status = "Connected - refreshing...";
                 await _log.WriteLineAsync("Backend connected — refreshing chat selectors.").ConfigureAwait(false);
                 await RefreshAllAsync(preserveSelection: true, CancellationToken.None).ConfigureAwait(false);
                 // RefreshAllAsync only sets "Connected" when preserveSelection
                 // is false (initial load). For a reconnect we still want to
                 // visibly clear any stale error text, so do it here.
                 await SwitchToUi();
+                if (_disposed)
+                    return;
+
                 if (_status.StartsWith("Error", StringComparison.Ordinal)
-                    || _status.StartsWith("Connected — refreshing", StringComparison.Ordinal))
+                    || _status.StartsWith("Connected - refreshing", StringComparison.Ordinal))
                 {
                     Status = "Connected";
                 }
@@ -252,6 +267,31 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 await _log.WriteLineAsync($"Connected-refresh failed: {ex.Message}").ConfigureAwait(false);
             }
         });
+    }
+
+    public bool IsDisposed => _disposed;
+
+    private Task LogVmAsync(string message)
+        => _log.WriteLineAsync($"ChatVM[{GetHashCode():x8}] {message}");
+
+    private void LogVmImmediate(string message)
+        => _log.WriteLineImmediate($"ChatVM[{GetHashCode():x8}] {message}");
+
+    public void Dispose()
+    {
+        if (_disposed)
+            return;
+
+        _ = LogVmAsync("Dispose: tearing down chat view model.");
+        _disposed = true;
+        _backend.Connected -= OnBackendConnected;
+
+        try { _periodicCts?.Cancel(); } catch { }
+        _periodicCts?.Dispose();
+        _periodicCts = null;
+
+        CancelThreadActivation();
+        DisconnectThreadWatch();
     }
 
     /// <summary>
@@ -288,6 +328,49 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         return true;
     }
 
+    private bool SetSelectorIndex(ref int field, int value, string propertyName, bool forceNotify = false)
+    {
+        if (field == value)
+        {
+            if (forceNotify)
+                RaiseNotifyPropertyChangedEvent(propertyName);
+            return false;
+        }
+
+        field = value;
+        RaiseNotifyPropertyChangedEvent(propertyName);
+        return true;
+    }
+
+    private static int FindIndexById(ObservableList<SharpClawSelectorItem> list, Guid? id)
+    {
+        var normalized = NormalizeSelectorId(id);
+        for (var i = 0; i < list.Count; i++)
+        {
+            if (NormalizeSelectorId(list[i].Id) == normalized)
+                return i;
+        }
+
+        return 0;
+    }
+
+    private static SharpClawSelectorItem ItemAtOrSentinel(
+        ObservableList<SharpClawSelectorItem> list,
+        int index,
+        SharpClawSelectorItem sentinel)
+    {
+        return index >= 0 && index < list.Count ? list[index] : sentinel;
+    }
+
+    private void SyncSelectedIndexFromId(
+        ObservableList<SharpClawSelectorItem> list,
+        Guid? id,
+        ref int indexField,
+        string indexPropertyName)
+    {
+        SetSelectorIndex(ref indexField, FindIndexById(list, id), indexPropertyName, forceNotify: true);
+    }
+
     private void SyncSelectedItemFromId(
         ref SharpClawSelectorItem? field,
         ObservableList<SharpClawSelectorItem> list,
@@ -310,9 +393,10 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         {
             SetSelectorId(ref _selectedChannelId, SentinelId, nameof(SelectedChannelId), forceNotify: true);
             SyncSelectedItemFromId(ref _selectedChannel, Channels, SentinelId, NoChannels, nameof(SelectedChannel));
+            SyncSelectedIndexFromId(Channels, SentinelId, ref _selectedChannelIndex, nameof(SelectedChannelIndex));
             ResetThreadSelection(clearThreads: true);
             CancelThreadActivation();
-            Transcript.Clear();
+            ClearTranscript();
             DisconnectThreadWatch();
         }
         finally
@@ -328,6 +412,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         {
             SetSelectorId(ref _selectedThreadId, SentinelId, nameof(SelectedThreadId), forceNotify: true);
             SyncSelectedItemFromId(ref _selectedThread, Threads, SentinelId, NoThread, nameof(SelectedThread));
+            SyncSelectedIndexFromId(Threads, SentinelId, ref _selectedThreadIndex, nameof(SelectedThreadIndex));
             CancelThreadActivation();
             if (clearThreads)
             {
@@ -343,7 +428,6 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     [DataMember] public ObservableList<SharpClawSelectorItem> Contexts { get; } = new();
     [DataMember] public ObservableList<SharpClawSelectorItem> Channels { get; } = new();
     [DataMember] public ObservableList<SharpClawSelectorItem> Threads { get; } = new();
-    [DataMember] public ObservableList<SharpClawChatTurn> Transcript { get; } = new();
 
     /// <summary>Subtitle shown beneath the Context dropdown.</summary>
     [DataMember] public string ContextHint => "Created in SharpClaw (permissions only configurable there)";
@@ -375,6 +459,32 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     }
 
     [DataMember]
+    public int SelectedContextIndex
+    {
+        get => _selectedContextIndex;
+        set
+        {
+            if (value < 0 || value >= Contexts.Count)
+                return;
+
+            if (_suppressCascade != 0)
+                return;
+
+            if (!SetSelectorIndex(ref _selectedContextIndex, value, nameof(SelectedContextIndex)))
+                return;
+
+            var item = ItemAtOrSentinel(Contexts, value, NoContext);
+            if (!ReferenceEquals(_selectedContext, item))
+            {
+                _selectedContext = item;
+                RaiseNotifyPropertyChangedEvent(nameof(SelectedContext));
+            }
+
+            SelectedContextId = item.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
     public Guid? SelectedContextId
     {
         get => _selectedContextId;
@@ -385,10 +495,15 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 return;
 
             SyncSelectedItemFromId(ref _selectedContext, Contexts, normalized, NoContext, nameof(SelectedContext));
+            SyncSelectedIndexFromId(Contexts, normalized, ref _selectedContextIndex, nameof(SelectedContextIndex));
             if (_suppressCascade != 0)
+            {
+                _ = LogVmAsync($"SelectedContextIndex: ignored suppressed value={value}.");
                 return;
+            }
 
             unchecked { _selectionVersion++; }
+            _ = LogVmAsync($"SelectedContextId: changed to {normalized?.ToString() ?? "<null>"} version={_selectionVersion}.");
             ResetChannelAndThreadSelection();
             _ = ReloadChannelsAsync(CancellationToken.None);
         }
@@ -415,6 +530,32 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     }
 
     [DataMember]
+    public int SelectedChannelIndex
+    {
+        get => _selectedChannelIndex;
+        set
+        {
+            if (value < 0 || value >= Channels.Count)
+                return;
+
+            if (_suppressCascade != 0)
+                return;
+
+            if (!SetSelectorIndex(ref _selectedChannelIndex, value, nameof(SelectedChannelIndex)))
+                return;
+
+            var item = ItemAtOrSentinel(Channels, value, NoChannels);
+            if (!ReferenceEquals(_selectedChannel, item))
+            {
+                _selectedChannel = item;
+                RaiseNotifyPropertyChangedEvent(nameof(SelectedChannel));
+            }
+
+            SelectedChannelId = item.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
     public Guid? SelectedChannelId
     {
         get => _selectedChannelId;
@@ -425,12 +566,17 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 return;
 
             SyncSelectedItemFromId(ref _selectedChannel, Channels, normalized, NoChannels, nameof(SelectedChannel));
+            SyncSelectedIndexFromId(Channels, normalized, ref _selectedChannelIndex, nameof(SelectedChannelIndex));
             if (_suppressCascade != 0)
+            {
+                _ = LogVmAsync($"SelectedChannelIndex: ignored suppressed value={value}.");
                 return;
+            }
 
             unchecked { _selectionVersion++; }
+            _ = LogVmAsync($"SelectedChannelId: changed to {normalized?.ToString() ?? "<null>"} version={_selectionVersion}.");
             ResetThreadSelection(clearThreads: false);
-            Transcript.Clear();
+            ClearTranscript();
             DisconnectThreadWatch();
             _ = ReloadThreadsAsync(CancellationToken.None);
         }
@@ -452,6 +598,32 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     }
 
     [DataMember]
+    public int SelectedThreadIndex
+    {
+        get => _selectedThreadIndex;
+        set
+        {
+            if (value < 0 || value >= Threads.Count)
+                return;
+
+            if (_suppressCascade != 0)
+                return;
+
+            if (!SetSelectorIndex(ref _selectedThreadIndex, value, nameof(SelectedThreadIndex)))
+                return;
+
+            var item = ItemAtOrSentinel(Threads, value, NoThread);
+            if (!ReferenceEquals(_selectedThread, item))
+            {
+                _selectedThread = item;
+                RaiseNotifyPropertyChangedEvent(nameof(SelectedThread));
+            }
+
+            SelectedThreadId = item.Id ?? SentinelId;
+        }
+    }
+
+    [DataMember]
     public Guid? SelectedThreadId
     {
         get => _selectedThreadId;
@@ -462,19 +634,24 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 return;
 
             SyncSelectedItemFromId(ref _selectedThread, Threads, normalized, NoThread, nameof(SelectedThread));
+            SyncSelectedIndexFromId(Threads, normalized, ref _selectedThreadIndex, nameof(SelectedThreadIndex));
             if (_suppressCascade != 0)
+            {
+                _ = LogVmAsync($"SelectedThreadIndex: ignored suppressed value={value}.");
                 return;
+            }
 
             unchecked { _selectionVersion++; }
-            if (IsRealId(normalized))
+            _ = LogVmAsync($"SelectedThreadId: changed to {normalized?.ToString() ?? "<null>"} version={_selectionVersion}.");
+            CancelThreadActivation();
+            DisconnectThreadWatch();
+            if (!IsRealId(normalized))
             {
-                QueueThreadActivation();
+                ClearTranscript();
             }
             else
             {
-                CancelThreadActivation();
-                Transcript.Clear();
-                DisconnectThreadWatch();
+                Status = "Thread selected. Click Open to load.";
             }
         }
     }
@@ -491,6 +668,13 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     {
         get => _status;
         set => SetProperty(ref _status, value ?? string.Empty);
+    }
+
+    [DataMember]
+    public string TranscriptText
+    {
+        get => _transcriptText;
+        private set => SetProperty(ref _transcriptText, value ?? string.Empty);
     }
 
     [DataMember]
@@ -517,12 +701,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         }
     }
 
-    [DataMember] public IAsyncCommand RefreshCommand { get; }
     // Send is exposed as the concrete AsyncCommand so we can flip CanExecute
     // from the watch loop / stream lifecycle (the IAsyncCommand interface
     // only exposes a getter).
     [DataMember] public AsyncCommand SendCommand { get; }
     [DataMember] public IAsyncCommand CreateThreadCommand { get; }
+    [DataMember] public AsyncCommand OpenThreadCommand { get; }
 
     [DataMember]
     public string NewThreadName
@@ -540,8 +724,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     /// </summary>
     public void EnsureStarted()
     {
+        if (_disposed)
+            return;
+
         if (_initialized) return;
         _initialized = true;
+        _ = LogVmAsync("EnsureStarted: initial refresh scheduled.");
 
         _ = Task.Run(async () =>
         {
@@ -552,9 +740,13 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     private void StartPeriodicRefresh()
     {
+        if (_disposed)
+            return;
+
         _periodicCts?.Cancel();
         _periodicCts = new CancellationTokenSource();
         var ct = _periodicCts.Token;
+        _ = LogVmAsync("StartPeriodicRefresh: 15 second refresh loop started.");
 
         _ = Task.Run(async () =>
         {
@@ -565,6 +757,18 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 try
                 {
                     await Task.Delay(TimeSpan.FromSeconds(15), ct).ConfigureAwait(false);
+
+                    await SwitchToUi();
+                    if (_disposed)
+                        break;
+
+                    if (IsRealId(SelectedThreadId))
+                    {
+                        await _log.WriteLineAsync("Periodic refresh skipped: active thread selected.").ConfigureAwait(false);
+                        continue;
+                    }
+
+                    await _log.WriteLineAsync("Periodic refresh tick.").ConfigureAwait(false);
                     await RefreshAllAsync(preserveSelection: true, ct).ConfigureAwait(false);
                 }
                 catch (OperationCanceledException) { break; }
@@ -578,23 +782,38 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     // ── Thread activity watch ────────────────────────────────────
 
-    private void QueueThreadActivation()
+    private async Task OpenSelectedThreadAsync(CancellationToken ct)
     {
-        CancelThreadActivation();
-
+        // Remote UI command callbacks are asynchronous. Capture the
+        // selector state synchronously at command invocation time before
+        // this method yields, matching Microsoft's guidance for commands
+        // that depend on multiple bound properties.
         var channelId = RealIdOrNull(SelectedChannelId);
         var threadId = RealIdOrNull(SelectedThreadId);
+        var version = _selectionVersion;
+
+        await SwitchToUi();
+        if (_disposed || ct.IsCancellationRequested)
+            return;
+
         if (channelId is not Guid chId || threadId is not Guid thId)
         {
-            Transcript.Clear();
-            DisconnectThreadWatch();
+            Status = "Select a channel and thread before opening.";
             return;
         }
 
-        var version = _selectionVersion;
+        _ = LogVmAsync($"OpenSelectedThread: requested channel={channelId} thread={threadId} version={version}.");
+        QueueThreadActivation(chId, thId, version);
+    }
+
+    private void QueueThreadActivation(Guid channelId, Guid threadId, long version)
+    {
+        CancelThreadActivation();
+
         var cts = new CancellationTokenSource();
         _threadActivationCts = cts;
-        _ = Task.Run(() => ActivateThreadAsync(chId, thId, version, cts));
+        _ = LogVmAsync($"QueueThreadActivation: channel={channelId} thread={threadId} version={version}.");
+        _ = Task.Run(() => ActivateThreadAsync(channelId, threadId, version, cts));
     }
 
     private void CancelThreadActivation()
@@ -604,6 +823,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             return;
 
         _threadActivationCts = null;
+        _ = LogVmAsync("CancelThreadActivation: cancellation requested.");
         try { cts.Cancel(); } catch { /* best effort */ }
     }
 
@@ -612,39 +832,55 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         var ct = cts.Token;
         try
         {
-            // Let the ComboBox finish committing/closing before we touch the
-            // transcript or open the watch stream. This keeps selection UI
-            // work tiny and prevents heavy Remote UI updates from running
-            // inside the selection-change delivery path.
-            await Task.Delay(150, ct).ConfigureAwait(false);
-
+            LogVmImmediate($"CRASHMARK ActivateThread ENTER channel={channelId} thread={threadId} version={version}.");
+            LogVmImmediate($"CRASHMARK ActivateThread BEFORE SwitchToUi#1 channel={channelId} thread={threadId}.");
             await SwitchToUi();
+            LogVmImmediate($"CRASHMARK ActivateThread AFTER SwitchToUi#1 selectedChannel={RealIdOrNull(SelectedChannelId)?.ToString() ?? "<none>"} selectedThread={RealIdOrNull(SelectedThreadId)?.ToString() ?? "<none>"} currentVersion={_selectionVersion}.");
             if (ct.IsCancellationRequested
                 || version != _selectionVersion
                 || RealIdOrNull(SelectedChannelId) != channelId
                 || RealIdOrNull(SelectedThreadId) != threadId)
+            {
+                _ = LogVmAsync($"ActivateThread: stale before load channel={channelId} thread={threadId} requestedVersion={version} currentVersion={_selectionVersion}.");
                 return;
+            }
 
+            LogVmImmediate("CRASHMARK ActivateThread BEFORE IsBusy=true.");
             IsBusy = true;
+            LogVmImmediate("CRASHMARK ActivateThread AFTER IsBusy=true BEFORE Status=Loading.");
             Status = "Loading thread...";
-            Transcript.Clear();
+            DisconnectThreadWatch();
+            LogVmImmediate("CRASHMARK ActivateThread AFTER Status=Loading BEFORE GetHistory.");
 
-            var history = await _backend.GetHistoryAsync(channelId, threadId, ct).ConfigureAwait(false);
+            using var loadCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            loadCts.CancelAfter(TimeSpan.FromSeconds(20));
+            var history = await _backend.GetHistoryAsync(channelId, threadId, loadCts.Token).ConfigureAwait(false);
+            LogVmImmediate($"CRASHMARK ActivateThread AFTER GetHistory count={history.Count} BEFORE SwitchToUi#2.");
 
             await SwitchToUi();
+            LogVmImmediate($"CRASHMARK ActivateThread AFTER SwitchToUi#2 selectedChannel={RealIdOrNull(SelectedChannelId)?.ToString() ?? "<none>"} selectedThread={RealIdOrNull(SelectedThreadId)?.ToString() ?? "<none>"} currentVersion={_selectionVersion}.");
             if (ct.IsCancellationRequested
                 || version != _selectionVersion
                 || RealIdOrNull(SelectedChannelId) != channelId
                 || RealIdOrNull(SelectedThreadId) != threadId)
+            {
+                _ = LogVmAsync($"ActivateThread: stale after history channel={channelId} thread={threadId} requestedVersion={version} currentVersion={_selectionVersion}.");
                 return;
+            }
 
+            LogVmImmediate($"CRASHMARK ActivateThread BEFORE ReplaceTranscript count={history.Count}.");
             ReplaceTranscript(history);
+            LogVmImmediate($"CRASHMARK ActivateThread AFTER ReplaceTranscript chars={TranscriptText.Length} BEFORE Status=ThreadLoaded.");
             Status = "Thread loaded.";
-            ReconnectThreadWatch();
+            LogVmImmediate("CRASHMARK ActivateThread COMPLETED without starting thread watch.");
         }
-        catch (OperationCanceledException) { }
+        catch (OperationCanceledException)
+        {
+            LogVmImmediate($"CRASHMARK ActivateThread CANCELED channel={channelId} thread={threadId}.");
+        }
         catch (Exception ex)
         {
+            LogVmImmediate($"CRASHMARK ActivateThread EXCEPTION {ex}");
             await SwitchToUi();
             if (!ct.IsCancellationRequested)
                 Status = $"Error: {ex.Message}";
@@ -652,13 +888,17 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         }
         finally
         {
+            LogVmImmediate("CRASHMARK ActivateThread FINALLY BEFORE SwitchToUi.");
             await SwitchToUi();
+            LogVmImmediate("CRASHMARK ActivateThread FINALLY AFTER SwitchToUi.");
             if (ReferenceEquals(_threadActivationCts, cts))
             {
                 _threadActivationCts = null;
                 IsBusy = false;
+                LogVmImmediate("CRASHMARK ActivateThread FINALLY cleared current activation and IsBusy=false.");
             }
             cts.Dispose();
+            LogVmImmediate("CRASHMARK ActivateThread FINALLY disposed CTS.");
         }
     }
 
@@ -704,22 +944,35 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         }
         _watchedChannelId = null;
         _watchedThreadId = null;
-        if (_isThreadBusy) IsThreadBusy = false;
+        if (_isThreadBusy)
+        {
+            if (_disposed)
+                _isThreadBusy = false;
+            else
+                IsThreadBusy = false;
+        }
     }
 
     private async Task RunThreadWatchAsync(Guid channelId, Guid threadId, CancellationToken ct)
     {
+        LogVmImmediate($"CRASHMARK ThreadWatch ENTER channel={channelId} thread={threadId}.");
         await _log.WriteLineAsync($"ThreadWatch: connecting channel={channelId} thread={threadId}").ConfigureAwait(false);
         try
         {
-            using var resp = await _backend.StartThreadWatchAsync(channelId, threadId, ct).ConfigureAwait(false);
+            LogVmImmediate($"CRASHMARK ThreadWatch BEFORE StartThreadWatchAsync channel={channelId} thread={threadId}.");
+            using var connectCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+            connectCts.CancelAfter(TimeSpan.FromSeconds(10));
+            using var resp = await _backend.StartThreadWatchAsync(channelId, threadId, connectCts.Token).ConfigureAwait(false);
+            LogVmImmediate($"CRASHMARK ThreadWatch AFTER StartThreadWatchAsync status={(int)resp.StatusCode}.");
             if (!resp.IsSuccessStatusCode)
             {
                 await _log.WriteLineAsync($"ThreadWatch: HTTP {(int)resp.StatusCode}").ConfigureAwait(false);
                 return;
             }
 
+            LogVmImmediate("CRASHMARK ThreadWatch BEFORE ReadAsStream.");
             using var stream = await resp.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+            LogVmImmediate("CRASHMARK ThreadWatch AFTER ReadAsStream.");
             using var reader = new StreamReader(stream);
 
             string? eventName = null;
@@ -737,12 +990,16 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 {
                     if (eventName == "Processing")
                     {
+                        LogVmImmediate("CRASHMARK ThreadWatch EVENT Processing BEFORE SwitchToUi.");
                         await SwitchToUi();
+                        LogVmImmediate("CRASHMARK ThreadWatch EVENT Processing AFTER SwitchToUi.");
                         IsThreadBusy = true;
                     }
                     else if (eventName == "NewMessages")
                     {
+                        LogVmImmediate("CRASHMARK ThreadWatch EVENT NewMessages BEFORE SwitchToUi.");
                         await SwitchToUi();
+                        LogVmImmediate("CRASHMARK ThreadWatch EVENT NewMessages AFTER SwitchToUi.");
                         IsThreadBusy = false;
                         if (_isSending)
                         {
@@ -759,10 +1016,15 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                     eventName = null;
                 }
             }
+            LogVmImmediate("CRASHMARK ThreadWatch EXIT stream ended.");
         }
-        catch (OperationCanceledException) { /* normal on selection change / shutdown */ }
+        catch (OperationCanceledException)
+        {
+            LogVmImmediate("CRASHMARK ThreadWatch CANCELED.");
+        }
         catch (Exception ex)
         {
+            LogVmImmediate($"CRASHMARK ThreadWatch EXCEPTION {ex}");
             await _log.WriteLineAsync($"ThreadWatch: {ex.GetType().Name}: {ex.Message}").ConfigureAwait(false);
         }
     }
@@ -773,13 +1035,18 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
 
     public async Task RefreshAllAsync(bool preserveSelection, CancellationToken ct)
     {
+        _ = LogVmAsync($"RefreshAll: requested preserveSelection={preserveSelection}.");
         // Coalesce overlapping refresh requests. Periodic refresh ticks,
         // reconnect notifications, and the user clicking "Refresh" can all
         // race; we only ever want one refresh chain executing on the UI
         // context at a time, with at most one queued follow-up pass.
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         if (_refreshInFlight)
         {
+            _ = LogVmAsync($"RefreshAll: coalesced preserveSelection={preserveSelection}.");
             _refreshPending = true;
             // If any caller wants a fresh wipe, the queued pass should honor
             // that. Otherwise the queued pass preserves selection.
@@ -813,10 +1080,14 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     private async Task RefreshAllCoreAsync(bool preserveSelection, CancellationToken ct)
     {
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         var version = _selectionVersion;
         var prevContextId = preserveSelection ? RealIdOrNull(SelectedContextId) : null;
         var prevChannelId = preserveSelection ? RealIdOrNull(SelectedChannelId) : null;
         var prevThreadId = preserveSelection ? RealIdOrNull(SelectedThreadId) : null;
+        _ = LogVmAsync($"RefreshAllCore: start preserveSelection={preserveSelection} prevContext={prevContextId?.ToString() ?? "<none>"} prevChannel={prevChannelId?.ToString() ?? "<none>"} prevThread={prevThreadId?.ToString() ?? "<none>"}.");
 
         IsBusy = true;
         if (!preserveSelection)
@@ -826,9 +1097,14 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         {
             // HTTP runs off-context (it's "free thread") so we don't block
             // the UI sync context while waiting for the network.
+            _ = LogVmAsync("RefreshAllCore: GET contexts.");
             var contexts = await _backend.GetContextsAsync(ct).ConfigureAwait(false);
+            _ = LogVmAsync($"RefreshAllCore: GET contexts returned {contexts.Count}.");
 
             await SwitchToUi();
+            if (_disposed)
+                return;
+
             if (version != _selectionVersion)
                 return;
 
@@ -842,13 +1118,14 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                 foreach (var c in contexts)
                     desired.Add((c.Id, c.Name ?? c.Id.ToString()));
                 MergeById(Contexts, desired, NoContext);
+                _ = LogVmAsync($"RefreshAllCore: contexts merged desired={desired.Count} actual={Contexts.Count}.");
 
                 if (prevContextId is Guid cid)
                 {
                     var restoredContext = FindById(Contexts, cid);
                     if (restoredContext is null)
                         ForceSelect(ref _selectedContext, NoContext, nameof(SelectedContext));
-                    else if (!ReferenceEquals(_selectedContext, restoredContext))
+                    else
                         ForceSelect(ref _selectedContext, restoredContext, nameof(SelectedContext));
                 }
                 else
@@ -864,6 +1141,9 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             await ReloadChannelsCoreAsync(prevChannelId, prevThreadId, ct).ConfigureAwait(false);
 
             await SwitchToUi();
+            if (_disposed)
+                return;
+
             // Always overwrite stale error text on a successful refresh so a
             // reconnect can clear an "API error" subtitle without waiting for
             // the user to interact again.
@@ -884,7 +1164,8 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         finally
         {
             await SwitchToUi();
-            IsBusy = false;
+            if (!_disposed)
+                IsBusy = false;
         }
     }
 
@@ -913,12 +1194,21 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         // Capture filter on UI context (avoid reading SelectedContext from
         // a background thread).
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         var contextFilter = RealIdOrNull(SelectedContextId);
         var version = _selectionVersion;
+        _ = LogVmAsync($"ReloadChannelsCore: start contextFilter={contextFilter?.ToString() ?? "<none>"} preserveChannel={preserveChannelId?.ToString() ?? "<none>"} preserveThread={preserveThreadId?.ToString() ?? "<none>"} version={version}.");
 
+        _ = LogVmAsync("ReloadChannelsCore: GET channels.");
         var all = await _backend.GetChannelsAsync(ct).ConfigureAwait(false);
+        _ = LogVmAsync($"ReloadChannelsCore: GET channels returned {all.Count}.");
 
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         if (version != _selectionVersion || contextFilter != RealIdOrNull(SelectedContextId))
             return;
 
@@ -938,13 +1228,14 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             }
 
             MergeById(Channels, desired, NoChannels);
+            _ = LogVmAsync($"ReloadChannelsCore: channels merged desired={desired.Count} actual={Channels.Count}.");
 
             if (preserveChannelId is Guid cid)
             {
                 var restored = FindById(Channels, cid);
                 if (restored is null)
                     ForceSelect(ref _selectedChannel, NoChannels, nameof(SelectedChannel));
-                else if (!ReferenceEquals(_selectedChannel, restored))
+                else
                     ForceSelect(ref _selectedChannel, restored, nameof(SelectedChannel));
             }
             else
@@ -958,6 +1249,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         }
 
         await ReloadThreadsCoreAsync(preserveThreadId, ct).ConfigureAwait(false);
+        _ = LogVmAsync("ReloadChannelsCore: completed.");
     }
 
     private async Task ReloadThreadsAsync(Guid? preserveThreadId, CancellationToken ct)
@@ -977,12 +1269,12 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         await SwitchToUi();
         if (IsRealId(SelectedThreadId))
         {
-            QueueThreadActivation();
+            Status = "Thread selected. Click Load to refresh the transcript.";
         }
         else
         {
             CancelThreadActivation();
-            Transcript.Clear();
+            ClearTranscript();
             DisconnectThreadWatch();
         }
     }
@@ -994,14 +1286,23 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
     private async Task ReloadThreadsCoreAsync(Guid? preserveThreadId, CancellationToken ct)
     {
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         var channelId = RealIdOrNull(SelectedChannelId);
         var version = _selectionVersion;
+        _ = LogVmAsync($"ReloadThreadsCore: start channel={channelId?.ToString() ?? "<none>"} preserveThread={preserveThreadId?.ToString() ?? "<none>"} version={version}.");
 
+        _ = LogVmAsync($"ReloadThreadsCore: GET threads channel={channelId?.ToString() ?? "<none>"}.");
         var threads = channelId is Guid chId
             ? await _backend.GetThreadsAsync(chId, ct).ConfigureAwait(false)
             : (System.Collections.Generic.IReadOnlyList<ThreadDto>)Array.Empty<ThreadDto>();
+        _ = LogVmAsync($"ReloadThreadsCore: GET threads returned {threads.Count}.");
 
         await SwitchToUi();
+        if (_disposed)
+            return;
+
         if (version != _selectionVersion || channelId != RealIdOrNull(SelectedChannelId))
             return;
 
@@ -1015,14 +1316,24 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             foreach (var t in threads)
                 desired.Add((t.Id, t.Name ?? t.Id.ToString()));
 
+            if (preserveThreadId is Guid preserved
+                && IsRealId(SelectedThreadId)
+                && SelectedThreadId == preserved
+                && SameSelectorSnapshot(Threads, desired))
+            {
+                _ = LogVmAsync("ReloadThreadsCore: thread snapshot unchanged; skipped merge/restore.");
+                return;
+            }
+
             MergeById(Threads, desired, NoThread);
+            _ = LogVmAsync($"ReloadThreadsCore: threads merged desired={desired.Count} actual={Threads.Count}.");
 
             if (preserveThreadId is Guid tid)
             {
                 var restored = FindById(Threads, tid);
                 if (restored is null)
                     ForceSelect(ref _selectedThread, NoThread, nameof(SelectedThread));
-                else if (!ReferenceEquals(_selectedThread, restored))
+                else
                     ForceSelect(ref _selectedThread, restored, nameof(SelectedThread));
             }
             else
@@ -1051,14 +1362,17 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         if (propertyName == nameof(SelectedContext))
         {
             SetSelectorId(ref _selectedContextId, value?.Id ?? SentinelId, nameof(SelectedContextId), forceNotify: true);
+            SyncSelectedIndexFromId(Contexts, value?.Id ?? SentinelId, ref _selectedContextIndex, nameof(SelectedContextIndex));
         }
         else if (propertyName == nameof(SelectedChannel))
         {
             SetSelectorId(ref _selectedChannelId, value?.Id ?? SentinelId, nameof(SelectedChannelId), forceNotify: true);
+            SyncSelectedIndexFromId(Channels, value?.Id ?? SentinelId, ref _selectedChannelIndex, nameof(SelectedChannelIndex));
         }
         else if (propertyName == nameof(SelectedThread))
         {
             SetSelectorId(ref _selectedThreadId, value?.Id ?? SentinelId, nameof(SelectedThreadId), forceNotify: true);
+            SyncSelectedIndexFromId(Threads, value?.Id ?? SentinelId, ref _selectedThreadIndex, nameof(SelectedThreadIndex));
         }
     }
 
@@ -1067,6 +1381,24 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         foreach (var item in list)
             if (item.Id == id) return item;
         return null;
+    }
+
+    private static bool SameSelectorSnapshot(
+        ObservableList<SharpClawSelectorItem> list,
+        System.Collections.Generic.IList<(Guid? Id, string Label)> desired)
+    {
+        if (list.Count != desired.Count)
+            return false;
+
+        for (var i = 0; i < desired.Count; i++)
+        {
+            if (NormalizeSelectorId(list[i].Id) != NormalizeSelectorId(desired[i].Id))
+                return false;
+            if (!string.Equals(list[i].DisplayName, desired[i].Label ?? string.Empty, StringComparison.Ordinal))
+                return false;
+        }
+
+        return true;
     }
 
     /// <summary>
@@ -1267,21 +1599,87 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         return new SharpClawChatTurn(kind, sender, m.Content ?? string.Empty, ts, isRemoteUser);
     }
 
+    private void ClearTranscript()
+    {
+        TranscriptText = string.Empty;
+    }
+
     private void ReplaceTranscript(System.Collections.Generic.IReadOnlyList<ChatMessageDto> history)
     {
-        // Already on the UI sync context (callers ensure that). Direct, simple
-        // rebuild — no caps, no truncation, no batched yields. The earlier
-        // cosmetic mitigations were hiding the real cause (selector cascade
-        // re-entry from object-reference SelectedItem bindings).
-        Transcript.Clear();
-        for (var i = 0; i < history.Count; i++)
-            Transcript.Add(BuildTurnFromHistory(history[i]));
+        // Already on the UI sync context (callers ensure that). The load
+        // path deliberately updates a single serialized string instead of
+        // mutating an ObservableList of rich objects. That keeps the Remote
+        // UI transaction bounded to one property change and avoids forcing
+        // the VS-side WPF host to realize item containers while the command
+        // callback is still unwinding.
+        TranscriptText = BuildTranscriptText(history);
+    }
+
+    private static string BuildTranscriptText(System.Collections.Generic.IReadOnlyList<ChatMessageDto> history)
+    {
+        if (history.Count == 0)
+            return "No messages in this thread.";
+
+        var sb = new StringBuilder();
+        var start = 0;
+        if (history.Count > MaxRenderedHistoryMessages)
+        {
+            start = history.Count - MaxRenderedHistoryMessages;
+            AppendTranscriptBlock(
+                sb,
+                "system",
+                DateTimeOffset.Now.LocalDateTime.ToString("HH:mm"),
+                $"Showing the last {MaxRenderedHistoryMessages} of {history.Count} messages.",
+                addSeparator: false);
+        }
+
+        for (var i = start; i < history.Count; i++)
+        {
+            var turn = BuildTurnFromHistory(history[i]);
+            AppendTranscriptBlock(sb, turn.Sender, turn.Timestamp, turn.Body, addSeparator: sb.Length > 0);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string FormatTranscriptBlock(string sender, string timestamp, string body)
+    {
+        var sb = new StringBuilder();
+        AppendTranscriptBlock(sb, sender, timestamp, body, addSeparator: false);
+        return sb.ToString();
+    }
+
+    private static string AppendTranscriptText(string current, string block)
+    {
+        if (string.IsNullOrEmpty(current))
+            return block;
+
+        return current + Environment.NewLine + Environment.NewLine + block;
+    }
+
+    private static void AppendTranscriptBlock(
+        StringBuilder sb,
+        string sender,
+        string timestamp,
+        string body,
+        bool addSeparator)
+    {
+        if (addSeparator)
+            sb.AppendLine().AppendLine();
+
+        if (!string.IsNullOrWhiteSpace(timestamp))
+            sb.Append('[').Append(timestamp).Append("] ");
+
+        sb.Append(string.IsNullOrWhiteSpace(sender) ? "message" : sender.Trim());
+        sb.AppendLine();
+        sb.Append(body ?? string.Empty);
     }
 
     // â”€â”€ Send â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
 
     public async Task SendAsync(CancellationToken ct)
     {
+        await SwitchToUi();
         if (RealIdOrNull(SelectedChannelId) is not Guid channelId)
         {
             Status = "Select a channel before sending.";
@@ -1291,7 +1689,7 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         if (_isSending || _isThreadBusy)
         {
             Status = _isThreadBusy
-                ? "Another client is streaming on this thread — wait for it to finish."
+                ? "Another client is streaming on this thread - wait for it to finish."
                 : "A send is already in progress.";
             return;
         }
@@ -1300,14 +1698,18 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
         if (string.IsNullOrEmpty(text))
             return;
 
+        var threadId = RealIdOrNull(SelectedThreadId);
         Composer = string.Empty;
         var nowStamp = DateTimeOffset.Now.LocalDateTime.ToString("HH:mm");
-        Transcript.Add(new SharpClawChatTurn(SharpClawTurnKind.User, "you (VS2026)", text!, nowStamp));
+        var transcriptBeforeSend = TranscriptText;
+        var userBlock = FormatTranscriptBlock("you (VS2026)", nowStamp, text!);
+        var prefixWithUser = AppendTranscriptText(transcriptBeforeSend, userBlock);
+        void SetAssistantText(string body)
+        {
+            TranscriptText = AppendTranscriptText(prefixWithUser, FormatTranscriptBlock("assistant", nowStamp, body));
+        }
 
-        // Live assistant bubble updated as text deltas arrive. We mirror the
-        // Uno cursor convention so partial responses look alive.
-        var assistant = new SharpClawChatTurn(SharpClawTurnKind.Assistant, "assistant", "â–", nowStamp);
-        Transcript.Add(assistant);
+        SetAssistantText("|");
 
         var streamed = new StringBuilder();
         var needsNewline = false;
@@ -1318,15 +1720,16 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
             _isSending = true;
             _historyStaleAfterSend = false;
             SendCommand.CanExecute = false;
-            Status = "Sendingâ€¦";
+            Status = "Sending...";
 
             using var response = await _backend
-                .StartChatStreamAsync(channelId, RealIdOrNull(SelectedThreadId), text!, ct)
+                .StartChatStreamAsync(channelId, threadId, text!, ct)
                 .ConfigureAwait(false);
 
             if (!response.IsSuccessStatusCode)
             {
-                assistant.Body = $"âœ— {(int)response.StatusCode} {response.ReasonPhrase}";
+                await SwitchToUi();
+                SetAssistantText($"x {(int)response.StatusCode} {response.ReasonPhrase}");
                 Status = $"Error: {(int)response.StatusCode}";
                 return;
             }
@@ -1343,80 +1746,86 @@ internal sealed class SharpClawChatViewModel : NotifyPropertyChangedObject
                                 streamed.Append('\n');
                                 needsNewline = false;
                             }
+
                             streamed.Append(ev.Delta);
-                            assistant.Body = streamed.ToString() + "â–";
+                            await SwitchToUi();
+                            SetAssistantText(streamed.ToString() + "|");
                         }
                         break;
 
                     case ChatStreamEventType.ToolCallStart:
-                        streamed.Append($"\nâš™ [{ev.ToolName ?? "tool"}] â†’ {ev.ToolStatus ?? "started"}");
+                        streamed.Append($"\n[tool:{ev.ToolName ?? "tool"}] {ev.ToolStatus ?? "started"}");
                         needsNewline = true;
-                        assistant.Body = streamed.ToString() + "â–";
+                        await SwitchToUi();
+                        SetAssistantText(streamed.ToString() + "|");
                         break;
 
                     case ChatStreamEventType.ToolCallResult:
-                        streamed.Append($"\nâš™ [{ev.ToolName ?? "tool"}] â†’ {ev.ToolStatus ?? "done"}");
+                        streamed.Append($"\n[tool:{ev.ToolName ?? "tool"}] {ev.ToolStatus ?? "done"}");
                         needsNewline = true;
-                        assistant.Body = streamed.ToString() + "â–";
+                        await SwitchToUi();
+                        SetAssistantText(streamed.ToString() + "|");
                         break;
 
                     case ChatStreamEventType.ApprovalRequired:
-                        streamed.Append($"\nâ³ [{ev.ToolName ?? "action"}] awaiting approval");
+                        streamed.Append($"\n[action:{ev.ToolName ?? "action"}] awaiting approval");
                         needsNewline = true;
-                        assistant.Body = streamed.ToString() + "â–";
+                        await SwitchToUi();
+                        SetAssistantText(streamed.ToString() + "|");
                         break;
 
                     case ChatStreamEventType.ApprovalResult:
-                        streamed.Append($"\nâš™ [{ev.ToolName ?? "action"}] â†’ {ev.ToolStatus ?? "resolved"}");
+                        streamed.Append($"\n[action:{ev.ToolName ?? "action"}] {ev.ToolStatus ?? "resolved"}");
                         needsNewline = true;
-                        assistant.Body = streamed.ToString() + "â–";
+                        await SwitchToUi();
+                        SetAssistantText(streamed.ToString() + "|");
                         break;
 
                     case ChatStreamEventType.Error:
+                        await SwitchToUi();
                         Status = $"Error: {ev.Error}";
-                        assistant.Body = streamed.Length > 0
-                            ? streamed.ToString() + $"\nâœ— {ev.Error}"
-                            : $"âœ— {ev.Error}";
+                        SetAssistantText(streamed.Length > 0
+                            ? streamed.ToString() + $"\nx {ev.Error}"
+                            : $"x {ev.Error}");
                         return;
 
                     case ChatStreamEventType.Done:
-                        // Prefer the authoritative final text from the Done payload;
-                        // fall back to the streamed buffer if absent.
+                        await SwitchToUi();
                         if (!string.IsNullOrEmpty(ev.FinalText))
-                            assistant.Body = ev.FinalText!;
+                            SetAssistantText(ev.FinalText!);
                         else if (streamed.Length > 0)
-                            assistant.Body = streamed.ToString();
+                            SetAssistantText(streamed.ToString());
                         else
-                            assistant.Body = "(empty response)";
+                            SetAssistantText("(empty response)");
                         Status = "Idle";
                         return;
                 }
             }
 
-            // Stream ended without an explicit Done event.
-            assistant.Body = streamed.Length > 0 ? streamed.ToString() : "(no response)";
+            await SwitchToUi();
+            SetAssistantText(streamed.Length > 0 ? streamed.ToString() : "(no response)");
         }
         catch (OperationCanceledException)
         {
-            assistant.Body = streamed.Length > 0 ? streamed.ToString() : "(cancelled)";
+            await SwitchToUi();
+            SetAssistantText(streamed.Length > 0 ? streamed.ToString() : "(cancelled)");
         }
         catch (Exception ex)
         {
+            await SwitchToUi();
             Status = $"Error: {ex.Message}";
-            assistant.Body = streamed.Length > 0
-                ? streamed.ToString() + $"\nâœ— {ex.Message}"
-                : $"âœ— {ex.Message}";
+            SetAssistantText(streamed.Length > 0
+                ? streamed.ToString() + $"\nx {ex.Message}"
+                : $"x {ex.Message}");
             await _log.WriteLineAsync($"Send failed: {ex}").ConfigureAwait(false);
         }
         finally
         {
+            await SwitchToUi();
             IsBusy = false;
             _isSending = false;
             SendCommand.CanExecute = ComputeCanSend();
 
-            // Another client posted while we were streaming — refresh now so
-            // the transcript reflects the merged history without clobbering
-            // our just-rendered assistant bubble mid-stream.
             if (_historyStaleAfterSend)
             {
                 _historyStaleAfterSend = false;

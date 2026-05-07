@@ -35,6 +35,7 @@ internal sealed class SharpClawExtension : Extension
         // Backend connectivity is shared across commands and tool windows.
         serviceCollection.AddSingleton<SharpClawBackend>();
         serviceCollection.AddSingleton<SharpClawConnector>();
+        serviceCollection.AddSingleton<SharpClawChatSession>();
 
         // Register the output log both as itself and as IExtensionInitializer so
         // the framework calls its InitializeAsync to create the Output channel.

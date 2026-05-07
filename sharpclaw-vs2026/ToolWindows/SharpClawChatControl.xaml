@@ -153,39 +153,39 @@
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
                     <ColumnDefinition Width="*" />
-                    <ColumnDefinition Width="Auto" />
                 </Grid.ColumnDefinitions>
 
-                <!-- Bind SelectedValue to the stable Guid Id (not the item reference)
-                     so a Remote UI IPC re-push during MergeById can't replay a
-                     stale item reference and re-enter the cascading reload.
-                     Reference-based SelectedItem binding is what was crashing
-                     VS when a refresh / watch event landed mid-selection. -->
                 <ComboBox Grid.Row="0" Grid.Column="0" Margin="0,0,4,0"
                           ItemsSource="{Binding Contexts}"
-                          SelectedValuePath="Id"
-                          SelectedValue="{Binding SelectedContextId, Mode=TwoWay}"
+                          SelectedIndex="{Binding SelectedContextIndex, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName"
                           ToolTip="Context" />
 
                 <ComboBox Grid.Row="0" Grid.Column="1" Margin="4,0"
                           ItemsSource="{Binding Channels}"
-                          SelectedValuePath="Id"
-                          SelectedValue="{Binding SelectedChannelId, Mode=TwoWay}"
+                          SelectedIndex="{Binding SelectedChannelIndex, Mode=TwoWay}"
                           DisplayMemberPath="DisplayName"
                           ToolTip="Channel" />
 
-                <ComboBox Grid.Row="0" Grid.Column="2" Margin="4,0"
-                          ItemsSource="{Binding Threads}"
-                          SelectedValuePath="Id"
-                          SelectedValue="{Binding SelectedThreadId, Mode=TwoWay}"
-                          DisplayMemberPath="DisplayName"
-                          ToolTip="Thread" />
+                <Grid Grid.Row="0" Grid.Column="2" Margin="4,0,0,0">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*" />
+                        <ColumnDefinition Width="Auto" />
+                    </Grid.ColumnDefinitions>
 
-                <Button Grid.Row="0" Grid.Column="3" Margin="8,0,0,0"
-                        Padding="12,4"
-                        Content="Refresh"
-                        Command="{Binding RefreshCommand}" />
+                    <ComboBox Grid.Column="0"
+                              ItemsSource="{Binding Threads}"
+                              SelectedIndex="{Binding SelectedThreadIndex, Mode=TwoWay}"
+                              DisplayMemberPath="DisplayName"
+                              ToolTip="Thread" />
+
+                    <Button Grid.Column="1" Margin="4,0,0,0"
+                            Padding="10,2" MinWidth="72"
+                            Content="Load"
+                            ToolTip="Load the selected thread"
+                            IsEnabled="{Binding OpenThreadCommand.RunningCommandsCount.IsZero}"
+                            Command="{Binding OpenThreadCommand}" />
+                </Grid>
 
                 <!-- Explanatory subtitles so users know which selectors require
                      creating the resource in SharpClaw vs. inline here. -->
@@ -224,97 +224,21 @@
             </Grid>
         </Border>
 
-        <!-- Transcript: bubble per turn, right-aligned for user, left-aligned
-             for assistant, with role-aware accent colors driven by the
-             SharpClawChatTurn.IsXxx flags so converters aren't needed. -->
-        <ListBox Grid.Row="1"
-                 ItemsSource="{Binding Transcript}"
-                 BorderThickness="0"
-                 HorizontalContentAlignment="Stretch"
-                 ScrollViewer.HorizontalScrollBarVisibility="Disabled"
-                 ScrollViewer.VerticalScrollBarVisibility="Auto"
-                 Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
-            <ListBox.ItemContainerStyle>
-                <Style TargetType="ListBoxItem">
-                    <Setter Property="Focusable" Value="False" />
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch" />
-                    <Setter Property="Padding" Value="0" />
-                    <Setter Property="Background" Value="Transparent" />
-                </Style>
-            </ListBox.ItemContainerStyle>
-            <ListBox.ItemTemplate>
-                <DataTemplate>
-                    <Grid Margin="8,4">
-                        <Grid.Resources>
-                            <!-- Sender-aware bubble palette. We use semi-transparent
-                                 overlays (~0x35 alpha) on top of the tool-window
-                                 background so the same brushes look pale on a light
-                                 VS theme and dark on a dark VS theme without us
-                                 having to write per-theme dictionaries.
-                                   â€¢ Local user (you, in this VS2026)  â†’ purple
-                                   â€¢ Remote user (other client/CLI/Uno) â†’ blue
-                                   â€¢ Assistant / agent                 â†’ green -->
-                            <SolidColorBrush x:Key="SharpClawUserBubble"        Color="#358B5CF6" />
-                            <SolidColorBrush x:Key="SharpClawUserBubbleBorder"  Color="#808B5CF6" />
-                            <SolidColorBrush x:Key="SharpClawRemoteUserBubble"       Color="#353B82F6" />
-                            <SolidColorBrush x:Key="SharpClawRemoteUserBubbleBorder" Color="#803B82F6" />
-                            <SolidColorBrush x:Key="SharpClawAgentBubble"       Color="#3522C55E" />
-                            <SolidColorBrush x:Key="SharpClawAgentBubbleBorder" Color="#8022C55E" />
-                        </Grid.Resources>
-                        <Border x:Name="Bubble"
-                                Padding="10,6"
-                                CornerRadius="6"
-                                MaxWidth="640"
-                                HorizontalAlignment="Left"
-                                Background="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientBeginKey}}"
-                                BorderBrush="{DynamicResource {x:Static styles:VsBrushes.CommandBarBorderKey}}"
-                                BorderThickness="1">
-                            <StackPanel>
-                                <TextBlock x:Name="Sender"
-                                           Text="{Binding Sender}"
-                                           FontWeight="SemiBold"
-                                           FontSize="11"
-                                           Margin="0,0,0,2"
-                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}" />
-                                <TextBlock Text="{Binding Body}"
-                                           TextWrapping="Wrap"
-                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
-                                <TextBlock Text="{Binding Timestamp}"
-                                           FontSize="10"
-                                           Margin="0,2,0,0"
-                                           HorizontalAlignment="Right"
-                                           Foreground="{DynamicResource {x:Static styles:VsBrushes.GrayTextKey}}" />
-                            </StackPanel>
-                        </Border>
-                    </Grid>
-                    <DataTemplate.Triggers>
-                        <DataTrigger Binding="{Binding IsLocalUser}" Value="True">
-                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
-                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawUserBubble}" />
-                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawUserBubbleBorder}" />
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding IsRemoteUser}" Value="True">
-                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Right" />
-                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawRemoteUserBubble}" />
-                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawRemoteUserBubbleBorder}" />
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding IsAssistant}" Value="True">
-                            <Setter TargetName="Bubble" Property="Background" Value="{StaticResource SharpClawAgentBubble}" />
-                            <Setter TargetName="Bubble" Property="BorderBrush" Value="{StaticResource SharpClawAgentBubbleBorder}" />
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding IsSystem}" Value="True">
-                            <Setter TargetName="Bubble" Property="HorizontalAlignment" Value="Stretch" />
-                            <Setter TargetName="Bubble" Property="Background" Value="Transparent" />
-                            <Setter TargetName="Bubble" Property="BorderThickness" Value="0" />
-                        </DataTrigger>
-                        <DataTrigger Binding="{Binding IsTool}" Value="True">
-                            <Setter TargetName="Bubble" Property="Background"
-                                    Value="{DynamicResource {x:Static styles:VsBrushes.CommandBarGradientMiddleKey}}" />
-                        </DataTrigger>
-                    </DataTemplate.Triggers>
-                </DataTemplate>
-            </ListBox.ItemTemplate>
-        </ListBox>
+        <!-- Transcript. Keep this as a single text payload rather than a
+             remote observable collection: loading a thread should produce
+             one Remote UI property update, not a burst of item/container
+             realization work inside the Visual Studio process. -->
+        <Border Grid.Row="1"
+                Padding="8"
+                Background="{DynamicResource {x:Static styles:VsBrushes.ToolWindowBackgroundKey}}">
+            <ScrollViewer HorizontalScrollBarVisibility="Disabled"
+                          VerticalScrollBarVisibility="Auto">
+                <TextBlock Text="{Binding TranscriptText}"
+                           TextWrapping="Wrap"
+                           FontFamily="Consolas"
+                           Foreground="{DynamicResource {x:Static styles:VsBrushes.ToolWindowTextKey}}" />
+            </ScrollViewer>
+        </Border>
 
         <!-- Composer -->
         <Grid Grid.Row="2" Margin="8">
@@ -335,6 +259,7 @@
                     Padding="16,4"
                     VerticalAlignment="Bottom"
                     Content="Send"
+                    IsEnabled="{Binding SendCommand.RunningCommandsCount.IsZero}"
                     Command="{Binding SendCommand}" />
         </Grid>
 
