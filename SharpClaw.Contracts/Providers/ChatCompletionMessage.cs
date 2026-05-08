@@ -7,6 +7,13 @@ namespace SharpClaw.Contracts.Providers;
 public sealed record ChatCompletionMessage(string Role, string Content)
 {
     /// <summary>
+    /// Hidden provider-specific transcript state associated with this
+    /// message. Provider clients may serialize it back to their native wire
+    /// format when replaying history.
+    /// </summary>
+    public string? ProviderMetadataJson { get; init; }
+
+    /// <summary>
     /// Optional base64-encoded image data (e.g. a screenshot PNG).
     /// When set, providers should include this as a multipart content
     /// block alongside <see cref="Content"/>.

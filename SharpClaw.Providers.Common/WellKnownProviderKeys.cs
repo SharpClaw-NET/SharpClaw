@@ -8,6 +8,7 @@ namespace SharpClaw.Providers.Common;
 public static class WellKnownProviderKeys
 {
     public const string OpenAI                  = "openai";
+    public const string DeepSeek                = "deepseek";
     public const string Anthropic               = "anthropic";
     public const string OpenRouter              = "openrouter";
     public const string GoogleVertexAI          = "google-vertex-ai";
@@ -32,7 +33,7 @@ public static class WellKnownProviderKeys
     /// </summary>
     public static readonly IReadOnlyList<string> All =
     [
-        OpenAI, Anthropic, OpenRouter, GoogleGemini, GoogleGeminiOpenAi,
+        OpenAI, DeepSeek, Anthropic, OpenRouter, GoogleGemini, GoogleGeminiOpenAi,
         GoogleVertexAI, GoogleVertexAIOpenAi, ZAI, VercelAIGateway, XAI,
         Groq, Cerebras, Mistral, GitHubCopilot, Minimax, LlamaSharp, Ollama,
     ];

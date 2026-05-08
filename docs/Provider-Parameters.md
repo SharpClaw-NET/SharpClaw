@@ -56,9 +56,9 @@ Each provider has a dedicated page with full parameter tables, wire
 format examples, and provider-specific notes:
 
 | Provider | `ProviderType` | Protocol | Doc |
-|---|---|---|
-|---|
+|---|---|---|---|
 | OpenAI | `OpenAI` (`0`) | Chat Completions + Responses API | [providers/OpenAI.md](providers/OpenAI.md) |
+| DeepSeek | `deepseek` | OpenAI-compatible | [providers/DeepSeek.md](providers/DeepSeek.md) |
 | Anthropic | `Anthropic` (`1`) | Anthropic Messages API | [providers/Anthropic.md](providers/Anthropic.md) |
 | OpenRouter | `OpenRouter` (`2`) | OpenAI-compatible | [providers/OpenRouter.md](providers/OpenRouter.md) |
 | Google Vertex AI (native) | `GoogleVertexAI` (`3`) | Native `generateContent` (**stub**) | [providers/Google-Vertex-AI.md](providers/Google-Vertex-AI.md) |
@@ -82,17 +82,17 @@ format examples, and provider-specific notes:
 
 ## Parameter support matrix
 
-| Parameter | OpenAI | Anthropic | OpenRouter | Vertex AI³ | Vertex AI OAI | Gemini | Gemini OAI | xAI | Groq | Cerebras | Mistral | Copilot | ZAI | Vercel | Minimax | LlamaSharp | Whisper | Custom | Ollama |
-|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
-| `temperature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| `topP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| `topK` | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| `frequencyPenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `presencePenalty` | ✅ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
-| `seed` | ✅ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `responseFormat` | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅⁴ | ❌ | ✅ | ✅ |
-| `reasoningEffort` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ⚠️⁵ | ❌ | ✅ | ❌ |
+| Parameter | OpenAI | DeepSeek | Anthropic | OpenRouter | Vertex AI³ | Vertex AI OAI | Gemini | Gemini OAI | xAI | Groq | Cerebras | Mistral | Copilot | ZAI | Vercel | Minimax | LlamaSharp | Whisper | Custom | Ollama |
+|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
+| `temperature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `topP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `topK` | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
+| `frequencyPenalty` | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `presencePenalty` | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
+| `seed` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `responseFormat` | ✅ | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅⁴ | ❌ | ✅ | ✅ |
+| `reasoningEffort` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ⚠️⁵ | ❌ | ✅ | ❌ |
 
 > ¹ Google's OpenAI-compatible endpoints (`GoogleGeminiOpenAi`,
 > `GoogleVertexAIOpenAi`) only accept the full `json_schema` variant.
@@ -143,8 +143,9 @@ format examples, and provider-specific notes:
 | Stop sequences max **5** | Google (all four types) |
 | Stop sequences max **8 192** | Anthropic |
 | `json_object` rejected | GoogleGeminiOpenAi, GoogleVertexAIOpenAi |
-| No `frequencyPenalty` / `presencePenalty` | Anthropic, GoogleGemini (native), GoogleVertexAI (native), Cerebras, Mistral, Minimax |
-| `"xhigh"` reasoning | OpenAI, GitHub Copilot only |
+| No `frequencyPenalty` / `presencePenalty` | DeepSeek, Anthropic, GoogleGemini (native), GoogleVertexAI (native), Cerebras, Mistral, Minimax |
+| `"xhigh"` reasoning | OpenAI, DeepSeek, GitHub Copilot |
+| Hidden thinking-state replay | DeepSeek (preserves provider-specific `reasoning_content` across tool-call turns) |
 | No typed parameters at all | Whisper |
 | `responseFormat` grammar-constrained subset | LlamaSharp (strict-mode schema subset via GBNF; exotic keywords degrade to generic JSON with a logged warning; tool calling takes precedence) |
 | `reasoningEffort` informational only | LlamaSharp (no mechanical reasoning-budget knob in llama.cpp; surfaced via chat header) |

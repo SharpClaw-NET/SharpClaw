@@ -1322,7 +1322,7 @@ public sealed partial class FirstSetupPage : Page
 
     private void PopulateProviderTypeSelector()
     {
-        string[] types = ["OpenAI", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
+        string[] types = ["OpenAI", "DeepSeek", "Anthropic", "OpenRouter", "GoogleGemini", "GoogleVertexAI",
             "ZAI", "VercelAIGateway", "XAI", "Groq", "Cerebras", "Mistral", "GitHubCopilot",
             "Minimax", "Custom", "LlamaSharp", "Ollama"];
         foreach (var t in types)

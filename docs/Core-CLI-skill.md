@@ -55,7 +55,7 @@ me                                  Show current user + role
 PROVIDER
 ────────────────────────────────────────
 provider add <name> <type> [endpoint]
-  Types: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleVertexAIOpenAi,
+  Types: OpenAI, DeepSeek, Anthropic, OpenRouter, GoogleVertexAI, GoogleVertexAIOpenAi,
          GoogleGemini, GoogleGeminiOpenAi, ZAI, VercelAIGateway, XAI, Groq,
          Cerebras, Mistral, GitHubCopilot, Minimax, Custom
   endpoint required for Custom only.

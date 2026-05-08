@@ -39,6 +39,30 @@ public static class ProviderParameterSpecs
         SupportsToolChoice = true,
     };
 
+    // DeepSeek (OpenAI-compatible Chat Completions)
+    public static readonly CompletionParameterSpec DeepSeek = new()
+    {
+        ProviderName = "DeepSeek",
+        SupportsTemperature = true,
+        TemperatureMin = 0.0f,
+        TemperatureMax = 2.0f,
+        SupportsTopP = true,
+        TopPMin = 0.0f,
+        TopPMax = 1.0f,
+        SupportsTopK = false,
+        SupportsFrequencyPenalty = false,
+        SupportsPresencePenalty = false,
+        SupportsStop = true,
+        MaxStopSequences = 16,
+        SupportsSeed = false,
+        SupportsResponseFormat = true,
+        OnlyJsonObjectResponseFormat = true,
+        SupportsReasoningEffort = true,
+        ValidReasoningEffortValues = ["low", "medium", "high", "xhigh", "max"],
+        SupportsToolChoice = true,
+        SupportsStrictTools = false,
+    };
+
     // ─────────────────────────────────────────────────────────
     // Anthropic
     // ─────────────────────────────────────────────────────────
@@ -476,6 +500,7 @@ public static class ProviderParameterSpecs
     private static readonly Dictionary<string, CompletionParameterSpec> ByKey = new()
     {
         [WellKnownProviderKeys.OpenAI]               = OpenAI,
+        [WellKnownProviderKeys.DeepSeek]             = DeepSeek,
         [WellKnownProviderKeys.Anthropic]            = Anthropic,
         [WellKnownProviderKeys.OpenRouter]           = OpenRouter,
         [WellKnownProviderKeys.GoogleVertexAI]       = GoogleVertexAI,

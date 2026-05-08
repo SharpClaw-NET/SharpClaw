@@ -41,6 +41,13 @@ public class ChatMessageDB : BaseEntity
 
     public required string Content { get; set; }
 
+    /// <summary>
+    /// Hidden provider-specific transcript state that may be required to
+    /// faithfully replay this message to its originating model provider.
+    /// This is not user-visible message content.
+    /// </summary>
+    public string? ProviderMetadataJson { get; set; }
+
     public Guid ChannelId { get; set; }
     public ChannelDB Channel { get; set; } = null!;
 

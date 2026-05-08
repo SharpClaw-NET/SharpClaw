@@ -31,7 +31,7 @@ POST   /providers/{id}/set-key     { apiKey }  → 204
 POST   /providers/{id}/sync-models → synced model list
 POST   /providers/{id}/auth/device-code  → { userCode, verificationUri, expiresInSeconds }
 
-ProviderType values: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Minimax, Custom, Local.
+ProviderType values: OpenAI, DeepSeek, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Minimax, Custom, LlamaSharp, Ollama.
 
 apiEndpoint required for Custom only. sync-models is the preferred way to add models.
 

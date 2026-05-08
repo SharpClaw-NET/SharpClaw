@@ -30,7 +30,7 @@ The agent can plug directly into your IDE (Visual Studio 2026, VS Code) over a l
 - **Typed tool lifecycle.** Queued, Executing, AwaitingApproval, Completed, Failed, Denied, Cancelled, Paused. Every state transition is logged.
 - **Task orchestration.** Compiled step trees with conditionals, loops, error handling, and streaming. Not "improvise from conversation history."
 - **IDE integration.** EditorBridge connects to VS 2026 and VS Code. Read, edit, build, navigate, all through the editor's own APIs.
-- **13+ LLM providers.** OpenAI, Anthropic, Google, Groq, Mistral, and more. Encrypted key storage. Automatic capability inference. Responses API routing for OpenAI.
+- **14+ LLM providers.** OpenAI, DeepSeek, Anthropic, Google, Groq, Mistral, and more. Encrypted key storage. Automatic capability inference. Responses API routing for OpenAI.
 
 ## Architecture
 

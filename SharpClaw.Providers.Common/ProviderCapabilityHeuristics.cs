@@ -97,6 +97,9 @@ public static class ProviderCapabilityHeuristics
         => n.StartsWith("minimax") || n.StartsWith("abab");
     public static bool IsMinimaxVision(string n) => n.StartsWith("minimax-vl");
 
+    public static bool IsDeepSeekChat(string n) => n.StartsWith("deepseek-");
+    public static bool IsDeepSeekVision(string n) => false;
+
     /// <summary>
     /// Generic non-vendor chat families surfaced by gateway providers
     /// (OpenRouter, Groq, Cerebras, Vercel, ZAI). Vision is not inferred
@@ -139,6 +142,9 @@ public static class ProviderCapabilityHeuristics
 
     public static HashSet<string> ForMinimax(string name)
         => Resolve(name, IsMinimaxChat, IsMinimaxVision);
+
+    public static HashSet<string> ForDeepSeek(string name)
+        => Resolve(name, IsDeepSeekChat, IsDeepSeekVision);
 
     /// <summary>
     /// Aggregate resolver matching any known chat or vision family.

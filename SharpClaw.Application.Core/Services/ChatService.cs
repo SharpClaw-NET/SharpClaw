@@ -204,7 +204,8 @@ public sealed class ChatService(
             PermissionRoleName = agent.Role?.Name,
             ClientType = request.ClientType,
             PromptTokens = loopResult.TotalPromptTokens > 0 ? loopResult.TotalPromptTokens : null,
-            CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null
+            CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null,
+            ProviderMetadataJson = loopResult.ProviderMetadataJson
         };
 
         db.ChatMessages.Add(assistantMessage);
@@ -463,7 +464,10 @@ public sealed class ChatService(
 
         var messages = cold
             .OrderBy(m => m.CreatedAt)
-            .Select(m => new ChatCompletionMessage(m.Role, m.Content))
+            .Select(m => new ChatCompletionMessage(m.Role, m.Content)
+            {
+                ProviderMetadataJson = m.ProviderMetadataJson
+            })
             .ToList();
 
         // Trim oldest messages until the total character count fits.
@@ -878,7 +882,14 @@ public sealed class ChatService(
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
         foreach (var msg in history)
-            messages.Add(new ToolAwareMessage { Role = msg.Role, Content = msg.Content });
+        {
+            messages.Add(new ToolAwareMessage
+            {
+                Role = msg.Role,
+                Content = msg.Content,
+                ProviderMetadataJson = msg.ProviderMetadataJson
+            });
+        }
 
         var jobResults = new List<AgentJobResponse>();
         var fullContent = new StringBuilder();
@@ -886,6 +897,7 @@ public sealed class ChatService(
         var totalPromptTokens = 0;
         var totalCompletionTokens = 0;
         var roundJobIds = new List<Guid>();
+        string? finalProviderMetadataJson = null;
 
         while (true)
         {
@@ -914,11 +926,16 @@ public sealed class ChatService(
             fullContent.Append(roundResult.Content ?? "");
 
             if (!roundResult.HasToolCalls || ++rounds > MaxToolCallRounds)
+            {
+                finalProviderMetadataJson = roundResult.ProviderMetadataJson;
                 break;
+            }
 
             // Record assistant turn with tool calls
             messages.Add(ToolAwareMessage.AssistantWithToolCalls(
-                roundResult.ToolCalls, roundResult.Content));
+                roundResult.ToolCalls,
+                roundResult.Content,
+                roundResult.ProviderMetadataJson));
 
             // Reset content for next round (tool results will produce new text)
             fullContent.Clear();
@@ -1034,7 +1051,8 @@ public sealed class ChatService(
             PermissionRoleName = agent.Role?.Name,
             ClientType = request.ClientType,
             PromptTokens = totalPromptTokens > 0 ? totalPromptTokens : null,
-            CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null
+            CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null,
+            ProviderMetadataJson = finalProviderMetadataJson
         };
 
         db.ChatMessages.Add(assistantMessage);
@@ -1506,7 +1524,14 @@ public sealed class ChatService(
     {
         var messages = new List<ToolAwareMessage>(dbHistory.Count);
         foreach (var msg in dbHistory)
-            messages.Add(new ToolAwareMessage { Role = msg.Role, Content = msg.Content });
+        {
+            messages.Add(new ToolAwareMessage
+            {
+                Role = msg.Role,
+                Content = msg.Content,
+                ProviderMetadataJson = msg.ProviderMetadataJson
+            });
+        }
 
         var supportsVision = modelCapabilityTags.Contains(WellKnownCapabilityKeys.Vision);
         var jobResults = new List<AgentJobResponse>();
@@ -1552,11 +1577,19 @@ public sealed class ChatService(
                 var finalContent = toolNotation.Length > 0
                     ? toolNotation.ToString() + "\n" + (result.Content ?? "")
                     : result.Content ?? "";
-                return new ToolLoopResult(finalContent, jobResults, totalPromptTokens, totalCompletionTokens);
+                return new ToolLoopResult(
+                    finalContent,
+                    jobResults,
+                    totalPromptTokens,
+                    totalCompletionTokens,
+                    result.ProviderMetadataJson);
             }
 
             // Record assistant turn with tool calls
-            messages.Add(ToolAwareMessage.AssistantWithToolCalls(result.ToolCalls, result.Content));
+            messages.Add(ToolAwareMessage.AssistantWithToolCalls(
+                result.ToolCalls,
+                result.Content,
+                result.ProviderMetadataJson));
 
             var anyUnresolvableApproval = false;
             roundJobIds.Clear();
@@ -1665,7 +1698,12 @@ public sealed class ChatService(
                 var finalContent = toolNotation.Length > 0
                     ? toolNotation.ToString() + "\n" + (finalResult.Content ?? "")
                     : finalResult.Content ?? "";
-                return new ToolLoopResult(finalContent, jobResults, totalPromptTokens, totalCompletionTokens);
+                return new ToolLoopResult(
+                    finalContent,
+                    jobResults,
+                    totalPromptTokens,
+                    totalCompletionTokens,
+                    finalResult.ProviderMetadataJson);
             }
         }
     }
@@ -1735,7 +1773,8 @@ public sealed class ChatService(
             result.Content ?? "",
             [],
             result.Usage?.PromptTokens ?? 0,
-            result.Usage?.CompletionTokens ?? 0);
+            result.Usage?.CompletionTokens ?? 0,
+            result.ProviderMetadataJson);
     }
 
     /// <summary>
@@ -1907,7 +1946,8 @@ public sealed class ChatService(
         string AssistantContent,
         List<AgentJobResponse> JobResults,
         int TotalPromptTokens = 0,
-        int TotalCompletionTokens = 0);
+        int TotalCompletionTokens = 0,
+        string? ProviderMetadataJson = null);
 
     // ═══════════════════════════════════════════════════════════════
     // Tool call notation (persisted in assistant message content)

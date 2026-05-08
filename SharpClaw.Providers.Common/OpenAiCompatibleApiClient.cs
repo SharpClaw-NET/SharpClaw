@@ -18,6 +18,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     protected abstract string ApiEndpoint { get; }
     public abstract string ProviderKey { get; }
     public virtual bool SupportsNativeToolCalling => true;
+    protected virtual bool SupportsReasoningContentReplay => false;
 
     public virtual async Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default)
@@ -57,7 +58,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             ChatCompletionResult? final = null;
             await foreach (var chunk in StreamResponsesApiAsync(
                 httpClient, apiKey, model, systemPrompt,
-                messages.Select(m => new ToolAwareMessage { Role = m.Role, Content = m.Content }).ToList(),
+                messages.Select(m => new ToolAwareMessage
+                {
+                    Role = m.Role,
+                    Content = m.Content,
+                    ProviderMetadataJson = m.ProviderMetadataJson
+                }).ToList(),
                 [], maxCompletionTokens, providerParameters, completionParameters, ct))
             {
                 if (chunk.IsFinished)
@@ -74,7 +80,14 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             payloadMessages.Add(new CompletionMessagePayload("system", systemPrompt));
 
         foreach (var msg in messages)
-            payloadMessages.Add(new CompletionMessagePayload(msg.Role, msg.Content));
+        {
+            payloadMessages.Add(new CompletionMessagePayload(msg.Role, msg.Content)
+            {
+                ReasoningContent = SupportsReasoningContentReplay
+                    ? ExtractReasoningContent(msg.ProviderMetadataJson)
+                    : null
+            });
+        }
 
         var payload = new CompletionRequest(model, payloadMessages)
         {
@@ -92,7 +105,11 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
         ConfigureRequest(request);
-        request.Content = MergeProviderParameters(payload, providerParameters);
+        request.Content = MergeProviderParameters(
+            payload,
+            providerParameters,
+            completionParameters,
+            hasTools: false);
 
         var response = await httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
@@ -109,6 +126,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                 ? new TokenUsage(u.PromptTokens, u.CompletionTokens)
                 : null,
             FinishReason = MapOpenAiFinishReason(choice?.FinishReason),
+            ProviderMetadataJson = SupportsReasoningContentReplay
+                ? BuildProviderMetadataJson(choice?.Message?.ReasoningContent)
+                : null,
         };
     }
 
@@ -176,7 +196,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
         ConfigureRequest(request);
-        request.Content = MergeProviderParameters(payload, providerParameters, OaiToolJsonOptions);
+        request.Content = MergeProviderParameters(
+            payload,
+            providerParameters,
+            completionParameters,
+            tools.Count > 0,
+            OaiToolJsonOptions);
 
         var response = await httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
@@ -206,10 +231,14 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         // Aggregate content and tool calls across all choices so the
         // tool-loop sees every dispatched call.
         var aggregatedContent = new StringBuilder();
+        var aggregatedReasoningContent = new StringBuilder();
         var aggregatedToolCalls = new List<ChatToolCall>();
         string? lastFinishReason = null;
         foreach (var ch in choices)
         {
+            if (ch.Message?.ReasoningContent is { Length: > 0 } reasoning)
+                aggregatedReasoningContent.Append(reasoning);
+
             if (ch.Message?.Content is { Length: > 0 } text)
             {
                 if (aggregatedContent.Length > 0) aggregatedContent.Append('\n');
@@ -237,10 +266,16 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
                 ? new TokenUsage(u.PromptTokens, u.CompletionTokens)
                 : null,
             FinishReason = MapOpenAiFinishReason(lastFinishReason),
+            ProviderMetadataJson = SupportsReasoningContentReplay
+                ? BuildProviderMetadataJson(
+                    aggregatedReasoningContent.Length > 0
+                        ? aggregatedReasoningContent.ToString()
+                        : null)
+                : null,
         };
     }
 
-    private static object ConvertToOaiMessage(ToolAwareMessage msg) => msg switch
+    private object ConvertToOaiMessage(ToolAwareMessage msg) => msg switch
     {
         { Role: "system" } => new OaiMessage { Role = "system", Content = msg.Content! },
         { Role: "user", HasImage: true } => new OaiMessage
@@ -256,9 +291,19 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             {
                 Id = tc.Id,
                 Function = new OaiFunctionCallPayload { Name = tc.Name, Arguments = tc.ArgumentsJson }
-            }).ToList()
+            }).ToList(),
+            ReasoningContent = SupportsReasoningContentReplay
+                ? ExtractReasoningContent(msg.ProviderMetadataJson)
+                : null
         },
-        { Role: "assistant" } => new OaiMessage { Role = "assistant", Content = msg.Content },
+        { Role: "assistant" } => new OaiMessage
+        {
+            Role = "assistant",
+            Content = msg.Content,
+            ReasoningContent = SupportsReasoningContentReplay
+                ? ExtractReasoningContent(msg.ProviderMetadataJson)
+                : null
+        },
         { Role: "tool", HasImage: true } => new OaiToolResultMessage
         {
             ToolCallId = msg.ToolCallId!,
@@ -350,7 +395,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/chat/completions");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
         ConfigureRequest(request);
-        request.Content = MergeProviderParameters(payload, providerParameters, OaiToolJsonOptions);
+        request.Content = MergeProviderParameters(
+            payload,
+            providerParameters,
+            completionParameters,
+            tools.Count > 0,
+            OaiToolJsonOptions);
 
         using var response = await httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
@@ -360,6 +410,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         using var reader = new StreamReader(stream);
 
         var contentBuilder = new System.Text.StringBuilder();
+        var reasoningContentBuilder = new System.Text.StringBuilder();
         // Accumulate tool calls by index
         var toolCallAccumulator = new Dictionary<int, (string Id, string Name, System.Text.StringBuilder Args)>();
         TokenUsage? streamUsage = null;
@@ -400,6 +451,9 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             {
                 if (choice.FinishReason is { } fr) streamFinishReason = fr;
                 if (choice.Delta is null) continue;
+
+                if (choice.Delta.ReasoningContent is { Length: > 0 } reasoningDelta)
+                    reasoningContentBuilder.Append(reasoningDelta);
 
                 // Accumulate text deltas
                 if (choice.Delta.Content is { } textDelta && textDelta.Length > 0)
@@ -453,7 +507,50 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             ToolCalls = toolCalls,
             Usage = streamUsage,
             FinishReason = MapOpenAiFinishReason(streamFinishReason),
+            ProviderMetadataJson = SupportsReasoningContentReplay
+                ? BuildProviderMetadataJson(
+                    reasoningContentBuilder.Length > 0
+                        ? reasoningContentBuilder.ToString()
+                        : null)
+                : null,
         });
+    }
+
+    private const string ReasoningContentMetadataKey = "reasoning_content";
+
+    private static string? BuildProviderMetadataJson(string? reasoningContent)
+    {
+        if (string.IsNullOrEmpty(reasoningContent))
+            return null;
+
+        return JsonSerializer.Serialize(new Dictionary<string, string>
+        {
+            [ReasoningContentMetadataKey] = reasoningContent
+        });
+    }
+
+    private static string? ExtractReasoningContent(string? providerMetadataJson)
+    {
+        if (string.IsNullOrWhiteSpace(providerMetadataJson))
+            return null;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(providerMetadataJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object ||
+                !doc.RootElement.TryGetProperty(ReasoningContentMetadataKey, out var reasoning) ||
+                reasoning.ValueKind != JsonValueKind.String)
+            {
+                return null;
+            }
+
+            var text = reasoning.GetString();
+            return string.IsNullOrEmpty(text) ? null : text;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
     }
 
     /// <summary>
@@ -487,6 +584,31 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     /// </summary>
     protected virtual Dictionary<string, JsonElement>? TranslateProviderParameters(
         Dictionary<string, JsonElement>? providerParameters) => providerParameters;
+
+    /// <summary>
+    /// Allows subclasses to synthesize or validate top-level provider
+    /// parameters using the typed completion settings and tool context
+    /// before provider-native translation and merge.
+    /// </summary>
+    protected virtual Dictionary<string, JsonElement>? PrepareProviderParameters(
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        bool hasTools) => providerParameters;
+
+    /// <summary>
+    /// Serializes <paramref name="payload"/> and merges provider parameters
+    /// after giving subclasses the full request context.
+    /// </summary>
+    protected HttpContent MergeProviderParameters<T>(
+        T payload,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        bool hasTools,
+        JsonSerializerOptions? options = null)
+        => MergeProviderParameters(
+            payload,
+            PrepareProviderParameters(providerParameters, completionParameters, hasTools),
+            options);
 
     /// <summary>
     /// Serializes <paramref name="payload"/> and merges any user-supplied
@@ -579,7 +701,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 
     private sealed record CompletionMessagePayload(
         [property: JsonPropertyName("role")] string Role,
-        [property: JsonPropertyName("content")] string Content);
+        [property: JsonPropertyName("content")] string? Content)
+    {
+        [JsonPropertyName("reasoning_content")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReasoningContent { get; init; }
+    }
 
     private sealed record CompletionResponse(
         [property: JsonPropertyName("choices")] List<CompletionChoice>? Choices,
@@ -681,12 +808,18 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     {
         [JsonPropertyName("role")] public required string Role { get; init; }
         [JsonPropertyName("content")] public object? Content { get; init; }
+        [JsonPropertyName("reasoning_content")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReasoningContent { get; init; }
     }
 
     private sealed class OaiAssistantToolCallMessage
     {
         [JsonPropertyName("role")] public string Role => "assistant";
         [JsonPropertyName("content")] public string? Content { get; init; }
+        [JsonPropertyName("reasoning_content")]
+        [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+        public string? ReasoningContent { get; init; }
         [JsonPropertyName("tool_calls")] public required List<OaiToolCallPayload> ToolCalls { get; init; }
     }
 
@@ -747,6 +880,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     {
         [JsonPropertyName("role")] public string? Role { get; set; }
         [JsonPropertyName("content")] public string? Content { get; set; }
+        [JsonPropertyName("reasoning_content")] public string? ReasoningContent { get; set; }
         [JsonPropertyName("tool_calls")] public List<OaiResponseToolCall>? ToolCalls { get; set; }
     }
 
@@ -828,6 +962,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     private sealed class OaiStreamDelta
     {
         [JsonPropertyName("content")] public string? Content { get; set; }
+        [JsonPropertyName("reasoning_content")] public string? ReasoningContent { get; set; }
         [JsonPropertyName("tool_calls")] public List<OaiStreamToolCallDelta>? ToolCalls { get; set; }
     }
 
@@ -961,7 +1096,12 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/responses");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
         ConfigureRequest(request);
-        request.Content = MergeProviderParameters(payload, providerParameters, OaiToolJsonOptions);
+        request.Content = MergeProviderParameters(
+            payload,
+            providerParameters,
+            completionParameters,
+            respTools.Count > 0,
+            OaiToolJsonOptions);
 
         using var response = await httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);

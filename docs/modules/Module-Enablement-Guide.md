@@ -522,7 +522,7 @@ key.
 | **Prerequisites** | None |
 | **Exports** | None |
 
-Registers the OpenAI-protocol plugin family — OpenAI, OpenRouter,
+Registers the OpenAI-protocol plugin family — OpenAI, DeepSeek, OpenRouter,
 ZAI, Vercel AI Gateway, xAI, Groq, Cerebras, Mistral, GitHub Copilot,
 Minimax, Custom, plus Google Gemini and Vertex AI OpenAI-compatible
 shims. All share `OpenAiCompatibleApiClient` as their wire-format

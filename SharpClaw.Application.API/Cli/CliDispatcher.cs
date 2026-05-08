@@ -425,7 +425,7 @@ public static class CliDispatcher
                     svc),
             "add" when args.Length < 4
                 => UsageResult("provider add <name> <type>",
-                    "Types: openai, anthropic, openrouter, google-vertex-ai,",
+                    "Types: openai, deepseek, anthropic, openrouter, google-vertex-ai,",
                     "       google-vertex-ai-openai, google-gemini, google-gemini-openai,",
                     "       zai, vercel-ai-gateway, xai, groq, cerebras,",
                     "       mistral, github-copilot, minimax, custom"),
@@ -3545,7 +3545,7 @@ public static class CliDispatcher
             Provider:  provider <sub> [args]
               provider add <name> <type> [endpoint]
                 Types: OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
-                       ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
+                       DeepSeek, ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot, Custom
               provider get|list|update|delete|set-key|login|sync-models|refresh-caps <id> [args]
               provider cost <id> [--days <n>]   provider cost-total [--days <n>] [--simple] [--all]
 

@@ -30,6 +30,13 @@ public sealed class ChatCompletionResult
     public bool HasToolCalls => ToolCalls.Count > 0;
 
     /// <summary>
+    /// Hidden provider-specific transcript state that must be replayed on
+    /// later turns for providers that require it. This is not user-visible
+    /// assistant content.
+    /// </summary>
+    public string? ProviderMetadataJson { get; init; }
+
+    /// <summary>
     /// Token usage reported by the provider. <see langword="null"/> when
     /// the provider does not include usage data in the response.
     /// </summary>
@@ -148,6 +155,13 @@ public sealed record ToolAwareMessage
     public string? Content { get; init; }
 
     /// <summary>
+    /// Hidden provider-specific transcript state associated with this
+    /// message. Provider clients may serialize it back to their native wire
+    /// format when replaying history.
+    /// </summary>
+    public string? ProviderMetadataJson { get; init; }
+
+    /// <summary>
     /// Tool calls emitted by the assistant. Present only when
     /// <see cref="Role"/> is <c>"assistant"</c>.
     /// </summary>
@@ -183,8 +197,16 @@ public sealed record ToolAwareMessage
         new() { Role = "assistant", Content = content };
 
     public static ToolAwareMessage AssistantWithToolCalls(
-        IReadOnlyList<ChatToolCall> toolCalls, string? content = null) =>
-        new() { Role = "assistant", Content = content, ToolCalls = toolCalls };
+        IReadOnlyList<ChatToolCall> toolCalls,
+        string? content = null,
+        string? providerMetadataJson = null) =>
+        new()
+        {
+            Role = "assistant",
+            Content = content,
+            ToolCalls = toolCalls,
+            ProviderMetadataJson = providerMetadataJson
+        };
 
     public static ToolAwareMessage ToolResult(string toolCallId, string content) =>
         new() { Role = "tool", Content = content, ToolCallId = toolCallId };

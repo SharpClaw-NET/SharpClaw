@@ -85,6 +85,14 @@ public class CapabilityResolverTests
     public void MinimaxResolver(string model, string[] expected)
         => ProviderCapabilityHeuristics.ForMinimax(model).Should().BeEquivalentTo(expected);
 
+    [TestCase("deepseek-v4-flash",  new[] { Chat })]
+    [TestCase("deepseek-v4-pro",    new[] { Chat })]
+    [TestCase("deepseek-chat",      new[] { Chat })]
+    [TestCase("deepseek-reasoner",  new[] { Chat })]
+    [TestCase("gpt-4o",             new string[0])]
+    public void DeepSeekResolver(string model, string[] expected)
+        => ProviderCapabilityHeuristics.ForDeepSeek(model).Should().BeEquivalentTo(expected);
+
     [TestCase("gpt-4o",                                   new[] { Chat, Vision })]
     [TestCase("claude-3-5-sonnet",                        new[] { Chat, Vision })]
     [TestCase("gemini-1.5-pro",                           new[] { Chat, Vision })]
@@ -93,6 +101,7 @@ public class CapabilityResolverTests
     [TestCase("llama-4-maverick",                         new[] { Chat, Vision })]
     [TestCase("llama-3.1-70b",                            new[] { Chat })]
     [TestCase("deepseek-v3",                              new[] { Chat })]
+    [TestCase("deepseek-v4-flash",                        new[] { Chat })]
     [TestCase("qwen-2.5-72b",                             new[] { Chat })]
     [TestCase("phi-4",                                    new[] { Chat })]
     [TestCase("command-r-plus",                           new[] { Chat })]

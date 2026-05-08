@@ -101,7 +101,7 @@ Authentication check — requires a valid `X-Api-Key` header.
 ### ProviderType
 
 ```
-OpenAI, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
+OpenAI, DeepSeek, Anthropic, OpenRouter, GoogleVertexAI, GoogleGemini,
 ZAI, VercelAIGateway, XAI, Groq, Cerebras, Mistral, GitHubCopilot,
 Minimax, Custom, LlamaSharp, Whisper, Ollama
 ```

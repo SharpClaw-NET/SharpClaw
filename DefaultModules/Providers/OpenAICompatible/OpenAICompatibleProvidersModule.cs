@@ -9,9 +9,9 @@ namespace SharpClaw.Modules.Providers.OpenAICompatible;
 
 /// <summary>
 /// Default module: registers the OpenAI-protocol family of provider plugins
-/// (OpenAI, OpenRouter, ZAI, Vercel AI Gateway, xAI, Groq, Cerebras, Mistral,
-/// GitHub Copilot, Minimax, Custom, Google Gemini OpenAI shim, Google Vertex
-/// AI OpenAI shim). All thirteen share <see cref="OpenAiCompatibleApiClient"/>
+/// (OpenAI, DeepSeek, OpenRouter, ZAI, Vercel AI Gateway, xAI, Groq, Cerebras,
+/// Mistral, GitHub Copilot, Minimax, Custom, Google Gemini OpenAI shim,
+/// Google Vertex AI OpenAI shim). All fourteen share <see cref="OpenAiCompatibleApiClient"/>
 /// as the wire-format base; the heuristics are imported from
 /// <see cref="ProviderCapabilityHeuristics"/>.
 /// </summary>
@@ -25,6 +25,7 @@ public sealed class OpenAICompatibleProvidersModule : ISharpClawModule
     {
         var openAiCaps  = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForOpenAI);
         var googleCaps  = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForGoogle);
+        var deepSeekCaps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForDeepSeek);
         var mistralCaps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForMistral);
         var xaiCaps     = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForXai);
         var minimaxCaps = new HeuristicCapabilityResolver(ProviderCapabilityHeuristics.ForMinimax);
@@ -37,6 +38,12 @@ public sealed class OpenAICompatibleProvidersModule : ISharpClawModule
             _ => new OpenAiApiClient(), openAiCaps,
             parameterSpec: ProviderParameterSpecs.OpenAI,
             costFeed: new OpenAiApiClient(),
+            ownerModuleId: owner));
+
+        services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
+            WellKnownProviderKeys.DeepSeek, "DeepSeek", false,
+            _ => new DeepSeekApiClient(), deepSeekCaps,
+            parameterSpec: ProviderParameterSpecs.DeepSeek,
             ownerModuleId: owner));
 
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
