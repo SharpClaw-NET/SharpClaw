@@ -35,6 +35,16 @@
   </ItemGroup>
 
   <!--
+    Built for bundled modules that need it at runtime, but not exposed as an API compiler reference.
+    The explicit copy below takes the fresh DLL from this project output instead of a module bin.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\SharpClaw.Providers.LocalCommon\SharpClaw.Providers.LocalCommon.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!--
     Bundled modules: ReferenceOutputAssembly=false keeps them off the compiler reference list so the
     API cannot take accidental compile-time dependencies. Private is left at its default (true) so
     that Visual Studio includes these projects in the pre-launch build graph — without it VS skips
@@ -79,26 +89,41 @@
   </ItemGroup>
 
   <!--
-    Copy all DLLs from every module's output folder, not just the module DLL itself.
-    This ensures transitive dependencies unique to a module (e.g. Whisper.net, NAudio) are present
-    at runtime. SkipUnchangedFiles avoids unnecessary copies on incremental builds.
-    Both top-level (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module
-    layouts are matched.
+    Copy module assemblies and their transitive dependencies from each module's output folder.
+    Host assemblies (SharpClaw.Contracts, SharpClaw.Utils, etc.) are deliberately excluded because
+    the API already references them directly - module bin copies may be stale and would overwrite
+    the freshly built host DLLs.
+
+    Module DLLs:       SharpClaw.Modules.*.dll
+    Transitive deps:   *.dll that do NOT start with SharpClaw. (e.g. Cronos, Whisper.net, NAudio)
+
+    SkipUnchangedFiles avoids unnecessary copies on incremental builds. Both top-level
+    (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module layouts are matched.
   -->
   <Target Name="CopyBundledModules" AfterTargets="Build">
     <ItemGroup>
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_BundledHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Providers.LocalCommon\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Providers.LocalCommon.dll" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_NonHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_BundledHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">
     <ItemGroup>
       <_CopiedBundledModuleDll Include="$(OutputPath)SharpClaw.Modules.*.dll" />
+      <_CopiedBundledHostDll Include="$(OutputPath)SharpClaw.Providers.Common.dll" />
+      <_CopiedBundledHostDll Include="$(OutputPath)SharpClaw.Providers.LocalCommon.dll" />
       <_CopiedBundledModuleManifest Include="$(OutputPath)modules\**\*" />
     </ItemGroup>
     <Delete Files="@(_CopiedBundledModuleDll)" Condition="'@(_CopiedBundledModuleDll)' != ''" />
+    <Delete Files="@(_CopiedBundledHostDll)" Condition="'@(_CopiedBundledHostDll)' != ''" />
     <Delete Files="@(_CopiedBundledModuleManifest)" Condition="'@(_CopiedBundledModuleManifest)' != ''" />
   </Target>
 
