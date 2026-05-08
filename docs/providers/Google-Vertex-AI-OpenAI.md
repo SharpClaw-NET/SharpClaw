@@ -19,8 +19,8 @@ Parameters follow the standard OpenAI schema.
 
 If you need native Vertex AI or Gemini parameters like
 `responseMimeType`, `safetySettings`, or `thinkingConfig`, use
-[`GoogleGemini`](Google-Gemini.md) (native, implemented) or wait for
-[`GoogleVertexAI`](Google-Vertex-AI.md) (native, not yet implemented).
+[`GoogleGemini`](Google-Gemini.md) or
+[`GoogleVertexAI`](Google-Vertex-AI.md).
 
 ---
 

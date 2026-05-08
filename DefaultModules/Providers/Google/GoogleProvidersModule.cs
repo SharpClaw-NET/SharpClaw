@@ -25,8 +25,9 @@ public sealed class GoogleProvidersModule : ISharpClawModule
 
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
             WellKnownProviderKeys.GoogleVertexAI, "Google Vertex AI", false,
-            _ => new GoogleVertexAIApiClient(), caps,
+            endpoint => new GoogleVertexAIApiClient(endpoint), caps,
             parameterSpec: ProviderParameterSpecs.GoogleVertexAI,
+            supportsAutomaticEndpointDiscovery: true,
             ownerModuleId: "sharpclaw_providers_google"));
 
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(

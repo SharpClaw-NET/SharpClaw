@@ -104,6 +104,65 @@ public sealed class GoogleGeminiApiClientTests
     }
 
     [Test]
+    public async Task ChatCompletionAsync_MapsNativePenaltyParameters()
+    {
+        using var handler = new CaptureHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new GoogleGeminiApiClient();
+
+        await client.ChatCompletionAsync(
+            httpClient,
+            "test-key",
+            "gemini-test",
+            systemPrompt: null,
+            [new ChatCompletionMessage("user", "Hello")],
+            completionParameters: new CompletionParameters
+            {
+                PresencePenalty = 0.25f,
+                FrequencyPenalty = -0.5f
+            });
+
+        using var doc = JsonDocument.Parse(handler.LastRequestBody!);
+        var generationConfig = doc.RootElement.GetProperty("generationConfig");
+        generationConfig.GetProperty("presencePenalty").GetDouble()
+            .Should().BeApproximately(0.25, 0.000001);
+        generationConfig.GetProperty("frequencyPenalty").GetDouble()
+            .Should().BeApproximately(-0.5, 0.000001);
+    }
+
+    [Test]
+    public async Task ChatCompletionWithToolsAsync_MapsToolChoiceToToolConfig()
+    {
+        using var handler = new CaptureHandler();
+        using var httpClient = new HttpClient(handler);
+        var client = new GoogleGeminiApiClient();
+
+        await client.ChatCompletionWithToolsAsync(
+            httpClient,
+            "test-key",
+            "gemini-test",
+            systemPrompt: null,
+            [new ToolAwareMessage { Role = "user", Content = "Hello" }],
+            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            completionParameters: new CompletionParameters
+            {
+                ToolChoice = ToolChoice.ForFunction("lookup")
+            });
+
+        using var doc = JsonDocument.Parse(handler.LastRequestBody!);
+        var functionCallingConfig = doc.RootElement
+            .GetProperty("toolConfig")
+            .GetProperty("functionCallingConfig");
+
+        functionCallingConfig.GetProperty("mode").GetString()
+            .Should().Be("ANY");
+        functionCallingConfig.GetProperty("allowedFunctionNames")
+            .EnumerateArray()
+            .Select(v => v.GetString())
+            .Should().Equal("lookup");
+    }
+
+    [Test]
     public async Task ChatCompletionAsync_StillPassesUnknownNativeRootParameters()
     {
         using var handler = new CaptureHandler();
@@ -159,6 +218,13 @@ public sealed class GoogleGeminiApiClientTests
         await action.Should().ThrowAsync<InvalidOperationException>()
             .WithMessage("Google Gemini provider parameter 'generation_config' must be a JSON object.");
     }
+
+    private static JsonElement EmptyObjectSchema()
+        => JsonSerializer.SerializeToElement(new
+        {
+            type = "object",
+            properties = new Dictionary<string, object?>()
+        });
 
     private sealed class CaptureHandler : HttpMessageHandler
     {

@@ -16,7 +16,8 @@
 
 This provider type calls Google's native Gemini API directly — **not**
 the OpenAI-compatible wrapper. Provider parameters follow the Gemini
-schema and are passed through as-is.
+schema. Known generation-config fields are routed into
+`generationConfig`.
 
 If you prefer to use OpenAI-compatible parameter names, use
 [`GoogleGeminiOpenAi`](Google-Gemini-OpenAI.md) instead.
@@ -29,13 +30,14 @@ If you prefer to use OpenAI-compatible parameter names, use
 |---|---|---|
 | `temperature` | ✅ | `0.0` – `2.0` |
 | `topP` | ✅ | `0.0` – `1.0` |
-| `topK` | ✅ | `1` – **`40`** |
-| `frequencyPenalty` | ❌ | — (not available on native endpoint) |
-| `presencePenalty` | ❌ | — (not available on native endpoint) |
+| `topK` | ✅ | Model-dependent integer |
+| `frequencyPenalty` | ✅ | `-2.0` – `2.0` |
+| `presencePenalty` | ✅ | `-2.0` – `2.0` |
 | `stop` | ✅ | Up to **5** sequences |
 | `seed` | ✅ | Any integer |
 | `responseFormat` | ✅ | Mapped to `responseMimeType` (see below) |
 | `reasoningEffort` | ✅ | `"none"`, `"minimal"`, `"low"`, `"medium"`, `"high"` |
+| `toolChoice` | ✅ | `auto`, `none`, `required`, named function |
 
 ---
 
@@ -56,6 +58,8 @@ The native client builds a Gemini-schema request body.
     "temperature": 0.7,
     "topP": 0.9,
     "topK": 40,
+    "presencePenalty": 0.1,
+    "frequencyPenalty": 0.1,
     "maxOutputTokens": 1024,
     "stopSequences": ["\n"],
     "seed": 42,
@@ -74,7 +78,12 @@ The native client builds a Gemini-schema request body.
         }
       ]
     }
-  ]
+  ],
+  "toolConfig": {
+    "functionCallingConfig": {
+      "mode": "ANY"
+    }
+  }
 }
 ```
 
@@ -124,6 +133,20 @@ be turned off for Gemini 2.5 Pro or Gemini 3+ models. `"xhigh"` is
 > For Gemini 3.x models that prefer the `thinkingLevel` string enum
 > over `thinkingBudget`, use `providerParameters` to pass
 > `thinkingConfig.thinkingLevel` directly.
+
+---
+
+## Tool choice mapping
+
+When native tools are present, SharpClaw maps `toolChoice` to
+`toolConfig.functionCallingConfig`:
+
+| `toolChoice` | `functionCallingConfig.mode` |
+|---|---|
+| `auto` / omitted | omitted (provider default) |
+| `none` | `NONE` |
+| `required` | `ANY` |
+| named function | `ANY` with `allowedFunctionNames` |
 
 ---
 
@@ -191,7 +214,8 @@ Nested generation config values are also supported:
 }
 ```
 
-Top-level native fields still pass through unchanged:
+Known top-level native fields may be supplied in REST lowerCamelCase or
+snake_case. They are sent as native lowerCamelCase:
 
 ```json
 {
@@ -233,8 +257,8 @@ Top-level native fields still pass through unchanged:
 |---|---|---|
 | Endpoint | `generateContent` | `/v1beta/openai/chat/completions` |
 | Parameter schema | Gemini native | OpenAI-compatible |
-| `frequencyPenalty` | ❌ | ✅ |
-| `presencePenalty` | ❌ | ✅ |
+| `frequencyPenalty` | ✅ | ✅ |
+| `presencePenalty` | ✅ | ✅ |
 | `responseMimeType` | ✅ (via `responseFormat` or `providerParameters`) | ❌ |
 | `safetySettings` | ✅ | ❌ |
 | `json_object` response format | ✅ | ❌ (only `json_schema`) |

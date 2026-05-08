@@ -61,7 +61,7 @@ format examples, and provider-specific notes:
 | DeepSeek | `deepseek` | OpenAI-compatible | [providers/DeepSeek.md](providers/DeepSeek.md) |
 | Anthropic | `Anthropic` (`1`) | Anthropic Messages API | [providers/Anthropic.md](providers/Anthropic.md) |
 | OpenRouter | `OpenRouter` (`2`) | OpenAI-compatible | [providers/OpenRouter.md](providers/OpenRouter.md) |
-| Google Vertex AI (native) | `GoogleVertexAI` (`3`) | Native `generateContent` (**stub**) | [providers/Google-Vertex-AI.md](providers/Google-Vertex-AI.md) |
+| Google Vertex AI (native) | `GoogleVertexAI` (`3`) | Native `generateContent` | [providers/Google-Vertex-AI.md](providers/Google-Vertex-AI.md) |
 | Google Gemini (native) | `GoogleGemini` (`4`) | Native `generateContent` | [providers/Google-Gemini.md](providers/Google-Gemini.md) |
 | ZAI (Zhipu AI) | `ZAI` (`5`) | OpenAI-compatible | [providers/ZAI.md](providers/ZAI.md) |
 | Vercel AI Gateway | `VercelAIGateway` (`6`) | OpenAI-compatible | [providers/Vercel-AI.md](providers/Vercel-AI.md) |
@@ -82,17 +82,17 @@ format examples, and provider-specific notes:
 
 ## Parameter support matrix
 
-| Parameter | OpenAI | DeepSeek | Anthropic | OpenRouter | Vertex AI³ | Vertex AI OAI | Gemini | Gemini OAI | xAI | Groq | Cerebras | Mistral | Copilot | ZAI | Vercel | Minimax | LlamaSharp | Whisper | Custom | Ollama |
+| Parameter | OpenAI | DeepSeek | Anthropic | OpenRouter | Vertex AI | Vertex AI OAI | Gemini | Gemini OAI | xAI | Groq | Cerebras | Mistral | Copilot | ZAI | Vercel | Minimax | LlamaSharp | Whisper | Custom | Ollama |
 |---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|---|
 | `temperature` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
 | `topP` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
 | `topK` | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ |
-| `frequencyPenalty` | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `presencePenalty` | ✅ | ❌ | ❌ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `frequencyPenalty` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
+| `presencePenalty` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
 | `stop` | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ✅ |
 | `seed` | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅ | ❌ | ✅ | ✅ |
-| `responseFormat` | ✅ | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅⁴ | ❌ | ✅ | ✅ |
-| `reasoningEffort` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ⚠️⁵ | ❌ | ✅ | ❌ |
+| `responseFormat` | ✅ | ✅ | ❌ | ✅ | ✅² | ⚠️¹ | ✅² | ⚠️¹ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ✅ | ❌ | ✅³ | ❌ | ✅ | ✅ |
+| `reasoningEffort` | ✅ | ✅ | ❌ | ❌ | ✅ | ✅ | ✅ | ✅ | ❌ | ❌ | ❌ | ❌ | ✅ | ❌ | ❌ | ❌ | ⚠️⁴ | ❌ | ✅ | ❌ |
 
 > ¹ Google's OpenAI-compatible endpoints (`GoogleGeminiOpenAi`,
 > `GoogleVertexAIOpenAi`) only accept the full `json_schema` variant.
@@ -104,10 +104,7 @@ format examples, and provider-specific notes:
 > and `json_schema`. The `json_schema` variant additionally extracts
 > the inner schema and sets `responseSchema` in `generationConfig`.
 >
-> ³ `GoogleVertexAI` (native) is **not yet implemented** — the spec is
-> reserved for forward-compatibility. Use `GoogleVertexAIOpenAi` instead.
->
-> ⁴ LlamaSharp accepts both `{"type":"json_object"}` (mapped to a
+> ³ LlamaSharp accepts both `{"type":"json_object"}` (mapped to a
 > generic JSON GBNF grammar) and `{"type":"json_schema", …}` (converted
 > by `LlamaSharpJsonSchemaConverter` into a schema-specific GBNF
 > attached to `DefaultSamplingPipeline.Grammar`). The converter covers
@@ -122,7 +119,7 @@ format examples, and provider-specific notes:
 > contains tools and a `responseFormat`, the tool-envelope grammar wins
 > and `responseFormat` is ignored with a debug-category log line.
 >
-> ⁵ LlamaSharp accepts `reasoningEffort` informationally only. llama.cpp
+> ⁴ LlamaSharp accepts `reasoningEffort` informationally only. llama.cpp
 > has no reasoning-budget knob; the value is surfaced to the model via a
 > `reasoning-effort: {level} (informational; this model has no
 > mechanical reasoning-effort control)` segment in the default chat
@@ -137,20 +134,19 @@ format examples, and provider-specific notes:
 |---|---|
 | Temperature max **1.0** | Anthropic, Mistral |
 | Temperature max **1.5** | Cerebras |
-| `topK` max **40** | Google Gemini (native), Google Vertex AI (native) |
+| `topK` model-dependent | Google Gemini (native), Google Vertex AI (native) |
 | `topK` max **128** | LlamaSharp |
 | `topK` **not supported** (OAI schema has no `top_k`) | GoogleGeminiOpenAi, GoogleVertexAIOpenAi, Ollama |
 | Stop sequences max **5** | Google (all four types) |
 | Stop sequences max **8 192** | Anthropic |
 | `json_object` rejected | GoogleGeminiOpenAi, GoogleVertexAIOpenAi |
-| No `frequencyPenalty` / `presencePenalty` | DeepSeek, Anthropic, GoogleGemini (native), GoogleVertexAI (native), Cerebras, Mistral, Minimax |
+| No `frequencyPenalty` / `presencePenalty` | DeepSeek, Anthropic, Cerebras, Mistral, Minimax |
 | `"xhigh"` reasoning | OpenAI, DeepSeek, GitHub Copilot |
 | Hidden thinking-state replay | DeepSeek (preserves provider-specific `reasoning_content` across tool-call turns) |
 | No typed parameters at all | Whisper |
 | `responseFormat` grammar-constrained subset | LlamaSharp (strict-mode schema subset via GBNF; exotic keywords degrade to generic JSON with a logged warning; tool calling takes precedence) |
 | `reasoningEffort` informational only | LlamaSharp (no mechanical reasoning-budget knob in llama.cpp; surfaced via chat header) |
 | Tool calling: model-dependent reliability | LlamaSharp, Ollama, Custom |
-| **Not yet implemented** | GoogleVertexAI (native) — use GoogleVertexAIOpenAi |
 
 ---
 
@@ -159,8 +155,7 @@ format examples, and provider-specific notes:
 The `providerParameters` dictionary (`Dictionary<string, JsonElement>?`)
 is a **temporary fallback** for provider-specific options that SharpClaw
 does not yet model as typed fields. Keys are merged into the API request
-payload **after** typed parameters, so they can override or supply
-additional values.
+payload alongside typed parameters so they can supply additional values.
 
 Keys that the client already sets (e.g. `model`, `messages`, `tools`)
 are **never overwritten** — user-supplied parameters are additive only.

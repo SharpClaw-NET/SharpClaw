@@ -316,6 +316,10 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
                 genConfig["topP"] = topP;
             if (completionParameters.TopK is { } topK)
                 genConfig["topK"] = topK;
+            if (completionParameters.PresencePenalty is { } presencePenalty)
+                genConfig["presencePenalty"] = presencePenalty;
+            if (completionParameters.FrequencyPenalty is { } frequencyPenalty)
+                genConfig["frequencyPenalty"] = frequencyPenalty;
             if (completionParameters.Stop is { Length: > 0 } stop)
             {
                 var arr = new JsonArray();
@@ -365,6 +369,8 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
             {
                 new JsonObject { ["functionDeclarations"] = functionDeclarations }
             };
+
+            ApplyToolChoice(body, completionParameters?.ToolChoice);
         }
 
         MergeProviderParameters(body, genConfig, providerParameters);
@@ -511,6 +517,19 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
         "mediaResolution"
     };
 
+    private static readonly HashSet<string> RootRequestFields = new(StringComparer.Ordinal)
+    {
+        "cachedContent",
+        "contents",
+        "generationConfig",
+        "safetySettings",
+        "serviceTier",
+        "store",
+        "systemInstruction",
+        "toolConfig",
+        "tools"
+    };
+
     private static void MergeProviderParameters(
         JsonObject body,
         JsonObject genConfig,
@@ -534,10 +553,11 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
                 continue;
             }
 
-            if (body.ContainsKey(key))
+            var normalizedRootKey = NormalizeRootRequestKey(key);
+            if (body.ContainsKey(normalizedRootKey))
                 continue;
 
-            body[key] = JsonSerializer.SerializeToNode(value);
+            body[normalizedRootKey] = JsonSerializer.SerializeToNode(value);
         }
     }
 
@@ -561,6 +581,48 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
     private static bool IsGenerationConfigWrapper(string key)
         => string.Equals(key, "generationConfig", StringComparison.Ordinal)
            || string.Equals(key, "generation_config", StringComparison.Ordinal);
+
+    private static string NormalizeRootRequestKey(string key)
+    {
+        var normalized = NormalizeGenerationConfigKey(key);
+        return RootRequestFields.Contains(normalized) ? normalized : key;
+    }
+
+    private static void ApplyToolChoice(JsonObject body, ToolChoice? toolChoice)
+    {
+        if (toolChoice is null || toolChoice.Mode is ToolChoiceMode.Auto)
+            return;
+
+        var functionCallingConfig = new JsonObject();
+        switch (toolChoice.Mode)
+        {
+            case ToolChoiceMode.None:
+                functionCallingConfig["mode"] = "NONE";
+                break;
+            case ToolChoiceMode.Required:
+                functionCallingConfig["mode"] = "ANY";
+                break;
+            case ToolChoiceMode.Named:
+                if (string.IsNullOrWhiteSpace(toolChoice.NamedFunction))
+                    throw new InvalidOperationException(
+                        "Google Gemini named tool choice requires a function name.");
+
+                functionCallingConfig["mode"] = "ANY";
+                functionCallingConfig["allowedFunctionNames"] = new JsonArray
+                {
+                    toolChoice.NamedFunction
+                };
+                break;
+            case ToolChoiceMode.Auto:
+            default:
+                return;
+        }
+
+        body["toolConfig"] = new JsonObject
+        {
+            ["functionCallingConfig"] = functionCallingConfig
+        };
+    }
 
     private static void AddIfMissing(JsonObject target, string key, JsonElement value)
     {
