@@ -156,8 +156,42 @@ the final chunk's `usageMetadata`.
 
 ## `providerParameters` examples
 
-Provider parameters are merged additively into the top-level request
-body. They can supply any native Gemini field:
+Provider parameters are merged additively into the native Gemini request.
+Known `GenerationConfig` fields are merged into `generationConfig`; all
+other fields remain top-level native request fields.
+
+Top-level `generationConfig` and `generation_config` objects are merged
+into `generationConfig`. Snake_case generation config keys are
+normalized to Gemini REST lowerCamelCase, so this:
+
+```json
+{
+  "response_mime_type": "application/json"
+}
+```
+
+is sent as:
+
+```json
+{
+  "generationConfig": {
+    "responseMimeType": "application/json"
+  }
+}
+```
+
+Nested generation config values are also supported:
+
+```json
+{
+  "generation_config": {
+    "response_mime_type": "application/json",
+    "candidate_count": 2
+  }
+}
+```
+
+Top-level native fields still pass through unchanged:
 
 ```json
 {
@@ -187,6 +221,9 @@ body. They can supply any native Gemini field:
 > **Note:** If a `providerParameters` key conflicts with a key already
 > set by the client (e.g. `contents`, `systemInstruction`, `tools`), the
 > client's value takes precedence and the user-supplied key is skipped.
+> The same precedence applies inside `generationConfig`: typed
+> SharpClaw fields such as `responseFormat`, `temperature`, and `topP`
+> win over provider parameter values.
 
 ---
 

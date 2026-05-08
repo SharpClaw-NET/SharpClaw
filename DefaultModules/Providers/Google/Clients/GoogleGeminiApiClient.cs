@@ -12,8 +12,9 @@ namespace SharpClaw.Modules.Providers.Google.Clients;
 
 /// <summary>
 /// Native Google Gemini client that calls the <c>generateContent</c> and
-/// <c>streamGenerateContent</c> endpoints directly.  Provider parameters
-/// are passed through as-is — no translation or remapping is performed.
+/// <c>streamGenerateContent</c> endpoints directly. Provider parameters
+/// use native Gemini request fields, with generation-config values merged
+/// into <c>generationConfig</c>.
 /// </summary>
 public sealed class GoogleGeminiApiClient : IProviderApiClient
 {
@@ -347,9 +348,6 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
             }
         }
 
-        if (genConfig.Count > 0)
-            body["generationConfig"] = genConfig;
-
         // ── tools ─────────────────────────────────────────────────
         if (tools.Count > 0)
         {
@@ -369,15 +367,10 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
             };
         }
 
-        // ── provider parameters (additive merge) ──────────────────
-        if (providerParameters is { Count: > 0 })
-        {
-            foreach (var (key, value) in providerParameters)
-            {
-                if (body.ContainsKey(key)) continue;
-                body[key] = JsonSerializer.SerializeToNode(value);
-            }
-        }
+        MergeProviderParameters(body, genConfig, providerParameters);
+
+        if (genConfig.Count > 0)
+            body["generationConfig"] = genConfig;
 
         return body;
     }
@@ -491,6 +484,122 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
             "high" => 24576,
             _ => 8192 // default to medium
         };
+    }
+
+    private static readonly HashSet<string> GenerationConfigFields = new(StringComparer.Ordinal)
+    {
+        "stopSequences",
+        "responseMimeType",
+        "responseSchema",
+        "_responseJsonSchema",
+        "responseJsonSchema",
+        "responseModalities",
+        "candidateCount",
+        "maxOutputTokens",
+        "temperature",
+        "topP",
+        "topK",
+        "seed",
+        "presencePenalty",
+        "frequencyPenalty",
+        "responseLogprobs",
+        "logprobs",
+        "enableEnhancedCivicAnswers",
+        "speechConfig",
+        "thinkingConfig",
+        "imageConfig",
+        "mediaResolution"
+    };
+
+    private static void MergeProviderParameters(
+        JsonObject body,
+        JsonObject genConfig,
+        Dictionary<string, JsonElement>? providerParameters)
+    {
+        if (providerParameters is not { Count: > 0 })
+            return;
+
+        foreach (var (key, value) in providerParameters)
+        {
+            if (IsGenerationConfigWrapper(key))
+            {
+                MergeGenerationConfig(genConfig, key, value);
+                continue;
+            }
+
+            var normalizedConfigKey = NormalizeGenerationConfigKey(key);
+            if (GenerationConfigFields.Contains(normalizedConfigKey))
+            {
+                AddIfMissing(genConfig, normalizedConfigKey, value);
+                continue;
+            }
+
+            if (body.ContainsKey(key))
+                continue;
+
+            body[key] = JsonSerializer.SerializeToNode(value);
+        }
+    }
+
+    private static void MergeGenerationConfig(JsonObject genConfig, string key, JsonElement value)
+    {
+        if (value.ValueKind != JsonValueKind.Object)
+        {
+            throw new InvalidOperationException(
+                $"Google Gemini provider parameter '{key}' must be a JSON object.");
+        }
+
+        foreach (var prop in value.EnumerateObject())
+        {
+            AddIfMissing(
+                genConfig,
+                NormalizeGenerationConfigKey(prop.Name),
+                prop.Value);
+        }
+    }
+
+    private static bool IsGenerationConfigWrapper(string key)
+        => string.Equals(key, "generationConfig", StringComparison.Ordinal)
+           || string.Equals(key, "generation_config", StringComparison.Ordinal);
+
+    private static void AddIfMissing(JsonObject target, string key, JsonElement value)
+    {
+        if (target.ContainsKey(key))
+            return;
+
+        target[key] = JsonSerializer.SerializeToNode(value);
+    }
+
+    private static string NormalizeGenerationConfigKey(string key)
+    {
+        if (!key.Contains('_', StringComparison.Ordinal))
+            return key;
+
+        var leadingUnderscores = 0;
+        while (leadingUnderscores < key.Length && key[leadingUnderscores] == '_')
+            leadingUnderscores++;
+
+        var prefix = key[..leadingUnderscores];
+        var remainder = key[leadingUnderscores..];
+        if (remainder.Length == 0)
+            return key;
+
+        var segments = remainder
+            .Split('_', StringSplitOptions.RemoveEmptyEntries);
+        if (segments.Length == 0)
+            return key;
+
+        var builder = new StringBuilder(prefix);
+        builder.Append(segments[0]);
+        for (var i = 1; i < segments.Length; i++)
+        {
+            var segment = segments[i];
+            builder.Append(char.ToUpperInvariant(segment[0]));
+            if (segment.Length > 1)
+                builder.Append(segment[1..]);
+        }
+
+        return builder.ToString();
     }
 
     private static JsonNode ParseJsonOrWrap(string json)
