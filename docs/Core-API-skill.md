@@ -1,7 +1,8 @@
 SharpClaw Core API — Agent Skill Reference
 
 Base: http://127.0.0.1:48923
-Auth: X-Api-Key header on every request. Key at %LOCALAPPDATA%/SharpClaw/.api-key.
+Auth: X-Api-Key header for the current runtime instance, plus Bearer JWT on
+non-exempt user endpoints. Gateway service calls may use X-Gateway-Token.
 All bodies JSON. Enums serialised as strings. Timestamps ISO 8601.
 
 ────────────────────────────────────────
@@ -504,9 +505,12 @@ Startup validation: invalid Base64 or wrong key length → backend crashes with 
 ────────────────────────────────────────
 ENV FILE MANAGEMENT
 ────────────────────────────────────────
-Two .env files (JSON-with-comments, loaded into IConfiguration):
-  Core — server-side (Infrastructure/Environment/.env). Managed exclusively via API.
-  Interface — client-side (SharpClaw.Uno/Environment/.env). Direct file I/O by client.
+Three .env files use JSON-with-comments and load into IConfiguration. The
+Core env file is server-side and lives under
+SharpClaw.Application.Infrastructure/Environment. The Interface env file
+lives under SharpClaw.Uno/Environment and controls client process startup and
+URLs. The Gateway env file lives under SharpClaw.Gateway/Environment and
+controls public proxy routing, internal API auth, and queue behavior.
 
 All /env/core/* endpoints require JWT auth. Caller must be admin OR EnvEditor:AllowNonAdmin=true in Core .env.
 
@@ -514,8 +518,18 @@ GET  /env/core/auth  → { authorised: bool }  (pre-check — is caller allowed 
 GET  /env/core       → { content: "raw JSON string" }  (403 if not authorised, 404 if file missing)
 PUT  /env/core       { content }  → { saved: true }  (403 if not authorised)
 
-Core .env keys: Encryption:Key (AES-256-GCM, 32-byte Base64; auto-generated if unset; invalid value crashes backend), Jwt:Secret,
-Interface .env keys: Api:Url (default http://127.0.0.1:48923), Backend:Enabled (default true).
+Core .env keys include Encryption:Key, EncryptDatabase, EncryptProviderKeys,
+Jwt:Secret, Jwt:Issuer, Jwt:Audience, Jwt:AccessTokenLifetime,
+Jwt:RefreshTokenLifetime, Auth:DisableApiKeyCheck,
+Auth:DisableAccessTokenCheck, database settings, logging settings, Admin,
+Local model settings, EnvEditor, UniqueNames, ExternalModules, and Modules.
+Jwt:Secret and Encryption:Key are generated per instance when omitted.
+
+Interface .env keys include Api:Url, Backend:Enabled, Gateway:Enabled,
+Gateway:Url, process-startup flags, and logging settings. Gateway .env keys
+include InternalApi:BaseUrl, TimeoutSeconds, ApiKey, ApiKeyFilePath,
+GatewayToken, GatewayTokenFilePath, Gateway:RequestQueue,
+Gateway:Endpoints, and Gateway:Modules.
 
 Changes to Core .env require a backend restart to take effect.
 

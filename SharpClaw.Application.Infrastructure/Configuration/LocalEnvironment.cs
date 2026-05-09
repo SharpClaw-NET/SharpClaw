@@ -21,10 +21,25 @@ public static class LocalEnvironment
           // SharpClaw Environment Configuration
           // Values here are loaded for all environments.
 
-          "Admin": { "Username": "admin", "Password": "123456" },
+          "Jwt": {
+            "Issuer": "SharpClaw",
+            "Audience": "SharpClaw",
+            "AccessTokenLifetime": "00:30:00",
+            "RefreshTokenLifetime": "30.00:00:00"
+          },
 
-          // Allow non-admin users to edit this file from the Uno client.
-          //"EnvEditor": { "AllowNonAdmin": "false" }
+          "Auth": {
+            "DisableApiKeyCheck": "false",
+            "DisableAccessTokenCheck": "false"
+          },
+
+          "Admin": {
+            "Username": "admin",
+            "Password": "123456",
+            "ReconcilePermissions": "true"
+          },
+
+          "EnvEditor": { "AllowNonAdmin": "false" }
         }
         """;
 

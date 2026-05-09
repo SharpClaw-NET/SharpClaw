@@ -2,12 +2,13 @@
 
 > **Base URL:** `http://127.0.0.1:48923`
 >
-> **Authentication:** Every request must include an `X-Api-Key` header.
-> The key is auto-generated per backend instance and written to that
-> backend instance's runtime directory. Frontends, gateways, and editor
-> integrations should resolve the runtime auth path through backend
-> discovery metadata or an explicit runtime file path, not by assuming a
-> single machine-global `%LOCALAPPDATA%/SharpClaw/.api-key` file.
+> **Authentication:** Requests pass the per-instance `X-Api-Key` gate first.
+> Non-exempt user endpoints also require `Authorization: Bearer <token>`.
+> Gateway service calls may present `X-Gateway-Token` instead of a user JWT.
+> Runtime auth files are generated per backend instance, so frontends,
+> gateways, and editor integrations should resolve them through backend
+> discovery metadata or explicit file paths rather than assuming a single
+> machine-global location.
 
 All request/response bodies are JSON. Enum fields are serialized as strings.
 Timestamps are ISO 8601 (`DateTimeOffset`).
@@ -214,42 +215,54 @@ Pending, Downloading, Ready, Failed
 
 ## Auth
 
-SharpClaw uses a two-layer authentication scheme:
+SharpClaw uses two authentication layers for normal callers. The first
+layer is the per-instance API key in the `X-Api-Key` header. Core creates
+that key at startup, writes it to the backend instance runtime `.api-key`
+file, and deletes it on clean shutdown when it still owns the file. This
+is a local-process trust check, not a user identity check, so clients
+should resolve the key from backend discovery metadata or from an explicit
+runtime file path rather than assuming a machine-global location.
 
-1. **API Key** — Every request (except `GET /echo`) must include an
-   `X-Api-Key` header. The key is auto-generated per backend instance and
-   written to that instance's runtime `.api-key` file. This is for local
-   machine trust, not user identity. Consumers should resolve the path
-   from backend discovery metadata or an explicit runtime auth path.
-2. **JWT Bearer Token** — After the API key check, a standard
-   `Authorization: Bearer <token>` header identifies the user. Endpoints
-   that are not exempt (see below) return `401` if the token is missing,
-   expired, or invalid.
+The second layer is the user JWT in `Authorization: Bearer <token>`.
+After the API key middleware accepts a request, `JwtSessionMiddleware`
+validates the token and populates `SessionService.UserId`. Endpoints that
+are not anonymous and are not exempt return `401` for a missing or invalid
+token, and return `419` with `access_token_expired` when the token was
+validly signed but has expired or was invalidated server-side. The exempt
+paths are `/echo`, `/ping`, `/auth/login`, `/auth/register`, and
+`/auth/refresh`; anonymous endpoints declared with ASP.NET Core metadata
+also bypass JWT enforcement.
 
-**Exempt paths** (no JWT required): `/echo`, `/ping`, `/auth/login`,
-`/auth/register`, `/auth/refresh`, `/editor/ws*`.
+The gateway has a service credential in addition to caller JWTs. A gateway
+request still carries the internal `X-Api-Key`, but it may also send
+`X-Gateway-Token` from the backend instance `.gateway-token` file. That
+token proves the request came from the trusted gateway process and lets
+gateway-owned background work reach Core endpoints that do not have a
+user context.
 
-### Token lifetimes (defaults)
+### Token lifetimes
 
-| Token | Default Lifetime | Configurable via |
-|-------|-----------------|------------------|
-| Access token (JWT) | 30 minutes | `Jwt:AccessTokenLifetime` |
-| Refresh token | 30 days | `Jwt:RefreshTokenLifetime` |
+Access tokens default to thirty minutes and refresh tokens default to
+thirty days. Both are configured through the Core `.env` `Jwt` section
+with TimeSpan text, for example `AccessTokenLifetime` set to `"00:30:00"`
+and `RefreshTokenLifetime` set to `"30.00:00:00"`. `Jwt:Issuer` and
+`Jwt:Audience` default to `SharpClaw`; `Jwt:Secret` signs tokens and may
+be left unset so the backend generates and persists a per-instance secret.
+Access tokens are stateless after issuance, while refresh tokens are
+stored server-side and rotate on refresh.
 
-Access tokens are short-lived and stateless (validated by signature +
-expiry). Refresh tokens are stored server-side and support revocation
-and rotation.
+### Development and testing auth flags
 
-### Development / testing auth flags
-
-Both authentication layers can be individually disabled via `.env` for
-local development and testing.  **Never disable in production.**
-
-| `.env` key | Layer disabled | Default |
-|---|---|---|
-| `Auth:DisableApiKeyCheck` | API-key middleware (`X-Api-Key` header) — all requests pass without a key | `false` |
-| `Auth:DisableAccessTokenCheck` | JWT session middleware — all requests pass without a Bearer token | `false` |
-| `Agent:DisableCustomProviderParameters` | Custom `providerParameters` dictionary — when `true`, the escape-hatch dictionary is stripped before sending to the provider (typed fields still apply) | `false` |
+The Core `.env` can disable either authentication layer for controlled
+local testing. `Auth:DisableApiKeyCheck` makes the API-key middleware pass
+every request as though a valid `X-Api-Key` header was present.
+`Auth:DisableAccessTokenCheck` stops JWT enforcement for protected
+endpoints, although a supplied valid Bearer token is still parsed and used
+to populate the session. These switches should remain `false` outside
+local testing. `Agent:DisableCustomProviderParameters` is not an auth
+gate, but it is a related hardening switch: when `true`, the free-form
+`providerParameters` escape hatch is stripped before sending a request to
+an LLM provider, while typed agent and model fields still apply.
 
 Example `.env` snippet:
 
@@ -2632,31 +2645,22 @@ SharpClaw encrypts provider API keys at rest using **AES-256-GCM**.
 
 ### Key resolution
 
-At startup the encryption key is resolved in order:
-
-1. **Explicit** — `Encryption:Key` in the Core `.env` (Base64-encoded,
-   exactly 256 bits / 32 bytes after decoding).
-2. **Auto-generated** — if no key is configured, SharpClaw generates a
-   cryptographically secure 256-bit key via
-   `RandomNumberGenerator.GetBytes(32)`, persists it to
-   `%LOCALAPPDATA%/SharpClaw/.encryption-key`, and reuses it on
-   subsequent startups.
-
-On Linux/macOS the generated key file is restricted to owner-only
-permissions (`600`).
+At startup, Core first tries `Encryption:Key` from the Core `.env`. The
+value must decode to exactly thirty-two bytes because provider-key
+encryption and encrypted JSON persistence use AES-256-GCM. If no key is
+configured there, SharpClaw creates a cryptographically secure key with
+`RandomNumberGenerator.GetBytes(32)`, persists it through
+`PersistentKeyStore`, and reuses it on later startups. On Linux and macOS,
+generated key files are written with owner-only permissions.
 
 ### Startup validation
 
 If `Encryption:Key` is set in the Core `.env`, SharpClaw validates it
-**before** the server accepts any requests:
-
-- **Invalid Base64** — the backend crashes immediately with:
-  `Encryption:Key is not valid Base64.`
-- **Wrong key length** — the backend crashes immediately with:
-  `Encryption:Key must be exactly 256 bits (32 bytes) after Base64 decoding. Got N bytes.`
-
-Both errors advise removing the key from `.env` to fall back to
-auto-generation.
+before the server accepts requests. Invalid Base64 crashes startup with
+`Encryption:Key is not valid Base64.` A decoded value with the wrong byte
+length crashes startup with `Encryption:Key must be exactly 256 bits (32
+bytes) after Base64 decoding. Got N bytes.` Both errors advise removing
+`Encryption:Key` from `.env` to fall back to auto-generation.
 
 > ⚠️ **Changing or losing the encryption key makes all previously
 > encrypted provider API keys permanently unreadable.** Re-enter them
@@ -2671,23 +2675,26 @@ auto-generation.
 
 ## Env file management
 
-SharpClaw manages two `.env` configuration files:
+SharpClaw uses JSON-with-comments environment files that are loaded into
+`IConfiguration`. Core reads `SharpClaw.Application.Infrastructure/Environment/.env`
+and, in development, `.dev.env`. The Uno interface reads
+`SharpClaw.Uno/Environment/.env` and `.dev.env` directly from the client
+process. The public gateway reads `SharpClaw.Gateway/Environment/.env`
+and `.dev.env` through `GatewayEnvironment.AddGatewayEnvironment()`.
 
-- **Core** — server-side application configuration
-  (`SharpClaw.Application.Infrastructure/Environment/.env`). Managed
-  exclusively through the API endpoints below. Contains encryption keys,
-  JWT secrets, database connection strings, local inference settings, and
-  admin credentials.
-- **Interface** — client-side configuration
-  (`SharpClaw.Uno/Environment/.env`). Read and written directly by the
-  Uno client (not exposed via the API).
+The Core env file is special because it can contain encryption keys, JWT
+secrets, connection strings, and initial admin credentials. It is managed
+through the `/env/core/*` API endpoints below and is automatically
+encrypted at rest after startup when an encryption key is available. The
+Interface env file is regular client-side configuration for the current
+desktop user. The Gateway env file controls public endpoint exposure,
+internal API discovery, request queue behavior, and gateway logging.
 
-Both files use JSON-with-comments format and are loaded via
-`PhysicalFileProvider` into `IConfiguration`.
-
-All Core `.env` endpoints require authentication (JWT) and enforce
-server-side authorisation: the caller must be a user admin **or** the
-`EnvEditor:AllowNonAdmin` setting must be `true` in the Core `.env`.
+All Core `.env` endpoints require a valid user JWT. The caller must be an
+admin user unless `EnvEditor:AllowNonAdmin` is set to `true` in the Core
+`.env`. Changes to the Core `.env` require a backend restart before they
+affect the running service; the Uno env editor performs that restart after
+saving.
 
 ### GET /env/core/auth
 
@@ -2746,55 +2753,54 @@ Overwrite the Core `.env` file with new content.
 
 ### Core `.env` keys
 
-| Key | Description |
-|-----|-------------|
-| `Encryption:Key` | AES-256-GCM key for encrypting provider API keys at rest. Must be exactly 256 bits (32 bytes) Base64-encoded. If empty/unset, auto-generated in the current backend instance `secrets` directory. **Invalid values crash the backend at startup.** ⚠️ Changing this key makes previously encrypted API keys unreadable. |
-| `Jwt:Secret` | HMAC signing key for JWT access tokens |
-| `Jwt:AccessTokenLifetime` | Access token lifetime (e.g. `"00:30:00"`) |
-| `Jwt:RefreshTokenLifetime` | Refresh token lifetime (e.g. `"30.00:00:00"`) |
-| `ConnectionStrings:Postgres` | Optional Postgres connection string (default: EF InMemory + JSON sync) |
-| `Api:ListenUrl` | HTTP listen URL (default: `http://127.0.0.1:48923`) |
-| `Admin:Username` | Seeded admin username |
-| `Admin:Password` | Seeded admin password |
-| `Admin:ReconcilePermissions` | When `true`, reconcile the Admin role's permission set on every startup to back-fill newly added flags and wildcard grants (default: `false`) |
-| `Browser:Executable` | Chromium executable path for `AccessLocalhostInBrowser` |
-| `Browser:Arguments` | Extra browser launch arguments |
-| `Local:GpuLayerCount` | Default GPU layers for local inference (default: `-1` = auto) |
-| `Local:ContextSize` | Default context size for local models |
-| `Local:KeepLoaded` | Keep models pinned after use |
-| `Local:IdleCooldownMinutes` | Idle minutes before unloading unpinned models |
-| `Logging:Serilog:Enabled` | Master switch for Serilog in the Core process. When `false`, Serilog sinks are disabled entirely. |
-| `Logging:Serilog:ConsoleEnabled` | Enable or disable the Core console sink. |
-| `Logging:Serilog:FileEnabled` | Enable or disable the Core per-instance session file sink under the backend instance `logs` directory. |
-| `Logging:Serilog:RequestLoggingEnabled` | Enable or disable ASP.NET Core request logging through Serilog. |
-| `Logging:Serilog:MinimumLevel` | Default Serilog level for Core logs. Safe default: `Information`. |
-| `Logging:Serilog:MicrosoftMinimumLevel` | Override level for `Microsoft.*` categories. Safe default: `Warning`. |
-| `Logging:Serilog:AspNetCoreMinimumLevel` | Override level for `Microsoft.AspNetCore.*` categories. Safe default: `Warning`. |
-| `Logging:Serilog:EntityFrameworkCoreMinimumLevel` | Override level for `Microsoft.EntityFrameworkCore.*` categories. Safe default: `Warning`. |
-| `Database:EnableDetailedErrors` | Enable EF Core detailed errors. Safe default: `true`. |
-| `Database:EnableSensitiveDataLogging` | Include parameter values and entity data in EF Core logs. Safe default: `false`; enable only for local debugging. |
-| `EnvEditor:AllowNonAdmin` | When `true`, non-admin users can edit the Core `.env` via the API |
-| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend |
-| `Auth:DisableApiKeyCheck` | Disable API-key middleware (dev only) |
-| `Auth:DisableAccessTokenCheck` | Disable JWT enforcement (dev only) |
-| `Agent:DisableCustomProviderParameters` | Strip `providerParameters` escape-hatch before sending to provider |
+The Core template is `SharpClaw.Application.Infrastructure/Environment/.env.template`.
+It includes the `Encryption` section for the at-rest encryption key and
+encryption toggles, the `Jwt` section for token signing, issuer, audience,
+and lifetimes, and the `Auth` section for local-only bypass switches.
+`Agent:DisableCustomProviderParameters` is also in the template because it
+is the hardening switch for free-form provider parameters.
+
+Database configuration lives in the `Database` section. `Database:Provider`
+accepts `JsonFile`, `Postgres`, `SqlServer`, or `SQLite`, and relational
+providers read their matching `ConnectionStrings` entry. The same section
+also holds the JSON persistence durability options such as checksums, event
+log retention, snapshots, async flush, detailed errors, and sensitive-data
+logging. Migrations remain manual and are not generated or run by editing
+the env file.
+
+`Admin` controls first-run admin seeding and permission reconciliation.
+`Local` controls LLamaSharp defaults such as GPU layers, context size,
+keep-loaded behavior, idle unload timing, maximum cached sessions, model
+directory, and optional Hugging Face token. `EnvEditor` controls whether
+non-admin users may edit the Core env through the API. `UniqueNames`
+contains per-entity unique-name enforcement flags. `ExternalModules` and
+`Modules` control module discovery, module host guardrails, and bundled
+module enablement.
 
 ### Interface `.env` keys
 
-| Key | Description |
-|-----|-------------|
-| `Api:Url` | API base URL (default: `http://127.0.0.1:48923`) |
-| `Backend:Enabled` | When `false`, the Uno client skips launching the bundled backend (default: `true`) |
-| `Gateway:Enabled` | When `false`, the Uno client skips launching the bundled gateway (default: `true`) |
-| `Gateway:Url` | Gateway bind URL used when the Uno client launches the bundled gateway |
-| `Processes:Persistent` | Keep bundled backend and gateway alive when the Uno frontend exits |
-| `Processes:AutoStart` | Register backend and gateway startup scripts at Windows login |
-| `Logging:Serilog:Enabled` | Master switch for Serilog in the Uno frontend |
-| `Logging:Serilog:ConsoleEnabled` | Enable or disable Uno console logging |
-| `Logging:Serilog:FileEnabled` | Enable or disable Uno file logging to the Local AppData session folder |
-| `Logging:Serilog:MinimumLevel` | Default Serilog level for Uno logs. Safe default: `Information`. |
-| `Logging:Serilog:MicrosoftMinimumLevel` | Override level for `Microsoft.*` categories in Uno |
-| `Logging:Serilog:UnoMinimumLevel` | Override level for `Uno.*` categories. Safe default: `Warning`. |
+The Interface template is `SharpClaw.Uno/Environment/.env.template`.
+`Api:Url` selects the Core API URL and is also passed to a bundled backend
+as `ASPNETCORE_URLS` when the client launches one. `Backend:Enabled`
+controls bundled backend launch. `Gateway:Enabled` is false in the
+template so the public gateway is opt-in, and `Gateway:Url` is used only
+when that bundled gateway is launched. `Processes:Persistent` keeps child
+processes alive after the frontend exits, while `Processes:AutoStart`
+registers Windows startup scripts. The `Logging:Serilog` section controls
+frontend logging.
+
+### Gateway `.env` keys
+
+The Gateway template is `SharpClaw.Gateway/Environment/.env.template`.
+`InternalApi` contains the selected Core API URL, timeout, optional API-key
+override, optional API-key file path, optional gateway service token, and
+optional gateway-token file path. Empty auth values are ignored so normal
+instance discovery can resolve the runtime `.api-key` and `.gateway-token`
+files. `Gateway:RequestQueue` controls mutation queueing, retry, timeout,
+and max queue size. `Gateway:Endpoints` is secure by default: the master
+switch is on, but each built-in public endpoint group is false until an
+operator opts in. `Gateway:Modules` controls gateway-side module endpoint
+loading and hot reload.
 
 ---
 
@@ -3193,15 +3199,15 @@ The agent must also be the channel's primary agent or listed in its
 `AllowedAgents` (channel-level first, context-level fallback).
 
 Accessible threads are surfaced in the chat header
-(`accessible-threads:` section) and via inline tools provided by the
-[Context Tools](modules/Module-ContextTools.md) module.
+(`accessible-threads:` section). Older builds also exposed a separate Context
+Tools module, but that module is not part of the current bundled module set.
 
 ---
 
 ## Modules
 
 Modules are addressed by **module ID strings**, not GUIDs. Example:
-`sharpclaw_computer_use`.
+`sharpclaw_agent_orchestration`.
 
 ### GET /modules
 
@@ -3279,27 +3285,14 @@ For tutorial-style module workflows, see
 
 ## Bundled modules
 
-SharpClaw ships with a set of default modules that register their own
-action keys, resource types, and REST endpoints at startup. Each module
-has its own documentation:
+The current `DefaultModules` tree ships agent orchestration, editor common,
+metrics, module development, provider modules for Anthropic, Google,
+LlamaSharp, Ollama, and OpenAI-compatible APIs, plus the VS 2026 and VS Code
+editor integrations. Older docs for removed or externalized modules may remain
+in the repository as historical references, but they are not part of the
+current bundled module set unless a deployment supplies them as external
+modules.
 
-| Module | Documentation |
-|--------|---------------|
-| Agent Orchestration | [Module-AgentOrchestration.md](modules/Module-AgentOrchestration.md) |
-| Bot Integration | [Module-BotIntegration.md](modules/Module-BotIntegration.md) |
-| Computer Use | [Module-ComputerUse.md](modules/Module-ComputerUse.md) |
-| Context Tools | [Module-ContextTools.md](modules/Module-ContextTools.md) |
-| Dangerous Shell | [Module-DangerousShell.md](modules/Module-DangerousShell.md) |
-| Database Access | [Module-DatabaseAccess.md](modules/Module-DatabaseAccess.md) |
-| Editor Common | [Module-EditorCommon.md](modules/Module-EditorCommon.md) |
-| Mk8 Shell | [Module-Mk8Shell.md](modules/Module-Mk8Shell.md) |
-| Module Dev | [Module-ModuleDev.md](modules/Module-ModuleDev.md) |
-| Office Apps | [Module-OfficeApps.md](modules/Module-OfficeApps.md) |
-| Transcription | [Module-Transcription.md](modules/Module-Transcription.md) |
-| VS 2026 Editor | [Module-VS2026Editor.md](modules/Module-VS2026Editor.md) |
-| VS Code Editor | [Module-VSCodeEditor.md](modules/Module-VSCodeEditor.md) |
-| Web Access | [Module-WebAccess.md](modules/Module-WebAccess.md) |
-
-For enabling/disabling modules, see the
-[Module Enablement Guide](modules/Module-Enablement-Guide.md).
-For task and module walkthroughs, also see the `docs/guides/` folder.
+For the current enablement keys and base/development defaults, see the
+[Module Enablement Guide](modules/Module-Enablement-Guide.md). For task and
+module authoring walkthroughs, also see the `docs/guides/` folder.

@@ -7,13 +7,8 @@ namespace SharpClaw.Gateway.Configuration;
 /// <summary>
 /// Loads gateway environment configuration from <c>Environment/.env</c>
 /// (always) and <c>Environment/.dev.env</c> (development only) relative
-/// to the assembly location.  Creates a default <c>.env</c> if one does
+/// to the assembly location. Creates a default <c>.env</c> if one does
 /// not exist.
-/// <para>
-/// This follows the same pattern used by the Core and Interface
-/// environments — JSON-with-comments loaded via
-/// <see cref="PhysicalFileProvider"/>.
-/// </para>
 /// </summary>
 public static class GatewayEnvironment
 {
@@ -22,22 +17,30 @@ public static class GatewayEnvironment
         {
           // SharpClaw Gateway Environment Configuration
           // Values here are loaded for all environments.
-          //
-          // DEFAULT POSTURE: all public-facing REST endpoints are disabled.
-          // Enable individual endpoint groups via the Endpoints toggles below.
 
-          // ── Internal API ───────────────────────────────────────────
-          // Base URL + timeout for the internal SharpClaw Application API.
-          // TimeoutSeconds should be generous — agent tool-call chains
-          // (wait, screenshot, click, type, inference) can take minutes.
           "InternalApi": {
             "BaseUrl": "http://127.0.0.1:48923",
-            "TimeoutSeconds": "300"
+            "TimeoutSeconds": "300",
+            "ApiKey": "",
+            "ApiKeyFilePath": "",
+            "GatewayToken": "",
+            "GatewayTokenFilePath": ""
           },
 
-          // ── Request Queue ──────────────────────────────────────────
-          // Buffers mutation requests and forwards them to the core API
-          // sequentially (or with bounded concurrency).
+          "Logging": {
+            "Serilog": {
+              "Enabled": "true",
+              "ConsoleEnabled": "true",
+              "FileEnabled": "true",
+              "RequestLoggingEnabled": "true",
+              "MinimumLevel": "Information",
+              "MicrosoftMinimumLevel": "Warning",
+              "AspNetCoreMinimumLevel": "Warning",
+              "EntityFrameworkCoreMinimumLevel": "Warning",
+              "UnoMinimumLevel": "Warning"
+            }
+          },
+
           "Gateway": {
             "RequestQueue": {
               "Enabled": "true",
@@ -48,27 +51,36 @@ public static class GatewayEnvironment
               "MaxQueueSize": "500"
             },
 
-              // ── Endpoint Toggles ───────────────────────────────────────
-              // Master kill-switch and per-group enable/disable.
-              // All endpoint groups are disabled by default. Enable
-              // individual groups as needed to expose the public REST surface.
-              "Endpoints": {
-                "Enabled": "true",
-                "Auth": "false",
-                "Agents": "false",
-                "Channels": "false",
-                "ChannelContexts": "false",
-                "Chat": "false",
-                "ChatStream": "false",
-                "Threads": "false",
-                "ThreadChat": "false",
-                "Jobs": "false",
-                "Models": "false",
-                "Providers": "false",
-                "Roles": "false",
-                "Users": "false",
-                "Cost": "false"
-              }
+            "Endpoints": {
+              "Enabled": "true",
+              "Auth": "false",
+              "Agents": "false",
+              "Channels": "false",
+              "ChannelContexts": "false",
+              "Chat": "false",
+              "ChatStream": "false",
+              "Threads": "false",
+              "ThreadChat": "false",
+              "ThreadWatch": "false",
+              "Jobs": "false",
+              "Models": "false",
+              "LocalModels": "false",
+              "Providers": "false",
+              "Roles": "false",
+              "Users": "false",
+              "Cost": "false",
+              "Tasks": "false",
+              "TaskStreaming": "false",
+              "ToolAwarenessSets": "false",
+              "Resources": "false"
+            },
+
+            "Modules": {
+              "Modules": {},
+              "Groups": {},
+              "HotReloadEnabled": "false",
+              "DrainTimeoutSeconds": "30"
+            }
           }
         }
         """;
@@ -111,7 +123,7 @@ public static class GatewayEnvironment
         }
         catch
         {
-            // Best-effort — read-only or restricted file system.
+            // Best-effort; read-only or restricted file system.
         }
     }
 }

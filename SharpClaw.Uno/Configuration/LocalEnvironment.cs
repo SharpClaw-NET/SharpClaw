@@ -26,21 +26,11 @@ public static class LocalEnvironment
           // when connecting to an API instance running on another machine.
           "Api": { "Url": "http://127.0.0.1:48923" },
 
-          // -- Backend Process -------------------------------------------
-          // Set Enabled to false to prevent the client from launching a
-          // bundled backend process. Use this when the API is installed
-          // separately, runs as a system service, or is on another host.
-          //"Backend": { "Enabled": "false" },
+          "Backend": { "Enabled": "true" },
 
-          // -- Public Gateway -----------------------------------------------
-          // Set Enabled to false to prevent the client from launching the
-          // gateway proxy. Url controls the address/port the gateway binds to.
-          //"Gateway": { "Enabled": "false", "Url": "http://0.0.0.0:48924" },
+          "Gateway": { "Enabled": "false", "Url": "http://0.0.0.0:48924" },
 
-          // -- Process Lifecycle --------------------------------------------
-          // Persistent: keep backend/gateway running when the frontend exits.
-          // AutoStart:  register them to launch at Windows login (startup folder).
-          //"Processes": { "Persistent": "true", "AutoStart": "true" }
+          "Processes": { "Persistent": "false", "AutoStart": "false" }
         }
         """;
 
@@ -70,15 +60,14 @@ public static class LocalEnvironment
 
     /// <summary>
     /// Reads <c>Gateway:Enabled</c> from the environment files.
-    /// Defaults to <c>true</c> when not configured.
-    /// Set to <c>false</c> to prevent the client from launching the
-    /// gateway proxy.
+    /// Defaults to <c>false</c> when not configured. Set to <c>true</c>
+    /// to let the client launch the bundled gateway proxy.
     /// </summary>
     public static bool LoadGatewayEnabled(bool isDevelopment = false)
     {
         var config = BuildConfiguration(isDevelopment);
         var value = config["Gateway:Enabled"];
-        return value is null || !bool.TryParse(value, out var enabled) || enabled;
+        return value is not null && bool.TryParse(value, out var enabled) && enabled;
     }
 
     /// <summary>

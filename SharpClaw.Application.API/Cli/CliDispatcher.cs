@@ -1045,20 +1045,12 @@ public static class CliDispatcher
         if (action == "clear" && extra.Length >= 2)
         {
             var key = extra[1].ToLowerInvariant();
-
-            var current = scope == "channel"
-                ? await svc.GetForChannelAsync(entityId)
-                : await svc.GetForContextAsync(entityId);
-
-            if (current is null) return Results.NotFound();
-
-            var req = MergeDefaultResourceKey(current, key, null, svc);
-            if (req is null)
+            if (!svc.IsValidKey(key))
                 return UsageResult($"Unknown key '{extra[1]}'.");
 
             var result = scope == "channel"
-                ? await svc.SetForChannelAsync(entityId, req)
-                : await svc.SetForContextAsync(entityId, req);
+                ? await svc.ClearKeyForChannelAsync(entityId, key)
+                : await svc.ClearKeyForContextAsync(entityId, key);
 
             if (result is null) return Results.NotFound();
             PrintJsonWithShortIds(result);

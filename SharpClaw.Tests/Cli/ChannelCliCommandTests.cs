@@ -11,7 +11,6 @@ using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
-using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Tests.Cli;
@@ -104,6 +103,58 @@ public sealed class ChannelCliCommandTests
         context.DefaultResourceSet!.Id.Should().NotBe(Guid.Empty);
         context.DefaultResourceSet.Entries.Should().ContainSingle(e =>
             e.ResourceKey == "agent" && e.ResourceId == agentId);
+    }
+
+    [Test]
+    public async Task WhenContextDefaultsClearUsesKnownKeyThenDefaultIsRemoved()
+    {
+        var services = CreateServices(registerDefaultResourceModule: true);
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (_, agentId, contextId, _) = await SeedChannelGraphAsync(db);
+
+        var setHandled = await CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString(), "set", "agent", agentId.ToString()],
+            services);
+        var clearHandled = await CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString(), "clear", "agent"],
+            services);
+
+        setHandled.Should().BeTrue();
+        clearHandled.Should().BeTrue();
+        await using var assertScope = services.CreateAsyncScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var context = await assertDb.AgentContexts
+            .Include(c => c.DefaultResourceSet!).ThenInclude(d => d.Entries)
+            .SingleAsync(c => c.Id == contextId);
+        context.DefaultResourceSet.Should().NotBeNull();
+        context.DefaultResourceSet!.Entries.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task WhenChannelDefaultsClearUsesKnownKeyThenDefaultIsRemoved()
+    {
+        var services = CreateServices(registerDefaultResourceModule: true);
+        using var scope = services.CreateScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var (channelId, agentId, _, _) = await SeedChannelGraphAsync(db);
+
+        var setHandled = await CliDispatcher.TryHandleAsync(
+            ["channel", "defaults", channelId.ToString(), "set", "agent", agentId.ToString()],
+            services);
+        var clearHandled = await CliDispatcher.TryHandleAsync(
+            ["channel", "defaults", channelId.ToString(), "clear", "agent"],
+            services);
+
+        setHandled.Should().BeTrue();
+        clearHandled.Should().BeTrue();
+        await using var assertScope = services.CreateAsyncScope();
+        var assertDb = assertScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var channel = await assertDb.Channels
+            .Include(c => c.DefaultResourceSet!).ThenInclude(d => d.Entries)
+            .SingleAsync(c => c.Id == channelId);
+        channel.DefaultResourceSet.Should().NotBeNull();
+        channel.DefaultResourceSet!.Entries.Should().BeEmpty();
     }
 
     [Test]

@@ -6,8 +6,9 @@ Gateway auto-attaches X-Api-Key when forwarding to internal API (localhost:48923
 All bodies JSON. Enums serialised as strings. Timestamps ISO 8601.
 
 The gateway is a thin reverse proxy — it never interprets business logic.
-It adds: endpoint toggles, rate limiting, IP banning, anti-spam, bot integrations.
-Depends only on SharpClaw.Contracts (DTOs, enums).
+It adds endpoint toggles, rate limiting, IP banning, anti-spam checks,
+queued mutation forwarding, and optional module-owned endpoint hosting.
+Depends only on SharpClaw.Contracts for shared DTOs and enums.
 
 ────────────────────────────────────────
 SECURITY
@@ -28,14 +29,23 @@ Rate limit policies:
 ────────────────────────────────────────
 ENDPOINT TOGGLES
 ────────────────────────────────────────
-Configured in Gateway:Endpoints section of .env.
-Master kill-switch: Enabled=false → 503 for all requests.
-Per-group toggles: Auth, Agents, Channels, ChannelContexts, Chat, ChatStream, Threads, ThreadChat, Jobs, Models, Providers, Roles, Users, AudioDevices, Transcription, TranscriptionStreaming, Cost, Bots.
+Configured in the Gateway:Endpoints section of .env. The master switch is
+Enabled; when it is false, public proxy routes return 503. The committed
+template keeps every built-in endpoint group disabled by default, while the
+development template enables the built-in groups for local testing.
+
+Built-in groups are Auth, Agents, Channels, ChannelContexts, Chat,
+ChatStream, Threads, ThreadChat, ThreadWatch, Jobs, Models, LocalModels,
+Providers, Roles, Users, Cost, Tasks, TaskStreaming, ToolAwarenessSets, and
+Resources. Module-owned routes under /api/modules/* are resolved through the
+gateway module endpoint catalog and use `Gateway:Modules:Modules:{moduleId}`
+plus `Gateway:Modules:Groups:{moduleId}/{groupId}`.
 
 ResolveGroup priority (first match wins):
   /api/auth*                       → Auth
   */chat/stream*, */chat/sse*      → ChatStream
   */chat/cost*, */cost*            → Cost
+  */threads/*/watch*               → ThreadWatch
   */threads/*/chat*                → ThreadChat
   */chat*                          → Chat
   */threads*                       → Threads
@@ -43,14 +53,17 @@ ResolveGroup priority (first match wins):
   /api/agents*                     → Agents
   /api/channels*                   → Channels
   /api/channelcontexts*, /api/channel-contexts*  → ChannelContexts
+  /api/models/local*               → LocalModels
   /api/models*                     → Models
   /api/providers*                  → Providers
   /api/roles*                      → Roles
   /api/users*                      → Users
-  /api/audio-devices*              → AudioDevices
-  */ws*, */stream*                 → TranscriptionStreaming
-  /api/transcription*              → Transcription
-  /api/bots*                       → Bots
+  /api/tasks* with /stream         → TaskStreaming
+  /api/tasks*                      → Tasks
+  /api/toolawarenesssets*          → ToolAwarenessSets
+  /api/tool-awareness-sets*        → ToolAwarenessSets
+  /api/resources*                  → Resources
+  /api/modules/{module}/{group}/*  → module-owned group
 
 ────────────────────────────────────────
 AUTH
@@ -64,10 +77,14 @@ GET  /api/auth/me/role             → RolePermissionsResponse
 ────────────────────────────────────────
 AGENTS
 ────────────────────────────────────────
+POST /api/agents                    { name, modelId, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
 GET  /api/agents                   → AgentResponse[]
 GET  /api/agents/{id}              → AgentResponse
-
-Read-only. Create/update/delete is internal-only.
+GET  /api/agents/{id}/cost         → AgentCostResponse
+PUT  /api/agents/{id}              { name?, modelId?, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
+DELETE /api/agents/{id}
+PUT  /api/agents/{id}/role         { roleId }
+POST /api/agents/sync-with-models  → AgentResponse[]
 
 ────────────────────────────────────────
 CHANNELS
@@ -81,11 +98,11 @@ DELETE /api/channels/{id}
 ────────────────────────────────────────
 CHANNEL CONTEXTS
 ────────────────────────────────────────
-POST   /api/channelcontexts        { agentId, name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-GET    /api/channelcontexts?agentId={guid}
-GET    /api/channelcontexts/{id}
-PUT    /api/channelcontexts/{id}   { name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-DELETE /api/channelcontexts/{id}
+POST   /api/channel-contexts        { agentId, name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
+GET    /api/channel-contexts?agentId={guid}
+GET    /api/channel-contexts/{id}
+PUT    /api/channel-contexts/{id}   { name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
+DELETE /api/channel-contexts/{id}
 
 ────────────────────────────────────────
 THREADS
@@ -145,18 +162,24 @@ AgentJobStatus: Queued, Executing, AwaitingApproval, Completed, Failed, Denied, 
 ────────────────────────────────────────
 MODELS
 ────────────────────────────────────────
+POST /api/models                    { name, providerId, capabilities? }
 GET /api/models?providerId={guid}   → ModelResponse[]
 GET /api/models/{id}                → ModelResponse
-
-Read-only. Create/update/delete is internal-only.
+PUT /api/models/{id}                { name?, capabilities? }
+DELETE /api/models/{id}
 
 ────────────────────────────────────────
 PROVIDERS
 ────────────────────────────────────────
+POST /api/providers                  { name, providerType, apiEndpoint?, apiKey? }
 GET /api/providers                  → ProviderResponse[]
 GET /api/providers/{id}             → ProviderResponse
-
-Read-only. Create/update/delete/sync/set-key is internal-only.
+PUT /api/providers/{id}             { name?, apiEndpoint? }
+DELETE /api/providers/{id}
+POST /api/providers/{id}/sync-models
+POST /api/providers/{id}/set-key     { apiKey }
+POST /api/providers/{id}/auth/device-code
+POST /api/providers/{id}/auth/device-code/poll
 
 ────────────────────────────────────────
 COST TRACKING
@@ -172,51 +195,29 @@ GET /api/providers/cost/total?days=30&startDate=...&endDate=...&all=true&simple=
 ────────────────────────────────────────
 ROLES
 ────────────────────────────────────────
+POST /api/roles                      { name }
 GET /api/roles                      → RoleResponse[]
 GET /api/roles/{id}                 → RoleResponse
 GET /api/roles/{id}/permissions     → RolePermissionsResponse
-
-Read-only. Permission updates (PUT /roles/{id}/permissions) are internal-only.
+PUT /api/roles/{id}/name             { name }
+PUT /api/roles/{id}/permissions      (SetRolePermissionsRequest)
+DELETE /api/roles/{id}
 
 ────────────────────────────────────────
 USERS
 ────────────────────────────────────────
 GET /api/users                      → UserEntry[] (admin-only)
+PUT /api/users/{id}/role            { roleId }
 
 ────────────────────────────────────────
-AUDIO DEVICES
+MODULE-OWNED OR REMOVED SURFACES
 ────────────────────────────────────────
-GET /api/audio-devices              → AudioDeviceResponse[]
-GET /api/audio-devices/{id}         → AudioDeviceResponse
-
-Read-only.
-
-────────────────────────────────────────
-TRANSCRIPTION
-────────────────────────────────────────
-GET  /api/transcription/{jobId}              → AgentJobResponse
-POST /api/transcription/{jobId}/stop
-POST /api/transcription/{jobId}/cancel
-GET  /api/transcription/{jobId}/segments?since={ISO8601}  → TranscriptionSegmentResponse[]
-
-────────────────────────────────────────
-TRANSCRIPTION STREAMING
-────────────────────────────────────────
-GET /api/jobs/{jobId}/ws       → WebSocket proxy (JSON text frames with segment objects)
-GET /api/jobs/{jobId}/stream   → SSE proxy (data: frames with segment JSON)
-
-Registered via minimal API (MapTranscriptionStreamingProxy).
-
-────────────────────────────────────────
-BOTS
-────────────────────────────────────────
-GET /api/bots/status  → { telegram: { enabled, configured }, discord: { enabled, configured } }
-
-enabled reflects .env toggle. configured is true when a non-empty BotToken is present.
-
-Telegram: BackgroundService, long-polling via Bot API, validates token with getMe on startup.
-Discord: BackgroundService, WebSocket Gateway v10, validates with /users/@me, Identify with GUILDS|GUILD_MESSAGES|MESSAGE_CONTENT intents.
-Both: message reception and logging implemented. Core relay NOT YET implemented — placeholder acknowledgement only.
+The current gateway project does not ship standalone audio-device,
+transcription, transcription-streaming, bot, WhatsApp, Slack, or Teams
+controllers. Older builds documented those as built-in gateway routes. In the
+current project, such surfaces must be supplied by module-owned gateway
+extensions under /api/modules/* or exposed directly by the core API surface
+that owns the feature.
 
 ────────────────────────────────────────
 CONFIGURATION (.env)
@@ -224,14 +225,16 @@ CONFIGURATION (.env)
 File: SharpClaw.Gateway/Environment/.env (JSON-with-comments, auto-created if missing).
 Loaded via GatewayEnvironment.AddGatewayEnvironment() with PhysicalFileProvider + ExclusionFilters.None.
 
-InternalApi:BaseUrl         http://127.0.0.1:48923
-InternalApi:ApiKey          (auto-read from %LOCALAPPDATA%/SharpClaw/.api-key; explicit override)
-Gateway:Endpoints:Enabled   true (master kill-switch)
-Gateway:Endpoints:{Group}   true (per-group toggles, all default true)
-Gateway:Bots:Telegram:Enabled   false
-Gateway:Bots:Telegram:BotToken  (empty)
-Gateway:Bots:Discord:Enabled    false
-Gateway:Bots:Discord:BotToken   (empty)
+InternalApi settings point the gateway at the core API. BaseUrl defaults to
+http://127.0.0.1:48923 and TimeoutSeconds defaults to 300. ApiKey,
+ApiKeyFilePath, GatewayToken, and GatewayTokenFilePath are optional overrides;
+when they are empty, selected-backend discovery supplies the current runtime
+.api-key and .gateway-token files.
+
+Gateway:RequestQueue controls queued mutation forwarding. Gateway:Endpoints
+contains the master switch, the built-in endpoint group switches, and the
+module group map. Gateway:Modules controls external gateway module hosts,
+their group flags, hot reload, and drain timeout.
 
 ────────────────────────────────────────
 ERROR RESPONSES
@@ -253,8 +256,13 @@ All errors: { "error": "description" }
 ────────────────────────────────────────
 SCOPE
 ────────────────────────────────────────
-The gateway is a read-heavy public proxy. It intentionally does NOT proxy:
-  Provider create/update/delete, Model create/update/delete, Agent create/update/delete,
-  Role permission updates, Resource create/update/delete/sync, Local model management,
-  Editor bridge WebSocket, Env file management, Task definitions & instances.
-These are accessible only via the internal API on localhost.
+The gateway is a public proxy in front of the core API. The current controllers
+proxy both reads and mutations for the surfaces listed above, and queued
+mutation forwarding can serialize POST, PUT, and DELETE traffic before it
+reaches the core API. Endpoint group toggles decide which public surfaces are
+exposed in a deployment.
+
+Env file management, the editor bridge WebSocket, scheduler/task-definition
+controllers, tool-awareness-set controllers, resource lookup controllers, and
+module-owned surfaces exist here only when a concrete gateway controller or
+gateway module maps them. A toggle by itself does not create a route.

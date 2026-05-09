@@ -279,11 +279,25 @@ try
     });
 
     // Auth
+    var configuredJwtSecret = builder.Configuration["Jwt:Secret"];
     var jwtOptions = new JwtOptions
     {
-        Secret = builder.Configuration["Jwt:Secret"]
-            ?? PersistentKeyStore.GetOrCreate("jwt-secret", backendInstancePaths)
+        Secret = string.IsNullOrWhiteSpace(configuredJwtSecret)
+            ? PersistentKeyStore.GetOrCreate("jwt-secret", backendInstancePaths)
+            : configuredJwtSecret
     };
+    var jwtSection = builder.Configuration.GetSection("Jwt");
+    jwtOptions.Issuer = jwtSection["Issuer"] ?? jwtOptions.Issuer;
+    jwtOptions.Audience = jwtSection["Audience"] ?? jwtOptions.Audience;
+
+    if (TimeSpan.TryParse(jwtSection["AccessTokenLifetime"], out var accessTokenLifetime)
+        && accessTokenLifetime > TimeSpan.Zero)
+        jwtOptions.AccessTokenLifetime = accessTokenLifetime;
+
+    if (TimeSpan.TryParse(jwtSection["RefreshTokenLifetime"], out var refreshTokenLifetime)
+        && refreshTokenLifetime > TimeSpan.Zero)
+        jwtOptions.RefreshTokenLifetime = refreshTokenLifetime;
+
     builder.Services.AddSingleton(jwtOptions);
     builder.Services.AddScoped<TokenService>();
     builder.Services.AddScoped<AuthService>();

@@ -17,75 +17,48 @@ strings. Timestamps are ISO 8601 (`DateTimeOffset`).
 ## Purpose
 
 The **SharpClaw Gateway** (`SharpClaw.Gateway`) is a standalone
-ASP.NET Core reverse-proxy that sits between the public internet and
-the internal SharpClaw Application API (`http://127.0.0.1:48923`).
+ASP.NET Core reverse proxy that sits between public clients and the
+internal SharpClaw Application API. The internal API stays bound to a
+local or private address and protects itself with a per-instance runtime
+API key. The gateway resolves that key from explicit configuration, an
+auth file path, or selected-backend discovery metadata, then attaches it
+when forwarding requests.
 
-It exists so the internal API — which binds to `localhost` and uses an
-auto-generated file-based API key — is never exposed directly.
-The gateway adds:
+The gateway is intentionally thin. Controllers forward requests through
+`InternalApiClient`, mutations can be serialized through the request queue,
+and the security middleware adds endpoint gates, rate limits, IP bans,
+body-size checks, and content-type checks. Gateway-side module endpoint
+groups are supported through `Gateway:Modules`, but the current gateway
+project does not include the legacy bot, audio-device, or transcription
+controllers that older docs described.
 
-- **Endpoint toggles** — every endpoint group can be enabled/disabled
-  from the `.env` file, including a master kill-switch.
-- **Rate limiting** — three policies (global, auth, chat) with
-  per-IP sliding/fixed windows.
-- **IP banning** — automatic bans after repeated rate-limit violations.
-- **Anti-spam** — body-size limits and content-type enforcement.
-- **Request queue** — sequential forwarding of mutation requests with
-  retry, timeout, and bounded concurrency.
-- **Bot integrations** — Telegram, Discord, WhatsApp, Slack, Matrix,
-  Signal, Email, and Microsoft Teams hosted services that relay
-  messages to/from the core API (DMs only).
+The current gateway implementation is instance-scoped. A gateway process
+resolves its own instance root, keeps its own manifest, logs, and discovery
+entry, and binds to one selected backend instance. When launched by the
+Uno frontend, the frontend passes the selected backend URL, backend
+instance metadata, and runtime auth values directly to the gateway.
 
-> **Default posture:** Out of the box, all public-facing REST/streaming
-> endpoints are **disabled**. Only the **Bots** endpoint group and the
-> **Telegram** bot integration are enabled, so the gateway acts purely
-> as a bot relay. Enable individual endpoint groups in `.env` as
-> needed to expose the full REST surface.
-
-The gateway depends only on `SharpClaw.Contracts` (DTOs, enums) — it
-has no access to `DbContext`, services, or business logic.
-
-The current gateway implementation is also instance-scoped. A gateway
-process resolves its own gateway instance root, keeps its own manifest,
-logs, and discovery entry, and binds to one selected backend instance.
-When launched by the Uno frontend, the frontend passes the selected
-backend URL, backend instance metadata, and verified runtime auth values
-directly to the gateway.
+The gateway depends only on `SharpClaw.Contracts` for DTOs and enums; it has
+no access to Core `DbContext`, domain services, or business logic.
 
 ---
 
 ## Table of Contents
 
-- [Architecture](#architecture)
-- [Configuration (.env)](#configuration-env)
-- [Security middleware](#security-middleware)
-- [Endpoint toggles](#endpoint-toggles)
-- [Health probes](#health-probes)
-- [Gateway status](#gateway-status)
-- [Auth](#auth)
-- [Agents](#agents)
-- [Channels](#channels)
-- [Channel contexts](#channel-contexts)
-- [Threads](#threads)
-- [Chat (per-channel)](#chat-per-channel)
-- [Thread chat](#thread-chat)
-- [Chat streaming (SSE)](#chat-streaming-sse)
-- [Agent jobs](#agent-jobs)
-- [Models](#models)
-- [Providers](#providers)
-- [Cost tracking](#cost-tracking)
-- [Roles](#roles)
-- [Users](#users)
-- [Audio devices](#audio-devices)
-- [Transcription](#transcription)
-- [Transcription streaming](#transcription-streaming)
-- [Bots](#bots)
-- [WhatsApp webhook](#whatsapp-webhook-endpoints)
-- [Slack webhook](#slack-webhook-endpoint)
-- [Teams webhook](#teams-webhook-endpoint)
-- [Error handling](#error-handling)
-- [Response headers](#response-headers)
-- [Rate limiting details](#rate-limiting-details)
+This reference starts with [Architecture](#architecture),
+[Configuration](#configuration-env), [Security middleware](#security-middleware),
+and [Endpoint toggles](#endpoint-toggles). It then documents
+[Health probes](#health-probes), [Gateway status](#gateway-status),
+[Auth](#auth), [Agents](#agents), [Channels](#channels),
+[Channel contexts](#channel-contexts), [Threads](#threads),
+[Chat](#chat-per-channel), [Thread chat](#thread-chat),
+[Chat streaming](#chat-streaming-sse), [Agent jobs](#agent-jobs),
+[Models](#models), [Providers](#providers), [Cost tracking](#cost-tracking),
+[Roles](#roles), [Users](#users),
+[Module-owned or removed surfaces](#module-owned-or-removed-surfaces),
+[Error handling](#error-handling), [Response headers](#response-headers),
+[Rate limiting details](#rate-limiting-details),
+[Project structure](#project-structure), and [Scope](#scope--non-goals).
 
 ---
 
@@ -161,28 +134,20 @@ A default `.env` is auto-created on first run if missing.
 
 ### Full default .env
 
+The committed gateway template now mirrors the runtime options class. This
+is the shape generated for a missing gateway env file; development mode may
+override endpoint toggles from `.dev.env`.
+
 ```jsonc
 {
-  // SharpClaw Gateway Environment Configuration
-  // Values here are loaded for all environments.
-  //
-  // DEFAULT POSTURE: only bot integrations are enabled.
-  // All public-facing REST/streaming endpoints are disabled.
-  // To expose the full REST API, set the individual endpoint
-  // toggles to "true" (or flip the master "Enabled" switch).
-
-  // ── Internal API ───────────────────────────────────────────
-  // Base URL + timeout for the internal SharpClaw Application API.
-  // TimeoutSeconds should be generous — agent tool-call chains
-  // (wait, screenshot, click, type, inference) can take minutes.
   "InternalApi": {
     "BaseUrl": "http://127.0.0.1:48923",
-    "TimeoutSeconds": "300"
+    "TimeoutSeconds": "300",
+    "ApiKey": "",
+    "ApiKeyFilePath": "",
+    "GatewayToken": "",
+    "GatewayTokenFilePath": ""
   },
-
-  // ── Request Queue ──────────────────────────────────────────
-  // Buffers mutation requests and forwards them to the core API
-  // sequentially (or with bounded concurrency).
   "Gateway": {
     "RequestQueue": {
       "Enabled": "true",
@@ -192,12 +157,6 @@ A default `.env` is auto-created on first run if missing.
       "RetryDelayMs": "500",
       "MaxQueueSize": "500"
     },
-
-    // ── Endpoint Toggles ─────────────────────────────────────
-    // Master kill-switch and per-group enable/disable.
-    // By default everything except "Bots" is disabled so the
-    // gateway acts purely as a bot relay. Enable individual
-    // groups as needed to expose the public REST surface.
     "Endpoints": {
       "Enabled": "true",
       "Auth": "false",
@@ -208,61 +167,24 @@ A default `.env` is auto-created on first run if missing.
       "ChatStream": "false",
       "Threads": "false",
       "ThreadChat": "false",
+      "ThreadWatch": "false",
       "Jobs": "false",
       "Models": "false",
+      "LocalModels": "false",
       "Providers": "false",
       "Roles": "false",
       "Users": "false",
-      "AudioDevices": "false",
-      "Transcription": "false",
-      "TranscriptionStreaming": "false",
       "Cost": "false",
-      "Bots": "true"
+      "Tasks": "false",
+      "TaskStreaming": "false",
+      "ToolAwarenessSets": "false",
+      "Resources": "false"
     },
-
-    // ── Bot Integrations ─────────────────────────────────────
-    // Bots are enabled by default — configure tokens via the
-    // Uno settings page or directly in this file.
-    "Bots": {
-      "Telegram": {
-        "Enabled": "true",
-        "BotToken": ""
-      },
-      "Discord": {
-        "Enabled": "false",
-        "BotToken": ""
-      },
-      "WhatsApp": {
-        "Enabled": "false",
-        "PhoneNumberId": "",
-        "VerifyToken": ""
-      },
-      "Slack": {
-        "Enabled": "false",
-        "SigningSecret": ""
-      },
-      "Matrix": {
-        "Enabled": "false",
-        "HomeserverUrl": ""
-      },
-      "Signal": {
-        "Enabled": "false",
-        "ApiUrl": "",
-        "PhoneNumber": ""
-      },
-      "Email": {
-        "Enabled": "false",
-        "ImapHost": "",
-        "ImapPort": "993",
-        "SmtpHost": "",
-        "SmtpPort": "587",
-        "Username": "",
-        "PollIntervalSeconds": "30"
-      },
-      "Teams": {
-        "Enabled": "false",
-        "AppId": ""
-      }
+    "Modules": {
+      "Modules": {},
+      "Groups": {},
+      "HotReloadEnabled": "false",
+      "DrainTimeoutSeconds": "30"
     }
   }
 }
@@ -270,72 +192,24 @@ A default `.env` is auto-created on first run if missing.
 
 ### Settings reference
 
-| Section | Key | Default | Description |
-|---------|-----|---------|-------------|
-| `InternalApi` | `BaseUrl` | `http://127.0.0.1:48923` | Internal Application API URL |
-| `InternalApi` | `TimeoutSeconds` | `300` | HttpClient timeout for core API requests (seconds). Generous default accommodates agent tool-call chains. |
-| `InternalApi` | `ApiKey` | *(resolved from explicit value, explicit file path, or selected backend discovery)* | Explicit API key override |
-| `InternalApi` | `ApiKeyFilePath` | *(empty)* | Explicit path to the selected backend runtime `.api-key` file |
-| `InternalApi` | `GatewayToken` | *(resolved from explicit value, explicit file path, or selected backend discovery)* | Gateway service token for core API auth without user JWT |
-| `InternalApi` | `GatewayTokenFilePath` | *(empty)* | Explicit path to the selected backend runtime `.gateway-token` file |
-| `Logging:Serilog` | `Enabled` | `true` | Master switch for Serilog in the gateway process |
-| `Logging:Serilog` | `ConsoleEnabled` | `true` | Enable or disable the gateway console sink |
-| `Logging:Serilog` | `FileEnabled` | `true` | Enable or disable the Local AppData session file sink |
-| `Logging:Serilog` | `RequestLoggingEnabled` | `true` | Enable or disable ASP.NET Core request logging through Serilog |
-| `Logging:Serilog` | `MinimumLevel` | `Information` | Default Serilog level for gateway logs |
-| `Logging:Serilog` | `MicrosoftMinimumLevel` | `Warning` | Override level for `Microsoft.*` categories |
-| `Logging:Serilog` | `AspNetCoreMinimumLevel` | `Warning` | Override level for `Microsoft.AspNetCore.*` categories |
-| `Logging:Serilog` | `EntityFrameworkCoreMinimumLevel` | `Warning` | Override level for `Microsoft.EntityFrameworkCore.*` categories |
-| `Gateway:RequestQueue` | `Enabled` | `true` | Enable the mutation request queue (sequential forwarding) |
-| `Gateway:RequestQueue` | `MaxConcurrency` | `1` | Concurrent processing slots (1 = fully sequential) |
-| `Gateway:RequestQueue` | `TimeoutSeconds` | `30` | Per-request timeout for queued forwarding |
-| `Gateway:RequestQueue` | `MaxRetries` | `2` | Retry attempts for transient failures (5xx, timeout) |
-| `Gateway:RequestQueue` | `RetryDelayMs` | `500` | Initial retry delay in ms (doubles each attempt) |
-| `Gateway:RequestQueue` | `MaxQueueSize` | `500` | Max queued requests before 503 rejection |
-| `Gateway:Endpoints` | `Enabled` | `true` | Master kill-switch — `false` returns 503 for all requests |
-| `Gateway:Endpoints` | `Auth` | `false` | Toggle `/api/auth/*` |
-| `Gateway:Endpoints` | `Agents` | `false` | Toggle `/api/agents/*` |
-| `Gateway:Endpoints` | `Channels` | `false` | Toggle `/api/channels/*` (non-chat, non-thread) |
-| `Gateway:Endpoints` | `ChannelContexts` | `false` | Toggle `/api/channelcontexts/*` |
-| `Gateway:Endpoints` | `Chat` | `false` | Toggle channel chat (non-stream) |
-| `Gateway:Endpoints` | `ChatStream` | `false` | Toggle SSE chat streaming |
-| `Gateway:Endpoints` | `Threads` | `false` | Toggle thread CRUD |
-| `Gateway:Endpoints` | `ThreadChat` | `false` | Toggle thread chat (non-stream) |
-| `Gateway:Endpoints` | `Jobs` | `false` | Toggle agent job operations |
-| `Gateway:Endpoints` | `Models` | `false` | Toggle `/api/models/*` |
-| `Gateway:Endpoints` | `Providers` | `false` | Toggle `/api/providers/*` (non-cost) |
-| `Gateway:Endpoints` | `Roles` | `false` | Toggle `/api/roles/*` |
-| `Gateway:Endpoints` | `Users` | `false` | Toggle `/api/users/*` |
-| `Gateway:Endpoints` | `AudioDevices` | `false` | Toggle `/api/audio-devices/*` |
-| `Gateway:Endpoints` | `Transcription` | `false` | Toggle `/api/transcription/*` |
-| `Gateway:Endpoints` | `TranscriptionStreaming` | `false` | Toggle WebSocket/SSE transcription proxy |
-| `Gateway:Endpoints` | `Cost` | `false` | Toggle all cost endpoints |
-| `Gateway:Endpoints` | `Bots` | `true` | Toggle `/api/bots/*` |
-| `Gateway:Bots:Telegram` | `Enabled` | `true` | Enable Telegram bot service |
-| `Gateway:Bots:Telegram` | `BotToken` | *(empty)* | Token from @BotFather |
-| `Gateway:Bots:Discord` | `Enabled` | `false` | Enable Discord bot service |
-| `Gateway:Bots:Discord` | `BotToken` | *(empty)* | Token from Discord Developer Portal |
-| `Gateway:Bots:WhatsApp` | `Enabled` | `false` | Enable WhatsApp bot service |
-| `Gateway:Bots:WhatsApp` | `PhoneNumberId` | *(empty)* | WhatsApp Business phone number ID from Meta Cloud API |
-| `Gateway:Bots:WhatsApp` | `VerifyToken` | *(empty)* | Arbitrary token for Meta webhook verification |
-| `Gateway:Bots:Slack` | `Enabled` | `false` | Enable Slack bot service |
-| `Gateway:Bots:Slack` | `SigningSecret` | *(empty)* | Slack app signing secret for webhook verification |
-| `Gateway:Bots:Matrix` | `Enabled` | `false` | Enable Matrix bot service |
-| `Gateway:Bots:Matrix` | `HomeserverUrl` | *(empty)* | Matrix homeserver base URL (e.g. `https://matrix.org`) |
-| `Gateway:Bots:Signal` | `Enabled` | `false` | Enable Signal bot service |
-| `Gateway:Bots:Signal` | `ApiUrl` | *(empty)* | signal-cli REST API base URL (e.g. `http://localhost:8080`) |
-| `Gateway:Bots:Signal` | `PhoneNumber` | *(empty)* | Registered phone number in E.164 format |
-| `Gateway:Bots:Email` | `Enabled` | `false` | Enable Email bot service |
-| `Gateway:Bots:Email` | `ImapHost` | *(empty)* | IMAP server hostname |
-| `Gateway:Bots:Email` | `ImapPort` | `993` | IMAP server port (TLS) |
-| `Gateway:Bots:Email` | `SmtpHost` | *(empty)* | SMTP server hostname |
-| `Gateway:Bots:Email` | `SmtpPort` | `587` | SMTP server port (STARTTLS) |
-| `Gateway:Bots:Email` | `Username` | *(empty)* | Email account username / address |
-| `Gateway:Bots:Email` | `PollIntervalSeconds` | `30` | IMAP poll interval in seconds |
-| `Gateway:Bots:Teams` | `Enabled` | `false` | Enable Microsoft Teams bot service |
-| `Gateway:Bots:Teams` | `AppId` | *(empty)* | Microsoft App ID (GUID) from Azure Bot registration |
+`InternalApi:BaseUrl` and `InternalApi:TimeoutSeconds` configure the core
+API client. `InternalApi:ApiKey` and `InternalApi:GatewayToken` are direct
+secret overrides. `InternalApi:ApiKeyFilePath` and
+`InternalApi:GatewayTokenFilePath` point to runtime auth files. Empty
+values are ignored so selected-backend discovery can resolve the current
+`.api-key` and `.gateway-token` files.
 
----
+`Gateway:RequestQueue` controls queued mutation forwarding. The queue is
+enabled by default, runs one request at a time unless `MaxConcurrency` is
+increased, retries transient failures, and rejects new mutations with 503
+when `MaxQueueSize` is reached.
+
+`Gateway:Endpoints:Enabled` is the master switch. The base template leaves
+each built-in public group false, which means a new gateway will answer
+health and gateway-status requests but will return 503 for proxied public
+API groups until the operator opts in. Development overrides may enable
+those groups for local testing. `Gateway:Modules` separately controls
+gateway-side module extension hosts and per-module endpoint groups.
 
 ## Security middleware
 
@@ -361,38 +235,20 @@ count as violations.
 
 ## Endpoint toggles
 
-`GatewayEndpointOptions` exposes a `bool` property per endpoint group.
-`EndpointGateMiddleware.ResolveGroup()` maps each incoming request path
-to a group name. The resolution order (first match wins):
+`GatewayEndpointOptions` exposes a property for each built-in endpoint
+group, and `EndpointGateMiddleware.ResolveGroup()` maps request paths to
+those names before a controller runs. Auth requests map to `Auth`; channel
+and thread chat stream paths map to `ChatStream`, `ThreadChat`, or `Chat`
+depending on the path; job, model, provider, role, user, cost, task, tool
+awareness, resource, and local-model paths map to their matching groups.
+`ThreadWatch` handles the thread watch SSE path. Static groups are false in
+the base `.env.template`; module endpoint groups are enabled separately by
+`Gateway:Modules:Modules:{moduleId}` and
+`Gateway:Modules:Groups:{moduleId}/{groupId}`.
 
-| Priority | Path pattern | Group |
-|----------|-------------|-------|
-| 1 | `/api/auth*` | `Auth` |
-| 2 | `*/chat/stream*`, `*/chat/sse*` | `ChatStream` |
-| 3 | `*/chat/cost*`, `*/cost*` | `Cost` |
-| 4 | `*/threads/*/chat*` | `ThreadChat` |
-| 5 | `*/chat*` | `Chat` |
-| 6 | `*/threads*` | `Threads` |
-| 7 | `*/jobs*` | `Jobs` |
-| 8 | `/api/agents*` | `Agents` |
-| 9 | `/api/channels*` | `Channels` |
-| 10 | `/api/channelcontexts*`, `/api/channel-contexts*` | `ChannelContexts` |
-| 11 | `/api/models*` | `Models` |
-| 12 | `/api/providers*` | `Providers` |
-| 13 | `/api/roles*` | `Roles` |
-| 14 | `/api/users*` | `Users` |
-| 15 | `/api/audio-devices*` | `AudioDevices` |
-| 16 | `*/ws*`, `*/stream*` | `TranscriptionStreaming` |
-| 17 | `/api/transcription*` | `Transcription` |
-| 18 | `/api/bots*` | `Bots` |
-
-Unmatched paths pass through (allowed by default).
-
-> **Note:** The `/api/gateway/*` endpoints (status, queue stream) and
-> health probes (`/healthz`, `/readyz`) are not mapped to any endpoint
-> group — they are always available regardless of toggle state.
-
----
+Unmatched paths pass through. The `/api/gateway/*` endpoints and the
+`/healthz` and `/readyz` probes are intentionally not assigned to a public
+endpoint group, so they remain available regardless of toggle state.
 
 ## Health probes
 
@@ -526,6 +382,14 @@ Returns the authenticated user's role and permissions.
 **Route prefix:** `/api/agents`
 **Rate limit policy:** `global` (60 req/min sliding window)
 
+### POST /api/agents
+
+Forwards `CreateAgentRequest` to the core API and returns the created
+`AgentResponse`. Invalid requests are returned as `400`; connectivity failures
+to the core API are returned as `502`.
+
+---
+
 ### GET /api/agents
 
 **200** → `AgentResponse[]`
@@ -536,6 +400,47 @@ Returns the authenticated user's role and permissions.
 
 **200** → `AgentResponse`
 **404** → `{ error: "Agent not found." }`
+
+---
+
+### GET /api/agents/{id}/cost
+
+**200** → `AgentCostResponse`
+**404** → `{ error: "Agent not found." }`
+
+---
+
+### PUT /api/agents/{id}
+
+Forwards `UpdateAgentRequest` to the core API.
+
+**200** → `AgentResponse`
+**404** → `{ error: "Agent not found." }`
+
+---
+
+### DELETE /api/agents/{id}
+
+**204** No Content
+**404** Not Found
+
+---
+
+### PUT /api/agents/{id}/role
+
+Assigns a role to an agent by forwarding `AssignAgentRoleRequest`.
+
+**200** → `AgentResponse`
+**403** → `{ error: "Insufficient permissions." }`
+**404** → `{ error: "Agent not found." }`
+
+---
+
+### POST /api/agents/sync-with-models
+
+Synchronizes agents with available models and returns the resulting agent list.
+
+**200** → `AgentResponse[]`
 
 ---
 
@@ -594,10 +499,10 @@ Optional query parameter: `?agentId={guid}`
 
 ## Channel contexts
 
-**Route prefix:** `/api/channelcontexts`
+**Route prefix:** `/api/channel-contexts`
 **Rate limit policy:** `global`
 
-### POST /api/channelcontexts
+### POST /api/channel-contexts
 
 ```json
 { "agentId": "guid", "name?": "string",
@@ -610,7 +515,7 @@ Optional query parameter: `?agentId={guid}`
 
 ---
 
-### GET /api/channelcontexts
+### GET /api/channel-contexts
 
 Optional query parameter: `?agentId={guid}`
 
@@ -618,14 +523,14 @@ Optional query parameter: `?agentId={guid}`
 
 ---
 
-### GET /api/channelcontexts/{id}
+### GET /api/channel-contexts/{id}
 
 **200** → `ContextResponse`
 **404** → `{ error: "Context not found." }`
 
 ---
 
-### PUT /api/channelcontexts/{id}
+### PUT /api/channel-contexts/{id}
 
 ```json
 { "name?": "string", "permissionSetId?": "guid",
@@ -637,7 +542,7 @@ Optional query parameter: `?agentId={guid}`
 
 ---
 
-### DELETE /api/channelcontexts/{id}
+### DELETE /api/channel-contexts/{id}
 
 **204** No Content
 **404** Not Found
@@ -891,6 +796,15 @@ Resume a paused job.
 **Route prefix:** `/api/models`
 **Rate limit policy:** `global`
 
+### POST /api/models
+
+Forwards `CreateModelRequest` to the core API.
+
+**200** → `ModelResponse`
+**400** → `{ error: "Invalid model request." }`
+
+---
+
 ### GET /api/models
 
 Optional query parameter: `?providerId={guid}`
@@ -906,10 +820,35 @@ Optional query parameter: `?providerId={guid}`
 
 ---
 
+### PUT /api/models/{id}
+
+Forwards `UpdateModelRequest` to the core API.
+
+**200** → `ModelResponse`
+**404** → `{ error: "Model not found." }`
+
+---
+
+### DELETE /api/models/{id}
+
+**204** No Content
+**404** Not Found
+
+---
+
 ## Providers
 
 **Route prefix:** `/api/providers`
 **Rate limit policy:** `global`
+
+### POST /api/providers
+
+Forwards `CreateProviderRequest` to the core API.
+
+**200** → `ProviderResponse`
+**400** → `{ error: "Invalid provider request." }`
+
+---
 
 ### GET /api/providers
 
@@ -920,6 +859,59 @@ Optional query parameter: `?providerId={guid}`
 ### GET /api/providers/{id}
 
 **200** → `ProviderResponse`
+**404** → `{ error: "Provider not found." }`
+
+---
+
+### PUT /api/providers/{id}
+
+Forwards `UpdateProviderRequest` to the core API.
+
+**200** → `ProviderResponse`
+**404** → `{ error: "Provider not found." }`
+
+---
+
+### DELETE /api/providers/{id}
+
+**204** No Content
+**404** Not Found
+
+---
+
+### POST /api/providers/{id}/sync-models
+
+Synchronizes provider models through the core API.
+
+**200** → `ProviderResponse[]`
+**404** → `{ error: "Provider not found." }`
+
+---
+
+### POST /api/providers/{id}/set-key
+
+Forwards `SetApiKeyRequest` and returns no content on success.
+
+**204** No Content
+**404** → `{ error: "Provider not found." }`
+
+---
+
+### POST /api/providers/{id}/auth/device-code
+
+Starts provider device-code authentication when the provider supports it.
+
+**200** → `DeviceCodeResponse`
+**404** → `{ error: "Provider not found." }`
+
+---
+
+### POST /api/providers/{id}/auth/device-code/poll
+
+Polls an in-progress provider device-code authentication request.
+
+**200** → provider-specific poll result
+**408** → `{ status: "expired" }`
 **404** → `{ error: "Provider not found." }`
 
 ---
@@ -962,11 +954,10 @@ Optional query parameters: `?days=30`, `?startDate=...`, `?endDate=...`
 
 Aggregate cost across all providers.
 
-Optional query parameters:
-- `?days=30` — number of days to look back
-- `?startDate=...` / `?endDate=...` — date range (ISO 8601)
-- `?all=true` — include all providers (even zero-cost)
-- `?simple=true` — return `ProviderCostSimpleResponse` instead
+Optional query parameters are `?days=30` for a lookback window,
+`?startDate=...` and `?endDate=...` for an ISO 8601 date range,
+`?all=true` to include providers with zero cost, and `?simple=true` to return
+`ProviderCostSimpleResponse` instead of the full aggregate shape.
 
 **200** → `ProviderCostTotalResponse` (default) or `ProviderCostSimpleResponse` (`?simple=true`)
 
@@ -976,6 +967,15 @@ Optional query parameters:
 
 **Route prefix:** `/api/roles`
 **Rate limit policy:** `global`
+
+### POST /api/roles
+
+Forwards `CreateRoleRequest` to the core API.
+
+**201** → `RoleResponse`
+**400** → `{ error: "Invalid role request." }`
+
+---
 
 ### GET /api/roles
 
@@ -997,6 +997,35 @@ Optional query parameters:
 
 ---
 
+### PUT /api/roles/{id}/name
+
+Renames a role through `RenameRoleRequest`.
+
+**200** → `RoleResponse`
+**404** → `{ error: "Role not found." }`
+**409** → `{ error: "Role name conflict." }`
+
+---
+
+### PUT /api/roles/{id}/permissions
+
+Replaces role permissions through `SetRolePermissionsRequest`.
+
+**200** → `RolePermissionsResponse`
+**401** → `{ error: "Not authenticated." }`
+**403** → `{ error: "Insufficient permissions." }`
+**404** → `{ error: "Role not found." }`
+**409** → `{ error: "Permission conflict." }`
+
+---
+
+### DELETE /api/roles/{id}
+
+**204** No Content
+**404** Not Found
+
+---
+
 ## Users
 
 **Route prefix:** `/api/users`
@@ -1011,475 +1040,27 @@ Admin-only list of all users.
 
 ---
 
-## Audio devices
+### PUT /api/users/{id}/role
 
-**Route prefix:** `/api/audio-devices`
-**Rate limit policy:** `global`
+Assigns a role to a user through `SetUserRoleRequest`.
 
-### GET /api/audio-devices
-
-**200** → `AudioDeviceResponse[]`
-
----
-
-### GET /api/audio-devices/{id}
-
-**200** → `AudioDeviceResponse`
-**404** → `{ error: "Audio device not found." }`
+**200** → `UserEntry`
+**400** → `{ error: "Invalid role assignment." }`
+**403** → `{ error: "Admin access required." }`
+**404** → `{ error: "User not found." }`
 
 ---
 
-## Transcription
-
-**Route prefix:** `/api/transcription`
-**Rate limit policy:** `global`
-
-These endpoints use a nil channel ID internally — the internal API
-resolves jobs by `jobId` directly.
-
-### GET /api/transcription/{jobId}
-
-**200** → `AgentJobResponse`
-**404** → `{ error: "Transcription job not found." }`
-
----
-
-### POST /api/transcription/{jobId}/stop
-
-**200** → `AgentJobResponse`
-**404** → `{ error: "Transcription job not found." }`
-
----
-
-### POST /api/transcription/{jobId}/cancel
-
-**200** → `AgentJobResponse`
-**404** → `{ error: "Transcription job not found." }`
-
----
-
-### GET /api/transcription/{jobId}/segments
-
-Optional query parameter: `?since={ISO8601}`
-
-**200** → `TranscriptionSegmentResponse[]`
-**404** → `{ error: "Transcription job not found." }`
-
----
-
-## Transcription streaming
-
-Registered via minimal API (`MapTranscriptionStreamingProxy`).
-
-### GET /api/jobs/{jobId}/ws
-
-WebSocket proxy for live transcription segments. Requires
-`WebSocket` upgrade; returns `400` otherwise.
-
----
-
-### GET /api/jobs/{jobId}/stream
-
-SSE proxy for live transcription segments.
-
-**Response:** `text/event-stream` with `no-cache`, `keep-alive`.
-
----
-
-## Bots
-
-**Route prefix:** `/api/bots`
-**Rate limit policy:** `global`
-
-The Bots endpoint group manages bot integration records stored in the
-core database. GETs are forwarded directly; mutations (POST/PUT/DELETE)
-are routed through the request queue for sequential processing.
-Successful mutations fire the `BotReloadSignal` so running bot
-services re-fetch their configuration.
-
-### GET /api/bots/list
-
-Lists all bot integrations from the core database.
-
-**200** → `BotIntegrationResponse[]`
-**502** → `{ error: "Core API unreachable: ..." }`
-
----
-
-### POST /api/bots
-
-Creates a new bot integration. Triggers bot reload on success.
-
-```json
-{ "name": "string", "botType": "Telegram|Discord|WhatsApp|Slack|Matrix|Signal|Email|Teams",
-  "enabled": true, "botToken": "string",
-  "defaultChannelId?": "guid", "defaultThreadId?": "guid",
-  "platformConfig?": "json-string" }
-```
-
-The `platformConfig` field is a JSON string containing platform-specific
-settings. Required fields vary by platform:
-
-| Platform | `platformConfig` fields | Description |
-|----------|------------------------|-------------|
-| Telegram | *(none)* | Token only |
-| Discord | *(none)* | Token only |
-| WhatsApp | `PhoneNumberId`, `VerifyToken` | Meta Cloud API phone number ID and webhook verify token |
-| Slack | `SigningSecret` | Slack app signing secret for webhook verification |
-| Matrix | `HomeserverUrl` | Matrix homeserver base URL |
-| Signal | `ApiUrl`, `PhoneNumber` | signal-cli REST API URL and E.164 phone number |
-| Email | `ImapHost`, `ImapPort`, `SmtpHost`, `SmtpPort`, `Username`, `PollIntervalSeconds` | IMAP/SMTP mail server settings |
-| Teams | `AppId` | Microsoft App ID (GUID) from Azure Bot registration |
-
-**201** → `BotIntegrationResponse`
-
----
-
-### GET /api/bots/{id}
-
-**200** → `BotIntegrationResponse`
-**502** → `{ error: "Core API unreachable: ..." }`
-
----
-
-### PUT /api/bots/{id}
-
-Updates a bot integration. Triggers bot reload on success.
-
-```json
-{ "enabled?": true, "botToken?": "string",
-  "defaultChannelId?": "guid", "defaultThreadId?": "guid",
-  "platformConfig?": "json-string" }
-```
-
-**200** → `BotIntegrationResponse`
-
----
-
-### DELETE /api/bots/{id}
-
-Deletes a bot integration. Triggers bot reload on success.
-
-**200** / **204**
-
----
-
-### POST /api/bots/reload
-
-Manually fires the bot reload signal. Used by clients that mutate bot
-rows via the core API directly (bypassing the gateway proxy).
-
-**200** → `{ reloaded: true }`
-
----
-
-### GET /api/bots/status
-
-Returns the enabled/configured state of bot integrations.
-
-**200:**
-
-```json
-{
-  "telegram": { "enabled": true, "configured": false },
-  "discord":  { "enabled": false, "configured": false },
-  "whatsapp": { "enabled": false, "configured": false },
-  "slack":    { "enabled": false, "configured": false },
-  "matrix":   { "enabled": false, "configured": false },
-  "signal":   { "enabled": false, "configured": false },
-  "email":    { "enabled": false, "configured": false },
-  "teams":    { "enabled": false, "configured": false }
-}
-```
-
-`enabled` reflects the core database value. `configured` is `true`
-when a non-empty `BotToken` is present (or for Signal, when `ApiUrl`
-and `PhoneNumber` are set in platform config).
-
----
-
-### Telegram bot service
-
-`TelegramBotService` is a `BackgroundService` that long-polls the
-Telegram Bot API. On startup it fetches its configuration from the
-core API (`GET /bots/config/telegram`), validates the token via
-`getMe`, then enters its poll loop.
-
-Incoming DMs are forwarded to the core API via
-`POST /channels/{channelId}/chat/threads/{threadId}` using the bot's
-`defaultChannelId` and `defaultThreadId`. The core processes the
-message (including any agent tool calls) and returns a response, which
-the bot sends back to the Telegram user via `sendMessage`.
-
-The service automatically reloads its configuration when
-`BotReloadSignal` fires (e.g. after bot settings are changed via the
-gateway or the Uno settings page).
-
-Configuration: `Gateway:Bots:Telegram:Enabled` (default `true`) +
-`BotToken` (must be set for the bot to start).
-
----
-
-### Discord bot service
-
-`DiscordBotService` is a `BackgroundService` that connects to the
-Discord Gateway WebSocket (v10). On startup it fetches its configuration
-from the core API (`GET /bots/config/discord`), validates the token via
-`/users/@me`, sends `Identify` with intents
-`GUILDS | GUILD_MESSAGES | DIRECT_MESSAGES`, and handles heartbeating.
-The `MESSAGE_CONTENT` privileged intent is not required — Discord
-always delivers full message content in DMs without it.
-
-Only direct messages are processed — `MESSAGE_CREATE` events in guild
-channels and from bot users are ignored. DM messages are forwarded to
-the core API via `POST /channels/{channelId}/chat/threads/{threadId}`
-using the bot’s `defaultChannelId` and `defaultThreadId`. The core
-processes the message (including any agent tool calls) and returns a
-response, which the bot sends back via the Discord REST API
-(`POST /channels/{channelId}/messages`).
-
-The service recognises fatal Gateway close codes (4003, 4004,
-4010–4014) and stops without reconnecting when one is received.
-
-The service automatically reloads its configuration when
-`BotReloadSignal` fires (e.g. after bot settings are changed via the
-gateway or the Uno settings page). Discord has a 2 000-character message
-limit; responses exceeding this are truncated.
-
-Configuration: `Gateway:Bots:Discord:Enabled` (default `false`) +
-`BotToken`.
-
----
-
-### WhatsApp bot service
-
-`WhatsAppBotService` is a `BackgroundService` that manages the WhatsApp
-bot lifecycle. Unlike Telegram (polling) and Discord (WebSocket),
-WhatsApp Cloud API uses **webhooks** — Meta sends HTTP requests to the
-gateway when messages arrive.
-
-On startup the service fetches its configuration from the core API
-(`GET /bots/config/whatsapp`) for the access token, channel, and thread,
-then merges WhatsApp-specific settings from the gateway `.env`
-(`PhoneNumberId`, `VerifyToken`). It validates the Meta access token via
-`GET https://graph.facebook.com/v21.0/me`, and publishes the combined
-configuration to the `WhatsAppBotState` singleton so the webhook
-endpoints can process incoming messages.
-
-The service automatically reloads configuration when `BotReloadSignal`
-fires.
-
-Configuration:
-- Core database: `BotToken` (Meta Graph API access token),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:WhatsApp:Enabled` (default `false`),
-  `PhoneNumberId`, `VerifyToken`
-
----
-
-### WhatsApp webhook endpoints
-
-Registered via minimal API (`MapWhatsAppWebhookProxy`). These handle
-the Meta Cloud API webhook protocol.
-
-#### GET /api/bots/whatsapp/webhook
-
-Meta webhook verification (subscription challenge-response).
-
-Query parameters:
-- `hub.mode` — must be `subscribe`
-- `hub.verify_token` — must match the gateway’s `VerifyToken`
-- `hub.challenge` — challenge string to echo back
-
-**200** → plain text challenge
-**400** → invalid `hub.mode`
-**401** → token mismatch
-**503** → bot not configured
-
-#### POST /api/bots/whatsapp/webhook
-
-Incoming message handler. Returns `200` immediately (Meta requires
-fast acknowledgement), then processes the message asynchronously:
-forwards text messages to the core API and replies via the WhatsApp
-Cloud API (`POST https://graph.facebook.com/v21.0/{phoneNumberId}/messages`).
-
-**200** → always (async processing)
-**503** → bot not configured
-
----
-
-### Slack bot service
-
-`SlackBotService` is a `BackgroundService` that manages the Slack bot
-lifecycle. Like WhatsApp, Slack uses **webhooks** — Slack sends HTTP
-POST requests to the gateway when events occur (via the Events API).
-
-On startup the service fetches its configuration from the core API
-(`GET /bots/config/slack`) for the bot token, channel, and thread,
-then merges the Slack-specific signing secret from the gateway `.env`.
-It validates the token via `GET https://slack.com/api/auth.test` and
-publishes the combined configuration to the `SlackBotState` singleton
-so the webhook endpoint can process incoming events.
-
-Only direct messages (DMs) are processed — messages in channels and
-groups (where `channel_type` is not `im`) are ignored. Messages from
-other bots (`bot_id` present) and message subtypes (edits, file
-shares, etc.) are also skipped.
-
-Configuration:
-- Core database: `BotToken` (Slack Bot User OAuth Token),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:Slack:Enabled` (default `false`),
-  `SigningSecret`
-
----
-
-### Slack webhook endpoint
-
-Registered via minimal API (`MapSlackWebhookProxy`). Handles the
-Slack Events API protocol.
-
-#### POST /api/bots/slack/events
-
-Incoming event handler. Supports two event types:
-
-- **`url_verification`** — returns the `challenge` field (Slack sends
-  this during app setup).
-- **`event_callback`** — processes `message` events with
-  `channel_type: "im"` (DMs only). Returns `200` immediately, then
-  forwards to the core API asynchronously.
-
-**200** → always (async processing / challenge response)
-**503** → bot not configured
-
----
-
-### Matrix bot service
-
-`MatrixBotService` is a `BackgroundService` that long-polls the
-Matrix Client-Server API (`/sync`) for incoming messages. On startup
-it fetches its configuration from the core API
-(`GET /bots/config/matrix`), merges the homeserver URL from the
-gateway `.env`, validates the token via `/account/whoami`, resolves
-the DM room set from `m.direct` account data, then enters its sync
-loop.
-
-Only messages in DM rooms (rooms listed in `m.direct`) are processed;
-messages in group rooms are ignored. Messages from the initial sync
-(historical) are skipped.
-
-Replies are sent via
-`PUT /_matrix/client/v3/rooms/{roomId}/send/m.room.message/{txnId}`.
-
-Configuration:
-- Core database: `BotToken` (Matrix access token),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:Matrix:Enabled` (default `false`),
-  `HomeserverUrl`
-
----
-
-### Signal bot service
-
-`SignalBotService` is a `BackgroundService` that polls the signal-cli
-REST API (`GET /v1/receive/{number}`) for incoming messages. Requires
-a running `signal-cli` REST API instance with a registered phone
-number.
-
-On startup it fetches its configuration from the core API
-(`GET /bots/config/signal`), merges `ApiUrl` and `PhoneNumber` from
-the gateway `.env`, validates the signal-cli API via
-`GET /v1/about`, then enters its poll loop.
-
-Only individual (non-group) messages are processed — messages with a
-`groupInfo` object in the envelope's `dataMessage` are ignored.
-
-Replies are sent via `POST /v2/send`.
-
-Configuration:
-- Core database: `BotToken` (unused — signal-cli handles auth),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:Signal:Enabled` (default `false`),
-  `ApiUrl`, `PhoneNumber`
-
----
-
-### Email bot service
-
-`EmailBotService` is a `BackgroundService` that polls IMAP for
-unread messages and forwards them to the core API. Replies are sent
-via SMTP. Uses a minimal built-in IMAP client (TLS over
-`TcpClient`/`SslStream`) — no external mail libraries.
-
-Email is inherently 1:1, so no DM filtering is needed — every
-incoming message is treated as a direct message.
-
-On startup it fetches its configuration from the core API
-(`GET /bots/config/email`) for the password (stored as `BotToken`),
-merges IMAP/SMTP host, port, and username settings from the gateway
-`.env`, then enters its poll loop.
-
-The poll cycle: connect via IMAP TLS → `LOGIN` → `SELECT INBOX` →
-`SEARCH UNSEEN` → `FETCH` each message (From, Subject, Body) →
-`STORE +FLAGS (\Seen)` → forward to core → reply via SMTP.
-
-Configuration:
-- Core database: `BotToken` (email password),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:Email:Enabled` (default `false`),
-  `ImapHost`, `ImapPort` (993), `SmtpHost`, `SmtpPort` (587),
-  `Username`, `PollIntervalSeconds` (30)
-
----
-
-### Teams bot service
-
-`TeamsBotService` is a `BackgroundService` that manages the Microsoft
-Teams bot lifecycle. Like WhatsApp and Slack, Teams uses **webhooks**
-— the Bot Framework sends HTTP POST requests to the gateway when
-activities arrive.
-
-On startup the service fetches its configuration from the core API
-(`GET /bots/config/teams`) for the client secret (stored as
-`BotToken`), channel, and thread, then merges the App ID from the
-gateway `.env`. It validates credentials via an Azure AD OAuth2
-client-credentials token request against
-`https://login.microsoftonline.com/botframework.com/oauth2/v2.0/token`
-and publishes the combined configuration to the `TeamsBotState`
-singleton.
-
-Only personal (1:1 DM) conversations are processed — activities where
-`conversation.conversationType` is not `personal` are ignored. Bot
-`@mention` text is stripped from the message before forwarding.
-
-Replies are sent via the Bot Framework REST API
-(`POST {serviceUrl}/v3/conversations/{id}/activities/{id}`) using an
-OAuth2 bearer token.
-
-Configuration:
-- Core database: `BotToken` (Azure AD client secret),
-  `DefaultChannelId`, `DefaultThreadId`
-- Gateway `.env`: `Gateway:Bots:Teams:Enabled` (default `false`),
-  `AppId`
-
----
-
-### Teams webhook endpoint
-
-Registered via minimal API (`MapTeamsWebhookProxy`). Handles
-Bot Framework v3 activities.
-
-#### POST /api/bots/teams/messages
-
-Incoming activity handler. Returns `200` immediately, then processes
-the activity asynchronously. Only `message` activities with
-`conversation.conversationType: "personal"` (1:1 DMs) are forwarded
-to the core API.
-
-**200** → always (async processing)
-**503** → bot not configured
-
----
+## Module-Owned Or Removed Surfaces
+
+The current `SharpClaw.Gateway` project does not contain standalone
+audio-device, transcription, bot integration, WhatsApp, Slack, or Teams
+controllers. Older documentation described those as built-in gateway
+surfaces, but the current gateway either does not expose them or expects
+module-contributed endpoints to be controlled through `Gateway:Modules`.
+If a deployment adds a gateway module, enable both the module-level flag
+and the specific `{moduleId}/{groupId}` flag before expecting routes from
+that module to map.
 
 ## Error handling
 
@@ -1563,76 +1144,24 @@ IP's ban counter. Exceeding **10 violations in 5 minutes** triggers a
 
 ## Project structure
 
-```
-SharpClaw.Gateway/
-├── Bots/
-│   ├── DiscordBotService.cs          BackgroundService — WebSocket Gateway v10
-│   ├── EmailBotService.cs            BackgroundService — IMAP polling + SMTP replies
-│   ├── MatrixBotService.cs           BackgroundService — /sync long-polling
-│   ├── SignalBotService.cs           BackgroundService — signal-cli REST polling
-│   ├── SlackBotService.cs            BackgroundService — config lifecycle (webhook)
-│   ├── SlackBotState.cs              Singleton config holder for Slack webhook proxy
-│   ├── SlackWebhookProxy.cs          Minimal API — Slack Events API endpoint
-│   ├── TeamsBotService.cs            BackgroundService — config lifecycle (webhook)
-│   ├── TeamsBotState.cs              Singleton config holder for Teams webhook proxy
-│   ├── TeamsWebhookProxy.cs          Minimal API — Bot Framework activity endpoint
-│   ├── TelegramBotService.cs         BackgroundService — HTTP long-polling
-│   ├── WhatsAppBotService.cs         BackgroundService — config lifecycle (webhook)
-│   ├── WhatsAppBotState.cs           Singleton config holder for WhatsApp webhook proxy
-│   └── WhatsAppWebhookProxy.cs       Minimal API — Meta webhook endpoints
-├── Configuration/
-│   ├── DiscordBotOptions.cs           IOptions<T> for Gateway:Bots:Discord
-│   ├── EmailBotOptions.cs             IOptions<T> for Gateway:Bots:Email
-│   ├── GatewayEndpointOptions.cs      IOptions<T> for Gateway:Endpoints
-│   ├── GatewayEnvironment.cs          .env loader + default template
-│   ├── MatrixBotOptions.cs            IOptions<T> for Gateway:Bots:Matrix
-│   ├── RequestQueueOptions.cs         IOptions<T> for Gateway:RequestQueue
-│   ├── SignalBotOptions.cs            IOptions<T> for Gateway:Bots:Signal
-│   ├── SlackBotOptions.cs             IOptions<T> for Gateway:Bots:Slack
-│   ├── TeamsBotOptions.cs             IOptions<T> for Gateway:Bots:Teams
-│   ├── TelegramBotOptions.cs          IOptions<T> for Gateway:Bots:Telegram
-│   └── WhatsAppBotOptions.cs          IOptions<T> for Gateway:Bots:WhatsApp
-├── Controllers/
-│   ├── AgentsController.cs            GET list, GET by id
-│   ├── AgentJobsController.cs         Full job lifecycle
-│   ├── AudioDevicesController.cs      GET list, GET by id
-│   ├── AuthController.cs              Register, login, refresh, me, me/role
-│   ├── BotsController.cs              CRUD, status, config, reload
-│   ├── ChannelContextsController.cs   CRUD
-│   ├── ChannelsController.cs          CRUD
-│   ├── ChatController.cs              Send, history, cost
-│   ├── ChatStreamProxy.cs             Minimal API — SSE + approval
-│   ├── GatewayController.cs           Gateway-level endpoints
-│   ├── ModelsController.cs            GET list, GET by id
-│   ├── ProvidersController.cs         GET list, GET by id, cost endpoints
-│   ├── RolesController.cs             GET list, GET by id, GET permissions
-│   ├── ThreadChatController.cs        Send, history, cost
-│   ├── ThreadsController.cs           CRUD
-│   ├── TranscriptionController.cs     Get, stop, cancel, segments
-│   ├── TranscriptionStreamingProxy.cs Minimal API — WS + SSE proxy
-│   └── UsersController.cs             GET list (admin)
-├── Environment/
-│   └── .env                           Gateway configuration
-├── Infrastructure/
-│   ├── BotReloadSignal.cs             Signal for bot config hot-reload
-│   ├── ErrorEnvelopeFilter.cs         MVC exception → error envelope
-│   ├── GatewayErrors.cs               Shared error response helpers
-│   ├── GatewayRequestDispatcher.cs    Scoped dispatcher (queue or direct)
-│   ├── InternalApiClient.cs           Typed HttpClient + X-Api-Key
-│   ├── InternalApiOptions.cs          IOptions<T> for InternalApi
-│   ├── QueuedRequest.cs               Queue item model
-│   ├── QueueMetrics.cs                Processing-time metrics
-│   ├── RequestPriority.cs             Priority enum for queued requests
-│   └── RequestQueueService.cs         Bounded channel + processing
-├── Security/
-│   ├── AntiSpamMiddleware.cs          Body size + content-type enforcement
-│   ├── EndpointGateMiddleware.cs      Per-group enable/disable
-│   ├── IpBanMiddleware.cs             Reject banned IPs
-│   ├── IpBanService.cs                Violation tracking + auto-ban
-│   └── RateLimiterConfiguration.cs    Three rate-limit policies
-├── Program.cs                         Entry point + DI + middleware pipeline
-└── SharpClaw.Gateway.csproj           net10.0, Contracts-only dependency
-```
+The current gateway project is intentionally small. `Program.cs` wires
+configuration, endpoint gating, rate limiting, anti-spam checks, the request
+queue, and the thin proxy controllers. `Controllers` contains the public
+surfaces that still ship with the gateway: auth, agents, channels, channel
+contexts, chat, streamed chat, threads, thread chat, jobs, models, providers,
+roles, users, and the gateway status endpoints. `Configuration` contains only
+the gateway endpoint, request queue, and env loader options, while
+`Infrastructure` contains the internal API client, queued request dispatcher,
+queue metrics, request queue service, and shared error-envelope helpers.
+
+`Security` contains the middleware for endpoint gates, IP bans, body and
+content-type checks, and rate-limit policies. `Modules` contains the gateway
+module loader and endpoint-group catalog, plus the hosting and routing helpers
+used when an external gateway module contributes routes. There is no built-in
+`Bots` directory and no built-in audio-device or transcription controller in
+the current gateway project; deployments that need those routes must provide
+them through module-owned gateway extensions or route directly to the core API
+surface that owns them.
 
 ### OpenAPI / Swagger
 
@@ -1644,19 +1173,16 @@ exposes an OpenAPI document at `/openapi/v1.json` and a Swagger UI at
 
 ## Scope & non-goals
 
-The gateway is a **read-heavy public proxy**. It exposes endpoints
-useful for external consumers and integrations. It intentionally
-**does not** proxy:
+The gateway is a public proxy in front of the core API, not a separate
+business-logic host. The current controllers proxy both reads and mutations for
+the surfaces listed above, and the request queue can serialize mutation
+traffic before forwarding it to the core API. Endpoint group toggles are the
+main control for deciding which public surfaces are exposed in a deployment.
 
-- Provider create/update/delete (admin-only internal operations)
-- Model create/update/delete
-- Agent create/update/delete
-- Role permission updates (`PUT /roles/{id}/permissions`)
-- Resource create/update/delete/sync
-- Local model management
-- Editor bridge WebSocket
-- Env file management
-- Task definitions & instances
-- Any operation that mutates sensitive internal state
-
-These are accessible only via the internal API on `localhost`.
+The gateway still does not own every SharpClaw capability. Env file management,
+the editor bridge WebSocket, scheduler/task-definition controllers,
+tool-awareness-set controllers, resource lookup controllers, and module-owned
+surfaces only exist here when a concrete gateway controller or gateway module
+maps them. If a path is only represented by an endpoint toggle and no
+controller or module route exists, enabling the toggle will not create the
+route by itself.
