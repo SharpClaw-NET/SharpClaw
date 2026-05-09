@@ -191,9 +191,10 @@ public partial class App : Application
                     services.AddSingleton(new ClientSettings(frontendInstance));
                     services.AddSingleton(new AccountStore(frontendInstance));
                     var moduleStateCache = new ModuleStateCache();
+                    var contributionRegistry = new ModuleFrontendContributionRegistry(moduleStateCache);
                     services.AddSingleton(moduleStateCache);
-                    services.AddSingleton(new ModuleFrontendContributionRegistry(moduleStateCache));
-                    services.AddSingleton(new ModuleUiHookService());
+                    services.AddSingleton(contributionRegistry);
+                    services.AddSingleton(new ModuleFrontendStateService(moduleStateCache, contributionRegistry));
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );

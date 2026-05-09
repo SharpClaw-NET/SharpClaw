@@ -23,15 +23,15 @@ internal sealed class ModuleFrontendContributionRegistry(ModuleStateCache module
             .OrderBy(item => item.Order)
             .ThenBy(item => item.Label, StringComparer.OrdinalIgnoreCase)];
 
-    public async Task RefreshAsync(SharpClawApiClient api)
+    public async Task RefreshAsync(SharpClawApiClient api, CancellationToken ct = default)
     {
         try
         {
-            using var resp = await api.GetAsync("/modules/frontend-contributions");
+            using var resp = await api.GetAsync("/modules/frontend-contributions", ct);
             if (!resp.IsSuccessStatusCode) return;
 
-            using var stream = await resp.Content.ReadAsStreamAsync();
-            var response = await JsonSerializer.DeserializeAsync<ModuleFrontendContributionResponse>(stream, TerminalUI.Json);
+            using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            var response = await JsonSerializer.DeserializeAsync<ModuleFrontendContributionResponse>(stream, TerminalUI.Json, ct);
             if (response is null) return;
 
             _items = response.Items;

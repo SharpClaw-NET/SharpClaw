@@ -465,9 +465,7 @@ public sealed partial class BootPage : Page
             App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
 
             // Pre-populate module caches for the session
-            await App.Services!.GetRequiredService<ModuleStateCache>().RefreshAsync(api);
-            await App.Services!.GetRequiredService<ModuleFrontendContributionRegistry>().RefreshAsync(api);
-            await App.Services!.GetRequiredService<ModuleUiHookService>().RefreshAsync(api);
+            await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
 
             await Task.Delay(1000, CancellationToken.None);
             var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();

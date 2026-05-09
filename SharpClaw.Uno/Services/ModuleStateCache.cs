@@ -25,15 +25,15 @@ internal sealed class ModuleStateCache
         => _modules.GetValueOrDefault(moduleId);
 
     /// <summary>Refresh the cache from the API.</summary>
-    public async Task RefreshAsync(SharpClawApiClient api)
+    public async Task RefreshAsync(SharpClawApiClient api, CancellationToken ct = default)
     {
         try
         {
-            using var resp = await api.GetAsync("/modules");
+            using var resp = await api.GetAsync("/modules", ct);
             if (!resp.IsSuccessStatusCode) return;
 
-            using var stream = await resp.Content.ReadAsStreamAsync();
-            var items = await JsonSerializer.DeserializeAsync<List<ModuleStateCacheEntry>>(stream, TerminalUI.Json);
+            using var stream = await resp.Content.ReadAsStreamAsync(ct);
+            var items = await JsonSerializer.DeserializeAsync<List<ModuleStateCacheEntry>>(stream, TerminalUI.Json, ct);
             if (items is null) return;
 
             var dict = new Dictionary<string, ModuleStateCacheEntry>(items.Count, StringComparer.Ordinal);

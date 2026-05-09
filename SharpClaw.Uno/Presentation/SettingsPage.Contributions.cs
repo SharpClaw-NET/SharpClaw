@@ -11,15 +11,11 @@ public sealed partial class SettingsPage
 
     private async Task RefreshModuleFrontendStateAsync()
     {
-        var moduleCache = App.Services?.GetService<ModuleStateCache>();
-        if (moduleCache is not null)
-            await moduleCache.RefreshAsync(Api);
+        var moduleFrontendState = App.Services?.GetService<ModuleFrontendStateService>();
+        if (moduleFrontendState is not null)
+            await moduleFrontendState.RefreshAsync(Api);
 
         _cachedModuleStates = await FetchListAsync<ModuleStateEntry>("/modules");
-
-        var contributions = App.Services?.GetService<ModuleFrontendContributionRegistry>();
-        if (contributions is not null)
-            await contributions.RefreshAsync(Api);
     }
 
     private void AddContributionTabs()
