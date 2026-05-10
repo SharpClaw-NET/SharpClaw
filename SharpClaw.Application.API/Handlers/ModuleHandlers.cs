@@ -383,7 +383,7 @@ public static class ModuleHandlers
                     ? fl.Select(f => new { flagKey = f.FlagKey, displayName = f.DisplayName, description = f.Description } as object).ToList()
                     : [];
                 resources = resourcesByModule.TryGetValue(moduleId, out var rl)
-                    ? rl.Select(r => new { resourceType = r.ResourceType, grantLabel = r.GrantLabel } as object).ToList()
+                    ? rl.Select(r => new { resourceType = r.ResourceType, grantLabel = r.GrantLabel, defaultResourceKey = r.DefaultResourceKey } as object).ToList()
                     : [];
             }
             else
@@ -391,7 +391,7 @@ public static class ModuleHandlers
                 flags = bundled.GetGlobalFlagDescriptors()
                     .Select(f => new { flagKey = f.FlagKey, displayName = f.DisplayName, description = f.Description } as object).ToList();
                 resources = bundled.GetResourceTypeDescriptors()
-                    .Select(r => new { resourceType = r.ResourceType, grantLabel = r.GrantLabel } as object).ToList();
+                    .Select(r => new { resourceType = r.ResourceType, grantLabel = r.GrantLabel, defaultResourceKey = r.DefaultResourceKey } as object).ToList();
             }
 
             // Resolve contract dependencies to module IDs

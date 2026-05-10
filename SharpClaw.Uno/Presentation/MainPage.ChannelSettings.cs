@@ -93,13 +93,20 @@ public sealed partial class MainPage
 
         _resourceLookupCache.Clear();
         HashSet<Guid> transcriptionModelIds = [];
+        var permissionMetadata = await TerminalUI.LoadPermissionMetadataAsync(api);
         try
         {
-            var lookupTasks = TerminalUI.ResourceAccessTypes.Select(async t =>
+            var resourceTypes = permissionMetadata
+                .Where(module => module.Enabled)
+                .SelectMany(module => module.ResourceTypes)
+                .Select(resource => resource.ResourceType)
+                .Distinct(StringComparer.Ordinal)
+                .ToList();
+            var lookupTasks = resourceTypes.Select(async resourceType =>
             {
-                try { using var resp = await api.GetAsync($"/resources/lookup/{t.ApiName}"); if (resp.IsSuccessStatusCode) { using var s = await resp.Content.ReadAsStreamAsync(); var items = await JsonSerializer.DeserializeAsync<List<ResourceItemDto>>(s, Json); return (t.ApiName, Items: items ?? []); } }
+                try { using var resp = await api.GetAsync($"/resources/lookup/{resourceType}"); if (resp.IsSuccessStatusCode) { using var s = await resp.Content.ReadAsStreamAsync(); var items = await JsonSerializer.DeserializeAsync<List<ResourceItemDto>>(s, Json); return (resourceType, Items: items ?? []); } }
                 catch { /* swallow */ }
-                return (t.ApiName, Items: new List<ResourceItemDto>());
+                return (resourceType, Items: new List<ResourceItemDto>());
             });
             foreach (var (apiName, items) in await Task.WhenAll(lookupTasks))
                 _resourceLookupCache[apiName] = items;
@@ -120,12 +127,13 @@ public sealed partial class MainPage
         }
         catch { /* swallow */ }
 
-        await BuildSettingsPanelAsync(api, channelId, disableChatHeader, disableToolSchemas, customChatHeader, allowedAgents, channelDefaultAgentId, permRoleId, permJson, transcriptionModelIds);
+        await BuildSettingsPanelAsync(api, channelId, disableChatHeader, disableToolSchemas, customChatHeader, allowedAgents, channelDefaultAgentId, permRoleId, permJson, transcriptionModelIds, permissionMetadata);
     }
 
     private async Task BuildSettingsPanelAsync(SharpClawApiClient api, Guid channelId, bool disableChatHeader, bool disableToolSchemas, string? customChatHeader,
         List<(Guid Id, string Name, string ProviderModel)> allowedAgents,
-        Guid? channelDefaultAgentId, Guid? permRoleId, JsonElement? permJson, HashSet<Guid> transcriptionModelIds)
+        Guid? channelDefaultAgentId, Guid? permRoleId, JsonElement? permJson, HashSet<Guid> transcriptionModelIds,
+        List<ModulePermissionMetadata> permissionMetadata)
     {
         SettingsPanel.Children.Clear();
 
@@ -232,17 +240,19 @@ public sealed partial class MainPage
         BuildTranscriptionAgentSection(channelId, channelDefaultAgentId, allowedAgents, transcriptionModelIds);
 
         // ── Input Audio ──
-        BuildInputAudioSection();
+        BuildInputAudioSection(FindInputAudioResourceType(permissionMetadata));
 
         // ── Default Document Session ──
-        BuildDefaultResourceSection(api, channelId, "Default Document",
-            "Document session used when spreadsheet tools omit resourceId",
-            "DocumentSession", "document", defaultDocSessionId);
+        if (FindResourceTypeByDefaultKey(permissionMetadata, "document") is { } documentResourceType)
+            BuildDefaultResourceSection(api, channelId, "Default Document",
+                "Document session used when spreadsheet tools omit resourceId",
+                documentResourceType, "document", defaultDocSessionId);
 
         // ── Default Native Application ──
-        BuildDefaultResourceSection(api, channelId, "Default Application",
-            "Native application used when launch_application or stop_process omit resourceId",
-            "NativeApplication", "nativeapp", defaultNativeAppId);
+        if (FindResourceTypeByDefaultKey(permissionMetadata, "nativeapp") is { } nativeAppResourceType)
+            BuildDefaultResourceSection(api, channelId, "Default Application",
+                "Native application used when launch_application or stop_process omit resourceId",
+                nativeAppResourceType, "nativeapp", defaultNativeAppId);
 
         // ── Channel Permissions ──
         AddSettingsSection("Channel Permissions", "Pre-authorization overrides that let the agent act without requiring user approval");
@@ -254,9 +264,8 @@ public sealed partial class MainPage
             .WithAutoSuggestBox(true)
             .WithExisting(permJson);
 
-        _permEditor.BuildGlobalFlags(SettingsPanel);
-        AddSettingsSubSection("Resource Accesses");
-        await _permEditor.BuildResourceGrantsAsync(SettingsPanel);
+        await _permEditor.EnsureResourcesLoadedAsync(permissionMetadata);
+        _permEditor.BuildModulePermissions(SettingsPanel, permissionMetadata);
 
         var saveBtn = new Button { Content = new TextBlock { Text = "Save Permissions", FontFamily = _monoFont, FontSize = 12, Foreground = Brush(0x00FF00) }, Background = Brush(0x1A2A1A), BorderBrush = Brush(0x00FF00), BorderThickness = new Thickness(1), Padding = new Thickness(16, 8), Margin = new Thickness(0, 8, 0, 0) };
         saveBtn.Click += async (_, _) => await SavePermissionsAsync(permRoleId, channelId);
@@ -311,10 +320,31 @@ public sealed partial class MainPage
         SettingsPanel.Children.Add(txSearch);
     }
 
-    private void BuildInputAudioSection()
+    private static string? FindResourceTypeByDefaultKey(
+        IEnumerable<ModulePermissionMetadata> metadata,
+        string defaultResourceKey)
+        => metadata
+            .Where(module => module.Enabled)
+            .SelectMany(module => module.ResourceTypes)
+            .FirstOrDefault(resource => string.Equals(
+                resource.DefaultResourceKey,
+                defaultResourceKey,
+                StringComparison.OrdinalIgnoreCase))
+            ?.ResourceType;
+
+    private static string? FindInputAudioResourceType(IEnumerable<ModulePermissionMetadata> metadata)
+        => metadata
+            .Where(module => module.Enabled)
+            .SelectMany(module => module.ResourceTypes)
+            .FirstOrDefault(resource =>
+                resource.DefaultResourceKey?.Contains("audio", StringComparison.OrdinalIgnoreCase) == true
+                || resource.DisplayName.Contains("audio", StringComparison.OrdinalIgnoreCase))
+            ?.ResourceType;
+
+    private void BuildInputAudioSection(string? inputAudioResourceType)
     {
         AddSettingsSection("Input Audio", "Audio capture device used for voice-to-text transcription (saved locally per device)");
-        var inputAudios = _resourceLookupCache.TryGetValue("inputAudioAccesses", out var adItems) ? adItems : [];
+        var inputAudios = inputAudioResourceType is not null && _resourceLookupCache.TryGetValue(inputAudioResourceType, out var adItems) ? adItems : [];
         var adDisplayMap = new Dictionary<string, Guid>(inputAudios.Count);
         foreach (var d in inputAudios) adDisplayMap.TryAdd($"{d.Name}  ({d.Id.ToString()[..8]}…)", d.Id);
 

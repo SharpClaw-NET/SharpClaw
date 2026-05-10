@@ -71,147 +71,12 @@ internal sealed class PermissionEditorBuilder
 
     // ── Build methods ────────────────────────────────────────────
 
-    /// <summary>
-    /// Builds the global flags section into <paramref name="container"/>.
-    /// </summary>
-    /// <returns><c>true</c> if at least one flag was added.</returns>
-    public bool BuildGlobalFlags(StackPanel container)
+    public void BuildModulePermissions(StackPanel container, IEnumerable<ModulePermissionMetadata> metadata)
     {
         _flagEditors.Clear();
-        var panel = new StackPanel { Spacing = _flagClearance ? 10 : 4 };
-
-        // Resolve the globalFlags sub-objects from existing/caller JSON.
-        JsonElement? existingFlags = _existing is { } ex
-            && ex.TryGetProperty("globalFlags", out var ef) ? ef : null;
-        JsonElement? callerFlags = _callerFilter is { } cf
-            && cf.TryGetProperty("globalFlags", out var cff) ? cff : null;
-
-        for (var i = 0; i < TerminalUI.GlobalFlagNames.Length; i++)
-        {
-            var flag = TerminalUI.GlobalFlagNames[i];
-
-            // Caller filtering — skip flags the caller doesn't hold
-            if (_callerFilter is not null)
-            {
-                if (callerFlags is null || !callerFlags.Value.TryGetProperty(flag, out _))
-                    continue;
-            }
-
-            // A flag is "on" if the key exists in the globalFlags dict.
-            var on = existingFlags is { } ef2 && ef2.TryGetProperty(flag, out _);
-            var cb = new CheckBox
-            {
-                IsChecked = on, MinWidth = 0, MinHeight = 0,
-                Padding = new Thickness(4, 0, 0, 0),
-                Content = new TextBlock
-                {
-                    Text = TerminalUI.FormatFlagName(flag),
-                    FontFamily = TerminalUI.Mono, FontSize = 11,
-                    Foreground = TerminalUI.Brush(0xE0E0E0),
-                },
-            };
-            cb.Unchecked += (_, _) => _onManualEdit?.Invoke();
-            if (TerminalUI.GlobalFlagTooltips.TryGetValue(flag, out var tip))
-                ToolTipService.SetToolTip(cb, tip);
-
-            ComboBox? clrBox = null;
-            if (_flagClearance)
-            {
-                // Clearance is now the dictionary value.
-                var cl = existingFlags is { } ef3
-                    && ef3.TryGetProperty(flag, out var clrProp)
-                        ? clrProp.GetString() ?? "Unset" : "Unset";
-
-                var row = new StackPanel { Spacing = 4 };
-                row.Children.Add(cb);
-                row.Children.Add(new TextBlock
-                {
-                    Text = "Clearance:", FontFamily = TerminalUI.Mono, FontSize = 9,
-                    Foreground = TerminalUI.Brush(0x808080), Margin = new Thickness(24, 2, 0, 0),
-                });
-                clrBox = TerminalUI.MakeClearanceCombo(cl, includeUnset: true);
-                clrBox.Margin = new Thickness(24, 0, 0, 0);
-                row.Children.Add(clrBox);
-                panel.Children.Add(row);
-            }
-            else
-            {
-                panel.Children.Add(cb);
-            }
-
-            _flagEditors[flag] = (cb, clrBox);
-        }
-
-        container.Children.Add(panel);
-        return _flagEditors.Count > 0;
-    }
-
-    /// <summary>
-    /// Builds the resource grants section into <paramref name="container"/>.
-    /// Performs a parallel fetch of all resource lookups.
-    /// </summary>
-    public async Task BuildResourceGrantsAsync(StackPanel container)
-    {
         _grantPanels.Clear();
-        _nameCache.Clear();
-        _resourcesByType.Clear();
-        await PreloadResourceNamesAsync();
-
-        // Resolve the resourceGrants sub-objects from existing/caller JSON.
-        JsonElement? existingGrants = _existing is { } ex
-            && ex.TryGetProperty("resourceGrants", out var eg) ? eg : null;
-        JsonElement? callerGrants = _callerFilter is { } cf
-            && cf.TryGetProperty("resourceGrants", out var cg) ? cg : null;
-
-        var resCont = new StackPanel { Spacing = _grantClearance ? 16 : 10 };
-
-        foreach (var (apiName, displayName) in TerminalUI.ResourceAccessTypes)
-        {
-            // Caller filtering — skip types the caller has no grants for
-            var callerIds = GetCallerResourceIds(callerGrants, apiName);
-            if (_callerFilter is not null && callerIds is null)
-                continue;
-
-            var section = new StackPanel { Spacing = _grantClearance ? 4 : 2 };
-            var header = new TextBlock
-            {
-                Text = displayName, FontFamily = TerminalUI.Mono, FontSize = 12,
-                Foreground = TerminalUI.Brush(0x00CCFF),
-                FontWeight = Microsoft.UI.Text.FontWeights.SemiBold,
-            };
-            if (TerminalUI.ResourceAccessTooltips.TryGetValue(apiName, out var resTip))
-                ToolTipService.SetToolTip(header, resTip);
-            section.Children.Add(header);
-
-            var gp = new StackPanel { Spacing = _grantClearance ? 6 : 2, Margin = new Thickness(12, 0, 0, 0) };
-            _grantPanels[apiName] = gp;
-
-            // Populate existing grants from the resourceGrants dict
-            if (existingGrants is { } eg2
-                && eg2.TryGetProperty(apiName, out var ap) && ap.ValueKind == JsonValueKind.Array)
-                foreach (var g in ap.EnumerateArray())
-                    if (g.TryGetProperty("resourceId", out var rid) && rid.ValueKind == JsonValueKind.String)
-                    {
-                        var cl = g.TryGetProperty("clearance", out var clp) ? clp.GetString() ?? "Independent" : "Independent";
-                        AddGrantRow(gp, rid.GetGuid(), cl);
-                    }
-
-            section.Children.Add(gp);
-
-            // Add-resource controls
-            var capturedApi = apiName;
-            var actionsRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-
-            if (_useAutoSuggest)
-                BuildAutoSuggestSelector(actionsRow, capturedApi, apiName);
-            else
-                BuildComboSelector(actionsRow, capturedApi, callerIds);
-
-            section.Children.Add(actionsRow);
-            resCont.Children.Add(section);
-        }
-
-        container.Children.Add(resCont);
+        foreach (var module in TerminalUI.TopologicalSort(metadata.ToList()).Where(module => module.Enabled))
+            BuildSingleModule(container, module);
     }
 
     // ── Collection methods ───────────────────────────────────────
@@ -419,13 +284,14 @@ internal sealed class PermissionEditorBuilder
         actionsRow.Children.Add(addBtn);
     }
 
-    private async Task PreloadResourceNamesAsync()
+    private async Task PreloadResourceNamesAsync(IEnumerable<ModulePermissionMetadata> metadata)
     {
-        var tasks = TerminalUI.ResourceAccessTypes.Select(async r =>
+        var resourceTypes = ResolveResourceTypes(metadata);
+        var tasks = resourceTypes.Select(async r =>
         {
             try
             {
-                using var resp = await _api.GetAsync($"/resources/lookup/{r.ApiName}");
+                using var resp = await _api.GetAsync($"/resources/lookup/{r.ResourceType}");
                 if (!resp.IsSuccessStatusCode) return;
                 using var s = await resp.Content.ReadAsStreamAsync();
                 using var doc = await JsonDocument.ParseAsync(s);
@@ -437,11 +303,22 @@ internal sealed class PermissionEditorBuilder
                     _nameCache[id] = name;
                     items.Add((id, name));
                 }
-                _resourcesByType[r.ApiName] = items;
+                _resourcesByType[r.ResourceType] = items;
             }
             catch { /* swallow */ }
         });
         await Task.WhenAll(tasks);
+    }
+
+    private static IReadOnlyList<(string ResourceType, string DisplayName)> ResolveResourceTypes(
+        IEnumerable<ModulePermissionMetadata> metadata)
+    {
+        return metadata
+            .Where(module => module.Enabled)
+            .SelectMany(module => module.ResourceTypes)
+            .GroupBy(resource => resource.ResourceType, StringComparer.Ordinal)
+            .Select(group => (ResourceType: group.Key, DisplayName: group.First().DisplayName))
+            .ToList();
     }
 
     private static HashSet<Guid>? GetCallerResourceIds(JsonElement? callerGrants, string accessType)
@@ -512,7 +389,7 @@ internal sealed class PermissionEditorBuilder
         _grantPanels.Clear();
         _nameCache.Clear();
         _resourcesByType.Clear();
-        await PreloadResourceNamesAsync();
+        await PreloadResourceNamesAsync(metadata);
 
         var sorted = TerminalUI.TopologicalSort(metadata);
 
@@ -542,10 +419,10 @@ internal sealed class PermissionEditorBuilder
     /// Ensures resource name caches are populated.
     /// Call once before using <see cref="BuildSingleModule"/>.
     /// </summary>
-    public async Task EnsureResourcesLoadedAsync()
+    public async Task EnsureResourcesLoadedAsync(IEnumerable<ModulePermissionMetadata> metadata)
     {
         if (_resourcesByType.Count == 0)
-            await PreloadResourceNamesAsync();
+            await PreloadResourceNamesAsync(metadata);
     }
 
     /// <summary>

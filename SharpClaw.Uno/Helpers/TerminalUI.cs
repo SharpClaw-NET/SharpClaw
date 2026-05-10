@@ -55,37 +55,6 @@ internal static class TerminalUI
 
     // ── Permission metadata ─────────────────────────────────────
 
-    public static readonly (string ApiName, string DisplayName)[] ResourceAccessTypes =
-    [
-        ("DsShell", "Dangerous Shell"),
-        ("Mk8Shell", "Safe Shell"),
-        ("Container", "Containers"),
-        ("WaWebsite", "Websites"),
-        ("WaSearch", "Search Engines"),
-        ("DbInternal", "Internal Databases"),
-        ("DbExternal", "External Databases"),
-        ("TrAudio", "Input Audios"),
-        ("CuDisplay", "Display Devices"),
-        ("EditorSession", "Editor Sessions"),
-        ("AoAgent", "Agent Management"),
-        ("AoTask", "Task Management"),
-        ("AoSkill", "Skill Management"),
-        ("AoAgentHeader", "Agent Header Editing"),
-        ("AoChannelHeader", "Channel Header Editing"),
-        ("OaDocument", "Document Sessions"),
-        ("CuNativeApp", "Native Applications"),
-        ("BiChannel", "Bot Integrations"),
-    ];
-
-    public static readonly string[] GlobalFlagNames =
-        ["CanCreateSubAgents", "CanCreateContainers", "CanRegisterDatabases",
-         "CanAccessLocalhostInBrowser", "CanAccessLocalhostCli",
-         "CanClickDesktop", "CanTypeOnDesktop", "CanReadCrossThreadHistory",
-         "CanEditAgentHeader", "CanEditChannelHeader",
-         "CanCreateDocumentSessions", "CanEnumerateWindows",
-         "CanFocusWindow", "CanCloseWindow", "CanResizeWindow",
-         "CanSendHotkey", "CanReadClipboard", "CanWriteClipboard"];
-
     public static readonly Dictionary<string, string> GlobalFlagTooltips = new()
     {
         ["CanCreateSubAgents"] = "Allow the agent to spawn child agents on its own",
@@ -228,13 +197,13 @@ internal static class TerminalUI
         {
             using var resp = await api.GetAsync("/modules/permissions-metadata");
             if (!resp.IsSuccessStatusCode)
-                return _cachedPermMetadata ?? BuildFallbackMetadata();
+                return _cachedPermMetadata ?? [];
 
             using var stream = await resp.Content.ReadAsStreamAsync();
             using var doc = await System.Text.Json.JsonDocument.ParseAsync(stream);
 
             if (!doc.RootElement.TryGetProperty("modules", out var modulesArr))
-                return _cachedPermMetadata ?? BuildFallbackMetadata();
+                return _cachedPermMetadata ?? [];
 
             var result = new List<ModulePermissionMetadata>();
             foreach (var m in modulesArr.EnumerateArray())
@@ -267,7 +236,11 @@ internal static class TerminalUI
                     foreach (var r in res.EnumerateArray())
                         entry.ResourceTypes.Add(new ModulePermissionMetadata.ResourceTypeEntry(
                             r.GetProperty("resourceType").GetString() ?? "",
-                            r.GetProperty("grantLabel").GetString() ?? ""));
+                            r.GetProperty("grantLabel").GetString() ?? "",
+                            r.TryGetProperty("defaultResourceKey", out var keyProp)
+                                && keyProp.ValueKind == System.Text.Json.JsonValueKind.String
+                                    ? keyProp.GetString()
+                                    : null));
 
                 if (m.TryGetProperty("dependsOn", out var deps) && deps.ValueKind == System.Text.Json.JsonValueKind.Array)
                     foreach (var d in deps.EnumerateArray())
@@ -282,7 +255,7 @@ internal static class TerminalUI
         }
         catch
         {
-            return _cachedPermMetadata ?? BuildFallbackMetadata();
+            return _cachedPermMetadata ?? [];
         }
     }
 
@@ -325,30 +298,6 @@ internal static class TerminalUI
         return sorted;
     }
 
-    /// <summary>
-    /// Build fallback metadata from the hardcoded arrays when the API is unreachable.
-    /// All flags and resources are placed under a synthetic "core" module.
-    /// </summary>
-    private static List<ModulePermissionMetadata> BuildFallbackMetadata()
-    {
-        var flags = GlobalFlagNames.Select(f => new ModulePermissionMetadata.FlagEntry(
-            f, FormatFlagName(f),
-            GlobalFlagTooltips.GetValueOrDefault(f) ?? "")).ToList();
-
-        var resources = ResourceAccessTypes.Select(r => new ModulePermissionMetadata.ResourceTypeEntry(
-            r.ApiName, r.DisplayName)).ToList();
-
-        return [new ModulePermissionMetadata
-        {
-            ModuleId = "core",
-            DisplayName = "Core",
-            Enabled = true,
-            GlobalFlags = flags,
-            ResourceTypes = resources,
-            DependsOn = [],
-        }];
-    }
-
     /// <summary>Invalidate the cached permission metadata so the next call re-fetches.</summary>
     public static void InvalidatePermissionMetadataCache() => _cachedPermMetadata = null;
 }
@@ -372,5 +321,5 @@ internal sealed class ModulePermissionMetadata
     public string[]? Platforms { get; init; }
 
     public sealed record FlagEntry(string FlagKey, string DisplayName, string Description);
-    public sealed record ResourceTypeEntry(string ResourceType, string DisplayName);
+    public sealed record ResourceTypeEntry(string ResourceType, string DisplayName, string? DefaultResourceKey = null);
 }

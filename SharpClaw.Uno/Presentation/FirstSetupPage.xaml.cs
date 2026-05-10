@@ -878,7 +878,7 @@ public sealed partial class FirstSetupPage : Page
         _wizardHistory.Clear();
         _lastAutoSkipped.Clear();
 
-        await _permEditor.EnsureResourcesLoadedAsync();
+        await _permEditor.EnsureResourcesLoadedAsync(_sortedModules);
 
         // Skip to first navigable module
         _moduleIndex = 0;
