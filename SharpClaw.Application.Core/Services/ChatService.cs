@@ -69,6 +69,15 @@ public sealed class ChatService(
         Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback = null,
         CancellationToken ct = default)
     {
+        var timingRequestId = Guid.NewGuid().ToString("N")[..8];
+        var totalTiming = Stopwatch.StartNew();
+        Console.WriteLine(
+            $"[chat-timing-debug] start requestId={timingRequestId} " +
+            $"channelId={channelId} threadId={threadId?.ToString() ?? "none"} " +
+            $"requestedAgentId={request.AgentId?.ToString() ?? "none"} " +
+            $"messageChars={request.Message?.Length ?? 0} ctRequested={ct.IsCancellationRequested} " +
+            $"timestamp={DateTimeOffset.UtcNow:O}");
+
         bool userMessagePersisted = false;
 
         var channel = await db.Channels
@@ -112,6 +121,7 @@ public sealed class ChatService(
         {
 
         // Build history: only when a thread is specified; otherwise a single one-shot.
+        var historyLoadTiming = Stopwatch.StartNew();
         List<ChatCompletionMessage> history;
         if (threadId is not null)
         {
@@ -121,6 +131,14 @@ public sealed class ChatService(
         {
             history = [];
         }
+        historyLoadTiming.Stop();
+        var historyChars = history.Sum(m => m.Content?.Length ?? 0);
+        Console.WriteLine(
+            $"[chat-timing-debug] history-loaded requestId={timingRequestId} " +
+            $"threadId={threadId?.ToString() ?? "none"} historyMessages={history.Count} " +
+            $"historyChars={historyChars} maxHistoryMessages={MaxHistoryMessages} " +
+            $"maxHistoryCharacters={MaxHistoryCharacters} elapsedMs={totalTiming.ElapsedMilliseconds} " +
+            $"historyLoadMs={historyLoadTiming.ElapsedMilliseconds}");
 
         history.Add(new ChatCompletionMessage(ChatRoles.User, request.Message));
 
@@ -156,6 +174,13 @@ public sealed class ChatService(
         var maxTokens = agent.MaxCompletionTokens;
         var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
         var toolAwareness = enableTools ? (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools) : null;
+        Console.WriteLine(
+            $"[chat-timing-debug] before-provider requestId={timingRequestId} " +
+            $"agentId={agent.Id} agentName=\"{agent.Name}\" modelId={model.Id} " +
+            $"model=\"{model.Name}\" providerKey={provider.ProviderKey} providerName=\"{provider.Name}\" " +
+            $"systemPromptChars={systemPrompt.Length} maxCompletionTokens={maxTokens?.ToString() ?? "none"} " +
+            $"enableTools={enableTools} providerParamsPresent={providerParams is not null} " +
+            $"completionParamsPresent={completionParams is not null} elapsedMs={totalTiming.ElapsedMilliseconds}");
 
         // Persist user message immediately so it gets an accurate
         // CreatedAt and survives crashes during LLM inference.
@@ -181,6 +206,7 @@ public sealed class ChatService(
         await db.SaveChangesAsync(ct);
         userMessagePersisted = true;
 
+        var providerTiming = Stopwatch.StartNew();
         var loopResult = enableTools
             ? await RunNativeToolLoopAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
@@ -189,6 +215,17 @@ public sealed class ChatService(
             : await RunPlainCompletionAsync(
                 client, httpClient, apiKey, model.Name, systemPrompt,
                 history, maxTokens, providerParams, completionParams, ct);
+        providerTiming.Stop();
+        var tokenUsageAvailable = loopResult.TotalPromptTokens > 0 || loopResult.TotalCompletionTokens > 0;
+        var totalTokens = tokenUsageAvailable
+            ? loopResult.TotalPromptTokens + loopResult.TotalCompletionTokens
+            : 0;
+        Console.WriteLine(
+            $"[chat-timing-debug] after-provider requestId={timingRequestId} " +
+            $"providerCallMs={providerTiming.ElapsedMilliseconds} totalElapsedMs={totalTiming.ElapsedMilliseconds} " +
+            $"tokenUsageAvailable={tokenUsageAvailable} promptTokens={loopResult.TotalPromptTokens} " +
+            $"completionTokens={loopResult.TotalCompletionTokens} totalTokens={totalTokens} " +
+            $"ctRequested={ct.IsCancellationRequested}");
 
         // Persist assistant message after LLM completes
         var assistantMessage = new ChatMessageDB
@@ -209,7 +246,13 @@ public sealed class ChatService(
         };
 
         db.ChatMessages.Add(assistantMessage);
+        var assistantSaveTiming = Stopwatch.StartNew();
         await db.SaveChangesAsync(ct);
+        assistantSaveTiming.Stop();
+        Console.WriteLine(
+            $"[chat-timing-debug] assistant-saved requestId={timingRequestId} " +
+            $"assistantContentChars={loopResult.AssistantContent?.Length ?? 0} " +
+            $"saveMs={assistantSaveTiming.ElapsedMilliseconds} totalElapsedMs={totalTiming.ElapsedMilliseconds}");
 
         if (threadId is not null)
             threadActivity.Publish(threadId.Value,
@@ -232,9 +275,20 @@ public sealed class ChatService(
             agentCost);
 
         }
-        catch (OperationCanceledException) { throw; }
+        catch (OperationCanceledException ex)
+        {
+            Console.WriteLine(
+                $"[chat-timing-debug] exception requestId={timingRequestId} " +
+                $"type={ex.GetType().Name} message=\"{ex.Message.Replace("\"", "'")}\" " +
+                $"elapsedMs={totalTiming.ElapsedMilliseconds} ctRequested={ct.IsCancellationRequested}");
+            throw;
+        }
         catch (Exception ex)
         {
+            Console.WriteLine(
+                $"[chat-timing-debug] exception requestId={timingRequestId} " +
+                $"type={ex.GetType().Name} message=\"{ex.Message.Replace("\"", "'")}\" " +
+                $"elapsedMs={totalTiming.ElapsedMilliseconds} ctRequested={ct.IsCancellationRequested}");
             await PersistStreamErrorAsync(channelId, threadId, request, ex,
                 userMessagePersisted, ct);
             throw;
