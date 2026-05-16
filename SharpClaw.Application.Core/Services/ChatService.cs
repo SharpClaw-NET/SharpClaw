@@ -270,6 +270,9 @@ public sealed class ChatService(
         await db.SaveChangesAsync(CancellationToken.None);
         assistantSaveTiming.Stop();
 
+        await jobService.RecordTokensForCurrentExecutionAsync(
+            loopResult.TotalPromptTokens, loopResult.TotalCompletionTokens, ct);
+
         if (logTiming)
         {
             logger.LogDebug(
@@ -1291,6 +1294,9 @@ public sealed class ChatService(
         await db.SaveChangesAsync(CancellationToken.None);
         assistantMessagePersisted = true;
         assistantSaveTiming.Stop();
+
+        await jobService.RecordTokensForCurrentExecutionAsync(
+            totalPromptTokens, totalCompletionTokens, ct);
 
         if (logTiming)
         {

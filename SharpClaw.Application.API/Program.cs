@@ -343,6 +343,7 @@ try
     builder.Services.AddScoped<IAgentJobController, HostAgentJobController>();
     builder.Services.AddScoped<IAgentManager, HostAgentManager>();
     builder.Services.AddScoped<IAgentJobReader, HostAgentJobReader>();
+    builder.Services.AddSingleton<IAgentJobCostTracker, HostAgentJobCostTracker>();
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
     builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
     builder.Services.AddScoped<IChatProcessingBridge, ChatProcessingBridge>();

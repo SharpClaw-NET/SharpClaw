@@ -218,23 +218,72 @@ it under a legacy name, add `Aliases: ["do_something"]` to the definition.
 Implement the handler by overriding `ExecuteToolAsync`:
 
 ```csharp
-public async Task<ModuleToolResult> ExecuteToolAsync(
+public async Task<string> ExecuteToolAsync(
     string toolName,
-    JsonElement arguments,
-    Guid agentId,
-    IServiceProvider services,
+    JsonElement parameters,
+    AgentJobContext job,
+    IServiceProvider scopedServices,
     CancellationToken ct)
 {
     if (toolName is "do_something")
     {
-        var target = arguments.GetProperty("target").GetString()!;
+        var target = parameters.GetProperty("target").GetString()!;
         // ... do the work ...
-        return ModuleToolResult.Success("Done.");
+        return $"Done with {target}.";
     }
 
-    return ModuleToolResult.NotHandled();
+    throw new NotImplementedException($"Tool '{toolName}' is not handled.");
 }
 ```
+
+### Reporting token usage from module tools
+
+Core automatically records the normal chat provider usage that it performs
+itself, but modules often run their own model calls. A transcription module
+might call an STT endpoint for every audio window, an OCR module might call a
+vision model for every page, and a workflow module might call a private model
+behind its own client. Those calls still belong to the `AgentJobDB` row that
+started the module work, so the module should report them through
+`IAgentJobCostTracker` instead of trying to update core tables directly.
+
+Resolve `IAgentJobCostTracker` from the `scopedServices` argument passed to
+`ExecuteToolAsync` and call `RecordTokensAsync` with the current
+`AgentJobContext.JobId`. The method is additive, so a long transcription loop can
+report usage after each chunk and the final `AgentJobResponse.jobCost` will show
+the accumulated prompt, completion, and total tokens. External modules get the
+same contract forwarded into their isolated module container, and bundled modules
+can resolve it from the same restricted service scope as other host bridges.
+
+```csharp
+public async Task<string> ExecuteToolAsync(
+    string toolName,
+    JsonElement parameters,
+    AgentJobContext job,
+    IServiceProvider scopedServices,
+    CancellationToken ct)
+{
+    var costTracker = scopedServices.GetRequiredService<IAgentJobCostTracker>();
+
+    var result = await myModelClient.RunAsync(parameters, ct);
+
+    await costTracker.RecordTokensAsync(
+        job.JobId,
+        result.Usage.PromptTokens,
+        result.Usage.CompletionTokens,
+        ct);
+
+    return result.Text;
+}
+```
+
+If a provider returns only a single token total, keep the convention consistent
+inside your module and document it near the call site. For example, a
+transcription client that receives only a billed token total can report zero
+prompt tokens and the billed total as completion tokens, while a client that
+knows the prompt-conditioning text and generated transcript tokens should record
+those two values separately. The core contract only accepts non-negative token
+counts; it does not try to infer transcription, image, or private-provider usage
+from module-owned HTTP requests.
 
 ### Inline tools
 

@@ -93,6 +93,7 @@ public sealed class ExternalModuleHost : IAsyncDisposable
         // host's job system, model registry, and module-owned EF persistence.
         ForwardSingleton<IModuleDbContextFactory>(hostServices, services);
         ForwardSingleton<IModelInfoProvider>(hostServices, services);
+        ForwardSingleton<IAgentJobCostTracker>(hostServices, services);
         ForwardSingleton<EncryptionOptions>(hostServices, services);
         ForwardSingleton<ICliIdResolver>(hostServices, services);
         ForwardSingleton<SharpClaw.Contracts.Tasks.IHostQueueMetrics>(hostServices, services);

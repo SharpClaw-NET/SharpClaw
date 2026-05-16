@@ -1959,8 +1959,11 @@ request (e.g. shell type, transcription parameters) when applicable.
 output (e.g. transcription); `null` otherwise.
 
 `jobCost` contains the prompt and completion tokens attributed to this
-specific job from the LLM round that triggered it. `null` for jobs
-that were not submitted during a chat tool-call round.
+specific job. Core records chat-provider usage for jobs that execute chat
+work, and modules can add their own usage through `IAgentJobCostTracker`
+when they call transcription, OCR, private LLM, or other model APIs from
+inside a job. `jobCost` is `null` only when no usage has been recorded for
+that job.
 
 `channelCost` is piggybacked on all detail / mutation responses
 (Submit, GetById, Approve, Stop, Cancel, Pause, Resume) so callers
@@ -2373,7 +2376,7 @@ and task responses so callers rarely need the dedicated cost endpoints.
 | Response type | Field(s) | When populated |
 |---------------|----------|----------------|
 | `ChatResponse` | `channelCost`, `threadCost`, `agentCost` | Always (every chat turn) |
-| `AgentJobResponse` | `channelCost`, `jobCost` | `channelCost` on detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`); `jobCost` when the job was submitted during a chat tool-call round |
+| `AgentJobResponse` | `channelCost`, `jobCost` | `channelCost` on detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`); `jobCost` when core or a module has recorded token usage for that job |
 | `TaskInstanceResponse` | `channelCost` | On `GET .../instances/{instanceId}` when bound to a channel |
 | SSE `Done` event | Inside the `ChatResponse` payload | Always |
 

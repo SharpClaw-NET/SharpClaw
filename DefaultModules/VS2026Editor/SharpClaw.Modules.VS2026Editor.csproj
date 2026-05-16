@@ -10,7 +10,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\EditorCommon\SharpClaw.Modules.EditorCommon.csproj" />
-    <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
   <ItemGroup>

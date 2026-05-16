@@ -30,7 +30,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <PackageReference Include="SharpClaw.Contracts" />
     <ProjectReference Include="..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
   </ItemGroup>

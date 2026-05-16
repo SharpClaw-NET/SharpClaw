@@ -14,7 +14,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
 

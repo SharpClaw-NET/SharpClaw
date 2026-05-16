@@ -43,13 +43,13 @@ TOOL REGISTRATION
 ────────────────────────────────────────
 Job-pipeline tools (full job lifecycle, auditable):
   Return ModuleToolDefinition records from GetToolDefinitions().
-  Handle in ExecuteToolAsync(toolName, arguments, agentId, services, ct).
+  Handle in ExecuteToolAsync(toolName, parameters, job, scopedServices, ct).
   Tool exposed to model as: {prefix}_{name}
   Aliases: IReadOnlyList<string>? on the record for legacy names.
 
 Inline tools (stateless, no job record, runs in chat loop):
   Return ModuleInlineToolDefinition records from GetInlineToolDefinitions().
-  Handle in ExecuteInlineToolAsync(toolName, arguments, agentId, services, ct).
+  Handle in ExecuteInlineToolAsync(toolName, parameters, context, scopedServices, ct).
 
 ModuleToolDefinition constructor:
   Name, Description, ParametersSchema (JsonElement), Permission, TimeoutSeconds?,
@@ -61,10 +61,19 @@ ModuleToolPermission:
   DelegateTo: string?  (name of existing AgentActionService method; validated at startup)
 
 Return values:
-  ModuleToolResult.Success(message)
-  ModuleToolResult.NotHandled()
-  ModuleInlineToolResult.Success(message)
-  ModuleInlineToolResult.NotHandled()
+  ExecuteToolAsync returns the string persisted as the job result.
+  ExecuteInlineToolAsync returns the string inserted into the chat loop.
+  Throw NotImplementedException for tool names the module does not handle.
+
+Job cost tracking:
+  Modules that spend tokens outside the core chat pipeline should resolve
+  SharpClaw.Contracts.Modules.IAgentJobCostTracker from the scopedServices
+  argument passed to ExecuteToolAsync and call RecordTokensAsync(job.JobId,
+  promptTokens, completionTokens, ct). Calls are additive, so transcription,
+  OCR, or private model pipelines can report usage after every chunk and the
+  host will expose the accumulated total through AgentJobResponse.jobCost.
+  External modules receive this contract through the host bridge, so they do
+  not need to reference Core or update AgentJobDB directly.
 
 ────────────────────────────────────────
 CONTRACTS

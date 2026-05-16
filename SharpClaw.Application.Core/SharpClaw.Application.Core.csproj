@@ -22,7 +22,7 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
+    <PackageReference Include="SharpClaw.Contracts" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SharpClaw.Modules.Hosting\SharpClaw.Modules.Hosting.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />

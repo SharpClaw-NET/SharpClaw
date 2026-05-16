@@ -45,6 +45,7 @@ public sealed class AgentJobService(
     private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
     private readonly IConfiguration _configuration = configuration;
     private readonly ILogger<AgentJobService> _logger = logger;
+    private static readonly AsyncLocal<Guid?> CurrentExecutionJob = new();
 
     // ═══════════════════════════════════════════════════════════════
     // Public API
@@ -456,6 +457,8 @@ public sealed class AgentJobService(
 
     private async Task ExecuteJobAsync(AgentJobDB job, CancellationToken ct)
     {
+        using var executionScope = BeginExecutionScope(job.Id);
+
         job.Status = AgentJobStatus.Executing;
         job.StartedAt = DateTimeOffset.UtcNow;
         AddLog(job, "Execution started.");
@@ -1096,23 +1099,38 @@ public sealed class AgentJobService(
         CancellationToken ct = default)
     {
         if (jobIds.Count == 0) return;
+        if (promptTokens < 0)
+            throw new ArgumentOutOfRangeException(nameof(promptTokens), promptTokens,
+                "Prompt tokens cannot be negative.");
+        if (completionTokens < 0)
+            throw new ArgumentOutOfRangeException(nameof(completionTokens), completionTokens,
+                "Completion tokens cannot be negative.");
 
         // Jobs being recorded are from the current session (just executed),
         // so they should be in EF. Fall back to cold store + re-attach if
         // a restart happened mid-flight.
-        var jobs = await db.AgentJobs
+        var loadedJobs = await db.AgentJobs
             .Where(j => jobIds.Contains(j.Id))
             .ToListAsync(ct);
+        var jobsById = loadedJobs.ToDictionary(j => j.Id);
 
-        if (jobs.Count == 0)
+        if (jobsById.Count < jobIds.Count)
         {
             foreach (var id in jobIds)
             {
+                if (jobsById.ContainsKey(id)) continue;
+
                 var job = await entities.FindAsync<AgentJobDB>(db, id, ct);
                 if (job is not null)
-                    jobs.Add(job);
+                    jobsById[id] = job;
             }
         }
+
+        var jobs = jobIds
+            .Select(id => jobsById.GetValueOrDefault(id))
+            .Where(job => job is not null)
+            .Select(job => job!)
+            .ToList();
 
         if (jobs.Count == 0) return;
 
@@ -1128,5 +1146,28 @@ public sealed class AgentJobService(
         }
 
         await db.SaveChangesAsync(ct);
+    }
+
+    internal async Task RecordTokensForCurrentExecutionAsync(
+        int promptTokens, int completionTokens, CancellationToken ct = default)
+    {
+        if (promptTokens <= 0 && completionTokens <= 0) return;
+        if (CurrentExecutionJob.Value is not { } jobId) return;
+
+        await RecordTokensAsync([jobId], promptTokens, completionTokens, ct);
+    }
+
+    internal static Guid? CurrentExecutionJobId => CurrentExecutionJob.Value;
+
+    internal static IDisposable BeginExecutionScope(Guid jobId)
+    {
+        var previous = CurrentExecutionJob.Value;
+        CurrentExecutionJob.Value = jobId;
+        return new ExecutionScope(previous);
+    }
+
+    private sealed class ExecutionScope(Guid? previous) : IDisposable
+    {
+        public void Dispose() => CurrentExecutionJob.Value = previous;
     }
 }
