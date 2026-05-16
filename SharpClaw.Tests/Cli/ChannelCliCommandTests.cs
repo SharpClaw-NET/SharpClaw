@@ -20,7 +20,7 @@ public sealed class ChannelCliCommandTests
     [Test]
     public async Task WhenContextDefaultsSetUsesUnknownKeyAndInvalidResourceValueThenKeyErrorIsReported()
     {
-        var services = CreateServices(registerDefaultResourceModule: true);
+        var services = CreateServices();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var (_, _, contextId, _) = await SeedChannelGraphAsync(db);
@@ -36,7 +36,7 @@ public sealed class ChannelCliCommandTests
     [Test]
     public async Task WhenChannelDefaultsSetUsesUnknownKeyAndInvalidResourceValueThenKeyErrorIsReported()
     {
-        var services = CreateServices(registerDefaultResourceModule: true);
+        var services = CreateServices();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var (channelId, _, _, _) = await SeedChannelGraphAsync(db);
@@ -84,7 +84,7 @@ public sealed class ChannelCliCommandTests
     [Test]
     public async Task WhenContextDefaultsSetUsesKnownKeyAndResourceIdThenDefaultIsStored()
     {
-        var services = CreateServices(registerDefaultResourceModule: true);
+        var services = CreateServices();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var (_, agentId, contextId, _) = await SeedChannelGraphAsync(db);
@@ -108,7 +108,7 @@ public sealed class ChannelCliCommandTests
     [Test]
     public async Task WhenContextDefaultsClearUsesKnownKeyThenDefaultIsRemoved()
     {
-        var services = CreateServices(registerDefaultResourceModule: true);
+        var services = CreateServices();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var (_, agentId, contextId, _) = await SeedChannelGraphAsync(db);
@@ -122,6 +122,12 @@ public sealed class ChannelCliCommandTests
 
         setHandled.Should().BeTrue();
         clearHandled.Should().BeTrue();
+        var output = await CaptureOutputAsync(() => CliDispatcher.TryHandleAsync(
+            ["context", "defaults", contextId.ToString()],
+            services));
+        output.Should().Contain("\"Entries\": {}");
+        output.Should().NotContain("\"agent\"");
+
         await using var assertScope = services.CreateAsyncScope();
         var assertDb = assertScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var context = await assertDb.AgentContexts
@@ -134,7 +140,7 @@ public sealed class ChannelCliCommandTests
     [Test]
     public async Task WhenChannelDefaultsClearUsesKnownKeyThenDefaultIsRemoved()
     {
-        var services = CreateServices(registerDefaultResourceModule: true);
+        var services = CreateServices();
         using var scope = services.CreateScope();
         var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var (channelId, agentId, _, _) = await SeedChannelGraphAsync(db);
@@ -148,6 +154,12 @@ public sealed class ChannelCliCommandTests
 
         setHandled.Should().BeTrue();
         clearHandled.Should().BeTrue();
+        var output = await CaptureOutputAsync(() => CliDispatcher.TryHandleAsync(
+            ["channel", "defaults", channelId.ToString()],
+            services));
+        output.Should().Contain("\"Entries\": {}");
+        output.Should().NotContain("\"agent\"");
+
         await using var assertScope = services.CreateAsyncScope();
         var assertDb = assertScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
         var channel = await assertDb.Channels

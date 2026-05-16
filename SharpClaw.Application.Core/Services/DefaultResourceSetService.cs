@@ -8,9 +8,8 @@ namespace SharpClaw.Application.Services;
 
 /// <summary>
 /// Manages <see cref="DefaultResourceSetDB"/> entities attached to
-/// channels and contexts.  The set of valid resource keys is owned
-/// entirely by registered modules via
-/// <c>ModuleResourceTypeDescriptor.DefaultResourceKey</c>.
+/// channels and contexts.  Valid resource keys come from core defaults
+/// and registered module resource descriptors.
 /// </summary>
 public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegistry moduleRegistry)
 {
@@ -191,13 +190,13 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegis
         return drs;
     }
 
-    private static void Apply(DefaultResourceSetDB drs, SetDefaultResourcesRequest request)
+    private void Apply(DefaultResourceSetDB drs, SetDefaultResourcesRequest request)
     {
         foreach (var (key, value) in request.Entries)
             ApplyKey(drs, key, value);
     }
 
-    private static void ApplyKey(DefaultResourceSetDB drs, string key, Guid? value)
+    private void ApplyKey(DefaultResourceSetDB drs, string key, Guid? value)
     {
         var normalised = key.ToLowerInvariant();
         var existing = drs.Entries.FirstOrDefault(
@@ -206,7 +205,11 @@ public sealed class DefaultResourceSetService(SharpClawDbContext db, ModuleRegis
         if (value is null)
         {
             if (existing is not null)
+            {
                 drs.Entries.Remove(existing);
+                db.DefaultResourceEntries.Remove(existing);
+            }
+
             return;
         }
 

@@ -1,6 +1,7 @@
 using System.Text.RegularExpressions;
 
 using SharpClaw.Application.Core.Clients;
+using SharpClaw.Application.Core.DefaultResources;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 
@@ -37,8 +38,8 @@ public sealed class ModuleRegistry
     // to resource types through this registry instead of a static class.
     private readonly Dictionary<string, string> _delegateToResourceType = new(StringComparer.Ordinal);
 
-    // DefaultResourceKey (case-insensitive) → descriptor. Used by the
-    // default-resource service to validate and map short per-channel/context keys.
+    // Module-owned DefaultResourceKey (case-insensitive) -> descriptor. Core
+    // keys live in CoreDefaultResourceKeys and stay available when modules are disabled.
     private readonly Dictionary<string, ModuleResourceTypeDescriptor> _defaultResourceKeyToDescriptor
         = new(StringComparer.OrdinalIgnoreCase);
 
@@ -206,6 +207,7 @@ public sealed class ModuleRegistry
                         "is already mapped by another module.");
 
                 if (desc.DefaultResourceKey is not null &&
+                    !CoreDefaultResourceKeys.Contains(desc.DefaultResourceKey) &&
                     _defaultResourceKeyToDescriptor.ContainsKey(desc.DefaultResourceKey))
                     throw new InvalidOperationException(
                         $"Default resource key '{desc.DefaultResourceKey}' from module '{module.Id}' " +
@@ -292,7 +294,9 @@ public sealed class ModuleRegistry
 
                 if (desc.DefaultResourceKey is not null)
                 {
-                    _defaultResourceKeyToDescriptor[desc.DefaultResourceKey] = desc;
+                    if (!CoreDefaultResourceKeys.Contains(desc.DefaultResourceKey))
+                        _defaultResourceKeyToDescriptor[desc.DefaultResourceKey] = desc;
+
                     _delegateToDefaultResourceKey[desc.DelegateMethodName] = desc.DefaultResourceKey;
                 }
             }
@@ -374,7 +378,9 @@ public sealed class ModuleRegistry
 
                 if (desc.DefaultResourceKey is not null)
                 {
-                    _defaultResourceKeyToDescriptor.Remove(desc.DefaultResourceKey);
+                    if (!CoreDefaultResourceKeys.Contains(desc.DefaultResourceKey))
+                        _defaultResourceKeyToDescriptor.Remove(desc.DefaultResourceKey);
+
                     _delegateToDefaultResourceKey.Remove(desc.DelegateMethodName);
                 }
             }
@@ -730,12 +736,12 @@ public sealed class ModuleRegistry
 
     /// <summary>
     /// Returns <see langword="true"/> when <paramref name="key"/> is a
-    /// registered default-resource key contributed by any module.
+    /// registered default-resource key contributed by core or any module.
     /// </summary>
     public bool IsRegisteredDefaultResourceKey(string key)
     {
         _lock.EnterReadLock();
-        try { return _defaultResourceKeyToDescriptor.ContainsKey(key); }
+        try { return CoreDefaultResourceKeys.Contains(key) || _defaultResourceKeyToDescriptor.ContainsKey(key); }
         finally { _lock.ExitReadLock(); }
     }
 
@@ -763,12 +769,16 @@ public sealed class ModuleRegistry
     }
 
     /// <summary>
-    /// Get all registered default-resource keys contributed by modules.
+    /// Get all registered default-resource keys contributed by core and modules.
     /// </summary>
     public IReadOnlyList<string> GetAllDefaultResourceKeys()
     {
         _lock.EnterReadLock();
-        try { return [.. _defaultResourceKeyToDescriptor.Keys]; }
+        try
+        {
+            return [.. CoreDefaultResourceKeys.All.Concat(_defaultResourceKeyToDescriptor.Keys)
+                .Distinct(StringComparer.OrdinalIgnoreCase)];
+        }
         finally { _lock.ExitReadLock(); }
     }
 
