@@ -221,7 +221,7 @@ public sealed class ChatService(
         };
 
         db.ChatMessages.Add(userMessage);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
         userMessagePersisted = true;
 
         var providerTiming = Stopwatch.StartNew();
@@ -267,7 +267,7 @@ public sealed class ChatService(
 
         db.ChatMessages.Add(assistantMessage);
         var assistantSaveTiming = Stopwatch.StartNew();
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
         assistantSaveTiming.Stop();
 
         if (logTiming)
@@ -285,11 +285,8 @@ public sealed class ChatService(
         // Piggyback cost data on the response so callers don't need
         // a separate round-trip to the /cost endpoints.
         var costTiming = Stopwatch.StartNew();
-        var channelCost = await GetChannelCostAsync(channelId, ct);
-        var threadCost = threadId is not null
-            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
-            : null;
-        var agentCost = await GetAgentCostAsync(agent.Id, ct);
+        var (channelCost, threadCost, agentCost) =
+            await GetResponseCostsAsync(channelId, threadId, agent.Id, ct);
         costTiming.Stop();
 
         if (logTiming)
@@ -388,24 +385,7 @@ public sealed class ChatService(
             hint: new PersistenceQueryHint("ChannelId", channelId),
             ct: ct);
 
-        var breakdown = messages
-            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
-            .Where(g => g.Key.SenderAgentId.HasValue)
-            .Select(g => new AgentTokenBreakdown(
-                g.Key.SenderAgentId!.Value,
-                g.Key.SenderAgentName ?? "Unknown",
-                g.Sum(m => m.PromptTokens!.Value),
-                g.Sum(m => m.CompletionTokens ?? 0),
-                g.Sum(m => m.PromptTokens!.Value) + g.Sum(m => m.CompletionTokens ?? 0)))
-            .OrderByDescending(b => b.TotalTokens)
-            .ToList();
-
-        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
-        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
-
-        return new ChannelCostResponse(
-            channelId, totalPrompt, totalCompletion,
-            totalPrompt + totalCompletion, breakdown);
+        return BuildChannelCost(channelId, messages);
     }
 
     public async Task<ThreadCostResponse?> GetThreadCostAsync(
@@ -421,24 +401,7 @@ public sealed class ChatService(
             hint: new PersistenceQueryHint("ThreadId", threadId),
             ct: ct);
 
-        var breakdown = rows
-            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
-            .Where(g => g.Key.SenderAgentId.HasValue)
-            .Select(g => new AgentTokenBreakdown(
-                g.Key.SenderAgentId!.Value,
-                g.Key.SenderAgentName ?? "Unknown",
-                g.Sum(m => m.PromptTokens!.Value),
-                g.Sum(m => m.CompletionTokens ?? 0),
-                g.Sum(m => m.PromptTokens!.Value) + g.Sum(m => m.CompletionTokens ?? 0)))
-            .OrderByDescending(b => b.TotalTokens)
-            .ToList();
-
-        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
-        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
-
-        return new ThreadCostResponse(
-            threadId, channelId, totalPrompt, totalCompletion,
-            totalPrompt + totalCompletion, breakdown);
+        return BuildThreadCost(channelId, threadId, rows);
     }
 
     /// <summary>
@@ -457,7 +420,73 @@ public sealed class ChatService(
             hint: new PersistenceQueryHint("SenderAgentId", agentId),
             ct: ct);
 
+        return BuildAgentCost(agentId, agent.Name, messages);
+    }
+
+    private async Task<(ChannelCostResponse ChannelCost, ThreadCostResponse? ThreadCost, AgentCostResponse? AgentCost)> GetResponseCostsAsync(
+        Guid channelId, Guid? threadId, Guid agentId, CancellationToken ct)
+    {
+        var channelMessages = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => m.ChannelId == channelId && m.PromptTokens != null,
+            hint: new PersistenceQueryHint("ChannelId", channelId),
+            ct: ct);
+
+        var channelCost = BuildChannelCost(channelId, channelMessages);
+
+        ThreadCostResponse? threadCost = null;
+        if (threadId is { } tid)
+        {
+            var threadExists = channelMessages.Any(m => m.ThreadId == tid)
+                || await db.ChatThreads.AnyAsync(t => t.Id == tid && t.ChannelId == channelId, ct);
+
+            if (threadExists)
+                threadCost = BuildThreadCost(channelId, tid, channelMessages.Where(m => m.ThreadId == tid));
+        }
+
+        var agent = await db.Agents.FindAsync([agentId], ct);
+        if (agent is null)
+            return (channelCost, threadCost, null);
+
+        var agentMessages = await entities.QueryAsync<ChatMessageDB>(
+            db,
+            m => m.SenderAgentId == agentId && m.PromptTokens != null,
+            hint: new PersistenceQueryHint("SenderAgentId", agentId),
+            ct: ct);
+
+        var agentCost = BuildAgentCost(agentId, agent.Name, agentMessages);
+        return (channelCost, threadCost, agentCost);
+    }
+
+    private static ChannelCostResponse BuildChannelCost(
+        Guid channelId, IEnumerable<ChatMessageDB> messages)
+    {
+        var breakdown = BuildAgentBreakdown(messages);
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ChannelCostResponse(
+            channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
+
+    private static ThreadCostResponse BuildThreadCost(
+        Guid channelId, Guid threadId, IEnumerable<ChatMessageDB> messages)
+    {
+        var breakdown = BuildAgentBreakdown(messages);
+        var totalPrompt = breakdown.Sum(b => b.PromptTokens);
+        var totalCompletion = breakdown.Sum(b => b.CompletionTokens);
+
+        return new ThreadCostResponse(
+            threadId, channelId, totalPrompt, totalCompletion,
+            totalPrompt + totalCompletion, breakdown);
+    }
+
+    private static AgentCostResponse BuildAgentCost(
+        Guid agentId, string agentName, IEnumerable<ChatMessageDB> messages)
+    {
         var channelBreakdown = messages
+            .Where(m => m.PromptTokens is not null)
             .GroupBy(m => m.ChannelId)
             .Select(g => new AgentChannelTokenBreakdown(
                 g.Key,
@@ -471,9 +500,25 @@ public sealed class ChatService(
         var totalCompletion = channelBreakdown.Sum(b => b.CompletionTokens);
 
         return new AgentCostResponse(
-            agentId, agent.Name,
+            agentId, agentName,
             totalPrompt, totalCompletion,
             totalPrompt + totalCompletion, channelBreakdown);
+    }
+
+    private static List<AgentTokenBreakdown> BuildAgentBreakdown(
+        IEnumerable<ChatMessageDB> messages)
+    {
+        return messages
+            .Where(m => m.PromptTokens is not null && m.SenderAgentId.HasValue)
+            .GroupBy(m => new { m.SenderAgentId, m.SenderAgentName })
+            .Select(g => new AgentTokenBreakdown(
+                g.Key.SenderAgentId!.Value,
+                g.Key.SenderAgentName ?? "Unknown",
+                g.Sum(m => m.PromptTokens!.Value),
+                g.Sum(m => m.CompletionTokens ?? 0),
+                g.Sum(m => m.PromptTokens!.Value) + g.Sum(m => m.CompletionTokens ?? 0)))
+            .OrderByDescending(b => b.TotalTokens)
+            .ToList();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -874,6 +919,9 @@ public sealed class ChatService(
         var totalTiming = Stopwatch.StartNew();
         var logTiming = logger.IsEnabled(LogLevel.Debug);
         var streamCompleted = false;
+        var userMessagePersisted = false;
+        var assistantMessagePersisted = false;
+        var streamedContent = new StringBuilder();
 
         if (logTiming)
         {
@@ -1019,7 +1067,8 @@ public sealed class ChatService(
         };
 
         db.ChatMessages.Add(userMessage);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
+        userMessagePersisted = true;
 
         // Convert history to tool-aware messages
         var messages = new List<ToolAwareMessage>(history.Count);
@@ -1048,12 +1097,17 @@ public sealed class ChatService(
             providerRound++;
             var providerRoundTiming = Stopwatch.StartNew();
             ChatCompletionResult? roundResult = null;
+            var roundDeltaContent = new StringBuilder();
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
                 httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct))
             {
                 if (chunk.Delta is not null)
+                {
+                    roundDeltaContent.Append(chunk.Delta);
+                    streamedContent.Append(chunk.Delta);
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
+                }
 
                 if (chunk.IsFinished)
                     roundResult = chunk.Finished;
@@ -1061,6 +1115,7 @@ public sealed class ChatService(
 
             if (roundResult is null)
             {
+                fullContent.Append(roundDeltaContent);
                 providerRoundTiming.Stop();
                 if (logTiming)
                 {
@@ -1093,7 +1148,10 @@ public sealed class ChatService(
                     totalTiming.ElapsedMilliseconds);
             }
 
-            fullContent.Append(roundResult.Content ?? "");
+            var roundContent = roundResult.Content;
+            if (string.IsNullOrEmpty(roundContent) && roundDeltaContent.Length > 0)
+                roundContent = roundDeltaContent.ToString();
+            fullContent.Append(roundContent ?? "");
 
             if (!roundResult.HasToolCalls || ++rounds > MaxToolCallRounds)
             {
@@ -1121,6 +1179,7 @@ public sealed class ChatService(
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
                     var taskNotation = FormatTaskToolNotation(tc.Name);
                     fullContent.Append(taskNotation);
+                    streamedContent.Append(taskNotation);
                     yield return ChatStreamEvent.TextDelta(taskNotation);
                     continue;
                 }
@@ -1133,6 +1192,7 @@ public sealed class ChatService(
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult));
                     var inlineNotation = FormatInlineToolNotation(tc.Name);
                     fullContent.Append(inlineNotation);
+                    streamedContent.Append(inlineNotation);
                     yield return ChatStreamEvent.TextDelta(inlineNotation);
                     continue;
                 }
@@ -1193,6 +1253,7 @@ public sealed class ChatService(
                 // Inject standardized tool notation into persisted content
                 var notation = FormatToolNotation(jobResponse);
                 fullContent.Append(notation);
+                streamedContent.Append(notation);
 
                 messages.Add(BuildToolResultMessage(tc.Id, jobResponse, supportsVision));
             }
@@ -1227,7 +1288,8 @@ public sealed class ChatService(
 
         db.ChatMessages.Add(assistantMessage);
         var assistantSaveTiming = Stopwatch.StartNew();
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesAsync(CancellationToken.None);
+        assistantMessagePersisted = true;
         assistantSaveTiming.Stop();
 
         if (logTiming)
@@ -1245,11 +1307,8 @@ public sealed class ChatService(
                 new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
 
         var costTiming = Stopwatch.StartNew();
-        var channelCost = await GetChannelCostAsync(channelId, ct);
-        var threadCost = threadId is not null
-            ? await GetThreadCostAsync(channelId, threadId.Value, ct)
-            : null;
-        var agentCost = await GetAgentCostAsync(agent.Id, ct);
+        var (channelCost, threadCost, agentCost) =
+            await GetResponseCostsAsync(channelId, threadId, agent.Id, ct);
         costTiming.Stop();
 
         streamCompleted = true;
@@ -1277,9 +1336,24 @@ public sealed class ChatService(
             if (!streamCompleted && logTiming)
             {
                 logger.LogDebug(
-                    "Streaming chat request {RequestId} ended before completion after {ElapsedMs}ms. ChannelId={ChannelId} ThreadId={ThreadId} CancellationRequested={CancellationRequested}",
+                    "Streaming chat request {RequestId} ended before completion after {ElapsedMs}ms. ChannelId={ChannelId} ThreadId={ThreadId} UserMessagePersisted={UserMessagePersisted} AssistantMessagePersisted={AssistantMessagePersisted} PartialChars={PartialChars} CancellationRequested={CancellationRequested}",
                     timingRequestId, totalTiming.ElapsedMilliseconds,
-                    channelId, threadId, ct.IsCancellationRequested);
+                    channelId, threadId, userMessagePersisted,
+                    assistantMessagePersisted, streamedContent.Length,
+                    ct.IsCancellationRequested);
+            }
+
+            if (!streamCompleted && userMessagePersisted && !assistantMessagePersisted && streamedContent.Length > 0)
+            {
+                await PersistPartialAssistantMessageAsync(
+                    channelId,
+                    threadId,
+                    request,
+                    agent,
+                    streamedContent.ToString(),
+                    totalPromptTokens: null,
+                    totalCompletionTokens: null,
+                    providerMetadataJson: null);
             }
 
             threadLock?.Dispose();
@@ -1287,9 +1361,60 @@ public sealed class ChatService(
     }
 
     /// <summary>
-    /// Persists a <c>system</c>-role error message into the thread/channel
-    /// so the failure is visible when the user reloads history.
+    /// Persists the assistant text emitted before a stream was interrupted.
     /// </summary>
+    private async Task PersistPartialAssistantMessageAsync(
+        Guid channelId,
+        Guid? threadId,
+        ChatRequest request,
+        AgentDB agent,
+        string content,
+        int? totalPromptTokens,
+        int? totalCompletionTokens,
+        string? providerMetadataJson)
+    {
+        try
+        {
+            var assistantMessage = new ChatMessageDB
+            {
+                Role = ChatRoles.Assistant,
+                Origin = MessageOrigin.Assistant,
+                Content = content,
+                ChannelId = channelId,
+                ThreadId = threadId,
+                SenderAgentId = agent.Id,
+                SenderAgentName = agent.Name,
+                PermissionRoleId = agent.RoleId,
+                PermissionRoleName = agent.Role?.Name,
+                ClientType = request.ClientType,
+                PromptTokens = totalPromptTokens is > 0 ? totalPromptTokens : null,
+                CompletionTokens = totalCompletionTokens is > 0 ? totalCompletionTokens : null,
+                ProviderMetadataJson = providerMetadataJson
+            };
+
+            db.ChatMessages.Add(assistantMessage);
+            await db.SaveChangesAsync(CancellationToken.None);
+
+            if (threadId is not null)
+                threadActivity.Publish(threadId.Value,
+                    new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
+
+            if (logger.IsEnabled(LogLevel.Debug))
+            {
+                logger.LogDebug(
+                    "Persisted partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId} AssistantMessageId={AssistantMessageId} ContentChars={ContentChars}",
+                    channelId, threadId, assistantMessage.Id, content.Length);
+            }
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(
+                ex,
+                "Failed to persist partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId}",
+                channelId, threadId);
+        }
+    }
+
     private async Task PersistStreamErrorAsync(
         Guid channelId, Guid? threadId, ChatRequest request, Exception ex,
         bool userMessageAlreadyPersisted, CancellationToken ct)
