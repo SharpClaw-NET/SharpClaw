@@ -1,4 +1,5 @@
 ﻿using System.Buffers;
+using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using SharpClaw.Helpers;
@@ -164,22 +165,7 @@ public sealed partial class MainPage
             if (job.ChannelCost is { } jobCost)
                 RenderInlineCost(jobCost, null);
 
-            if (job.Status == "AwaitingApproval")
-            {
-                JobApproveButton.Visibility = Visibility.Visible;
-                JobCancelButton.Visibility = Visibility.Visible;
-            }
-            else if (job.Status is "Queued" or "Executing")
-            {
-                JobCancelButton.Visibility = Visibility.Visible;
-                JobStopButton.Visibility = Visibility.Visible;
-                JobPauseButton.Visibility = Visibility.Visible;
-            }
-            else if (job.Status == "Paused")
-            {
-                JobResumeButton.Visibility = Visibility.Visible;
-                JobCancelButton.Visibility = Visibility.Visible;
-            }
+            ApplyJobActionVisibility(job.Status);
 
             _currentJobDetail = job;
             CopyLogsButton.Visibility = job.Logs is { Count: > 0 } ? Visibility.Visible : Visibility.Collapsed;
@@ -416,70 +402,74 @@ public sealed partial class MainPage
     // ── Job action buttons ──────────────────────────────────────
 
     private async void OnJobApproveClick(object sender, RoutedEventArgs e)
-    {
-        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
-        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        try
-        {
-            var body = JsonSerializer.Serialize(new { }, Json);
-            var content = new StringContent(body, Encoding.UTF8, "application/json");
-            var resp = await api.PostAsync($"/channels/{channelId}/jobs/{jobId}/approve", content);
-            if (resp.IsSuccessStatusCode) await ShowJobViewAsync(jobId);
-            else AppendJobLog("error", $"Approve failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
-        }
-        catch (Exception ex) { AppendJobLog("error", $"Approve failed: {ex.Message}", DateTimeOffset.Now); }
-    }
+        => await ExecuteJobActionAsync(UnoJobActionKind.Approve);
 
     private async void OnJobCancelClick(object sender, RoutedEventArgs e)
-    {
-        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
-        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        try
-        {
-            var resp = await api.PostAsync($"/channels/{channelId}/jobs/{jobId}/cancel", null);
-            if (resp.IsSuccessStatusCode) await ShowJobViewAsync(jobId);
-            else AppendJobLog("error", $"Cancel failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
-        }
-        catch (Exception ex) { AppendJobLog("error", $"Cancel failed: {ex.Message}", DateTimeOffset.Now); }
-    }
+        => await ExecuteJobActionAsync(UnoJobActionKind.Cancel);
 
     private async void OnJobStopClick(object sender, RoutedEventArgs e)
-    {
-        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
-        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        try
-        {
-            var resp = await api.PostAsync($"/channels/{channelId}/jobs/{jobId}/stop", null);
-            if (resp.IsSuccessStatusCode) await ShowJobViewAsync(jobId);
-            else AppendJobLog("error", $"Stop failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
-        }
-        catch (Exception ex) { AppendJobLog("error", $"Stop failed: {ex.Message}", DateTimeOffset.Now); }
-    }
+        => await ExecuteJobActionAsync(UnoJobActionKind.Stop);
 
     private async void OnJobPauseClick(object sender, RoutedEventArgs e)
-    {
-        if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
-        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        try
-        {
-            var resp = await api.PutAsync($"/channels/{channelId}/jobs/{jobId}/pause", null);
-            if (resp.IsSuccessStatusCode) await ShowJobViewAsync(jobId);
-            else AppendJobLog("error", $"Pause failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
-        }
-        catch (Exception ex) { AppendJobLog("error", $"Pause failed: {ex.Message}", DateTimeOffset.Now); }
-    }
+        => await ExecuteJobActionAsync(UnoJobActionKind.Pause);
 
     private async void OnJobResumeClick(object sender, RoutedEventArgs e)
+        => await ExecuteJobActionAsync(UnoJobActionKind.Resume);
+
+    private void ApplyJobActionVisibility(string status)
+    {
+        foreach (var action in UnoClientState.GetVisibleJobActions(status))
+        {
+            switch (action)
+            {
+                case UnoJobActionKind.Approve:
+                    JobApproveButton.Visibility = Visibility.Visible;
+                    break;
+                case UnoJobActionKind.Cancel:
+                    JobCancelButton.Visibility = Visibility.Visible;
+                    break;
+                case UnoJobActionKind.Stop:
+                    JobStopButton.Visibility = Visibility.Visible;
+                    break;
+                case UnoJobActionKind.Pause:
+                    JobPauseButton.Visibility = Visibility.Visible;
+                    break;
+                case UnoJobActionKind.Resume:
+                    JobResumeButton.Visibility = Visibility.Visible;
+                    break;
+            }
+        }
+    }
+
+    private async Task ExecuteJobActionAsync(UnoJobActionKind action)
     {
         if (_selectedChannelId is not { } channelId || _selectedJobId is not { } jobId) return;
+
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        var request = UnoClientState.CreateJobActionRequest(channelId, jobId, action);
+        var label = action.ToString();
         try
         {
-            var resp = await api.PutAsync($"/channels/{channelId}/jobs/{jobId}/resume", null);
-            if (resp.IsSuccessStatusCode) await ShowJobViewAsync(jobId);
-            else AppendJobLog("error", $"Resume failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
+            HttpContent? content = null;
+            if (request.SendsEmptyJsonBody)
+            {
+                var body = JsonSerializer.Serialize(new { }, Json);
+                content = new StringContent(body, Encoding.UTF8, "application/json");
+            }
+
+            using var resp = request.Method == HttpMethod.Put
+                ? await api.PutAsync(request.Path, content)
+                : await api.PostAsync(request.Path, content);
+
+            if (resp.IsSuccessStatusCode)
+                await ShowJobViewAsync(jobId);
+            else
+                AppendJobLog("error", $"{label} failed: {(int)resp.StatusCode} {resp.ReasonPhrase}", DateTimeOffset.Now);
         }
-        catch (Exception ex) { AppendJobLog("error", $"Resume failed: {ex.Message}", DateTimeOffset.Now); }
+        catch (Exception ex)
+        {
+            AppendJobLog("error", $"{label} failed: {ex.Message}", DateTimeOffset.Now);
+        }
     }
 
     private void OnTabJobsClick(object sender, RoutedEventArgs e)

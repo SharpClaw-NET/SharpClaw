@@ -84,12 +84,9 @@ public sealed partial class MainPage
                         ChatLog("[ThreadWatch] Event: Processing");
                         DispatcherQueue.TryEnqueue(() =>
                         {
-                            _isThreadBusy = true;
-                            if (!_isSending)
-                            {
-                                SendButton.IsEnabled = false;
-                                MessageInput.IsEnabled = false;
-                            }
+                            ApplyThreadWatchDecision(UnoClientState.ApplyThreadWatchEvent(
+                                CurrentChatInteractionState(),
+                                "Processing"));
                         });
                     }
                     else if (evtSpan.SequenceEqual("NewMessages"))
@@ -97,17 +94,14 @@ public sealed partial class MainPage
                         ChatLog("[ThreadWatch] Event: NewMessages");
                         DispatcherQueue.TryEnqueue(async () =>
                         {
-                            _isThreadBusy = false;
-                            if (!_isSending)
-                            {
-                                SendButton.IsEnabled = true;
-                                MessageInput.IsEnabled = true;
-                            }
+                            var decision = UnoClientState.ApplyThreadWatchEvent(
+                                CurrentChatInteractionState(),
+                                "NewMessages");
+                            ApplyThreadWatchDecision(decision);
 
-                            if (_isSending)
+                            if (!decision.LoadHistoryNow)
                             {
                                 ChatLog("[ThreadWatch] NewMessages during send — flagging stale");
-                                _historyStaleAfterSend = true;
                                 return;
                             }
 
@@ -126,6 +120,18 @@ public sealed partial class MainPage
         }
         catch (OperationCanceledException) { ChatLog("[ThreadWatch] Cancelled (normal)"); }
         catch (Exception ex) { ChatLog($"[ThreadWatch] Error: {ex.GetType().Name}: {ex.Message}"); }
+    }
+
+    private UnoChatInteractionState CurrentChatInteractionState()
+        => new(_isSending, _isThreadBusy, _historyStaleAfterSend);
+
+    private void ApplyThreadWatchDecision(UnoThreadWatchDecision decision)
+    {
+        _isSending = decision.State.IsSending;
+        _isThreadBusy = decision.State.IsThreadBusy;
+        _historyStaleAfterSend = decision.State.HistoryStaleAfterSend;
+        SendButton.IsEnabled = decision.SendEnabled;
+        MessageInput.IsEnabled = decision.InputEnabled;
     }
 
     // ── Cost bars ────────────────────────────────────────────────
@@ -432,8 +438,8 @@ public sealed partial class MainPage
         {
             try
             {
-                var title = TerminalUI.Truncate(text, 10);
-                var chBody = JsonSerializer.Serialize(new { title, agentId = _selectedAgentId }, Json);
+                var createChannel = UnoClientState.CreateChannelRequest(text, _selectedAgentId);
+                var chBody = JsonSerializer.Serialize(createChannel, Json);
                 var chContent = new StringContent(chBody, Encoding.UTF8, "application/json");
                 var chResp = await api.PostAsync("/channels", chContent);
                 if (!chResp.IsSuccessStatusCode)
@@ -447,9 +453,9 @@ public sealed partial class MainPage
                 using var chCreateStream = await chResp.Content.ReadAsStreamAsync();
                 using var chDoc = await JsonDocument.ParseAsync(chCreateStream);
                 var chId = chDoc.RootElement.GetProperty("id").GetGuid();
-                var chTitle = chDoc.RootElement.GetProperty("title").GetString() ?? title;
+                var chTitle = chDoc.RootElement.GetProperty("title").GetString() ?? createChannel.Title;
 
-                var thBody = JsonSerializer.Serialize(new { name = "Default" }, Json);
+                var thBody = JsonSerializer.Serialize(UnoClientState.CreateDefaultThreadRequest(), Json);
                 var thContent = new StringContent(thBody, Encoding.UTF8, "application/json");
                 var thResp = await api.PostAsync($"/channels/{chId}/threads", thContent);
                 if (thResp.IsSuccessStatusCode)
@@ -481,8 +487,8 @@ public sealed partial class MainPage
             _pendingNewThread = false;
             try
             {
-                var threadName = TerminalUI.Truncate(text, 10);
-                var thBody = JsonSerializer.Serialize(new { name = threadName }, Json);
+                var createThread = UnoClientState.CreatePendingThreadRequest(text);
+                var thBody = JsonSerializer.Serialize(createThread, Json);
                 var thContent = new StringContent(thBody, Encoding.UTF8, "application/json");
                 var thResp = await api.PostAsync($"/channels/{pendingChId}/threads", thContent);
                 if (thResp.IsSuccessStatusCode)
@@ -550,10 +556,14 @@ public sealed partial class MainPage
         }
         finally
         {
-            _isSending = false;
-            _historyStaleAfterSend = false;
-            SendButton.IsEnabled = !_isThreadBusy;
-            MessageInput.IsEnabled = !_isThreadBusy;
+            var decision = UnoClientState.CompleteSend(CurrentChatInteractionState());
+            ApplyThreadWatchDecision(decision);
+            if (decision.LoadHistoryNow)
+            {
+                await LoadHistoryAsync(channelId);
+                await LoadCostAsync(channelId);
+                ScrollToBottom();
+            }
             UpdateCursor();
             DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
         }
@@ -578,25 +588,22 @@ public sealed partial class MainPage
         _streamCts = cts;
         var ct = cts.Token;
 
-        var threadPart = _selectedThreadId is { } tid
-            ? $"/threads/{tid}"
-            : "";
-        var url = $"/channels/{channelId}/chat{threadPart}/stream";
-        ChatLog($"[Stream] POST {url}");
-
-        var body = JsonSerializer.Serialize(new
-        {
+        var request = UnoClientState.CreateChatStreamRequest(
+            channelId,
+            _selectedThreadId,
             message,
-            agentId = _selectedAgentId,
-            clientType = _clientType
-        }, Json);
+            _selectedAgentId,
+            _clientType);
+        ChatLog($"[Stream] POST {request.Path}");
+
+        var body = JsonSerializer.Serialize(request.Body, Json);
         var content = new StringContent(body, Encoding.UTF8, "application/json");
 
         var sw = Stopwatch.StartNew();
         HttpResponseMessage? resp = null;
         try
         {
-            resp = await api.PostStreamAsync(url, content, ct);
+            resp = await api.PostStreamAsync(request.Path, content, ct);
             ChatLog($"[Stream] Headers: {(int)resp.StatusCode} in {sw.ElapsedMilliseconds}ms");
 
             if (!resp.IsSuccessStatusCode)
