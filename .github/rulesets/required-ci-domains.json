@@ -1,0 +1,47 @@
+{
+  "name": "Required CI Domains",
+  "target": "branch",
+  "enforcement": "active",
+  "conditions": {
+    "ref_name": {
+      "include": [
+        "~DEFAULT_BRANCH",
+        "refs/heads/release/**"
+      ],
+      "exclude": []
+    }
+  },
+  "rules": [
+    {
+      "type": "required_status_checks",
+      "parameters": {
+        "strict_required_status_checks_policy": true,
+        "required_status_checks": [
+          { "context": "Correctness / Core" },
+          { "context": "Correctness / CLI Commands" },
+          { "context": "Correctness / CLI REPL" },
+          { "context": "Correctness / Gateway" },
+          { "context": "Correctness / Frontend" },
+          { "context": "Correctness / Persistence" },
+          { "context": "Correctness / Providers" },
+          { "context": "Correctness / Tasks" },
+          { "context": "Correctness / Chat" },
+          { "context": "Correctness / Jobs" },
+          { "context": "Correctness / Tools" },
+          { "context": "Correctness / Costs" },
+          { "context": "Correctness / Cache" },
+          { "context": "Correctness / Agent Orchestration" },
+          { "context": "Correctness / Defaults" },
+          { "context": "Correctness / Module Contracts" },
+          { "context": "Correctness / Provider Registration" },
+          { "context": "Performance / Streaming" },
+          { "context": "Performance / Chat Throughput" },
+          { "context": "Performance / Jobs" },
+          { "context": "Performance / Tools" },
+          { "context": "Performance / Cache and Resolution" }
+        ]
+      }
+    }
+  ],
+  "bypass_actors": []
+}

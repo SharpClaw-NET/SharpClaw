@@ -154,6 +154,67 @@ public sealed class TestHarnessArchitectureTests
         workflow.Should().NotContain("--filter \"TestCategory=PerformanceDiagnostic\"");
     }
 
+    [Test]
+    public void RequiredCiRulesetRequiresEveryPublicDomainCheck()
+    {
+        var root = FindSolutionRoot();
+        var rulesetPath = Path.Combine(root, ".github", "rulesets", "required-ci-domains.json");
+        using var ruleset = JsonDocument.Parse(File.ReadAllText(rulesetPath));
+
+        var rootElement = ruleset.RootElement;
+        rootElement.GetProperty("name").GetString().Should().Be("Required CI Domains");
+        rootElement.GetProperty("target").GetString().Should().Be("branch");
+        rootElement.GetProperty("enforcement").GetString().Should().Be("active");
+
+        var includes = rootElement
+            .GetProperty("conditions")
+            .GetProperty("ref_name")
+            .GetProperty("include")
+            .EnumerateArray()
+            .Select(e => e.GetString())
+            .ToList();
+        includes.Should().Contain("~DEFAULT_BRANCH");
+        includes.Should().Contain("refs/heads/release/**");
+
+        var requiredChecks = rootElement
+            .GetProperty("rules")
+            .EnumerateArray()
+            .Single(rule => rule.GetProperty("type").GetString() == "required_status_checks")
+            .GetProperty("parameters")
+            .GetProperty("required_status_checks")
+            .EnumerateArray()
+            .Select(e => e.GetProperty("context").GetString())
+            .ToList();
+
+        var expectedChecks = new[]
+        {
+            "Correctness / Core",
+            "Correctness / CLI Commands",
+            "Correctness / CLI REPL",
+            "Correctness / Gateway",
+            "Correctness / Frontend",
+            "Correctness / Persistence",
+            "Correctness / Providers",
+            "Correctness / Tasks",
+            "Correctness / Chat",
+            "Correctness / Jobs",
+            "Correctness / Tools",
+            "Correctness / Costs",
+            "Correctness / Cache",
+            "Correctness / Agent Orchestration",
+            "Correctness / Defaults",
+            "Correctness / Module Contracts",
+            "Correctness / Provider Registration",
+            "Performance / Streaming",
+            "Performance / Chat Throughput",
+            "Performance / Jobs",
+            "Performance / Tools",
+            "Performance / Cache and Resolution",
+        };
+
+        requiredChecks.Should().BeEquivalentTo(expectedChecks);
+    }
+
     private static IConfigurationRoot LoadTemplate(string path) =>
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
