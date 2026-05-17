@@ -231,17 +231,14 @@ public sealed class TestHarnessArchitectureTests
 
         var workflowParts = workflow.Split("  performance:", StringSplitOptions.None);
         workflowParts.Should().HaveCount(2);
-        CountOccurrences(workflowParts[0], "          - domain: ")
-            .Should()
-            .Be(ExpectedCorrectnessDomains.Length);
-        CountOccurrences(workflowParts[1], "          - domain: ")
-            .Should()
-            .Be(ExpectedPerformanceDomains.Length);
+        var correctnessDomains = ExtractWorkflowDomains(workflowParts[0]);
+        var performanceDomains = ExtractWorkflowDomains(workflowParts[1]);
 
-        foreach (var domain in ExpectedCorrectnessDomains)
-            workflow.Should().Contain($"domain: {domain}");
-        foreach (var domain in ExpectedPerformanceDomains)
-            workflow.Should().Contain($"domain: {domain}");
+        correctnessDomains.Should().Equal(ExpectedCorrectnessDomains);
+        performanceDomains.Should().Equal(ExpectedPerformanceDomains);
+
+        correctnessDomains.Count.Should().BeGreaterThan(70);
+        performanceDomains.Count.Should().BeGreaterThan(15);
 
         workflow.Should().Contain("FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath");
         workflow.Should().Contain("FullyQualifiedName~ApiJob");
@@ -317,35 +314,62 @@ public sealed class TestHarnessArchitectureTests
         bypassActors[0].GetProperty("actor_type").GetString().Should().Be("RepositoryRole");
         bypassActors[0].GetProperty("bypass_mode").GetString().Should().Be("always");
 
-        var requiredChecks = rootElement
+        var rules = rootElement
             .GetProperty("rules")
             .EnumerateArray()
+            .ToList();
+        var ruleTypes = rules.Select(rule => rule.GetProperty("type").GetString()).ToArray();
+        ruleTypes.Should().Contain("required_status_checks");
+        ruleTypes.Should().Contain("pull_request");
+        ruleTypes.Should().Contain("code_quality");
+        ruleTypes.Should().Contain("code_scanning");
+
+        var statusRuleParameters = rules
             .Single(rule => rule.GetProperty("type").GetString() == "required_status_checks")
-            .GetProperty("parameters")
+            .GetProperty("parameters");
+        statusRuleParameters
+            .GetProperty("strict_required_status_checks_policy")
+            .GetBoolean()
+            .Should()
+            .BeTrue();
+        statusRuleParameters
+            .GetProperty("do_not_enforce_on_create")
+            .GetBoolean()
+            .Should()
+            .BeFalse();
+
+        var requiredChecks = statusRuleParameters
             .GetProperty("required_status_checks")
             .EnumerateArray()
             .Select(e => e.GetProperty("context").GetString())
             .ToList();
 
-        var expectedChecks = ExpectedCorrectnessDomains
-            .Select(domain => $"Correctness / {domain}")
-            .Concat(ExpectedPerformanceDomains.Select(domain => $"Performance / {domain}"))
-            .ToArray();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
+        var expectedChecks = ExtractRequiredCheckContextsFromWorkflow(workflow);
 
-        requiredChecks.Should().BeEquivalentTo(expectedChecks);
+        expectedChecks.Count.Should().BeGreaterThan(90);
+        requiredChecks.Should().Equal(expectedChecks);
     }
 
-    private static int CountOccurrences(string text, string value)
+    private static IReadOnlyList<string> ExtractRequiredCheckContextsFromWorkflow(string workflow)
     {
-        var count = 0;
-        var index = 0;
-        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
-        {
-            count++;
-            index += value.Length;
-        }
+        var workflowParts = workflow.Split("  performance:", StringSplitOptions.None);
+        workflowParts.Should().HaveCount(2);
+        return ExtractWorkflowDomains(workflowParts[0])
+            .Select(domain => $"Correctness / {domain}")
+            .Concat(ExtractWorkflowDomains(workflowParts[1]).Select(domain => $"Performance / {domain}"))
+            .ToArray();
+    }
 
-        return count;
+    private static IReadOnlyList<string> ExtractWorkflowDomains(string workflowPart)
+    {
+        const string marker = "- domain: ";
+        return workflowPart
+            .Split('\n')
+            .Select(line => line.Trim())
+            .Where(line => line.StartsWith(marker, StringComparison.Ordinal))
+            .Select(line => line[marker.Length..].Trim().Trim('\'', '"'))
+            .ToArray();
     }
 
     private static IConfigurationRoot LoadTemplate(string path) =>
