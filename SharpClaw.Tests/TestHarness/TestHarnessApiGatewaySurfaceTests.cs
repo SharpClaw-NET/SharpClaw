@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Net;
 using System.Net.Sockets;
 using System.Text;
@@ -143,6 +144,28 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         sse.Should().Contain("gateway-real-before");
         sse.Should().Contain("event: Done");
         sse.Should().Contain("gateway-real-after");
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_StreamingOverhead_GatewaySseProxy1000TinyChunks_Under500ms()
+    {
+        var channelId = Guid.NewGuid();
+        await using var internalApi = await StartInternalSseServerAsync(channelId, textDeltaCount: 1000);
+        await using var gateway = await StartGatewayProxyAsync(internalApi.Urls.Single());
+
+        using var client = new HttpClient
+        {
+            BaseAddress = new Uri(gateway.Urls.Single())
+        };
+
+        var sw = Stopwatch.StartNew();
+        var sse = await client.GetStringAsync($"/api/channels/{channelId}/chat/stream?message=via-gateway");
+        sw.Stop();
+
+        CountOccurrences(sse, "event: TextDelta").Should().Be(1000);
+        sse.Should().Contain("event: Done");
+        sw.ElapsedMilliseconds.Should().BeLessThanOrEqualTo(500);
     }
 
     [Test]
@@ -689,7 +712,9 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             JobCost: new TokenUsageResponse(1, 2, 3),
             ChannelCost: new ChannelCostResponse(channelId, 1, 2, 3, []));
 
-    private static async Task<WebApplication> StartInternalSseServerAsync(Guid expectedChannelId)
+    private static async Task<WebApplication> StartInternalSseServerAsync(
+        Guid expectedChannelId,
+        int textDeltaCount = 1)
     {
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseUrls($"http://127.0.0.1:{GetFreeTcpPort()}");
@@ -699,8 +724,12 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             channelId.Should().Be(expectedChannelId);
             context.Request.Query["message"].ToString().Should().Be("via-gateway");
             context.Response.ContentType = "text/event-stream";
-            await context.Response.WriteAsync("event: TextDelta\n");
-            await context.Response.WriteAsync("""data: {"type":"TextDelta","delta":"gateway-real-before"}""" + "\n\n");
+            for (var i = 0; i < textDeltaCount; i++)
+            {
+                await context.Response.WriteAsync("event: TextDelta\n");
+                await context.Response.WriteAsync(
+                    $$"""data: {"type":"TextDelta","delta":"gateway-real-before-{{i}}"}""" + "\n\n");
+            }
             await context.Response.Body.FlushAsync();
             await context.Response.WriteAsync("event: Done\n");
             await context.Response.WriteAsync("""data: {"type":"Done","finalResponse":{"assistantMessage":{"role":"assistant","content":"gateway-real-after","createdAt":"2026-01-01T00:00:00Z"}}}""" + "\n\n");
@@ -735,6 +764,19 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         {
             listener.Stop();
         }
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private sealed class RecordingResponseHandler(HttpResponseMessage response) : HttpMessageHandler

@@ -40,6 +40,7 @@ public sealed class TestHarnessPerformanceTierTests
     private static readonly ConcurrentDictionary<string, Lazy<Task<SurfaceLatencyMeasurement>>> LatencyMeasurements = new();
     private static readonly ConcurrentDictionary<string, Lazy<Task<StreamingSurfaceSetMeasurement>>> SurfaceSetMeasurements = new();
     private static readonly ConcurrentDictionary<string, Lazy<Task<ToolRoundTripMeasurement>>> ToolMeasurements = new();
+    private static readonly ConcurrentDictionary<string, Lazy<Task<AccessibleThreadsLoadMeasurement>>> AccessibleMeasurements = new();
 
     [TestCaseSource(nameof(StreamingAllSurfaceTiers))]
     [Category(HarnessTestCategories.PerformanceDiagnostic)]
@@ -172,6 +173,14 @@ public sealed class TestHarnessPerformanceTierTests
     }
 
     [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_StreamingOverhead_ApiSse1000TinyChunks_Under250ms()
+    {
+        var measured = await MeasureApiSseAsync(Enumerable.Repeat("x", 1000).ToArray());
+        measured.SharpClawOverheadMs.Should().BeLessThanOrEqualTo(250, measured.Describe());
+    }
+
+    [Test]
     [Category(HarnessTestCategories.PerformanceDiagnostic)]
     public async Task StreamingOverhead_FewLargeChunksVersusManyTinyChunks_WithinSameBand()
     {
@@ -230,6 +239,19 @@ public sealed class TestHarnessPerformanceTierTests
     {
         var measured = await CachedAsync("accessible-0", MeasureAccessibleThreadsZeroAsync);
         measured.Should().BeLessThanOrEqualTo(10);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_AccessibleThreads_List_1000Threads_ColdAndRepeatUnder500ms()
+    {
+        var measured = await CachedAccessibleThreadsAsync(
+            "accessible-1000",
+            () => MeasureAccessibleThreadsLoadAsync(1000));
+
+        measured.ResultCount.Should().Be(1000);
+        measured.ColdMs.Should().BeLessThanOrEqualTo(500, measured.Describe());
+        measured.RepeatMs.Should().BeLessThanOrEqualTo(500, measured.Describe());
     }
 
     [TestCase(5)]
@@ -500,8 +522,26 @@ public sealed class TestHarnessPerformanceTierTests
     [Category(HarnessTestCategories.PerformanceGate)]
     public async Task PerformanceGate_DirectJobSummaries_OneHundredJobs_Under25ms()
     {
-        var measured = await CachedAsync("direct-job-summaries-100", MeasureDirectJobSummariesAsync);
+        var measured = await CachedAsync("direct-job-summaries-100", () => MeasureDirectJobSummariesAsync(100, 8_000));
         measured.Should().BeLessThanOrEqualTo(25);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJobSummaries_OneThousandJobsLargeBodies_Under250ms()
+    {
+        var measured = await CachedAsync(
+            "direct-job-summaries-1000",
+            () => MeasureDirectJobSummariesAsync(1000, 16_000));
+        measured.Should().BeLessThanOrEqualTo(250);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJob_TwentyParallelAllowedNoOpJobs_Under250ms()
+    {
+        var measured = await CachedAsync("direct-job-parallel-20", MeasureTwentyParallelAllowedJobsAsync);
+        measured.Should().BeLessThanOrEqualTo(250);
     }
 
     private static IEnumerable<TestCaseData> StreamingAllSurfaceTiers()
@@ -557,6 +597,11 @@ public sealed class TestHarnessPerformanceTierTests
         string key,
         Func<Task<ToolRoundTripMeasurement>> factory) =>
         ToolMeasurements.GetOrAdd(key, _ => new Lazy<Task<ToolRoundTripMeasurement>>(factory)).Value;
+
+    private static Task<AccessibleThreadsLoadMeasurement> CachedAccessibleThreadsAsync(
+        string key,
+        Func<Task<AccessibleThreadsLoadMeasurement>> factory) =>
+        AccessibleMeasurements.GetOrAdd(key, _ => new Lazy<Task<AccessibleThreadsLoadMeasurement>>(factory)).Value;
 
     private static void AssertHotPathBudget(HotPathSampleMeasurement measured, string surface)
     {
@@ -671,6 +716,60 @@ public sealed class TestHarnessPerformanceTierTests
         sw.Stop();
         return SurfaceLatencyMeasurement.FromProviderTiming(
             "sse",
+            sw.ElapsedMilliseconds,
+            host.Harness.ProviderTimings.Last());
+    }
+
+    private static async Task<SurfaceLatencyMeasurement> MeasureApiSseAsync(IReadOnlyList<string> chunks)
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.StreamingProviderKey,
+            agentSystemPrompt: "p",
+            disableToolSchemas: true);
+        await WarmSseAsync(host);
+        seeded = await host.SeedChatAsync(
+            TestHarnessConstants.StreamingProviderKey,
+            agentSystemPrompt: "p",
+            disableToolSchemas: true);
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.StreamingProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn
+                    {
+                        Content = null,
+                        StreamingChunks = chunks,
+                        CompletionDelayMs = 0
+                    }
+                ]
+            });
+        var context = new DefaultHttpContext();
+        await using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        var sw = Stopwatch.StartNew();
+        await ChatStreamHandlers.StreamChat(
+            context,
+            seeded.Channel.Id,
+            new ChatRequest("sse tiny chunks"),
+            host.Chat,
+            NullLoggerFactory.Instance);
+        sw.Stop();
+
+        body.Position = 0;
+        var sse = await new StreamReader(body).ReadToEndAsync();
+        CountOccurrences(sse, "event: TextDelta").Should().Be(chunks.Count);
+        sse.Should().Contain("event: Done");
+
+        return SurfaceLatencyMeasurement.FromProviderTiming(
+            "api sse",
             sw.ElapsedMilliseconds,
             host.Harness.ProviderTimings.Last());
     }
@@ -856,6 +955,42 @@ public sealed class TestHarnessPerformanceTierTests
         return sw.ElapsedMilliseconds;
     }
 
+    private static async Task<AccessibleThreadsLoadMeasurement> MeasureAccessibleThreadsLoadAsync(int threadCount)
+    {
+        await using var fixture = AccessibleThreadsFixture.Create();
+        var (agentId, channelId) = await fixture.SeedThreadScenarioAsync(threadCount);
+        using var doc = JsonDocument.Parse("{}");
+
+        var coldSw = Stopwatch.StartNew();
+        var cold = await fixture.Module.ExecuteInlineToolAsync(
+            "list_accessible_threads",
+            doc.RootElement,
+            new InlineToolContext(agentId, channelId, null, "cold"),
+            fixture.Services,
+            default);
+        coldSw.Stop();
+
+        var repeatSw = Stopwatch.StartNew();
+        var repeat = await fixture.Module.ExecuteInlineToolAsync(
+            "list_accessible_threads",
+            doc.RootElement,
+            new InlineToolContext(agentId, channelId, null, "repeat"),
+            fixture.Services,
+            default);
+        repeatSw.Stop();
+
+        using var parsed = JsonDocument.Parse(repeat);
+        var resultCount = parsed.RootElement.GetArrayLength();
+        resultCount.Should().Be(threadCount);
+        cold.Should().Contain("Thread 0000");
+
+        return new AccessibleThreadsLoadMeasurement(
+            threadCount,
+            resultCount,
+            coldSw.ElapsedMilliseconds,
+            repeatSw.ElapsedMilliseconds);
+    }
+
     private static async Task<long> MeasureInlinePermissionCheckAsync()
     {
         await using var host = ChatHarnessHost.Create();
@@ -969,7 +1104,8 @@ public sealed class TestHarnessPerformanceTierTests
         var seeded = await host.SeedChatAsync(
             TestHarnessConstants.PlainProviderKey,
             agentSystemPrompt: "p",
-            customHeader: dynamicEnabled ? "h {{agent-name}} {{testharness}}\n" : null);
+            customHeader: dynamicEnabled ? "h {{agent-name}} {{testharness}}\n" : null,
+            disableToolSchemas: true);
         await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("warm one"));
         await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("warm two"));
         await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("warm three"));
@@ -998,7 +1134,8 @@ public sealed class TestHarnessPerformanceTierTests
             var seeded = await host.SeedChatAsync(
                 TestHarnessConstants.PlainProviderKey,
                 agentSystemPrompt: "p",
-                customHeader: dynamicEnabled ? "h {{agent-name}} {{testharness}}\n" : null);
+                customHeader: dynamicEnabled ? "h {{agent-name}} {{testharness}}\n" : null,
+                disableToolSchemas: true);
 
             await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("warm one"));
             await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("warm two"));
@@ -1080,13 +1217,13 @@ public sealed class TestHarnessPerformanceTierTests
         return sw.ElapsedMilliseconds;
     }
 
-    private static async Task<long> MeasureDirectJobSummariesAsync()
+    private static async Task<long> MeasureDirectJobSummariesAsync(int jobCount, int resultBytes)
     {
         await using var host = ChatHarnessHost.Create();
         var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
         var now = DateTimeOffset.UtcNow;
 
-        for (var i = 0; i < 100; i++)
+        for (var i = 0; i < jobCount; i++)
         {
             host.Db.AgentJobs.Add(new AgentJobDB
             {
@@ -1096,7 +1233,7 @@ public sealed class TestHarnessPerformanceTierTests
                 ActionKey = TestHarnessConstants.JobPermissionedTool,
                 Status = AgentJobStatus.Completed,
                 EffectiveClearance = PermissionClearance.Independent,
-                ResultData = new string('x', 8_000),
+                ResultData = new string('x', resultBytes),
                 ScriptJson = """{"result":""}""",
                 CreatedAt = now.AddMilliseconds(i),
                 UpdatedAt = now.AddMilliseconds(i),
@@ -1113,12 +1250,73 @@ public sealed class TestHarnessPerformanceTierTests
         var summaries = await svc.ListSummariesAsync(seeded.Channel.Id);
         sw.Stop();
 
-        summaries.Should().HaveCount(100);
+        summaries.Should().HaveCount(jobCount);
+        JsonSerializer.Serialize(summaries).Should().NotContain(new string('x', Math.Min(resultBytes, 100)));
         return sw.ElapsedMilliseconds;
+    }
+
+    private static async Task<long> MeasureTwentyParallelAllowedJobsAsync()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+        await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":""}"""));
+
+        host.Harness.Reset();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "" });
+
+        var sw = Stopwatch.StartNew();
+        var tasks = Enumerable.Range(0, 20)
+            .Select(async _ =>
+            {
+                await using var scope = host.CreateScope();
+                var scopedSvc = scope.ServiceProvider.GetRequiredService<AgentJobService>();
+                return await scopedSvc.SubmitAsync(
+                    seeded.Channel.Id,
+                    new SubmitAgentJobRequest(
+                        ActionKey: TestHarnessConstants.JobPermissionedTool,
+                        ScriptJson: """{"result":""}"""));
+            })
+            .ToArray();
+        var results = await Task.WhenAll(tasks);
+        sw.Stop();
+
+        results.Should().OnlyContain(r => r.Status == AgentJobStatus.Completed);
+        return sw.ElapsedMilliseconds;
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 }
 
 internal sealed record ToolRoundTripMeasurement(long ClientVisibleMs, long ProviderActualMs);
+
+internal sealed record AccessibleThreadsLoadMeasurement(
+    int ExpectedCount,
+    int ResultCount,
+    long ColdMs,
+    long RepeatMs)
+{
+    public string Describe() =>
+        $"expectedCount={ExpectedCount}, resultCount={ResultCount}, coldMs={ColdMs}, repeatMs={RepeatMs}";
+}
 
 internal sealed record HotPathSampleMeasurement(string Name, IReadOnlyList<double> SamplesMs)
 {
@@ -1219,7 +1417,10 @@ file sealed class AccessibleThreadsFixture : IAsyncDisposable
         return new AccessibleThreadsFixture(provider, provider.CreateAsyncScope(), module);
     }
 
-    public async Task<(Guid AgentId, Guid ChannelId)> SeedZeroThreadScenarioAsync()
+    public Task<(Guid AgentId, Guid ChannelId)> SeedZeroThreadScenarioAsync() =>
+        SeedThreadScenarioAsync(0);
+
+    public async Task<(Guid AgentId, Guid ChannelId)> SeedThreadScenarioAsync(int threadCount)
     {
         var now = DateTimeOffset.UtcNow;
         var permissionSet = new PermissionSetDB
@@ -1278,6 +1479,17 @@ file sealed class AccessibleThreadsFixture : IAsyncDisposable
         Db.Roles.Add(role);
         Db.Agents.Add(agent);
         Db.Channels.AddRange(current, source);
+        for (var i = 0; i < threadCount; i++)
+        {
+            Db.ChatThreads.Add(new ChatThreadDB
+            {
+                Id = Guid.NewGuid(),
+                ChannelId = source.Id,
+                Name = $"Thread {i:D4}",
+                CreatedAt = now.AddMilliseconds(i),
+                UpdatedAt = now.AddMilliseconds(i)
+            });
+        }
         await Db.SaveChangesAsync();
         return (agent.Id, current.Id);
     }
