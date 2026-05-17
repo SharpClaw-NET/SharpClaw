@@ -79,10 +79,13 @@ public static class ChatStreamProxy
             return;
         }
 
-        context.Response.StatusCode = (int)response.StatusCode;
-        context.Response.ContentType = "application/json";
-        var content = await response.Content.ReadAsStringAsync(context.RequestAborted);
-        await context.Response.WriteAsync(content, context.RequestAborted);
+        using (response)
+        {
+            context.Response.StatusCode = (int)response.StatusCode;
+            context.Response.ContentType = "application/json";
+            var content = await response.Content.ReadAsStringAsync(context.RequestAborted);
+            await context.Response.WriteAsync(content, context.RequestAborted);
+        }
     }
 
     private static async Task ProxySse(HttpContext context, string internalPath)
@@ -114,26 +117,24 @@ public static class ChatStreamProxy
             return;
         }
 
-        context.Response.ContentType = "text/event-stream";
-        context.Response.Headers.CacheControl = "no-cache";
-        context.Response.Headers.Connection = "keep-alive";
-
-        await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
-        using var reader = new StreamReader(stream);
-
-        try
+        using (response)
         {
-            while (!context.RequestAborted.IsCancellationRequested)
+            context.Response.StatusCode = (int)response.StatusCode;
+            context.Response.ContentType = "text/event-stream";
+            context.Response.Headers.CacheControl = "no-cache";
+            context.Response.Headers.Connection = "keep-alive";
+
+            await using var stream = await response.Content.ReadAsStreamAsync(context.RequestAborted);
+
+            try
             {
-                var line = await reader.ReadLineAsync(context.RequestAborted);
-                if (line is null) break;
-                await context.Response.WriteAsync(line + "\n", context.RequestAborted);
+                await stream.CopyToAsync(context.Response.Body, context.RequestAborted);
                 await context.Response.Body.FlushAsync(context.RequestAborted);
             }
-        }
-        catch (OperationCanceledException)
-        {
-            // Client disconnected
+            catch (OperationCanceledException)
+            {
+                // Client disconnected
+            }
         }
     }
 }

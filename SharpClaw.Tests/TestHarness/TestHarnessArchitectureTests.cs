@@ -11,6 +11,107 @@ namespace SharpClaw.Tests.TestHarness;
 [TestFixture]
 public sealed class TestHarnessArchitectureTests
 {
+    private static readonly string[] ExpectedCorrectnessDomains =
+    [
+        "API Key Provider",
+        "Architecture Core Dependencies",
+        "Architecture Module Dependencies",
+        "Clients Finish Reasons",
+        "Core Header Tags",
+        "Core Chat Cache",
+        "Cross Thread History",
+        "CLI Channel Commands",
+        "CLI REPL",
+        "Gateway Abstraction Boundaries",
+        "Gateway Internal API Client",
+        "Gateway Synthetic Modules",
+        "Gateway Endpoint Catalog",
+        "Gateway Endpoint Toggles",
+        "Gateway Route Parity",
+        "Gateway Lifecycle",
+        "Gateway Hot Reload",
+        "Gateway Chat Surface",
+        "Gateway Chat Errors And Cancellation",
+        "API Job Contracts",
+        "Gateway Job Contracts",
+        "Frontend Instances",
+        "Frontend Gateway Process",
+        "Frontend Uno Client State",
+        "Persistence Files",
+        "Persistence Cold Store",
+        "Persistence Integrity",
+        "Persistence Transactions",
+        "Persistence Instances",
+        "Providers Capabilities",
+        "Providers Hosted OpenAI Compatible",
+        "Providers Google",
+        "LlamaSharp Schema Conversion",
+        "LlamaSharp Parameter Validation",
+        "LlamaSharp Tool Calling",
+        "LlamaSharp Local Inference",
+        "Tasks Scripts Compiler Parser",
+        "Tasks Scripts Semantics Validator",
+        "Tasks Step Keys",
+        "Tasks Execution Lifecycle",
+        "Tasks Shared Data",
+        "Tasks Triggers",
+        "Chat Prompt Surface",
+        "Chat Tool Permissions",
+        "Chat Costs And Budgets",
+        "Chat Thread History",
+        "Chat Thread Concurrency",
+        "Chat Agent Selection",
+        "Chat Prompt Assembly",
+        "Chat Streaming",
+        "Jobs Direct",
+        "Jobs Lifecycle",
+        "Jobs Streaming",
+        "Tools Inline Permissions",
+        "Tools Arguments Output And Latency",
+        "Tools Provider Stream Bulk",
+        "Tools Provider Stream Cache",
+        "Tools Provider Stream Lifecycle",
+        "Costs Job Accounting",
+        "Costs Streaming",
+        "Costs Multi Agent",
+        "Costs Module Hooks",
+        "Cache Header Invalidations",
+        "Cache Tool Settings",
+        "Agent Orchestration Access",
+        "Agent Orchestration History",
+        "Defaults Mutations",
+        "Defaults Resource Resolution",
+        "Module API Host Startup",
+        "Module Bundled Outputs",
+        "Module External Lifecycle",
+        "Module Harness Integration",
+        "Module Harness Cost And Matrix",
+        "Module Contracts Architecture",
+        "Provider Registration"
+    ];
+
+    private static readonly string[] ExpectedPerformanceDomains =
+    [
+        "Streaming End To End",
+        "Streaming API",
+        "Streaming Gateway",
+        "Streaming Concurrency",
+        "Chat Non Streaming",
+        "Chat Concurrent Throughput",
+        "Chat Sequential Warm Cache",
+        "Jobs Direct Actions",
+        "Jobs Summaries",
+        "Jobs Parallel",
+        "Tools Permission Checks",
+        "Tools Provider Stream Serial",
+        "Tools Provider Stream Parallel",
+        "Accessible Threads",
+        "Prompt Assembly",
+        "Cost Lookup",
+        "Provider Resolution",
+        "Cold Chat Cache"
+    ];
+
     [Test]
     public void ProductionTemplateDisablesHarnessAndDevTemplateEnablesIt()
     {
@@ -127,28 +228,59 @@ public sealed class TestHarnessArchitectureTests
 
         workflow.Should().Contain("name: Correctness / ${{ matrix.domain }}");
         workflow.Should().Contain("name: Performance / ${{ matrix.domain }}");
-        workflow.Should().Contain("domain: Chat");
-        workflow.Should().Contain("domain: Jobs");
-        workflow.Should().Contain("domain: Tools");
-        workflow.Should().Contain("domain: Costs");
-        workflow.Should().Contain("domain: Cache");
-        workflow.Should().Contain("domain: Agent Orchestration");
-        workflow.Should().Contain("domain: Defaults");
-        workflow.Should().Contain("domain: Module Contracts");
-        workflow.Should().Contain("domain: Provider Registration");
-        workflow.Should().Contain("FullyQualifiedName~TestHarnessApiGatewaySurfaceTests");
-        workflow.Should().Contain("FullyQualifiedName~TestHarnessCacheBehaviorTests");
-        workflow.Should().Contain("domain: Providers");
-        workflow.Should().Contain("domain: Persistence");
-        workflow.Should().Contain("domain: Streaming");
-        workflow.Should().Contain("domain: Chat Throughput");
-        workflow.Should().Contain("domain: Cache and Resolution");
+
+        var workflowParts = workflow.Split("  performance:", StringSplitOptions.None);
+        workflowParts.Should().HaveCount(2);
+        CountOccurrences(workflowParts[0], "          - domain: ")
+            .Should()
+            .Be(ExpectedCorrectnessDomains.Length);
+        CountOccurrences(workflowParts[1], "          - domain: ")
+            .Should()
+            .Be(ExpectedPerformanceDomains.Length);
+
+        foreach (var domain in ExpectedCorrectnessDomains)
+            workflow.Should().Contain($"domain: {domain}");
+        foreach (var domain in ExpectedPerformanceDomains)
+            workflow.Should().Contain($"domain: {domain}");
+
+        workflow.Should().Contain("FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath");
+        workflow.Should().Contain("FullyQualifiedName~ApiJob");
+        workflow.Should().Contain("FullyQualifiedName~EffectiveToolDefinitionsStayWarmUntilAgentToolSettingsChange");
+        workflow.Should().Contain("FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LocalInference");
         workflow.Should().Contain("FullyQualifiedName~PerformanceGate_ColdChatAfterCacheClear");
         workflow.Should().Contain("--filter \"TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})\"");
         workflow.Should().Contain("--filter \"TestCategory=PerformanceGate&(${{ matrix.filter }})\"");
         workflow.Should().NotContain("name: Performance Diagnostics");
         workflow.Should().NotContain("name: Correctness Tests");
         workflow.Should().NotContain("name: Performance Gates");
+        workflow.Should().NotContain("domain: Core\n");
+        workflow.Should().NotContain("domain: Gateway\n");
+        workflow.Should().NotContain("domain: Frontend\n");
+        workflow.Should().NotContain("domain: Persistence\n");
+        workflow.Should().NotContain("domain: Providers\n");
+        workflow.Should().NotContain("domain: Tasks\n");
+        workflow.Should().NotContain("domain: Chat\n");
+        workflow.Should().NotContain("domain: Jobs\n");
+        workflow.Should().NotContain("domain: Tools\n");
+        workflow.Should().NotContain("domain: Costs\n");
+        workflow.Should().NotContain("domain: Cache\n");
+        workflow.Should().NotContain("domain: Streaming\n");
+        workflow.Should().NotContain("domain: Gateway Abstractions\n");
+        workflow.Should().NotContain("domain: Gateway Routing\n");
+        workflow.Should().NotContain("domain: Gateway Harness Surface\n");
+        workflow.Should().NotContain("domain: Frontend Runtime\n");
+        workflow.Should().NotContain("domain: Providers Local LlamaSharp\n");
+        workflow.Should().NotContain("domain: Tasks Scripts\n");
+        workflow.Should().NotContain("domain: Tasks Lifecycle\n");
+        workflow.Should().NotContain("domain: Chat Pipeline\n");
+        workflow.Should().NotContain("domain: Tools Correctness\n");
+        workflow.Should().NotContain("domain: Tools Repeated Interactions\n");
+        workflow.Should().NotContain("domain: Cache Correctness\n");
+        workflow.Should().NotContain("domain: Defaults Resources\n");
+        workflow.Should().NotContain("domain: Module Packaging\n");
+        workflow.Should().NotContain("domain: Module Contracts Harness\n");
+        workflow.Should().NotContain("domain: Chat Throughput\n");
+        workflow.Should().NotContain("domain: Cache and Resolution");
         workflow.Should().NotContain("domain: Agent Orchestration and Defaults");
         workflow.Should().NotContain("SHARPCLAW_RUN_PERF_DIAGNOSTICS");
         workflow.Should().NotContain("--filter \"TestCategory=PerformanceDiagnostic\"");
@@ -195,33 +327,25 @@ public sealed class TestHarnessArchitectureTests
             .Select(e => e.GetProperty("context").GetString())
             .ToList();
 
-        var expectedChecks = new[]
-        {
-            "Correctness / Core",
-            "Correctness / CLI Commands",
-            "Correctness / CLI REPL",
-            "Correctness / Gateway",
-            "Correctness / Frontend",
-            "Correctness / Persistence",
-            "Correctness / Providers",
-            "Correctness / Tasks",
-            "Correctness / Chat",
-            "Correctness / Jobs",
-            "Correctness / Tools",
-            "Correctness / Costs",
-            "Correctness / Cache",
-            "Correctness / Agent Orchestration",
-            "Correctness / Defaults",
-            "Correctness / Module Contracts",
-            "Correctness / Provider Registration",
-            "Performance / Streaming",
-            "Performance / Chat Throughput",
-            "Performance / Jobs",
-            "Performance / Tools",
-            "Performance / Cache and Resolution",
-        };
+        var expectedChecks = ExpectedCorrectnessDomains
+            .Select(domain => $"Correctness / {domain}")
+            .Concat(ExpectedPerformanceDomains.Select(domain => $"Performance / {domain}"))
+            .ToArray();
 
         requiredChecks.Should().BeEquivalentTo(expectedChecks);
+    }
+
+    private static int CountOccurrences(string text, string value)
+    {
+        var count = 0;
+        var index = 0;
+        while ((index = text.IndexOf(value, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += value.Length;
+        }
+
+        return count;
     }
 
     private static IConfigurationRoot LoadTemplate(string path) =>
