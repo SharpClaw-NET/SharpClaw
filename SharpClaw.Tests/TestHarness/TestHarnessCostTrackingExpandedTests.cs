@@ -1,7 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Services;
+using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Modules.TestHarness;
@@ -164,6 +166,140 @@ public sealed class TestHarnessCostTrackingExpandedTests
         result!.TotalCost.Should().Be(12.34m);
         result.CostApiSupported.Should().BeTrue();
         host.Harness.CostCalls.Should().ContainSingle();
+    }
+
+    [Test]
+    public async Task DirectJobSubmissionCompletesAndListSummariesStayLightweight()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "direct-ok" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var job = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"direct-ok"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Completed);
+        job.ResultData.Should().Be("direct-ok");
+        job.StartedAt.Should().NotBeNull();
+        job.CompletedAt.Should().NotBeNull();
+        job.Logs.Select(l => l.Message).Should().Contain(m => m.Contains("Job completed successfully"));
+        host.Harness.ToolCalls.Should().ContainSingle()
+            .Which.JobId.Should().Be(job.Id);
+
+        host.PersistenceCounter.Reset();
+        var summaries = await svc.ListSummariesAsync(seeded.Channel.Id);
+
+        summaries.Should().ContainSingle()
+            .Which.Status.Should().Be(AgentJobStatus.Completed);
+        host.PersistenceCounter.QueryCalls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task DirectJobDeniedStopsBeforeModuleInvocation()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var job = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"should-not-run"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Denied);
+        job.CompletedAt.Should().BeNull();
+        job.ResultData.Should().BeNull();
+        job.Logs.Should().Contain(l =>
+            l.Level == JobLogLevels.Warning
+            && l.Message.Contains("Denied", StringComparison.OrdinalIgnoreCase));
+        host.Harness.ToolCalls.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task DirectJobFailureCapturesErrorAndFailedToolCall()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var job = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"fail":true}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Failed);
+        job.CompletedAt.Should().NotBeNull();
+        job.ErrorLog.Should().Contain("test harness tool failure");
+        job.Logs.Should().Contain(l => l.Level == JobLogLevels.Error);
+        host.Harness.ToolCalls.Should().ContainSingle()
+            .Which.Failed.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task LongRunningDirectJobPauseResumeStopAndCompletedCancelAreStable()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var started = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"started","remainExecuting":true}"""));
+
+        started.Status.Should().Be(AgentJobStatus.Executing);
+        started.CompletedAt.Should().BeNull();
+        started.ResultData.Should().Be("started");
+
+        var paused = await svc.PauseAsync(started.Id);
+        paused!.Status.Should().Be(AgentJobStatus.Paused);
+
+        var resumed = await svc.ResumeAsync(started.Id);
+        resumed!.Status.Should().Be(AgentJobStatus.Executing);
+
+        var stopped = await svc.StopAsync(started.Id);
+        stopped!.Status.Should().Be(AgentJobStatus.Completed);
+        stopped.CompletedAt.Should().NotBeNull();
+
+        var cancelCompleted = await svc.CancelAsync(started.Id);
+        cancelCompleted!.Status.Should().Be(AgentJobStatus.Completed);
+        cancelCompleted.Logs.Should().Contain(l =>
+            l.Message.Contains("Cancel rejected", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
+    public async Task DirectStreamingJobToolConcatenatesChunksIntoResult()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigureStreamingJobTool(new TestHarnessToolBehavior { Result = "stream-direct" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var job = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobStreamingTool,
+                ScriptJson: """{"result":"stream-direct"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Completed);
+        job.ResultData.Should().Be("stream-direct");
+        host.Harness.ToolCalls.Should().ContainSingle()
+            .Which.Kind.Should().Be("job-streaming");
     }
 
     private static void ConfigureJobToolThenFinal(

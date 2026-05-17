@@ -11,7 +11,11 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SharpClaw.Application.API.Handlers;
+using SharpClaw.Application.Services;
+using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
@@ -74,7 +78,7 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         int expectedGatewayStatus,
         string expectedError)
     {
-        var controller = CreateGatewayController(new HttpResponseMessage(internalStatus));
+        var controller = CreateGatewayChatController(new HttpResponseMessage(internalStatus));
 
         var result = await controller.Send(Guid.NewGuid(), new ChatRequest("error"), default);
 
@@ -178,6 +182,103 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             .Should().BeFalse();
     }
 
+    [Test]
+    public async Task ApiJobSubmitAttachesChannelCostToJobResponse()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "api-job-ok" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("warm channel cost"));
+
+        var job = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Submit(
+                seeded.Channel.Id,
+                new SubmitAgentJobRequest(
+                    ActionKey: TestHarnessConstants.JobPermissionedTool,
+                    ScriptJson: """{"result":"api-job-ok"}"""),
+                host.Services.GetRequiredService<AgentJobService>(),
+                host.Chat));
+
+        job!.Status.Should().Be(AgentJobStatus.Completed);
+        job.ResultData.Should().Be("api-job-ok");
+        job.ChannelCost.Should().NotBeNull();
+        job.ChannelCost!.TotalTokens.Should().BeGreaterThan(0);
+    }
+
+    [Test]
+    public async Task GatewayJobSubmitForwardsStableJobResponse()
+    {
+        var channelId = Guid.NewGuid();
+        var agentId = Guid.NewGuid();
+        var response = new AgentJobResponse(
+            Guid.NewGuid(),
+            channelId,
+            agentId,
+            TestHarnessConstants.JobPermissionedTool,
+            null,
+            AgentJobStatus.Completed,
+            PermissionClearance.Independent,
+            "gateway-job-ok",
+            null,
+            [new AgentJobLogResponse("done", "Info", DateTimeOffset.UtcNow)],
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            JobCost: new TokenUsageResponse(1, 2, 3),
+            ChannelCost: new ChannelCostResponse(channelId, 1, 2, 3, []));
+        using var httpResponse = new HttpResponseMessage(HttpStatusCode.OK)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(response, JsonOptions), Encoding.UTF8, "application/json")
+        };
+        var controller = CreateGatewayJobController(httpResponse);
+
+        var result = await controller.Submit(
+            channelId,
+            new SubmitAgentJobRequest(ActionKey: TestHarnessConstants.JobPermissionedTool),
+            default);
+
+        var returned = result.Should().BeAssignableTo<OkObjectResult>().Subject
+            .Value.Should().BeAssignableTo<AgentJobResponse>().Subject;
+        returned.Status.Should().Be(AgentJobStatus.Completed);
+        returned.JobCost!.TotalTokens.Should().Be(3);
+        returned.ChannelCost!.TotalTokens.Should().Be(3);
+    }
+
+    [TestCase(HttpStatusCode.BadRequest, 400, "Invalid job request.")]
+    [TestCase(HttpStatusCode.ServiceUnavailable, 502, "Internal service unavailable.")]
+    public async Task GatewayJobSubmitErrorEnvelopeShapeIsStable(
+        HttpStatusCode internalStatus,
+        int expectedGatewayStatus,
+        string expectedError)
+    {
+        var controller = CreateGatewayJobController(new HttpResponseMessage(internalStatus));
+
+        var result = await controller.Submit(
+            Guid.NewGuid(),
+            new SubmitAgentJobRequest(ActionKey: TestHarnessConstants.JobPermissionedTool),
+            default);
+
+        var objectResult = result.Should().BeAssignableTo<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(expectedGatewayStatus);
+        JsonSerializer.Serialize(objectResult.Value).Should().Contain(expectedError);
+    }
+
+    [Test]
+    public async Task GatewayJobDetailNotFoundEnvelopeShapeIsStable()
+    {
+        var controller = CreateGatewayJobController(new HttpResponseMessage(HttpStatusCode.NotFound));
+
+        var result = await controller.GetById(Guid.NewGuid(), Guid.NewGuid(), default);
+
+        var objectResult = result.Should().BeAssignableTo<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(404);
+        JsonSerializer.Serialize(objectResult.Value).Should().Contain("Job not found.");
+    }
+
     private static void ConfigureSingleTurn(
         ChatHarnessHost host,
         string content,
@@ -254,7 +355,7 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         {
             Content = new StringContent(payload, Encoding.UTF8, "application/json")
         };
-        var controller = CreateGatewayController(httpResponse);
+        var controller = CreateGatewayChatController(httpResponse);
 
         var result = await controller.Send(channelId, request, default);
 
@@ -262,7 +363,13 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             .Value.Should().BeAssignableTo<ChatResponse>().Subject;
     }
 
-    private static ChatController CreateGatewayController(HttpResponseMessage response)
+    private static ChatController CreateGatewayChatController(HttpResponseMessage response) =>
+        new(CreateInternalApiClient(response));
+
+    private static AgentJobsController CreateGatewayJobController(HttpResponseMessage response) =>
+        new(CreateInternalApiClient(response));
+
+    private static InternalApiClient CreateInternalApiClient(HttpResponseMessage response)
     {
         var handler = new FixedResponseHandler(response);
         var client = new HttpClient(handler)
@@ -276,7 +383,7 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             Options.Create(new InternalApiOptions { ApiKey = "test-key", GatewayToken = "gateway-token" }),
             new HttpContextAccessor(),
             writer);
-        return new ChatController(api);
+        return api;
     }
 
     private static async Task<WebApplication> StartInternalSseServerAsync(Guid expectedChannelId)

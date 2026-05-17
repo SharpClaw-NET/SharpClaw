@@ -202,6 +202,22 @@ public sealed class TestHarnessModule : ISharpClawModule
         return StreamToolAsync(toolName, parameters, job, scopedServices, ct);
     }
 
+    public ModuleJobCompletionBehavior GetJobCompletionBehavior(
+        string toolName,
+        JsonElement parameters,
+        AgentJobContext job)
+    {
+        if (parameters.ValueKind == JsonValueKind.Object
+            && parameters.TryGetProperty("remainExecuting", out var remain)
+            && remain.ValueKind is JsonValueKind.True or JsonValueKind.False
+            && remain.GetBoolean())
+        {
+            return ModuleJobCompletionBehavior.RemainExecuting;
+        }
+
+        return ModuleJobCompletionBehavior.CompleteWhenExecutionReturns;
+    }
+
     private static async IAsyncEnumerable<string> StreamToolAsync(
         string toolName,
         JsonElement parameters,
@@ -426,6 +442,7 @@ public sealed class TestHarnessModule : ISharpClawModule
                 "payloadBytes": { "type": "integer" },
                 "fail": { "type": "boolean" },
                 "malformed": { "type": "boolean" },
+                "remainExecuting": { "type": "boolean" },
                 "result": { "type": "string" }
               },
               "additionalProperties": false

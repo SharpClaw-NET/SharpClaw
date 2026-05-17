@@ -3,7 +3,11 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Application.API.Handlers;
+using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Modules.TestHarness;
@@ -323,6 +327,121 @@ public sealed class TestHarnessChatPipelineTests
         var sse = await new StreamReader(body).ReadToEndAsync();
         sse.Should().Contain("event: TextDelta");
         sse.Should().Contain("event: Done");
+    }
+
+    [Test]
+    public async Task ThreadedChatSendsNewestHistoryWithinConfiguredMessageLimit()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var now = DateTimeOffset.UtcNow.AddMinutes(-10);
+        var thread = new ChatThreadDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "History Limit",
+            ChannelId = seeded.Channel.Id,
+            MaxMessages = 3,
+            CreatedAt = now,
+            UpdatedAt = now
+        };
+        host.Db.ChatThreads.Add(thread);
+        for (var i = 0; i < 5; i++)
+        {
+            host.Db.ChatMessages.Add(new ChatMessageDB
+            {
+                Id = Guid.NewGuid(),
+                Role = i % 2 == 0 ? ChatRoles.User : ChatRoles.Assistant,
+                Origin = i % 2 == 0 ? MessageOrigin.User : MessageOrigin.Assistant,
+                Content = $"history-{i}",
+                ChannelId = seeded.Channel.Id,
+                ThreadId = thread.Id,
+                CreatedAt = now.AddSeconds(i),
+                UpdatedAt = now.AddSeconds(i)
+            });
+        }
+
+        await host.Db.SaveChangesAsync();
+
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("current"),
+            thread.Id);
+
+        host.Harness.ProviderRequests.Single()
+            .Messages.Select(m => m.Content)
+            .Should().Equal("history-2", "history-3", "history-4", "current");
+    }
+
+    [Test]
+    public async Task RequestedAllowedAgentUsesThatAgentPromptAndSenderMetadata()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "primary system");
+        var other = new AgentDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "Allowed Harness Agent",
+            ModelId = seeded.Model.Id,
+            Model = seeded.Model,
+            RoleId = seeded.Role.Id,
+            Role = seeded.Role,
+            SystemPrompt = "allowed system",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        host.Db.Agents.Add(other);
+        seeded.Channel.AllowedAgents.Add(other);
+        await host.Db.SaveChangesAsync();
+
+        var response = await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("use allowed", AgentId: other.Id));
+
+        host.Harness.ProviderRequests.Single().SystemPrompt.Should().Be("allowed system");
+        response.AssistantMessage.SenderAgentId.Should().Be(other.Id);
+        response.AssistantMessage.SenderAgentName.Should().Be("Allowed Harness Agent");
+        response.AgentCost!.AgentId.Should().Be(other.Id);
+    }
+
+    [Test]
+    public async Task RequestedDisallowedAgentFailsBeforeProviderCall()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.PlainProviderKey);
+        var other = new AgentDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "Disallowed Harness Agent",
+            ModelId = seeded.Model.Id,
+            Model = seeded.Model,
+            RoleId = seeded.Role.Id,
+            Role = seeded.Role,
+            SystemPrompt = "blocked",
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        host.Db.Agents.Add(other);
+        await host.Db.SaveChangesAsync();
+
+        var act = () => host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("blocked", AgentId: other.Id));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*not allowed*");
+        host.Harness.ProviderRequests.Should().BeEmpty();
     }
 
     [Test]

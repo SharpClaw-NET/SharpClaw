@@ -16,6 +16,7 @@ using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
@@ -467,6 +468,30 @@ public sealed class TestHarnessPerformanceTierTests
         stats.Max.Should().BeLessThan(50);
         stats.P95.Should().BeLessThan(10);
         stats.P99.Should().BeLessThan(25);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJobAllowedWarmNoOp_Under25ms()
+    {
+        var measured = await CachedAsync("direct-job-allowed", MeasureDirectAllowedJobAsync);
+        measured.Should().BeLessThanOrEqualTo(25);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJobDeniedWarmNoOp_Under10ms()
+    {
+        var measured = await CachedAsync("direct-job-denied", MeasureDirectDeniedJobAsync);
+        measured.Should().BeLessThanOrEqualTo(10);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJobSummaries_OneHundredJobs_Under25ms()
+    {
+        var measured = await CachedAsync("direct-job-summaries-100", MeasureDirectJobSummariesAsync);
+        measured.Should().BeLessThanOrEqualTo(25);
     }
 
     private static IEnumerable<TestCaseData> StreamingAllSurfaceTiers()
@@ -932,6 +957,92 @@ public sealed class TestHarnessPerformanceTierTests
         for (var i = 0; i < 1_000; i++)
             factory.GetClient(TestHarnessConstants.PlainProviderKey);
         sw.Stop();
+        return sw.ElapsedMilliseconds;
+    }
+
+    private static async Task<long> MeasureDirectAllowedJobAsync()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":""}"""));
+        host.Harness.Reset();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "" });
+
+        var sw = Stopwatch.StartNew();
+        await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":""}"""));
+        sw.Stop();
+        return sw.ElapsedMilliseconds;
+    }
+
+    private static async Task<long> MeasureDirectDeniedJobAsync()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":""}"""));
+
+        var sw = Stopwatch.StartNew();
+        await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":""}"""));
+        sw.Stop();
+        return sw.ElapsedMilliseconds;
+    }
+
+    private static async Task<long> MeasureDirectJobSummariesAsync()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var now = DateTimeOffset.UtcNow;
+
+        for (var i = 0; i < 100; i++)
+        {
+            host.Db.AgentJobs.Add(new AgentJobDB
+            {
+                Id = Guid.NewGuid(),
+                AgentId = seeded.Agent.Id,
+                ChannelId = seeded.Channel.Id,
+                ActionKey = TestHarnessConstants.JobPermissionedTool,
+                Status = AgentJobStatus.Completed,
+                EffectiveClearance = PermissionClearance.Independent,
+                ResultData = new string('x', 8_000),
+                ScriptJson = """{"result":""}""",
+                CreatedAt = now.AddMilliseconds(i),
+                UpdatedAt = now.AddMilliseconds(i),
+                StartedAt = now.AddMilliseconds(i),
+                CompletedAt = now.AddMilliseconds(i + 1)
+            });
+        }
+        await host.Db.SaveChangesAsync();
+
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+        await svc.ListSummariesAsync(seeded.Channel.Id);
+
+        var sw = Stopwatch.StartNew();
+        var summaries = await svc.ListSummariesAsync(seeded.Channel.Id);
+        sw.Stop();
+
+        summaries.Should().HaveCount(100);
         return sw.ElapsedMilliseconds;
     }
 }

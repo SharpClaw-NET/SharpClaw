@@ -130,10 +130,12 @@ public sealed class TestHarnessArchitectureTests
         workflow.Should().Contain("domain: Chat");
         workflow.Should().Contain("domain: Jobs Tools Costs");
         workflow.Should().Contain("domain: Agent Orchestration and Defaults");
+        workflow.Should().Contain("FullyQualifiedName~TestHarnessApiGatewaySurfaceTests");
         workflow.Should().Contain("domain: Providers");
         workflow.Should().Contain("domain: Persistence");
         workflow.Should().Contain("domain: Streaming");
         workflow.Should().Contain("domain: Chat Throughput");
+        workflow.Should().Contain("domain: Jobs");
         workflow.Should().Contain("domain: Tools");
         workflow.Should().Contain("domain: Cache and Resolution");
         workflow.Should().Contain("--filter \"TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})\"");
