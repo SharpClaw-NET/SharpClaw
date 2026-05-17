@@ -1,3 +1,5 @@
+using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Services.Triggers;
@@ -9,14 +11,21 @@ namespace SharpClaw.Application.Core.Services.Triggers;
 /// </summary>
 public sealed class TaskTriggerSourceRegistry(
     IEnumerable<ITaskTriggerSource> sources,
-    IEnumerable<ITaskTriggerBindingSideEffect>? sideEffects = null)
+    IEnumerable<ITaskTriggerBindingSideEffect>? sideEffects = null,
+    ModuleRegistry? moduleRegistry = null)
     : ITaskTriggerSourceRegistry
 {
-    public IReadOnlyList<ITaskTriggerSource> Sources { get; } =
+    private readonly IReadOnlyList<ITaskTriggerSource> _sources =
         sources.ToList().AsReadOnly();
 
-    public IReadOnlyList<ITaskTriggerBindingSideEffect> SideEffects { get; } =
+    private readonly IReadOnlyList<ITaskTriggerBindingSideEffect> _sideEffects =
         (sideEffects ?? []).ToList().AsReadOnly();
+
+    public IReadOnlyList<ITaskTriggerSource> Sources =>
+        [.. _sources.Concat(GetExternalServices<ITaskTriggerSource>())];
+
+    public IReadOnlyList<ITaskTriggerBindingSideEffect> SideEffects =>
+        [.. _sideEffects.Concat(GetExternalServices<ITaskTriggerBindingSideEffect>())];
 
     public ITaskTriggerSource? ResolveByKey(string? triggerKey)
     {
@@ -45,5 +54,18 @@ public sealed class TaskTriggerSourceRegistry(
         }
 
         return null;
+    }
+
+    private IEnumerable<T> GetExternalServices<T>()
+        where T : class
+    {
+        if (moduleRegistry is null)
+            yield break;
+
+        foreach (var host in moduleRegistry.GetExternalHosts())
+        {
+            foreach (var service in host.Services.GetServices<T>())
+                yield return service;
+        }
     }
 }

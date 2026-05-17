@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.Providers;
 
@@ -29,12 +30,51 @@ public sealed class ProviderApiClientFactory
         return _registry.GetModule(owner) is not null;
     }
 
+    private IProviderPlugin? GetActivePlugin(string providerKey)
+    {
+        if (_plugins.TryGetValue(providerKey, out var plugin) && IsActive(plugin))
+            return plugin;
+
+        if (_registry is null)
+            return null;
+
+        foreach (var host in _registry.GetExternalHosts())
+        {
+            foreach (var externalPlugin in host.Services.GetServices<IProviderPlugin>())
+            {
+                if (externalPlugin.ProviderKey == providerKey && IsActive(externalPlugin))
+                    return externalPlugin;
+            }
+        }
+
+        return null;
+    }
+
+    private IEnumerable<IProviderPlugin> GetExternalPlugins()
+    {
+        if (_registry is null)
+            yield break;
+
+        foreach (var host in _registry.GetExternalHosts())
+        {
+            foreach (var plugin in host.Services.GetServices<IProviderPlugin>())
+            {
+                if (IsActive(plugin))
+                    yield return plugin;
+            }
+        }
+    }
+
     /// <summary>Indicates whether a plugin is registered for the given provider key.</summary>
     public bool IsAvailable(string providerKey)
-        => _plugins.TryGetValue(providerKey, out var plugin) && IsActive(plugin);
+        => GetActivePlugin(providerKey) is not null;
 
     /// <summary>Enumerates the plugin metadata for every registered, currently-active provider key.</summary>
-    public IEnumerable<IProviderPlugin> Plugins => _plugins.Values.Where(IsActive);
+    public IEnumerable<IProviderPlugin> Plugins => _plugins.Values
+        .Concat(GetExternalPlugins())
+        .Where(IsActive)
+        .GroupBy(p => p.ProviderKey, StringComparer.Ordinal)
+        .Select(g => g.First());
 
     /// <summary>
     /// Returns the API client for the given provider key. For providers
@@ -48,7 +88,8 @@ public sealed class ProviderApiClientFactory
     /// </exception>
     public IProviderApiClient GetClient(string providerKey, string? apiEndpoint = null)
     {
-        if (!_plugins.TryGetValue(providerKey, out var plugin) || !IsActive(plugin))
+        var plugin = GetActivePlugin(providerKey);
+        if (plugin is null)
             throw new ProviderUnavailableException(providerKey);
 
         return plugin.CreateClient(apiEndpoint);
@@ -60,7 +101,7 @@ public sealed class ProviderApiClientFactory
     /// when its owning module is disabled.
     /// </summary>
     public IProviderPlugin? GetPlugin(string providerKey)
-        => _plugins.TryGetValue(providerKey, out var plugin) && IsActive(plugin) ? plugin : null;
+        => GetActivePlugin(providerKey);
 
     /// <summary>
     /// Resolves the <see cref="ICompletionParameterSpec"/> declared by the

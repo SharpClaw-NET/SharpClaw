@@ -34,5 +34,6 @@
     <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />
     <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj" />
     <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj" />
+    <ProjectReference Include="..\SharpClaw.Tests.ExternalModule\SharpClaw.Tests.ExternalModule.csproj" />
   </ItemGroup>
 </Project>

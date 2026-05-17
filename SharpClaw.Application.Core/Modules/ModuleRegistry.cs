@@ -963,6 +963,20 @@ public sealed class ModuleRegistry
         }
     }
 
+    /// <summary>Get all currently registered external module hosts.</summary>
+    public IReadOnlyList<ExternalModuleHost> GetExternalHosts()
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return [.. _externalHosts.Values];
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
     /// <summary>Whether the given module was loaded externally (hot-loaded).</summary>
     public bool IsExternal(string moduleId)
     {
