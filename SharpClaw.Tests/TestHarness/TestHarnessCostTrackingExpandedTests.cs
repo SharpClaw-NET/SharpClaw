@@ -223,6 +223,83 @@ public sealed class TestHarnessCostTrackingExpandedTests
     }
 
     [Test]
+    public async Task DirectJobAwaitingApprovalExecutesAfterAuthorizedApproval()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "approved-ok" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true,
+            clearance: PermissionClearance.ApprovedByWhitelistedUser);
+        var session = host.Services.GetRequiredService<SessionService>();
+        var userId = seeded.User!.Id;
+        session.UserId = null;
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var pending = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"approved-ok"}"""));
+
+        pending.Status.Should().Be(AgentJobStatus.AwaitingApproval);
+        host.Harness.ToolCalls.Should().BeEmpty();
+
+        session.UserId = userId;
+        var approved = await svc.ApproveAsync(
+            pending.Id,
+            new ApproveAgentJobRequest());
+
+        approved!.Status.Should().Be(AgentJobStatus.Completed);
+        approved.ResultData.Should().Be("approved-ok");
+        approved.Logs.Select(l => l.Message).Should().Contain(m =>
+            m.Contains("Awaiting approval", StringComparison.OrdinalIgnoreCase));
+        approved.Logs.Select(l => l.Message).Should().Contain(m =>
+            m.Contains("Approved by", StringComparison.OrdinalIgnoreCase));
+        host.Harness.ToolCalls.Should().ContainSingle()
+            .Which.JobId.Should().Be(pending.Id);
+    }
+
+    [Test]
+    public async Task DirectJobApprovalDeniesWhenPermissionWasRevokedWhileAwaiting()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "should-not-run" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true,
+            clearance: PermissionClearance.ApprovedByWhitelistedUser);
+        var session = host.Services.GetRequiredService<SessionService>();
+        session.UserId = null;
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var pending = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"should-not-run"}"""));
+
+        pending.Status.Should().Be(AgentJobStatus.AwaitingApproval);
+        var flags = host.Db.GlobalFlags
+            .Where(f => f.PermissionSetId == seeded.PermissionSet.Id)
+            .ToList();
+        host.Db.GlobalFlags.RemoveRange(flags);
+        await host.Db.SaveChangesAsync();
+
+        session.UserId = seeded.User!.Id;
+        var denied = await svc.ApproveAsync(
+            pending.Id,
+            new ApproveAgentJobRequest());
+
+        denied!.Status.Should().Be(AgentJobStatus.Denied);
+        denied.CompletedAt.Should().NotBeNull();
+        denied.Logs.Should().Contain(l =>
+            l.Level == JobLogLevels.Warning
+            && l.Message.Contains("permission revoked", StringComparison.OrdinalIgnoreCase));
+        host.Harness.ToolCalls.Should().BeEmpty();
+    }
+
+    [Test]
     public async Task DirectJobFailureCapturesErrorAndFailedToolCall()
     {
         await using var host = ChatHarnessHost.Create();

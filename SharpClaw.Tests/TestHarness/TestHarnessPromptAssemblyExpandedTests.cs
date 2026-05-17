@@ -141,6 +141,7 @@ public sealed class TestHarnessPromptAssemblyExpandedTests
         request.Tools.Select(t => t.Name).Should().Equal(
         [
             TestHarnessConstants.JobPermissionedToolAlias,
+            TestHarnessConstants.JobResourceTool,
             TestHarnessConstants.JobStreamingTool,
             TestHarnessConstants.InlineOpenTool,
             TestHarnessConstants.InlinePermissionedToolAlias

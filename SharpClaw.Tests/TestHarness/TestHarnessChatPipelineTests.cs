@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Application.API.Handlers;
+using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core;
@@ -445,10 +447,269 @@ public sealed class TestHarnessChatPipelineTests
     }
 
     [Test]
+    public async Task ThreadedChatDefaultHistoryLimitKeepsNewestFiftyInChronologicalOrder()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var thread = await CreateThreadAsync(host, seeded.Channel.Id, "Default History");
+        var now = DateTimeOffset.UtcNow.AddMinutes(-30);
+
+        for (var i = 0; i < 70; i++)
+        {
+            host.Db.ChatMessages.Add(new ChatMessageDB
+            {
+                Id = Guid.NewGuid(),
+                Role = i % 2 == 0 ? ChatRoles.User : ChatRoles.Assistant,
+                Origin = i % 2 == 0 ? MessageOrigin.User : MessageOrigin.Assistant,
+                Content = $"history-{i:00}",
+                ChannelId = seeded.Channel.Id,
+                ThreadId = thread.Id,
+                CreatedAt = now.AddSeconds(i),
+                UpdatedAt = now.AddSeconds(i)
+            });
+        }
+        await host.Db.SaveChangesAsync();
+
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("current"),
+            thread.Id);
+
+        host.Harness.ProviderRequests.Single()
+            .Messages.Select(m => m.Content)
+            .Should().Equal(
+                Enumerable.Range(20, 50).Select(i => $"history-{i:00}").Concat(["current"]));
+    }
+
+    [Test]
+    public async Task ThreadedChatCharacterLimitTrimsOldestWholeMessages()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var thread = await CreateThreadAsync(
+            host,
+            seeded.Channel.Id,
+            "Character Limit",
+            maxMessages: 10,
+            maxCharacters: 12);
+        var now = DateTimeOffset.UtcNow.AddMinutes(-10);
+
+        foreach (var (content, index) in new[] { "first-long", "second", "third" }.Select((content, index) => (content, index)))
+        {
+            host.Db.ChatMessages.Add(new ChatMessageDB
+            {
+                Id = Guid.NewGuid(),
+                Role = index % 2 == 0 ? ChatRoles.User : ChatRoles.Assistant,
+                Origin = index % 2 == 0 ? MessageOrigin.User : MessageOrigin.Assistant,
+                Content = content,
+                ChannelId = seeded.Channel.Id,
+                ThreadId = thread.Id,
+                CreatedAt = now.AddSeconds(index),
+                UpdatedAt = now.AddSeconds(index)
+            });
+        }
+        await host.Db.SaveChangesAsync();
+
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("current"),
+            thread.Id);
+
+        host.Harness.ProviderRequests.Single()
+            .Messages.Select(m => m.Content)
+            .Should().Equal("second", "third", "current");
+    }
+
+    [Test]
+    public async Task SameThreadConcurrentSendsSerializeProviderCallsAcrossScopes()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var thread = await CreateThreadAsync(host, seeded.Channel.Id, "Serialized Thread");
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.PlainProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn { Content = "first", CompletionDelayMs = 250 },
+                    new TestHarnessProviderTurn { Content = "second", CompletionDelayMs = 250 }
+                ]
+            });
+
+        var first = SendInNewScopeAsync(host, seeded.Channel.Id, thread.Id, "first");
+        var second = SendInNewScopeAsync(host, seeded.Channel.Id, thread.Id, "second");
+
+        await WaitForProviderRequestsAsync(host, expectedCount: 1, timeoutMs: 500);
+        await Task.Delay(100);
+        host.Harness.ProviderRequests.Should().HaveCount(1);
+
+        var responses = await Task.WhenAll(first, second);
+
+        responses.Select(r => r.AssistantMessage.Content)
+            .Should().BeEquivalentTo(["first", "second"]);
+        host.Harness.ProviderRequests.Should().HaveCount(2);
+        var requests = host.Harness.ProviderRequests.OrderBy(r => r.Sequence).ToList();
+        (requests[1].CapturedAt - requests[0].CapturedAt).TotalMilliseconds
+            .Should().BeGreaterThan(150);
+    }
+
+    [Test]
+    public async Task DifferentThreadConcurrentSendsCanOverlapProviderCallsAcrossScopes()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var firstThread = await CreateThreadAsync(host, seeded.Channel.Id, "Thread A");
+        var secondThread = await CreateThreadAsync(host, seeded.Channel.Id, "Thread B");
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.PlainProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn { Content = "a", CompletionDelayMs = 250 },
+                    new TestHarnessProviderTurn { Content = "b", CompletionDelayMs = 250 }
+                ]
+            });
+
+        var first = SendInNewScopeAsync(host, seeded.Channel.Id, firstThread.Id, "a");
+        var second = SendInNewScopeAsync(host, seeded.Channel.Id, secondThread.Id, "b");
+
+        await WaitForProviderRequestsAsync(host, expectedCount: 2, timeoutMs: 250);
+        await Task.WhenAll(first, second);
+
+        var requests = host.Harness.ProviderRequests.OrderBy(r => r.Sequence).ToList();
+        (requests[1].CapturedAt - requests[0].CapturedAt).TotalMilliseconds
+            .Should().BeLessThan(150);
+    }
+
+    [Test]
+    public async Task CancelledThreadedSendReleasesThreadLockForNextSend()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true",
+            ["Chat:DisableDefaultSystemPrompt"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "p");
+        var thread = await CreateThreadAsync(host, seeded.Channel.Id, "Cancel Thread");
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.PlainProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn { Content = "cancelled", CompletionDelayMs = 1000 },
+                    new TestHarnessProviderTurn { Content = "after-cancel" }
+                ]
+            });
+        using var cts = new CancellationTokenSource();
+
+        var cancelled = SendInNewScopeAsync(
+            host,
+            seeded.Channel.Id,
+            thread.Id,
+            "cancel me",
+            cts.Token);
+        await WaitForProviderRequestsAsync(host, expectedCount: 1, timeoutMs: 500);
+        cts.Cancel();
+        var cancelledAct = async () => await cancelled;
+        await cancelledAct.Should().ThrowAsync<OperationCanceledException>();
+
+        var sw = Stopwatch.StartNew();
+        var next = await SendInNewScopeAsync(
+            host,
+            seeded.Channel.Id,
+            thread.Id,
+            "after cancel");
+        sw.Stop();
+
+        next.AssistantMessage.Content.Should().Be("after-cancel");
+        sw.ElapsedMilliseconds.Should().BeLessThan(250);
+        host.Harness.ProviderRequests.Should().HaveCount(2);
+    }
+
+    [Test]
     public void BudgetHelperFailsAtOneMillisecondOverBudget()
     {
         var act = () => HarnessBudget.AssertWithin(1101, 1000, 100, "budget sample");
         act.Should().Throw<AssertionException>();
+    }
+
+    private static async Task<ChatThreadDB> CreateThreadAsync(
+        ChatHarnessHost host,
+        Guid channelId,
+        string name,
+        int? maxMessages = null,
+        int? maxCharacters = null)
+    {
+        var thread = new ChatThreadDB
+        {
+            Id = Guid.NewGuid(),
+            Name = name,
+            ChannelId = channelId,
+            MaxMessages = maxMessages,
+            MaxCharacters = maxCharacters,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        host.Db.ChatThreads.Add(thread);
+        await host.Db.SaveChangesAsync();
+        return thread;
+    }
+
+    private static async Task<ChatResponse> SendInNewScopeAsync(
+        ChatHarnessHost host,
+        Guid channelId,
+        Guid threadId,
+        string message,
+        CancellationToken ct = default)
+    {
+        await using var scope = host.CreateScope();
+        var chat = scope.ServiceProvider.GetRequiredService<ChatService>();
+        return await chat.SendMessageAsync(channelId, new ChatRequest(message), threadId, ct: ct);
+    }
+
+    private static async Task WaitForProviderRequestsAsync(
+        ChatHarnessHost host,
+        int expectedCount,
+        int timeoutMs)
+    {
+        var sw = Stopwatch.StartNew();
+        while (sw.ElapsedMilliseconds < timeoutMs)
+        {
+            if (host.Harness.ProviderRequests.Count >= expectedCount)
+                return;
+            await Task.Delay(10);
+        }
+
+        host.Harness.ProviderRequests.Should().HaveCountGreaterThanOrEqualTo(expectedCount);
     }
 
     private static void ConfigureProviderToolThenFinal(

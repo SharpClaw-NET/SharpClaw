@@ -2,7 +2,11 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Services;
+using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.DefaultResources;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.TestHarness;
 
@@ -127,6 +131,119 @@ public sealed class TestHarnessDefaultsAndResourcesTests
         registry.GetDescriptorByDefaultResourceKey("agent").Should().BeNull();
         registry.GetAllDefaultResourceKeys().Count(k => string.Equals(k, "agent", StringComparison.OrdinalIgnoreCase))
             .Should().Be(1);
+    }
+
+    [Test]
+    public async Task PerResourceJobUsesChannelDefaultResourceWhenRequestOmitsResource()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "resource-ok" });
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var resourceId = Guid.NewGuid();
+        GrantHarnessResource(host, seeded.PermissionSet, resourceId);
+        await host.Db.SaveChangesAsync();
+
+        var defaults = host.Services.GetRequiredService<DefaultResourceSetService>();
+        await defaults.SetKeyForChannelAsync(
+            seeded.Channel.Id,
+            TestHarnessConstants.DefaultResourceKey,
+            resourceId);
+
+        var job = await host.Services.GetRequiredService<AgentJobService>().SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobResourceTool,
+                ScriptJson: """{"result":"resource-ok"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Completed);
+        job.ResourceId.Should().Be(resourceId);
+        job.ResultData.Should().Be("resource-ok");
+        host.Harness.ToolCalls.Should().ContainSingle()
+            .Which.ToolName.Should().Be(TestHarnessConstants.JobResourceTool);
+    }
+
+    [Test]
+    public async Task PerResourceJobPrefersChannelDefaultOverContextDefault()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "channel-default" });
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var contextResourceId = Guid.NewGuid();
+        var channelResourceId = Guid.NewGuid();
+        GrantHarnessResource(host, seeded.PermissionSet, contextResourceId);
+        GrantHarnessResource(host, seeded.PermissionSet, channelResourceId);
+
+        var context = new SharpClaw.Contracts.Entities.Core.Context.ChannelContextDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "Default Resource Context",
+            AgentId = seeded.Agent.Id,
+            Agent = seeded.Agent,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        seeded.Channel.AgentContextId = context.Id;
+        seeded.Channel.AgentContext = context;
+        host.Db.AgentContexts.Add(context);
+        await host.Db.SaveChangesAsync();
+
+        var defaults = host.Services.GetRequiredService<DefaultResourceSetService>();
+        await defaults.SetKeyForContextAsync(
+            context.Id,
+            TestHarnessConstants.DefaultResourceKey,
+            contextResourceId);
+        await defaults.SetKeyForChannelAsync(
+            seeded.Channel.Id,
+            TestHarnessConstants.DefaultResourceKey,
+            channelResourceId);
+
+        var job = await host.Services.GetRequiredService<AgentJobService>().SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobResourceTool,
+                ScriptJson: """{"result":"channel-default"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Completed);
+        job.ResourceId.Should().Be(channelResourceId);
+        host.Harness.ToolCalls.Should().ContainSingle();
+    }
+
+    [Test]
+    public async Task PerResourceJobWithoutDefaultStopsBeforeModuleInvocation()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        GrantHarnessResource(host, seeded.PermissionSet, Guid.NewGuid());
+        await host.Db.SaveChangesAsync();
+
+        var job = await host.Services.GetRequiredService<AgentJobService>().SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobResourceTool,
+                ScriptJson: """{"result":"should-not-run"}"""));
+
+        job.Status.Should().Be(AgentJobStatus.Denied);
+        job.ResourceId.Should().BeNull();
+        host.Harness.ToolCalls.Should().BeEmpty();
+    }
+
+    private static void GrantHarnessResource(
+        ChatHarnessHost host,
+        PermissionSetDB permissionSet,
+        Guid resourceId,
+        bool isDefault = false)
+    {
+        host.Db.ResourceAccesses.Add(new ResourceAccessDB
+        {
+            Id = Guid.NewGuid(),
+            PermissionSetId = permissionSet.Id,
+            ResourceType = TestHarnessConstants.ResourceType,
+            ResourceId = resourceId,
+            Clearance = PermissionClearance.Independent,
+            IsDefault = isDefault,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        });
     }
 
     private sealed class ShadowCoreAgentDefaultModule : ISharpClawModule

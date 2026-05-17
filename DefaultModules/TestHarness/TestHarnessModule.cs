@@ -105,6 +105,7 @@ public sealed class TestHarnessModule : ISharpClawModule
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions()
     {
         var permission = PermissionDescriptor();
+        var resourcePermission = ResourcePermissionDescriptor();
         return
         [
             new(
@@ -113,6 +114,12 @@ public sealed class TestHarnessModule : ISharpClawModule
                 ToolBehaviorSchema(),
                 permission,
                 Aliases: [TestHarnessConstants.JobPermissionedToolAlias]),
+
+            new(
+                TestHarnessConstants.JobResourceTool,
+                "Deterministic per-resource job tool for default-resource resolution tests.",
+                ToolBehaviorSchema(),
+                resourcePermission),
 
             new(
                 TestHarnessConstants.JobStreamingTool,
@@ -172,6 +179,7 @@ public sealed class TestHarnessModule : ISharpClawModule
         var behavior = toolName switch
         {
             TestHarnessConstants.JobPermissionedTool => state.PermissionedJobToolBehavior,
+            TestHarnessConstants.JobResourceTool => state.PermissionedJobToolBehavior,
             TestHarnessConstants.JobStreamingTool => state.StreamingJobToolBehavior,
             _ => throw new InvalidOperationException($"Unknown test harness job tool: '{toolName}'.")
         };
@@ -413,6 +421,15 @@ public sealed class TestHarnessModule : ISharpClawModule
             IsPerResource: false,
             Check: null,
             DelegateTo: TestHarnessConstants.DelegateName);
+    }
+
+    private ModuleToolPermission ResourcePermissionDescriptor()
+    {
+        Interlocked.Increment(ref _permissionDescriptorBuilds);
+        return new(
+            IsPerResource: true,
+            Check: null,
+            DelegateTo: TestHarnessConstants.ResourceDelegateName);
     }
 
     private static Task<List<Guid>> LoadHarnessResourceIdsAsync(

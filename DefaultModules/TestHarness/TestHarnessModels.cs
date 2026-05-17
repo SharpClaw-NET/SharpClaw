@@ -31,6 +31,7 @@ public static class TestHarnessConstants
     public const string InlinePermissionedToolAlias = "test_harness_inline_permissioned_alias";
     public const string JobPermissionedTool = "test_harness_job_permissioned";
     public const string JobPermissionedToolAlias = "test_harness_job_permissioned_alias";
+    public const string JobResourceTool = "test_harness_job_resource";
     public const string JobStreamingTool = "test_harness_job_streaming";
 }
 
