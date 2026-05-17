@@ -403,36 +403,60 @@ public sealed class TestHarnessRepeatedToolInteractionTests
     [Category(HarnessTestCategories.PerformanceGate)]
     public async Task PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedNoOpToolCalls_NoGlobalSerialization()
     {
-        var sw = Stopwatch.StartNew();
-        var tasks = Enumerable.Range(0, 10)
-            .Select(i => RunIsolatedHundredToolChatAsync(grantPermission: true, $"parallel-allowed-{i}"))
-            .ToArray();
-        var results = await Task.WhenAll(tasks);
-        sw.Stop();
+        var chats = new List<IsolatedHundredToolChat>();
+        try
+        {
+            for (var i = 0; i < 10; i++)
+                chats.Add(await CreateIsolatedHundredToolChatAsync(grantPermission: true));
 
-        results.Should().OnlyContain(r => r.ToolBodyInvocations == HundredCalls);
-        sw.ElapsedMilliseconds.Should().BeLessThanOrEqualTo(
-            results.Max(r => r.ClientVisibleMs) + 200,
-            "parallel 100-tool chats should not serialize behind a process-wide lock");
-        results.Select(r => r.LastFinalText).Should().OnlyHaveUniqueItems();
+            var sw = Stopwatch.StartNew();
+            var tasks = chats
+                .Select((chat, i) => chat.RunAsync($"parallel-allowed-{i}"))
+                .ToArray();
+            var results = await Task.WhenAll(tasks);
+            sw.Stop();
+
+            results.Should().OnlyContain(r => r.ToolBodyInvocations == HundredCalls);
+            sw.ElapsedMilliseconds.Should().BeLessThanOrEqualTo(
+                results.Max(r => r.ClientVisibleMs) + 200,
+                "parallel 100-tool chats should not serialize behind a process-wide lock");
+            results.Select(r => r.LastFinalText).Should().OnlyHaveUniqueItems();
+        }
+        finally
+        {
+            foreach (var chat in chats)
+                await chat.DisposeAsync();
+        }
     }
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
     public async Task PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls_NoGlobalSerialization()
     {
-        var sw = Stopwatch.StartNew();
-        var tasks = Enumerable.Range(0, 10)
-            .Select(i => RunIsolatedHundredToolChatAsync(grantPermission: false, $"parallel-denied-{i}"))
-            .ToArray();
-        var results = await Task.WhenAll(tasks);
-        sw.Stop();
+        var chats = new List<IsolatedHundredToolChat>();
+        try
+        {
+            for (var i = 0; i < 10; i++)
+                chats.Add(await CreateIsolatedHundredToolChatAsync(grantPermission: false));
 
-        results.Should().OnlyContain(r => r.ToolBodyInvocations == 0);
-        results.Should().OnlyContain(r => r.PermissionDeniedResults == HundredCalls);
-        sw.ElapsedMilliseconds.Should().BeLessThanOrEqualTo(
-            results.Max(r => r.ClientVisibleMs) + 200,
-            "parallel denied 100-tool chats should stop at host permission checks without global serialization");
+            var sw = Stopwatch.StartNew();
+            var tasks = chats
+                .Select((chat, i) => chat.RunAsync($"parallel-denied-{i}"))
+                .ToArray();
+            var results = await Task.WhenAll(tasks);
+            sw.Stop();
+
+            results.Should().OnlyContain(r => r.ToolBodyInvocations == 0);
+            results.Should().OnlyContain(r => r.PermissionDeniedResults == HundredCalls);
+            sw.ElapsedMilliseconds.Should().BeLessThanOrEqualTo(
+                results.Max(r => r.ClientVisibleMs) + 200,
+                "parallel denied 100-tool chats should stop at host permission checks without global serialization");
+        }
+        finally
+        {
+            foreach (var chat in chats)
+                await chat.DisposeAsync();
+        }
     }
 
     private static IEnumerable<TestCaseData> HundredToolCallCorrectnessCases()
@@ -535,22 +559,38 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         return BuildMeasurement(host, run);
     }
 
-    private static async Task<RepeatedToolRunMeasurement> RunIsolatedHundredToolChatAsync(
-        bool grantPermission,
-        string finalText)
+    private static async Task<IsolatedHundredToolChat> CreateIsolatedHundredToolChatAsync(bool grantPermission)
     {
-        await using var host = CreateHotPathHost();
+        var host = CreateHotPathHost();
         host.Harness.ConfigurePermissionedInlineTool(new TestHarnessToolBehavior { Result = "" });
-        var seeded = await host.SeedChatAsync(
-            TestHarnessConstants.StreamingProviderKey,
-            grantHarnessPermission: grantPermission,
-            agentSystemPrompt: "p");
-        var run = await RunStreamingToolLoopAsync(
-            host,
-            seeded.Channel.Id,
-            BuildToolCalls(HundredCalls, TestHarnessConstants.InlinePermissionedTool),
-            finalText);
-        return BuildMeasurement(host, run);
+        try
+        {
+            var seeded = await host.SeedChatAsync(
+                TestHarnessConstants.StreamingProviderKey,
+                grantHarnessPermission: grantPermission,
+                agentSystemPrompt: "p");
+            return new IsolatedHundredToolChat(host, seeded.Channel.Id);
+        }
+        catch
+        {
+            await host.DisposeAsync();
+            throw;
+        }
+    }
+
+    private sealed class IsolatedHundredToolChat(ChatHarnessHost host, Guid channelId) : IAsyncDisposable
+    {
+        public async Task<RepeatedToolRunMeasurement> RunAsync(string finalText)
+        {
+            var run = await RunStreamingToolLoopAsync(
+                host,
+                channelId,
+                BuildToolCalls(HundredCalls, TestHarnessConstants.InlinePermissionedTool),
+                finalText);
+            return BuildMeasurement(host, run);
+        }
+
+        public ValueTask DisposeAsync() => host.DisposeAsync();
     }
 
     private static ChatHarnessHost CreateHotPathHost() =>

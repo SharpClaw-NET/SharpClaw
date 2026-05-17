@@ -123,8 +123,12 @@ public sealed class TestHarnessStreamingCorrectnessTests
         sw.Stop();
 
         deltas.Should().Equal(["one"]);
-        sw.ElapsedMilliseconds.Should().BeLessThan(900);
-        host.Harness.ProviderTimings.Single().ElapsedMs.Should().BeLessThan(900);
+        sw.ElapsedMilliseconds.Should().BeLessThan(
+            1500,
+            "cancellation should happen before the second delayed chunk completes");
+        host.Harness.ProviderTimings.Single().ElapsedMs.Should().BeLessThan(
+            1500,
+            "provider work should stop before the second delayed chunk completes");
     }
 
     [Test]

@@ -390,6 +390,10 @@ internal sealed record TimedRunStats(
             Percentile(ordered, 0.99));
     }
 
+    public string Describe() =>
+        $"count={Measurements.Count}, max={Max}ms, p95={P95}ms, p99={P99}ms, " +
+        $"samples=[{string.Join(",", Measurements)}]";
+
     private static double Percentile(IReadOnlyList<long> ordered, double percentile)
     {
         if (ordered.Count == 1)

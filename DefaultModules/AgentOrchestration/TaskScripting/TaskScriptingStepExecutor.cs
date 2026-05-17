@@ -81,14 +81,7 @@ public sealed class TaskScriptingStepExecutor : ITaskStepInvocationExecutor
             }
 
             case TaskScriptingStepKeys.WaitUntilStopped:
-                try
-                {
-                    await Task.Delay(Timeout.Infinite, context.CancellationToken);
-                }
-                catch (OperationCanceledException)
-                {
-                    // Expected — task was stopped.
-                }
+                await Task.Delay(Timeout.Infinite, context.CancellationToken);
                 return TaskStepResult.Continue;
 
             case TaskScriptingStepKeys.Return:
