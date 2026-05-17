@@ -210,6 +210,144 @@ public sealed class TestHarnessApiGatewaySurfaceTests
     }
 
     [Test]
+    public async Task ApiJobListSummariesDetailAndLifecycleActionsUseStableContracts()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "api-lifecycle" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("warm channel cost"));
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var executing = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Submit(
+                seeded.Channel.Id,
+                new SubmitAgentJobRequest(
+                    ActionKey: TestHarnessConstants.JobPermissionedTool,
+                    ScriptJson: """{"result":"api-lifecycle","remainExecuting":true}"""),
+                svc,
+                host.Chat));
+        var cancellable = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Submit(
+                seeded.Channel.Id,
+                new SubmitAgentJobRequest(
+                    ActionKey: TestHarnessConstants.JobPermissionedTool,
+                    ScriptJson: """{"result":"api-cancel","remainExecuting":true}"""),
+                svc,
+                host.Chat));
+
+        var list = await ExecuteResultAsync<IReadOnlyList<AgentJobResponse>>(
+            await AgentJobHandlers.List(seeded.Channel.Id, svc));
+        var summaries = await ExecuteResultAsync<IReadOnlyList<AgentJobSummaryResponse>>(
+            await AgentJobHandlers.ListSummaries(seeded.Channel.Id, svc));
+        var detail = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.GetById(seeded.Channel.Id, executing!.Id, svc, host.Chat));
+        var paused = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Pause(seeded.Channel.Id, executing.Id, svc, host.Chat));
+        var resumed = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Resume(seeded.Channel.Id, executing.Id, svc, host.Chat));
+        var stopped = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Stop(seeded.Channel.Id, executing.Id, svc, host.Chat));
+        var cancelled = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Cancel(seeded.Channel.Id, cancellable!.Id, svc, host.Chat));
+
+        list!.Select(j => j.Id).Should().Contain([executing.Id, cancellable.Id]);
+        summaries!.Select(j => j.Id).Should().Contain([executing.Id, cancellable.Id]);
+        detail!.ChannelCost.Should().NotBeNull();
+        detail.ChannelCost!.TotalTokens.Should().BeGreaterThan(0);
+        paused!.Status.Should().Be(AgentJobStatus.Paused);
+        paused.ChannelCost.Should().NotBeNull();
+        resumed!.Status.Should().Be(AgentJobStatus.Executing);
+        stopped!.Status.Should().Be(AgentJobStatus.Completed);
+        cancelled!.Status.Should().Be(AgentJobStatus.Cancelled);
+        cancelled.CompletedAt.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task ApiJobApproveExecutesPendingJobAndAttachesChannelCost()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "approved-api" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true,
+            clearance: PermissionClearance.ApprovedByPermittedAgent);
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("warm approve cost"));
+        var session = host.Services.GetRequiredService<SessionService>();
+        session.UserId = null;
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var pending = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Submit(
+                seeded.Channel.Id,
+                new SubmitAgentJobRequest(
+                    ActionKey: TestHarnessConstants.JobPermissionedTool,
+                    ScriptJson: """{"result":"approved-api"}"""),
+                svc,
+                host.Chat));
+
+        pending!.Status.Should().Be(AgentJobStatus.AwaitingApproval);
+
+        var approved = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Approve(
+                seeded.Channel.Id,
+                pending.Id,
+                new ApproveAgentJobRequest(ApproverAgentId: seeded.Agent.Id),
+                svc,
+                host.Chat));
+
+        approved!.Status.Should().Be(AgentJobStatus.Completed);
+        approved.ResultData.Should().Be("approved-api");
+        approved.ChannelCost.Should().NotBeNull();
+        approved.ChannelCost!.TotalTokens.Should().BeGreaterThan(0);
+    }
+
+    [Test]
+    public async Task ApiJobRoutesDoNotLeakOrMutateJobsFromAnotherChannel()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "wrong-channel" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var otherChannel = new SharpClaw.Contracts.Entities.Core.Context.ChannelDB
+        {
+            Id = Guid.NewGuid(),
+            Title = "Other Channel",
+            AgentId = seeded.Agent.Id,
+            Agent = seeded.Agent,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
+        host.Db.Channels.Add(otherChannel);
+        await host.Db.SaveChangesAsync();
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+        var job = await ExecuteResultAsync<AgentJobResponse>(
+            await AgentJobHandlers.Submit(
+                seeded.Channel.Id,
+                new SubmitAgentJobRequest(
+                    ActionKey: TestHarnessConstants.JobPermissionedTool,
+                    ScriptJson: """{"result":"wrong-channel","remainExecuting":true}"""),
+                svc,
+                host.Chat));
+
+        var detail = await ExecuteRawResultAsync(
+            await AgentJobHandlers.GetById(otherChannel.Id, job!.Id, svc, host.Chat));
+        var pause = await ExecuteRawResultAsync(
+            await AgentJobHandlers.Pause(otherChannel.Id, job.Id, svc, host.Chat));
+        var after = await svc.GetAsync(job.Id);
+
+        detail.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        pause.StatusCode.Should().Be(StatusCodes.Status404NotFound);
+        after!.Status.Should().Be(AgentJobStatus.Executing);
+    }
+
+    [Test]
     public async Task GatewayJobSubmitForwardsStableJobResponse()
     {
         var channelId = Guid.NewGuid();
@@ -248,6 +386,89 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         returned.ChannelCost!.TotalTokens.Should().Be(3);
     }
 
+    [Test]
+    public async Task GatewayJobListAndSummariesForwardStablePaths()
+    {
+        var channelId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        using var listResponse = JsonResponse(new[]
+        {
+            BuildJobResponse(channelId, jobId, AgentJobStatus.Completed)
+        });
+        var listController = CreateGatewayJobController(listResponse, out var listHandler);
+
+        var listResult = await listController.List(channelId, default);
+
+        listResult.Should().BeAssignableTo<OkObjectResult>().Subject
+            .Value.Should().BeAssignableTo<IReadOnlyList<AgentJobResponse>>().Subject
+            .Should().ContainSingle(j => j.Id == jobId);
+        listHandler.Requests.Should().ContainSingle()
+            .Which.Should().Match<CapturedGatewayRequest>(r =>
+                r.Method == HttpMethod.Get
+                && r.PathAndQuery == $"/channels/{channelId}/jobs");
+
+        using var summariesResponse = JsonResponse(new[]
+        {
+            new AgentJobSummaryResponse(
+                jobId,
+                channelId,
+                Guid.NewGuid(),
+                TestHarnessConstants.JobPermissionedTool,
+                null,
+                AgentJobStatus.Completed,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow,
+                DateTimeOffset.UtcNow)
+        });
+        var summariesController = CreateGatewayJobController(summariesResponse, out var summariesHandler);
+
+        var summariesResult = await summariesController.ListSummaries(channelId, default);
+
+        summariesResult.Should().BeAssignableTo<OkObjectResult>().Subject
+            .Value.Should().BeAssignableTo<IReadOnlyList<AgentJobSummaryResponse>>().Subject
+            .Should().ContainSingle(j => j.Id == jobId);
+        summariesHandler.Requests.Should().ContainSingle()
+            .Which.Should().Match<CapturedGatewayRequest>(r =>
+                r.Method == HttpMethod.Get
+                && r.PathAndQuery == $"/channels/{channelId}/jobs/summaries");
+    }
+
+    [TestCase("detail", "GET", "")]
+    [TestCase("approve", "POST", "/approve")]
+    [TestCase("stop", "POST", "/stop")]
+    [TestCase("cancel", "POST", "/cancel")]
+    [TestCase("pause", "PUT", "/pause")]
+    [TestCase("resume", "PUT", "/resume")]
+    public async Task GatewayJobLifecycleActionsForwardStableMethodsAndPaths(
+        string action,
+        string expectedMethod,
+        string suffix)
+    {
+        var channelId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+        using var response = JsonResponse(BuildJobResponse(channelId, jobId, AgentJobStatus.Completed));
+        var controller = CreateGatewayJobController(response, out var handler);
+
+        var result = action switch
+        {
+            "detail" => await controller.GetById(channelId, jobId, default),
+            "approve" => await controller.Approve(channelId, jobId, new ApproveAgentJobRequest(), default),
+            "stop" => await controller.Stop(channelId, jobId, default),
+            "cancel" => await controller.Cancel(channelId, jobId, default),
+            "pause" => await controller.Pause(channelId, jobId, default),
+            "resume" => await controller.Resume(channelId, jobId, default),
+            _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
+        };
+
+        result.Should().BeAssignableTo<OkObjectResult>().Subject
+            .Value.Should().BeAssignableTo<AgentJobResponse>().Subject
+            .Id.Should().Be(jobId);
+        handler.Requests.Should().ContainSingle()
+            .Which.Should().Match<CapturedGatewayRequest>(r =>
+                r.Method.Method == expectedMethod
+                && r.PathAndQuery == $"/channels/{channelId}/jobs/{jobId}{suffix}");
+    }
+
     [TestCase(HttpStatusCode.BadRequest, 400, "Invalid job request.")]
     [TestCase(HttpStatusCode.ServiceUnavailable, 502, "Internal service unavailable.")]
     public async Task GatewayJobSubmitErrorEnvelopeShapeIsStable(
@@ -273,6 +494,32 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         var controller = CreateGatewayJobController(new HttpResponseMessage(HttpStatusCode.NotFound));
 
         var result = await controller.GetById(Guid.NewGuid(), Guid.NewGuid(), default);
+
+        var objectResult = result.Should().BeAssignableTo<ObjectResult>().Subject;
+        objectResult.StatusCode.Should().Be(404);
+        JsonSerializer.Serialize(objectResult.Value).Should().Contain("Job not found.");
+    }
+
+    [TestCase("approve")]
+    [TestCase("stop")]
+    [TestCase("cancel")]
+    [TestCase("pause")]
+    [TestCase("resume")]
+    public async Task GatewayJobMutationNotFoundEnvelopeShapeIsStable(string action)
+    {
+        var controller = CreateGatewayJobController(new HttpResponseMessage(HttpStatusCode.NotFound));
+        var channelId = Guid.NewGuid();
+        var jobId = Guid.NewGuid();
+
+        var result = action switch
+        {
+            "approve" => await controller.Approve(channelId, jobId, new ApproveAgentJobRequest(), default),
+            "stop" => await controller.Stop(channelId, jobId, default),
+            "cancel" => await controller.Cancel(channelId, jobId, default),
+            "pause" => await controller.Pause(channelId, jobId, default),
+            "resume" => await controller.Resume(channelId, jobId, default),
+            _ => throw new ArgumentOutOfRangeException(nameof(action), action, null)
+        };
 
         var objectResult = result.Should().BeAssignableTo<ObjectResult>().Subject;
         objectResult.StatusCode.Should().Be(404);
@@ -345,6 +592,25 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         return JsonSerializer.Deserialize<T>(json, JsonOptions);
     }
 
+    private static async Task<(int StatusCode, string Body)> ExecuteRawResultAsync(IResult result)
+    {
+        using var services = new ServiceCollection()
+            .AddLogging()
+            .ConfigureHttpJsonOptions(options =>
+            {
+                options.SerializerOptions.Converters.Add(new System.Text.Json.Serialization.JsonStringEnumConverter());
+            })
+            .BuildServiceProvider();
+        var context = new DefaultHttpContext { RequestServices = services };
+        await using var body = new MemoryStream();
+        context.Response.Body = body;
+
+        await result.ExecuteAsync(context);
+
+        body.Position = 0;
+        return (context.Response.StatusCode, await new StreamReader(body).ReadToEndAsync());
+    }
+
     private static async Task<ChatResponse> ExecuteGatewayChatAsync(
         Guid channelId,
         ChatRequest request,
@@ -369,9 +635,19 @@ public sealed class TestHarnessApiGatewaySurfaceTests
     private static AgentJobsController CreateGatewayJobController(HttpResponseMessage response) =>
         new(CreateInternalApiClient(response));
 
-    private static InternalApiClient CreateInternalApiClient(HttpResponseMessage response)
+    private static AgentJobsController CreateGatewayJobController(
+        HttpResponseMessage response,
+        out RecordingResponseHandler handler)
     {
-        var handler = new FixedResponseHandler(response);
+        handler = new RecordingResponseHandler(response);
+        return new AgentJobsController(CreateInternalApiClient(handler));
+    }
+
+    private static InternalApiClient CreateInternalApiClient(HttpResponseMessage response)
+        => CreateInternalApiClient(new RecordingResponseHandler(response));
+
+    private static InternalApiClient CreateInternalApiClient(HttpMessageHandler handler)
+    {
         var client = new HttpClient(handler)
         {
             BaseAddress = new Uri("http://internal.test")
@@ -385,6 +661,33 @@ public sealed class TestHarnessApiGatewaySurfaceTests
             writer);
         return api;
     }
+
+    private static HttpResponseMessage JsonResponse<T>(T value) =>
+        new(HttpStatusCode.OK)
+        {
+            Content = new StringContent(JsonSerializer.Serialize(value, JsonOptions), Encoding.UTF8, "application/json")
+        };
+
+    private static AgentJobResponse BuildJobResponse(
+        Guid channelId,
+        Guid jobId,
+        AgentJobStatus status) =>
+        new(
+            jobId,
+            channelId,
+            Guid.NewGuid(),
+            TestHarnessConstants.JobPermissionedTool,
+            null,
+            status,
+            PermissionClearance.Independent,
+            "gateway-job",
+            null,
+            [new AgentJobLogResponse("done", "Info", DateTimeOffset.UtcNow)],
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow,
+            JobCost: new TokenUsageResponse(1, 2, 3),
+            ChannelCost: new ChannelCostResponse(channelId, 1, 2, 3, []));
 
     private static async Task<WebApplication> StartInternalSseServerAsync(Guid expectedChannelId)
     {
@@ -434,11 +737,29 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         }
     }
 
-    private sealed class FixedResponseHandler(HttpResponseMessage response) : HttpMessageHandler
+    private sealed class RecordingResponseHandler(HttpResponseMessage response) : HttpMessageHandler
     {
-        protected override Task<HttpResponseMessage> SendAsync(
+        private readonly List<CapturedGatewayRequest> _requests = [];
+
+        public IReadOnlyList<CapturedGatewayRequest> Requests => _requests;
+
+        protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
-            CancellationToken cancellationToken) =>
-            Task.FromResult(response);
+            CancellationToken cancellationToken)
+        {
+            var body = request.Content is null
+                ? null
+                : await request.Content.ReadAsStringAsync(cancellationToken);
+            _requests.Add(new CapturedGatewayRequest(
+                request.Method,
+                request.RequestUri!.PathAndQuery,
+                body));
+            return response;
+        }
     }
+
+    private sealed record CapturedGatewayRequest(
+        HttpMethod Method,
+        string PathAndQuery,
+        string? Body);
 }
