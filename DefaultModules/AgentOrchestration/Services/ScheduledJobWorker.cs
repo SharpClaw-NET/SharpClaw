@@ -106,7 +106,9 @@ public sealed class ScheduledJobWorker(
                         job.TaskDefinitionId.Value,
                         paramValues,
                         job.CallerAgentId,
-                        ct);
+                        channelId: null,
+                        contextId: null,
+                        ct: ct);
 
                     logger.LogInformation(
                         "Scheduled job {Name} ({Id}) launched task instance {InstanceId}.",

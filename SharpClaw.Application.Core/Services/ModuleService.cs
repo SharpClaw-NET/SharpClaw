@@ -535,8 +535,6 @@ public sealed class ModuleService(
     {
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderUser);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
-        chatCache.RemoveByPrefix(ChatCache.PrefixExtraTools);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }
 

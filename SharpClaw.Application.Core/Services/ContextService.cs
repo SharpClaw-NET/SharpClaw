@@ -217,7 +217,6 @@ public sealed class ContextService(
 
     private void InvalidateContextRuntimeState()
     {
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }

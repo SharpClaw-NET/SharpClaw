@@ -801,17 +801,21 @@ and other server-side configuration. Changes require a backend restart.
 Chat-path runtime switches live under the `Chat` section. Set
 `Chat:DisableDefaultHeaders` to `true` to remove the generated metadata
 header while keeping explicit agent or channel custom headers available.
-Set `Chat:DisableSystemPrompt` to `true` to remove the core-generated
+Set `Chat:DisableDefaultSystemPrompt` to `true` to remove the core-generated
 native-tool instruction suffix without erasing an agent's own configured
-system prompt. Set `Chat:DisableAccessibleThreadsHeader` to `true` to keep
-cross-thread summaries out of generated headers and the
-`{{accessible-threads}}` tag. Set `Chat:DisableModuleHeaderTags` to `true`
+system prompt. Set `Chat:DisableHeaderTagExpansion` to `true` when explicit
+custom headers should be sent as literal text with no built-in tag, resource
+tag, or module-owned tag resolution. Set `Chat:DisableModuleHeaderTags` to `true`
 to prevent module-owned custom-header tags from executing. Set
 `Chat:CacheMaxMegabytes` to set the unified chat cache memory budget. That
-cache keeps contributor output, accessible-thread summaries, header user or
-agent state, and recently-used channel/thread/agent token totals hot until the
-budget is full, then evicts the oldest cached objects first. Set it to `0`
-when every chat turn must force fresh persistence and permission reads.
+cache keeps header user or agent state and recently-used channel/thread/agent
+token totals hot until the budget is full, then evicts the oldest cached
+objects first. Set it to `0` when every chat turn must force fresh persistence
+and permission reads.
+Set `AgentOrchestration:DisableAccessibleThreadsHeader` to `true` when the
+Agent Orchestration module should make the `{{accessible-threads}}`
+custom-header tag empty while leaving its explicit cross-thread tools
+available.
 
 ```
 env get

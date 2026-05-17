@@ -324,16 +324,17 @@ Assign these through `PUT /roles/{id}/permissions`.
 
 ## Agent tool exposure
 
-When an agent has `CanInvokeTasksAsTool`, every active task definition is
-surfaced to it as a tool. The tool name is:
+When an agent has `CanInvokeTasksAsTool`, Agent Orchestration exposes the
+static `ao_invoke_task` tool. The agent supplies either a `taskId` or
+`taskName`, plus an optional `parameters` object keyed by task parameter name.
 
 ```
-task_invoke__{task-name}
+ao_invoke_task
 ```
 
-The tool schema is built from the definition parameter list. When the agent
-invokes the tool, an instance is created and started automatically; the agent
-receives the output snapshot when the instance reaches a terminal status.
+When the agent invokes the tool, the normal module tool pipeline evaluates the
+`CanInvokeTasksAsTool` permission first. If approved, an instance is created
+on the current channel and started automatically.
 
 ---
 

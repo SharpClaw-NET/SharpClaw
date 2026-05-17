@@ -16,6 +16,8 @@ public sealed class TaskInstanceLauncher(
         Guid taskDefinitionId,
         IReadOnlyDictionary<string, string>? parameterValues,
         Guid? callerAgentId,
+        Guid? channelId,
+        Guid? contextId,
         CancellationToken ct)
     {
         Dictionary<string, string>? values = parameterValues is null
@@ -25,7 +27,9 @@ public sealed class TaskInstanceLauncher(
         var instance = await taskService.CreateInstanceAsync(
             new StartTaskInstanceRequest(
                 TaskDefinitionId: taskDefinitionId,
-                ParameterValues: values),
+                ChannelId: channelId,
+                ParameterValues: values,
+                ContextId: contextId),
             callerAgentId: callerAgentId,
             ct: ct);
 

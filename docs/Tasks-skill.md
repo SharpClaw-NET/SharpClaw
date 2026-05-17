@@ -83,8 +83,8 @@ CanInvokeTasksAsTool   see active definitions as agent tool schemas
 AGENT TOOL EXPOSURE
 ----------------------------------------
 Active task definitions are exposed as tools to agents with CanInvokeTasksAsTool.
-Tool name pattern: task_invoke__{task-name}
-Parameters are mapped to JSON Schema from the definition parameter list.
+Tool name: ao_invoke_task
+Pass taskId or taskName, plus optional parameters keyed by parameter name.
 Invoking the tool creates and starts an instance automatically.
 
 ----------------------------------------

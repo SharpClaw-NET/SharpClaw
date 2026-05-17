@@ -1,4 +1,5 @@
 using System.Text.Json;
+using Microsoft.Extensions.Configuration;
 
 namespace SharpClaw.Modules.AgentOrchestration;
 
@@ -7,7 +8,9 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// inline tools. Rolled into agent-orchestration from the former
 /// <c>sharpclaw_context_tools</c> module.
 /// </summary>
-internal sealed class ContextToolsService(ContextDataReader dataReader)
+internal sealed class ContextToolsService(
+    ContextDataReader dataReader,
+    IConfiguration? configuration = null)
 {
     public static async Task<string> WaitAsync(
         JsonElement parameters, CancellationToken ct)
@@ -41,6 +44,20 @@ internal sealed class ContextToolsService(ContextDataReader dataReader)
         });
 
         return JsonSerializer.Serialize(result);
+    }
+
+    public async Task<string> FormatAccessibleThreadsHeaderAsync(
+        Guid agentId, Guid channelId, CancellationToken ct)
+    {
+        if (configuration?.GetValue<bool>("AgentOrchestration:DisableAccessibleThreadsHeader") == true)
+            return "";
+
+        var threads = await dataReader.GetAccessibleThreadsAsync(agentId, channelId, ct);
+        if (threads.Count == 0)
+            return "(none)";
+
+        return string.Join(", ", threads.Select(
+            t => $"{t.ThreadName} [{t.ChannelTitle}] ({t.ThreadId:D})"));
     }
 
     public async Task<string> ReadThreadHistoryAsync(

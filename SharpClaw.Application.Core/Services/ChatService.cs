@@ -45,7 +45,6 @@ public sealed class ChatService(
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
     IServiceProvider serviceProvider,
-    IChatProcessingBridge chatProcessingBridge,
     IConfiguration configuration)
 {
     private const int MaxHistoryMessages = 50;
@@ -64,11 +63,8 @@ public sealed class ChatService(
     private readonly bool _disableDefaultChatHeaders =
         configuration.GetValue<bool>("Chat:DisableDefaultHeaders");
 
-    private readonly bool _disableSystemPrompt =
-        configuration.GetValue<bool>("Chat:DisableSystemPrompt");
-
-    private readonly bool _disableAccessibleThreadsHeader =
-        configuration.GetValue<bool>("Chat:DisableAccessibleThreadsHeader");
+    private readonly bool _disableDefaultSystemPrompt =
+        configuration.GetValue<bool>("Chat:DisableDefaultSystemPrompt");
 
     /// <summary>
     /// Sends a chat message through the specified channel, optionally
@@ -847,8 +843,7 @@ public sealed class ChatService(
                 agentId,
                 channelId,
                 providerKey,
-                completionParameters?.ReasoningEffort,
-                _disableAccessibleThreadsHeader),
+                completionParameters?.ReasoningEffort),
             async innerCt => await BuildAgentSuffixTextAsync(
                 agentId, channelId, innerCt, completionParameters, providerKey),
             ChatCache.EstimateString,
@@ -858,8 +853,8 @@ public sealed class ChatService(
     }
 
     /// <summary>
-    /// Appends the shared agent-role, policy, accessible-threads, and closing
-    /// bracket to a header being constructed.
+    /// Appends the shared agent-role, policy, and closing bracket to a
+    /// header being constructed.
     /// Shared across all header paths (authenticated user, external user, task).
     /// </summary>
     private async Task<string> BuildAgentSuffixTextAsync(
@@ -902,18 +897,6 @@ public sealed class ChatService(
         }
 
         sb.Append(" | policy: unlisted-resource/GUID=denied; disclose gaps to user");
-
-        if (!_disableAccessibleThreadsHeader)
-        {
-            var accessibleThreads = await chatProcessingBridge.GetAccessibleThreadsAsync(
-                agentId, channelId, ct);
-            if (accessibleThreads.Count > 0)
-            {
-                sb.Append(" | accessible-threads: ");
-                sb.Append(string.Join(", ", accessibleThreads.Select(
-                    t => $"{t.ThreadName} [{t.ChannelTitle}] ({t.ThreadId:D})")));
-            }
-        }
 
         // Informational notice: surfaced when the provider accepts
         // reasoningEffort but cannot mechanically act on it (see
@@ -1283,7 +1266,7 @@ public sealed class ChatService(
             {
                 // ── Task-specific tool interception ──────────────
                 var (handled, taskResult) = await TryHandleTaskToolAsync(
-                    tc, request.TaskContext, ct, channelId, agent.Id);
+                    tc, request.TaskContext, ct);
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
@@ -1672,9 +1655,6 @@ public sealed class ChatService(
     /// <summary>
     /// Returns the effective tool list for a chat call.  When a task context is
     /// present, task-scoped tools (shared data, output, custom hooks) are appended.
-    /// When the agent has the <c>CanInvokeTasksAsTool</c> global flag (owned by
-    /// the agent-orchestration module), active
-    /// task definitions are exposed as platform-level tools.
     /// The tool-awareness filter is applied last so it can suppress any tool by name.
     /// </summary>
     private async Task<IReadOnlyList<ChatToolDefinition>> GetEffectiveToolsAsync(
@@ -1687,20 +1667,18 @@ public sealed class ChatService(
         {
             return await chatCache.GetOrCreateAsync(
                 ChatCache.KeyEffectiveTools(agentId.Value, BuildToolAwarenessFingerprint(toolAwareness)),
-                async innerCt => await BuildEffectiveToolsAsync(null, toolAwareness, agentId.Value, innerCt),
+                _ => BuildEffectiveToolsAsync(null, toolAwareness),
                 EstimateToolDefinitions,
                 ct)
                 ?? [];
         }
 
-        return await BuildEffectiveToolsAsync(taskContext, toolAwareness, agentId, ct);
+        return await BuildEffectiveToolsAsync(taskContext, toolAwareness);
     }
 
-    private async Task<IReadOnlyList<ChatToolDefinition>> BuildEffectiveToolsAsync(
+    private Task<IReadOnlyList<ChatToolDefinition>> BuildEffectiveToolsAsync(
         TaskChatContext? taskContext,
-        Dictionary<string, bool>? toolAwareness,
-        Guid? agentId,
-        CancellationToken ct)
+        Dictionary<string, bool>? toolAwareness)
     {
         var baseTools = new List<ChatToolDefinition>(moduleRegistry.GetAllToolDefinitions());
 
@@ -1712,24 +1690,14 @@ public sealed class ChatService(
                 baseTools.AddRange(store.GetToolDefinitions());
         }
 
-        // Platform-level extra tools contributed by modules through
-        // IChatProcessingBridge. Each contributor evaluates its own policy
-        // (e.g. agent-orchestration's CanInvokeTasksAsTool) so this method
-        // never names a module-owned permission key inline.
-        if (agentId.HasValue && taskContext is null)
-        {
-            var extraTools = await chatProcessingBridge.GetExtraToolsAsync(agentId.Value, ct);
-            if (extraTools.Count > 0)
-                baseTools.AddRange(extraTools);
-        }
-
         if (toolAwareness is null or { Count: 0 })
-            return baseTools;
+            return Task.FromResult<IReadOnlyList<ChatToolDefinition>>(baseTools);
 
         // Filter: include only tools whose key is true or absent in the set.
-        return baseTools
+        var filtered = baseTools
             .Where(t => !toolAwareness.TryGetValue(t.Name, out var enabled) || enabled)
             .ToList();
+        return Task.FromResult<IReadOnlyList<ChatToolDefinition>>(filtered);
     }
 
     private static string BuildToolAwarenessFingerprint(Dictionary<string, bool>? toolAwareness)
@@ -1756,24 +1724,16 @@ public sealed class ChatService(
     /// <summary>
     /// Try to handle a native tool call as a task-specific tool.
     /// <para>
-    /// Handles two cases:
-    /// 1. In-flight task-context tools (shared data, output, custom hooks) when
-    ///    <paramref name="taskContext"/> is present.
-    /// 2. Platform-level task invocation via <c>task_invoke__*</c> tool names when
-    ///    <paramref name="channelId"/> and <paramref name="agentId"/> are provided.
-    ///    Creates a new task instance and starts it; returns immediately with the
-    ///    instance ID so the model receives confirmation of the launch.
+    /// Handles in-flight task-context tools (shared data, output, custom hooks)
+    /// when <paramref name="taskContext"/> is present.
     /// </para>
     /// Returns <c>true</c> and sets <paramref name="result"/> if handled.
     /// </summary>
     private async Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
         ChatToolCall toolCall,
         TaskChatContext? taskContext,
-        CancellationToken ct,
-        Guid? channelId = null,
-        Guid? agentId = null)
+        CancellationToken ct)
     {
-        // Case 1: in-flight task-context tools
         if (taskContext is not null)
         {
             var store = TaskSharedData.Get(taskContext.InstanceId);
@@ -1793,62 +1753,6 @@ public sealed class ChatService(
                 {
                     return (true, $"Error handling task tool '{toolCall.Name}': {ex.Message}");
                 }
-            }
-        }
-
-        // Case 2: platform task invocation (task_invoke__<name>)
-        var taskName = TaskToolProvider.TryParseTaskName(toolCall.Name);
-        if (taskName is not null && channelId.HasValue)
-        {
-            try
-            {
-                using var scope = serviceScopeFactory.CreateScope();
-                var taskSvc = scope.ServiceProvider.GetRequiredService<TaskService>();
-                var orchestrator = scope.ServiceProvider.GetRequiredService<TaskOrchestrator>();
-
-                // Resolve definition by name
-                var definitions = await taskSvc.ListDefinitionsAsync(ct);
-                var definition = definitions.FirstOrDefault(d =>
-                    string.Equals(d.Name, taskName, StringComparison.Ordinal));
-
-                if (definition is null)
-                    return (true, $"Task '{taskName}' not found or not active.");
-
-                // Parse parameter values from tool arguments
-                Dictionary<string, string>? paramValues = null;
-                if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
-                {
-                    try
-                    {
-                        paramValues = JsonSerializer
-                            .Deserialize<Dictionary<string, string>>(toolCall.ArgumentsJson);
-                    }
-                    catch (JsonException)
-                    {
-                        return (true, "Error: malformed task parameter arguments.");
-                    }
-                }
-
-                var request = new StartTaskInstanceRequest(
-                    TaskDefinitionId: definition.Id,
-                    ChannelId: channelId,
-                    ParameterValues: paramValues,
-                    StartImmediately: true);
-
-                var instance = await taskSvc.CreateInstanceAsync(
-                    request,
-                    callerAgentId: agentId,
-                    ct: ct);
-
-                await orchestrator.StartAsync(instance.Id, ct);
-
-                return (true,
-                    $"Task '{taskName}' started (instance {instance.Id}). " +
-                    "It is running in the background. You may check its status later.");
-            }
-            catch (Exception ex)
-            {
-                return (true, $"Error starting task '{taskName}': {ex.Message}");
             }
         }
 
@@ -1884,6 +1788,20 @@ public sealed class ChatService(
         catch (JsonException)
         {
             return "Error: malformed tool arguments JSON.";
+        }
+
+        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, canonicalName);
+        if (descriptor is not null)
+        {
+            var verdict = await jobService.CheckPermissionAsync(
+                agentId,
+                resourceId: null,
+                new ActionCaller(AgentId: agentId),
+                ct,
+                actionKey: toolCall.Name);
+
+            if (verdict.Verdict != ClearanceVerdict.Approved)
+                return $"Error: permission denied for inline tool '{toolCall.Name}': {verdict.Reason}";
         }
 
         // External modules use their own DI container.
@@ -2132,7 +2050,7 @@ public sealed class ChatService(
             {
                 // ── Task-specific tool interception ──────────────
                 var (handled, taskResult) = await TryHandleTaskToolAsync(
-                    tc, taskContext, ct, channelId, agentId);
+                    tc, taskContext, ct);
                 if (handled)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
@@ -2457,7 +2375,7 @@ public sealed class ChatService(
 
     private string BuildEffectiveSystemPrompt(string? agentPrompt, bool includeCorePrompt)
     {
-        if (!includeCorePrompt || _disableSystemPrompt)
+        if (!includeCorePrompt || _disableDefaultSystemPrompt)
             return agentPrompt ?? "";
 
         return BuildSystemPrompt(agentPrompt);

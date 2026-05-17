@@ -1,10 +1,6 @@
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Application.Services;
-using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Tests.Services;
 
@@ -12,45 +8,57 @@ namespace SharpClaw.Tests.Services;
 public sealed class ChatCacheTests
 {
     [Test]
-    public async Task ChatProcessingBridge_CachesContributorResultsUntilBudgetEvicts()
+    public async Task GetOrCreateAsync_CachesValueUntilBudgetEvicts()
     {
-        var contributor = new CountingContributor();
-        var bridge = new ChatProcessingBridge(
-            [contributor],
-            CreateCache(cacheBytes: 1_000_000));
+        var cache = CreateCache(cacheBytes: 1_000_000);
+        var calls = 0;
 
-        var agentId = Guid.NewGuid();
-        var channelId = Guid.NewGuid();
+        var first = await cache.GetOrCreateAsync(
+            "key",
+            _ =>
+            {
+                calls++;
+                return Task.FromResult<string?>("value");
+            },
+            ct: CancellationToken.None);
+        var second = await cache.GetOrCreateAsync(
+            "key",
+            _ =>
+            {
+                calls++;
+                return Task.FromResult<string?>("other");
+            },
+            ct: CancellationToken.None);
 
-        var firstTools = await bridge.GetExtraToolsAsync(agentId);
-        var secondTools = await bridge.GetExtraToolsAsync(agentId);
-        var firstThreads = await bridge.GetAccessibleThreadsAsync(agentId, channelId);
-        var secondThreads = await bridge.GetAccessibleThreadsAsync(agentId, channelId);
-
-        firstTools.Should().BeEquivalentTo(secondTools);
-        firstThreads.Should().BeEquivalentTo(secondThreads);
-        contributor.ToolCalls.Should().Be(1);
-        contributor.ThreadCalls.Should().Be(1);
+        first.Should().Be("value");
+        second.Should().Be("value");
+        calls.Should().Be(1);
     }
 
     [Test]
     public async Task CacheMaxBytesZero_DisablesChatCache()
     {
-        var contributor = new CountingContributor();
-        var bridge = new ChatProcessingBridge(
-            [contributor],
-            CreateCache(cacheBytes: 0));
+        var cache = CreateCache(cacheBytes: 0);
+        var calls = 0;
 
-        var agentId = Guid.NewGuid();
-        var channelId = Guid.NewGuid();
+        await cache.GetOrCreateAsync(
+            "key",
+            _ =>
+            {
+                calls++;
+                return Task.FromResult<string?>("value");
+            },
+            ct: CancellationToken.None);
+        await cache.GetOrCreateAsync(
+            "key",
+            _ =>
+            {
+                calls++;
+                return Task.FromResult<string?>("value");
+            },
+            ct: CancellationToken.None);
 
-        await bridge.GetExtraToolsAsync(agentId);
-        await bridge.GetExtraToolsAsync(agentId);
-        await bridge.GetAccessibleThreadsAsync(agentId, channelId);
-        await bridge.GetAccessibleThreadsAsync(agentId, channelId);
-
-        contributor.ToolCalls.Should().Be(2);
-        contributor.ThreadCalls.Should().Be(2);
+        calls.Should().Be(2);
     }
 
     [Test]
@@ -175,33 +183,4 @@ public sealed class ChatCacheTests
         return new ChatCache(configuration);
     }
 
-    private sealed class CountingContributor : IChatProcessingContributor
-    {
-        private readonly JsonElement _schema = JsonDocument.Parse("{}").RootElement.Clone();
-
-        public int ToolCalls { get; private set; }
-        public int ThreadCalls { get; private set; }
-
-        public Task<IReadOnlyList<ChatToolDefinition>> GetExtraToolsAsync(
-            Guid agentId, CancellationToken ct = default)
-        {
-            ToolCalls++;
-            IReadOnlyList<ChatToolDefinition> tools =
-            [
-                new("test_tool", "Test tool.", _schema)
-            ];
-            return Task.FromResult(tools);
-        }
-
-        public Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
-            Guid agentId, Guid currentChannelId, CancellationToken ct = default)
-        {
-            ThreadCalls++;
-            IReadOnlyList<ThreadSummary> threads =
-            [
-                new(Guid.NewGuid(), "Thread", Guid.NewGuid(), "Channel")
-            ];
-            return Task.FromResult(threads);
-        }
-    }
 }

@@ -14,4 +14,13 @@ public sealed record ModuleHeaderTag(
     /// Receives the scoped <see cref="IServiceProvider"/> and returns the replacement string.
     /// </summary>
     Func<IServiceProvider, CancellationToken, Task<string>> Resolve
-);
+)
+{
+    /// <summary>
+    /// Optional context-aware resolver for tags that depend on the current
+    /// channel, agent, user, client, or provider request. When set, the host
+    /// uses this resolver instead of <see cref="Resolve"/>.
+    /// </summary>
+    public Func<IServiceProvider, ModuleHeaderTagContext, CancellationToken, Task<string>>?
+        ResolveWithContext { get; init; }
+}

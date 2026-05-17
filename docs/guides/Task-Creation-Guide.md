@@ -346,16 +346,13 @@ Other values: `"markdown"`, `"text"`.
 
 ## Agent tool exposure
 
-Active task definitions are automatically exposed as tools to agents that
-have the `CanInvokeTasksAsTool` permission. The tool name is derived from
-the task name:
-
-- Task named `summarise` -> tool `task_invoke__summarise`
-- Task named `fetch-and-report` -> tool `task_invoke__fetch-and-report`
+Active task definitions can be started by agents that have the
+`CanInvokeTasksAsTool` permission. Agent Orchestration exposes the static
+`ao_invoke_task` tool; the agent passes either `taskId` or `taskName`, plus
+an optional `parameters` object keyed by task parameter name.
 
 When an agent invokes the tool, an instance is created and started
-automatically. The agent receives the output snapshot when the instance
-completes.
+automatically after the normal module tool permission check passes.
 
 Activate a definition so it appears in agent tool schemas:
 

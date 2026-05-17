@@ -486,8 +486,6 @@ public sealed class AgentService(
     private void InvalidateAgentRuntimeState()
     {
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
-        chatCache.RemoveByPrefix(ChatCache.PrefixExtraTools);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }
 

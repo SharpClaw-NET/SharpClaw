@@ -9,8 +9,6 @@ public sealed class ChatCache(IConfiguration configuration)
     private const long DefaultMaxMegabytes = 2048;
     private const long BytesPerMegabyte = 1024 * 1024;
 
-    public const string PrefixExtraTools = "chat:extra-tools:";
-    public const string PrefixAccessibleThreads = "chat:accessible-threads:";
     public const string PrefixHeaderUser = "chat:header:user:";
     public const string PrefixHeaderAgentSuffix = "chat:header:agent-suffix:";
     public const string PrefixThreadHistoryLimits = "chat:thread-history-limits:";
@@ -233,12 +231,6 @@ public sealed class ChatCache(IConfiguration configuration)
             EstimateAgentCost);
     }
 
-    public static string KeyExtraTools(Guid agentId)
-        => $"{PrefixExtraTools}{agentId:D}";
-
-    public static string KeyAccessibleThreads(Guid agentId, Guid currentChannelId)
-        => $"{PrefixAccessibleThreads}{agentId:D}:{currentChannelId:D}";
-
     public static string KeyHeaderUser(Guid userId)
         => $"{PrefixHeaderUser}{userId:D}";
 
@@ -246,12 +238,10 @@ public sealed class ChatCache(IConfiguration configuration)
         Guid agentId,
         Guid channelId,
         string providerKey,
-        string? reasoningEffort,
-        bool disableAccessibleThreadsHeader)
+        string? reasoningEffort)
         => PrefixHeaderAgentSuffix
            + $"{agentId:D}:{channelId:D}:"
-           + $"{providerKey}:{reasoningEffort}:"
-           + $"{disableAccessibleThreadsHeader}";
+           + $"{providerKey}:{reasoningEffort}";
 
     public static string KeyThreadHistoryLimits(Guid threadId)
         => $"{PrefixThreadHistoryLimits}{threadId:D}";

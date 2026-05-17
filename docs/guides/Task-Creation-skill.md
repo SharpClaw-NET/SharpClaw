@@ -144,7 +144,8 @@ OS shortcuts: POST /tasks/{id}/shortcuts/install  |  DELETE /tasks/{id}/shortcut
 AGENT TOOL EXPOSURE
 ----------------------------------------
 Active definitions are exposed to agents with CanInvokeTasksAsTool.
-Tool name pattern: task_invoke__{task-name}
+Tool name: ao_invoke_task
+Pass taskId or taskName, plus optional parameters keyed by parameter name.
 Invoking the tool creates and starts an instance automatically.
 Set active: PUT /tasks/{id} { "isActive": true }
 

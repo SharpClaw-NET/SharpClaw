@@ -350,7 +350,6 @@ public sealed class ChannelService(
 
     private void InvalidateChannelRuntimeState()
     {
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }

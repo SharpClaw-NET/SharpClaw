@@ -9,11 +9,11 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts;
-using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Attributes;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -24,8 +24,7 @@ namespace SharpClaw.Application.Services;
 /// <b>Context tags</b> — single-value lookups:<br/>
 /// <c>{{time}}</c>, <c>{{user}}</c>, <c>{{via}}</c>, <c>{{role}}</c>,
 /// <c>{{bio}}</c>, <c>{{agent-role}}</c>, <c>{{clearance}}</c>,
-/// <c>{{grants}}</c>, <c>{{agent-grants}}</c>, <c>{{editor}}</c>,
-/// <c>{{accessible-threads}}</c>.
+/// <c>{{grants}}</c>, <c>{{agent-grants}}</c>, <c>{{editor}}</c>.
 /// </para>
 /// <para>
 /// <b>Resource tags</b> — enumerate entities from the database:<br/>
@@ -40,7 +39,6 @@ namespace SharpClaw.Application.Services;
 public sealed partial class HeaderTagProcessor(
     SharpClawDbContext db,
     ModuleRegistry moduleRegistry,
-    IChatProcessingBridge chatProcessingBridge,
     IServiceProvider serviceProvider,
     ProviderApiClientFactory clientFactory,
     IConfiguration configuration)
@@ -59,11 +57,11 @@ public sealed partial class HeaderTagProcessor(
     // ── Sensitive-field cache (thread-safe, lives for app lifetime) ─
     private static readonly ConcurrentDictionary<Type, HashSet<string>> SensitiveFieldCache = new();
 
-    private readonly bool _disableAccessibleThreadsHeader =
-        configuration.GetValue<bool>("Chat:DisableAccessibleThreadsHeader");
-
     private readonly bool _disableModuleHeaderTags =
         configuration.GetValue<bool>("Chat:DisableModuleHeaderTags");
+
+    private readonly bool _disableHeaderTagExpansion =
+        configuration.GetValue<bool>("Chat:DisableHeaderTagExpansion");
 
     /// <summary>
     /// Expands all <c>{{tag}}</c> placeholders in <paramref name="template"/>
@@ -79,6 +77,9 @@ public sealed partial class HeaderTagProcessor(
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
+        if (_disableHeaderTagExpansion)
+            return template;
+
         var matches = TagPattern().Matches(template);
         if (matches.Count == 0)
             return template;
@@ -199,9 +200,8 @@ public sealed partial class HeaderTagProcessor(
             "clearance" => "(per-action; see grants)",
             "grants" => FormatGrants(ctx.UserPs),
             "agent-grants" => await FormatAgentGrantsAsync(ctx, ct),
-            "accessible-threads" => await FormatAccessibleThreadsAsync(ctx, ct),
             "reasoning-effort" => FormatReasoningEffortNotice(ctx),
-            _ => await TryExpandModuleTagAsync(tagName, ct)
+            _ => await TryExpandModuleTagAsync(tagName, ctx, ct)
                  ?? await TryExpandResourceTagAsync(tagName, itemTemplate, ct)
                  ?? $"{{{{unknown:{tagName}}}}}"
         };
@@ -328,11 +328,26 @@ public sealed partial class HeaderTagProcessor(
         grants.Add($"{grantName}[{idList}]");
     }
 
-    private async Task<string?> TryExpandModuleTagAsync(string tagName, CancellationToken ct)
+    private async Task<string?> TryExpandModuleTagAsync(
+        string tagName, HeaderContext ctx, CancellationToken ct)
     {
         var tag = moduleRegistry.GetHeaderTag(tagName);
         if (tag is null) return null;
         if (_disableModuleHeaderTags) return "";
+        if (tag.ResolveWithContext is not null)
+        {
+            var moduleContext = new ModuleHeaderTagContext(
+                ctx.Channel.Id,
+                ctx.Channel.Title,
+                ctx.Agent.Id,
+                ctx.Agent.Name,
+                ctx.ClientType,
+                ctx.User?.Id,
+                ctx.CompletionParameters,
+                ctx.ProviderKey);
+            return await tag.ResolveWithContext(serviceProvider, moduleContext, ct);
+        }
+
         return await tag.Resolve(serviceProvider, ct);
     }
 
@@ -353,24 +368,6 @@ public sealed partial class HeaderTagProcessor(
             return "";
 
         return ChatHeaderNotices.FormatReasoningEffortNotice(effort);
-    }
-
-    private async Task<string> FormatAccessibleThreadsAsync(HeaderContext ctx, CancellationToken ct)
-    {
-        if (_disableAccessibleThreadsHeader)
-            return "";
-
-        var threads = await chatProcessingBridge.GetAccessibleThreadsAsync(
-            ctx.Agent.Id, ctx.Channel.Id, ct);
-
-        if (threads.Count == 0)
-            return "(none)";
-
-        var entries = threads
-            .Select(t => $"{t.ThreadName} [{t.ChannelTitle}] ({t.ThreadId:D})")
-            .ToList();
-
-        return string.Join(", ", entries);
     }
 
     // ═══════════════════════════════════════════════════════════════

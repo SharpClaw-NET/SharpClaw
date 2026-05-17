@@ -41,12 +41,6 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         services.TryAddScoped<AgentOrchestrationService>();
         services.AddScoped<ITaskStepExecutorExtension, AgentOrchestrationTaskStepExecutor>();
 
-        // Module-owned chat contributor: surfaces task definitions as agent
-        // tools when the agent has CanInvokeTasksAsTool. The flag key is read
-        // directly from AgentOrchestrationPermissionKeys; the policy decision
-        // and the data fetch both live in the module.
-        services.AddScoped<IChatProcessingContributor, AgentOrchestrationChatContributor>();
-
         // Event-bus triggers (Event / TaskCompleted / TaskFailed) — moved here
         // from core by the trigger-extraction plan. The same instance is
         // exposed both as a trigger source and as a host event sink.
@@ -82,7 +76,6 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         // ── Context tools (rolled in from sharpclaw_context_tools) ─────────────
         services.TryAddScoped<ContextDataReader>();
         services.TryAddScoped<ContextToolsService>();
-        services.AddScoped<IChatProcessingContributor, ContextToolsChatContributor>();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -90,6 +83,18 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
     // ═══════════════════════════════════════════════════════════════
 
     public IReadOnlyList<ModuleContractExport> ExportedContracts => [];
+
+    public IReadOnlyList<ModuleHeaderTag>? GetHeaderTags() =>
+    [
+        new ModuleHeaderTag(
+            Name: "accessible-threads",
+            Resolve: static (_, _) => Task.FromResult("(none)"))
+        {
+            ResolveWithContext = static async (sp, context, ct) =>
+                await sp.GetRequiredService<ContextToolsService>()
+                    .FormatAccessibleThreadsHeaderAsync(context.AgentId, context.ChannelId, ct)
+        }
+    ];
 
     // ═══════════════════════════════════════════════════════════════
     // Resource Type Descriptors
@@ -710,6 +715,10 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
             IsPerResource: false, Check: null,
             DelegateTo: "CreateSubAgentAsync");
 
+        var globalInvokeTask = new ModuleToolPermission(
+            IsPerResource: false, Check: null,
+            DelegateTo: "InvokeTaskAsToolAsync");
+
         var perResourceManageAgent = new ModuleToolPermission(
             IsPerResource: true, Check: null,
             DelegateTo: "ManageAgentAsync");
@@ -745,6 +754,11 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
                 "Edit task name, interval, or retries.",
                 BuildEditTaskSchema(), perResourceEditTask,
                 Aliases: ["edit_task"]),
+
+            new("ao_invoke_task",
+                "Start an active task definition by taskId or taskName.",
+                BuildInvokeTaskSchema(), globalInvokeTask,
+                Aliases: ["invoke_task"]),
 
             new("ao_access_skill",
                 "Retrieve a skill's instruction text.",
@@ -790,6 +804,9 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
                         "edit_task requires a ResourceId (target task)."),
                     parameters, ct),
 
+            "ao_invoke_task" or "invoke_task"
+                => await InvokeTaskAsync(parameters, job, sp, ct),
+
             "ao_access_skill" or "access_skill"
                 => await svc.AccessSkillAsync(
                     job.ResourceId ?? throw new InvalidOperationException(
@@ -816,6 +833,71 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
     // ═══════════════════════════════════════════════════════════════
     // Inline Tool Definitions (rolled in from sharpclaw_context_tools)
     // ═══════════════════════════════════════════════════════════════
+
+    private static async Task<string> InvokeTaskAsync(
+        JsonElement parameters,
+        AgentJobContext job,
+        IServiceProvider sp,
+        CancellationToken ct)
+    {
+        var taskId = ReadGuid(parameters, "taskId") ?? ReadGuid(parameters, "taskDefinitionId");
+        var taskName = ReadString(parameters, "taskName") ?? ReadString(parameters, "name");
+
+        var authoring = sp.GetRequiredService<ITaskAuthoring>();
+        var definitions = await authoring.ListDefinitionsAsync(ct);
+        var definition = taskId is { } id
+            ? definitions.FirstOrDefault(d => d.Id == id)
+            : definitions.FirstOrDefault(d =>
+                string.Equals(d.Name, taskName, StringComparison.Ordinal));
+
+        if (definition is null)
+            return "Error: task definition not found.";
+
+        if (!definition.IsActive)
+            return $"Error: task '{definition.Name}' is not active.";
+
+        var launcher = sp.GetRequiredService<ITaskInstanceLauncher>();
+        var instanceId = await launcher.LaunchAsync(
+            definition.Id,
+            ReadParameterValues(parameters),
+            job.AgentId,
+            job.ChannelId,
+            contextId: null,
+            ct: ct);
+
+        return $"Task '{definition.Name}' started (instance {instanceId:D}).";
+    }
+
+    private static Guid? ReadGuid(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property)
+           && Guid.TryParse(property.GetString(), out var value)
+            ? value
+            : null;
+
+    private static string? ReadString(JsonElement element, string propertyName)
+        => element.TryGetProperty(propertyName, out var property)
+           && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
+    private static Dictionary<string, string>? ReadParameterValues(JsonElement element)
+    {
+        if (!element.TryGetProperty("parameters", out var values)
+            || values.ValueKind != JsonValueKind.Object)
+        {
+            return null;
+        }
+
+        var result = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var property in values.EnumerateObject())
+        {
+            result[property.Name] = property.Value.ValueKind == JsonValueKind.String
+                ? property.Value.GetString() ?? ""
+                : property.Value.GetRawText();
+        }
+
+        return result.Count == 0 ? null : result;
+    }
 
     public IReadOnlyList<ModuleInlineToolDefinition> GetInlineToolDefinitions()
     {
@@ -1026,6 +1108,31 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
                     }
                 },
                 "required": ["resource_id"]
+            }
+            """);
+        return doc.RootElement.Clone();
+    }
+
+    private static JsonElement BuildInvokeTaskSchema()
+    {
+        using var doc = JsonDocument.Parse("""
+            {
+                "type": "object",
+                "properties": {
+                    "taskId": {
+                        "type": "string",
+                        "description": "Task definition GUID. Use this or taskName."
+                    },
+                    "taskName": {
+                        "type": "string",
+                        "description": "Task definition name. Use this or taskId."
+                    },
+                    "parameters": {
+                        "type": "object",
+                        "description": "Task parameter values keyed by parameter name.",
+                        "additionalProperties": true
+                    }
+                }
             }
             """);
         return doc.RootElement.Clone();

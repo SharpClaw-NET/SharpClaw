@@ -389,14 +389,11 @@ public sealed class HostAgentBridge(
     private void InvalidateAgentRuntimeState()
     {
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
-        chatCache.RemoveByPrefix(ChatCache.PrefixExtraTools);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }
 
     private void InvalidateChannelRuntimeState()
     {
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
     }
@@ -404,7 +401,6 @@ public sealed class HostAgentBridge(
     private void InvalidateThreadRuntimeState(Guid threadId)
     {
         chatCache.Remove(ChatCache.KeyThreadHistoryLimits(threadId));
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
     }
 

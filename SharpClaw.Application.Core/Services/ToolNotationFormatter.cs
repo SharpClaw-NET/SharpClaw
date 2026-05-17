@@ -59,7 +59,7 @@ public static class ToolNotationFormatter
 
     /// <summary>
     /// Format: <c>\n⚙ [tool_name] → done</c> — used for task-specific
-    /// tools surfaced via <see cref="TaskToolProvider"/>.
+    /// task tools surfaced by modules.
     /// </summary>
     public static string ForTaskTool(string toolName)
         => $"\n{ExecutionGlyph} [{toolName}] → {DoneStatus}";

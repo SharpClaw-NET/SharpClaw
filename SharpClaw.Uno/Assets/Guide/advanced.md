@@ -98,7 +98,7 @@ Agents: Alice (guid1), Bob (guid2), Charlie (guid3)
 
 Fields marked with `[HeaderSensitive]` render as `[redacted]`.
 
-Header expansion is on the chat hot path. `Chat:DisableAccessibleThreadsHeader=true` suppresses cross-thread summaries in the generated header and makes `{{accessible-threads}}` expand to an empty string. `Chat:DisableModuleHeaderTags=true` prevents module-owned header tag resolvers from executing inside custom headers. `Chat:CacheMaxMegabytes` controls the unified chat cache memory budget for contributor output, accessible-thread summaries, header state, and recently-used channel/thread/agent token totals. Set it to `0` only when every message must force fresh persistence and permission reads.
+Header expansion is on the chat hot path. `Chat:DisableHeaderTagExpansion=true` treats explicit custom headers as literal text, so no built-in tags, resource tags, or module-owned tags are resolved. `Chat:DisableModuleHeaderTags=true` prevents only module-owned header tag resolvers from executing inside custom headers. `AgentOrchestration:DisableAccessibleThreadsHeader=true` makes `{{accessible-threads}}` expand to an empty string when tag expansion is still enabled. `Chat:CacheMaxMegabytes` controls the unified chat cache memory budget for header state and recently-used channel/thread/agent token totals. Set it to `0` only when every message must force fresh persistence and permission reads.
 
 ### Setting Custom Headers
 
@@ -123,7 +123,7 @@ To suppress headers entirely:
 - **Agent level**: Set a blank custom header
 - **Channel level**: Enable **Disable Chat Header** in channel settings
 
-For instance-wide behavior, edit Core `.env` and set `Chat:DisableDefaultHeaders=true`. To remove the core-generated native-tool instruction suffix from provider calls, set `Chat:DisableSystemPrompt=true`; this does not remove the system prompt saved on each agent.
+For instance-wide behavior, edit Core `.env` and set `Chat:DisableDefaultHeaders=true`. To remove the core-generated native-tool instruction suffix from provider calls, set `Chat:DisableDefaultSystemPrompt=true`; this does not remove the system prompt saved on each agent. To keep an explicit custom header but send it as pure text, set `Chat:DisableHeaderTagExpansion=true`.
 
 ### Permissions
 
@@ -142,17 +142,25 @@ SharpClaw uses two `.env` files (JSON-with-comments format):
 
 **Managed via:** Settings → >env button → **Application Core** tab
 
-**Settings:**
-- `Encryption:Key`: AES encryption key for secrets
-- `Jwt:Secret`: JWT signing key
-- `ConnectionStrings:Postgres`: PostgreSQL connection string (optional)
-- `Api:ListenUrl`: Backend bind address (default `http://127.0.0.1:48923`)
-- `Admin:Username` / `Admin:Password`: First-time admin credentials
-- `Browser:Executable` / `Browser:Arguments`: Chromium path for localhost browser action
-- `Local:GpuLayerCount` / `Local:ContextSize` / `Local:KeepLoaded` / `Local:IdleCooldownMinutes`: Local model settings
-- `Chat:DisableDefaultHeaders` / `Chat:DisableSystemPrompt` / `Chat:DisableAccessibleThreadsHeader` / `Chat:DisableModuleHeaderTags` / `Chat:CacheMaxMegabytes`: Chat prompt-shaping and hot-path cache settings
-- `EnvEditor:AllowNonAdmin`: Allow non-admin users to edit the Core .env
-- `Backend:Enabled`: Enable/disable backend auto-start
+Core settings include `Encryption:Key` for secret encryption, `Jwt:Secret`
+for token signing, `ConnectionStrings:Postgres` when PostgreSQL is used, and
+`Api:ListenUrl` for the backend bind address. The default backend bind address
+is `http://127.0.0.1:48923`.
+
+Startup and local runtime behavior is controlled with `Admin:Username` and
+`Admin:Password` for the first admin account, `Browser:Executable` and
+`Browser:Arguments` for localhost browser actions, and the `Local:*` model
+settings such as `Local:GpuLayerCount`, `Local:ContextSize`,
+`Local:KeepLoaded`, and `Local:IdleCooldownMinutes`. `EnvEditor:AllowNonAdmin`
+controls whether non-admin users can edit Core `.env`, and `Backend:Enabled`
+controls backend auto-start.
+
+Chat prompt-shaping and hot-path cache switches live under `Chat`. Use
+`Chat:DisableDefaultHeaders`, `Chat:DisableDefaultSystemPrompt`,
+`Chat:DisableHeaderTagExpansion`, `Chat:DisableModuleHeaderTags`, and
+`Chat:CacheMaxMegabytes` for Core chat behavior. Agent Orchestration owns its
+own cross-thread header summary switch:
+`AgentOrchestration:DisableAccessibleThreadsHeader`.
 
 ### Interface .env (client-side)
 

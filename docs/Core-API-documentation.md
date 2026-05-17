@@ -268,10 +268,13 @@ Example `.env` snippet:
   },
   "Chat": {
     "DisableDefaultHeaders": false,
-    "DisableSystemPrompt": false,
-    "DisableAccessibleThreadsHeader": false,
+    "DisableDefaultSystemPrompt": false,
+    "DisableHeaderTagExpansion": false,
     "DisableModuleHeaderTags": false,
     "CacheMaxMegabytes": 2048
+  },
+  "AgentOrchestration": {
+    "DisableAccessibleThreadsHeader": false
   }
 }
 ```
@@ -282,17 +285,23 @@ immediately (equivalent to every request carrying a valid key).
 The `Chat` section controls prompt-shaping work on the hot path.
 `DisableDefaultHeaders` removes the generated per-message metadata header
 while leaving explicit agent or channel custom headers in place.
-`DisableSystemPrompt` removes the core-generated native-tool instruction
-suffix, but it does not erase an agent's own configured system prompt.
-`DisableAccessibleThreadsHeader` keeps cross-thread summaries out of
-default headers and out of `{{accessible-threads}}` custom-header tags.
+`DisableDefaultSystemPrompt` removes the core-generated native-tool
+instruction suffix, but it does not erase an agent's own configured system
+prompt. `DisableHeaderTagExpansion` treats explicit custom headers as literal
+text, so no built-in tags, resource tags, or module-owned tags are resolved
+before the header is prepended.
 `DisableModuleHeaderTags` stops module-owned header tag resolvers from
 executing inside custom headers. `CacheMaxMegabytes` sets the memory budget
-for the unified chat cache. The cache keeps contributor output,
-accessible-thread summaries, header user or agent state, and recently used
-channel/thread/agent token totals hot until the budget is exceeded, then
-evicts the oldest cached objects first. Set it to `0` when validating raw
-persistence reads or debugging cache-sensitive permission changes.
+for the unified chat cache. The cache keeps header user or agent state and
+recently used channel/thread/agent token totals hot until the budget is
+exceeded, then evicts the oldest cached objects first. Set it to `0` when
+validating raw persistence reads or debugging cache-sensitive permission
+changes.
+
+The `AgentOrchestration` section is owned by the bundled Agent Orchestration
+module. `DisableAccessibleThreadsHeader` makes that module's
+`{{accessible-threads}}` custom-header tag resolve to an empty string without
+disabling the module's explicit cross-thread tools or permission checks.
 
 When `DisableAccessTokenCheck` is `true`, the `JwtSessionMiddleware`
 skips enforcement — no 401 is returned for missing/expired tokens on
@@ -2750,12 +2759,11 @@ and lifetimes, and the `Auth` section for local-only bypass switches.
 is the hardening switch for free-form provider parameters.
 
 The `Chat` section controls chat-path prompt shaping and cache behavior.
-Default headers, the core-generated system prompt suffix, accessible-thread
-header content, and module-owned header tag execution can each be disabled
-independently. `CacheMaxMegabytes` controls the unified chat cache memory
-budget for contributor output, header state, accessible-thread summaries, and
-recently used channel/thread/agent token totals. The cache evicts oldest
-objects first when it reaches that budget.
+Default headers, the core-generated system prompt suffix, and module-owned
+header tag execution can each be disabled independently. `CacheMaxMegabytes`
+controls the unified chat cache memory budget for header state and recently
+used channel/thread/agent token totals. The cache evicts oldest objects first
+when it reaches that budget.
 
 Database configuration lives in the `Database` section. `Database:Provider`
 accepts `JsonFile`, `Postgres`, `SqlServer`, or `SQLite`, and relational
@@ -3194,9 +3202,11 @@ overrides the channel opt-in requirement.
 The agent must also be the channel's primary agent or listed in its
 `AllowedAgents` (channel-level first, context-level fallback).
 
-Accessible threads are surfaced in the chat header
-(`accessible-threads:` section). Older builds also exposed a separate Context
-Tools module, but that module is not part of the current bundled module set.
+Accessible threads are surfaced through the Agent Orchestration
+`{{accessible-threads}}` custom-header tag and through the
+`list_accessible_threads` / `read_thread_history` inline tools. Older builds
+also exposed a separate Context Tools module, but that module is not part of
+the current bundled module set.
 
 ---
 

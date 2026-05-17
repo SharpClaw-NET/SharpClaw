@@ -368,7 +368,7 @@ Cross-thread history access (double-gate):
   Channels without opt-in are private even if the agent holds the permission.
   Independent clearance on the agent overrides the channel opt-in requirement.
   Agent must be primary or in AllowedAgents on the target channel.
-  Accessible threads listed in chat header (accessible-threads section) and via list_accessible_threads / read_thread_history inline tools.
+  Accessible threads are available through {{accessible-threads}} and via list_accessible_threads / read_thread_history inline tools.
 
 ────────────────────────────────────────────────────────────────────
 ADVANCED EXAMPLE: Multi-Agent Channel with Context
@@ -527,15 +527,18 @@ generated per instance when omitted.
 
 Chat-path switches live under Chat. DisableDefaultHeaders removes the generated
 metadata header but still lets explicit agent/channel custom headers run.
-DisableSystemPrompt removes the core-generated native-tool instruction suffix
-but preserves the agent's configured prompt. DisableAccessibleThreadsHeader
-keeps cross-thread summaries out of generated headers and out of
-{{accessible-threads}}. DisableModuleHeaderTags prevents module-owned header
-tag resolvers from running in custom headers. CacheMaxMegabytes sets the
-unified chat cache memory budget. It keeps contributor output, accessible
-thread summaries, header user or agent state, and recently-used channel,
-thread, and agent token totals hot until the budget is full; oldest objects
-are evicted first. 0 disables chat caching.
+DisableDefaultSystemPrompt removes the core-generated native-tool instruction
+suffix but preserves the agent's configured prompt. DisableHeaderTagExpansion
+treats explicit custom headers as literal text without resolving built-in,
+resource, or module-owned tags. DisableModuleHeaderTags prevents module-owned
+header tag resolvers from running in custom headers. CacheMaxMegabytes sets the
+unified chat cache memory budget. It keeps header user or agent state and
+recently-used channel, thread, and agent token totals hot until the budget is
+full; oldest objects are evicted first. 0 disables chat caching.
+
+AgentOrchestration:DisableAccessibleThreadsHeader keeps Agent Orchestration
+{{accessible-threads}} output empty without disabling the module's explicit
+cross-thread tools.
 
 Interface .env keys include Api:Url, Backend:Enabled, Gateway:Enabled,
 Gateway:Url, process-startup flags, and logging settings. Gateway .env keys
@@ -641,5 +644,5 @@ agent tool exposure, scheduling, SSE streaming): Tasks-skill.md
 Short summary: tasks are user-defined C# scripts that run as managed background
 processes. Register a definition with POST /tasks, launch an instance with
 POST /tasks/{id}/instances, stream output from GET /tasks/{id}/instances/{iid}/stream.
-Active definitions are exposed as task_invoke__{name} tools to agents with
-CanInvokeTasksAsTool permission.
+Agents with CanInvokeTasksAsTool can start active definitions through the
+Agent Orchestration ao_invoke_task tool.

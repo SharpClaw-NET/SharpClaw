@@ -16,5 +16,7 @@ public interface ITaskInstanceLauncher
         Guid taskDefinitionId,
         IReadOnlyDictionary<string, string>? parameterValues,
         Guid? callerAgentId,
+        Guid? channelId,
+        Guid? contextId,
         CancellationToken ct);
 }

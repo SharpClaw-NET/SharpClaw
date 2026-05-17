@@ -347,7 +347,6 @@ try
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
     builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
     builder.Services.AddSingleton<ChatCache>();
-    builder.Services.AddScoped<IChatProcessingBridge, ChatProcessingBridge>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
@@ -364,8 +363,6 @@ try
     builder.Services.AddScoped<TaskService>();
     builder.Services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
     builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
-    builder.Services.AddScoped<TaskToolProvider>();
-    builder.Services.AddScoped<ITaskToolCatalog>(sp => sp.GetRequiredService<TaskToolProvider>());
     builder.Services.AddScoped<IGlobalFlagEvaluator, GlobalFlagEvaluator>();
     builder.Services.AddScoped<EnvFileService>();
     builder.Services.AddScoped<TaskOrchestrator>();

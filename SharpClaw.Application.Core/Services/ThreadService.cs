@@ -83,7 +83,6 @@ public sealed class ThreadService(SharpClawDbContext db, ChatCache chatCache)
     private void InvalidateThreadRuntimeState(Guid threadId)
     {
         chatCache.Remove(ChatCache.KeyThreadHistoryLimits(threadId));
-        chatCache.RemoveByPrefix(ChatCache.PrefixAccessibleThreads);
         chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
     }
 
