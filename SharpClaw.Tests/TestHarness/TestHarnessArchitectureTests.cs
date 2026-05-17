@@ -176,6 +176,15 @@ public sealed class TestHarnessArchitectureTests
         includes.Should().Contain("~DEFAULT_BRANCH");
         includes.Should().Contain("refs/heads/release/**");
 
+        var bypassActors = rootElement
+            .GetProperty("bypass_actors")
+            .EnumerateArray()
+            .ToList();
+        bypassActors.Should().ContainSingle();
+        bypassActors[0].GetProperty("actor_id").GetInt32().Should().Be(5);
+        bypassActors[0].GetProperty("actor_type").GetString().Should().Be("RepositoryRole");
+        bypassActors[0].GetProperty("bypass_mode").GetString().Should().Be("always");
+
         var requiredChecks = rootElement
             .GetProperty("rules")
             .EnumerateArray()
