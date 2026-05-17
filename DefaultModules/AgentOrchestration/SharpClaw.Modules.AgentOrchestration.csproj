@@ -29,4 +29,8 @@
     <PackageReference Include="Microsoft.Extensions.DependencyInjection.Abstractions" />
   </ItemGroup>
 
+  <ItemGroup>
+    <InternalsVisibleTo Include="SharpClaw.Tests" />
+  </ItemGroup>
+
 </Project>

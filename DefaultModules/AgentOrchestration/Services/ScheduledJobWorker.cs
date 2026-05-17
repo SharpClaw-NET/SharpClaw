@@ -85,6 +85,14 @@ public sealed class ScheduledJobWorker(
 
         foreach (var job in dueJobs)
         {
+            bool wasMissed = (now - job.NextRunAt) > missedThreshold;
+            if (job.MissedFirePolicy == MissedFirePolicy.Skip && wasMissed)
+            {
+                AdvanceNextRunAt(job, now);
+                await db.SaveChangesAsync(ct);
+                continue;
+            }
+
             job.Status = ScheduledTaskStatus.Running;
             job.LastRunAt = now;
             await db.SaveChangesAsync(ct);
@@ -118,14 +126,6 @@ public sealed class ScheduledJobWorker(
                 job.Status = ScheduledTaskStatus.Completed;
                 job.RetryCount = 0;
                 job.LastError = null;
-
-                bool wasMissed = (now - job.NextRunAt) > missedThreshold;
-                if (job.MissedFirePolicy == MissedFirePolicy.Skip && wasMissed)
-                {
-                    AdvanceNextRunAt(job, now);
-                    await db.SaveChangesAsync(ct);
-                    continue;
-                }
 
                 AdvanceNextRunAt(job, now);
 
@@ -170,6 +170,10 @@ public sealed class ScheduledJobWorker(
         {
             job.Status    = ScheduledTaskStatus.Pending;
             job.NextRunAt = now.Add(job.RepeatInterval.Value);
+        }
+        else
+        {
+            job.Status = ScheduledTaskStatus.Completed;
         }
     }
 }
