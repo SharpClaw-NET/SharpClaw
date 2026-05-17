@@ -34,8 +34,10 @@ jobs:
         include:
           - domain: Core
             filter: 'FullyQualifiedName~SharpClaw.Tests.AppInfoTests|FullyQualifiedName~SharpClaw.Tests.Api|FullyQualifiedName~SharpClaw.Tests.Architecture|FullyQualifiedName~SharpClaw.Tests.Clients|FullyQualifiedName~SharpClaw.Tests.Modules|FullyQualifiedName~SharpClaw.Tests.Services'
-          - domain: CLI
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli'
+          - domain: CLI Commands
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.ChannelCliCommandTests'
+          - domain: CLI REPL
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.CliReplSmokeTests'
           - domain: Gateway
             filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway|FullyQualifiedName~TestHarnessApiGatewaySurfaceTests'
           - domain: Frontend
@@ -48,8 +50,12 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks'
           - domain: Chat
             filter: 'FullyQualifiedName~TestHarnessChatPipelineTests|FullyQualifiedName~TestHarnessPromptAssemblyExpandedTests|FullyQualifiedName~TestHarnessStreamingCorrectnessTests'
-          - domain: Jobs Tools Costs
-            filter: 'FullyQualifiedName~TestHarnessCostTrackingExpandedTests|FullyQualifiedName~TestHarnessToolCorrectnessExpandedTests|FullyQualifiedName~TestHarnessRepeatedToolInteractionTests'
+          - domain: Jobs
+            filter: 'FullyQualifiedName~DirectJob|FullyQualifiedName~LongRunningDirectJob|FullyQualifiedName~DirectStreamingJob'
+          - domain: Tools
+            filter: 'FullyQualifiedName~TestHarnessToolCorrectnessExpandedTests|FullyQualifiedName~TestHarnessRepeatedToolInteractionTests'
+          - domain: Costs
+            filter: 'FullyQualifiedName~JobCostIsNonNull|FullyQualifiedName~FailedJobCostBehavior|FullyQualifiedName~StreamingCostReportedOnlyAtEnd|FullyQualifiedName~MultipleAgentsInOneChannelDoNotCrossContaminateCosts|FullyQualifiedName~CustomModuleCostHookAddsUsage'
           - domain: Agent Orchestration
             filter: 'FullyQualifiedName~TestHarnessAgentOrchestrationExpandedTests'
           - domain: Defaults

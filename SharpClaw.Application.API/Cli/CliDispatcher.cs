@@ -1,5 +1,6 @@
 using System.Diagnostics;
 using System.Net.Http;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
@@ -202,46 +203,55 @@ public static class CliDispatcher
     {
         var args = new List<string>();
         var span = input.AsSpan().Trim();
+        var current = new StringBuilder();
         var inQuotes = false;
-        var start = 0;
+        var tokenStarted = false;
 
-        for (var i = 0; i <= span.Length; i++)
+        for (var i = 0; i < span.Length; i++)
         {
-            var atEnd = i == span.Length;
-            var isQuote = !atEnd && span[i] == '"';
-            var isSpace = !atEnd && !inQuotes && span[i] == ' ';
+            var ch = span[i];
 
-            // A quote only toggles quoted mode when it appears at the very
-            // start of a new token (i == start). A quote that appears
-            // mid-token (e.g. inside JSON like {"key":"val"}) is treated as
-            // a regular character so the full token is preserved intact.
-            var isTokenStart = i == start;
-
-            if (isQuote && isTokenStart)
+            if (inQuotes && ch == '\\' && i + 1 < span.Length && span[i + 1] == '"')
             {
-                inQuotes = !inQuotes;
-                if (!inQuotes)
+                current.Append('"');
+                tokenStarted = true;
+                i++;
+                continue;
+            }
+
+            if (ch == '"')
+            {
+                if (inQuotes)
                 {
-                    // Closing quote: emit the content captured between the quotes.
-                    args.Add(span[(start + 1)..i].ToString());
-                    start = i + 1;
+                    inQuotes = false;
+                    continue;
                 }
-                else
+
+                if (!tokenStarted)
                 {
-                    // Opening quote: mark start here (will be stripped on close).
-                    start = i;
+                    inQuotes = true;
+                    tokenStarted = true;
+                    continue;
+                }
+            }
+
+            if (ch == ' ' && !inQuotes)
+            {
+                if (tokenStarted)
+                {
+                    args.Add(current.ToString());
+                    current.Clear();
+                    tokenStarted = false;
                 }
                 continue;
             }
 
-            if (atEnd || isSpace)
-            {
-                if (i > start)
-                    args.Add(span[start..i].ToString());
-
-                start = i + 1;
-            }
+            current.Append(ch);
+            tokenStarted = true;
         }
+
+        if (tokenStarted)
+            args.Add(current.ToString());
 
         return [.. args];
     }
@@ -2216,30 +2226,29 @@ public static class CliDispatcher
             "list" => UsageResult("job list [channelId]  (no current channel selected — specify a channel ID or use 'channel select')"),
 
             "status" when args.Length >= 3
-                => await AgentJobHandlers.GetById(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc, AgentJobHandlers.GetById),
             "status" => UsageResult("job status <jobId>"),
 
             "approve" when args.Length >= 3
-                => await AgentJobHandlers.Approve(
-                    Guid.Empty, CliIdMap.Resolve(args[2]),
-                    new ApproveAgentJobRequest(),
-                    svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc,
+                    (channelId, jobId, jobSvc, chat) => AgentJobHandlers.Approve(
+                        channelId, jobId, new ApproveAgentJobRequest(), jobSvc, chat)),
             "approve" => UsageResult("job approve <jobId>"),
 
             "stop" when args.Length >= 3
-                => await AgentJobHandlers.Stop(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc, AgentJobHandlers.Stop),
             "stop" => UsageResult("job stop <jobId>"),
 
             "cancel" when args.Length >= 3
-                => await AgentJobHandlers.Cancel(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc, AgentJobHandlers.Cancel),
             "cancel" => UsageResult("job cancel <jobId>"),
 
             "pause" when args.Length >= 3
-                => await AgentJobHandlers.Pause(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc, AgentJobHandlers.Pause),
             "pause" => UsageResult("job pause <jobId>"),
 
             "resume" when args.Length >= 3
-                => await AgentJobHandlers.Resume(Guid.Empty, CliIdMap.Resolve(args[2]), svc, chatSvc),
+                => await HandleScopedJobCommand(args[2], svc, chatSvc, AgentJobHandlers.Resume),
             "resume" => UsageResult("job resume <jobId>"),
 
             "listen" when args.Length >= 3
@@ -2248,6 +2257,19 @@ public static class CliDispatcher
 
             _ => UsageResult($"Unknown sub-command: job {sub}. Try 'help' for usage.")
         };
+    }
+
+    private static async Task<IResult> HandleScopedJobCommand(
+        string jobArg,
+        AgentJobService svc,
+        ChatService chatSvc,
+        Func<Guid, Guid, AgentJobService, ChatService, Task<IResult>> action)
+    {
+        var jobId = CliIdMap.Resolve(jobArg);
+        var job = await svc.GetAsync(jobId);
+        return job is null
+            ? Results.NotFound()
+            : await action(job.ChannelId, jobId, svc, chatSvc);
     }
 
     private static async Task<IResult> HandleJobSubmit(

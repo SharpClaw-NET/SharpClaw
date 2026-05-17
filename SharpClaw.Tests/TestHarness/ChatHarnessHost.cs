@@ -8,6 +8,7 @@ using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Services;
+using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
@@ -61,6 +62,10 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             Key = new byte[32],
             EncryptProviderKeys = false
         });
+        services.AddSingleton(new JwtOptions
+        {
+            Secret = Convert.ToBase64String(new byte[32])
+        });
         services.AddDbContext<SharpClawDbContext>(
             options => options.UseInMemoryDatabase(
                 databaseName,
@@ -71,6 +76,8 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatCache>();
         services.AddSingleton<ProviderApiClientFactory>();
         services.AddSingleton<CountingPersistenceEntityResolver>();
+        services.AddScoped<TokenService>();
+        services.AddScoped<AuthService>();
         services.AddScoped<IPersistenceEntityResolver>(
             sp => sp.GetRequiredService<CountingPersistenceEntityResolver>());
         services.AddScoped<SessionService>();
@@ -83,6 +90,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<ProviderCostService>();
         services.AddScoped<ProviderService>();
         services.AddScoped<RoleService>();
+        services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();
         services.AddScoped<ModuleExecutionContext>();
