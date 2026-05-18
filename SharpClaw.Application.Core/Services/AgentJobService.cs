@@ -46,6 +46,7 @@ public sealed class AgentJobService(
     private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
     private readonly IConfiguration _configuration = configuration;
     private readonly ILogger<AgentJobService> _logger = logger;
+    private readonly List<AgentJobLogEntryDB> _pendingCacheLogs = [];
     private static readonly AsyncLocal<Guid?> CurrentExecutionJob = new();
 
     // ═══════════════════════════════════════════════════════════════
@@ -121,7 +122,7 @@ public sealed class AgentJobService(
 
         db.AgentJobs.Add(job);
         AddLog(job, $"Job queued: {request.ActionKey ?? "unknown"}.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
         var caller = new ActionCaller(session.UserId, request.CallerAgentId);
         var result = await DispatchPermissionCheckAsync(
@@ -155,7 +156,7 @@ public sealed class AgentJobService(
                 {
                     job.Status = AgentJobStatus.AwaitingApproval;
                     AddLog(job, $"Awaiting approval: {result.Reason}");
-                    await db.SaveChangesAsync(ct);
+                    await SaveChangesAndCacheLogsAsync(ct);
                 }
                 break;
 
@@ -163,10 +164,11 @@ public sealed class AgentJobService(
             default:
                 job.Status = AgentJobStatus.Denied;
                 AddLog(job, $"Denied: {result.Reason}", JobLogLevels.Warning);
-                await db.SaveChangesAsync(ct);
+                await SaveChangesAndCacheLogsAsync(ct);
                 break;
         }
 
+        chatCache.SetJobLogs(job.Id, ToLogResponses(job.LogEntries));
         return ToResponse(job);
     }
 
@@ -184,8 +186,8 @@ public sealed class AgentJobService(
         if (job.Status != AgentJobStatus.AwaitingApproval)
         {
             AddLog(job, $"Approve rejected: job is {job.Status}, not AwaitingApproval.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         var approver = new ActionCaller(session.UserId, request.ApproverAgentId);
@@ -210,7 +212,7 @@ public sealed class AgentJobService(
 
             case ClearanceVerdict.PendingApproval:
                 AddLog(job, $"Approval attempt by {FormatCaller(approver)} insufficient: {result.Reason}", JobLogLevels.Warning);
-                await db.SaveChangesAsync(ct);
+                await SaveChangesAndCacheLogsAsync(ct);
                 break;
 
             case ClearanceVerdict.Denied:
@@ -218,11 +220,11 @@ public sealed class AgentJobService(
                 job.Status = AgentJobStatus.Denied;
                 job.CompletedAt = DateTimeOffset.UtcNow;
                 AddLog(job, $"Denied: agent permission revoked. Attempt by {FormatCaller(approver)}: {result.Reason}", JobLogLevels.Warning);
-                await db.SaveChangesAsync(ct);
+                await SaveChangesAndCacheLogsAsync(ct);
                 break;
         }
 
-        return ToResponse(job);
+        return await ToResponseAsync(job, ct);
     }
 
     /// <summary>Cancel a job that has not yet completed.</summary>
@@ -236,16 +238,16 @@ public sealed class AgentJobService(
                        or AgentJobStatus.Denied or AgentJobStatus.Cancelled)
         {
             AddLog(job, $"Cancel rejected: job is already {job.Status}.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         job.Status = AgentJobStatus.Cancelled;
         job.CompletedAt = DateTimeOffset.UtcNow;
         AddLog(job, "Job cancelled.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
-        return ToResponse(job);
+        return await ToResponseAsync(job, ct);
     }
 
     /// <summary>Stop a long-running job and complete it normally.</summary>
@@ -259,23 +261,23 @@ public sealed class AgentJobService(
             && job.ActionKey?.StartsWith(requiredActionPrefix, StringComparison.OrdinalIgnoreCase) != true)
         {
             AddLog(job, "Stop rejected: job action does not match the requested action prefix.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         if (job.Status is not AgentJobStatus.Executing and not AgentJobStatus.Paused)
         {
             AddLog(job, $"Stop rejected: job is {job.Status}, not Executing or Paused.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         job.Status = AgentJobStatus.Completed;
         job.CompletedAt = DateTimeOffset.UtcNow;
         AddLog(job, "Job stopped.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
-        return ToResponse(job);
+        return await ToResponseAsync(job, ct);
     }
 
     /// <summary>
@@ -291,15 +293,15 @@ public sealed class AgentJobService(
         if (job.Status != AgentJobStatus.Executing)
         {
             AddLog(job, $"Pause rejected: job is {job.Status}, not Executing.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         job.Status = AgentJobStatus.Paused;
         AddLog(job, "Job paused.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
-        return ToResponse(job);
+        return await ToResponseAsync(job, ct);
     }
 
     /// <summary>
@@ -316,15 +318,15 @@ public sealed class AgentJobService(
         if (job.Status != AgentJobStatus.Paused)
         {
             AddLog(job, $"Resume rejected: job is {job.Status}, not Paused.", JobLogLevels.Warning);
-            await db.SaveChangesAsync(ct);
-            return ToResponse(job);
+            await SaveChangesAndCacheLogsAsync(ct);
+            return await ToResponseAsync(job, ct);
         }
 
         job.Status = AgentJobStatus.Executing;
         AddLog(job, "Job resumed.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
-        return ToResponse(job);
+        return await ToResponseAsync(job, ct);
     }
 
     /// <summary>Retrieve a single job by ID.</summary>
@@ -332,7 +334,15 @@ public sealed class AgentJobService(
         Guid jobId, CancellationToken ct = default)
     {
         var job = await LoadJobAsync(jobId, ct);
-        return job is null ? null : ToResponse(job);
+        return job is null ? null : await ToResponseAsync(job, ct);
+    }
+
+    /// <summary>Retrieve a single job summary by ID without loading logs.</summary>
+    public async Task<AgentJobSummaryResponse?> GetSummaryAsync(
+        Guid jobId, CancellationToken ct = default)
+    {
+        var job = await LoadJobAsync(jobId, ct);
+        return job is null ? null : ToSummaryResponse(job);
     }
 
     /// <summary>List all jobs for a channel, most recent first.</summary>
@@ -345,19 +355,11 @@ public sealed class AgentJobService(
             hint: new PersistenceQueryHint("ChannelId", channelId),
             ct: ct);
 
-        foreach (var job in jobs)
-        {
-            if (job.LogEntries.Count == 0)
-            {
-                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
-                    db,
-                    l => l.AgentJobId == job.Id,
-                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
-                    ct: ct)).ToList();
-            }
-        }
+        var responses = new List<AgentJobResponse>(jobs.Count);
+        foreach (var job in jobs.OrderByDescending(j => j.CreatedAt))
+            responses.Add(await ToResponseAsync(job, ct));
 
-        return jobs.OrderByDescending(j => j.CreatedAt).Select(ToResponse).ToList();
+        return responses;
     }
 
     /// <summary>
@@ -376,10 +378,7 @@ public sealed class AgentJobService(
 
         return jobs
             .OrderByDescending(j => j.CreatedAt)
-            .Select(j => new AgentJobSummaryResponse(
-                j.Id, j.ChannelId, j.AgentId,
-                j.ActionKey, j.ResourceId, j.Status,
-                j.CreatedAt, j.StartedAt, j.CompletedAt))
+            .Select(ToSummaryResponse)
             .ToList();
     }
 
@@ -395,19 +394,11 @@ public sealed class AgentJobService(
                  && (resourceId == null || j.ResourceId == resourceId),
             ct: ct);
 
-        foreach (var job in jobs)
-        {
-            if (job.LogEntries.Count == 0)
-            {
-                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
-                    db,
-                    l => l.AgentJobId == job.Id,
-                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
-                    ct: ct)).ToList();
-            }
-        }
+        var responses = new List<AgentJobResponse>(jobs.Count);
+        foreach (var job in jobs.OrderByDescending(j => j.CreatedAt))
+            responses.Add(await ToResponseAsync(job, ct));
 
-        return jobs.OrderByDescending(j => j.CreatedAt).Select(ToResponse).ToList();
+        return responses;
     }
 
     public async Task<IReadOnlyList<AgentJobSummaryResponse>> ListJobSummariesByActionPrefixAsync(
@@ -424,10 +415,7 @@ public sealed class AgentJobService(
 
         return jobs
             .OrderByDescending(j => j.CreatedAt)
-            .Select(j => new AgentJobSummaryResponse(
-                j.Id, j.ChannelId, j.AgentId,
-                j.ActionKey, j.ResourceId, j.Status,
-                j.CreatedAt, j.StartedAt, j.CompletedAt))
+            .Select(ToSummaryResponse)
             .ToList();
     }
 
@@ -463,7 +451,7 @@ public sealed class AgentJobService(
         job.Status = AgentJobStatus.Executing;
         job.StartedAt = DateTimeOffset.UtcNow;
         AddLog(job, "Execution started.");
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
 
         try
         {
@@ -498,7 +486,7 @@ public sealed class AgentJobService(
                 job.Id, job.ActionKey);
         }
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
     }
 
     private async Task<AgentJobExecutionOutcome> DispatchExecutionAsync(AgentJobDB job, CancellationToken ct)
@@ -1039,31 +1027,29 @@ public sealed class AgentJobService(
     private sealed record ResolvedDefaultResourceId(Guid? ResourceId);
 
     private async Task<AgentJobDB?> LoadJobAsync(Guid jobId, CancellationToken ct)
-    {
-        var job = await entities.FindAsync<AgentJobDB>(db, jobId, ct);
-        if (job is not null)
-        {
-            if (job.LogEntries.Count == 0)
-            {
-                job.LogEntries = (await entities.QueryAsync<AgentJobLogEntryDB>(
-                    db,
-                    l => l.AgentJobId == jobId,
-                    hint: new PersistenceQueryHint("AgentJobId", jobId),
-                    ct: ct)).ToList();
-            }
-        }
+        => await entities.FindAsync<AgentJobDB>(db, jobId, ct);
 
-        return job;
-    }
-
-    private static void AddLog(AgentJobDB job, string message, string level = JobLogLevels.Info)
+    private void AddLog(AgentJobDB job, string message, string level = JobLogLevels.Info)
     {
-        job.LogEntries.Add(new AgentJobLogEntryDB
+        var entry = new AgentJobLogEntryDB
         {
             AgentJobId = job.Id,
             Message = message,
             Level = level
-        });
+        };
+
+        job.LogEntries.Add(entry);
+        _pendingCacheLogs.Add(entry);
+    }
+
+    private async Task SaveChangesAndCacheLogsAsync(CancellationToken ct)
+    {
+        var pendingLogs = _pendingCacheLogs.ToArray();
+        await db.SaveChangesAsync(ct);
+        _pendingCacheLogs.Clear();
+
+        foreach (var log in pendingLogs)
+            chatCache.AppendJobLogIfCached(log.AgentJobId, ToLogResponse(log));
     }
 
     private static string FormatCaller(ActionCaller caller) =>
@@ -1075,7 +1061,39 @@ public sealed class AgentJobService(
         string? ResultData,
         ModuleJobCompletionBehavior CompletionBehavior);
 
+    private async Task<AgentJobResponse> ToResponseAsync(AgentJobDB job, CancellationToken ct)
+        => ToResponse(job, await GetJobLogsAsync(job, ct));
+
+    private async Task<IReadOnlyList<AgentJobLogResponse>> GetJobLogsAsync(
+        AgentJobDB job,
+        CancellationToken ct)
+    {
+        if (chatCache.TryGetJobLogs(job.Id, out var cached))
+            return cached ?? [];
+
+        var logs = await chatCache.GetJobLogsAsync(
+            job.Id,
+            async innerCt =>
+            {
+                var entries = await entities.QueryAsync<AgentJobLogEntryDB>(
+                    db,
+                    l => l.AgentJobId == job.Id,
+                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
+                    ct: innerCt);
+
+                return ToLogResponses(entries);
+            },
+            ct);
+
+        return logs ?? [];
+    }
+
     private static AgentJobResponse ToResponse(AgentJobDB job)
+        => ToResponse(job, ToLogResponses(job.LogEntries));
+
+    private static AgentJobResponse ToResponse(
+        AgentJobDB job,
+        IReadOnlyList<AgentJobLogResponse> logs)
     {
         var jobCost = job.PromptTokens is not null || job.CompletionTokens is not null
             ? new TokenUsageResponse(
@@ -1094,10 +1112,7 @@ public sealed class AgentJobService(
             EffectiveClearance: job.EffectiveClearance,
             ResultData: job.ResultData,
             ErrorLog: job.ErrorLog,
-            Logs: job.LogEntries
-                .OrderBy(l => l.CreatedAt)
-                .Select(l => new AgentJobLogResponse(l.Message, l.Level, l.CreatedAt))
-                .ToList(),
+            Logs: logs,
             CreatedAt: job.CreatedAt,
             StartedAt: job.StartedAt,
             CompletedAt: job.CompletedAt,
@@ -1105,6 +1120,22 @@ public sealed class AgentJobService(
             WorkingDirectory: job.WorkingDirectory,
             JobCost: jobCost);
     }
+
+    private static IReadOnlyList<AgentJobLogResponse> ToLogResponses(
+        IEnumerable<AgentJobLogEntryDB> logs)
+        => logs
+            .OrderBy(static log => log.CreatedAt)
+            .Select(ToLogResponse)
+            .ToArray();
+
+    private static AgentJobLogResponse ToLogResponse(AgentJobLogEntryDB log)
+        => new(log.Message, log.Level, log.CreatedAt);
+
+    private static AgentJobSummaryResponse ToSummaryResponse(AgentJobDB job)
+        => new(
+            job.Id, job.ChannelId, job.AgentId,
+            job.ActionKey, job.ResourceId, job.Status,
+            job.CreatedAt, job.StartedAt, job.CompletedAt);
 
     /// <summary>
     /// Records prompt/completion tokens on a set of jobs that were
@@ -1162,7 +1193,7 @@ public sealed class AgentJobService(
             jobs[i].CompletionTokens = (jobs[i].CompletionTokens ?? 0) + completionPer + (i == 0 ? completionRemainder : 0);
         }
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesAndCacheLogsAsync(ct);
     }
 
     internal async Task RecordTokensForCurrentExecutionAsync(

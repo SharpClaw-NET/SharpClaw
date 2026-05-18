@@ -183,6 +183,7 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
         DeleteIfExists(LogFilePath);
         DeleteIfExists(DebugFilePath);
         DeleteIfExists(ExceptionFilePath);
+        DeleteIfExists(SerilogFilePath);
     }
 
     private static void DeleteIfExists(string path)

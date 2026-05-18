@@ -202,7 +202,7 @@ public sealed class ColdEntityStore(
         if (indexFilter is { } filter)
         {
             var indexedIds = await ColdEntityIndex.LookupAsync(
-                fs, dir, filter.PropertyName, filter.Value, logger, ct);
+                fs, dir, filter.PropertyName, filter.Value, logger, ct, typeof(T).Name);
 
             if (indexedIds is not null)
             {

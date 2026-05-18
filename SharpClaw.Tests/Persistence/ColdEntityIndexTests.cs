@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Logging.Abstractions;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Security;
@@ -40,6 +41,18 @@ public class ColdEntityIndexTests
             Content = "test",
             CreatedAt = DateTimeOffset.UtcNow,
             UpdatedAt = DateTimeOffset.UtcNow,
+        };
+    }
+
+    private static AgentJobLogEntryDB CreateJobLog(Guid jobId, string message = "segment")
+    {
+        return new AgentJobLogEntryDB
+        {
+            Id = Guid.NewGuid(),
+            AgentJobId = jobId,
+            Message = message,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
         };
     }
 
@@ -84,6 +97,56 @@ public class ColdEntityIndexTests
         result.Should().HaveCount(2);
         result.Should().Contain(msg1.Id);
         result.Should().Contain(msg2.Id);
+    }
+
+    [Test]
+    public async Task AgentJobLogIndex_UsesKeyScopedShardPerJob()
+    {
+        var jobId = Guid.NewGuid();
+        var otherJobId = Guid.NewGuid();
+        var log1 = CreateJobLog(jobId, "one");
+        var log2 = CreateJobLog(jobId, "two");
+        var other = CreateJobLog(otherJobId, "other");
+
+        await ColdEntityIndex.UpdateIndexAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB), log1.Id, log1,
+            deleted: false, NullLogger.Instance, CancellationToken.None);
+        await ColdEntityIndex.UpdateIndexAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB), log2.Id, log2,
+            deleted: false, NullLogger.Instance, CancellationToken.None);
+        await ColdEntityIndex.UpdateIndexAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB), other.Id, other,
+            deleted: false, NullLogger.Instance, CancellationToken.None);
+
+        File.Exists(ColdEntityIndex.GetShardPath(_fs, _entityDir, nameof(AgentJobLogEntryDB.AgentJobId)))
+            .Should().BeFalse();
+        File.Exists(ColdEntityIndex.GetKeyScopedShardPath(
+                _fs, _entityDir, nameof(AgentJobLogEntryDB.AgentJobId), jobId))
+            .Should().BeTrue();
+
+        var result = await ColdEntityIndex.LookupAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB.AgentJobId), jobId,
+            NullLogger.Instance, CancellationToken.None, nameof(AgentJobLogEntryDB));
+
+        result.Should().HaveCount(2);
+        result.Should().Contain([log1.Id, log2.Id]);
+        result.Should().NotContain(other.Id);
+    }
+
+    [Test]
+    public async Task AgentJobLogIndex_ReturnsEmptySetForMissingJobWhenScopedIndexExists()
+    {
+        var log = CreateJobLog(Guid.NewGuid());
+        await ColdEntityIndex.UpdateIndexAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB), log.Id, log,
+            deleted: false, NullLogger.Instance, CancellationToken.None);
+
+        var result = await ColdEntityIndex.LookupAsync(_fs,
+            _entityDir, nameof(AgentJobLogEntryDB.AgentJobId), Guid.NewGuid(),
+            NullLogger.Instance, CancellationToken.None, nameof(AgentJobLogEntryDB));
+
+        result.Should().NotBeNull();
+        result.Should().BeEmpty();
     }
 
     [Test]

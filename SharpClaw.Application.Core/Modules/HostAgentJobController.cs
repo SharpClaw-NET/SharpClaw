@@ -10,7 +10,8 @@ namespace SharpClaw.Application.Core.Modules;
 
 public sealed class HostAgentJobController(
     AgentJobService jobs,
-    SharpClawDbContext db) : IAgentJobController
+    SharpClawDbContext db,
+    ChatCache chatCache) : IAgentJobController
 {
     public Task<AgentJobResponse> SubmitJobAsync(
         Guid channelId,
@@ -33,14 +34,16 @@ public sealed class HostAgentJobController(
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null) return;
 
-        job.LogEntries.Add(new AgentJobLogEntryDB
+        var entry = new AgentJobLogEntryDB
         {
             AgentJobId = jobId,
             Message = message,
             Level = level,
-        });
+        };
+        job.LogEntries.Add(entry);
 
         await db.SaveChangesAsync(ct);
+        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
     }
 
     public async Task MarkJobFailedAsync(
@@ -55,14 +58,16 @@ public sealed class HostAgentJobController(
         job.Status = AgentJobStatus.Failed;
         job.CompletedAt = DateTimeOffset.UtcNow;
         job.ErrorLog = exception.ToString();
-        job.LogEntries.Add(new AgentJobLogEntryDB
+        var entry = new AgentJobLogEntryDB
         {
             AgentJobId = jobId,
             Message = $"Job failed: {exception.Message}",
             Level = JobLogLevels.Error,
-        });
+        };
+        job.LogEntries.Add(entry);
 
         await db.SaveChangesAsync(ct);
+        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
     }
 
     public async Task MarkJobCompletedAsync(
@@ -80,16 +85,18 @@ public sealed class HostAgentJobController(
         if (resultData is not null)
             job.ResultData = resultData;
 
-        job.LogEntries.Add(new AgentJobLogEntryDB
+        var entry = new AgentJobLogEntryDB
         {
             AgentJobId = jobId,
             Message = string.IsNullOrWhiteSpace(message)
                 ? "Job completed by module."
                 : message,
             Level = JobLogLevels.Info,
-        });
+        };
+        job.LogEntries.Add(entry);
 
         await db.SaveChangesAsync(ct);
+        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
     }
 
     public async Task MarkJobCancelledAsync(
@@ -103,16 +110,18 @@ public sealed class HostAgentJobController(
 
         job.Status = AgentJobStatus.Cancelled;
         job.CompletedAt = DateTimeOffset.UtcNow;
-        job.LogEntries.Add(new AgentJobLogEntryDB
+        var entry = new AgentJobLogEntryDB
         {
             AgentJobId = jobId,
             Message = string.IsNullOrWhiteSpace(message)
                 ? "Job cancelled by module."
                 : message,
             Level = JobLogLevels.Warning,
-        });
+        };
+        job.LogEntries.Add(entry);
 
         await db.SaveChangesAsync(ct);
+        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
     }
 
     public async Task CancelStaleJobsByActionPrefixAsync(
@@ -131,19 +140,29 @@ public sealed class HostAgentJobController(
             .Where(j => j.ActionKey!.StartsWith(actionKeyPrefix, StringComparison.OrdinalIgnoreCase))
             .ToList();
 
+        var cancelledLogs = new List<(Guid JobId, AgentJobLogEntryDB Entry)>(stale.Count);
         foreach (var job in stale)
         {
             job.Status = AgentJobStatus.Cancelled;
             job.CompletedAt = DateTimeOffset.UtcNow;
-            job.LogEntries.Add(new AgentJobLogEntryDB
+            var entry = new AgentJobLogEntryDB
             {
                 AgentJobId = job.Id,
                 Message = "Cancelled: stale from previous session.",
                 Level = JobLogLevels.Warning,
-            });
+            };
+            job.LogEntries.Add(entry);
+            cancelledLogs.Add((job.Id, entry));
         }
 
         if (stale.Count > 0)
+        {
             await db.SaveChangesAsync(ct);
+            foreach (var (jobId, entry) in cancelledLogs)
+                chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+        }
     }
+
+    private static AgentJobLogResponse ToLogResponse(AgentJobLogEntryDB log)
+        => new(log.Message, log.Level, log.CreatedAt);
 }

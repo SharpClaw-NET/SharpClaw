@@ -39,7 +39,7 @@ public static class AgentJobHandlers
     public static async Task<IResult> Approve(
         Guid channelId, Guid jobId, ApproveAgentJobRequest request, AgentJobService svc, ChatService chatSvc)
     {
-        if (await GetScopedJobAsync(channelId, jobId, svc) is null) return Results.NotFound();
+        if (await GetScopedJobSummaryAsync(channelId, jobId, svc) is null) return Results.NotFound();
         var job = await svc.ApproveAsync(jobId, request);
         if (job is null) return Results.NotFound();
         var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
@@ -50,7 +50,7 @@ public static class AgentJobHandlers
     public static async Task<IResult> Stop(
         Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
-        if (await GetScopedJobAsync(channelId, jobId, svc) is null) return Results.NotFound();
+        if (await GetScopedJobSummaryAsync(channelId, jobId, svc) is null) return Results.NotFound();
         var job = await svc.StopAsync(jobId);
         if (job is null) return Results.NotFound();
         var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
@@ -61,7 +61,7 @@ public static class AgentJobHandlers
     public static async Task<IResult> Cancel(
         Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
-        if (await GetScopedJobAsync(channelId, jobId, svc) is null) return Results.NotFound();
+        if (await GetScopedJobSummaryAsync(channelId, jobId, svc) is null) return Results.NotFound();
         var job = await svc.CancelAsync(jobId);
         if (job is null) return Results.NotFound();
         var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
@@ -72,7 +72,7 @@ public static class AgentJobHandlers
     public static async Task<IResult> Pause(
         Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
-        if (await GetScopedJobAsync(channelId, jobId, svc) is null) return Results.NotFound();
+        if (await GetScopedJobSummaryAsync(channelId, jobId, svc) is null) return Results.NotFound();
         var job = await svc.PauseAsync(jobId);
         if (job is null) return Results.NotFound();
         var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
@@ -83,7 +83,7 @@ public static class AgentJobHandlers
     public static async Task<IResult> Resume(
         Guid channelId, Guid jobId, AgentJobService svc, ChatService chatSvc)
     {
-        if (await GetScopedJobAsync(channelId, jobId, svc) is null) return Results.NotFound();
+        if (await GetScopedJobSummaryAsync(channelId, jobId, svc) is null) return Results.NotFound();
         var job = await svc.ResumeAsync(jobId);
         if (job is null) return Results.NotFound();
         var cost = await chatSvc.GetChannelCostAsync(job.ChannelId);
@@ -94,6 +94,13 @@ public static class AgentJobHandlers
         Guid channelId, Guid jobId, AgentJobService svc)
     {
         var job = await svc.GetAsync(jobId);
+        return job?.ChannelId == channelId ? job : null;
+    }
+
+    private static async Task<AgentJobSummaryResponse?> GetScopedJobSummaryAsync(
+        Guid channelId, Guid jobId, AgentJobService svc)
+    {
+        var job = await svc.GetSummaryAsync(jobId);
         return job?.ChannelId == channelId ? job : null;
     }
 }

@@ -133,7 +133,7 @@ jobs:
           - domain: Chat Streaming
             filter: 'FullyQualifiedName~TestHarnessStreamingCorrectnessTests'
           - domain: Jobs Direct
-            filter: 'FullyQualifiedName~DirectJobSubmissionCompletes|FullyQualifiedName~DirectJobDeniedStops|FullyQualifiedName~DirectJobAwaitingApproval|FullyQualifiedName~DirectJobApprovalDenies|FullyQualifiedName~DirectJobFailure'
+            filter: 'FullyQualifiedName~DirectJobSubmissionCompletes|FullyQualifiedName~DirectJobDetailAndLifecycleActionsReuseCachedLogs|FullyQualifiedName~DirectJobDeniedStops|FullyQualifiedName~DirectJobAwaitingApproval|FullyQualifiedName~DirectJobApprovalDenies|FullyQualifiedName~DirectJobFailure'
           - domain: Jobs Lifecycle
             filter: 'FullyQualifiedName~LongRunningDirectJobPauseResumeStopAndCompletedCancelAreStable'
           - domain: Jobs Streaming
@@ -169,7 +169,7 @@ jobs:
           - domain: Defaults Resource Resolution
             filter: 'FullyQualifiedName~PerResourceJob'
           - domain: Module API Host Startup
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ApiHostStartupTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ApiHostStartupTests|FullyQualifiedName~SharpClaw.Tests.Logging.SessionLogWriterTests'
           - domain: Module Bundled Outputs
             filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleOutputTests'
           - domain: Module External Lifecycle
@@ -229,7 +229,7 @@ jobs:
           - domain: Jobs Direct Actions
             filter: 'FullyQualifiedName~PerformanceGate_DirectJobAllowedWarmNoOp|FullyQualifiedName~PerformanceGate_DirectJobDeniedWarmNoOp'
           - domain: Jobs Summaries
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJobSummaries'
+            filter: 'FullyQualifiedName~PerformanceGate_DirectJobSummaries|FullyQualifiedName~PerformanceGate_DirectJobDetailHotLogs'
           - domain: Jobs Parallel
             filter: 'FullyQualifiedName~PerformanceGate_DirectJob_TwentyParallelAllowedNoOpJobs'
           - domain: Tools Permission Checks

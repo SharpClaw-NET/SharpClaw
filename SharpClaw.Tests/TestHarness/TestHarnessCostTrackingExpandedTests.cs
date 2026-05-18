@@ -201,6 +201,36 @@ public sealed class TestHarnessCostTrackingExpandedTests
     }
 
     [Test]
+    public async Task DirectJobDetailAndLifecycleActionsReuseCachedLogs()
+    {
+        await using var host = ChatHarnessHost.Create();
+        host.Harness.ConfigurePermissionedJobTool(new TestHarnessToolBehavior { Result = "started" });
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.ToolProviderKey,
+            grantHarnessPermission: true);
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+
+        var job = await svc.SubmitAsync(
+            seeded.Channel.Id,
+            new SubmitAgentJobRequest(
+                ActionKey: TestHarnessConstants.JobPermissionedTool,
+                ScriptJson: """{"result":"started","remainExecuting":true}"""));
+
+        host.PersistenceCounter.Reset();
+        var firstDetail = await svc.GetAsync(job.Id);
+
+        firstDetail!.Logs.Should().NotBeEmpty();
+        host.PersistenceCounter.QueryCalls.Should().Be(0);
+
+        host.PersistenceCounter.Reset();
+        var stopped = await svc.StopAsync(job.Id);
+
+        stopped!.Status.Should().Be(AgentJobStatus.Completed);
+        stopped.Logs.Select(l => l.Message).Should().Contain("Job stopped.");
+        host.PersistenceCounter.QueryCalls.Should().Be(0);
+    }
+
+    [Test]
     public async Task DirectJobDeniedStopsBeforeModuleInvocation()
     {
         await using var host = ChatHarnessHost.Create();

@@ -582,6 +582,16 @@ public sealed class TestHarnessPerformanceTierTests
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
+    public async Task PerformanceGate_DirectJobDetailHotLogs_OneHundredReads_Under100ms()
+    {
+        var measured = await CachedAsync(
+            "direct-job-detail-hot-logs-100",
+            () => MeasureDirectJobDetailHotLogsAsync(logCount: 500, readCount: 100));
+        measured.Should().BeLessThanOrEqualTo(100);
+    }
+
+    [Test]
+    [Category(HarnessTestCategories.PerformanceGate)]
     public async Task PerformanceGate_DirectJob_TwentyParallelAllowedNoOpJobs_Under250ms()
     {
         var measured = await CachedAsync("direct-job-parallel-20", MeasureTwentyParallelAllowedJobsAsync);
@@ -1288,6 +1298,58 @@ public sealed class TestHarnessPerformanceTierTests
 
         summaries.Should().HaveCount(jobCount);
         JsonSerializer.Serialize(summaries).Should().NotContain(new string('x', Math.Min(resultBytes, 100)));
+        return sw.ElapsedMilliseconds;
+    }
+
+    private static async Task<long> MeasureDirectJobDetailHotLogsAsync(int logCount, int readCount)
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var now = DateTimeOffset.UtcNow;
+        var job = new AgentJobDB
+        {
+            Id = Guid.NewGuid(),
+            AgentId = seeded.Agent.Id,
+            ChannelId = seeded.Channel.Id,
+            ActionKey = TestHarnessConstants.JobPermissionedTool,
+            Status = AgentJobStatus.Executing,
+            EffectiveClearance = PermissionClearance.Independent,
+            CreatedAt = now,
+            UpdatedAt = now,
+            StartedAt = now
+        };
+
+        host.Db.AgentJobs.Add(job);
+        for (var i = 0; i < logCount; i++)
+        {
+            host.Db.AgentJobLogEntries.Add(new AgentJobLogEntryDB
+            {
+                Id = Guid.NewGuid(),
+                AgentJobId = job.Id,
+                Message = $"segment {i}",
+                Level = JobLogLevels.Info,
+                CreatedAt = now.AddMilliseconds(i),
+                UpdatedAt = now.AddMilliseconds(i)
+            });
+        }
+        await host.Db.SaveChangesAsync();
+
+        var svc = host.Services.GetRequiredService<AgentJobService>();
+        var warm = await svc.GetAsync(job.Id);
+        warm!.Logs.Should().HaveCount(logCount);
+
+        host.PersistenceCounter.Reset();
+        var sw = Stopwatch.StartNew();
+        for (var i = 0; i < readCount; i++)
+        {
+            var detail = await svc.GetAsync(job.Id);
+            detail!.Logs.Should().HaveCount(logCount);
+        }
+        sw.Stop();
+
+        host.PersistenceCounter.QueryCalls.Should().Be(
+            0,
+            "hot job detail reads should reuse cached log snapshots instead of querying log storage");
         return sw.ElapsedMilliseconds;
     }
 

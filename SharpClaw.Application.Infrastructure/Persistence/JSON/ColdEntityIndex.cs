@@ -36,12 +36,26 @@ internal sealed class ColdEntityIndex
         ["TaskOutputEntryDB"] = ["TaskInstanceId"],
     };
 
+    private static readonly Dictionary<string, HashSet<string>> KeyScopedIndexedProperties = new(StringComparer.Ordinal)
+    {
+        ["AgentJobLogEntryDB"] = new HashSet<string>(StringComparer.Ordinal) { "AgentJobId" }
+    };
+
     /// <summary>
     /// Returns the shard file path for a given property:
     /// <c>{entityDir}/_index_{propertyName}.json</c>.
     /// </summary>
     internal static string GetShardPath(IPersistenceFileSystem fs, string entityDir, string propertyName)
         => fs.CombinePath(entityDir, $"_index_{propertyName}.json");
+
+    internal static string GetKeyScopedShardPath(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName,
+        Guid key)
+        => fs.CombinePath(
+            GetKeyScopedShardDirectory(fs, entityDir, propertyName),
+            $"{key:D}.json");
 
     /// <summary>
     /// Updates the sharded index files for a given entity directory after an entity
@@ -71,6 +85,13 @@ internal sealed class ColdEntityIndex
 
         foreach (var propName in propNames)
         {
+            if (IsKeyScoped(entityTypeName, propName))
+            {
+                await UpdateKeyScopedIndexAsync(
+                    fs, entityDir, propName, idStr, entity, deleted, logger, ct);
+                continue;
+            }
+
             var shardPath = GetShardPath(fs, entityDir, propName);
             var shard = await LoadShardAsync(fs, shardPath, logger, ct);
             var dirty = false;
@@ -121,6 +142,36 @@ internal sealed class ColdEntityIndex
     /// signaling the caller should fall back to a full scan.
     /// </summary>
     public static async Task<HashSet<Guid>?> LookupAsync(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName,
+        Guid value,
+        ILogger logger,
+        CancellationToken ct,
+        string? entityTypeName = null)
+    {
+        entityTypeName ??= GetEntityTypeName(entityDir);
+        if (IsKeyScoped(entityTypeName, propertyName))
+        {
+            var scopedPath = GetKeyScopedShardPath(fs, entityDir, propertyName, value);
+            if (fs.FileExists(scopedPath))
+                return await LoadKeyScopedIdsAsync(fs, scopedPath, logger, ct);
+
+            var scopedDir = GetKeyScopedShardDirectory(fs, entityDir, propertyName);
+            if (fs.DirectoryExists(scopedDir))
+                return [];
+
+            var legacy = await LookupLegacyShardAsync(fs, entityDir, propertyName, value, logger, ct);
+            if (legacy is not null)
+                return legacy;
+
+            return null;
+        }
+
+        return await LookupLegacyShardAsync(fs, entityDir, propertyName, value, logger, ct);
+    }
+
+    private static async Task<HashSet<Guid>?> LookupLegacyShardAsync(
         IPersistenceFileSystem fs,
         string entityDir,
         string propertyName,
@@ -179,8 +230,14 @@ internal sealed class ColdEntityIndex
 
         // Build per-property shards in memory
         var shards = new Dictionary<string, Dictionary<string, List<string>>>();
+        var keyScopedShards = new Dictionary<string, Dictionary<string, List<string>>>();
         foreach (var propName in propNames)
-            shards[propName] = new Dictionary<string, List<string>>();
+        {
+            if (IsKeyScoped(entityTypeName, propName))
+                keyScopedShards[propName] = new Dictionary<string, List<string>>();
+            else
+                shards[propName] = new Dictionary<string, List<string>>();
+        }
 
         foreach (var file in files)
         {
@@ -203,7 +260,9 @@ internal sealed class ColdEntityIndex
                     if (value is null) continue;
 
                     var key = value.ToString()!;
-                    var shard = shards[propName];
+                    var shard = IsKeyScoped(entityTypeName, propName)
+                        ? keyScopedShards[propName]
+                        : shards[propName];
                     if (!shard.TryGetValue(key, out var ids))
                     {
                         ids = [];
@@ -225,6 +284,16 @@ internal sealed class ColdEntityIndex
             totalKeys += shard.Count;
             var shardPath = GetShardPath(fs, entityDir, propName);
             await SaveShardAsync(fs, shardPath, shard, ct);
+        }
+
+        foreach (var (propName, shard) in keyScopedShards)
+        {
+            totalKeys += shard.Count;
+            await ReplaceKeyScopedShardsAsync(fs, entityDir, propName, shard, ct);
+
+            var legacyShardPath = GetShardPath(fs, entityDir, propName);
+            if (fs.FileExists(legacyShardPath))
+                fs.DeleteFile(legacyShardPath);
         }
 
         // Clean up legacy monolithic _index.json if present
@@ -259,6 +328,165 @@ internal sealed class ColdEntityIndex
         }
         if (tmpFiles.Length > 0)
             logger.LogInformation("Cleaned up {Count} orphan .tmp files in {Dir}", tmpFiles.Length, directory);
+    }
+
+    private static bool IsKeyScoped(string? entityTypeName, string propertyName)
+        => entityTypeName is not null
+           && KeyScopedIndexedProperties.TryGetValue(entityTypeName, out var properties)
+           && properties.Contains(propertyName);
+
+    private static string GetEntityTypeName(string entityDir)
+        => Path.GetFileName(entityDir.TrimEnd(
+            Path.DirectorySeparatorChar,
+            Path.AltDirectorySeparatorChar));
+
+    private static string GetKeyScopedShardDirectory(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName)
+        => fs.CombinePath(entityDir, $"_index_{propertyName}");
+
+    private static async Task UpdateKeyScopedIndexAsync(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName,
+        string entityId,
+        object? entity,
+        bool deleted,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (deleted || entity is null)
+        {
+            await RemoveFromKeyScopedShardsAsync(
+                fs, entityDir, propertyName, entityId, logger, ct);
+            return;
+        }
+
+        var prop = entity.GetType().GetProperty(propertyName);
+        if (prop?.GetValue(entity) is not Guid key)
+        {
+            await RemoveFromKeyScopedShardsAsync(
+                fs, entityDir, propertyName, entityId, logger, ct);
+            return;
+        }
+
+        var shardPath = GetKeyScopedShardPath(fs, entityDir, propertyName, key);
+        var ids = await LoadKeyScopedIdStringsAsync(fs, shardPath, logger, ct);
+        if (ids.Contains(entityId))
+            return;
+
+        ids.Add(entityId);
+        await SaveKeyScopedShardAsync(fs, shardPath, ids, ct);
+    }
+
+    private static async Task RemoveFromKeyScopedShardsAsync(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName,
+        string entityId,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var shardDir = GetKeyScopedShardDirectory(fs, entityDir, propertyName);
+        if (!fs.DirectoryExists(shardDir))
+            return;
+
+        foreach (var file in fs.GetFiles(shardDir, "*.json"))
+        {
+            var ids = await LoadKeyScopedIdStringsAsync(fs, file, logger, ct);
+            if (!ids.Remove(entityId))
+                continue;
+
+            if (ids.Count == 0)
+                fs.DeleteFile(file);
+            else
+                await SaveKeyScopedShardAsync(fs, file, ids, ct);
+        }
+    }
+
+    private static async Task ReplaceKeyScopedShardsAsync(
+        IPersistenceFileSystem fs,
+        string entityDir,
+        string propertyName,
+        Dictionary<string, List<string>> shard,
+        CancellationToken ct)
+    {
+        var shardDir = GetKeyScopedShardDirectory(fs, entityDir, propertyName);
+        if (fs.DirectoryExists(shardDir))
+        {
+            foreach (var file in fs.GetFiles(shardDir, "*.json"))
+                fs.DeleteFile(file);
+        }
+
+        fs.CreateDirectory(shardDir);
+        foreach (var (key, ids) in shard)
+        {
+            if (!Guid.TryParse(key, out var guidKey))
+                continue;
+
+            await SaveKeyScopedShardAsync(
+                fs,
+                GetKeyScopedShardPath(fs, entityDir, propertyName, guidKey),
+                ids,
+                ct);
+        }
+    }
+
+    private static async Task<HashSet<Guid>?> LoadKeyScopedIdsAsync(
+        IPersistenceFileSystem fs,
+        string shardPath,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        var idStrings = await LoadKeyScopedIdStringsAsync(fs, shardPath, logger, ct);
+        if (idStrings.Count == 0)
+            return null;
+
+        var result = new HashSet<Guid>();
+        foreach (var idStr in idStrings)
+        {
+            if (Guid.TryParse(idStr, out var id))
+                result.Add(id);
+        }
+
+        return result.Count == 0 ? null : result;
+    }
+
+    private static async Task<List<string>> LoadKeyScopedIdStringsAsync(
+        IPersistenceFileSystem fs,
+        string shardPath,
+        ILogger logger,
+        CancellationToken ct)
+    {
+        if (!fs.FileExists(shardPath))
+            return [];
+
+        try
+        {
+            var json = await fs.ReadAllTextAsync(shardPath, ct);
+            return JsonSerializer.Deserialize<List<string>>(json) ?? [];
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "Failed to read key-scoped index shard {Path}, rebuilding", shardPath);
+            return [];
+        }
+    }
+
+    private static async Task SaveKeyScopedShardAsync(
+        IPersistenceFileSystem fs,
+        string shardPath,
+        List<string> ids,
+        CancellationToken ct,
+        bool fsync = true)
+    {
+        var shardDir = Path.GetDirectoryName(shardPath);
+        if (!string.IsNullOrEmpty(shardDir))
+            fs.CreateDirectory(shardDir);
+
+        var json = JsonSerializer.Serialize(ids, JsonOptions);
+        await AtomicFileWriter.WriteTextAsync(fs, shardPath, json, fsync, ct);
     }
 
     private static async Task<Dictionary<string, List<string>>> LoadShardAsync(

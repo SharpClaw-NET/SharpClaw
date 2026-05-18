@@ -1,5 +1,6 @@
 using System.Text;
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 
 namespace SharpClaw.Application.Services;
@@ -14,6 +15,7 @@ public sealed class ChatCache(IConfiguration configuration)
     public const string PrefixThreadHistoryLimits = "chat:thread-history-limits:";
     public const string PrefixEffectiveTools = "chat:effective-tools:";
     public const string PrefixDefaultResourceResolution = "chat:default-resource:";
+    public const string PrefixJobLogs = "job:logs:";
 
     private readonly object _gate = new();
     private readonly Dictionary<string, CacheEntry> _entries = new(StringComparer.Ordinal);
@@ -189,6 +191,41 @@ public sealed class ChatCache(IConfiguration configuration)
             key.StartsWith(PrefixDefaultResourceResolution, StringComparison.Ordinal)
             && KeyHasGuidSegment(key, PrefixDefaultResourceResolution.Length + 37, agentId));
 
+    public Task<IReadOnlyList<AgentJobLogResponse>?> GetJobLogsAsync(
+        Guid jobId,
+        Func<CancellationToken, Task<IReadOnlyList<AgentJobLogResponse>>> factory,
+        CancellationToken ct)
+        => GetOrCreateAsync(
+            KeyJobLogs(jobId),
+            async innerCt => await factory(innerCt),
+            EstimateJobLogs,
+            ct);
+
+    public bool TryGetJobLogs(Guid jobId, out IReadOnlyList<AgentJobLogResponse>? logs)
+        => TryGet<IReadOnlyList<AgentJobLogResponse>>(KeyJobLogs(jobId), out logs);
+
+    public void SetJobLogs(Guid jobId, IReadOnlyList<AgentJobLogResponse> logs)
+        => Set<IReadOnlyList<AgentJobLogResponse>>(KeyJobLogs(jobId), logs.ToArray(), EstimateJobLogs);
+
+    public void AppendJobLogIfCached(Guid jobId, AgentJobLogResponse log)
+    {
+        Mutate<IReadOnlyList<AgentJobLogResponse>>(
+            KeyJobLogs(jobId),
+            logs =>
+            {
+                var next = new List<AgentJobLogResponse>(logs.Count + 1);
+                next.AddRange(logs);
+                next.Add(log);
+                return next
+                    .OrderBy(static entry => entry.Timestamp)
+                    .ToArray();
+            },
+            EstimateJobLogs);
+    }
+
+    public void RemoveJobLogs(Guid jobId)
+        => Remove(KeyJobLogs(jobId));
+
     public async Task<ChannelCostResponse> GetChannelCostAsync(
         Guid channelId,
         Func<CancellationToken, Task<ChannelCostResponse>> factory,
@@ -276,6 +313,9 @@ public sealed class ChatCache(IConfiguration configuration)
         => PrefixDefaultResourceResolution
            + $"{channelId:D}:{agentId:D}:"
            + (actionKey ?? "").Trim().ToLowerInvariant();
+
+    public static string KeyJobLogs(Guid jobId)
+        => $"{PrefixJobLogs}{jobId:D}";
 
     public static long EstimateString(string? value)
         => value is null ? 0 : Encoding.UTF8.GetByteCount(value);
@@ -380,6 +420,10 @@ public sealed class ChatCache(IConfiguration configuration)
 
     private static long EstimateAgentCost(AgentCostResponse cost)
         => 128 + EstimateString(cost.AgentName) + cost.ChannelBreakdown.Count * 80L;
+
+    private static long EstimateJobLogs(IReadOnlyList<AgentJobLogResponse> logs)
+        => 128 + logs.Sum(static log =>
+            48 + EstimateString(log.Message) + EstimateString(log.Level));
 
     private static ChannelCostResponse AddAgentTokens(
         ChannelCostResponse cost,
