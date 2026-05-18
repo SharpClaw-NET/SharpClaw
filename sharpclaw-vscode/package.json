@@ -79,7 +79,7 @@
     "package": "npx @vscode/vsce package"
   },
   "dependencies": {
-    "ws": "^8.18.0"
+    "ws": "^8.20.1"
   },
   "devDependencies": {
     "@types/node": "^20.11.0",
