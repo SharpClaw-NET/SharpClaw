@@ -1,10 +1,10 @@
 {
   "id": "sharpclaw_providers_openai_compat",
   "displayName": "OpenAI-Compatible Providers",
-  "version": "1.0.0",
+  "version": "0.1.0-beta",
   "toolPrefix": "po",
-  "entryAssembly": "SharpClaw.Modules.Providers.OpenAICompatible",
-  "minHostVersion": "1.0.0",
+  "entryAssembly": "SharpClaw.Modules.Providers.OpenAICompatible.dll",
+  "minHostVersion": "0.1.0-beta",
   "author": "mkn8rn",
   "description": "Provides OpenAI-protocol API clients: OpenAI, DeepSeek, OpenRouter, Eden AI, ZAI, Vercel AI Gateway, xAI, Groq, Cerebras, Mistral, GitHub Copilot, Minimax, Custom, Google Gemini (OpenAI shim), Google Vertex AI (OpenAI shim).",
   "license": "AGPL-3.0",

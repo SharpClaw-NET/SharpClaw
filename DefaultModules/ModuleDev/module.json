@@ -1,10 +1,10 @@
 {
   "id": "sharpclaw_module_dev",
   "displayName": "Module Development Kit",
-  "version": "1.0.0",
+  "version": "0.1.0-beta",
   "toolPrefix": "mdk",
-  "entryAssembly": "SharpClaw.Modules.ModuleDev",
-  "minHostVersion": "1.0.0",
+  "entryAssembly": "SharpClaw.Modules.ModuleDev.dll",
+  "minHostVersion": "0.1.0-beta",
   "author": "mkn8rn",
   "description": "Autonomous module authoring, building, hot-loading, and development introspection tools.",
   "license": "AGPL-3.0",

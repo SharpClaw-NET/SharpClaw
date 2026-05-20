@@ -1,7 +1,15 @@
 {
   "id": "sharpclaw_providers_google",
   "displayName": "Google Native Providers",
-  "version": "1.0.0",
+  "version": "0.1.0-beta",
   "enabled": true,
-  "toolPrefix": "pg"
+  "toolPrefix": "pg",
+  "entryAssembly": "SharpClaw.Modules.Providers.Google.dll",
+  "minHostVersion": "0.1.0-beta",
+  "author": "mkn8rn",
+  "description": "Native Google Gemini and Vertex AI provider integrations.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows", "linux", "macos" ],
+  "exports": [],
+  "requires": []
 }

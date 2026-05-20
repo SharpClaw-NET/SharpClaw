@@ -4,6 +4,17 @@
     <TargetFramework>net10.0</TargetFramework>
     <Nullable>enable</Nullable>
     <ImplicitUsings>enable</ImplicitUsings>
+    <CopyLocalLockFileAssemblies>true</CopyLocalLockFileAssemblies>
+    <IsPackable>true</IsPackable>
+    <PackageId>{{ASSEMBLY_NAME}}</PackageId>
+    <Version>0.1.0-beta</Version>
+    <Authors>mkn8rn</Authors>
+    <Description>{{DESCRIPTION}}</Description>
+    <PackageTags>sharpclaw;module;plugin;agent</PackageTags>
+    <SuppressDependenciesWhenPacking>true</SuppressDependenciesWhenPacking>
+    <IncludeContentInPack>false</IncludeContentInPack>
+    <TargetsForTfmSpecificContentInPackage>$(TargetsForTfmSpecificContentInPackage);AddSharpClawModulePayloadToPackage</TargetsForTfmSpecificContentInPackage>
+    <NoWarn>$(NoWarn);NU5100;NU5128</NoWarn>
   </PropertyGroup>
 
   <ItemGroup>
@@ -11,5 +22,23 @@
       <HintPath>{{CONTRACTS_PATH}}</HintPath>
     </Reference>
   </ItemGroup>
+
+  <ItemGroup>
+    <Content Include="module.json"
+             CopyToOutputDirectory="PreserveNewest"
+             Pack="false" />
+  </ItemGroup>
+
+  <Target Name="AddSharpClawModulePayloadToPackage"
+          Condition="Exists('$(MSBuildProjectDirectory)\module.json')">
+    <ItemGroup>
+      <_SharpClawModulePayload Include="$(TargetDir)**\*"
+                               Exclude="$(TargetDir)**\*.pdb;$(TargetDir)**\*.xml;$(TargetDir)**\*.nupkg" />
+      <TfmSpecificPackageFile Include="@(_SharpClawModulePayload)"
+                              PackagePath="sharpclaw\" />
+      <TfmSpecificPackageFile Include="$(MSBuildProjectDirectory)\module.json"
+                              PackagePath="sharpclaw\" />
+    </ItemGroup>
+  </Target>
 
 </Project>

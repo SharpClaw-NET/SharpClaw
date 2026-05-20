@@ -1,7 +1,15 @@
 {
   "id": "sharpclaw_providers_ollama",
   "displayName": "Ollama Provider",
-  "version": "1.0.0",
+  "version": "0.1.0-beta",
   "enabled": true,
-  "toolPrefix": "po2"
+  "toolPrefix": "po2",
+  "entryAssembly": "SharpClaw.Modules.Providers.Ollama.dll",
+  "minHostVersion": "0.1.0-beta",
+  "author": "mkn8rn",
+  "description": "Ollama provider integration for user-managed local Ollama servers.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows", "linux", "macos" ],
+  "exports": [],
+  "requires": []
 }

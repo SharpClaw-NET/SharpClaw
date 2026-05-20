@@ -50,10 +50,13 @@ internal sealed partial class ModuleScaffoldService(
         Directory.CreateDirectory(moduleDir);
 
         var files = new List<string>();
+        var assemblyName = ToPascalCase(spec.ModuleId);
 
         // 1. Generate .csproj
         var csprojContent = LoadTemplate("ProjectFile.csproj.template")
-            .Replace("{{CONTRACTS_PATH}}", devEnv.ContractsAssemblyPath);
+            .Replace("{{CONTRACTS_PATH}}", devEnv.ContractsAssemblyPath)
+            .Replace("{{ASSEMBLY_NAME}}", assemblyName)
+            .Replace("{{DESCRIPTION}}", spec.Description ?? $"{spec.DisplayName} SharpClaw module.");
 
         var csprojName = ToPascalCase(spec.ModuleId) + ".csproj";
         await WriteFileAsync(moduleDir, csprojName, csprojContent, ct);
@@ -79,7 +82,6 @@ internal sealed partial class ModuleScaffoldService(
         files.Add(moduleFileName);
 
         // 3. Generate module.json
-        var assemblyName = ToPascalCase(spec.ModuleId);
         var manifestContent = LoadTemplate("Manifest.json.template")
             .Replace("{{MODULE_ID}}", spec.ModuleId)
             .Replace("{{DISPLAY_NAME}}", spec.DisplayName)

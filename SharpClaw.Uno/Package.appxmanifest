@@ -7,7 +7,7 @@
 
   <Identity Name="com.mkn8rn.SharpClaw"
            Publisher="CN=SharpClaw Dev"
-           Version="0.0.3.0" />
+           Version="0.1.0.0" />
   <Properties />
 
   <Dependencies>
