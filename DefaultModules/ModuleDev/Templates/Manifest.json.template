@@ -3,6 +3,7 @@
   "displayName": "{{DISPLAY_NAME}}",
   "version": "0.1.0-beta",
   "toolPrefix": "{{TOOL_PREFIX}}",
+  "runtime": "dotnet",
   "entryAssembly": "{{ASSEMBLY_NAME}}.dll",
   "minHostVersion": "0.1.0-beta",
   "description": "{{DESCRIPTION}}",

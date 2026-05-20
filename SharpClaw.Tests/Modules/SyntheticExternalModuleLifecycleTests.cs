@@ -21,6 +21,86 @@ namespace SharpClaw.Tests.Modules;
 public sealed class SyntheticExternalModuleLifecycleTests
 {
     [Test]
+    public void ModuleManifestWithoutRuntimeDefaultsToDotNet()
+    {
+        const string json =
+            """
+            {
+              "id": "synthetic_external_lifecycle",
+              "displayName": "Synthetic External Lifecycle",
+              "version": "1.0.0",
+              "toolPrefix": "sel",
+              "entryAssembly": "SharpClaw.Tests.ExternalModule.dll",
+              "minHostVersion": "0.0.0"
+            }
+            """;
+        var manifest = JsonSerializer.Deserialize<ModuleManifest>(
+            json,
+            SecureJsonOptions.Manifest)!;
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
+
+        manifest.EntryAssembly.Should().Be("SharpClaw.Tests.ExternalModule.dll");
+        runtimeInfo.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
+        runtimeInfo.IsDotNet.Should().BeTrue();
+    }
+
+    [Test]
+    public async Task ExternalModuleHostRejectsUnsupportedForeignRuntimeClearly()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var moduleDir = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "foreign-runtime-modules",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(moduleDir);
+        var manifest = new ModuleManifest(
+            "synthetic_node_module",
+            "Synthetic Node Module",
+            "1.0.0",
+            "snm",
+            "server.js",
+            "0.0.0");
+        var runtimeInfo = new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.Node, "server.js");
+
+        var act = () => ExternalModuleHost.Load(
+            moduleDir,
+            manifest,
+            runtimeInfo,
+            host.Services,
+            host.Services.GetRequiredService<ILoggerFactory>());
+
+        act.Should()
+            .Throw<NotSupportedException>()
+            .WithMessage("*runtime 'node'*only supports 'dotnet'*not implemented yet*");
+    }
+
+    [Test]
+    public async Task NuGetPackageWithForeignRuntimeFailsWithUnsupportedRuntime()
+    {
+        var packageSource = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "foreign-runtime-nuget-source",
+            Guid.NewGuid().ToString("N"));
+        var packageCache = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "foreign-runtime-nuget-cache",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(packageSource);
+
+        const string packageId = "SharpClaw.Tests.ForeignRuntime.Package";
+        const string version = "1.0.0";
+        CreateForeignRuntimeModulePackage(packageSource, packageId, version);
+
+        var act = async () => await NuGetModulePackageResolver.ResolveAsync(
+            new NuGetModulePackageReference(packageId, version, packageSource),
+            packageCache);
+
+        await act.Should()
+            .ThrowAsync<NotSupportedException>()
+            .WithMessage("*runtime 'python'*only supports 'dotnet'*not implemented yet*");
+    }
+
+    [Test]
     public async Task NuGetPackageModuleMaterializesAndLoadsThroughExternalModuleHost()
     {
         await using var host = ChatHarnessHost.Create();
@@ -241,6 +321,44 @@ public sealed class SyntheticExternalModuleLifecycleTests
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
             archive.CreateEntryFromFile(file, Path.GetFileName(file));
+    }
+
+    private static void CreateForeignRuntimeModulePackage(
+        string packageSource,
+        string packageId,
+        string version)
+    {
+        var packagePath = Path.Combine(packageSource, $"{packageId}.{version}.nupkg");
+
+        using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
+        WriteTextEntry(
+            archive,
+            "sharpclaw/module.json",
+            """
+            {
+              "id": "synthetic_python_module",
+              "displayName": "Synthetic Python Module",
+              "version": "1.0.0",
+              "toolPrefix": "spm",
+              "runtime": "python",
+              "entrypoint": "synthetic_module.main:app",
+              "minHostVersion": "0.0.0"
+            }
+            """);
+        WriteTextEntry(
+            archive,
+            $"{packageId}.nuspec",
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <package>
+              <metadata>
+                <id>{packageId}</id>
+                <version>{version}</version>
+                <authors>SharpClaw.Tests</authors>
+                <description>Synthetic foreign-runtime SharpClaw module package.</description>
+              </metadata>
+            </package>
+            """);
     }
 
     private static void WriteTextEntry(ZipArchive archive, string entryName, string text)

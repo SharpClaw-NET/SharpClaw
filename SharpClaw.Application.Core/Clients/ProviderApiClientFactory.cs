@@ -38,7 +38,7 @@ public sealed class ProviderApiClientFactory
         if (_registry is null)
             return null;
 
-        foreach (var host in _registry.GetExternalHosts())
+        foreach (var host in _registry.GetRuntimeHosts())
         {
             foreach (var externalPlugin in host.Services.GetServices<IProviderPlugin>())
             {
@@ -55,7 +55,7 @@ public sealed class ProviderApiClientFactory
         if (_registry is null)
             yield break;
 
-        foreach (var host in _registry.GetExternalHosts())
+        foreach (var host in _registry.GetRuntimeHosts())
         {
             foreach (var plugin in host.Services.GetServices<IProviderPlugin>())
             {

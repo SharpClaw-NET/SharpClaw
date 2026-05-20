@@ -1815,15 +1815,15 @@ public sealed class ChatService(
                 return $"Error: permission denied for inline tool '{toolCall.Name}': {verdict.Reason}";
         }
 
-        // External modules use their own DI container.
-        var externalHost = moduleRegistry.GetExternalHost(moduleId);
-        if (externalHost is not null && !externalHost.TryAcquireExecution())
+        // Runtime-hosted modules use their own DI container.
+        var runtimeHost = moduleRegistry.GetRuntimeHost(moduleId);
+        if (runtimeHost is not null && !runtimeHost.TryAcquireExecution())
             return $"Error: module '{moduleId}' is unloading.";
 
         var sw = Stopwatch.StartNew();
         try
         {
-            using var externalScope = externalHost?.CreateScope();
+            using var externalScope = runtimeHost?.CreateScope();
             var scopedProvider = externalScope?.ServiceProvider ?? serviceProvider;
 
             // Set ModuleExecutionContext so IModuleConfigStore resolves correctly.
@@ -1863,7 +1863,7 @@ public sealed class ChatService(
         }
         finally
         {
-            externalHost?.ReleaseExecution();
+            runtimeHost?.ReleaseExecution();
         }
     }
 

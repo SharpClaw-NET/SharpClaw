@@ -62,7 +62,7 @@ public sealed class TaskTriggerSourceRegistry(
         if (moduleRegistry is null)
             yield break;
 
-        foreach (var host in moduleRegistry.GetExternalHosts())
+        foreach (var host in moduleRegistry.GetRuntimeHosts())
         {
             foreach (var service in host.Services.GetServices<T>())
                 yield return service;

@@ -173,7 +173,8 @@ internal static partial class NuGetModulePackageResolver
         var moduleRoot = ResolveModuleRoot(extractDir, modulePath);
         CopyDirectory(moduleRoot, destinationDir);
 
-        var manifest = ReadManifest(Path.Combine(destinationDir, ModuleFileNames.ManifestFile));
+        var (manifest, runtimeInfo) = ReadManifest(Path.Combine(destinationDir, ModuleFileNames.ManifestFile));
+        runtimeInfo.EnsureDotNetEntryAssembly(manifest);
         var entryAssemblyPath = Path.Combine(destinationDir, manifest.EntryAssembly);
         if (!File.Exists(entryAssemblyPath))
         {
@@ -217,7 +218,11 @@ internal static partial class NuGetModulePackageResolver
 
         foreach (var candidate in candidates)
         {
-            var manifest = ReadManifest(Path.Combine(candidate, ModuleFileNames.ManifestFile));
+            var (manifest, runtimeInfo) = ReadManifest(Path.Combine(candidate, ModuleFileNames.ManifestFile));
+            if (!runtimeInfo.IsDotNet)
+                return candidate;
+
+            runtimeInfo.EnsureDotNetEntryAssembly(manifest);
             if (File.Exists(Path.Combine(candidate, manifest.EntryAssembly))
                 || Directory.EnumerateFiles(candidate, manifest.EntryAssembly, SearchOption.AllDirectories).Any())
             {
@@ -229,14 +234,12 @@ internal static partial class NuGetModulePackageResolver
             $"NuGet package does not contain a loadable SharpClaw {ModuleFileNames.ManifestFile}.");
     }
 
-    private static ModuleManifest ReadManifest(string manifestPath)
+    private static (ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo) ReadManifest(string manifestPath)
     {
         var json = File.ReadAllText(manifestPath);
         var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
             ?? throw new InvalidOperationException($"Failed to parse module manifest '{manifestPath}'.");
-        PathGuard.EnsureFileName(manifest.EntryAssembly, nameof(manifest.EntryAssembly));
-        PathGuard.EnsureExtension(manifest.EntryAssembly, ".dll");
-        return manifest;
+        return (manifest, ModuleManifestRuntimeInfo.FromJson(json));
     }
 
     private static string? FindBestEntryAssembly(string moduleDir, string entryAssembly)
@@ -302,7 +305,11 @@ internal static partial class NuGetModulePackageResolver
 
         try
         {
-            var manifest = ReadManifest(manifestPath);
+            var (manifest, runtimeInfo) = ReadManifest(manifestPath);
+            if (!runtimeInfo.IsDotNet)
+                return false;
+
+            runtimeInfo.EnsureDotNetEntryAssembly(manifest);
             return File.Exists(Path.Combine(moduleDir, manifest.EntryAssembly));
         }
         catch

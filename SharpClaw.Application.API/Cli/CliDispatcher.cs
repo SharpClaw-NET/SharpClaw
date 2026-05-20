@@ -3360,7 +3360,7 @@ public static class CliDispatcher
     }
 
     /// <summary>
-    /// Invokes a module-provided CLI handler. For external (hot-loaded) modules
+    /// Invokes a module-provided CLI handler. For externally hosted modules
     /// the handler receives a service provider drawn from the module's own DI
     /// container so module-internal services resolve correctly. The host's
     /// service provider is passed through for bundled modules.
@@ -3369,25 +3369,25 @@ public static class CliDispatcher
         string moduleId, ModuleCliCommand cmd, string[] args,
         IServiceProvider hostSp, ModuleRegistry registry)
     {
-        var externalHost = registry.GetExternalHost(moduleId);
-        if (externalHost is null)
+        var runtimeHost = registry.GetRuntimeHost(moduleId);
+        if (runtimeHost is null)
         {
             await cmd.Handler(args, hostSp, CancellationToken.None);
             return;
         }
 
-        if (!externalHost.TryAcquireExecution())
+        if (!runtimeHost.TryAcquireExecution())
             throw new InvalidOperationException(
                 $"Module '{moduleId}' is unloading \u2014 cannot execute CLI commands.");
 
         try
         {
-            using var scope = externalHost.CreateScope();
+            using var scope = runtimeHost.CreateScope();
             await cmd.Handler(args, scope.ServiceProvider, CancellationToken.None);
         }
         finally
         {
-            externalHost.ReleaseExecution();
+            runtimeHost.ReleaseExecution();
         }
     }
 

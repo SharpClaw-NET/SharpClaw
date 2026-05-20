@@ -13,7 +13,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// Each host owns a per-module <see cref="ServiceProvider"/>, an in-flight execution
 /// counter, and the unload lifecycle.
 /// </summary>
-public sealed class ExternalModuleHost : IAsyncDisposable
+public sealed class ExternalModuleHost : IModuleRuntimeHost
 {
     private readonly ModuleLoadContext _loadContext;
     private readonly ServiceProvider _serviceProvider;
@@ -46,10 +46,17 @@ public sealed class ExternalModuleHost : IAsyncDisposable
         string moduleDir,
         ModuleManifest manifest,
         IServiceProvider hostServices,
+        ILoggerFactory loggerFactory) =>
+        Load(moduleDir, manifest, ModuleManifestRuntimeInfo.DotNetDefault, hostServices, loggerFactory);
+
+    internal static ExternalModuleHost Load(
+        string moduleDir,
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo,
+        IServiceProvider hostServices,
         ILoggerFactory loggerFactory)
     {
-        PathGuard.EnsureFileName(manifest.EntryAssembly, nameof(manifest.EntryAssembly));
-        PathGuard.EnsureExtension(manifest.EntryAssembly, ".dll");
+        runtimeInfo.EnsureDotNetEntryAssembly(manifest);
 
         var dllPath = PathGuard.EnsureContainedIn(
             Path.Combine(moduleDir, manifest.EntryAssembly), moduleDir);

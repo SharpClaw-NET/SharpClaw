@@ -319,11 +319,12 @@ public sealed class ModuleService(
         var json = await File.ReadAllTextAsync(manifestPath, ct);
         var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
             ?? throw new InvalidOperationException($"Failed to parse manifest in '{canonicalModuleDir}'.");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
         if (registry.GetModule(manifest.Id) is not null)
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
 
-        var host = ExternalModuleHost.Load(canonicalModuleDir, manifest, hostServices, loggerFactory);
+        var host = ExternalModuleHost.Load(canonicalModuleDir, manifest, runtimeInfo, hostServices, loggerFactory);
         try
         {
             registry.Register(host.Module, host);
@@ -460,6 +461,7 @@ public sealed class ModuleService(
         var json = await File.ReadAllTextAsync(manifestPath, ct);
         var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
             ?? throw new InvalidOperationException($"Failed to parse manifest in '{canonicalDir}'.");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
         if (registry.GetModule(manifest.Id) is { } existingModule)
         {
@@ -479,7 +481,7 @@ public sealed class ModuleService(
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
         }
 
-        var host = ExternalModuleHost.Load(canonicalDir, manifest, hostServices, loggerFactory);
+        var host = ExternalModuleHost.Load(canonicalDir, manifest, runtimeInfo, hostServices, loggerFactory);
         try
         {
             registry.Register(host.Module, host);

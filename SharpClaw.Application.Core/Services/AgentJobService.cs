@@ -538,18 +538,18 @@ public sealed class AgentJobService(
             ResourceId: job.ResourceId,
             ActionKey: job.ActionKey);
 
-        // External modules use their own per-module DI container;
+        // Runtime-hosted modules use their own per-module DI container;
         // bundled modules use the host's scope.
-        var externalHost = moduleRegistry.GetExternalHost(envelope.Module);
-        if (externalHost is not null && !externalHost.TryAcquireExecution())
+        var runtimeHost = moduleRegistry.GetRuntimeHost(envelope.Module);
+        if (runtimeHost is not null && !runtimeHost.TryAcquireExecution())
             throw new InvalidOperationException(
                 $"Module '{envelope.Module}' is unloading — cannot execute tools.");
 
         var sw = Stopwatch.StartNew();
         try
         {
-            using var scope = externalHost is not null
-                ? externalHost.CreateScope()
+            using var scope = runtimeHost is not null
+                ? runtimeHost.CreateScope()
                 : serviceScopeFactory.CreateScope();
 
             // Set ModuleExecutionContext so IModuleConfigStore resolves correctly.
@@ -628,7 +628,7 @@ public sealed class AgentJobService(
         }
         finally
         {
-            externalHost?.ReleaseExecution();
+            runtimeHost?.ReleaseExecution();
         }
     }
 
