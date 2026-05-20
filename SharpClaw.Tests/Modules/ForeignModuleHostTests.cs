@@ -21,7 +21,7 @@ public sealed class ForeignModuleHostTests
         host.ProcessId.Should().BeGreaterThan(0);
         host.Handshake.ModuleId.Should().Be("sample_node_module");
         host.Handshake.Runtime.Should().Be(ModuleManifestRuntimeInfo.Node);
-        host.Endpoints.Should().ContainSingle(e => e.RoutePattern == "/modules/sample/ping");
+        host.Endpoints.Should().Contain(e => e.RoutePattern == "/modules/sample/ping");
         host.CapturedOutput.StandardOutput.Should().Contain($"moduleDir={workspace.ModuleDir}");
         host.CapturedOutput.StandardOutput.Should().Contain($"dataDir={workspace.DataDir}");
         host.CapturedOutput.StandardOutput.Should().Contain("token=run-token");

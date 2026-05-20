@@ -34,10 +34,10 @@ internal sealed record ForeignModuleHealthResponse(
         new(IsHealthy, Message, Details?.ToDictionary(kv => kv.Key, kv => (object)kv.Value));
 }
 
-internal sealed record ForeignModuleDiscoveryResponse(
+public sealed record ForeignModuleDiscoveryResponse(
     IReadOnlyList<ForeignModuleEndpointDescriptor>? Endpoints = null);
 
-internal sealed record ForeignModuleEndpointDescriptor(
+public sealed record ForeignModuleEndpointDescriptor(
     string Method,
     string RoutePattern,
     string ResponseMode,
@@ -46,6 +46,6 @@ internal sealed record ForeignModuleEndpointDescriptor(
     string? ContributionId = null,
     IReadOnlyDictionary<string, JsonElement>? Metadata = null);
 
-internal sealed record ForeignModulePermissionDescriptor(
+public sealed record ForeignModulePermissionDescriptor(
     bool IsPerResource,
     string? DelegateTo = null);

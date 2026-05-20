@@ -753,6 +753,7 @@ try
             Log.Error(ex, "Module '{ModuleId}' failed to map endpoints", module.Id);
         }
     }
+    app.MapForeignModuleEndpoints(registry);
 
     // Webhook trigger routes — registered lazily after ApplicationStarted so
     // that TaskTriggerHostService has loaded its first binding set.  The

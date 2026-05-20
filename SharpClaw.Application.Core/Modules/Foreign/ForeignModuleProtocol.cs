@@ -1,6 +1,6 @@
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
-internal static class ForeignModuleProtocol
+public static class ForeignModuleProtocol
 {
     public const int Version = 1;
     public const string TokenHeaderName = "X-SharpClaw-Control-Token";
@@ -30,7 +30,7 @@ internal static class ForeignModuleCapability
     public const string HostCapabilities = "hostCapabilities";
 }
 
-internal static class ForeignModuleEndpointResponseMode
+public static class ForeignModuleEndpointResponseMode
 {
     public const string Json = "json";
     public const string Stream = "stream";

@@ -97,6 +97,12 @@ async Task HandleAsync(TcpClient client)
                             routePattern = "/modules/sample/ping",
                             responseMode = "json",
                         },
+                        new
+                        {
+                            method = "POST",
+                            routePattern = "/modules/sample/echo",
+                            responseMode = "json",
+                        },
                     },
                 });
                 break;
@@ -127,6 +133,27 @@ async Task HandleAsync(TcpClient client)
                     stop.TrySetResult();
                 break;
 
+            case "/modules/sample/ping":
+                await WriteJsonAsync(stream, new
+                {
+                    ok = true,
+                    path = request.Path,
+                    query = request.Query,
+                    marker = request.Headers.GetValueOrDefault("X-Test-Marker"),
+                }, ("X-Sidecar", "yes"));
+                break;
+
+            case "/modules/sample/echo":
+                await WriteJsonAsync(stream, new
+                {
+                    method = request.Method,
+                    path = request.Path,
+                    query = request.Query,
+                    body = request.Body,
+                    contentType = request.Headers.GetValueOrDefault("Content-Type"),
+                });
+                break;
+
             default:
                 await WriteTextAsync(stream, 404, "Not Found", "not found", "text/plain");
                 break;
@@ -143,7 +170,8 @@ static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)
     using var reader = new StreamReader(stream, Encoding.ASCII, leaveOpen: true);
     var requestLine = await reader.ReadLineAsync() ?? string.Empty;
     var parts = requestLine.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-    var path = parts.Length >= 2 ? new Uri("http://127.0.0.1" + parts[1]).AbsolutePath : "/";
+    var method = parts.Length >= 1 ? parts[0] : "GET";
+    var requestUri = parts.Length >= 2 ? new Uri("http://127.0.0.1" + parts[1]) : new Uri("http://127.0.0.1/");
     var headers = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
 
     while (await reader.ReadLineAsync() is { } line && line.Length > 0)
@@ -155,35 +183,71 @@ static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)
         headers[line[..separator].Trim()] = line[(separator + 1)..].Trim();
     }
 
-    return new SidecarRequest(path, headers);
+    var body = string.Empty;
+    if (headers.TryGetValue("Content-Length", out var contentLengthText)
+        && int.TryParse(contentLengthText, out var contentLength)
+        && contentLength > 0)
+    {
+        var buffer = new char[contentLength];
+        var offset = 0;
+        while (offset < contentLength)
+        {
+            var read = await reader.ReadAsync(buffer.AsMemory(offset, contentLength - offset));
+            if (read == 0)
+                break;
+
+            offset += read;
+        }
+
+        body = new string(buffer, 0, offset);
+    }
+
+    return new SidecarRequest(
+        method,
+        requestUri.AbsolutePath,
+        requestUri.Query,
+        headers,
+        body);
 }
 
-static Task WriteJsonAsync(NetworkStream stream, object value) =>
+static Task WriteJsonAsync(
+    NetworkStream stream,
+    object value,
+    params (string Name, string Value)[] headers) =>
     WriteTextAsync(
         stream,
         200,
         "OK",
         JsonSerializer.Serialize(value),
-        "application/json");
+        "application/json",
+        headers);
 
 static async Task WriteTextAsync(
     NetworkStream stream,
     int statusCode,
     string reasonPhrase,
     string text,
-    string contentType)
+    string contentType,
+    params (string Name, string Value)[] extraHeaders)
 {
     var bytes = Encoding.UTF8.GetBytes(text);
-    var headers = Encoding.ASCII.GetBytes(
+    var headerText =
         $"HTTP/1.1 {statusCode} {reasonPhrase}\r\n" +
         $"Content-Type: {contentType}; charset=utf-8\r\n" +
         $"Content-Length: {bytes.Length}\r\n" +
-        "Connection: close\r\n" +
-        "\r\n");
+        "Connection: close\r\n";
+    foreach (var (name, value) in extraHeaders)
+        headerText += $"{name}: {value}\r\n";
+    headerText += "\r\n";
+    var headers = Encoding.ASCII.GetBytes(
+        headerText);
     await stream.WriteAsync(headers);
     await stream.WriteAsync(bytes);
 }
 
 internal sealed record SidecarRequest(
+    string Method,
     string Path,
-    IReadOnlyDictionary<string, string> Headers);
+    string Query,
+    IReadOnlyDictionary<string, string> Headers,
+    string Body);

@@ -5,7 +5,7 @@ using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
-internal sealed class ForeignModuleHost : IModuleRuntimeHost
+internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
 {
     private static readonly TimeSpan ReadinessPollInterval = TimeSpan.FromMilliseconds(100);
 
@@ -123,6 +123,17 @@ internal sealed class ForeignModuleHost : IModuleRuntimeHost
     }
 
     public IServiceScope CreateScope() => _serviceProvider.CreateScope();
+
+    public Task<HttpResponseMessage> SendEndpointRequestAsync(
+        HttpRequestMessage request,
+        CancellationToken ct = default)
+    {
+        request.Headers.Remove(ForeignModuleProtocol.TokenHeaderName);
+        request.Headers.TryAddWithoutValidation(
+            ForeignModuleProtocol.TokenHeaderName,
+            _options.ControlToken);
+        return _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+    }
 
     public bool TryAcquireExecution()
     {
