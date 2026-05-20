@@ -391,7 +391,11 @@ public sealed class ModuleService(
 
         var dir = host.SourceDirectory;
         await UnloadExternalAsync(moduleId, ct);
-        return await LoadExternalAsync(dir, hostServices, ct);
+        return await LoadExternalFromAbsolutePathAsync(
+            dir,
+            hostServices,
+            ct,
+            persistDisabledEnvEntry: false);
     }
 
     /// <summary>
@@ -505,6 +509,28 @@ public sealed class ModuleService(
         }
     }
 
+    /// <summary>
+    /// Restore a NuGet package that contains a complete SharpClaw module payload,
+    /// materialize it into the local package-module cache, and load it through
+    /// the same external-module lifecycle as directory-backed modules.
+    /// </summary>
+    public async Task<ModuleStateResponse> LoadExternalPackageAsync(
+        NuGetModulePackageReference package,
+        IServiceProvider hostServices,
+        CancellationToken ct = default)
+    {
+        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
+            package,
+            ResolveNuGetModulesDir(),
+            ct);
+
+        return await LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            hostServices,
+            ct,
+            persistDisabledEnvEntry: false);
+    }
+
     public void RegisterModulePersistence(ISharpClawModule module)
     {
         ArgumentNullException.ThrowIfNull(module);
@@ -540,7 +566,8 @@ public sealed class ModuleService(
 
     /// <summary>
     /// Load external modules defined in the <c>ExternalModules</c> configuration section.
-    /// Each entry must have a <c>Path</c>; optional <c>Enabled</c> (default <c>true</c>).
+    /// Each entry may use either a <c>Path</c> or a NuGet <c>PackageId</c> plus
+    /// <c>Version</c>; optional <c>Enabled</c> defaults to <c>true</c>.
     /// Failed enabled entries crash startup by default; set
     /// <c>Modules:CrashOnExternalModuleLoadFailure</c> to <c>false</c> to keep warning-only behavior.
     /// </summary>
@@ -555,9 +582,21 @@ public sealed class ModuleService(
         foreach (var entry in section.GetChildren())
         {
             var path = entry["Path"];
-            if (string.IsNullOrWhiteSpace(path))
+            var packageId = entry["PackageId"];
+            var version = entry["Version"];
+            var entryLabel = !string.IsNullOrWhiteSpace(path)
+                ? path
+                : !string.IsNullOrWhiteSpace(packageId)
+                    ? $"{packageId}/{version ?? "(missing-version)"}"
+                    : $"index {entry.Key}";
+            if (string.IsNullOrWhiteSpace(path)
+                && string.IsNullOrWhiteSpace(packageId)
+                && string.IsNullOrWhiteSpace(version))
             {
-                logger.LogWarning("ExternalModules entry at index {Index} has no Path — skipped", entry.Key);
+                logger.LogWarning(
+                    "ExternalModules entry at index {Index} has neither Path nor PackageId/Version - skipped",
+                    entry.Key);
+
                 continue;
             }
 
@@ -567,30 +606,60 @@ public sealed class ModuleService(
 
             if (!enabled)
             {
-                logger.LogInformation("ExternalModules entry '{Path}' is disabled — skipped",
-                    PathGuard.SanitizeForLog(path));
+                logger.LogInformation("ExternalModules entry '{Entry}' is disabled - skipped",
+                    PathGuard.SanitizeForLog(entryLabel));
                 continue;
             }
 
             try
             {
-                var result = await LoadExternalFromAbsolutePathAsync(
-                    path,
-                    hostServices,
-                    ct,
-                    persistDisabledEnvEntry: false);
+                ModuleStateResponse result;
+                if (!string.IsNullOrWhiteSpace(path))
+                {
+                    result = await LoadExternalFromAbsolutePathAsync(
+                        path,
+                        hostServices,
+                        ct,
+                        persistDisabledEnvEntry: false);
+                }
+                else if (!string.IsNullOrWhiteSpace(packageId)
+                         || !string.IsNullOrWhiteSpace(version))
+                {
+                    if (string.IsNullOrWhiteSpace(packageId) || string.IsNullOrWhiteSpace(version))
+                    {
+                        throw new InvalidOperationException(
+                            "NuGet-backed ExternalModules entries require both PackageId and Version.");
+                    }
+
+                    result = await LoadExternalPackageAsync(
+                        new NuGetModulePackageReference(
+                            packageId,
+                            version,
+                            entry["Source"],
+                            entry["ModulePath"]),
+                        hostServices,
+                        ct);
+                }
+                else
+                {
+                    logger.LogWarning(
+                        "ExternalModules entry at index {Index} has neither Path nor PackageId/Version - skipped",
+                        entry.Key);
+                    continue;
+                }
+
                 loaded.Add(result);
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Failed to load .env external module from '{Path}'",
-                    PathGuard.SanitizeForLog(path));
+                logger.LogWarning(ex, "Failed to load .env external module from '{Entry}'",
+                    PathGuard.SanitizeForLog(entryLabel));
 
                 if (crashOnFailure)
                 {
                     throw new InvalidOperationException(
-                        $"Failed to load enabled external module configured at ExternalModules:{entry.Key}:Path. " +
-                        "Fix the module path or set ExternalModules entry Enabled=false. " +
+                        $"Failed to load enabled external module configured at ExternalModules:{entry.Key}. " +
+                        "Fix the module path or package reference, or set ExternalModules entry Enabled=false. " +
                         "Set Modules:CrashOnExternalModuleLoadFailure=false to allow startup to continue.",
                         ex);
                 }
@@ -605,6 +674,13 @@ public sealed class ModuleService(
         return Path.Combine(
             Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,
             ModuleFileNames.ExternalModulesDir);
+    }
+
+    public static string ResolveNuGetModulesDir()
+    {
+        return Path.Combine(
+            Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,
+            ModuleFileNames.NuGetModulesDir);
     }
 
     /// <summary>

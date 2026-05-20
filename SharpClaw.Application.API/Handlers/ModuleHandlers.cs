@@ -158,6 +158,38 @@ public static class ModuleHandlers
         return Results.Ok(loaded);
     }
 
+    /// <summary>Download and load an external module packaged as a NuGet package.</summary>
+    [MapPost("/packages/load")]
+    public static async Task<IResult> LoadPackage(
+        LoadNuGetModuleRequest request,
+        ModuleService svc,
+        ModuleLoader moduleLoader)
+    {
+        try
+        {
+            var result = await svc.LoadExternalPackageAsync(
+                new NuGetModulePackageReference(
+                    request.PackageId,
+                    request.Version,
+                    request.Source,
+                    request.ModulePath),
+                moduleLoader.RootServices);
+            return Results.Ok(result);
+        }
+        catch (ArgumentException ex)
+        {
+            return Results.BadRequest(new { error = ex.Message });
+        }
+        catch (FileNotFoundException ex)
+        {
+            return Results.NotFound(new { error = ex.Message });
+        }
+        catch (InvalidOperationException ex)
+        {
+            return Results.Json(new { error = ex.Message }, statusCode: StatusCodes.Status409Conflict);
+        }
+    }
+
     /// <summary>Reload an external module from its source directory.</summary>
     [MapPost("/{moduleId}/reload")]
     public static async Task<IResult> Reload(string moduleId, ModuleService svc, ModuleLoader moduleLoader)
@@ -491,3 +523,9 @@ public static class ModuleHandlers
         return Results.Ok(new ModuleFrontendContributionResponse(contributions));
     }
 }
+
+public sealed record LoadNuGetModuleRequest(
+    string PackageId,
+    string Version,
+    string? Source = null,
+    string? ModulePath = null);

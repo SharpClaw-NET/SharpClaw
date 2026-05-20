@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -19,6 +20,61 @@ namespace SharpClaw.Tests.Modules;
 [TestFixture]
 public sealed class SyntheticExternalModuleLifecycleTests
 {
+    [Test]
+    public async Task NuGetPackageModuleMaterializesAndLoadsThroughExternalModuleHost()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var packageSource = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "nuget-module-source",
+            Guid.NewGuid().ToString("N"));
+        var packageCache = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "nuget-module-cache",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(packageSource);
+
+        const string packageId = "SharpClaw.Tests.ExternalModule.Package";
+        const string version = "1.0.0";
+        CreateSyntheticExternalModulePackage(packageSource, packageId, version);
+        var registry = host.Services.GetRequiredService<ModuleRegistry>();
+        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
+            new NuGetModulePackageReference(packageId, version, packageSource),
+            packageCache);
+        var manifest = JsonSerializer.Deserialize<ModuleManifest>(
+            await File.ReadAllTextAsync(Path.Combine(moduleDir, "module.json")),
+            SecureJsonOptions.Manifest)!;
+        var moduleHost = ExternalModuleHost.Load(
+            moduleDir,
+            manifest,
+            host.Services,
+            host.Services.GetRequiredService<ILoggerFactory>());
+
+        try
+        {
+            registry.Register(moduleHost.Module, moduleHost);
+            await moduleHost.Module.InitializeAsync(moduleHost.Services, CancellationToken.None);
+
+            registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
+            registry.GetModule(SyntheticExternalLifecycleModule.ModuleId).Should().NotBeNull();
+            registry.TryResolve(SyntheticExternalLifecycleModule.JobTool, out var moduleId, out var toolName)
+                .Should().BeTrue();
+            moduleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
+            toolName.Should().Be(SyntheticExternalLifecycleModule.JobTool);
+        }
+        finally
+        {
+            if (registry.GetModule(SyntheticExternalLifecycleModule.ModuleId) is not null)
+            {
+                await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
+                await moduleHost.Module.ShutdownAsync();
+                registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
+            }
+
+            await moduleHost.DisposeAsync();
+        }
+    }
+
     [Test]
     public async Task ExternalModuleUnloadRemovesModuleOwnedSurfacesAndKeepsCoreState()
     {
@@ -145,5 +201,52 @@ public sealed class SyntheticExternalModuleLifecycleTests
             manifest,
             hostServices,
             hostServices.GetRequiredService<ILoggerFactory>());
+    }
+
+    private static void CreateSyntheticExternalModulePackage(
+        string packageSource,
+        string packageId,
+        string version)
+    {
+        var assemblyPath = typeof(SyntheticExternalLifecycleModule).Assembly.Location;
+        var sourceDir = Path.GetDirectoryName(assemblyPath)!;
+        var packagePath = Path.Combine(packageSource, $"{packageId}.{version}.nupkg");
+        var manifest = new ModuleManifest(
+            SyntheticExternalLifecycleModule.ModuleId,
+            "Synthetic External Lifecycle",
+            version,
+            SyntheticExternalLifecycleModule.ToolPrefixValue,
+            Path.GetFileName(assemblyPath),
+            "0.0.0");
+
+        using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
+        WriteTextEntry(archive, "module.json", JsonSerializer.Serialize(manifest));
+        WriteTextEntry(
+            archive,
+            $"{packageId}.nuspec",
+            $"""
+            <?xml version="1.0" encoding="utf-8"?>
+            <package>
+              <metadata>
+                <id>{packageId}</id>
+                <version>{version}</version>
+                <authors>SharpClaw.Tests</authors>
+                <description>Synthetic SharpClaw module package.</description>
+              </metadata>
+            </package>
+            """);
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*.dll"))
+            archive.CreateEntryFromFile(file, Path.GetFileName(file));
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
+            archive.CreateEntryFromFile(file, Path.GetFileName(file));
+    }
+
+    private static void WriteTextEntry(ZipArchive archive, string entryName, string text)
+    {
+        var entry = archive.CreateEntry(entryName);
+        using var writer = new StreamWriter(entry.Open());
+        writer.Write(text);
     }
 }

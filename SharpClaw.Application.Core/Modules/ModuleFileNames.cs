@@ -17,6 +17,9 @@ internal static class ModuleFileNames
     /// <summary>External (hot-loaded) modules subdirectory.</summary>
     public const string ExternalModulesDir = "external-modules";
 
+    /// <summary>Resolved NuGet package modules subdirectory.</summary>
+    public const string NuGetModulesDir = "nuget-modules";
+
     /// <summary>Environment subdirectory containing the Core <c>.env</c> file.</summary>
     public const string EnvironmentDir = "Environment";
 
