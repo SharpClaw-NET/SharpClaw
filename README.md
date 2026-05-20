@@ -57,6 +57,58 @@ Visual Studio or VS Code bridge, a Neovim adapter, a legacy desktop app, or a
 provider that is not OpenAI-compatible. A sufficiently trusted agent can even
 help build and hot-load new modules while SharpClaw is running.
 
+## Tasks As Structural Backpressure
+
+SharpClaw tasks are C# scripts, which means they can do more than describe work
+for an agent to attempt. They can become structural backpressure inside the same
+language you are already shipping. A prompt can remind a model to preserve an
+invariant, but a task can compile, run, call typed APIs, assert facts about the
+result, and refuse the artifact in the same practical way a test refuses broken
+code.
+
+That matters for AI coding loops because the important rule is often not "try
+harder" but "make the wrong path expensive to take by accident." A release task
+can check that generated routes still require the expected permission. A
+maintenance task can launch the product, exercise the gateway, inspect persisted
+state, and fail when the resulting shape is wrong. A migration assistant can
+ask an agent to make a change, run the code that proves the change is safe in
+your application terms, and feed the concrete failure back into the next
+iteration. The task is not a note in the prompt. It is executable pressure on
+the artifact.
+
+Because tasks live as ordinary C# source, they can share DTOs, helpers,
+contracts, and assertions with the rest of the system. They can look like
+workflow automation when the goal is to get work done, and they can look like
+tests when the goal is to prove that a model, module, or user change still
+respects a project invariant. The useful line is not between "task" and "test."
+The useful line is between rules the model is asked to remember and rules the
+runtime can make it confront.
+
+## Add Your Own Features
+
+SharpClaw is designed so new capabilities do not have to wait for Core to grow
+them. If you need Computer Use, you can add a module that owns the screen,
+mouse, keyboard, capture, policy, and approval surface you actually trust. If
+you need integration with a specific program, that module can wrap its API, CLI,
+IPC channel, COM surface, file format, or desktop automation path and expose it
+as typed tools and task steps. Once it exists, the same capability can be shared
+with other users instead of being trapped in one local script.
+
+That is what makes modules more than mods. A module can contribute providers,
+tools, resources, task steps, triggers, gateway endpoints, metrics, and desktop
+UI hooks. It can be a small adapter around a single command, or it can be a
+whole product surface with its own routes, screens, background workers, and
+agent-facing contract. In practice, a SharpClaw module can be an integration, a
+policy layer, an automation pack, a development tool, or a complete web app
+that happens to run inside the same permissioned agent runtime.
+
+The result is a runtime that can stay small at the center while the edge becomes
+highly specific. A hospital, game studio, law office, robotics lab, or solo
+developer can each add the tools and workflows that match their world without
+turning every agent into an unrestricted shell. SharpClaw gives those features
+a place to live, a permission model to stand behind, and a way to be reused by
+people who need the same capability later.
+
 ## Runtime Shape
 
 | Component | Role |
@@ -98,7 +150,9 @@ and local AppData log files are covered in [Logging](docs/Logging.md).
 ## License
 
 SharpClaw is licensed under the
-[GNU Affero General Public License v3.0](LICENSE.md). Report security issues
-through
+[GNU Affero General Public License v3.0](LICENSE.md). Some bundled modules,
+generated assets, documentation examples, or third-party components may carry
+their own license notices; check the files and package metadata in the part of
+the project you are using. Report security issues through
 [GitHub Private Vulnerability Reporting](https://github.com/mkn8rn/SharpClaw/security/advisories/new)
 rather than public issues.
