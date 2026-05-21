@@ -34,6 +34,9 @@ CONTROL_PATHS = {
     "health": "/.sharpclaw/health",
     "initialize": "/.sharpclaw/initialize",
     "shutdown": "/.sharpclaw/shutdown",
+    "tool_execute": "/.sharpclaw/tools/execute",
+    "tool_stream": "/.sharpclaw/tools/stream",
+    "inline_tool_execute": "/.sharpclaw/inline-tools/execute",
 }
 
 HOST_CAPABILITY_PATHS = {
@@ -48,6 +51,8 @@ HOST_CAPABILITY_PATHS = {
 }
 
 Handler = Callable[["RequestContext"], Any | Awaitable[Any]]
+ToolHandler = Callable[["ToolContext"], Any | Awaitable[Any]]
+InlineToolHandler = Callable[["InlineToolExecutionContext"], Any | Awaitable[Any]]
 
 
 class HostCapabilitiesClient:
@@ -163,6 +168,22 @@ class RequestContext:
         return json.loads(self.read_text() or "null")
 
 
+@dataclass(slots=True)
+class ToolContext:
+    tool_name: str
+    parameters: dict[str, Any]
+    job: dict[str, Any]
+    host_capabilities: HostCapabilitiesClient | None = None
+
+
+@dataclass(slots=True)
+class InlineToolExecutionContext:
+    tool_name: str
+    parameters: dict[str, Any]
+    context: dict[str, Any]
+    host_capabilities: HostCapabilitiesClient | None = None
+
+
 class SharpClawHost:
     def __init__(
         self,
@@ -170,6 +191,8 @@ class SharpClawHost:
         module_id: str,
         tool_prefix: str,
         endpoints: list[dict[str, Any]] | None = None,
+        tools: list[dict[str, Any]] | None = None,
+        inline_tools: list[dict[str, Any]] | None = None,
         initialize: Handler | None = None,
         shutdown: Handler | None = None,
         health: Handler | None = None,
@@ -190,6 +213,8 @@ class SharpClawHost:
         self.module_id = os.getenv(ENV["module_id"], module_id)
         self.tool_prefix = tool_prefix
         self.endpoints = [_normalize_endpoint(endpoint) for endpoint in endpoints or []]
+        self.tools = [_normalize_tool(tool) for tool in tools or []]
+        self.inline_tools = [_normalize_tool(tool) for tool in inline_tools or []]
         self.initialize = initialize or _noop
         self.shutdown = shutdown or _noop
         self.health = health or (lambda _: {"isHealthy": True, "message": "ready"})
@@ -262,7 +287,15 @@ class SharpClawHost:
                     "endpoints": [
                         _endpoint_descriptor(endpoint)
                         for endpoint in self.endpoints
-                    ]
+                    ],
+                    "tools": [
+                        _tool_descriptor(tool)
+                        for tool in self.tools
+                    ],
+                    "inlineTools": [
+                        _tool_descriptor(tool)
+                        for tool in self.inline_tools
+                    ],
                 }
             )
 
@@ -289,7 +322,84 @@ class SharpClawHost:
                 }
             )
 
+        if method == "POST" and path == CONTROL_PATHS["tool_execute"]:
+            return self._execute_tool(body, inline=False)
+
+        if method == "POST" and path == CONTROL_PATHS["inline_tool_execute"]:
+            return self._execute_tool(body, inline=True)
+
+        if method == "POST" and path == CONTROL_PATHS["tool_stream"]:
+            return self._stream_tool(body)
+
         return json_response({"error": "Unknown SharpClaw control route"}, status=404)
+
+    def _execute_tool(self, body: bytes, *, inline: bool) -> Response:
+        payload = json.loads(body.decode("utf-8") or "{}")
+        tool_name = payload.get("toolName")
+        candidates = self.inline_tools if inline else self.tools
+        tool = next((candidate for candidate in candidates if candidate["name"] == tool_name), None)
+        if tool is None:
+            return json_response({"error": f"Tool '{tool_name}' not found"}, status=404)
+
+        handler = tool.get("handler")
+        if handler is None:
+            return json_response({"error": f"Tool '{tool_name}' has no handler"}, status=500)
+
+        context = (
+            InlineToolExecutionContext(
+                tool_name=tool_name,
+                parameters=payload.get("parameters") or {},
+                context=payload.get("context") or {},
+                host_capabilities=self.host_capabilities,
+            )
+            if inline
+            else ToolContext(
+                tool_name=tool_name,
+                parameters=payload.get("parameters") or {},
+                job=payload.get("job") or {},
+                host_capabilities=self.host_capabilities,
+            )
+        )
+        result = _run_handler(handler, context)
+        if isinstance(result, dict) and "result" in result:
+            return json_response(result)
+
+        return json_response(
+            {
+                "result": "" if result is None else str(result),
+                "completionBehavior": tool.get("completionBehavior"),
+            }
+        )
+
+    def _stream_tool(self, body: bytes) -> Response:
+        payload = json.loads(body.decode("utf-8") or "{}")
+        tool_name = payload.get("toolName")
+        tool = next((candidate for candidate in self.tools if candidate["name"] == tool_name), None)
+        if tool is None:
+            return json_response({"error": f"Tool '{tool_name}' not found"}, status=404)
+
+        if not tool.get("supportsStreaming"):
+            return json_response({"error": f"Tool '{tool_name}' is not streaming"}, status=404)
+
+        handler = tool.get("handler")
+        if handler is None:
+            return json_response({"error": f"Tool '{tool_name}' has no handler"}, status=500)
+
+        context = ToolContext(
+            tool_name=tool_name,
+            parameters=payload.get("parameters") or {},
+            job=payload.get("job") or {},
+            host_capabilities=self.host_capabilities,
+        )
+        result = _run_handler(handler, context)
+        chunks = _collect_stream_chunks(result)
+        lines = "".join(json.dumps({"delta": str(chunk)}) + "\n" for chunk in chunks)
+        lines += json.dumps({"isFinal": True}) + "\n"
+        return Response(
+            body=lines,
+            status=200,
+            headers={"Content-Type": "application/x-ndjson; charset=utf-8"},
+        )
 
     def _handle_endpoint(
         self,
@@ -429,6 +539,36 @@ def _normalize_endpoint(endpoint: dict[str, Any]) -> dict[str, Any]:
     return normalized
 
 
+def _normalize_tool(tool: dict[str, Any]) -> dict[str, Any]:
+    name = tool.get("name")
+    if not name:
+        raise ValueError("SharpClaw tool descriptors must include name.")
+
+    handler = tool.get("handler")
+    if handler is not None and not callable(handler):
+        raise ValueError(f"SharpClaw tool '{name}' handler is not callable.")
+
+    normalized = dict(tool)
+    normalized["name"] = str(name)
+    normalized["description"] = str(tool.get("description") or "")
+    normalized["parametersSchema"] = (
+        tool.get("parametersSchema")
+        or tool.get("parameters_schema")
+        or {"type": "object", "properties": {}}
+    )
+    normalized["completionBehavior"] = (
+        tool.get("completionBehavior")
+        or tool.get("completion_behavior")
+        or "CompleteWhenExecutionReturns"
+    )
+    normalized["supportsStreaming"] = bool(
+        tool.get("supportsStreaming")
+        or tool.get("supports_streaming")
+        or False
+    )
+    return normalized
+
+
 def _endpoint_descriptor(endpoint: dict[str, Any]) -> dict[str, Any]:
     return {
         "method": endpoint["method"],
@@ -438,6 +578,19 @@ def _endpoint_descriptor(endpoint: dict[str, Any]) -> dict[str, Any]:
         "permission": endpoint.get("permission"),
         "contributionId": endpoint.get("contributionId") or endpoint.get("contribution_id"),
         "metadata": endpoint.get("metadata"),
+    }
+
+
+def _tool_descriptor(tool: dict[str, Any]) -> dict[str, Any]:
+    return {
+        "name": tool["name"],
+        "description": tool["description"],
+        "parametersSchema": tool["parametersSchema"],
+        "permission": tool.get("permission"),
+        "timeoutSeconds": tool.get("timeoutSeconds") or tool.get("timeout_seconds"),
+        "aliases": tool.get("aliases"),
+        "supportsStreaming": tool.get("supportsStreaming", False),
+        "completionBehavior": tool.get("completionBehavior"),
     }
 
 
@@ -484,6 +637,25 @@ def _coerce_response(value: Any) -> Response:
         return Response(value)
 
     return json_response(value)
+
+
+def _collect_stream_chunks(value: Any) -> list[Any]:
+    if value is None:
+        return []
+
+    if inspect.isasyncgen(value):
+        async def collect() -> list[Any]:
+            return [item async for item in value]
+
+        return asyncio.run(collect())
+
+    if isinstance(value, str | bytes):
+        return [value]
+
+    try:
+        return list(value)
+    except TypeError:
+        return [value]
 
 
 def _run_asgi_app(app: Callable[..., Awaitable[None]], context: RequestContext) -> Response:

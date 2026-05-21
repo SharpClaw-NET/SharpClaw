@@ -32,9 +32,14 @@ public sealed class JavaScriptModuleSdkTests
         source.Should().Contain("/.sharpclaw/health");
         source.Should().Contain("/.sharpclaw/initialize");
         source.Should().Contain("/.sharpclaw/shutdown");
+        source.Should().Contain("/.sharpclaw/tools/execute");
+        source.Should().Contain("/.sharpclaw/tools/stream");
+        source.Should().Contain("/.sharpclaw/inline-tools/execute");
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("createHostCapabilitiesClient");
+        source.Should().Contain("inlineTools");
+        source.Should().Contain("supportsStreaming");
     }
 
     [Test]

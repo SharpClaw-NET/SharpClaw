@@ -16,6 +16,7 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
     private readonly HttpClient _httpClient;
     private readonly ServiceProvider _serviceProvider;
     private readonly ForeignModuleHostCapabilityServer? _capabilityServer;
+    private readonly ForeignModuleProxy _moduleProxy;
     private readonly StringBuilder _stdout = new();
     private readonly StringBuilder _stderr = new();
     private readonly object _stdoutLock = new();
@@ -50,7 +51,8 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         _serviceProvider = serviceProvider;
         _capabilityServer = capabilityServer;
         SourceDirectory = options.ModuleDirectory;
-        Module = new ForeignModuleProxy(manifest, client, () => ShutdownSidecarAsync(CancellationToken.None));
+        _moduleProxy = new ForeignModuleProxy(manifest, client, () => ShutdownSidecarAsync(CancellationToken.None));
+        Module = _moduleProxy;
     }
 
     public ISharpClawModule Module { get; }
@@ -277,7 +279,9 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
                     _runtimeInfo,
                     _options.HostVersion,
                     timeoutCts.Token);
-                Endpoints = (await ProtocolClient.DiscoverAsync(timeoutCts.Token)).Endpoints ?? [];
+                var discovery = await ProtocolClient.DiscoverAsync(timeoutCts.Token);
+                Endpoints = discovery.Endpoints ?? [];
+                _moduleProxy.ApplyDiscovery(discovery);
                 _startupCompleted = true;
                 return;
             }

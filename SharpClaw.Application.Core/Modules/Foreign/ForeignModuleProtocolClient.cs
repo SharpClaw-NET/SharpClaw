@@ -1,6 +1,8 @@
 using System.Net.Http.Headers;
+using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
@@ -11,6 +13,7 @@ internal sealed class ForeignModuleProtocolClient
     {
         MaxDepth = 32,
         PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     private readonly HttpClient _httpClient;
@@ -67,6 +70,111 @@ internal sealed class ForeignModuleProtocolClient
             ForeignModuleProtocol.ShutdownPath,
             new ForeignModuleLifecycleRequest(ForeignModuleProtocol.Version, manifest.Id),
             ct);
+
+    public Task<ForeignModuleToolExecutionResponse> ExecuteToolAsync(
+        ModuleManifest manifest,
+        string toolName,
+        JsonElement parameters,
+        AgentJobContext job,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleToolExecutionRequest, ForeignModuleToolExecutionResponse>(
+            ForeignModuleProtocol.ToolExecutePath,
+            new ForeignModuleToolExecutionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                toolName,
+                parameters,
+                ForeignModuleAgentJobContext.From(job)),
+            ct);
+
+    public Task<ForeignModuleToolExecutionResponse> ExecuteInlineToolAsync(
+        ModuleManifest manifest,
+        string toolName,
+        JsonElement parameters,
+        InlineToolContext context,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleInlineToolExecutionRequest, ForeignModuleToolExecutionResponse>(
+            ForeignModuleProtocol.InlineToolExecutePath,
+            new ForeignModuleInlineToolExecutionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                toolName,
+                parameters,
+                ForeignModuleInlineToolContext.From(context)),
+            ct);
+
+    public async IAsyncEnumerable<string> ExecuteToolStreamingAsync(
+        ModuleManifest manifest,
+        string toolName,
+        JsonElement parameters,
+        AgentJobContext job,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        using var request = CreateRequest(HttpMethod.Post, ForeignModuleProtocol.ToolStreamPath);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(
+                new ForeignModuleToolExecutionRequest(
+                    ForeignModuleProtocol.Version,
+                    manifest.Id,
+                    toolName,
+                    parameters,
+                    ForeignModuleAgentJobContext.From(job)),
+                JsonOptions),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = response.Content is null
+                ? null
+                : await response.Content.ReadAsStringAsync(ct);
+            throw new ForeignModuleProtocolException(
+                $"Foreign module control request {request.Method} {request.RequestUri} failed with HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                body);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            ForeignModuleToolStreamEvent message;
+            try
+            {
+                message = JsonSerializer.Deserialize<ForeignModuleToolStreamEvent>(line, JsonOptions)
+                    ?? throw new JsonException("Stream event deserialized to null.");
+            }
+            catch (JsonException ex)
+            {
+                throw new ForeignModuleProtocolException(
+                    $"Foreign module streaming tool '{toolName}' returned invalid stream JSON.",
+                    response.StatusCode,
+                    line,
+                    ex);
+            }
+
+            if (!string.IsNullOrEmpty(message.Error))
+                throw new ForeignModuleProtocolException(
+                    $"Foreign module streaming tool '{toolName}' failed: {message.Error}");
+
+            if (message.Delta is not null)
+                yield return message.Delta;
+
+            if (message.Result is not null)
+                yield return message.Result;
+
+            if (message.IsFinal)
+                yield break;
+        }
+    }
 
     private static void ValidateHandshake(
         ModuleManifest manifest,

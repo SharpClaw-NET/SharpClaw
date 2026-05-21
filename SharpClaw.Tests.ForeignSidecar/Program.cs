@@ -84,7 +84,14 @@ async Task HandleAsync(TcpClient client)
                     toolPrefix,
                     runtime,
                     runtimeVersion = "test-runtime",
-                    capabilities = new[] { "endpoints", "lifecycleHooks" },
+                    capabilities = new[]
+                    {
+                        "endpoints",
+                        "jobTools",
+                        "inlineTools",
+                        "streamingTools",
+                        "lifecycleHooks",
+                    },
                 });
                 break;
 
@@ -104,6 +111,40 @@ async Task HandleAsync(TcpClient client)
                             method = "POST",
                             routePattern = "/modules/sample/echo",
                             responseMode = "json",
+                        },
+                    },
+                    tools = new[]
+                    {
+                        new
+                        {
+                            name = "sample_job",
+                            description = "Sample foreign job tool.",
+                            parametersSchema = EmptyObjectSchema(),
+                            permission = new
+                            {
+                                isPerResource = false,
+                            },
+                            supportsStreaming = false,
+                        },
+                        new
+                        {
+                            name = "sample_stream",
+                            description = "Sample foreign streaming job tool.",
+                            parametersSchema = EmptyObjectSchema(),
+                            permission = new
+                            {
+                                isPerResource = false,
+                            },
+                            supportsStreaming = true,
+                        },
+                    },
+                    inlineTools = new[]
+                    {
+                        new
+                        {
+                            name = "sample_inline",
+                            description = "Sample foreign inline tool.",
+                            parametersSchema = EmptyObjectSchema(),
                         },
                     },
                 });
@@ -133,6 +174,28 @@ async Task HandleAsync(TcpClient client)
                 });
                 if (mode != "ignore-shutdown")
                     stop.TrySetResult();
+                break;
+
+            case "/.sharpclaw/tools/execute":
+                await WriteJsonAsync(stream, new
+                {
+                    result = BuildToolResult("job", request.Body),
+                });
+                break;
+
+            case "/.sharpclaw/inline-tools/execute":
+                await WriteJsonAsync(stream, new
+                {
+                    result = BuildToolResult("inline", request.Body),
+                });
+                break;
+
+            case "/.sharpclaw/tools/stream":
+                await WriteNdjsonAsync(
+                    stream,
+                    new { delta = "first:" },
+                    new { delta = "second" },
+                    new { isFinal = true });
                 break;
 
             case "/modules/sample/ping":
@@ -166,6 +229,21 @@ async Task HandleAsync(TcpClient client)
 static string ReadEnv(string name) =>
     Environment.GetEnvironmentVariable(name)
     ?? throw new InvalidOperationException($"Missing required environment variable '{name}'.");
+
+static object EmptyObjectSchema() => new
+{
+    type = "object",
+    properties = new { },
+};
+
+static string BuildToolResult(string kind, string body)
+{
+    using var document = JsonDocument.Parse(body);
+    var root = document.RootElement;
+    var toolName = root.GetProperty("toolName").GetString();
+    var parameters = root.GetProperty("parameters").GetRawText();
+    return $"{kind}:{toolName}:{parameters}";
+}
 
 static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)
 {
@@ -223,6 +301,20 @@ static Task WriteJsonAsync(
         JsonSerializer.Serialize(value),
         "application/json",
         headers);
+
+static async Task WriteNdjsonAsync(
+    NetworkStream stream,
+    params object[] messages)
+{
+    var body = string.Concat(messages.Select(message =>
+        JsonSerializer.Serialize(message) + "\n"));
+    await WriteTextAsync(
+        stream,
+        200,
+        "OK",
+        body,
+        "application/x-ndjson");
+}
 
 static async Task WriteTextAsync(
     NetworkStream stream,

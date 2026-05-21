@@ -18,7 +18,10 @@ export const controlPaths = {
   discovery: '/.sharpclaw/discovery',
   health: '/.sharpclaw/health',
   initialize: '/.sharpclaw/initialize',
-  shutdown: '/.sharpclaw/shutdown'
+  shutdown: '/.sharpclaw/shutdown',
+  toolExecute: '/.sharpclaw/tools/execute',
+  toolStream: '/.sharpclaw/tools/stream',
+  inlineToolExecute: '/.sharpclaw/inline-tools/execute'
 };
 
 export const tokenHeaderName = 'X-SharpClaw-Control-Token';
@@ -46,6 +49,8 @@ export function createSharpClawHost(definition, options = {}) {
       ? createHostCapabilitiesClient()
       : options.hostCapabilities;
   const compiledEndpoints = normalized.endpoints.map(compileEndpoint);
+  const compiledTools = normalized.tools.map(compileTool);
+  const compiledInlineTools = normalized.inlineTools.map(compileInlineTool);
   let server;
 
   async function start() {
@@ -112,7 +117,9 @@ export function createSharpClawHost(definition, options = {}) {
 
     if (request.method === 'GET' && path === controlPaths.discovery) {
       writeJson(response, 200, {
-        endpoints: normalized.endpoints.map(toDescriptor)
+        endpoints: normalized.endpoints.map(toEndpointDescriptor),
+        tools: normalized.tools.map(toToolDescriptor),
+        inlineTools: normalized.inlineTools.map(toInlineToolDescriptor)
       });
       return;
     }
@@ -147,6 +154,33 @@ export function createSharpClawHost(definition, options = {}) {
       return;
     }
 
+    if (request.method === 'POST' && path === controlPaths.toolExecute) {
+      await executeToolRequest(
+        request,
+        response,
+        compiledTools,
+        body => createToolContext(request, path, body, hostCapabilities));
+      return;
+    }
+
+    if (request.method === 'POST' && path === controlPaths.inlineToolExecute) {
+      await executeToolRequest(
+        request,
+        response,
+        compiledInlineTools,
+        body => createInlineToolContext(request, path, body, hostCapabilities));
+      return;
+    }
+
+    if (request.method === 'POST' && path === controlPaths.toolStream) {
+      await streamToolRequest(
+        request,
+        response,
+        compiledTools,
+        body => createToolContext(request, path, body, hostCapabilities));
+      return;
+    }
+
     writeJson(response, 404, { error: 'Unknown SharpClaw control route' });
   }
 
@@ -164,6 +198,55 @@ export function createSharpClawHost(definition, options = {}) {
     const context = createContext(request, path, params, hostCapabilities);
     const result = await endpoint.handler(context);
     await writeEndpointResult(response, result);
+  }
+
+  async function executeToolRequest(request, response, tools, createToolContext) {
+    const body = JSON.parse(await readText(request) || '{}');
+    const tool = tools.find(candidate => candidate.name === body.toolName);
+    if (!tool) {
+      writeJson(response, 404, { error: `Tool '${body.toolName}' not found` });
+      return;
+    }
+
+    const result = await tool.handler(createToolContext(body));
+    if (result && typeof result === 'object' && 'result' in result) {
+      writeJson(response, 200, result);
+      return;
+    }
+
+    writeJson(response, 200, {
+      result: result === undefined || result === null ? '' : String(result),
+      completionBehavior: tool.completionBehavior
+    });
+  }
+
+  async function streamToolRequest(request, response, tools, createToolContext) {
+    const body = JSON.parse(await readText(request) || '{}');
+    const tool = tools.find(candidate => candidate.name === body.toolName);
+    if (!tool) {
+      writeJson(response, 404, { error: `Tool '${body.toolName}' not found` });
+      return;
+    }
+
+    if (!tool.supportsStreaming) {
+      writeJson(response, 404, { error: `Tool '${body.toolName}' is not streaming` });
+      return;
+    }
+
+    response.writeHead(200, {
+      'Content-Type': 'application/x-ndjson; charset=utf-8'
+    });
+    const result = await tool.handler(createToolContext(body));
+    if (isAsyncIterable(result) || isIterable(result)) {
+      for await (const chunk of result) {
+        response.write(`${JSON.stringify({ delta: String(chunk) })}\n`);
+      }
+    } else if (result !== undefined && result !== null) {
+      response.write(`${JSON.stringify({ delta: String(result) })}\n`);
+    }
+
+    response.write(`${JSON.stringify({ isFinal: true })}\n`);
+    response.end();
   }
 
   return { start, stop };
@@ -256,6 +339,8 @@ function normalizeDefinition(definition) {
     toolPrefix: definition.toolPrefix,
     capabilities: definition.capabilities ?? ['endpoints', 'lifecycleHooks'],
     endpoints,
+    tools: Array.isArray(definition.tools) ? definition.tools : [],
+    inlineTools: Array.isArray(definition.inlineTools) ? definition.inlineTools : [],
     initialize: definition.initialize ?? noop,
     shutdown: definition.shutdown ?? noop,
     health: definition.health ?? (() => ({ isHealthy: true, message: 'ready' }))
@@ -280,7 +365,35 @@ function compileEndpoint(endpoint) {
   };
 }
 
-function toDescriptor(endpoint) {
+function compileTool(tool) {
+  if (!tool || typeof tool !== 'object') {
+    throw new TypeError('Tool descriptors must be objects.');
+  }
+
+  if (typeof tool.handler !== 'function') {
+    throw new TypeError(`Tool ${tool.name} is missing a handler.`);
+  }
+
+  return {
+    ...tool,
+    supportsStreaming: tool.supportsStreaming ?? false,
+    completionBehavior: tool.completionBehavior ?? 'CompleteWhenExecutionReturns'
+  };
+}
+
+function compileInlineTool(tool) {
+  if (!tool || typeof tool !== 'object') {
+    throw new TypeError('Inline tool descriptors must be objects.');
+  }
+
+  if (typeof tool.handler !== 'function') {
+    throw new TypeError(`Inline tool ${tool.name} is missing a handler.`);
+  }
+
+  return { ...tool };
+}
+
+function toEndpointDescriptor(endpoint) {
   const {
     method,
     routePattern,
@@ -299,6 +412,48 @@ function toDescriptor(endpoint) {
     permission,
     contributionId,
     metadata
+  };
+}
+
+function toToolDescriptor(tool) {
+  const {
+    name,
+    description,
+    parametersSchema,
+    permission,
+    timeoutSeconds,
+    aliases,
+    supportsStreaming,
+    completionBehavior
+  } = tool;
+
+  return {
+    name,
+    description,
+    parametersSchema: parametersSchema ?? emptyObjectSchema(),
+    permission,
+    timeoutSeconds,
+    aliases,
+    supportsStreaming: supportsStreaming ?? false,
+    completionBehavior: completionBehavior ?? 'CompleteWhenExecutionReturns'
+  };
+}
+
+function toInlineToolDescriptor(tool) {
+  const {
+    name,
+    description,
+    parametersSchema,
+    permission,
+    aliases
+  } = tool;
+
+  return {
+    name,
+    description,
+    parametersSchema: parametersSchema ?? emptyObjectSchema(),
+    permission,
+    aliases
   };
 }
 
@@ -360,6 +515,28 @@ function createContext(request, path, params, hostCapabilities) {
   };
 }
 
+function createToolContext(request, path, body, hostCapabilities) {
+  return {
+    request,
+    path,
+    toolName: body.toolName,
+    parameters: body.parameters ?? {},
+    job: body.job,
+    hostCapabilities
+  };
+}
+
+function createInlineToolContext(request, path, body, hostCapabilities) {
+  return {
+    request,
+    path,
+    toolName: body.toolName,
+    parameters: body.parameters ?? {},
+    context: body.context,
+    hostCapabilities
+  };
+}
+
 async function writeEndpointResult(response, result) {
   if (result === undefined || result === null) {
     response.writeHead(204);
@@ -399,6 +576,21 @@ function writeJson(response, status, value) {
     'Content-Length': Buffer.byteLength(body)
   });
   response.end(body);
+}
+
+function emptyObjectSchema() {
+  return {
+    type: 'object',
+    properties: {}
+  };
+}
+
+function isAsyncIterable(value) {
+  return value && typeof value[Symbol.asyncIterator] === 'function';
+}
+
+function isIterable(value) {
+  return value && typeof value !== 'string' && typeof value[Symbol.iterator] === 'function';
 }
 
 async function readText(request) {
