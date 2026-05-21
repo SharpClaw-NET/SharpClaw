@@ -1,0 +1,32 @@
+from sharpclaw_module_host import create_sharpclaw_host, json_response
+
+
+async def ping(_context):
+    return json_response(
+        {
+            "ok": True,
+            "moduleId": "{{MODULE_ID}}",
+            "displayName": {{DISPLAY_NAME_PY}},
+        }
+    )
+
+
+host = create_sharpclaw_host(
+    module_id="{{MODULE_ID}}",
+    tool_prefix="{{TOOL_PREFIX}}",
+    endpoints=[
+        {
+            "method": "GET",
+            "route_pattern": "/modules/{{MODULE_ID}}/ping",
+            "response_mode": "json",
+            "handler": ping,
+        }
+    ],
+    initialize=lambda _context: "initialized",
+    shutdown=lambda _context: "stopping",
+    health=lambda _context: {"isHealthy": True, "message": "ready"},
+)
+
+
+if __name__ == "__main__":
+    host.serve()

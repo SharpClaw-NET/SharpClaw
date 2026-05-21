@@ -23,6 +23,12 @@ internal sealed class ModuleWorkspaceService
         ".css",
         ".html",
         ".md",
+        ".py",
+        ".pyi",
+        ".toml",
+        ".txt",
+        ".yaml",
+        ".yml",
         ".lock"
     ];
 

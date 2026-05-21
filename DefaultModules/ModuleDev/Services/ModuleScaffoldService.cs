@@ -18,6 +18,7 @@ internal sealed partial class ModuleScaffoldService(
 {
     internal const string DotNetRuntime = "dotnet";
     internal const string NodeRuntime = "node";
+    internal const string PythonRuntime = "python";
 
     /// <summary>
     /// Scaffold specification provided by the agent.
@@ -58,6 +59,7 @@ internal sealed partial class ModuleScaffoldService(
         {
             DotNetRuntime => await ScaffoldDotNetAsync(spec, moduleDir, ct),
             NodeRuntime => await ScaffoldNodeAsync(spec, moduleDir, ct),
+            PythonRuntime => await ScaffoldPythonAsync(spec, moduleDir, ct),
             _ => throw new ArgumentException($"Unsupported module runtime '{spec.Runtime}'."),
         };
     }
@@ -103,6 +105,38 @@ internal sealed partial class ModuleScaffoldService(
             .Replace("{{DISPLAY_NAME}}", spec.DisplayName)
             .Replace("{{TOOL_PREFIX}}", spec.ToolPrefix)
             .Replace("{{ASSEMBLY_NAME}}", assemblyName)
+            .Replace("{{DESCRIPTION}}", spec.Description ?? "");
+
+        await WriteFileAsync(moduleDir, "module.json", manifestContent, ct);
+        files.Add("module.json");
+
+        return new ScaffoldResult(moduleDir, files);
+    }
+
+    private async Task<ScaffoldResult> ScaffoldPythonAsync(
+        ScaffoldSpec spec, string moduleDir, CancellationToken ct)
+    {
+        var files = new List<string>();
+
+        var pyprojectContent = LoadTemplate("PythonPyproject.toml.template")
+            .Replace("{{PYTHON_PACKAGE_NAME}}", ToPythonPackageName(spec.ModuleId))
+            .Replace("{{MODULE_ID}}", spec.ModuleId);
+
+        await WriteFileAsync(moduleDir, "pyproject.toml", pyprojectContent, ct);
+        files.Add("pyproject.toml");
+
+        var moduleContent = LoadTemplate("PythonModule.py.template")
+            .Replace("{{MODULE_ID}}", spec.ModuleId)
+            .Replace("{{DISPLAY_NAME_PY}}", JsonSerializer.Serialize(spec.DisplayName))
+            .Replace("{{TOOL_PREFIX}}", spec.ToolPrefix);
+
+        await WriteFileAsync(moduleDir, "module.py", moduleContent, ct);
+        files.Add("module.py");
+
+        var manifestContent = LoadTemplate("PythonManifest.json.template")
+            .Replace("{{MODULE_ID}}", spec.ModuleId)
+            .Replace("{{DISPLAY_NAME}}", spec.DisplayName)
+            .Replace("{{TOOL_PREFIX}}", spec.ToolPrefix)
             .Replace("{{DESCRIPTION}}", spec.Description ?? "");
 
         await WriteFileAsync(moduleDir, "module.json", manifestContent, ct);
@@ -158,9 +192,9 @@ internal sealed partial class ModuleScaffoldService(
             throw new ArgumentException("Display name is required.");
 
         var runtime = NormalizeRuntime(spec.Runtime);
-        if (runtime is not DotNetRuntime and not NodeRuntime)
+        if (runtime is not DotNetRuntime and not NodeRuntime and not PythonRuntime)
             throw new ArgumentException(
-                $"Unsupported module runtime '{spec.Runtime}'. Allowed: {DotNetRuntime}, {NodeRuntime}.");
+                $"Unsupported module runtime '{spec.Runtime}'. Allowed: {DotNetRuntime}, {NodeRuntime}, {PythonRuntime}.");
 
         // Check uniqueness against loaded modules
         if (lifecycle.IsModuleRegistered(spec.ModuleId))
@@ -235,6 +269,9 @@ internal sealed partial class ModuleScaffoldService(
     }
 
     private static string ToNpmPackageName(string moduleId) =>
+        "sharpclaw-module-" + moduleId.Replace('_', '-');
+
+    private static string ToPythonPackageName(string moduleId) =>
         "sharpclaw-module-" + moduleId.Replace('_', '-');
 
     private static string NormalizeRuntime(string? runtime) =>

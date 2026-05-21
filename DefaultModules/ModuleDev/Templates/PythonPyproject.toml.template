@@ -1,0 +1,10 @@
+[project]
+name = "{{PYTHON_PACKAGE_NAME}}"
+version = "0.1.0b0"
+requires-python = ">=3.11"
+dependencies = [
+    "sharpclaw-module-host==0.1.0b0"
+]
+
+[tool.sharpclaw]
+module-id = "{{MODULE_ID}}"
