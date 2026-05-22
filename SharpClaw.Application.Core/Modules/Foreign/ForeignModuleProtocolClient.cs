@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
@@ -175,6 +176,206 @@ internal sealed class ForeignModuleProtocolClient
                 manifest.Id,
                 commandName,
                 args),
+            ct);
+
+    public Task<ForeignModuleTaskStepExecutionResponse> ExecuteTaskStepAsync(
+        ModuleManifest manifest,
+        string stepKey,
+        ForeignModuleTaskStepExecutionContextSnapshot context,
+        IReadOnlyList<string>? arguments,
+        string? expression,
+        string? resultVariable,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskStepExecutionRequest, ForeignModuleTaskStepExecutionResponse>(
+            ForeignModuleProtocol.TaskStepExecutePath,
+            new ForeignModuleTaskStepExecutionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                stepKey,
+                context,
+                arguments,
+                expression,
+                resultVariable),
+            ct);
+
+    public Task<ForeignModuleTaskStepExecutionResponse> ExecuteTaskStepInvocationAsync(
+        ModuleManifest manifest,
+        ITaskStepInvocation step,
+        ForeignModuleTaskStepExecutionContextSnapshot context,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskStepInvocationRequest, ForeignModuleTaskStepExecutionResponse>(
+            ForeignModuleProtocol.TaskStepInvokePath,
+            new ForeignModuleTaskStepInvocationRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                ForeignModuleTaskStepInvocationDescriptor.From(step),
+                context),
+            ct);
+
+    public Task<ForeignModuleTaskTriggerAttributeHandleResponse> HandleTaskTriggerAttributeAsync(
+        ModuleManifest manifest,
+        string handlerName,
+        ForeignModuleTaskTriggerAttributeContextDescriptor context,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerAttributeHandleRequest, ForeignModuleTaskTriggerAttributeHandleResponse>(
+            ForeignModuleProtocol.TaskTriggerAttributeHandlePath,
+            new ForeignModuleTaskTriggerAttributeHandleRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                handlerName,
+                context),
+            ct);
+
+    public Task<ForeignModuleTaskAckResponse> StartTaskTriggerSourceAsync(
+        ModuleManifest manifest,
+        IReadOnlyList<string> triggerKeys,
+        IReadOnlyList<ForeignModuleTaskTriggerSourceContextDescriptor> contexts,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerStartRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskTriggerStartPath,
+            new ForeignModuleTaskTriggerStartRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKeys,
+                contexts),
+            ct);
+
+    public Task<ForeignModuleTaskAckResponse> StopTaskTriggerSourceAsync(
+        ModuleManifest manifest,
+        IReadOnlyList<string> triggerKeys,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerStopRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskTriggerStopPath,
+            new ForeignModuleTaskTriggerStopRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKeys),
+            ct);
+
+    public async Task<string?> GetTaskTriggerBindingValueAsync(
+        ModuleManifest manifest,
+        string triggerKey,
+        TaskTriggerDefinition definition,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleTaskTriggerDefinitionRequest, ForeignModuleTaskTriggerBindingValueResponse>(
+            ForeignModuleProtocol.TaskTriggerBindingValuePath,
+            new ForeignModuleTaskTriggerDefinitionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKey,
+                definition),
+            ct);
+        return response.Value;
+    }
+
+    public async Task<string?> GetTaskTriggerBindingFilterAsync(
+        ModuleManifest manifest,
+        string triggerKey,
+        TaskTriggerDefinition definition,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleTaskTriggerDefinitionRequest, ForeignModuleTaskTriggerBindingValueResponse>(
+            ForeignModuleProtocol.TaskTriggerBindingFilterPath,
+            new ForeignModuleTaskTriggerDefinitionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKey,
+                definition),
+            ct);
+        return response.Value;
+    }
+
+    public async Task<bool> SyncTaskTriggerBindingsAsync(
+        ModuleManifest manifest,
+        IReadOnlyList<string> triggerKeys,
+        TaskDefinitionDescriptor definition,
+        IReadOnlyList<TaskTriggerDefinition> ownedTriggers,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleTaskTriggerSyncBindingsRequest, ForeignModuleTaskTriggerSyncBindingsResponse>(
+            ForeignModuleProtocol.TaskTriggerSyncBindingsPath,
+            new ForeignModuleTaskTriggerSyncBindingsRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKeys,
+                definition,
+                ownedTriggers),
+            ct);
+        return response.Changed;
+    }
+
+    public Task<ForeignModuleTaskAckResponse> RemoveTaskTriggerBindingsAsync(
+        ModuleManifest manifest,
+        IReadOnlyList<string> triggerKeys,
+        Guid definitionId,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerRemoveBindingsRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskTriggerRemoveBindingsPath,
+            new ForeignModuleTaskTriggerRemoveBindingsRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKeys,
+                definitionId),
+            ct);
+
+    public Task<ForeignModuleTaskAckResponse> NotifyTaskTriggerBindingCreatedAsync(
+        ModuleManifest manifest,
+        string triggerKey,
+        TaskDefinitionDescriptor definition,
+        TaskTriggerDefinition trigger,
+        TaskTriggerBindingDescriptor binding,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerBindingCreatedRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskTriggerBindingCreatedPath,
+            new ForeignModuleTaskTriggerBindingCreatedRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKey,
+                definition,
+                trigger,
+                binding),
+            ct);
+
+    public Task<ForeignModuleTaskAckResponse> NotifyTaskTriggerBindingRemovedAsync(
+        ModuleManifest manifest,
+        string triggerKey,
+        TaskTriggerBindingDescriptor binding,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskTriggerBindingRemovedRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskTriggerBindingRemovedPath,
+            new ForeignModuleTaskTriggerBindingRemovedRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                triggerKey,
+                binding),
+            ct);
+
+    public async Task<double> GetTaskMetricValueAsync(
+        ModuleManifest manifest,
+        string metricName,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleTaskMetricValueRequest, ForeignModuleTaskMetricValueResponse>(
+            ForeignModuleProtocol.TaskMetricValuePath,
+            new ForeignModuleTaskMetricValueRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                metricName),
+            ct);
+        return response.Value;
+    }
+
+    public Task<ForeignModuleTaskAckResponse> SendTaskEventAsync(
+        ModuleManifest manifest,
+        SharpClawEvent evt,
+        CancellationToken ct = default) =>
+        PostAsync<ForeignModuleTaskEventSinkRequest, ForeignModuleTaskAckResponse>(
+            ForeignModuleProtocol.TaskEventSinkPath,
+            new ForeignModuleTaskEventSinkRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                evt),
             ct);
 
     public async IAsyncEnumerable<string> ExecuteToolStreamingAsync(

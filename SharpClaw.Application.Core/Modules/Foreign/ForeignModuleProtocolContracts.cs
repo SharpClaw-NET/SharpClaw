@@ -2,6 +2,7 @@ using System.Text.Json;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
@@ -47,7 +48,14 @@ public sealed record ForeignModuleDiscoveryResponse(
     IReadOnlyList<ForeignModuleGlobalFlagDescriptor>? GlobalFlags = null,
     IReadOnlyList<ModuleUiContribution>? UiContributions = null,
     IReadOnlyList<ModuleFrontendContribution>? FrontendContributions = null,
-    IReadOnlyList<ForeignModuleCliCommandDescriptor>? CliCommands = null);
+    IReadOnlyList<ForeignModuleCliCommandDescriptor>? CliCommands = null,
+    ForeignModuleTaskParserDescriptor? TaskParser = null,
+    IReadOnlyList<TaskStepDescriptor>? TaskStepDescriptors = null,
+    IReadOnlyList<ForeignModuleTaskStepExecutorDescriptor>? TaskStepExecutors = null,
+    IReadOnlyList<ForeignModuleTaskTriggerSourceDescriptor>? TaskTriggerSources = null,
+    IReadOnlyList<ForeignModuleTaskTriggerBindingSideEffectDescriptor>? TaskTriggerBindingSideEffects = null,
+    IReadOnlyList<ForeignModuleTaskMetricProviderDescriptor>? TaskMetricProviders = null,
+    IReadOnlyList<ForeignModuleTaskEventSinkDescriptor>? TaskEventSinks = null);
 
 public sealed record ForeignModuleEndpointDescriptor(
     string Method,
@@ -318,3 +326,201 @@ internal sealed record ForeignModuleProtocolContractInvocationRequest(
 
 internal sealed record ForeignModuleProtocolContractInvocationResponse(
     JsonElement Result);
+
+public sealed record ForeignModuleTaskParserDescriptor(
+    IReadOnlyList<ForeignModuleTaskParserStepMapping>? StepKeyMappings = null,
+    IReadOnlyList<ForeignModuleTaskParserEventMapping>? EventTriggerMappings = null,
+    IReadOnlyList<string>? SingleArgExpressionMethods = null,
+    TaskParserPrimitives? Primitives = null,
+    IReadOnlyList<ForeignModuleTaskTriggerAttributeHandlerDescriptor>? TriggerAttributeHandlers = null);
+
+public sealed record ForeignModuleTaskParserStepMapping(
+    string MethodName,
+    string StepKey,
+    string ModuleId);
+
+public sealed record ForeignModuleTaskParserEventMapping(
+    string MethodName,
+    string TriggerKey,
+    string ModuleId);
+
+public sealed record ForeignModuleTaskTriggerAttributeHandlerDescriptor(
+    string Name,
+    IReadOnlyList<string>? NamedStringArgs = null,
+    IReadOnlyList<string>? NamedIntArgs = null,
+    IReadOnlyList<string>? NamedDoubleArgs = null);
+
+public sealed record ForeignModuleTaskStepExecutorDescriptor(
+    string ModuleId,
+    IReadOnlyList<string> StepKeys,
+    bool SupportsInvocation = false);
+
+public sealed record ForeignModuleTaskTriggerSourceDescriptor(
+    IReadOnlyList<string> TriggerKeys,
+    bool OwnsBindingPersistence = false);
+
+public sealed record ForeignModuleTaskTriggerBindingSideEffectDescriptor(
+    string TriggerKey);
+
+public sealed record ForeignModuleTaskMetricProviderDescriptor(
+    string MetricName,
+    string Description);
+
+public sealed record ForeignModuleTaskEventSinkDescriptor(
+    SharpClawEventType SubscribedEvents);
+
+internal sealed record ForeignModuleTaskStepExecutionRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string StepKey,
+    ForeignModuleTaskStepExecutionContextSnapshot Context,
+    IReadOnlyList<string>? Arguments = null,
+    string? Expression = null,
+    string? ResultVariable = null);
+
+internal sealed record ForeignModuleTaskStepInvocationRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    ForeignModuleTaskStepInvocationDescriptor Step,
+    ForeignModuleTaskStepExecutionContextSnapshot Context);
+
+internal sealed record ForeignModuleTaskStepExecutionContextSnapshot(
+    Guid InstanceId,
+    Guid ChannelId,
+    IReadOnlyDictionary<string, JsonElement>? Variables = null,
+    IReadOnlyList<ForeignModuleTaskEventHandlerSnapshot>? EventHandlers = null);
+
+internal sealed record ForeignModuleTaskEventHandlerSnapshot(
+    string? ModuleTriggerKey,
+    string? ParameterName);
+
+internal sealed record ForeignModuleTaskStepInvocationDescriptor(
+    string StepKey,
+    string? VariableName = null,
+    string? TypeName = null,
+    string? ResultVariable = null,
+    string? RawExpression = null,
+    IReadOnlyList<string>? Arguments = null,
+    string? ModuleTriggerKey = null,
+    string? HandlerParameter = null,
+    IReadOnlyList<ForeignModuleTaskStepInvocationDescriptor>? Body = null,
+    IReadOnlyList<ForeignModuleTaskStepInvocationDescriptor>? ElseBody = null)
+{
+    public static ForeignModuleTaskStepInvocationDescriptor From(ITaskStepInvocation step) =>
+        new(
+            step.StepKey,
+            step.VariableName,
+            step.TypeName,
+            step.ResultVariable,
+            step.RawExpression,
+            step.Arguments,
+            step.ModuleTriggerKey,
+            step.HandlerParameter,
+            step.Body is null ? null : [.. step.Body.Select(From)],
+            step.ElseBody is null ? null : [.. step.ElseBody.Select(From)]);
+}
+
+internal sealed record ForeignModuleTaskStepExecutionResponse(
+    TaskStepResult Result = TaskStepResult.Continue,
+    bool? Continue = null,
+    IReadOnlyDictionary<string, JsonElement>? VariableUpdates = null,
+    JsonElement? ResultVariableValue = null,
+    IReadOnlyList<string>? Logs = null,
+    string? OutputJson = null,
+    Guid? ChannelId = null);
+
+internal sealed record ForeignModuleTaskTriggerAttributeHandleRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string HandlerName,
+    ForeignModuleTaskTriggerAttributeContextDescriptor Context);
+
+internal sealed record ForeignModuleTaskTriggerAttributeContextDescriptor(
+    string AttributeName,
+    int Line,
+    int ArgumentCount,
+    IReadOnlyList<string?> StringArgs,
+    IReadOnlyList<int?> IntArgs,
+    IReadOnlyList<string?> RawArgs,
+    IReadOnlyDictionary<string, string?> NamedStringArgs,
+    IReadOnlyDictionary<string, int?> NamedIntArgs,
+    IReadOnlyDictionary<string, double?> NamedDoubleArgs);
+
+internal sealed record ForeignModuleTaskTriggerAttributeHandleResponse(
+    TaskTriggerDefinition? Trigger = null,
+    IReadOnlyList<ForeignModuleTaskTriggerAttributeDiagnostic>? Diagnostics = null);
+
+internal sealed record ForeignModuleTaskTriggerAttributeDiagnostic(
+    TaskTriggerAttributeDiagnosticSeverity Severity,
+    string Code,
+    string Message);
+
+internal sealed record ForeignModuleTaskTriggerStartRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    IReadOnlyList<string> TriggerKeys,
+    IReadOnlyList<ForeignModuleTaskTriggerSourceContextDescriptor> Contexts);
+
+internal sealed record ForeignModuleTaskTriggerStopRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    IReadOnlyList<string> TriggerKeys);
+
+internal sealed record ForeignModuleTaskTriggerSourceContextDescriptor(
+    Guid TaskDefinitionId,
+    TaskTriggerDefinition Definition);
+
+internal sealed record ForeignModuleTaskTriggerDefinitionRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string TriggerKey,
+    TaskTriggerDefinition Definition);
+
+internal sealed record ForeignModuleTaskTriggerBindingValueResponse(
+    string? Value);
+
+internal sealed record ForeignModuleTaskTriggerSyncBindingsRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    IReadOnlyList<string> TriggerKeys,
+    TaskDefinitionDescriptor Definition,
+    IReadOnlyList<TaskTriggerDefinition> OwnedTriggers);
+
+internal sealed record ForeignModuleTaskTriggerSyncBindingsResponse(
+    bool Changed);
+
+internal sealed record ForeignModuleTaskTriggerRemoveBindingsRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    IReadOnlyList<string> TriggerKeys,
+    Guid DefinitionId);
+
+internal sealed record ForeignModuleTaskTriggerBindingCreatedRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string TriggerKey,
+    TaskDefinitionDescriptor Definition,
+    TaskTriggerDefinition Trigger,
+    TaskTriggerBindingDescriptor Binding);
+
+internal sealed record ForeignModuleTaskTriggerBindingRemovedRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string TriggerKey,
+    TaskTriggerBindingDescriptor Binding);
+
+internal sealed record ForeignModuleTaskMetricValueRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string MetricName);
+
+internal sealed record ForeignModuleTaskMetricValueResponse(
+    double Value);
+
+internal sealed record ForeignModuleTaskEventSinkRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    SharpClawEvent Event);
+
+internal sealed record ForeignModuleTaskAckResponse(
+    bool Accepted = true);

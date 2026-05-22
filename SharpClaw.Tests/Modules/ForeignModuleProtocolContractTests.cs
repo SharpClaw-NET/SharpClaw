@@ -5,6 +5,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -80,6 +81,129 @@ public sealed class ForeignModuleProtocolContractTests
         cliCommand.Name.Should().Be("sample");
         cliCommand.Aliases.Should().Equal("smp");
         cliCommand.Scope.Should().Be(ModuleCliScope.TopLevel);
+
+        var parserAware = module.Should().BeAssignableTo<ITaskParserAware>().Which;
+        var parserExtension = parserAware.ParserExtension;
+        parserExtension.StepKeyMappings["SampleTaskStep"].StepKey.Should().Be("sample.task.step");
+        parserExtension.StepKeyMappings["SampleTaskStep"].ModuleId.Should().Be("sample_node_module");
+        parserExtension.EventTriggerMappings["OnSample"].TriggerKey.Should().Be("sample.trigger");
+        parserExtension.SingleArgExpressionMethods.Should().Contain("SampleTaskStep");
+
+        var attributeContext = new TestTriggerAttributeContext(
+            "SampleTrigger",
+            12,
+            stringArgs: ["positional"],
+            intArgs: [null],
+            rawArgs: ["\"positional\""],
+            namedStringArgs: new Dictionary<string, string?> { ["Name"] = "named-sample" });
+        var trigger = parserExtension.TriggerAttributeHandlers["SampleTrigger"].Handle(attributeContext);
+        trigger.Should().NotBeNull();
+        trigger!.TriggerKey.Should().Be("sample.trigger");
+        trigger.Line.Should().Be(12);
+        trigger.Parameters["name"].Should().Be("named-sample");
+        attributeContext.Diagnostics.Should().BeEmpty();
+
+        var taskServices = new ServiceCollection();
+        module.ConfigureServices(taskServices);
+        using var taskProvider = taskServices.BuildServiceProvider();
+
+        var descriptorProvider = taskProvider.GetServices<ITaskStepDescriptorProvider>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        descriptorProvider.ModuleId.Should().Be("sample_node_module");
+        descriptorProvider.Descriptors.Should().ContainSingle(descriptor =>
+            descriptor.StepKey == "sample.task.step"
+            && descriptor.OwnerId == "sample_node_module"
+            && descriptor.FirstArgIsExpression);
+
+        var executor = taskProvider.GetServices<ITaskStepExecutorExtension>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        executor.CanExecute("sample.task.step").Should().BeTrue();
+        executor.Should().BeAssignableTo<ITaskStepInvocationExecutor>();
+
+        var executionContext = new TestTaskStepExecutionContext();
+        var shouldContinue = await executor.ExecuteAsync(
+            "sample.task.step",
+            executionContext,
+            ["alpha"],
+            "expression",
+            "stepResult");
+        shouldContinue.Should().BeTrue();
+        executionContext.Variables["sidecarStep"].Should().Be("executed");
+        executionContext.Variables["stepResult"].Should().Be("step-result");
+        executionContext.Logs.Should().Contain("step log");
+        executionContext.Outputs.Should().Contain("""{"sidecar":true}""");
+
+        var invocationResult = await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStepInvocation("sample.task.step")
+            {
+                ResultVariable = "invocationResult",
+                RawExpression = "expression",
+                Arguments = ["alpha"],
+            },
+            executionContext);
+        invocationResult.Should().Be(TaskStepResult.Continue);
+        executionContext.Variables["sidecarInvocation"].Should().Be("executed");
+        executionContext.Variables["invocationResult"].Should().Be("invocation-result");
+
+        var triggerSource = taskProvider.GetServices<ITaskTriggerSource>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        var triggerDefinition = new TaskTriggerDefinition
+        {
+            TriggerKey = "sample.trigger",
+            Line = 4,
+            Parameters = new Dictionary<string, string?> { ["name"] = "sample" },
+        };
+        triggerSource.TriggerKeys.Should().Equal("sample.trigger");
+        triggerSource.GetBindingValue(triggerDefinition).Should().Be("sample-value");
+        triggerSource.GetBindingFilter(triggerDefinition).Should().Be("sample-filter");
+        await triggerSource.StartAsync(
+            [new TestTaskTriggerSourceContext(Guid.NewGuid(), triggerDefinition)],
+            CancellationToken.None);
+        (await triggerSource.SyncBindingsAsync(
+            new TaskDefinitionDescriptor(Guid.NewGuid(), "sample-task"),
+            [triggerDefinition],
+            CancellationToken.None)).Should().BeTrue();
+        await triggerSource.RemoveBindingsAsync(Guid.NewGuid(), CancellationToken.None);
+        await triggerSource.StopAsync();
+
+        var sideEffect = taskProvider.GetServices<ITaskTriggerBindingSideEffect>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        sideEffect.TriggerKey.Should().Be("sample.trigger");
+        var binding = new TaskTriggerBindingDescriptor(
+            Guid.NewGuid(),
+            "sample.trigger",
+            "sample-value",
+            "sample-filter");
+        await sideEffect.OnBindingCreatedAsync(
+            new TaskDefinitionDescriptor(Guid.NewGuid(), "sample-task"),
+            triggerDefinition,
+            binding,
+            CancellationToken.None);
+        await sideEffect.OnBindingRemovedAsync(binding, CancellationToken.None);
+
+        var metricProvider = taskProvider.GetServices<ITaskMetricProvider>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        metricProvider.MetricName.Should().Be("sample.metric");
+        (await metricProvider.GetValueAsync(CancellationToken.None)).Should().Be(42.5);
+
+        var eventSink = taskProvider.GetServices<ISharpClawEventSink>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        eventSink.SubscribedEvents.Should().Be(SharpClawEventType.AllModuleEvents);
+        await eventSink.OnEventAsync(
+            new SharpClawEvent(SharpClawEventType.ModuleEnabled, DateTimeOffset.UtcNow),
+            CancellationToken.None);
     }
 
     [Test]
@@ -201,6 +325,147 @@ public sealed class ForeignModuleProtocolContractTests
         listener.Start();
         try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
         finally { listener.Stop(); }
+    }
+
+    private sealed class TestTaskStepExecutionContext : ITaskStepExecutionContext
+    {
+        private readonly List<ITaskEventHandler> _eventHandlers = [];
+
+        public Guid InstanceId { get; } = Guid.NewGuid();
+        public Guid ChannelId { get; private set; } = Guid.NewGuid();
+        public CancellationToken CancellationToken => CancellationToken.None;
+        public IServiceProvider Services { get; } = new ServiceCollection().BuildServiceProvider();
+        public IDictionary<string, object?> Variables { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+        public IReadOnlyList<ITaskEventHandler> EventHandlers => _eventHandlers;
+        public List<string> Logs { get; } = [];
+        public List<string?> Outputs { get; } = [];
+
+        public string ResolveExpression(string expression) =>
+            Variables.TryGetValue(expression, out var value)
+                ? value?.ToString() ?? string.Empty
+                : expression;
+
+        public Task AppendLogAsync(string message)
+        {
+            Logs.Add(message);
+            return Task.CompletedTask;
+        }
+
+        public Task WriteOutputAsync(string? outputJson)
+        {
+            Outputs.Add(outputJson);
+            return Task.CompletedTask;
+        }
+
+        public void SetChannelId(Guid channelId) => ChannelId = channelId;
+
+        public Task<TaskStepResult> ExecuteStepsAsync(
+            IReadOnlyList<ITaskStepInvocation> steps,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(TaskStepResult.Continue);
+
+        public bool EvaluateCondition(string? expression) =>
+            bool.TryParse(expression, out var result) && result;
+
+        public void RegisterEventHandler(
+            string moduleTriggerKey,
+            string? parameterName,
+            IReadOnlyList<ITaskStepInvocation> body) =>
+            _eventHandlers.Add(new TestTaskEventHandler(moduleTriggerKey, parameterName));
+
+        public Task WaitIfPausedAsync() => Task.CompletedTask;
+    }
+
+    private sealed record TestTaskEventHandler(
+        string? ModuleTriggerKey,
+        string? ParameterName) : ITaskEventHandler
+    {
+        public Task ExecuteBodyAsync(CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed record TestTaskStepInvocation(string StepKey) : ITaskStepInvocation
+    {
+        public string? VariableName { get; init; }
+        public string? TypeName { get; init; }
+        public string? ResultVariable { get; init; }
+        public string? RawExpression { get; init; }
+        public IReadOnlyList<string>? Arguments { get; init; }
+        public string? ModuleTriggerKey { get; init; }
+        public string? HandlerParameter { get; init; }
+        public IReadOnlyList<ITaskStepInvocation>? Body { get; init; }
+        public IReadOnlyList<ITaskStepInvocation>? ElseBody { get; init; }
+    }
+
+    private sealed record TestTaskTriggerSourceContext(
+        Guid TaskDefinitionId,
+        TaskTriggerDefinition Definition) : ITaskTriggerSourceContext
+    {
+        public Task FireAsync(
+            IReadOnlyDictionary<string, string>? parameters = null,
+            CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class TestTriggerAttributeContext : TaskTriggerAttributeContext
+    {
+        private readonly IReadOnlyList<string?> _stringArgs;
+        private readonly IReadOnlyList<int?> _intArgs;
+        private readonly IReadOnlyList<string?> _rawArgs;
+        private readonly IReadOnlyDictionary<string, string?> _namedStringArgs;
+        private readonly IReadOnlyDictionary<string, int?> _namedIntArgs;
+        private readonly IReadOnlyDictionary<string, double?> _namedDoubleArgs;
+
+        public TestTriggerAttributeContext(
+            string attributeName,
+            int line,
+            IReadOnlyList<string?> stringArgs,
+            IReadOnlyList<int?> intArgs,
+            IReadOnlyList<string?> rawArgs,
+            IReadOnlyDictionary<string, string?>? namedStringArgs = null,
+            IReadOnlyDictionary<string, int?>? namedIntArgs = null,
+            IReadOnlyDictionary<string, double?>? namedDoubleArgs = null)
+        {
+            AttributeName = attributeName;
+            Line = line;
+            _stringArgs = stringArgs;
+            _intArgs = intArgs;
+            _rawArgs = rawArgs;
+            _namedStringArgs = namedStringArgs ?? new Dictionary<string, string?>(StringComparer.Ordinal);
+            _namedIntArgs = namedIntArgs ?? new Dictionary<string, int?>(StringComparer.Ordinal);
+            _namedDoubleArgs = namedDoubleArgs ?? new Dictionary<string, double?>(StringComparer.Ordinal);
+        }
+
+        public override string AttributeName { get; }
+        public override int Line { get; }
+        public override int ArgumentCount => Math.Max(_stringArgs.Count, Math.Max(_intArgs.Count, _rawArgs.Count));
+        public List<(TaskTriggerAttributeDiagnosticSeverity Severity, string Code, string Message)> Diagnostics { get; } = [];
+
+        public override string? GetStringArg(int index) =>
+            index >= 0 && index < _stringArgs.Count ? _stringArgs[index] : null;
+
+        public override int? GetIntArg(int index) =>
+            index >= 0 && index < _intArgs.Count ? _intArgs[index] : null;
+
+        public override string? GetNamedStringArg(string name) =>
+            _namedStringArgs.TryGetValue(name, out var value) ? value : null;
+
+        public override int? GetNamedIntArg(string name) =>
+            _namedIntArgs.TryGetValue(name, out var value) ? value : null;
+
+        public override double? GetNamedDoubleArg(string name) =>
+            _namedDoubleArgs.TryGetValue(name, out var value) ? value : null;
+
+        public override T? GetNamedEnumArg<T>(string name) where T : struct =>
+            null;
+
+        public override string? GetRawArgText(int index) =>
+            index >= 0 && index < _rawArgs.Count ? _rawArgs[index] : null;
+
+        public override void Report(
+            TaskTriggerAttributeDiagnosticSeverity severity,
+            string code,
+            string message) =>
+            Diagnostics.Add((severity, code, message));
     }
 
     private sealed class ProtocolProviderModule : ISharpClawModule, IForeignModuleProtocolContractExporter

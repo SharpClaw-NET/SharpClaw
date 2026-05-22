@@ -25,6 +25,19 @@ public static class ForeignModuleProtocol
     public const string ResourceIdsPath = "/.sharpclaw/resources/ids";
     public const string ResourceLookupPath = "/.sharpclaw/resources/lookup";
     public const string CliExecutePath = "/.sharpclaw/cli/execute";
+    public const string TaskStepExecutePath = "/.sharpclaw/tasks/steps/execute";
+    public const string TaskStepInvokePath = "/.sharpclaw/tasks/steps/invoke";
+    public const string TaskTriggerAttributeHandlePath = "/.sharpclaw/tasks/triggers/attributes/handle";
+    public const string TaskTriggerStartPath = "/.sharpclaw/tasks/triggers/start";
+    public const string TaskTriggerStopPath = "/.sharpclaw/tasks/triggers/stop";
+    public const string TaskTriggerBindingValuePath = "/.sharpclaw/tasks/triggers/binding-value";
+    public const string TaskTriggerBindingFilterPath = "/.sharpclaw/tasks/triggers/binding-filter";
+    public const string TaskTriggerSyncBindingsPath = "/.sharpclaw/tasks/triggers/sync-bindings";
+    public const string TaskTriggerRemoveBindingsPath = "/.sharpclaw/tasks/triggers/remove-bindings";
+    public const string TaskTriggerBindingCreatedPath = "/.sharpclaw/tasks/triggers/bindings/created";
+    public const string TaskTriggerBindingRemovedPath = "/.sharpclaw/tasks/triggers/bindings/removed";
+    public const string TaskMetricValuePath = "/.sharpclaw/tasks/metrics/value";
+    public const string TaskEventSinkPath = "/.sharpclaw/tasks/events/sink";
 }
 
 internal static class ForeignModuleCapability
@@ -37,6 +50,7 @@ internal static class ForeignModuleCapability
     public const string ModuleContributionDescriptors = "moduleContributionDescriptors";
     public const string LifecycleHooks = "lifecycleHooks";
     public const string HostCapabilities = "hostCapabilities";
+    public const string TaskRuntime = "taskRuntime";
 }
 
 public static class ForeignModuleEndpointResponseMode
