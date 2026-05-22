@@ -113,6 +113,18 @@ async Task HandleAsync(TcpClient client)
                             routePattern = "/modules/sample/echo",
                             responseMode = "json",
                         },
+                        new
+                        {
+                            method = "GET",
+                            routePattern = "/modules/sample/static/hello.txt",
+                            responseMode = "static",
+                        },
+                        new
+                        {
+                            method = "GET",
+                            routePattern = "/modules/sample/stream",
+                            responseMode = "stream",
+                        },
                     },
                     tools = new[]
                     {
@@ -253,6 +265,23 @@ async Task HandleAsync(TcpClient client)
                     body = request.Body,
                     contentType = request.Headers.GetValueOrDefault("Content-Type"),
                 });
+                break;
+
+            case "/modules/sample/static/hello.txt":
+                await WriteTextAsync(
+                    stream,
+                    200,
+                    "OK",
+                    "static-parity-asset",
+                    "text/plain");
+                break;
+
+            case "/modules/sample/stream":
+                await WriteNdjsonAsync(
+                    stream,
+                    new { delta = "first:" },
+                    new { delta = "second" },
+                    new { isFinal = true });
                 break;
 
             default:
