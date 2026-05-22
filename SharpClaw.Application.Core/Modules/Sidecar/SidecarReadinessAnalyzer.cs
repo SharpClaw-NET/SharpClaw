@@ -156,42 +156,12 @@ public sealed class SidecarReadinessAnalyzer
         AddCovered(findings, contributions.OverridesShutdown ? 1 : 0, "lifecycle.shutdown", "Shutdown is covered by the current foreign protocol.");
         AddCovered(findings, contributions.ExportedProtocolContractCount, "contracts.protocol.exports", "Protocol contract exports are covered by the current foreign protocol.");
         AddCovered(findings, contributions.RequiredProtocolContractCount, "contracts.protocol.requirements", "Protocol contract requirements are covered by the current foreign protocol.");
-
-        if (contributions.ResourceTypeDescriptorCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.resource_descriptors",
-                $"{contributions.ResourceTypeDescriptorCount} resource descriptor(s) need discovery and lookup operations."));
-
-        if (contributions.GlobalFlagDescriptorCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.global_flags",
-                $"{contributions.GlobalFlagDescriptorCount} global flag descriptor(s) need discovery."));
-
-        if (contributions.HeaderTagCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.header_tags",
-                $"{contributions.HeaderTagCount} header tag(s) need discovery and invocation operations."));
-
-        if (contributions.UiContributionCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.ui_contributions",
-                $"{contributions.UiContributionCount} UI contribution(s) need discovery."));
-
-        if (contributions.FrontendContributionCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.frontend_contributions",
-                $"{contributions.FrontendContributionCount} frontend contribution(s) need discovery."));
-
-        if (contributions.CliCommandCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "module.cli_commands",
-                $"{contributions.CliCommandCount} CLI command(s) need discovery and invocation operations."));
+        AddCovered(findings, contributions.ResourceTypeDescriptorCount, "module.resource_descriptors", "Resource descriptors, id lookup, and lookup items are covered by the current foreign protocol.");
+        AddCovered(findings, contributions.GlobalFlagDescriptorCount, "module.global_flags", "Global flag descriptors are covered by the current foreign protocol.");
+        AddCovered(findings, contributions.HeaderTagCount, "module.header_tags", "Header tag discovery and invocation are covered by the current foreign protocol.");
+        AddCovered(findings, contributions.UiContributionCount, "module.ui_contributions", "UI contribution descriptors are covered by the current foreign protocol.");
+        AddCovered(findings, contributions.FrontendContributionCount, "module.frontend_contributions", "Frontend contribution descriptors are covered by the current foreign protocol.");
+        AddCovered(findings, contributions.CliCommandCount, "module.cli_commands", "CLI command discovery and invocation are covered by the current foreign protocol.");
 
         if (contributions.ExportedClrContractCount > 0)
             findings.Add(new(
@@ -225,12 +195,11 @@ public sealed class SidecarReadinessAnalyzer
                 "Host event sinks need parent-to-sidecar event delivery: "
                 + string.Join(", ", services.EventSinkRegistrations)));
 
-        if (services.ProviderPluginRegistrations.Count > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "providers.plugins",
-                "Provider plugin registrations need a provider protocol: "
-                + string.Join(", ", services.ProviderPluginRegistrations)));
+        AddCovered(
+            findings,
+            services.ProviderPluginRegistrations.Count,
+            "providers.plugins",
+            "Provider plugin discovery and invocation are covered by the current foreign protocol.");
 
         if (services.ModuleDbContextTypes.Count > 0)
             findings.Add(new(
@@ -239,11 +208,7 @@ public sealed class SidecarReadinessAnalyzer
                 "Module-owned EF contexts need a host-backed storage capability or explicit data migration: "
                 + string.Join(", ", services.ModuleDbContextTypes)));
 
-        if (contributions.OverridesJobCompletionBehavior)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresProtocolSurface,
-                "jobs.completion_behavior",
-                "Dynamic job completion behavior needs a sidecar protocol equivalent."));
+        AddCovered(findings, contributions.OverridesJobCompletionBehavior ? 1 : 0, "jobs.completion_behavior", "Dynamic job completion behavior is covered by the current foreign protocol.");
 
         if (contributions.OverridesSeedData)
             findings.Add(new(

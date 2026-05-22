@@ -541,16 +541,21 @@ try
             continue;
         }
 
-        registry.Register(bundledModule);
+        using var moduleRegistrationScope = app.Services.CreateScope();
+        var moduleSvc = moduleRegistrationScope.ServiceProvider.GetRequiredService<ModuleService>();
+        var registeredModule = await moduleSvc.RegisterBundledRuntimeAsync(
+            bundledModule.Id,
+            app.Services,
+            CancellationToken.None);
         registeredBundledCount++;
 
         var manifest = moduleLoader.GetManifest(bundledModule.Id);
         var version = manifest?.Version ?? "unknown";
-        Log.Information("Module '{ModuleId}' ({DisplayName}) registered [bundled, v{Version}]",
-            bundledModule.Id, bundledModule.DisplayName, version);
-
-        if (manifest is not null)
-            registry.CacheManifest(bundledModule.Id, manifest);
+        var runtimeLabel = registry.GetRuntimeHost(bundledModule.Id) is null
+            ? "bundled"
+            : "bundled-sidecar";
+        Log.Information("Module '{ModuleId}' ({DisplayName}) registered [{Runtime}, v{Version}]",
+            registeredModule.Id, registeredModule.DisplayName, runtimeLabel, version);
     }
 
     if (storageMode == StorageMode.JsonFile)
@@ -575,9 +580,12 @@ try
     foreach (var (moduleId, reason) in excludedModules)
     {
         Log.Warning("Module '{ModuleId}' excluded from initialization: {Reason}", moduleId, reason);
+        var runtimeHost = registry.GetRuntimeHost(moduleId);
         app.Services.GetRequiredService<SharpClaw.Infrastructure.Persistence.Modules.RuntimeModuleDbContextRegistry>()
             .UnregisterModule(moduleId);
         registry.Unregister(moduleId);
+        if (runtimeHost is not null)
+            await runtimeHost.DisposeAsync();
     }
 
     // Track contracts that became unavailable due to runtime init failures
@@ -607,9 +615,12 @@ try
             foreach (var export in module.ExportedContracts)
                 failedContracts.Add(export.ContractName);
 
+            var runtimeHost = registry.GetRuntimeHost(moduleId);
             registry.Unregister(moduleId);
             app.Services.GetRequiredService<SharpClaw.Infrastructure.Persistence.Modules.RuntimeModuleDbContextRegistry>()
                 .UnregisterModule(moduleId);
+            if (runtimeHost is not null)
+                await runtimeHost.DisposeAsync();
             failedInitCount++;
             continue;
         }
@@ -627,9 +638,12 @@ try
             foreach (var export in module.ExportedContracts)
                 failedContracts.Add(export.ContractName);
 
+            var runtimeHost = registry.GetRuntimeHost(moduleId);
             registry.Unregister(moduleId);
             app.Services.GetRequiredService<SharpClaw.Infrastructure.Persistence.Modules.RuntimeModuleDbContextRegistry>()
                 .UnregisterModule(moduleId);
+            if (runtimeHost is not null)
+                await runtimeHost.DisposeAsync();
             failedInitCount++;
         }
     }
@@ -794,6 +808,15 @@ try
             catch (Exception ex)
             {
                 Log.Warning(ex, "Module '{ModuleId}' shutdown error", module.Id);
+            }
+        }
+
+        foreach (var runtimeHost in registry.GetRuntimeHosts())
+        {
+            try { runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
+            catch (Exception ex)
+            {
+                Log.Warning(ex, "Module runtime host disposal error");
             }
         }
     });

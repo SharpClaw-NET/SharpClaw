@@ -32,6 +32,9 @@
     <ProjectReference Include="..\SharpClaw.Migrations.Postgres\SharpClaw.Migrations.Postgres.csproj" />
     <ProjectReference Include="..\SharpClaw.Migrations.SqlServer\SharpClaw.Migrations.SqlServer.csproj" />
     <ProjectReference Include="..\SharpClaw.Migrations.SQLite\SharpClaw.Migrations.SQLite.csproj" />
+    <ProjectReference Include="..\SharpClaw.Modules.DotNetSidecarHost\SharpClaw.Modules.DotNetSidecarHost.csproj">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
   </ItemGroup>
 
   <!--
@@ -112,10 +115,12 @@
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_BundledHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Providers.LocalCommon\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Providers.LocalCommon.dll" />
+      <_DotNetSidecarHostFile Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost.*" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_NonHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
     <Copy SourceFiles="@(_BundledHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_DotNetSidecarHostFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">
@@ -123,10 +128,12 @@
       <_CopiedBundledModuleDll Include="$(OutputPath)SharpClaw.Modules.*.dll" />
       <_CopiedBundledHostDll Include="$(OutputPath)SharpClaw.Providers.Common.dll" />
       <_CopiedBundledHostDll Include="$(OutputPath)SharpClaw.Providers.LocalCommon.dll" />
+      <_CopiedDotNetSidecarHostFile Include="$(OutputPath)SharpClaw.Modules.DotNetSidecarHost.*" />
       <_CopiedBundledModuleManifest Include="$(OutputPath)modules\**\*" />
     </ItemGroup>
     <Delete Files="@(_CopiedBundledModuleDll)" Condition="'@(_CopiedBundledModuleDll)' != ''" />
     <Delete Files="@(_CopiedBundledHostDll)" Condition="'@(_CopiedBundledHostDll)' != ''" />
+    <Delete Files="@(_CopiedDotNetSidecarHostFile)" Condition="'@(_CopiedDotNetSidecarHostFile)' != ''" />
     <Delete Files="@(_CopiedBundledModuleManifest)" Condition="'@(_CopiedBundledModuleManifest)' != ''" />
   </Target>
 

@@ -1,3 +1,8 @@
+using System.Net;
+using System.Net.Sockets;
+using System.Reflection;
+using System.Security.Cryptography;
+
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -16,6 +21,7 @@ using SharpClaw.Infrastructure.Persistence;
 // query coupling and is acceptable per the cold-storage-ef-query-integration-plan.
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
+using SharpClaw.Utils.Instances;
 using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Services;
@@ -37,7 +43,8 @@ public sealed class ModuleService(
     ILoggerFactory loggerFactory,
     ILogger<ModuleService> logger,
     ChatCache chatCache,
-    IConfiguration? configuration = null)
+    IConfiguration? configuration = null,
+    SharpClawInstancePaths? instancePaths = null)
 {
     // ═══════════════════════════════════════════════════════════════
     // Queries
@@ -166,12 +173,13 @@ public sealed class ModuleService(
     public async Task<ModuleStateResponse> EnableAsync(
         string moduleId, IServiceProvider rootServices, CancellationToken ct = default)
     {
-        var module = loader.GetBundledModule(moduleId)
+        var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
 
         // Update DB
         var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
         var manifest = loader.GetManifest(moduleId);
+        ISharpClawModule module = bundledModule;
 
         if (state is null)
         {
@@ -193,9 +201,16 @@ public sealed class ModuleService(
         // Register + initialize if not already active
         if (registry.GetModule(moduleId) is null)
         {
+            IModuleRuntimeHost? runtimeHost = null;
             try
             {
-                registry.Register(module);
+                (module, runtimeHost) = await CreateBundledRuntimeAsync(
+                    bundledModule,
+                    manifest,
+                    rootServices,
+                    ct);
+
+                registry.Register(module, runtimeHost);
                 RegisterModulePersistence(module);
                 await LoadModulePersistenceAsync(module, ct);
 
@@ -216,13 +231,15 @@ public sealed class ModuleService(
                         $"Module '{moduleId}' has unsatisfied contract dependencies: {names}");
                 }
 
-                await module.InitializeAsync(rootServices, ct);
+                await module.InitializeAsync(runtimeHost?.Services ?? rootServices, ct);
             }
             catch
             {
                 // Rollback: unregister if init failed
                 moduleDbContextRegistry.UnregisterModule(moduleId);
                 registry.Unregister(moduleId);
+                if (runtimeHost is not null)
+                    await runtimeHost.DisposeAsync();
                 throw;
             }
 
@@ -242,14 +259,51 @@ public sealed class ModuleService(
         return ToResponse(module, state, manifest);
     }
 
+    public async Task<ISharpClawModule> RegisterBundledRuntimeAsync(
+        string moduleId,
+        IServiceProvider rootServices,
+        CancellationToken ct = default)
+    {
+        if (registry.GetModule(moduleId) is { } registered)
+            return registered;
+
+        var bundledModule = loader.GetBundledModule(moduleId)
+            ?? throw new ArgumentException($"Unknown module: {moduleId}");
+        var manifest = loader.GetManifest(moduleId);
+        IModuleRuntimeHost? runtimeHost = null;
+
+        try
+        {
+            var (module, host) = await CreateBundledRuntimeAsync(
+                bundledModule,
+                manifest,
+                rootServices,
+                ct);
+            runtimeHost = host;
+
+            registry.Register(module, runtimeHost);
+            if (manifest is not null)
+                registry.CacheManifest(moduleId, manifest);
+
+            return module;
+        }
+        catch
+        {
+            if (runtimeHost is not null)
+                await runtimeHost.DisposeAsync();
+            throw;
+        }
+    }
+
     /// <summary>
     /// Disable a module. Shuts it down, unregisters from <see cref="ModuleRegistry"/>,
     /// and updates DB.
     /// </summary>
     public async Task<ModuleStateResponse> DisableAsync(string moduleId, CancellationToken ct = default)
     {
-        var module = loader.GetBundledModule(moduleId)
+        var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
+        var module = registry.GetModule(moduleId) ?? bundledModule;
 
         // Check that no other enabled module depends on this module's contracts
         var protocolModule = module as IForeignModuleProtocolContractModule;
@@ -282,6 +336,7 @@ public sealed class ModuleService(
         // Shutdown + unregister
         if (registry.GetModule(moduleId) is not null)
         {
+            var runtimeHost = registry.GetRuntimeHost(moduleId);
             try { await module.ShutdownAsync(); }
             catch (Exception ex)
             {
@@ -289,6 +344,8 @@ public sealed class ModuleService(
             }
             moduleDbContextRegistry.UnregisterModule(moduleId);
             registry.Unregister(moduleId);
+            if (runtimeHost is not null)
+                await runtimeHost.DisposeAsync();
         }
 
         // Update DB
@@ -351,7 +408,7 @@ public sealed class ModuleService(
         if (registry.GetModule(manifest.Id) is not null)
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
 
-        var host = ExternalModuleHost.Load(canonicalModuleDir, manifest, runtimeInfo, hostServices, loggerFactory);
+        var host = await CreateRuntimeHostAsync(canonicalModuleDir, manifest, runtimeInfo, hostServices, ct);
         try
         {
             registry.Register(host.Module, host);
@@ -385,7 +442,10 @@ public sealed class ModuleService(
     /// </summary>
     public async Task UnloadExternalAsync(string moduleId, CancellationToken ct = default)
     {
-        var host = registry.GetExternalHost(moduleId)
+        if (loader.IsDefaultModule(moduleId))
+            throw new ArgumentException($"Module '{moduleId}' is a bundled module, not an external module.");
+
+        var host = registry.GetRuntimeHost(moduleId)
             ?? throw new ArgumentException($"Module '{moduleId}' is not an external module.");
 
         await host.DrainAsync(TimeSpan.FromSeconds(30), ct);
@@ -395,10 +455,17 @@ public sealed class ModuleService(
         await host.DisposeAsync();
         InvalidateModuleRuntimeState();
 
-        var (attempts, delay) = ResolveUnloadVerifyOptions();
-        var unloaded = await host.VerifyUnloadedAsync(attempts, delay, ct);
-        logger.LogInformation(
-            "External module '{ModuleId}' unloaded (GC verified: {Verified})", moduleId, unloaded);
+        if (host is ExternalModuleHost externalHost)
+        {
+            var (attempts, delay) = ResolveUnloadVerifyOptions();
+            var unloaded = await externalHost.VerifyUnloadedAsync(attempts, delay, ct);
+            logger.LogInformation(
+                "External module '{ModuleId}' unloaded (GC verified: {Verified})", moduleId, unloaded);
+        }
+        else
+        {
+            logger.LogInformation("External module '{ModuleId}' unloaded", moduleId);
+        }
     }
 
     private (int Attempts, TimeSpan Delay) ResolveUnloadVerifyOptions()
@@ -414,7 +481,10 @@ public sealed class ModuleService(
     public async Task<ModuleStateResponse> ReloadExternalAsync(
         string moduleId, IServiceProvider hostServices, CancellationToken ct = default)
     {
-        var host = registry.GetExternalHost(moduleId)
+        if (loader.IsDefaultModule(moduleId))
+            throw new ArgumentException($"Module '{moduleId}' is a bundled module, not an external module.");
+
+        var host = registry.GetRuntimeHost(moduleId)
             ?? throw new ArgumentException($"Module '{moduleId}' is not an external module.");
 
         var dir = host.SourceDirectory;
@@ -492,7 +562,7 @@ public sealed class ModuleService(
 
         if (registry.GetModule(manifest.Id) is { } existingModule)
         {
-            var existingHost = registry.GetExternalHost(manifest.Id);
+            var existingHost = registry.GetRuntimeHost(manifest.Id);
             if (existingHost is not null
                 && string.Equals(
                     Path.GetFullPath(existingHost.SourceDirectory),
@@ -508,7 +578,7 @@ public sealed class ModuleService(
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
         }
 
-        var host = ExternalModuleHost.Load(canonicalDir, manifest, runtimeInfo, hostServices, loggerFactory);
+        var host = await CreateRuntimeHostAsync(canonicalDir, manifest, runtimeInfo, hostServices, ct);
         try
         {
             registry.Register(host.Module, host);
@@ -584,6 +654,225 @@ public sealed class ModuleService(
         {
             await moduleJsonPersistence.LoadModuleAsync(registration, ct);
         }
+    }
+
+    private async Task<(ISharpClawModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(
+        ISharpClawModule bundledModule,
+        ModuleManifest? manifest,
+        IServiceProvider rootServices,
+        CancellationToken ct)
+    {
+        if (manifest is null)
+            return (bundledModule, null);
+
+        var runtimeInfo = LoadRuntimeInfo(manifest);
+        if (!ShouldUseDotNetSidecar(runtimeInfo))
+            return (bundledModule, null);
+
+        var moduleDir = PrepareBundledSidecarModuleDirectory(manifest);
+        var host = await CreateRuntimeHostAsync(moduleDir, manifest, runtimeInfo, rootServices, ct);
+        return (host.Module, host);
+    }
+
+    private async Task<IModuleRuntimeHost> CreateRuntimeHostAsync(
+        string moduleDir,
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo,
+        IServiceProvider hostServices,
+        CancellationToken ct)
+    {
+        if (ShouldUseDotNetSidecar(runtimeInfo))
+        {
+            return await ForeignModuleHost.StartAsync(
+                manifest,
+                runtimeInfo,
+                CreateDotNetSidecarLaunchOptions(moduleDir, manifest, hostServices),
+                ct);
+        }
+
+        return ExternalModuleHost.Load(moduleDir, manifest, runtimeInfo, hostServices, loggerFactory);
+    }
+
+    private bool ShouldUseDotNetSidecar(ModuleManifestRuntimeInfo runtimeInfo) =>
+        runtimeInfo.IsDotNet
+        && runtimeInfo.IsSidecarHostMode
+        && !(configuration?.GetValue("Modules:ForceInProcessDotNetSidecars", false) ?? false);
+
+    private ModuleManifestRuntimeInfo LoadRuntimeInfo(ModuleManifest manifest)
+    {
+        var manifestPath = Path.Combine(ResolveBundledModuleDirectory(manifest.Id), ModuleFileNames.ManifestFile);
+        if (!File.Exists(manifestPath))
+            return ModuleManifestRuntimeInfo.DotNetDefault;
+
+        return ModuleManifestRuntimeInfo.FromJson(File.ReadAllText(manifestPath));
+    }
+
+    private ForeignModuleHostLaunchOptions CreateDotNetSidecarLaunchOptions(
+        string moduleDir,
+        ModuleManifest manifest,
+        IServiceProvider hostServices)
+    {
+        var command = ResolveDotNetSidecarLaunchCommand();
+        return new ForeignModuleHostLaunchOptions
+        {
+            ExecutablePath = command.ExecutablePath,
+            Arguments = command.Arguments,
+            WorkingDirectory = command.WorkingDirectory,
+            ModuleDirectory = moduleDir,
+            ModuleDataDirectory = ResolveModuleDataDirectory(manifest.Id),
+            ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
+            ControlToken = CreateControlToken(),
+            HostVersion = ResolveHostVersion(),
+            HostServices = hostServices,
+        };
+    }
+
+    private string PrepareBundledSidecarModuleDirectory(ModuleManifest manifest)
+    {
+        var sourceDir = ResolveBundledModuleDirectory(manifest.Id);
+        var sourceManifest = Path.Combine(sourceDir, ModuleFileNames.ManifestFile);
+        if (!File.Exists(sourceManifest))
+        {
+            throw new FileNotFoundException(
+                $"Bundled module manifest for '{manifest.Id}' was not found.",
+                sourceManifest);
+        }
+
+        ModuleManifestRuntimeInfo.DotNetDefault.EnsureDotNetEntryAssembly(manifest);
+
+        var stagingDir = Path.Combine(
+            ResolveRuntimeDirectory(),
+            "module-sidecars",
+            manifest.Id);
+        Directory.CreateDirectory(stagingDir);
+        CopyIfChanged(sourceManifest, Path.Combine(stagingDir, ModuleFileNames.ManifestFile));
+
+        var baseDir = ResolveApplicationBaseDirectory();
+        var entryName = Path.GetFileNameWithoutExtension(manifest.EntryAssembly);
+        var payloadFiles = Directory.EnumerateFiles(baseDir, entryName + ".*")
+            .Where(file => file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".pdb", StringComparison.OrdinalIgnoreCase)
+                           || file.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase))
+            .ToArray();
+
+        if (!payloadFiles.Any(file => string.Equals(
+                Path.GetFileName(file),
+                manifest.EntryAssembly,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new FileNotFoundException(
+                $"Bundled module entry assembly '{manifest.EntryAssembly}' was not found beside the host output.",
+                Path.Combine(baseDir, manifest.EntryAssembly));
+        }
+
+        foreach (var file in payloadFiles)
+            CopyIfChanged(file, Path.Combine(stagingDir, Path.GetFileName(file)));
+
+        return stagingDir;
+    }
+
+    private static void CopyIfChanged(string source, string destination)
+    {
+        Directory.CreateDirectory(Path.GetDirectoryName(destination)!);
+        if (File.Exists(destination))
+        {
+            var sourceInfo = new FileInfo(source);
+            var destinationInfo = new FileInfo(destination);
+            if (sourceInfo.Length == destinationInfo.Length
+                && sourceInfo.LastWriteTimeUtc <= destinationInfo.LastWriteTimeUtc)
+            {
+                return;
+            }
+        }
+
+        File.Copy(source, destination, overwrite: true);
+    }
+
+    private static string ResolveApplicationBaseDirectory() =>
+        Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!;
+
+    private static string ResolveBundledModuleDirectory(string moduleId) =>
+        Path.Combine(
+            ResolveApplicationBaseDirectory(),
+            ModuleFileNames.BundledModulesDir,
+            moduleId);
+
+    private string ResolveRuntimeDirectory()
+    {
+        var runtimeDirectory = instancePaths?.RuntimeDirectory
+            ?? Path.Combine(ResolveApplicationBaseDirectory(), "runtime");
+        Directory.CreateDirectory(runtimeDirectory);
+        return runtimeDirectory;
+    }
+
+    private string ResolveModuleDataDirectory(string moduleId)
+    {
+        var dataRoot = instancePaths?.DataDirectory
+            ?? Path.Combine(ResolveApplicationBaseDirectory(), "Data");
+        var moduleDataDir = Path.Combine(dataRoot, "modules", moduleId, "sidecar");
+        Directory.CreateDirectory(moduleDataDir);
+        return moduleDataDir;
+    }
+
+    private (string ExecutablePath, IReadOnlyList<string> Arguments, string WorkingDirectory)
+        ResolveDotNetSidecarLaunchCommand()
+    {
+        var configuredPath = configuration?["Modules:DotNetSidecarHostPath"];
+        if (!string.IsNullOrWhiteSpace(configuredPath))
+        {
+            var fullPath = Path.GetFullPath(configuredPath);
+            if (!File.Exists(fullPath))
+            {
+                throw new FileNotFoundException(
+                    "The configured .NET sidecar host path does not exist.",
+                    fullPath);
+            }
+
+            var workingDirectory = Path.GetDirectoryName(fullPath)!;
+            return fullPath.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
+                ? ("dotnet", [fullPath], workingDirectory)
+                : (fullPath, [], workingDirectory);
+        }
+
+        var baseDir = ResolveApplicationBaseDirectory();
+        var hostPath = Path.Combine(baseDir, "SharpClaw.Modules.DotNetSidecarHost.dll");
+        var appHostName = OperatingSystem.IsWindows()
+            ? "SharpClaw.Modules.DotNetSidecarHost.exe"
+            : "SharpClaw.Modules.DotNetSidecarHost";
+        var appHostPath = Path.Combine(baseDir, appHostName);
+
+        if (File.Exists(appHostPath))
+            return (appHostPath, [], baseDir);
+
+        if (File.Exists(hostPath))
+            return ("dotnet", [hostPath], baseDir);
+
+        throw new FileNotFoundException(
+            "The shared .NET sidecar host is missing from the application output.",
+            hostPath);
+    }
+
+    private static string CreateControlToken() =>
+        Convert.ToHexString(RandomNumberGenerator.GetBytes(32));
+
+    private static string ResolveHostVersion()
+    {
+        var version = typeof(ModuleService).Assembly
+            .GetCustomAttribute<AssemblyInformationalVersionAttribute>()
+            ?.InformationalVersion;
+        if (string.IsNullOrWhiteSpace(version))
+            return "0.1.0-beta";
+
+        var metadataIndex = version.IndexOf('+', StringComparison.Ordinal);
+        return metadataIndex >= 0 ? version[..metadataIndex] : version;
+    }
+
+    private static int GetFreeTcpPort()
+    {
+        var listener = new TcpListener(IPAddress.Loopback, 0);
+        listener.Start();
+        try { return ((IPEndPoint)listener.LocalEndpoint).Port; }
+        finally { listener.Stop(); }
     }
 
     private void InvalidateModuleRuntimeState()

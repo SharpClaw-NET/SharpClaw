@@ -176,6 +176,8 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.SyntheticExternalModuleLifecycleTests'
           - domain: Module Foreign Runtime
             filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ForeignModule|FullyQualifiedName~SharpClaw.Tests.Modules.JavaScriptModuleSdkTests|FullyQualifiedName~SharpClaw.Tests.Modules.PythonModuleSdkTests'
+          - domain: Module Sidecar Parity
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledDotNetSidecarDefaultTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledTestHarnessSidecarConformanceTests|FullyQualifiedName~SharpClaw.Tests.Modules.DotNetSidecarHostTests|FullyQualifiedName~SharpClaw.Tests.Modules.SidecarReadinessInventoryTests'
           - domain: Module Harness Integration
             filter: 'FullyQualifiedName~ModuleRegistersDynamicProvidersToolsHeaderTagsAndCostFeed|FullyQualifiedName~ProviderCaptureRedactsSecretsButKeepsAssertablePromptShape'
           - domain: Module Harness Cost And Matrix

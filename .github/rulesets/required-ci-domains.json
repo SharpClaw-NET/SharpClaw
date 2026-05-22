@@ -90,6 +90,7 @@
           { "context": "Correctness / Module Bundled Outputs" },
           { "context": "Correctness / Module External Lifecycle" },
           { "context": "Correctness / Module Foreign Runtime" },
+          { "context": "Correctness / Module Sidecar Parity" },
           { "context": "Correctness / Module Harness Integration" },
           { "context": "Correctness / Module Harness Cost And Matrix" },
           { "context": "Correctness / Module Contracts Architecture" },

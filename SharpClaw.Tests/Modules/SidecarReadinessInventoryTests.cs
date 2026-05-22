@@ -1,4 +1,6 @@
 using System.Reflection;
+using System.Text.Json;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Sidecar;
 using SharpClaw.Contracts.Modules;
 
@@ -28,10 +30,6 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_agent_orchestration"] =
         [
             "events.sinks",
-            "module.cli_commands",
-            "module.global_flags",
-            "module.header_tags",
-            "module.resource_descriptors",
             "storage.module_dbcontexts",
             "tasks.parser_extension",
             "tasks.runtime_services",
@@ -39,8 +37,6 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_editor_common"] =
         [
             "contracts.clr.exports",
-            "module.cli_commands",
-            "module.header_tags",
             "storage.module_dbcontexts",
         ],
         ["sharpclaw_metrics"] =
@@ -51,44 +47,19 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_module_dev"] =
         [
             "contracts.clr.requirements",
-            "module.cli_commands",
-            "module.global_flags",
         ],
-        ["sharpclaw_providers_anthropic"] =
-        [
-            "providers.plugins",
-        ],
-        ["sharpclaw_providers_google"] =
-        [
-            "providers.plugins",
-        ],
+        ["sharpclaw_providers_anthropic"] = [],
+        ["sharpclaw_providers_google"] = [],
         ["sharpclaw_providers_llamasharp"] =
         [
-            "module.cli_commands",
-            "module.frontend_contributions",
-            "providers.plugins",
             "storage.module_dbcontexts",
         ],
-        ["sharpclaw_providers_ollama"] =
-        [
-            "providers.plugins",
-        ],
-        ["sharpclaw_providers_openai_compat"] =
-        [
-            "providers.plugins",
-        ],
-        ["sharpclaw_test_harness"] =
-        [
-            "jobs.completion_behavior",
-            "module.global_flags",
-            "module.header_tags",
-            "module.resource_descriptors",
-            "providers.plugins",
-        ],
+        ["sharpclaw_providers_ollama"] = [],
+        ["sharpclaw_providers_openai_compat"] = [],
+        ["sharpclaw_test_harness"] = [],
         ["sharpclaw_vs2026_editor"] =
         [
             "contracts.clr.requirements",
-            "module.resource_descriptors",
         ],
         ["sharpclaw_vscode_editor"] =
         [
@@ -123,7 +94,37 @@ public sealed class SidecarReadinessInventoryTests
             StringComparer.Ordinal);
 
         actual.Should().Equal(expected);
-        reports.Should().OnlyContain(report => !report.IsReadyForSidecarDefault);
+        reports.Where(report => report.IsReadyForSidecarDefault)
+            .Select(report => report.ModuleId)
+            .Should()
+            .Equal(
+            [
+                "sharpclaw_providers_anthropic",
+                "sharpclaw_providers_google",
+                "sharpclaw_providers_ollama",
+                "sharpclaw_providers_openai_compat",
+                "sharpclaw_test_harness",
+            ]);
+    }
+
+    [Test]
+    public void BundledModulesOptedIntoSidecarHostModeMustBeReadinessClean()
+    {
+        var reports = AnalyzeBundledModules()
+            .ToDictionary(report => report.ModuleId, StringComparer.Ordinal);
+        var sidecarModuleIds = LoadBundledManifests()
+            .Where(entry => entry.RuntimeInfo.IsSidecarHostMode)
+            .Select(entry => entry.Manifest.Id)
+            .Order(StringComparer.Ordinal)
+            .ToArray();
+
+        sidecarModuleIds.Should().Contain("sharpclaw_test_harness");
+        foreach (var moduleId in sidecarModuleIds)
+        {
+            reports.Should().ContainKey(moduleId);
+            reports[moduleId].Blockers.Should().BeEmpty(
+                $"module '{moduleId}' opted into hostMode=sidecar and must stay protocol-ready");
+        }
     }
 
     [Test]
@@ -192,5 +193,22 @@ public sealed class SidecarReadinessInventoryTests
         var tfm = new DirectoryInfo(testBinDir).Name;
 
         return Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+    }
+
+    private static IReadOnlyList<(ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo)>
+        LoadBundledManifests()
+    {
+        var modulesDir = Path.Combine(ResolveApiOutputDirectory(), "modules");
+        Directory.Exists(modulesDir).Should().BeTrue();
+
+        return Directory.EnumerateFiles(modulesDir, "module.json", SearchOption.AllDirectories)
+            .Select(path =>
+            {
+                var json = File.ReadAllText(path);
+                var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)!;
+                return (Manifest: manifest, RuntimeInfo: ModuleManifestRuntimeInfo.FromJson(json));
+            })
+            .OrderBy(entry => entry.Manifest.Id, StringComparer.Ordinal)
+            .ToArray();
     }
 }
