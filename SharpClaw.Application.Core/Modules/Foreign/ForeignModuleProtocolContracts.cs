@@ -1,7 +1,9 @@
 using System.Text.Json;
 using SharpClaw.Contracts.DTOs.AgentActions;
+using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
@@ -55,7 +57,8 @@ public sealed record ForeignModuleDiscoveryResponse(
     IReadOnlyList<ForeignModuleTaskTriggerSourceDescriptor>? TaskTriggerSources = null,
     IReadOnlyList<ForeignModuleTaskTriggerBindingSideEffectDescriptor>? TaskTriggerBindingSideEffects = null,
     IReadOnlyList<ForeignModuleTaskMetricProviderDescriptor>? TaskMetricProviders = null,
-    IReadOnlyList<ForeignModuleTaskEventSinkDescriptor>? TaskEventSinks = null);
+    IReadOnlyList<ForeignModuleTaskEventSinkDescriptor>? TaskEventSinks = null,
+    IReadOnlyList<ForeignModuleProviderPluginDescriptor>? ProviderPlugins = null);
 
 public sealed record ForeignModuleEndpointDescriptor(
     string Method,
@@ -524,3 +527,165 @@ internal sealed record ForeignModuleTaskEventSinkRequest(
 
 internal sealed record ForeignModuleTaskAckResponse(
     bool Accepted = true);
+
+public sealed record ForeignModuleProviderPluginDescriptor(
+    string ProviderKey,
+    string DisplayName,
+    string? OwnerModuleId = null,
+    bool RequiresEndpoint = false,
+    bool SupportsAutomaticEndpointDiscovery = false,
+    bool IsSeedable = true,
+    bool RequiresApiKey = true,
+    bool SupportsNativeToolCalling = false,
+    IReadOnlyList<ProviderCostSeed>? CostSeeds = null,
+    ForeignModuleCompletionParameterSpecDescriptor? ParameterSpec = null,
+    bool SupportsDeviceCodeFlow = false,
+    bool SupportsCostFeed = false,
+    string? CostFeedPermissionDeniedNote = null);
+
+public sealed record ForeignModuleCompletionParameterSpecDescriptor(
+    string ProviderName,
+    bool SupportsTemperature = true,
+    float TemperatureMin = 0.0f,
+    float TemperatureMax = 2.0f,
+    bool SupportsTopP = true,
+    float TopPMin = 0.0f,
+    float TopPMax = 1.0f,
+    bool SupportsTopK = true,
+    int TopKMin = 1,
+    int TopKMax = int.MaxValue,
+    bool SupportsFrequencyPenalty = true,
+    float FrequencyPenaltyMin = -2.0f,
+    float FrequencyPenaltyMax = 2.0f,
+    bool SupportsPresencePenalty = true,
+    float PresencePenaltyMin = -2.0f,
+    float PresencePenaltyMax = 2.0f,
+    bool SupportsStop = true,
+    int MaxStopSequences = 16,
+    bool SupportsSeed = true,
+    bool SupportsResponseFormat = true,
+    bool RejectsJsonObjectResponseFormat = false,
+    bool OnlyJsonObjectResponseFormat = false,
+    bool SupportsReasoningEffort = true,
+    bool ReasoningEffortInformationalOnly = false,
+    string[]? ValidReasoningEffortValues = null,
+    bool SupportsToolChoice = true,
+    bool SupportsStrictTools = false)
+{
+    public static ForeignModuleCompletionParameterSpecDescriptor From(ICompletionParameterSpec spec) =>
+        new(
+            spec.ProviderName,
+            spec.SupportsTemperature,
+            spec.TemperatureMin,
+            spec.TemperatureMax,
+            spec.SupportsTopP,
+            spec.TopPMin,
+            spec.TopPMax,
+            spec.SupportsTopK,
+            spec.TopKMin,
+            spec.TopKMax,
+            spec.SupportsFrequencyPenalty,
+            spec.FrequencyPenaltyMin,
+            spec.FrequencyPenaltyMax,
+            spec.SupportsPresencePenalty,
+            spec.PresencePenaltyMin,
+            spec.PresencePenaltyMax,
+            spec.SupportsStop,
+            spec.MaxStopSequences,
+            spec.SupportsSeed,
+            spec.SupportsResponseFormat,
+            spec.RejectsJsonObjectResponseFormat,
+            spec.OnlyJsonObjectResponseFormat,
+            spec.SupportsReasoningEffort,
+            spec.ReasoningEffortInformationalOnly,
+            spec.ValidReasoningEffortValues,
+            spec.SupportsToolChoice,
+            spec.SupportsStrictTools);
+}
+
+internal sealed record ForeignModuleProviderModelListRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string? Endpoint,
+    string ApiKey);
+
+internal sealed record ForeignModuleProviderModelListResponse(
+    IReadOnlyList<string> ModelIds);
+
+internal sealed record ForeignModuleProviderCapabilitiesResolveRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string ModelName);
+
+internal sealed record ForeignModuleProviderCapabilitiesResolveResponse(
+    IReadOnlyList<string> Tags);
+
+internal sealed record ForeignModuleProviderChatCompletionRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string? Endpoint,
+    string ApiKey,
+    string Model,
+    string? SystemPrompt,
+    IReadOnlyList<ChatCompletionMessage> Messages,
+    int? MaxCompletionTokens = null,
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    CompletionParameters? CompletionParameters = null);
+
+internal sealed record ForeignModuleProviderChatCompletionWithToolsRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string? Endpoint,
+    string ApiKey,
+    string Model,
+    string? SystemPrompt,
+    IReadOnlyList<ToolAwareMessage> Messages,
+    IReadOnlyList<ChatToolDefinition> Tools,
+    int? MaxCompletionTokens = null,
+    Dictionary<string, JsonElement>? ProviderParameters = null,
+    CompletionParameters? CompletionParameters = null);
+
+internal sealed record ForeignModuleProviderChatCompletionResponse(
+    ChatCompletionResult Result);
+
+internal sealed record ForeignModuleProviderDeviceCodeStartRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey);
+
+internal sealed record ForeignModuleProviderDeviceCodeStartResponse(
+    DeviceCodeSession Session);
+
+internal sealed record ForeignModuleProviderDeviceCodePollRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    DeviceCodeSession Session);
+
+internal sealed record ForeignModuleProviderDeviceCodePollResponse(
+    string? AccessToken);
+
+internal sealed record ForeignModuleProviderCostFeedRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string ApiKey,
+    DateTimeOffset StartTime,
+    DateTimeOffset? EndTime);
+
+internal sealed record ForeignModuleProviderCostFeedResponse(
+    ProviderCostResult? Result);
+
+internal sealed record ForeignModuleProviderAgentIdentifierSuffixRequest(
+    int ProtocolVersion,
+    string ModuleId,
+    string ProviderKey,
+    string ProviderName,
+    Guid ModelId);
+
+internal sealed record ForeignModuleProviderAgentIdentifierSuffixResponse(
+    string Suffix);

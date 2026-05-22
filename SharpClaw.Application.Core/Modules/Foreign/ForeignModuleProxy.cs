@@ -1,7 +1,9 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
@@ -35,6 +37,7 @@ internal sealed class ForeignModuleProxy(
     private IReadOnlyList<ForeignModuleTaskTriggerBindingSideEffectDescriptor> _taskTriggerBindingSideEffects = [];
     private IReadOnlyList<ForeignModuleTaskMetricProviderDescriptor> _taskMetricProviders = [];
     private IReadOnlyList<ForeignModuleTaskEventSinkDescriptor> _taskEventSinks = [];
+    private IReadOnlyList<ForeignModuleProviderPluginDescriptor> _providerPlugins = [];
     private ITaskParserModuleExtension? _parserExtension;
 
     public string Id => manifest.Id;
@@ -79,6 +82,12 @@ internal sealed class ForeignModuleProxy(
         {
             services.AddSingleton<ISharpClawEventSink>(
                 new ForeignModuleTaskEventSink(manifest, client, eventSink));
+        }
+
+        foreach (var providerPlugin in _providerPlugins)
+        {
+            services.AddSingleton<IProviderPlugin>(
+                new ForeignModuleProviderPlugin(manifest, client, providerPlugin));
         }
     }
 
@@ -132,6 +141,7 @@ internal sealed class ForeignModuleProxy(
         _taskTriggerBindingSideEffects = discovery.TaskTriggerBindingSideEffects ?? [];
         _taskMetricProviders = discovery.TaskMetricProviders ?? [];
         _taskEventSinks = discovery.TaskEventSinks ?? [];
+        _providerPlugins = discovery.ProviderPlugins ?? [];
         _parserExtension = null;
     }
 
@@ -579,6 +589,257 @@ internal sealed class ForeignModuleProxy(
 
         public Task OnEventAsync(SharpClawEvent evt, CancellationToken ct) =>
             client.SendTaskEventAsync(manifest, evt, ct);
+    }
+
+    private sealed class ForeignModuleProviderPlugin(
+        ModuleManifest manifest,
+        ForeignModuleProtocolClient client,
+        ForeignModuleProviderPluginDescriptor descriptor) : IProviderPlugin
+    {
+        public string ProviderKey => descriptor.ProviderKey;
+        public string DisplayName => descriptor.DisplayName;
+        public string OwnerModuleId => descriptor.OwnerModuleId ?? manifest.Id;
+        public bool RequiresEndpoint => descriptor.RequiresEndpoint;
+        public bool SupportsAutomaticEndpointDiscovery => descriptor.SupportsAutomaticEndpointDiscovery;
+        public bool IsSeedable => descriptor.IsSeedable;
+        public bool RequiresApiKey => descriptor.RequiresApiKey;
+        public IReadOnlyList<ProviderCostSeed> CostSeeds => descriptor.CostSeeds ?? [];
+        public ICompletionParameterSpec ParameterSpec { get; } =
+            new ForeignModuleCompletionParameterSpec(
+                descriptor.ParameterSpec
+                ?? new ForeignModuleCompletionParameterSpecDescriptor(descriptor.DisplayName));
+
+        public IModelCapabilityResolver Capabilities { get; } =
+            new ForeignModuleModelCapabilityResolver(manifest, client, descriptor.ProviderKey);
+
+        public IDeviceCodeFlow? DeviceCodeFlow =>
+            descriptor.SupportsDeviceCodeFlow
+                ? new ForeignModuleDeviceCodeFlow(manifest, client, descriptor.ProviderKey)
+                : null;
+
+        public IProviderCostFeed? CostFeed =>
+            descriptor.SupportsCostFeed
+                ? new ForeignModuleProviderCostFeed(
+                    manifest,
+                    client,
+                    descriptor.ProviderKey,
+                    descriptor.CostFeedPermissionDeniedNote)
+                : null;
+
+        public IProviderApiClient CreateClient(string? endpoint)
+        {
+            if (RequiresEndpoint
+                && !SupportsAutomaticEndpointDiscovery
+                && string.IsNullOrWhiteSpace(endpoint))
+            {
+                throw new ArgumentException(
+                    $"Provider '{ProviderKey}' requires a non-empty endpoint URL.",
+                    nameof(endpoint));
+            }
+
+            return new ForeignModuleProviderApiClient(
+                manifest,
+                client,
+                descriptor.ProviderKey,
+                endpoint,
+                descriptor.SupportsNativeToolCalling);
+        }
+
+        public Task<string> GetAgentIdentifierSuffixAsync(
+            string providerName,
+            Guid modelId,
+            CancellationToken ct = default) =>
+            client.GetProviderAgentIdentifierSuffixAsync(
+                manifest,
+                ProviderKey,
+                providerName,
+                modelId,
+                ct);
+    }
+
+    private sealed class ForeignModuleProviderApiClient(
+        ModuleManifest manifest,
+        ForeignModuleProtocolClient client,
+        string providerKey,
+        string? endpoint,
+        bool supportsNativeToolCalling) : IProviderApiClient
+    {
+        public string ProviderKey => providerKey;
+        public bool SupportsNativeToolCalling => supportsNativeToolCalling;
+
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(
+            HttpClient httpClient,
+            string apiKey,
+            CancellationToken ct = default) =>
+            client.ListProviderModelIdsAsync(
+                manifest,
+                ProviderKey,
+                endpoint,
+                apiKey,
+                ct);
+
+        public Task<ChatCompletionResult> ChatCompletionAsync(
+            HttpClient httpClient,
+            string apiKey,
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ChatCompletionMessage> messages,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default) =>
+            client.CompleteProviderChatAsync(
+                manifest,
+                ProviderKey,
+                endpoint,
+                apiKey,
+                model,
+                systemPrompt,
+                messages,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters,
+                ct);
+
+        public Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
+            HttpClient httpClient,
+            string apiKey,
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ToolAwareMessage> messages,
+            IReadOnlyList<ChatToolDefinition> tools,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default) =>
+            client.CompleteProviderChatWithToolsAsync(
+                manifest,
+                ProviderKey,
+                endpoint,
+                apiKey,
+                model,
+                systemPrompt,
+                messages,
+                tools,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters,
+                ct);
+
+        public IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
+            HttpClient httpClient,
+            string apiKey,
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ToolAwareMessage> messages,
+            IReadOnlyList<ChatToolDefinition> tools,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default) =>
+            client.StreamProviderChatWithToolsAsync(
+                manifest,
+                ProviderKey,
+                endpoint,
+                apiKey,
+                model,
+                systemPrompt,
+                messages,
+                tools,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters,
+                ct);
+    }
+
+    private sealed class ForeignModuleModelCapabilityResolver(
+        ModuleManifest manifest,
+        ForeignModuleProtocolClient client,
+        string providerKey) : IModelCapabilityResolver
+    {
+        public HashSet<string> Resolve(string modelName) =>
+            client.ResolveProviderCapabilitiesAsync(
+                manifest,
+                providerKey,
+                modelName,
+                CancellationToken.None).GetAwaiter().GetResult();
+    }
+
+    private sealed class ForeignModuleDeviceCodeFlow(
+        ModuleManifest manifest,
+        ForeignModuleProtocolClient client,
+        string providerKey) : IDeviceCodeFlow
+    {
+        public Task<DeviceCodeSession> StartAsync(HttpClient httpClient, CancellationToken ct = default) =>
+            client.StartProviderDeviceCodeAsync(manifest, providerKey, ct);
+
+        public Task<string?> PollAsync(
+            HttpClient httpClient,
+            DeviceCodeSession session,
+            CancellationToken ct = default) =>
+            client.PollProviderDeviceCodeAsync(manifest, providerKey, session, ct);
+    }
+
+    private sealed class ForeignModuleProviderCostFeed(
+        ModuleManifest manifest,
+        ForeignModuleProtocolClient client,
+        string providerKey,
+        string? permissionDeniedNote) : IProviderCostFeed
+    {
+        public string PermissionDeniedNote =>
+            permissionDeniedNote
+            ?? "Cost API is available for this provider but the current API key "
+            + "lacks the required permissions. Update the API key to one with "
+            + "billing/usage access to retrieve cost data.";
+
+        public Task<ProviderCostResult?> GetCostsAsync(
+            HttpClient httpClient,
+            string apiKey,
+            DateTimeOffset startTime,
+            DateTimeOffset? endTime,
+            CancellationToken ct = default) =>
+            client.GetProviderCostsAsync(
+                manifest,
+                providerKey,
+                apiKey,
+                startTime,
+                endTime,
+                ct);
+    }
+
+    private sealed class ForeignModuleCompletionParameterSpec(
+        ForeignModuleCompletionParameterSpecDescriptor descriptor) : ICompletionParameterSpec
+    {
+        public string ProviderName => descriptor.ProviderName;
+        public bool SupportsTemperature => descriptor.SupportsTemperature;
+        public float TemperatureMin => descriptor.TemperatureMin;
+        public float TemperatureMax => descriptor.TemperatureMax;
+        public bool SupportsTopP => descriptor.SupportsTopP;
+        public float TopPMin => descriptor.TopPMin;
+        public float TopPMax => descriptor.TopPMax;
+        public bool SupportsTopK => descriptor.SupportsTopK;
+        public int TopKMin => descriptor.TopKMin;
+        public int TopKMax => descriptor.TopKMax;
+        public bool SupportsFrequencyPenalty => descriptor.SupportsFrequencyPenalty;
+        public float FrequencyPenaltyMin => descriptor.FrequencyPenaltyMin;
+        public float FrequencyPenaltyMax => descriptor.FrequencyPenaltyMax;
+        public bool SupportsPresencePenalty => descriptor.SupportsPresencePenalty;
+        public float PresencePenaltyMin => descriptor.PresencePenaltyMin;
+        public float PresencePenaltyMax => descriptor.PresencePenaltyMax;
+        public bool SupportsStop => descriptor.SupportsStop;
+        public int MaxStopSequences => descriptor.MaxStopSequences;
+        public bool SupportsSeed => descriptor.SupportsSeed;
+        public bool SupportsResponseFormat => descriptor.SupportsResponseFormat;
+        public bool RejectsJsonObjectResponseFormat => descriptor.RejectsJsonObjectResponseFormat;
+        public bool OnlyJsonObjectResponseFormat => descriptor.OnlyJsonObjectResponseFormat;
+        public bool SupportsReasoningEffort => descriptor.SupportsReasoningEffort;
+        public bool ReasoningEffortInformationalOnly => descriptor.ReasoningEffortInformationalOnly;
+        public string[] ValidReasoningEffortValues =>
+            descriptor.ValidReasoningEffortValues
+            ?? ["none", "minimal", "low", "medium", "high", "xhigh"];
+
+        public bool SupportsToolChoice => descriptor.SupportsToolChoice;
+        public bool SupportsStrictTools => descriptor.SupportsStrictTools;
     }
 
     private sealed class ForeignModuleProtocolContractInvoker(

@@ -3,7 +3,9 @@ using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
+using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
@@ -377,6 +379,257 @@ internal sealed class ForeignModuleProtocolClient
                 manifest.Id,
                 evt),
             ct);
+
+    public async Task<IReadOnlyList<string>> ListProviderModelIdsAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string? endpoint,
+        string apiKey,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderModelListRequest, ForeignModuleProviderModelListResponse>(
+            ForeignModuleProtocol.ProviderModelsListPath,
+            new ForeignModuleProviderModelListRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                endpoint,
+                apiKey),
+            ct);
+        return response.ModelIds;
+    }
+
+    public async Task<HashSet<string>> ResolveProviderCapabilitiesAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string modelName,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderCapabilitiesResolveRequest, ForeignModuleProviderCapabilitiesResolveResponse>(
+            ForeignModuleProtocol.ProviderCapabilitiesResolvePath,
+            new ForeignModuleProviderCapabilitiesResolveRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                modelName),
+            ct);
+        return new HashSet<string>(response.Tags, StringComparer.Ordinal);
+    }
+
+    public async Task<ChatCompletionResult> CompleteProviderChatAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string? endpoint,
+        string apiKey,
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderChatCompletionRequest, ForeignModuleProviderChatCompletionResponse>(
+            ForeignModuleProtocol.ProviderChatCompletionPath,
+            new ForeignModuleProviderChatCompletionRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                endpoint,
+                apiKey,
+                model,
+                systemPrompt,
+                messages,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters),
+            ct);
+        return response.Result;
+    }
+
+    public async Task<ChatCompletionResult> CompleteProviderChatWithToolsAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string? endpoint,
+        string apiKey,
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderChatCompletionWithToolsRequest, ForeignModuleProviderChatCompletionResponse>(
+            ForeignModuleProtocol.ProviderChatCompletionWithToolsPath,
+            new ForeignModuleProviderChatCompletionWithToolsRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                endpoint,
+                apiKey,
+                model,
+                systemPrompt,
+                messages,
+                tools,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters),
+            ct);
+        return response.Result;
+    }
+
+    public async IAsyncEnumerable<ChatStreamChunk> StreamProviderChatWithToolsAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string? endpoint,
+        string apiKey,
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens,
+        Dictionary<string, JsonElement>? providerParameters,
+        CompletionParameters? completionParameters,
+        [EnumeratorCancellation] CancellationToken ct = default)
+    {
+        using var request = CreateRequest(HttpMethod.Post, ForeignModuleProtocol.ProviderStreamChatCompletionWithToolsPath);
+        request.Content = new StringContent(
+            JsonSerializer.Serialize(
+                new ForeignModuleProviderChatCompletionWithToolsRequest(
+                    ForeignModuleProtocol.Version,
+                    manifest.Id,
+                    providerKey,
+                    endpoint,
+                    apiKey,
+                    model,
+                    systemPrompt,
+                    messages,
+                    tools,
+                    maxCompletionTokens,
+                    providerParameters,
+                    completionParameters),
+                JsonOptions),
+            Encoding.UTF8,
+            "application/json");
+
+        using var response = await _httpClient.SendAsync(
+            request,
+            HttpCompletionOption.ResponseHeadersRead,
+            ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            var body = response.Content is null
+                ? null
+                : await response.Content.ReadAsStringAsync(ct);
+            throw new ForeignModuleProtocolException(
+                $"Foreign module control request {request.Method} {request.RequestUri} failed with HTTP {(int)response.StatusCode}.",
+                response.StatusCode,
+                body);
+        }
+
+        await using var stream = await response.Content.ReadAsStreamAsync(ct);
+        using var reader = new StreamReader(stream, Encoding.UTF8);
+        while (await reader.ReadLineAsync(ct) is { } line)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (string.IsNullOrWhiteSpace(line))
+                continue;
+
+            ChatStreamChunk chunk;
+            try
+            {
+                chunk = JsonSerializer.Deserialize<ChatStreamChunk>(line, JsonOptions)
+                    ?? throw new JsonException("Stream chunk deserialized to null.");
+            }
+            catch (JsonException ex)
+            {
+                throw new ForeignModuleProtocolException(
+                    $"Foreign module provider '{providerKey}' returned invalid stream JSON.",
+                    response.StatusCode,
+                    line,
+                    ex);
+            }
+
+            yield return chunk;
+
+            if (chunk.IsFinished)
+                yield break;
+        }
+    }
+
+    public async Task<DeviceCodeSession> StartProviderDeviceCodeAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderDeviceCodeStartRequest, ForeignModuleProviderDeviceCodeStartResponse>(
+            ForeignModuleProtocol.ProviderDeviceCodeStartPath,
+            new ForeignModuleProviderDeviceCodeStartRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey),
+            ct);
+        return response.Session;
+    }
+
+    public async Task<string?> PollProviderDeviceCodeAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        DeviceCodeSession session,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderDeviceCodePollRequest, ForeignModuleProviderDeviceCodePollResponse>(
+            ForeignModuleProtocol.ProviderDeviceCodePollPath,
+            new ForeignModuleProviderDeviceCodePollRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                session),
+            ct);
+        return response.AccessToken;
+    }
+
+    public async Task<ProviderCostResult?> GetProviderCostsAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string apiKey,
+        DateTimeOffset startTime,
+        DateTimeOffset? endTime,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderCostFeedRequest, ForeignModuleProviderCostFeedResponse>(
+            ForeignModuleProtocol.ProviderCostFeedPath,
+            new ForeignModuleProviderCostFeedRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                apiKey,
+                startTime,
+                endTime),
+            ct);
+        return response.Result;
+    }
+
+    public async Task<string> GetProviderAgentIdentifierSuffixAsync(
+        ModuleManifest manifest,
+        string providerKey,
+        string providerName,
+        Guid modelId,
+        CancellationToken ct = default)
+    {
+        var response = await PostAsync<ForeignModuleProviderAgentIdentifierSuffixRequest, ForeignModuleProviderAgentIdentifierSuffixResponse>(
+            ForeignModuleProtocol.ProviderAgentIdentifierSuffixPath,
+            new ForeignModuleProviderAgentIdentifierSuffixRequest(
+                ForeignModuleProtocol.Version,
+                manifest.Id,
+                providerKey,
+                providerName,
+                modelId),
+            ct);
+        return response.Suffix;
+    }
 
     public async IAsyncEnumerable<string> ExecuteToolStreamingAsync(
         ModuleManifest manifest,

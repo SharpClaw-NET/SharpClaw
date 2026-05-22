@@ -95,6 +95,7 @@ async Task HandleAsync(TcpClient client)
                         "frontendContributions",
                         "lifecycleHooks",
                         "taskRuntime",
+                        "providerPlugins",
                     },
                 });
                 break;
@@ -347,6 +348,63 @@ async Task HandleAsync(TcpClient client)
                             subscribedEvents = "AllModuleEvents",
                         },
                     },
+                    providerPlugins = new[]
+                    {
+                        new
+                        {
+                            providerKey = "sample-foreign-provider",
+                            displayName = "Sample Foreign Provider",
+                            ownerModuleId = moduleId,
+                            requiresEndpoint = true,
+                            supportsAutomaticEndpointDiscovery = true,
+                            isSeedable = true,
+                            requiresApiKey = false,
+                            supportsNativeToolCalling = true,
+                            supportsDeviceCodeFlow = true,
+                            supportsCostFeed = true,
+                            costFeedPermissionDeniedNote = "Sample foreign provider requires billing access.",
+                            costSeeds = new[]
+                            {
+                                new
+                                {
+                                    modelName = "sample-model",
+                                    inputCostPerMillion = 1.25m,
+                                    outputCostPerMillion = 2.50m,
+                                    currency = "usd",
+                                },
+                            },
+                            parameterSpec = new
+                            {
+                                providerName = "Sample Foreign Provider",
+                                supportsTemperature = true,
+                                temperatureMin = 0.0f,
+                                temperatureMax = 1.0f,
+                                supportsTopP = true,
+                                topPMin = 0.0f,
+                                topPMax = 1.0f,
+                                supportsTopK = false,
+                                topKMin = 1,
+                                topKMax = 1,
+                                supportsFrequencyPenalty = true,
+                                frequencyPenaltyMin = -1.0f,
+                                frequencyPenaltyMax = 1.0f,
+                                supportsPresencePenalty = true,
+                                presencePenaltyMin = -1.0f,
+                                presencePenaltyMax = 1.0f,
+                                supportsStop = true,
+                                maxStopSequences = 4,
+                                supportsSeed = true,
+                                supportsResponseFormat = true,
+                                rejectsJsonObjectResponseFormat = false,
+                                onlyJsonObjectResponseFormat = false,
+                                supportsReasoningEffort = true,
+                                reasoningEffortInformationalOnly = false,
+                                validReasoningEffortValues = new[] { "none", "low", "medium" },
+                                supportsToolChoice = true,
+                                supportsStrictTools = true,
+                            },
+                        },
+                    },
                 });
                 break;
 
@@ -517,6 +575,152 @@ async Task HandleAsync(TcpClient client)
                 });
                 break;
 
+            case "/.sharpclaw/providers/models/list":
+                await WriteJsonAsync(stream, new
+                {
+                    modelIds = new[] { "sample-model", "sample-vision-model" },
+                });
+                break;
+
+            case "/.sharpclaw/providers/capabilities/resolve":
+                await WriteJsonAsync(stream, new
+                {
+                    tags = new[] { "chat", "vision" },
+                });
+                break;
+
+            case "/.sharpclaw/providers/chat/complete":
+                await WriteJsonAsync(stream, new
+                {
+                    result = new
+                    {
+                        content = BuildProviderChatResult("chat", request.Body),
+                        toolCalls = Array.Empty<object>(),
+                        providerMetadataJson = """{"provider":"sample"}""",
+                        usage = new
+                        {
+                            promptTokens = 3,
+                            completionTokens = 5,
+                        },
+                        finishReason = "Stop",
+                    },
+                });
+                break;
+
+            case "/.sharpclaw/providers/chat/complete-tools":
+                await WriteJsonAsync(stream, new
+                {
+                    result = new
+                    {
+                        content = BuildProviderChatResult("tools", request.Body),
+                        toolCalls = new[]
+                        {
+                            new
+                            {
+                                id = "call-1",
+                                name = "sample_tool",
+                                argumentsJson = """{"ok":true}""",
+                            },
+                        },
+                        usage = new
+                        {
+                            promptTokens = 7,
+                            completionTokens = 11,
+                        },
+                        finishReason = "ToolCalls",
+                    },
+                });
+                break;
+
+            case "/.sharpclaw/providers/chat/stream-tools":
+                await WriteNdjsonAsync(
+                    stream,
+                    new { delta = "stream " },
+                    new
+                    {
+                        toolCallDelta = new
+                        {
+                            index = 0,
+                            id = "call-1",
+                            name = "sample_tool",
+                            argumentsFragment = """{"ok":""",
+                        },
+                    },
+                    new
+                    {
+                        toolCallDelta = new
+                        {
+                            index = 0,
+                            argumentsFragment = "true}",
+                        },
+                    },
+                    new
+                    {
+                        finished = new
+                        {
+                            content = "stream final",
+                            toolCalls = new[]
+                            {
+                                new
+                                {
+                                    id = "call-1",
+                                    name = "sample_tool",
+                                    argumentsJson = """{"ok":true}""",
+                                },
+                            },
+                            finishReason = "ToolCalls",
+                        },
+                    });
+                break;
+
+            case "/.sharpclaw/providers/device-code/start":
+                await WriteJsonAsync(stream, new
+                {
+                    session = new
+                    {
+                        deviceCode = "device-code",
+                        userCode = "USER-CODE",
+                        verificationUri = "https://example.test/device",
+                        expiresInSeconds = 900,
+                        intervalSeconds = 5,
+                    },
+                });
+                break;
+
+            case "/.sharpclaw/providers/device-code/poll":
+                await WriteJsonAsync(stream, new
+                {
+                    accessToken = "device-access-token",
+                });
+                break;
+
+            case "/.sharpclaw/providers/costs":
+                await WriteJsonAsync(stream, new
+                {
+                    result = new
+                    {
+                        totalAmount = 12.34m,
+                        currency = "usd",
+                        dailyBuckets = new[]
+                        {
+                            new
+                            {
+                                start = DateTimeOffset.Parse("2026-05-01T00:00:00Z"),
+                                end = DateTimeOffset.Parse("2026-05-02T00:00:00Z"),
+                                amount = 12.34m,
+                            },
+                        },
+                    },
+                });
+                break;
+
+            case "/.sharpclaw/providers/agent-identifier-suffix":
+                await WriteJsonAsync(stream, new
+                {
+                    suffix = "sample-sidecar",
+                });
+                break;
+
             case "/modules/sample/ping":
                 await WriteJsonAsync(stream, new
                 {
@@ -609,6 +813,18 @@ static string BuildCliResult(string body)
         .Select(arg => arg.GetString())
         .Where(arg => arg is not null);
     return $"cli:{command}:{string.Join(",", args)}";
+}
+
+static string BuildProviderChatResult(string kind, string body)
+{
+    using var document = JsonDocument.Parse(body);
+    var root = document.RootElement;
+    var providerKey = root.GetProperty("providerKey").GetString();
+    var model = root.GetProperty("model").GetString();
+    var messageCount = root.TryGetProperty("messages", out var messages)
+        ? messages.GetArrayLength()
+        : 0;
+    return $"{kind}:{providerKey}:{model}:{messageCount}";
 }
 
 static object BuildTriggerAttributeResult(string body)

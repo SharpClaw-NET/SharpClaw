@@ -38,6 +38,15 @@ public static class ForeignModuleProtocol
     public const string TaskTriggerBindingRemovedPath = "/.sharpclaw/tasks/triggers/bindings/removed";
     public const string TaskMetricValuePath = "/.sharpclaw/tasks/metrics/value";
     public const string TaskEventSinkPath = "/.sharpclaw/tasks/events/sink";
+    public const string ProviderModelsListPath = "/.sharpclaw/providers/models/list";
+    public const string ProviderCapabilitiesResolvePath = "/.sharpclaw/providers/capabilities/resolve";
+    public const string ProviderChatCompletionPath = "/.sharpclaw/providers/chat/complete";
+    public const string ProviderChatCompletionWithToolsPath = "/.sharpclaw/providers/chat/complete-tools";
+    public const string ProviderStreamChatCompletionWithToolsPath = "/.sharpclaw/providers/chat/stream-tools";
+    public const string ProviderDeviceCodeStartPath = "/.sharpclaw/providers/device-code/start";
+    public const string ProviderDeviceCodePollPath = "/.sharpclaw/providers/device-code/poll";
+    public const string ProviderCostFeedPath = "/.sharpclaw/providers/costs";
+    public const string ProviderAgentIdentifierSuffixPath = "/.sharpclaw/providers/agent-identifier-suffix";
 }
 
 internal static class ForeignModuleCapability
@@ -51,6 +60,7 @@ internal static class ForeignModuleCapability
     public const string LifecycleHooks = "lifecycleHooks";
     public const string HostCapabilities = "hostCapabilities";
     public const string TaskRuntime = "taskRuntime";
+    public const string ProviderPlugins = "providerPlugins";
 }
 
 public static class ForeignModuleEndpointResponseMode

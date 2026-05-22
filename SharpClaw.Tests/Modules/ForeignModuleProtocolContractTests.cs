@@ -3,8 +3,11 @@ using System.Net.Sockets;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Tests.Modules;
@@ -204,6 +207,122 @@ public sealed class ForeignModuleProtocolContractTests
         await eventSink.OnEventAsync(
             new SharpClawEvent(SharpClawEventType.ModuleEnabled, DateTimeOffset.UtcNow),
             CancellationToken.None);
+
+        foreignHost.Services.GetServices<IProviderPlugin>()
+            .Should()
+            .ContainSingle(plugin => plugin.ProviderKey == "sample-foreign-provider");
+
+        var providerPlugin = taskProvider.GetServices<IProviderPlugin>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        providerPlugin.ProviderKey.Should().Be("sample-foreign-provider");
+        providerPlugin.DisplayName.Should().Be("Sample Foreign Provider");
+        providerPlugin.OwnerModuleId.Should().Be("sample_node_module");
+        providerPlugin.RequiresEndpoint.Should().BeTrue();
+        providerPlugin.SupportsAutomaticEndpointDiscovery.Should().BeTrue();
+        providerPlugin.IsSeedable.Should().BeTrue();
+        providerPlugin.RequiresApiKey.Should().BeFalse();
+        providerPlugin.CostSeeds.Should().ContainSingle(seed =>
+            seed.ModelName == "sample-model"
+            && seed.InputCostPerMillion == 1.25m
+            && seed.OutputCostPerMillion == 2.50m);
+        providerPlugin.ParameterSpec.ProviderName.Should().Be("Sample Foreign Provider");
+        providerPlugin.ParameterSpec.TemperatureMax.Should().Be(1.0f);
+        providerPlugin.ParameterSpec.SupportsTopK.Should().BeFalse();
+        providerPlugin.ParameterSpec.ValidReasoningEffortValues.Should().Equal("none", "low", "medium");
+        providerPlugin.ParameterSpec.SupportsStrictTools.Should().BeTrue();
+        providerPlugin.DeviceCodeFlow.Should().NotBeNull();
+        providerPlugin.CostFeed.Should().NotBeNull();
+        providerPlugin.CostFeed!.PermissionDeniedNote.Should().Be("Sample foreign provider requires billing access.");
+        providerPlugin.Capabilities.Resolve("sample-model")
+            .Should()
+            .BeEquivalentTo([WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Vision]);
+        (await providerPlugin.GetAgentIdentifierSuffixAsync(
+            "Sample Foreign Provider",
+            Guid.NewGuid(),
+            CancellationToken.None)).Should().Be("sample-sidecar");
+
+        var providerFactory = new ProviderApiClientFactory(taskProvider.GetServices<IProviderPlugin>());
+        providerFactory.IsAvailable("sample-foreign-provider").Should().BeTrue();
+        providerFactory.GetParameterSpec("sample-foreign-provider").SupportsStrictTools.Should().BeTrue();
+
+        var registry = new ModuleRegistry();
+        registry.Register(module, foreignHost);
+        var registryProviderFactory = new ProviderApiClientFactory([], registry);
+        registryProviderFactory.IsAvailable("sample-foreign-provider").Should().BeTrue();
+        registryProviderFactory.GetPlugin("sample-foreign-provider")!.DisplayName.Should().Be("Sample Foreign Provider");
+
+        var providerClient = providerPlugin.CreateClient("http://127.0.0.1:9999");
+        providerClient.ProviderKey.Should().Be("sample-foreign-provider");
+        providerClient.SupportsNativeToolCalling.Should().BeTrue();
+
+        using var httpClient = new HttpClient();
+        (await providerClient.ListModelIdsAsync(httpClient, "api-key", CancellationToken.None))
+            .Should()
+            .Equal("sample-model", "sample-vision-model");
+
+        var chatResult = await providerClient.ChatCompletionAsync(
+            httpClient,
+            "api-key",
+            "sample-model",
+            "system",
+            [new ChatCompletionMessage("user", "hello")],
+            maxCompletionTokens: 64,
+            ct: CancellationToken.None);
+        chatResult.Content.Should().Be("chat:sample-foreign-provider:sample-model:1");
+        chatResult.Usage!.PromptTokens.Should().Be(3);
+        chatResult.FinishReason.Should().Be(FinishReason.Stop);
+
+        using var toolSchema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
+        var toolResult = await providerClient.ChatCompletionWithToolsAsync(
+            httpClient,
+            "api-key",
+            "sample-model",
+            "system",
+            [ToolAwareMessage.User("hello")],
+            [new ChatToolDefinition("sample_tool", "Sample tool.", toolSchema.RootElement.Clone())],
+            ct: CancellationToken.None);
+        toolResult.Content.Should().Be("tools:sample-foreign-provider:sample-model:1");
+        toolResult.ToolCalls.Should().ContainSingle(call =>
+            call.Id == "call-1"
+            && call.Name == "sample_tool"
+            && call.ArgumentsJson == """{"ok":true}""");
+        toolResult.FinishReason.Should().Be(FinishReason.ToolCalls);
+
+        var streamChunks = new List<ChatStreamChunk>();
+        await foreach (var chunk in providerClient.StreamChatCompletionWithToolsAsync(
+                           httpClient,
+                           "api-key",
+                           "sample-model",
+                           "system",
+                           [ToolAwareMessage.User("hello")],
+                           [new ChatToolDefinition("sample_tool", "Sample tool.", toolSchema.RootElement.Clone())],
+                           ct: CancellationToken.None))
+        {
+            streamChunks.Add(chunk);
+        }
+
+        streamChunks.Should().HaveCount(4);
+        streamChunks[0].Delta.Should().Be("stream ");
+        streamChunks[1].ToolCallDelta!.ArgumentsFragment.Should().Be("""{"ok":""");
+        streamChunks[^1].Finished!.ToolCalls.Should().ContainSingle(call => call.Name == "sample_tool");
+
+        var deviceSession = await providerPlugin.DeviceCodeFlow!.StartAsync(httpClient, CancellationToken.None);
+        deviceSession.UserCode.Should().Be("USER-CODE");
+        (await providerPlugin.DeviceCodeFlow.PollAsync(httpClient, deviceSession, CancellationToken.None))
+            .Should()
+            .Be("device-access-token");
+
+        var costs = await providerPlugin.CostFeed.GetCostsAsync(
+            httpClient,
+            "api-key",
+            DateTimeOffset.Parse("2026-05-01T00:00:00Z"),
+            DateTimeOffset.Parse("2026-05-02T00:00:00Z"),
+            CancellationToken.None);
+        costs.Should().NotBeNull();
+        costs!.TotalAmount.Should().Be(12.34m);
+        costs.DailyBuckets.Should().ContainSingle(bucket => bucket.Amount == 12.34m);
     }
 
     [Test]

@@ -14,7 +14,7 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
     private readonly ForeignModuleHostLaunchOptions _options;
     private readonly Process _process;
     private readonly HttpClient _httpClient;
-    private readonly ServiceProvider _serviceProvider;
+    private ServiceProvider _serviceProvider;
     private readonly ForeignModuleHostCapabilityServer? _capabilityServer;
     private readonly ForeignModuleProxy _moduleProxy;
     private readonly StringBuilder _stdout = new();
@@ -282,6 +282,7 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
                 var discovery = await ProtocolClient.DiscoverAsync(timeoutCts.Token);
                 Endpoints = discovery.Endpoints ?? [];
                 _moduleProxy.ApplyDiscovery(discovery);
+                await RebuildModuleServicesAsync();
                 _startupCompleted = true;
                 return;
             }
@@ -346,6 +347,16 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         }
 
         await WaitForExitOrKillAsync(ct);
+    }
+
+    private async Task RebuildModuleServicesAsync()
+    {
+        var services = new ServiceCollection();
+        _moduleProxy.ConfigureServices(services);
+        var provider = services.BuildServiceProvider();
+        var previous = _serviceProvider;
+        _serviceProvider = provider;
+        await previous.DisposeAsync();
     }
 
     private async Task WaitForExitOrKillAsync(CancellationToken ct)
