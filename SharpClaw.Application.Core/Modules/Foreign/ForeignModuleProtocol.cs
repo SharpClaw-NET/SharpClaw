@@ -69,6 +69,7 @@ public static class ForeignModuleEndpointResponseMode
     public const string Stream = "stream";
     public const string Static = "static";
     public const string Raw = "raw";
+    public const string WebSocket = "websocket";
 }
 
 public static class ForeignModuleHostCapabilityProtocol

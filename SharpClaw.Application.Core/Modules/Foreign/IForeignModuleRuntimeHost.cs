@@ -7,4 +7,9 @@ public interface IForeignModuleRuntimeHost : IModuleRuntimeHost
     Task<HttpResponseMessage> SendEndpointRequestAsync(
         HttpRequestMessage request,
         CancellationToken ct = default);
+
+    Task<System.Net.WebSockets.ClientWebSocket> ConnectEndpointWebSocketAsync(
+        string pathAndQuery,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> headers,
+        CancellationToken ct = default);
 }

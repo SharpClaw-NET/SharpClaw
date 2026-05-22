@@ -5,6 +5,7 @@ using Microsoft.AspNetCore.Routing.Patterns;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Net.Http.Headers;
+using System.Net.WebSockets;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 
@@ -31,6 +32,7 @@ public static class ForeignModuleEndpointMapper
             ForeignModuleEndpointResponseMode.Raw,
             ForeignModuleEndpointResponseMode.Static,
             ForeignModuleEndpointResponseMode.Stream,
+            ForeignModuleEndpointResponseMode.WebSocket,
         };
 
     public static IEndpointRouteBuilder MapForeignModuleEndpoints(
@@ -122,6 +124,15 @@ public static class ForeignModuleEndpointMapper
 
         try
         {
+            if (string.Equals(
+                    descriptor.ResponseMode,
+                    ForeignModuleEndpointResponseMode.WebSocket,
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                await ProxyWebSocketAsync(context, host);
+                return;
+            }
+
             using var outgoing = CreateProxyRequest(context.Request);
             using var response = await host.SendEndpointRequestAsync(outgoing, context.RequestAborted);
             await CopyProxyResponseAsync(response, context);
@@ -129,6 +140,69 @@ public static class ForeignModuleEndpointMapper
         finally
         {
             host.ReleaseExecution();
+        }
+    }
+
+    private static async Task ProxyWebSocketAsync(
+        HttpContext context,
+        IForeignModuleRuntimeHost host)
+    {
+        if (!context.WebSockets.IsWebSocketRequest)
+        {
+            context.Response.StatusCode = StatusCodes.Status400BadRequest;
+            await context.Response.WriteAsync("WebSocket connections only.", context.RequestAborted);
+            return;
+        }
+
+        var forwardedHeaders = context.Request.Headers.ToDictionary(
+            header => header.Key,
+            header => (IReadOnlyList<string>)header.Value
+                .Where(value => value is not null)
+                .Select(value => value!)
+                .ToArray(),
+            StringComparer.OrdinalIgnoreCase);
+        var pathAndQuery = context.Request.Path + context.Request.QueryString;
+
+        using var sidecarSocket = await host.ConnectEndpointWebSocketAsync(
+            pathAndQuery,
+            forwardedHeaders,
+            context.RequestAborted);
+        using var clientSocket = await context.WebSockets.AcceptWebSocketAsync();
+
+        var clientToSidecar = PumpWebSocketAsync(clientSocket, sidecarSocket, context.RequestAborted);
+        var sidecarToClient = PumpWebSocketAsync(sidecarSocket, clientSocket, context.RequestAborted);
+        await Task.WhenAll(clientToSidecar, sidecarToClient);
+    }
+
+    private static async Task PumpWebSocketAsync(
+        WebSocket source,
+        WebSocket destination,
+        CancellationToken ct)
+    {
+        var buffer = new byte[16 * 1024];
+
+        while (!ct.IsCancellationRequested
+               && source.State is WebSocketState.Open or WebSocketState.CloseReceived
+               && destination.State is WebSocketState.Open or WebSocketState.CloseReceived)
+        {
+            var result = await source.ReceiveAsync(buffer, ct);
+            if (result.MessageType == WebSocketMessageType.Close)
+            {
+                if (destination.State is WebSocketState.Open or WebSocketState.CloseReceived)
+                {
+                    await destination.CloseOutputAsync(
+                        result.CloseStatus ?? WebSocketCloseStatus.NormalClosure,
+                        result.CloseStatusDescription,
+                        CancellationToken.None);
+                }
+                return;
+            }
+
+            await destination.SendAsync(
+                new ArraySegment<byte>(buffer, 0, result.Count),
+                result.MessageType,
+                result.EndOfMessage,
+                ct);
         }
     }
 
@@ -214,6 +288,13 @@ public static class ForeignModuleEndpointMapper
             || !SupportedResponseModes.Contains(endpoint.ResponseMode))
         {
             error = $"Response mode '{endpoint.ResponseMode}' is not supported.";
+            return false;
+        }
+
+        if (string.Equals(endpoint.ResponseMode, ForeignModuleEndpointResponseMode.WebSocket, StringComparison.OrdinalIgnoreCase)
+            && !string.Equals(method, HttpMethods.Get, StringComparison.OrdinalIgnoreCase))
+        {
+            error = "WebSocket endpoints must use GET.";
             return false;
         }
 

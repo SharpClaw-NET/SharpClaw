@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
+using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 
@@ -128,6 +130,12 @@ async Task HandleAsync(TcpClient client)
                             method = "GET",
                             routePattern = "/modules/sample/stream",
                             responseMode = "stream",
+                        },
+                        new
+                        {
+                            method = "GET",
+                            routePattern = "/modules/sample/ws",
+                            responseMode = "websocket",
                         },
                     },
                     tools = new[]
@@ -759,6 +767,10 @@ async Task HandleAsync(TcpClient client)
                     new { isFinal = true });
                 break;
 
+            case "/modules/sample/ws":
+                await HandleWebSocketEchoAsync(stream, request);
+                break;
+
             default:
                 await WriteTextAsync(stream, 404, "Not Found", "not found", "text/plain");
                 break;
@@ -850,6 +862,53 @@ static object BuildTriggerAttributeResult(string body)
         },
         diagnostics = Array.Empty<object>(),
     };
+}
+
+static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest request)
+{
+    if (!request.Headers.TryGetValue("Sec-WebSocket-Key", out var key))
+    {
+        await WriteTextAsync(stream, 400, "Bad Request", "WebSocket connections only.", "text/plain");
+        return;
+    }
+
+    var accept = Convert.ToBase64String(SHA1.HashData(
+        Encoding.ASCII.GetBytes(key + "258EAFA5-E914-47DA-95CA-C5AB0DC85B11")));
+    var headers = Encoding.ASCII.GetBytes(
+        "HTTP/1.1 101 Switching Protocols\r\n" +
+        "Connection: Upgrade\r\n" +
+        "Upgrade: websocket\r\n" +
+        $"Sec-WebSocket-Accept: {accept}\r\n" +
+        "\r\n");
+    await stream.WriteAsync(headers);
+
+    using var socket = WebSocket.CreateFromStream(
+        stream,
+        isServer: true,
+        subProtocol: null,
+        keepAliveInterval: TimeSpan.FromSeconds(30));
+    var buffer = new byte[16 * 1024];
+
+    while (socket.State == WebSocketState.Open)
+    {
+        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+        if (result.MessageType == WebSocketMessageType.Close)
+        {
+            await socket.CloseOutputAsync(
+                WebSocketCloseStatus.NormalClosure,
+                "closing",
+                CancellationToken.None);
+            return;
+        }
+
+        var text = Encoding.UTF8.GetString(buffer, 0, result.Count);
+        var response = Encoding.UTF8.GetBytes("sidecar:" + text);
+        await socket.SendAsync(
+            response,
+            result.MessageType,
+            endOfMessage: true,
+            CancellationToken.None);
+    }
 }
 
 static async Task<SidecarRequest> ReadRequestAsync(NetworkStream stream)

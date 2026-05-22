@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Net.WebSockets;
 using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
@@ -151,6 +152,41 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         return _httpClient.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
     }
 
+    public async Task<ClientWebSocket> ConnectEndpointWebSocketAsync(
+        string pathAndQuery,
+        IReadOnlyDictionary<string, IReadOnlyList<string>> headers,
+        CancellationToken ct = default)
+    {
+        var target = new Uri(_options.ControlAddress, pathAndQuery);
+        var uri = new UriBuilder(target)
+        {
+            Scheme = string.Equals(target.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)
+                ? "wss"
+                : "ws",
+        }.Uri;
+
+        var socket = new ClientWebSocket();
+        try
+        {
+            foreach (var (name, values) in headers)
+            {
+                if (ShouldSkipWebSocketForwardedHeader(name))
+                    continue;
+
+                socket.Options.SetRequestHeader(name, string.Join(",", values));
+            }
+
+            socket.Options.SetRequestHeader(ForeignModuleProtocol.TokenHeaderName, _options.ControlToken);
+            await socket.ConnectAsync(uri, ct);
+            return socket;
+        }
+        catch
+        {
+            socket.Dispose();
+            throw;
+        }
+    }
+
     public bool TryAcquireExecution()
     {
         while (true)
@@ -246,6 +282,16 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
 
         return new Process { StartInfo = psi, EnableRaisingEvents = true };
     }
+
+    private static bool ShouldSkipWebSocketForwardedHeader(string name) =>
+        string.Equals(name, "Host", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Connection", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Upgrade", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Sec-WebSocket-Key", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Sec-WebSocket-Protocol", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Sec-WebSocket-Version", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, "Sec-WebSocket-Extensions", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(name, ForeignModuleProtocol.TokenHeaderName, StringComparison.OrdinalIgnoreCase);
 
     private void AttachOutputReaders()
     {
