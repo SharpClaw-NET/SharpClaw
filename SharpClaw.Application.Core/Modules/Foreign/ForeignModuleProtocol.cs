@@ -86,4 +86,6 @@ public static class ForeignModuleHostCapabilityProtocol
     public const string ModuleUnloadPath = "/.sharpclaw/host/modules/unload";
     public const string ModuleReloadPath = "/.sharpclaw/host/modules/reload";
     public const string ModuleToolInvokePath = "/.sharpclaw/host/modules/tools/invoke";
+    public const string ModuleStorageListPath = "/.sharpclaw/host/modules/storage/list";
+    public const string ModuleStorageInvokePath = "/.sharpclaw/host/modules/storage/invoke";
 }

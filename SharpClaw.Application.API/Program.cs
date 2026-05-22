@@ -353,6 +353,7 @@ try
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
     builder.Services.AddSingleton<IModuleInfoProvider, HostModuleInfoProvider>();
     builder.Services.AddSingleton<IForeignModuleProtocolContractResolver, HostModuleProtocolContractResolver>();
+    builder.Services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
 
     builder.Services.AddScoped<HeaderTagProcessor>();
     builder.Services.AddScoped<ChatService>();

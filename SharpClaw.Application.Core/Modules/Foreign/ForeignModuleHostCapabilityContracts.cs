@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
 
@@ -175,3 +176,16 @@ internal sealed record ForeignModuleToolInvokeRequest
 }
 
 internal sealed record ForeignModuleToolInvokeResponse(string Result);
+
+internal sealed record ForeignModuleStorageContractsResponse(
+    IReadOnlyList<ModuleStorageContractDescriptor> Contracts);
+
+internal sealed record ForeignModuleStorageInvokeRequest
+{
+    public string? ModuleId { get; init; }
+    public string StorageName { get; init; } = string.Empty;
+    public string Operation { get; init; } = string.Empty;
+    public JsonElement Parameters { get; init; }
+}
+
+internal sealed record ForeignModuleStorageInvokeResponse(JsonElement Result);

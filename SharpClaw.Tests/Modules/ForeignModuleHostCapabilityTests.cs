@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Tasks;
@@ -338,6 +339,50 @@ public sealed class ForeignModuleHostCapabilityTests
         lifecycle.LoadedDir.Should().Be("E:/modules/new_module");
         lifecycle.ReloadedId.Should().Be("loaded_module");
         lifecycle.UnloadedId.Should().Be("loaded_module");
+    }
+
+    [Test]
+    public async Task HostCapabilityServerForwardsModuleStorageCapabilities()
+    {
+        var storage = new RecordingModuleStorageGateway();
+        await using var services = new ServiceCollection()
+            .AddSingleton<IModuleStorageGateway>(storage)
+            .BuildServiceProvider();
+        await using var server = ForeignModuleHostCapabilityServer.Start("sample_module", services);
+        using var client = CreateClient(server);
+
+        using var listResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModuleStorageListPath,
+            new { });
+        using var invokeResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModuleStorageInvokePath,
+            new
+            {
+                storageName = "records",
+                operation = "get",
+                parameters = new
+                {
+                    id = "sample",
+                },
+            });
+
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        invokeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var listPayload = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listPayload.RootElement.GetProperty("contracts")[0].GetProperty("storageName")
+            .GetString()
+            .Should()
+            .Be("records");
+        var invokePayload = JsonDocument.Parse(await invokeResponse.Content.ReadAsStringAsync());
+        invokePayload.RootElement.GetProperty("result").GetProperty("value").GetString()
+            .Should()
+            .Be("sample:get");
+        storage.LastInvocation.Should().NotBeNull();
+        storage.LastInvocation!.Value.ModuleId.Should().Be("sample_module");
+        storage.LastInvocation!.Value.StorageName.Should().Be("records");
+        storage.LastInvocation!.Value.Operation.Should().Be("get");
+        storage.LastInvocation!.Value.Parameters.GetProperty("id").GetString().Should().Be("sample");
     }
 
     private static HttpClient CreateClient(ForeignModuleHostCapabilityServer server)
@@ -692,6 +737,33 @@ public sealed class ForeignModuleHostCapabilityTests
         [
             new("loaded_module", "lm", ["editor_bridge"])
         ];
+    }
+
+    private sealed class RecordingModuleStorageGateway : IModuleStorageGateway
+    {
+        public (string ModuleId, string StorageName, string Operation, JsonElement Parameters)? LastInvocation { get; private set; }
+
+        public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() =>
+        [
+            new(
+                "sample_module",
+                "records",
+                [new ModuleStorageOperationDescriptor("get")])
+        ];
+
+        public Task<JsonElement> InvokeAsync(
+            string moduleId,
+            string storageName,
+            string operation,
+            JsonElement parameters,
+            CancellationToken ct = default)
+        {
+            LastInvocation = (moduleId, storageName, operation, parameters.Clone());
+            return Task.FromResult(JsonSerializer.SerializeToElement(new
+            {
+                value = parameters.GetProperty("id").GetString() + ":" + operation,
+            }));
+        }
     }
 
     private sealed class EchoModule : ISharpClawModule

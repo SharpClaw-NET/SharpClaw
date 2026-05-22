@@ -228,6 +228,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await ReloadModuleAsync(services, Deserialize<ForeignModuleModuleIdRequest>(request), ct),
             ForeignModuleHostCapabilityProtocol.ModuleToolInvokePath =>
                 await InvokeModuleToolAsync(services, Deserialize<ForeignModuleToolInvokeRequest>(request), ct),
+            ForeignModuleHostCapabilityProtocol.ModuleStorageListPath =>
+                new ForeignModuleStorageContractsResponse(ResolveModuleStorage(services).ListContracts()),
+            ForeignModuleHostCapabilityProtocol.ModuleStorageInvokePath =>
+                await InvokeModuleStorageAsync(services, Deserialize<ForeignModuleStorageInvokeRequest>(request), ct),
             _ => throw new ArgumentException($"Unknown SharpClaw host capability path '{request.Path}'."),
         };
     }
@@ -584,6 +588,32 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         return new ForeignModuleToolInvokeResponse(result);
     }
 
+    private async Task<ForeignModuleStorageInvokeResponse> InvokeModuleStorageAsync(
+        IServiceProvider services,
+        ForeignModuleStorageInvokeRequest request,
+        CancellationToken ct)
+    {
+        var moduleId = string.IsNullOrWhiteSpace(request.ModuleId)
+            ? _moduleId
+            : request.ModuleId;
+        if (string.IsNullOrWhiteSpace(request.StorageName))
+            throw new ArgumentException("Storage name is required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.Operation))
+            throw new ArgumentException("Storage operation is required.", nameof(request));
+
+        using var emptyParameters = request.Parameters.ValueKind == JsonValueKind.Undefined
+            ? JsonDocument.Parse("{}")
+            : null;
+        var parameters = emptyParameters?.RootElement ?? request.Parameters;
+        return new ForeignModuleStorageInvokeResponse(
+            await ResolveModuleStorage(services).InvokeAsync(
+                moduleId,
+                request.StorageName,
+                request.Operation,
+                parameters,
+                ct));
+    }
+
     private IModuleConfigStore ResolveConfigStore(IServiceProvider services)
     {
         if (services.GetService<IModuleConfigStore>() is { } store)
@@ -630,6 +660,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static IModuleInfoProvider ResolveModuleInfo(IServiceProvider services) =>
         services.GetService<IModuleInfoProvider>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide module information.");
+
+    private static IModuleStorageGateway ResolveModuleStorage(IServiceProvider services) =>
+        services.GetService<IModuleStorageGateway>()
+        ?? throw new NotSupportedException("The SharpClaw host did not provide module storage capabilities.");
 
     private static T Deserialize<T>(CapabilityHttpRequest request)
     {
