@@ -9,4 +9,8 @@
     <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
 </Project>

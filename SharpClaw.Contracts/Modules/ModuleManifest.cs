@@ -31,5 +31,9 @@ public sealed record ModuleManifest(
     [property: JsonPropertyName("defaultEnabled")] bool DefaultEnabled = true,
     [property: JsonPropertyName("executionTimeoutSeconds")] int ExecutionTimeoutSeconds = 60,
     [property: JsonPropertyName("exports")] ModuleManifestContractRef[]? Exports = null,
-    [property: JsonPropertyName("requires")] ModuleManifestContractRef[]? Requires = null
+    [property: JsonPropertyName("requires")] ModuleManifestContractRef[]? Requires = null,
+    [property: JsonPropertyName("runtime")] string? Runtime = null,
+    [property: JsonPropertyName("entrypoint")] string? Entrypoint = null,
+    [property: JsonPropertyName("moduleType")] string? ModuleType = null,
+    [property: JsonPropertyName("hostMode")] string? HostMode = null
 );

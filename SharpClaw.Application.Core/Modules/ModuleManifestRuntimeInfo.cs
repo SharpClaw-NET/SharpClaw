@@ -4,11 +4,17 @@ using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Core.Modules;
 
-internal sealed record ModuleManifestRuntimeInfo(string Runtime, string? Entrypoint)
+internal sealed record ModuleManifestRuntimeInfo(
+    string Runtime,
+    string? Entrypoint,
+    string? ModuleType = null,
+    string? HostMode = null)
 {
     public const string DotNet = "dotnet";
     public const string Node = "node";
     public const string Python = "python";
+    public const string HostModeInProcess = "in-process";
+    public const string HostModeSidecar = "sidecar";
     public static ModuleManifestRuntimeInfo DotNetDefault { get; } = new(DotNet, null);
 
     private static readonly JsonDocumentOptions DocumentOptions = new()
@@ -19,6 +25,7 @@ internal sealed record ModuleManifestRuntimeInfo(string Runtime, string? Entrypo
     };
 
     public bool IsDotNet => string.Equals(Runtime, DotNet, StringComparison.Ordinal);
+    public bool IsSidecarHostMode => string.Equals(HostMode, HostModeSidecar, StringComparison.Ordinal);
 
     public static ModuleManifestRuntimeInfo FromJson(string json)
     {
@@ -26,14 +33,27 @@ internal sealed record ModuleManifestRuntimeInfo(string Runtime, string? Entrypo
         var root = doc.RootElement;
         var runtime = TryGetString(root, "runtime");
         var entrypoint = TryGetString(root, "entrypoint");
+        var moduleType = TryGetString(root, "moduleType");
+        var hostMode = NormalizeHostMode(TryGetString(root, "hostMode"));
 
-        return new ModuleManifestRuntimeInfo(Normalize(runtime), entrypoint);
+        return new ModuleManifestRuntimeInfo(Normalize(runtime), entrypoint, moduleType, hostMode);
     }
 
     public static string Normalize(string? runtime) =>
         string.IsNullOrWhiteSpace(runtime)
             ? DotNet
             : runtime.Trim().ToLowerInvariant();
+
+    public static string? NormalizeHostMode(string? hostMode)
+    {
+        if (string.IsNullOrWhiteSpace(hostMode))
+            return null;
+
+        var normalized = hostMode.Trim().ToLowerInvariant();
+        return normalized is "inprocess" or "in-process"
+            ? HostModeInProcess
+            : normalized;
+    }
 
     public void EnsureDotNetEntryAssembly(ModuleManifest manifest)
     {
@@ -54,6 +74,13 @@ internal sealed record ModuleManifestRuntimeInfo(string Runtime, string? Entrypo
 
         PathGuard.EnsureFileName(manifest.EntryAssembly, nameof(manifest.EntryAssembly));
         PathGuard.EnsureExtension(manifest.EntryAssembly, ".dll");
+
+        if (!string.IsNullOrWhiteSpace(ModuleType)
+            && ModuleType.Any(char.IsControl))
+        {
+            throw new InvalidOperationException(
+                $"Module '{manifest.Id}' declares an invalid moduleType.");
+        }
     }
 
     private static string? TryGetString(JsonElement root, string propertyName)

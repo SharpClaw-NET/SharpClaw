@@ -21,6 +21,7 @@
   </Folder>
   <Folder Name="/Shared/">
     <Project Path="SharpClaw.Contracts/SharpClaw.Contracts.csproj" />
+    <Project Path="SharpClaw.Modules.DotNetSidecarHost/SharpClaw.Modules.DotNetSidecarHost.csproj" />
     <Project Path="SharpClaw.Modules.Hosting/SharpClaw.Modules.Hosting.csproj" />
     <Project Path="SharpClaw.Providers.Common/SharpClaw.Providers.Common.csproj" />
     <Project Path="SharpClaw.Providers.LocalCommon/SharpClaw.Providers.LocalCommon.csproj" />

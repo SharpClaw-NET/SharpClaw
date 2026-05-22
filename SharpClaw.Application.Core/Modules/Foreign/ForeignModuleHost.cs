@@ -77,9 +77,9 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         ArgumentNullException.ThrowIfNull(options);
         options.Validate();
 
-        if (runtimeInfo.IsDotNet)
+        if (runtimeInfo.IsDotNet && !runtimeInfo.IsSidecarHostMode)
             throw new ArgumentException(
-                $"Foreign module host cannot start dotnet module '{manifest.Id}'.",
+                $"Foreign module host cannot start dotnet module '{manifest.Id}' unless hostMode is '{ModuleManifestRuntimeInfo.HostModeSidecar}'.",
                 nameof(runtimeInfo));
 
         if (!Directory.Exists(options.ModuleDirectory))

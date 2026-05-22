@@ -68,12 +68,7 @@ public sealed class ExternalModuleHost : IModuleRuntimeHost
         var context = new ModuleLoadContext(dllPath);
         var assembly = context.LoadFromAssemblyPath(Path.GetFullPath(dllPath));
 
-        var moduleType = assembly.GetTypes()
-            .FirstOrDefault(t => t.IsAssignableTo(typeof(ISharpClawModule)) && !t.IsAbstract)
-            ?? throw new InvalidOperationException(
-                $"No ISharpClawModule implementation found in '{Path.GetFileName(dllPath)}'.");
-
-        var module = (ISharpClawModule)Activator.CreateInstance(moduleType)!;
+        var module = CreateModuleInstance(assembly, manifest, runtimeInfo, dllPath);
 
         if (module.Id != manifest.Id)
             throw new InvalidOperationException(
@@ -119,6 +114,51 @@ public sealed class ExternalModuleHost : IModuleRuntimeHost
         var moduleProvider = services.BuildServiceProvider();
 
         return new ExternalModuleHost(context, module, moduleProvider, moduleDir);
+    }
+
+    internal static ISharpClawModule CreateModuleInstance(
+        System.Reflection.Assembly assembly,
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo,
+        string dllPath)
+    {
+        var moduleTypes = assembly.GetTypes()
+            .Where(t => t.IsAssignableTo(typeof(ISharpClawModule)) && !t.IsAbstract)
+            .ToArray();
+
+        if (moduleTypes.Length == 0)
+        {
+            throw new InvalidOperationException(
+                $"No ISharpClawModule implementation found in '{Path.GetFileName(dllPath)}'.");
+        }
+
+        if (!string.IsNullOrWhiteSpace(runtimeInfo.ModuleType))
+        {
+            var explicitType = moduleTypes.FirstOrDefault(t =>
+                string.Equals(t.FullName, runtimeInfo.ModuleType, StringComparison.Ordinal)
+                || string.Equals(t.AssemblyQualifiedName, runtimeInfo.ModuleType, StringComparison.Ordinal)
+                || string.Equals(t.Name, runtimeInfo.ModuleType, StringComparison.Ordinal));
+
+            if (explicitType is null)
+            {
+                throw new InvalidOperationException(
+                    $"Module '{manifest.Id}' declares moduleType '{runtimeInfo.ModuleType}', " +
+                    $"but that type was not found in '{Path.GetFileName(dllPath)}'.");
+            }
+
+            return (ISharpClawModule)Activator.CreateInstance(explicitType)!;
+        }
+
+        foreach (var moduleType in moduleTypes)
+        {
+            var candidate = (ISharpClawModule)Activator.CreateInstance(moduleType)!;
+            if (string.Equals(candidate.Id, manifest.Id, StringComparison.Ordinal))
+                return candidate;
+        }
+
+        throw new InvalidOperationException(
+            $"No ISharpClawModule implementation in '{Path.GetFileName(dllPath)}' " +
+            $"declares module id '{manifest.Id}'. Add moduleType to module.json when an assembly contains multiple modules.");
     }
 
     /// <summary>Creates a scoped <see cref="IServiceProvider"/> from the per-module container.</summary>
