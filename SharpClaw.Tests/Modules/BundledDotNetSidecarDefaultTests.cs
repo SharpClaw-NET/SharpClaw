@@ -13,13 +13,6 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
-using SharpClaw.Modules.AgentOrchestration;
-using SharpClaw.Modules.Metrics;
-using SharpClaw.Modules.ModuleDev;
-using SharpClaw.Modules.Providers.Anthropic;
-using SharpClaw.Modules.Providers.Google;
-using SharpClaw.Modules.Providers.Ollama;
-using SharpClaw.Modules.Providers.OpenAICompatible;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Instances;
 
@@ -152,22 +145,27 @@ public sealed class BundledDotNetSidecarDefaultTests
     [Test]
     public async Task SidecarManifestBundledModulesRegisterThroughForeignRuntimeHost()
     {
-        ISharpClawModule[] bundledModules =
+        var loader = ModuleLoader.DiscoverBundled();
+        var bundledModules = loader.GetAllBundled()
+            .Where(module => loader.IsManifestOnlyBundledModule(module.Id))
+            .OrderBy(module => module.Id, StringComparer.Ordinal)
+            .ToArray();
+        bundledModules.Select(module => module.Id).Should().Equal(
         [
-            new TestHarnessModule(),
-            new MetricsModule(),
-            new ModuleDevModule(),
-            new AnthropicProviderModule(),
-            new GoogleProvidersModule(),
-            new OllamaProviderModule(),
-            new OpenAICompatibleProvidersModule(),
-        ];
-        await using var harness = ModuleServiceHarness.Create(modules: bundledModules);
+            "sharpclaw_metrics",
+            "sharpclaw_module_dev",
+            "sharpclaw_providers_anthropic",
+            "sharpclaw_providers_google",
+            "sharpclaw_providers_ollama",
+            "sharpclaw_providers_openai_compat",
+            TestHarnessConstants.ModuleId,
+        ]);
+        await using var harness = ModuleServiceHarness.Create(moduleLoader: loader);
         var enabledModuleIds = new List<string>();
 
         try
         {
-            foreach (var bundledModule in bundledModules.OrderBy(module => module.Id, StringComparer.Ordinal))
+            foreach (var bundledModule in bundledModules)
             {
                 var response = await harness.ModuleService.EnableAsync(
                     bundledModule.Id,
@@ -192,14 +190,43 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
+    public async Task SidecarProviderPluginsAreVisibleThroughParentFactoryOnlyWhileEnabled()
+    {
+        await using var harness = ModuleServiceHarness.Create();
+
+        var response = await harness.ModuleService.EnableAsync(
+            "sharpclaw_providers_openai_compat",
+            harness.RootServices,
+            CancellationToken.None);
+
+        response.Enabled.Should().BeTrue();
+        harness.Registry.GetRuntimeHost("sharpclaw_providers_openai_compat")
+            .Should()
+            .BeAssignableTo<IForeignModuleRuntimeHost>();
+
+        var factory = harness.Root.GetRequiredService<ProviderApiClientFactory>();
+        factory.IsAvailable("openai").Should().BeTrue();
+        factory.GetPlugin("openai")!.OwnerModuleId.Should().Be("sharpclaw_providers_openai_compat");
+        factory.GetPlugin("custom")!.RequiresEndpoint.Should().BeTrue();
+
+        await harness.ModuleService.DisableAsync(
+            "sharpclaw_providers_openai_compat",
+            CancellationToken.None);
+
+        factory.IsAvailable("openai").Should().BeFalse();
+    }
+
+    [Test]
     public async Task SidecarOnlyModeRejectsBundledModulesWithReadinessBlockers()
     {
+        var settings = new Dictionary<string, string?>
+        {
+            [DotNetModuleHostingModeOptions.ConfigKey] = "sidecar-only",
+        };
+        var configuration = BuildConfiguration(settings);
         await using var harness = ModuleServiceHarness.Create(
-            new Dictionary<string, string?>
-            {
-                [DotNetModuleHostingModeOptions.ConfigKey] = "sidecar-only",
-            },
-            [new TestHarnessModule(), new AgentOrchestrationModule()]);
+            settings,
+            moduleLoader: ModuleLoader.DiscoverBundled(configuration));
 
         var act = async () => await harness.ModuleService.EnableAsync(
             "sharpclaw_agent_orchestration",
@@ -278,9 +305,7 @@ public sealed class BundledDotNetSidecarDefaultTests
                     configurationValues[pair.Key] = pair.Value;
             }
 
-            var configuration = new ConfigurationBuilder()
-                .AddInMemoryCollection(configurationValues)
-                .Build();
+            var configuration = BuildConfiguration(configurationValues);
 
             var services = new ServiceCollection();
             services.AddSingleton<IConfiguration>(configuration);
@@ -291,8 +316,13 @@ public sealed class BundledDotNetSidecarDefaultTests
                 options.UseInMemoryDatabase(
                     "BundledSidecarDefault_" + Guid.NewGuid().ToString("N"),
                     new InMemoryDatabaseRoot()));
-            services.AddSingleton(moduleLoader ?? new ModuleLoader(modules ?? [new TestHarnessModule()]));
+            var loader = moduleLoader
+                ?? (modules is not null
+                    ? new ModuleLoader(modules)
+                    : ModuleLoader.DiscoverBundled(configuration));
+            services.AddSingleton(loader);
             services.AddSingleton<ModuleRegistry>();
+            services.AddSingleton<ProviderApiClientFactory>();
             services.AddSingleton<RuntimeModuleDbContextRegistry>();
             services.AddSingleton<ModulePersistenceRegistrationFactory>();
             services.AddSingleton(new ModuleDbContextOptions
@@ -329,8 +359,7 @@ public sealed class BundledDotNetSidecarDefaultTests
 
         public async ValueTask DisposeAsync()
         {
-            var runtimeHost = Registry.GetRuntimeHost(TestHarnessConstants.ModuleId);
-            if (runtimeHost is not null)
+            foreach (var runtimeHost in Registry.GetRuntimeHosts())
                 await runtimeHost.DisposeAsync();
 
             await Scope.DisposeAsync();
@@ -346,6 +375,11 @@ public sealed class BundledDotNetSidecarDefaultTests
             }
         }
     }
+
+    private static IConfiguration BuildConfiguration(Dictionary<string, string?> values) =>
+        new ConfigurationBuilder()
+            .AddInMemoryCollection(values)
+            .Build();
 
     private static string ResolveDotNetSidecarHostPath()
     {
