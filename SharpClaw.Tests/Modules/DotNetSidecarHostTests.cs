@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Tasks;
 using SharpClaw.Tests.ExternalModule;
 
 namespace SharpClaw.Tests.Modules;
@@ -80,6 +81,7 @@ public sealed class DotNetSidecarHostTests
         foreignHost.Module.GetInlineToolDefinitions()
             .Should()
             .ContainSingle(tool => tool.Name == DotNetSidecarFixtureModule.InlineTool);
+        foreignHost.Handshake.Capabilities.Should().Contain("taskRuntime");
 
         using var payload = JsonDocument.Parse("""{"value":"hello"}""");
         var result = await foreignHost.Module.ExecuteToolAsync(
@@ -98,6 +100,110 @@ public sealed class DotNetSidecarHostTests
             CancellationToken.None);
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         (await response.Content.ReadAsStringAsync()).Should().Be("dotnet sidecar pong");
+
+        var parserAware = foreignHost.Module.Should().BeAssignableTo<ITaskParserAware>().Which;
+        parserAware.ParserExtension.StepKeyMappings["DotNetSidecarStep"].StepKey
+            .Should()
+            .Be(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey);
+        parserAware.ParserExtension.EventTriggerMappings["OnDotNetSidecar"].TriggerKey
+            .Should()
+            .Be(DotNetSidecarFixtureTriggerSource.TriggerKeyValue);
+
+        var triggerContext = new TestTriggerAttributeContext(
+            "DotNetSidecarTrigger",
+            9,
+            namedStringArgs: new Dictionary<string, string?> { ["Name"] = "fixture-trigger" });
+        var trigger = parserAware.ParserExtension
+            .TriggerAttributeHandlers["DotNetSidecarTrigger"]
+            .Handle(triggerContext);
+        trigger.Should().NotBeNull();
+        trigger!.TriggerKey.Should().Be(DotNetSidecarFixtureTriggerSource.TriggerKeyValue);
+        trigger.Parameters["name"].Should().Be("fixture-trigger");
+
+        var taskServices = new ServiceCollection();
+        foreignHost.Module.ConfigureServices(taskServices);
+        await using var taskProvider = taskServices.BuildServiceProvider();
+
+        var descriptorProvider = taskProvider.GetServices<ITaskStepDescriptorProvider>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        descriptorProvider.Descriptors.Should().ContainSingle(descriptor =>
+            descriptor.StepKey == DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey);
+
+        var executor = taskProvider.GetServices<ITaskStepExecutorExtension>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        var executionContext = new TestTaskStepExecutionContext();
+        (await executor.ExecuteAsync(
+            DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey,
+            executionContext,
+            ["arg"],
+            "expression",
+            "stepResult")).Should().BeTrue();
+        executionContext.Variables["dotnetSidecarStep"].Should().Be("expression");
+        executionContext.Variables["stepResult"].Should().Be("dotnet-sidecar-step-result");
+        executionContext.Logs.Should().Contain("dotnet sidecar step log");
+        executionContext.Outputs.Should().Contain("""{"dotnetSidecar":true}""");
+
+        var invocationResult = await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+            {
+                RawExpression = "raw expression",
+                ResultVariable = "invocationResult",
+            },
+            executionContext);
+        invocationResult.Should().Be(TaskStepResult.Continue);
+        executionContext.Variables["dotnetSidecarInvocation"].Should().Be("raw expression");
+        executionContext.Variables["invocationResult"].Should().Be("dotnet-sidecar-invocation-result");
+
+        var triggerSource = taskProvider.GetServices<ITaskTriggerSource>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        triggerSource.TriggerKeys.Should().Equal(DotNetSidecarFixtureTriggerSource.TriggerKeyValue);
+        triggerSource.GetBindingValue(trigger).Should().Be("fixture-trigger");
+        triggerSource.GetBindingFilter(trigger).Should().Be("dotnet-filter");
+        (await triggerSource.SyncBindingsAsync(
+            new TaskDefinitionDescriptor(Guid.NewGuid(), "fixture"),
+            [trigger],
+            CancellationToken.None)).Should().BeTrue();
+        await triggerSource.RemoveBindingsAsync(Guid.NewGuid(), CancellationToken.None);
+        await triggerSource.StopAsync();
+
+        var sideEffect = taskProvider.GetServices<ITaskTriggerBindingSideEffect>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        sideEffect.TriggerKey.Should().Be(DotNetSidecarFixtureTriggerSource.TriggerKeyValue);
+        var binding = new TaskTriggerBindingDescriptor(
+            Guid.NewGuid(),
+            DotNetSidecarFixtureTriggerSource.TriggerKeyValue,
+            "fixture-trigger",
+            "dotnet-filter");
+        await sideEffect.OnBindingCreatedAsync(
+            new TaskDefinitionDescriptor(Guid.NewGuid(), "fixture"),
+            trigger,
+            binding,
+            CancellationToken.None);
+        await sideEffect.OnBindingRemovedAsync(binding, CancellationToken.None);
+
+        var metric = taskProvider.GetServices<ITaskMetricProvider>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        metric.MetricName.Should().Be(DotNetSidecarFixtureMetricProvider.MetricNameValue);
+        (await metric.GetValueAsync(CancellationToken.None)).Should().Be(13.5);
+
+        var eventSink = taskProvider.GetServices<ISharpClawEventSink>()
+            .Should()
+            .ContainSingle()
+            .Subject;
+        eventSink.SubscribedEvents.Should().Be(SharpClawEventType.AllModuleEvents);
+        await eventSink.OnEventAsync(
+            new SharpClawEvent(SharpClawEventType.ModuleEnabled, DateTimeOffset.UtcNow),
+            CancellationToken.None);
     }
 
     private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
@@ -255,6 +361,100 @@ public sealed class DotNetSidecarHostTests
         public Task<IReadOnlyDictionary<string, string>> GetAllAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyDictionary<string, string>>(
                 new Dictionary<string, string>(_values, StringComparer.Ordinal));
+    }
+
+    private sealed class TestTaskStepExecutionContext : ITaskStepExecutionContext
+    {
+        public Guid InstanceId { get; } = Guid.NewGuid();
+        public Guid ChannelId { get; private set; } = Guid.NewGuid();
+        public CancellationToken CancellationToken => CancellationToken.None;
+        public IServiceProvider Services { get; } = new ServiceCollection().BuildServiceProvider();
+        public IDictionary<string, object?> Variables { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
+        public IReadOnlyList<ITaskEventHandler> EventHandlers => [];
+        public List<string> Logs { get; } = [];
+        public List<string?> Outputs { get; } = [];
+
+        public string ResolveExpression(string expression) =>
+            Variables.TryGetValue(expression, out var value)
+                ? value?.ToString() ?? string.Empty
+                : expression;
+
+        public Task AppendLogAsync(string message)
+        {
+            Logs.Add(message);
+            return Task.CompletedTask;
+        }
+
+        public Task WriteOutputAsync(string? outputJson)
+        {
+            Outputs.Add(outputJson);
+            return Task.CompletedTask;
+        }
+
+        public void SetChannelId(Guid channelId) => ChannelId = channelId;
+
+        public Task<TaskStepResult> ExecuteStepsAsync(
+            IReadOnlyList<ITaskStepInvocation> steps,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(TaskStepResult.Continue);
+
+        public bool EvaluateCondition(string? expression) =>
+            bool.TryParse(expression, out var value) && value;
+
+        public void RegisterEventHandler(
+            string moduleTriggerKey,
+            string? parameterName,
+            IReadOnlyList<ITaskStepInvocation> body)
+        {
+        }
+
+        public Task WaitIfPausedAsync() => Task.CompletedTask;
+    }
+
+    private sealed record TestTaskStepInvocation(string StepKey) : ITaskStepInvocation
+    {
+        public string? VariableName { get; init; }
+        public string? TypeName { get; init; }
+        public string? ResultVariable { get; init; }
+        public string? RawExpression { get; init; }
+        public IReadOnlyList<string>? Arguments { get; init; }
+        public string? ModuleTriggerKey { get; init; }
+        public string? HandlerParameter { get; init; }
+        public IReadOnlyList<ITaskStepInvocation>? Body { get; init; }
+        public IReadOnlyList<ITaskStepInvocation>? ElseBody { get; init; }
+    }
+
+    private sealed class TestTriggerAttributeContext : TaskTriggerAttributeContext
+    {
+        private readonly IReadOnlyDictionary<string, string?> _namedStringArgs;
+
+        public TestTriggerAttributeContext(
+            string attributeName,
+            int line,
+            IReadOnlyDictionary<string, string?>? namedStringArgs = null)
+        {
+            AttributeName = attributeName;
+            Line = line;
+            _namedStringArgs = namedStringArgs ?? new Dictionary<string, string?>(StringComparer.Ordinal);
+        }
+
+        public override string AttributeName { get; }
+        public override int Line { get; }
+        public override int ArgumentCount => 0;
+        public override string? GetStringArg(int index) => null;
+        public override int? GetIntArg(int index) => null;
+        public override string? GetNamedStringArg(string name) =>
+            _namedStringArgs.TryGetValue(name, out var value) ? value : null;
+        public override int? GetNamedIntArg(string name) => null;
+        public override double? GetNamedDoubleArg(string name) => null;
+        public override T? GetNamedEnumArg<T>(string name) where T : struct => null;
+        public override string? GetRawArgText(int index) => null;
+        public override void Report(
+            TaskTriggerAttributeDiagnosticSeverity severity,
+            string code,
+            string message)
+        {
+        }
     }
 
     private sealed class TestWorkspace : IDisposable

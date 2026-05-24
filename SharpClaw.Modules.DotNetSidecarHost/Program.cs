@@ -9,6 +9,7 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Utils.Security;
 
@@ -103,6 +104,7 @@ internal sealed class DotNetSidecarHost
         builder.Services.TryAddSingleton(TimeProvider.System);
         DotNetSidecarHostCapabilityProxies.Register(builder.Services);
         module.ConfigureServices(builder.Services);
+        RegisterTaskStepDescriptorProviders(builder.Services, module.GetType().Assembly);
 
         var app = builder.Build();
         app.UseWebSockets();
@@ -312,6 +314,7 @@ internal sealed class DotNetSidecarHost
         });
 
         MapProviderEndpoints();
+        MapTaskRuntimeEndpoints();
     }
 
     private void MapProviderEndpoints()
@@ -440,9 +443,199 @@ internal sealed class DotNetSidecarHost
                     .GetAgentIdentifierSuffixAsync(request.ProviderName, request.ModelId, ct))));
     }
 
+    private void MapTaskRuntimeEndpoints()
+    {
+        _app.MapPost(ForeignModuleProtocol.TaskStepExecutePath, async (
+            ForeignModuleTaskStepExecutionRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var executor = ResolveTaskStepExecutor(scope.ServiceProvider, request.StepKey);
+            var context = new DotNetSidecarTaskStepExecutionContext(
+                scope.ServiceProvider,
+                request.Context,
+                ct);
+            var shouldContinue = await executor.ExecuteAsync(
+                request.StepKey,
+                context,
+                request.Arguments,
+                request.Expression,
+                request.ResultVariable);
+            return Json(context.ToResponse(shouldContinue));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskStepInvokePath, async (
+            ForeignModuleTaskStepInvocationRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var executor = ResolveTaskStepExecutor(scope.ServiceProvider, request.Step.StepKey);
+            if (executor is not ITaskStepInvocationExecutor invocationExecutor)
+            {
+                throw new NotSupportedException(
+                    $"Task step '{request.Step.StepKey}' does not support invocation execution.");
+            }
+
+            var context = new DotNetSidecarTaskStepExecutionContext(
+                scope.ServiceProvider,
+                request.Context,
+                ct);
+            var result = await invocationExecutor.ExecuteInvocationAsync(
+                new DotNetSidecarTaskStepInvocation(request.Step),
+                context);
+            return Json(context.ToResponse(result, request.Step.ResultVariable));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerAttributeHandlePath, (
+            ForeignModuleTaskTriggerAttributeHandleRequest request) =>
+        {
+            if (_module is not ITaskParserAware parserAware
+                || !parserAware.ParserExtension.TriggerAttributeHandlers.TryGetValue(
+                    request.HandlerName,
+                    out var handler))
+            {
+                return Results.NotFound(new { error = $"Task trigger attribute handler '{request.HandlerName}' not found." });
+            }
+
+            var context = new DotNetSidecarTaskTriggerAttributeContext(request.Context);
+            return Json(new ForeignModuleTaskTriggerAttributeHandleResponse(
+                handler.Handle(context),
+                context.Diagnostics));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerStartPath, async (
+            ForeignModuleTaskTriggerStartRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, request.TriggerKeys);
+            var contexts = request.Contexts
+                .Select(context => new DotNetSidecarTaskTriggerSourceContext(
+                    context,
+                    scope.ServiceProvider.GetRequiredService<ITaskInstanceLauncher>()))
+                .Cast<ITaskTriggerSourceContext>()
+                .ToArray();
+            await source.StartAsync(contexts, ct);
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerStopPath, async (
+            ForeignModuleTaskTriggerStopRequest request) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, request.TriggerKeys);
+            await source.StopAsync();
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerBindingValuePath, (
+            ForeignModuleTaskTriggerDefinitionRequest request) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, [request.TriggerKey]);
+            return Json(new ForeignModuleTaskTriggerBindingValueResponse(
+                source.GetBindingValue(request.Definition)));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerBindingFilterPath, (
+            ForeignModuleTaskTriggerDefinitionRequest request) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, [request.TriggerKey]);
+            return Json(new ForeignModuleTaskTriggerBindingValueResponse(
+                source.GetBindingFilter(request.Definition)));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerSyncBindingsPath, async (
+            ForeignModuleTaskTriggerSyncBindingsRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, request.TriggerKeys);
+            var changed = await source.SyncBindingsAsync(
+                request.Definition,
+                request.OwnedTriggers,
+                ct);
+            return Json(new ForeignModuleTaskTriggerSyncBindingsResponse(changed));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerRemoveBindingsPath, async (
+            ForeignModuleTaskTriggerRemoveBindingsRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var source = ResolveTaskTriggerSource(scope.ServiceProvider, request.TriggerKeys);
+            await source.RemoveBindingsAsync(request.DefinitionId, ct);
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerBindingCreatedPath, async (
+            ForeignModuleTaskTriggerBindingCreatedRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var sideEffect = ResolveTaskTriggerBindingSideEffect(scope.ServiceProvider, request.TriggerKey);
+            await sideEffect.OnBindingCreatedAsync(
+                request.Definition,
+                request.Trigger,
+                request.Binding,
+                ct);
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskTriggerBindingRemovedPath, async (
+            ForeignModuleTaskTriggerBindingRemovedRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var sideEffect = ResolveTaskTriggerBindingSideEffect(scope.ServiceProvider, request.TriggerKey);
+            await sideEffect.OnBindingRemovedAsync(request.Binding, ct);
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskMetricValuePath, async (
+            ForeignModuleTaskMetricValueRequest request,
+            CancellationToken ct) =>
+        {
+            using var scope = _app.Services.CreateScope();
+            var metric = scope.ServiceProvider.GetServices<ITaskMetricProvider>()
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.MetricName,
+                    request.MetricName,
+                    StringComparison.Ordinal))
+                ?? throw new NotSupportedException($"Task metric '{request.MetricName}' not found.");
+            return Json(new ForeignModuleTaskMetricValueResponse(
+                await metric.GetValueAsync(ct)));
+        });
+
+        _app.MapPost(ForeignModuleProtocol.TaskEventSinkPath, async (
+            HttpContext context,
+            CancellationToken ct) =>
+        {
+            var request = await ReadTaskEventSinkRequestAsync(context, ct);
+            using var scope = _app.Services.CreateScope();
+            foreach (var sink in scope.ServiceProvider.GetServices<ISharpClawEventSink>()
+                         .Where(sink => (sink.SubscribedEvents & request.Event.Type) != 0))
+            {
+                await sink.OnEventAsync(request.Event, ct);
+            }
+
+            return Json(new ForeignModuleTaskAckResponse());
+        });
+    }
+
     private ForeignModuleDiscoveryResponse BuildDiscovery()
     {
         var protocolModule = _module as IForeignModuleProtocolContractModule;
+        using var scope = _app.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        var taskStepDescriptors = services.GetServices<ITaskStepDescriptorProvider>()
+            .SelectMany(provider => provider.Descriptors)
+            .ToArray();
+        var taskStepExecutors = services.GetServices<ITaskStepExecutorExtension>()
+            .Select(executor => ToTaskStepExecutorDescriptor(executor, taskStepDescriptors))
+            .Where(descriptor => descriptor.StepKeys.Count > 0)
+            .ToArray();
         return new ForeignModuleDiscoveryResponse(
             Endpoints: DiscoverMappedEndpoints(),
             Tools: [.. _module.GetToolDefinitions().Select(tool => ToForeignTool(
@@ -467,7 +660,25 @@ internal sealed class DotNetSidecarHost
                 command.Scope,
                 command.Description,
                 command.UsageLines))],
-            ProviderPlugins: [.. _app.Services.GetServices<IProviderPlugin>().Select(ToProviderDescriptor)]);
+            TaskParser: ToTaskParserDescriptor(_module as ITaskParserAware),
+            TaskStepDescriptors: taskStepDescriptors,
+            TaskStepExecutors: taskStepExecutors,
+            TaskTriggerSources: [.. services.GetServices<ITaskTriggerSource>()
+                .Select(source => new ForeignModuleTaskTriggerSourceDescriptor(
+                    source.TriggerKeys,
+                    source.OwnsBindingPersistence))
+                .Where(source => source.TriggerKeys.Count > 0)],
+            TaskTriggerBindingSideEffects: [.. services.GetServices<ITaskTriggerBindingSideEffect>()
+                .Select(sideEffect => new ForeignModuleTaskTriggerBindingSideEffectDescriptor(
+                    sideEffect.TriggerKey))],
+            TaskMetricProviders: [.. services.GetServices<ITaskMetricProvider>()
+                .Select(metric => new ForeignModuleTaskMetricProviderDescriptor(
+                    metric.MetricName,
+                    metric.Description))],
+            TaskEventSinks: [.. services.GetServices<ISharpClawEventSink>()
+                .Select(sink => new ForeignModuleTaskEventSinkDescriptor(
+                    sink.SubscribedEvents))],
+            ProviderPlugins: [.. services.GetServices<IProviderPlugin>().Select(ToProviderDescriptor)]);
     }
 
     private IReadOnlyList<ForeignModuleEndpointDescriptor> DiscoverMappedEndpoints()
@@ -523,7 +734,11 @@ internal sealed class DotNetSidecarHost
         if (_module.GetInlineToolDefinitions().Count > 0) capabilities.Add(ForeignModuleCapability.InlineTools);
         if (_module.GetFrontendContributions().Count > 0) capabilities.Add(ForeignModuleCapability.FrontendContributions);
         if (_module.GetUiContributions().Count > 0) capabilities.Add(ForeignModuleCapability.ModuleContributionDescriptors);
-        if (_app.Services.GetServices<IProviderPlugin>().Any()) capabilities.Add(ForeignModuleCapability.ProviderPlugins);
+        using var scope = _app.Services.CreateScope();
+        var services = scope.ServiceProvider;
+        if (_module is ITaskParserAware || HasTaskRuntimeContributions(services))
+            capabilities.Add(ForeignModuleCapability.TaskRuntime);
+        if (services.GetServices<IProviderPlugin>().Any()) capabilities.Add(ForeignModuleCapability.ProviderPlugins);
 
         return [.. capabilities.Order(StringComparer.Ordinal)];
     }
@@ -560,6 +775,62 @@ internal sealed class DotNetSidecarHost
     private static ForeignModuleProtocolContractRequirementDescriptor ToRequirementDescriptor(
         ForeignModuleProtocolContractRequirement requirement) =>
         new(requirement.ContractName, requirement.Schema, requirement.Optional, requirement.Description);
+
+    private static ForeignModuleTaskParserDescriptor? ToTaskParserDescriptor(ITaskParserAware? parserAware)
+    {
+        if (parserAware is null)
+            return null;
+
+        var extension = parserAware.ParserExtension;
+        return new ForeignModuleTaskParserDescriptor(
+            StepKeyMappings: [.. extension.StepKeyMappings.Select(mapping =>
+                new ForeignModuleTaskParserStepMapping(
+                    mapping.Key,
+                    mapping.Value.StepKey,
+                    mapping.Value.ModuleId))],
+            EventTriggerMappings: [.. extension.EventTriggerMappings.Select(mapping =>
+                new ForeignModuleTaskParserEventMapping(
+                    mapping.Key,
+                    mapping.Value.TriggerKey,
+                    mapping.Value.ModuleId))],
+            SingleArgExpressionMethods: [.. extension.SingleArgExpressionMethods],
+            Primitives: extension.Primitives,
+            TriggerAttributeHandlers: [.. extension.TriggerAttributeHandlers.Keys.Select(name =>
+                new ForeignModuleTaskTriggerAttributeHandlerDescriptor(
+                    name,
+                    NamedStringArgs:
+                    [
+                        "Name",
+                        "Timezone",
+                        "Filter",
+                        "Pattern",
+                        "Direction",
+                        "Events",
+                    ],
+                    NamedIntArgs:
+                    [
+                        "PollInterval",
+                        "Count",
+                        "Interval",
+                        "Seconds",
+                    ],
+                    NamedDoubleArgs:
+                    [
+                        "Threshold",
+                    ]))]);
+    }
+
+    private static ForeignModuleTaskStepExecutorDescriptor ToTaskStepExecutorDescriptor(
+        ITaskStepExecutorExtension executor,
+        IReadOnlyList<TaskStepDescriptor> descriptors) =>
+        new(
+            executor.ModuleId,
+            [.. descriptors
+                .Where(descriptor => string.Equals(descriptor.OwnerId, executor.ModuleId, StringComparison.Ordinal)
+                                     && executor.CanExecute(descriptor.StepKey))
+                .Select(descriptor => descriptor.StepKey)
+                .Distinct(StringComparer.Ordinal)],
+            SupportsInvocation: executor is ITaskStepInvocationExecutor);
 
     private static ForeignModuleHeaderTagDescriptor ToHeaderTagDescriptor(ModuleHeaderTag tag) =>
         new(tag.Name, SupportsContext: tag.ResolveWithContext is not null);
@@ -603,6 +874,52 @@ internal sealed class DotNetSidecarHost
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
             .Any(method => method.Name == nameof(ISharpClawModule.ExecuteToolStreamingAsync));
 
+    private static bool HasTaskRuntimeContributions(IServiceProvider services) =>
+        services.GetServices<ITaskStepDescriptorProvider>().Any()
+        || services.GetServices<ITaskStepExecutorExtension>().Any()
+        || services.GetServices<ITaskTriggerSource>().Any()
+        || services.GetServices<ITaskTriggerBindingSideEffect>().Any()
+        || services.GetServices<ITaskMetricProvider>().Any()
+        || services.GetServices<ISharpClawEventSink>().Any();
+
+    private static ITaskStepExecutorExtension ResolveTaskStepExecutor(
+        IServiceProvider services,
+        string stepKey) =>
+        services.GetServices<ITaskStepExecutorExtension>()
+            .FirstOrDefault(executor => executor.CanExecute(stepKey))
+        ?? throw new NotSupportedException($"Task step '{stepKey}' was not found.");
+
+    private static ITaskTriggerSource ResolveTaskTriggerSource(
+        IServiceProvider services,
+        IReadOnlyList<string> triggerKeys) =>
+        services.GetServices<ITaskTriggerSource>()
+            .FirstOrDefault(source => source.TriggerKeys.Any(triggerKey =>
+                triggerKeys.Contains(triggerKey, StringComparer.Ordinal)))
+        ?? throw new NotSupportedException(
+            $"Task trigger source '{string.Join(", ", triggerKeys)}' was not found.");
+
+    private static ITaskTriggerBindingSideEffect ResolveTaskTriggerBindingSideEffect(
+        IServiceProvider services,
+        string triggerKey) =>
+        services.GetServices<ITaskTriggerBindingSideEffect>()
+            .FirstOrDefault(sideEffect => string.Equals(
+                sideEffect.TriggerKey,
+                triggerKey,
+                StringComparison.Ordinal))
+        ?? throw new NotSupportedException($"Task trigger binding side effect '{triggerKey}' was not found.");
+
+    private static void RegisterTaskStepDescriptorProviders(IServiceCollection services, Assembly assembly)
+    {
+        var providerTypes = assembly.GetTypes()
+            .Where(type => !type.IsAbstract
+                           && !type.IsInterface
+                           && typeof(ITaskStepDescriptorProvider).IsAssignableFrom(type)
+                           && type.GetConstructor(Type.EmptyTypes) is not null);
+
+        foreach (var providerType in providerTypes)
+            services.AddSingleton(typeof(ITaskStepDescriptorProvider), providerType);
+    }
+
     private static bool HasCompletionBehaviorOverride(ISharpClawModule module) =>
         module.GetType()
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
@@ -634,6 +951,56 @@ internal sealed class DotNetSidecarHost
         return doc.RootElement.Clone();
     }
 
+    private static async Task<ForeignModuleTaskEventSinkRequest> ReadTaskEventSinkRequestAsync(
+        HttpContext context,
+        CancellationToken ct)
+    {
+        using var document = await JsonDocument.ParseAsync(context.Request.Body, cancellationToken: ct);
+        var root = document.RootElement;
+        var eventElement = root.GetProperty("event");
+        var eventType = eventElement.GetProperty("type").Deserialize<SharpClawEventType>(JsonOptions);
+        var timestamp = eventElement.GetProperty("timestamp").GetDateTimeOffset();
+        var data = eventElement.TryGetProperty("data", out var dataElement)
+                   && dataElement.ValueKind == JsonValueKind.Object
+            ? dataElement.EnumerateObject().ToDictionary(
+                property => property.Name,
+                property => (object)property.Value.Clone(),
+                StringComparer.Ordinal)
+            : null;
+
+        return new ForeignModuleTaskEventSinkRequest(
+            root.GetProperty("protocolVersion").GetInt32(),
+            root.GetProperty("moduleId").GetString() ?? string.Empty,
+            new SharpClawEvent(
+                eventType,
+                timestamp,
+                ReadNullableGuid(eventElement, "entityId"),
+                ReadNullableGuid(eventElement, "secondaryEntityId"),
+                ReadNullableString(eventElement, "sourceId"),
+                ReadNullableString(eventElement, "summary"),
+                data));
+    }
+
+    private static Guid? ReadNullableGuid(JsonElement element, string propertyName)
+    {
+        if (!element.TryGetProperty(propertyName, out var property)
+            || property.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+        {
+            return null;
+        }
+
+        return property.ValueKind == JsonValueKind.String
+               && Guid.TryParse(property.GetString(), out var parsed)
+            ? parsed
+            : property.GetGuid();
+    }
+
+    private static string? ReadNullableString(JsonElement element, string propertyName) =>
+        element.TryGetProperty(propertyName, out var property)
+        && property.ValueKind == JsonValueKind.String
+            ? property.GetString()
+            : null;
+
     private static IResult Json<T>(T value) => Results.Json(value, JsonOptions);
 
     private static async Task WriteNdjsonAsync<T>(HttpContext context, T value, CancellationToken ct)
@@ -644,6 +1011,258 @@ internal sealed class DotNetSidecarHost
     }
 
     private sealed record ConsoleCaptureResult(bool Success, string? Stdout, string? Stderr);
+
+    private sealed class DotNetSidecarTaskStepExecutionContext(
+        IServiceProvider services,
+        ForeignModuleTaskStepExecutionContextSnapshot snapshot,
+        CancellationToken cancellationToken) : ITaskStepExecutionContext
+    {
+        private readonly Guid _initialChannelId = snapshot.ChannelId;
+        private readonly List<string> _logs = [];
+        private readonly List<string?> _outputs = [];
+        private readonly List<ITaskEventHandler> _eventHandlers =
+        [
+            .. (snapshot.EventHandlers ?? []).Select(handler =>
+                new DotNetSidecarTaskEventHandler(handler.ModuleTriggerKey, handler.ParameterName))
+        ];
+
+        public Guid InstanceId { get; } = snapshot.InstanceId;
+        public Guid ChannelId { get; private set; } = snapshot.ChannelId;
+        public CancellationToken CancellationToken { get; } = cancellationToken;
+        public IServiceProvider Services { get; } = services;
+        public IDictionary<string, object?> Variables { get; } =
+            (snapshot.Variables ?? new Dictionary<string, JsonElement>(StringComparer.Ordinal))
+            .ToDictionary(
+                pair => pair.Key,
+                pair => ConvertJsonValue(pair.Value),
+                StringComparer.Ordinal);
+        public IReadOnlyList<ITaskEventHandler> EventHandlers => _eventHandlers;
+
+        public string ResolveExpression(string expression) =>
+            Variables.TryGetValue(expression, out var value)
+                ? value?.ToString() ?? string.Empty
+                : expression;
+
+        public Task AppendLogAsync(string message)
+        {
+            _logs.Add(message);
+            return Task.CompletedTask;
+        }
+
+        public Task WriteOutputAsync(string? outputJson)
+        {
+            _outputs.Add(outputJson);
+            return Task.CompletedTask;
+        }
+
+        public void SetChannelId(Guid channelId) => ChannelId = channelId;
+
+        public Task<TaskStepResult> ExecuteStepsAsync(
+            IReadOnlyList<ITaskStepInvocation> steps,
+            CancellationToken cancellationToken) =>
+            throw new NotSupportedException(
+                "Nested task step execution from a .NET sidecar requires a host callback that is not exposed yet.");
+
+        public bool EvaluateCondition(string? expression)
+        {
+            if (string.IsNullOrWhiteSpace(expression))
+                return false;
+
+            var resolved = ResolveExpression(expression);
+            return bool.TryParse(resolved, out var value) && value;
+        }
+
+        public void RegisterEventHandler(
+            string moduleTriggerKey,
+            string? parameterName,
+            IReadOnlyList<ITaskStepInvocation> body) =>
+            _eventHandlers.Add(new DotNetSidecarTaskEventHandler(moduleTriggerKey, parameterName));
+
+        public Task WaitIfPausedAsync() => Task.CompletedTask;
+
+        public ForeignModuleTaskStepExecutionResponse ToResponse(
+            bool shouldContinue,
+            string? resultVariable = null) =>
+            ToResponse(
+                shouldContinue ? TaskStepResult.Continue : TaskStepResult.Return,
+                shouldContinue,
+                resultVariable);
+
+        public ForeignModuleTaskStepExecutionResponse ToResponse(
+            TaskStepResult result,
+            string? resultVariable = null) =>
+            ToResponse(result, null, resultVariable);
+
+        private ForeignModuleTaskStepExecutionResponse ToResponse(
+            TaskStepResult result,
+            bool? shouldContinue,
+            string? resultVariable)
+        {
+            var variableUpdates = Variables.ToDictionary(
+                pair => pair.Key,
+                pair => SerializeVariableValue(pair.Value),
+                StringComparer.Ordinal);
+            JsonElement? resultVariableValue = resultVariable is not null
+                                                && variableUpdates.TryGetValue(resultVariable, out var value)
+                ? value
+                : null;
+
+            return new ForeignModuleTaskStepExecutionResponse(
+                result,
+                shouldContinue,
+                variableUpdates,
+                resultVariableValue,
+                _logs,
+                _outputs.LastOrDefault(),
+                ChannelId == _initialChannelId ? null : ChannelId);
+        }
+
+        private static object? ConvertJsonValue(JsonElement value) =>
+            value.ValueKind switch
+            {
+                JsonValueKind.Undefined or JsonValueKind.Null => null,
+                JsonValueKind.String => value.GetString(),
+                JsonValueKind.True => true,
+                JsonValueKind.False => false,
+                JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue,
+                JsonValueKind.Number => value.GetDouble(),
+                _ => value.Clone(),
+            };
+
+        private static JsonElement SerializeVariableValue(object? value)
+        {
+            if (value is JsonElement element)
+                return element.Clone();
+
+            try
+            {
+                return value is null
+                    ? JsonSerializer.SerializeToElement((string?)null, JsonOptions)
+                    : JsonSerializer.SerializeToElement(value, value.GetType(), JsonOptions);
+            }
+            catch (NotSupportedException)
+            {
+                return JsonSerializer.SerializeToElement(value?.ToString(), JsonOptions);
+            }
+        }
+    }
+
+    private sealed record DotNetSidecarTaskEventHandler(
+        string? ModuleTriggerKey,
+        string? ParameterName) : ITaskEventHandler
+    {
+        public Task ExecuteBodyAsync(CancellationToken ct) =>
+            throw new NotSupportedException(
+                "Executing task event handler bodies from a .NET sidecar requires a host callback that is not exposed yet.");
+    }
+
+    private sealed class DotNetSidecarTaskStepInvocation(
+        ForeignModuleTaskStepInvocationDescriptor descriptor) : ITaskStepInvocation
+    {
+        public string StepKey => descriptor.StepKey;
+        public string? VariableName => descriptor.VariableName;
+        public string? TypeName => descriptor.TypeName;
+        public string? ResultVariable => descriptor.ResultVariable;
+        public string? RawExpression => descriptor.RawExpression;
+        public IReadOnlyList<string>? Arguments => descriptor.Arguments;
+        public string? ModuleTriggerKey => descriptor.ModuleTriggerKey;
+        public string? HandlerParameter => descriptor.HandlerParameter;
+        public IReadOnlyList<ITaskStepInvocation>? Body =>
+            descriptor.Body is null ? null : [.. descriptor.Body.Select(step => new DotNetSidecarTaskStepInvocation(step))];
+        public IReadOnlyList<ITaskStepInvocation>? ElseBody =>
+            descriptor.ElseBody is null ? null : [.. descriptor.ElseBody.Select(step => new DotNetSidecarTaskStepInvocation(step))];
+    }
+
+    private sealed class DotNetSidecarTaskTriggerSourceContext(
+        ForeignModuleTaskTriggerSourceContextDescriptor descriptor,
+        ITaskInstanceLauncher launcher) : ITaskTriggerSourceContext
+    {
+        public TaskTriggerDefinition Definition => descriptor.Definition;
+        public Guid TaskDefinitionId => descriptor.TaskDefinitionId;
+
+        public async Task FireAsync(
+            IReadOnlyDictionary<string, string>? parameters = null,
+            CancellationToken ct = default) =>
+            _ = await launcher.LaunchAsync(
+                TaskDefinitionId,
+                parameters,
+                callerAgentId: null,
+                channelId: null,
+                contextId: null,
+                ct);
+    }
+
+    private sealed class DotNetSidecarTaskTriggerAttributeContext(
+        ForeignModuleTaskTriggerAttributeContextDescriptor descriptor) : TaskTriggerAttributeContext
+    {
+        private readonly List<ForeignModuleTaskTriggerAttributeDiagnostic> _diagnostics = [];
+
+        public override string AttributeName => descriptor.AttributeName;
+        public override int Line => descriptor.Line;
+        public override int ArgumentCount => descriptor.ArgumentCount;
+        public IReadOnlyList<ForeignModuleTaskTriggerAttributeDiagnostic> Diagnostics => _diagnostics;
+
+        public override string? GetStringArg(int index) =>
+            index >= 0 && index < descriptor.StringArgs.Count
+                ? descriptor.StringArgs[index]
+                : null;
+
+        public override int? GetIntArg(int index) =>
+            index >= 0 && index < descriptor.IntArgs.Count
+                ? descriptor.IntArgs[index]
+                : null;
+
+        public override string? GetNamedStringArg(string name) =>
+            descriptor.NamedStringArgs.TryGetValue(name, out var value)
+                ? value
+                : null;
+
+        public override int? GetNamedIntArg(string name) =>
+            descriptor.NamedIntArgs.TryGetValue(name, out var value)
+                ? value
+                : null;
+
+        public override double? GetNamedDoubleArg(string name) =>
+            descriptor.NamedDoubleArgs.TryGetValue(name, out var value)
+                ? value
+                : null;
+
+        public override T? GetNamedEnumArg<T>(string name) where T : struct
+        {
+            if (!descriptor.NamedStringArgs.TryGetValue(name, out var value)
+                || string.IsNullOrWhiteSpace(value))
+            {
+                return null;
+            }
+
+            return TryParseEnum<T>(value, out var parsed) ? parsed : null;
+        }
+
+        public override string? GetRawArgText(int index) =>
+            index >= 0 && index < descriptor.RawArgs.Count
+                ? descriptor.RawArgs[index]
+                : null;
+
+        public override void Report(
+            TaskTriggerAttributeDiagnosticSeverity severity,
+            string code,
+            string message) =>
+            _diagnostics.Add(new ForeignModuleTaskTriggerAttributeDiagnostic(severity, code, message));
+
+        private static bool TryParseEnum<T>(string value, out T parsed)
+            where T : struct
+        {
+            var normalized = string.Join(
+                ",",
+                value.Split('|', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .Select(part =>
+                    {
+                        var dot = part.LastIndexOf('.');
+                        return dot >= 0 ? part[(dot + 1)..] : part;
+                    }));
+            return Enum.TryParse(normalized, ignoreCase: true, out parsed);
+        }
+    }
 
     private static class ConsoleCapture
     {
