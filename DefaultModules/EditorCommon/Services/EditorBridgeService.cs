@@ -145,11 +145,8 @@ public sealed class EditorBridgeService(IServiceScopeFactory scopeFactory)
                     name, editorType, regMsg.EditorVersion,
                     regMsg.WorkspacePath, ct);
 
-                session.ConnectionId = connectionId;
                 sessionId = session.Id;
-
-                var db = scope.ServiceProvider.GetRequiredService<EditorCommonDbContext>();
-                await db.SaveChangesAsync(ct);
+                await sessionSvc.SetConnectionIdAsync(session.Id, connectionId, ct);
             }
 
             var conn = new EditorConnection(
@@ -204,13 +201,8 @@ public sealed class EditorBridgeService(IServiceScopeFactory scopeFactory)
                 try
                 {
                     using var scope = scopeFactory.CreateScope();
-                    var db = scope.ServiceProvider.GetRequiredService<EditorCommonDbContext>();
-                    var session = await db.EditorSessions.FindAsync(sessionId.Value);
-                    if (session is not null)
-                    {
-                        session.ConnectionId = null;
-                        await db.SaveChangesAsync();
-                    }
+                    var sessionSvc = scope.ServiceProvider.GetRequiredService<EditorSessionService>();
+                    await sessionSvc.SetConnectionIdAsync(sessionId.Value, null);
                 }
                 catch { /* best effort cleanup */ }
             }

@@ -169,6 +169,7 @@ public sealed class BundledDotNetSidecarDefaultTests
             .ToArray();
         bundledModules.Select(module => module.Id).Should().Equal(
         [
+            "sharpclaw_editor_common",
             "sharpclaw_metrics",
             "sharpclaw_module_dev",
             "sharpclaw_providers_anthropic",
@@ -177,6 +178,8 @@ public sealed class BundledDotNetSidecarDefaultTests
             "sharpclaw_providers_ollama",
             "sharpclaw_providers_openai_compat",
             TestHarnessConstants.ModuleId,
+            "sharpclaw_vs2026_editor",
+            "sharpclaw_vscode_editor",
         ]);
         await using var harness = ModuleServiceHarness.Create(moduleLoader: loader);
         var enabledModuleIds = new List<string>();
@@ -194,7 +197,8 @@ public sealed class BundledDotNetSidecarDefaultTests
                 response.Enabled.Should().BeTrue();
                 harness.Registry.GetRuntimeHost(bundledModule.Id)
                     .Should()
-                    .BeAssignableTo<IForeignModuleRuntimeHost>();
+                    .BeAssignableTo<IForeignModuleRuntimeHost>(
+                        $"module '{bundledModule.Id}' declares sidecar host mode");
                 harness.Registry.GetModule(bundledModule.Id)
                     .Should()
                     .NotBeSameAs(bundledModule);
@@ -232,6 +236,31 @@ public sealed class BundledDotNetSidecarDefaultTests
             CancellationToken.None);
 
         factory.IsAvailable("openai").Should().BeFalse();
+    }
+
+    [Test]
+    public async Task EditorCommonSidecarAdvertisesEditorWebSocketEndpoint()
+    {
+        await using var harness = ModuleServiceHarness.Create();
+
+        var response = await harness.ModuleService.EnableAsync(
+            "sharpclaw_editor_common",
+            harness.RootServices,
+            CancellationToken.None);
+
+        response.Enabled.Should().BeTrue();
+        var runtimeHost = harness.Registry.GetRuntimeHost("sharpclaw_editor_common")
+            .Should()
+            .BeAssignableTo<IForeignModuleRuntimeHost>()
+            .Subject;
+
+        runtimeHost.Endpoints.Should().Contain(endpoint =>
+            string.Equals(endpoint.Method, "GET", StringComparison.Ordinal)
+            && string.Equals(endpoint.RoutePattern, "/editor/ws", StringComparison.Ordinal)
+            && string.Equals(
+                endpoint.ResponseMode,
+                ForeignModuleEndpointResponseMode.WebSocket,
+                StringComparison.Ordinal));
     }
 
     [Test]

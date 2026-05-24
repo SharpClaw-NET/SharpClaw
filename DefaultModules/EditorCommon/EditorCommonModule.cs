@@ -3,8 +3,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Persistence;
 using SharpClaw.Modules.EditorCommon.Handlers;
 using SharpClaw.Modules.EditorCommon.Services;
 
@@ -14,25 +14,22 @@ namespace SharpClaw.Modules.EditorCommon;
 /// Infrastructure module: shared editor bridge and session services
 /// consumed by the VS 2026 and VS Code editor modules.
 /// No LLM-callable tools — this module provides only DI services,
-/// contract exports, and REST/WebSocket endpoints.
+/// protocol contract exports, and REST/WebSocket endpoints.
 /// </summary>
-public sealed class EditorCommonModule : ISharpClawModule
+public sealed class EditorCommonModule : ISharpClawModule, IForeignModuleProtocolContractModule
 {
     public string Id => "sharpclaw_editor_common";
     public string DisplayName => "Editor Common";
     public string ToolPrefix => "edc";
 
     // ═══════════════════════════════════════════════════════════════
-    // Contract Exports
+    // Protocol Contract Exports
     // ═══════════════════════════════════════════════════════════════
 
-    public IReadOnlyList<ModuleContractExport> ExportedContracts =>
-    [
-        new("editor_bridge", typeof(EditorBridgeService),
-            "WebSocket-based IDE bridge for editor extensions"),
-        new("editor_session", typeof(EditorSessionService),
-            "Editor session CRUD management"),
-    ];
+    public IReadOnlyList<ForeignModuleProtocolContractExport> ExportedProtocolContracts =>
+        EditorProtocolContracts.Exports;
+
+    public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts => [];
 
     // ═══════════════════════════════════════════════════════════════
     // DI Registration
@@ -40,10 +37,11 @@ public sealed class EditorCommonModule : ISharpClawModule
 
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddScoped(sp => sp.GetRequiredService<IModuleDbContextFactory>()
-            .CreateDbContext<EditorCommonDbContext>());
+        services.AddSingleton<EditorSessionStore>();
         services.AddSingleton<EditorBridgeService>();
         services.AddScoped<EditorSessionService>();
+        services.AddScoped<IForeignModuleProtocolContractInvoker, EditorBridgeProtocolContractInvoker>();
+        services.AddScoped<IForeignModuleProtocolContractInvoker, EditorSessionProtocolContractInvoker>();
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -75,6 +73,21 @@ public sealed class EditorCommonModule : ISharpClawModule
                 "resource editorsession delete <id>               Delete an editor session",
             ],
             Handler: HandleEditorSessionResourceCliAsync),
+    ];
+
+    public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
+    [
+        new("EditorSession", "EditorSession", "AccessEditorSessionAsync", static async (sp, ct) =>
+        {
+            var svc = sp.GetRequiredService<EditorSessionService>();
+            return [.. (await svc.ListAsync(ct)).Select(session => session.Id)];
+        },
+        LoadLookupItems: static async (sp, ct) =>
+        {
+            var svc = sp.GetRequiredService<EditorSessionService>();
+            return [.. (await svc.ListAsync(ct))
+                .Select(session => new ValueTuple<Guid, string>(session.Id, session.Name))];
+        }, DefaultResourceKey: "editor"),
     ];
 
     private static async Task HandleEditorSessionResourceCliAsync(

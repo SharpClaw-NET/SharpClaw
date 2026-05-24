@@ -249,10 +249,20 @@ internal sealed class DotNetSidecarHost
             ForeignModuleProtocolContractInvocationRequest request,
             CancellationToken ct) =>
         {
-            if (_module is not IForeignModuleProtocolContractExporter exporter)
-                return Results.NotFound(new { error = "Module does not export protocol contracts." });
+            using var scope = _app.Services.CreateScope();
+            var invoker = scope.ServiceProvider
+                .GetServices<IForeignModuleProtocolContractInvoker>()
+                .FirstOrDefault(candidate => string.Equals(
+                    candidate.ContractName,
+                    request.ContractName,
+                    StringComparison.Ordinal));
 
-            var invoker = exporter.GetProtocolContractInvoker(request.ContractName);
+            if (invoker is null && _module is IForeignModuleProtocolContractExporter exporter)
+                invoker = exporter.GetProtocolContractInvoker(request.ContractName);
+
+            if (invoker is null)
+                return Results.NotFound(new { error = $"Protocol contract '{request.ContractName}' was not found." });
+
             return Json(new ForeignModuleProtocolContractInvocationResponse(
                 await invoker.InvokeAsync(request.Operation, NormalizeJsonObject(request.Parameters), ct)));
         });
@@ -703,7 +713,9 @@ internal sealed class DotNetSidecarHost
                 descriptors.Add(new ForeignModuleEndpointDescriptor(
                     method,
                     route,
-                    ForeignModuleEndpointResponseMode.Raw));
+                    IsWebSocketEndpoint(endpoint, route, method)
+                        ? ForeignModuleEndpointResponseMode.WebSocket
+                        : ForeignModuleEndpointResponseMode.Raw));
             }
         }
 
@@ -712,6 +724,24 @@ internal sealed class DotNetSidecarHost
             .OrderBy(descriptor => descriptor.RoutePattern, StringComparer.Ordinal)
             .ThenBy(descriptor => descriptor.Method, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    private static bool IsWebSocketEndpoint(RouteEndpoint endpoint, string route, string method)
+    {
+        if (!string.Equals(method, "GET", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (route.EndsWith("/ws", StringComparison.OrdinalIgnoreCase)
+            || route.EndsWith("/websocket", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        return endpoint.Metadata
+            .OfType<MethodInfo>()
+            .Any(info => info.Name.Contains("WebSocket", StringComparison.OrdinalIgnoreCase)
+                         || info.GetParameters().Any(parameter =>
+                             parameter.ParameterType.FullName == "System.Net.WebSockets.WebSocket"));
     }
 
     private IProviderPlugin FindProvider(string providerKey) =>

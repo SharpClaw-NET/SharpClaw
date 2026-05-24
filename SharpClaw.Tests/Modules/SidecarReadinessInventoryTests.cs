@@ -31,11 +31,7 @@ public sealed class SidecarReadinessInventoryTests
         [
             "storage.module_dbcontexts",
         ],
-        ["sharpclaw_editor_common"] =
-        [
-            "contracts.clr.exports",
-            "storage.module_dbcontexts",
-        ],
+        ["sharpclaw_editor_common"] = [],
         ["sharpclaw_metrics"] = [],
         ["sharpclaw_module_dev"] = [],
         ["sharpclaw_providers_anthropic"] = [],
@@ -44,14 +40,8 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_providers_ollama"] = [],
         ["sharpclaw_providers_openai_compat"] = [],
         ["sharpclaw_test_harness"] = [],
-        ["sharpclaw_vs2026_editor"] =
-        [
-            "contracts.clr.requirements",
-        ],
-        ["sharpclaw_vscode_editor"] =
-        [
-            "contracts.clr.requirements",
-        ],
+        ["sharpclaw_vs2026_editor"] = [],
+        ["sharpclaw_vscode_editor"] = [],
     };
 
     [Test]
@@ -86,6 +76,7 @@ public sealed class SidecarReadinessInventoryTests
             .Should()
             .Equal(
             [
+                "sharpclaw_editor_common",
                 "sharpclaw_metrics",
                 "sharpclaw_module_dev",
                 "sharpclaw_providers_anthropic",
@@ -94,6 +85,8 @@ public sealed class SidecarReadinessInventoryTests
                 "sharpclaw_providers_ollama",
                 "sharpclaw_providers_openai_compat",
                 "sharpclaw_test_harness",
+                "sharpclaw_vs2026_editor",
+                "sharpclaw_vscode_editor",
             ]);
     }
 

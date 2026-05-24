@@ -20,8 +20,6 @@ public sealed class BundledModuleStorageGatewayTests
             [
                 "sharpclaw_agent_orchestration/scheduled_jobs",
                 "sharpclaw_agent_orchestration/skills",
-                "sharpclaw_editor_common/editor_sessions",
-                "sharpclaw_providers_llamasharp/local_models",
             ]);
 
         contracts.Single(contract => contract.StorageName == "scheduled_jobs")
@@ -29,9 +27,5 @@ public sealed class BundledModuleStorageGatewayTests
             .Should()
             .Contain(["create", "list", "pause", "resume", "lookup_items"]);
 
-        contracts.Single(contract => contract.StorageName == "local_models")
-            .Operations.Select(operation => operation.Name)
-            .Should()
-            .Contain(["list", "ready_file_path", "source_url"]);
     }
 }

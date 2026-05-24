@@ -1,13 +1,10 @@
 using System.Text.Json;
 
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
+using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Contracts.DTOs.Editor;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Modules.EditorCommon;
-using SharpClaw.Modules.EditorCommon.Models;
-using SharpClaw.Modules.EditorCommon.Services;
 
 namespace SharpClaw.Modules.VS2026Editor;
 
@@ -16,22 +13,30 @@ namespace SharpClaw.Modules.VS2026Editor;
 /// diagnostics, builds, and terminal commands through a connected
 /// VS 2026 extension. Windows only.
 /// </summary>
-public sealed class VS2026EditorModule : ISharpClawModule
+public sealed class VS2026EditorModule : ISharpClawModule, IForeignModuleProtocolContractModule
 {
+    private const string EditorBridgeContractName = "editor_bridge";
+    private const string EditorSessionContractName = "editor_session";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public string Id => "sharpclaw_vs2026_editor";
     public string DisplayName => "VS 2026 Editor";
     public string ToolPrefix => "vs26";
 
     // ═══════════════════════════════════════════════════════════════
-    // Contract Dependencies
+    // Protocol Contract Dependencies
     // ═══════════════════════════════════════════════════════════════
 
-    public IReadOnlyList<ModuleContractRequirement> RequiredContracts =>
+    public IReadOnlyList<ForeignModuleProtocolContractExport> ExportedProtocolContracts => [];
+
+    public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts =>
     [
-        new("editor_bridge", typeof(EditorBridgeService),
-            Description: "WebSocket bridge for IDE communication"),
-        new("editor_session", typeof(EditorSessionService),
-            Description: "Editor session management"),
+        new(EditorBridgeContractName, Description: "WebSocket bridge for IDE communication."),
+        new(EditorSessionContractName, Description: "Editor session management."),
     ];
 
     // ═══════════════════════════════════════════════════════════════
@@ -41,24 +46,6 @@ public sealed class VS2026EditorModule : ISharpClawModule
     public void ConfigureServices(IServiceCollection services)
     {
     }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Resource Type Descriptors
-    // ═══════════════════════════════════════════════════════════════
-
-    public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
-    [
-        new("EditorSession", "EditorSession", "AccessEditorSessionAsync", static async (sp, ct) =>
-        {
-            var db = sp.GetRequiredService<EditorCommonDbContext>();
-            return await db.EditorSessions.Select(e => e.Id).ToListAsync(ct);
-        },
-        LoadLookupItems: static async (sp, ct) =>
-        {
-            var db = sp.GetRequiredService<EditorCommonDbContext>();
-            return await db.EditorSessions.Select(e => new ValueTuple<Guid, string>(e.Id, e.Name)).ToListAsync(ct);
-        }, DefaultResourceKey: "editor"),
-    ];
 
     // ═══════════════════════════════════════════════════════════════
     // Tool Definitions
@@ -221,7 +208,7 @@ public sealed class VS2026EditorModule : ISharpClawModule
         AgentJobContext job, IServiceProvider scopedServices,
         CancellationToken ct)
     {
-        var bridge = scopedServices.GetRequiredService<EditorBridgeService>();
+        var bridge = ResolveEditorBridge(scopedServices);
 
         // Strip the "vs26_" prefix to get the WebSocket action name.
         var actionName = toolName.StartsWith("vs26_", StringComparison.Ordinal)
@@ -235,11 +222,14 @@ public sealed class VS2026EditorModule : ISharpClawModule
                 "Missing or invalid 'targetId' parameter.");
 
         // Validate the session is a VS 2026 session.
-        var conn = bridge.GetConnection(sessionId);
-        if (conn is not null && conn.EditorType != EditorType.VisualStudio2026)
+        var conn = await GetConnectionAsync(bridge, sessionId, ct);
+        if (conn.Exists
+            && !string.Equals(conn.EditorKey, "VisualStudio2026", StringComparison.Ordinal))
+        {
             throw new InvalidOperationException(
-                $"Session {sessionId} is connected to {conn.EditorType}, "
+                $"Session {sessionId} is connected to {conn.EditorKey}, "
                 + "not VisualStudio2026. Use the VS Code editor module instead.");
+        }
 
         // Build parameter dict for the WebSocket request (exclude targetId).
         var paramDict = new Dictionary<string, object?>();
@@ -258,9 +248,12 @@ public sealed class VS2026EditorModule : ISharpClawModule
             };
         }
 
-        var response = await bridge.SendRequestAsync(
-            sessionId, actionName,
-            paramDict.Count > 0 ? paramDict : null, ct);
+        var response = await SendRequestAsync(
+            bridge,
+            sessionId,
+            actionName,
+            paramDict.Count > 0 ? paramDict : null,
+            ct);
 
         if (!response.Success)
             throw new InvalidOperationException(
@@ -287,4 +280,49 @@ public sealed class VS2026EditorModule : ISharpClawModule
             "required": ["targetId"]
         }
         """);
+
+    private static IForeignModuleProtocolContractInvoker ResolveEditorBridge(IServiceProvider services) =>
+        services.GetRequiredService<IForeignModuleProtocolContractResolver>()
+            .Resolve(EditorBridgeContractName)
+        ?? throw new InvalidOperationException("The editor bridge protocol contract is not available.");
+
+    private static async Task<EditorConnectionProtocolResponse> GetConnectionAsync(
+        IForeignModuleProtocolContractInvoker bridge,
+        Guid sessionId,
+        CancellationToken ct)
+    {
+        var result = await bridge.InvokeAsync(
+            "get_connection",
+            ToElement(new { sessionId }),
+            ct);
+        return result.Deserialize<EditorConnectionProtocolResponse>(JsonOptions)
+            ?? new EditorConnectionProtocolResponse(false);
+    }
+
+    private static async Task<EditorActionResponse> SendRequestAsync(
+        IForeignModuleProtocolContractInvoker bridge,
+        Guid sessionId,
+        string action,
+        Dictionary<string, object?>? parameters,
+        CancellationToken ct)
+    {
+        var result = await bridge.InvokeAsync(
+            "send_request",
+            ToElement(new EditorBridgeSendRequest(sessionId, action, parameters)),
+            ct);
+        return result.Deserialize<EditorActionResponse>(JsonOptions)
+            ?? throw new InvalidOperationException("Editor bridge returned an empty response.");
+    }
+
+    private static JsonElement ToElement<T>(T value) =>
+        JsonSerializer.SerializeToElement(value, JsonOptions);
+
+    private sealed record EditorBridgeSendRequest(
+        Guid SessionId,
+        string Action,
+        Dictionary<string, object?>? Params);
+
+    private sealed record EditorConnectionProtocolResponse(
+        bool Exists,
+        string? EditorKey = null);
 }

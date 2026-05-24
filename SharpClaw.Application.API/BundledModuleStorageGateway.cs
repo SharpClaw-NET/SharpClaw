@@ -11,8 +11,6 @@ namespace SharpClaw.Application.API;
 public sealed class BundledModuleStorageGateway(IServiceProvider services) : IModuleStorageGateway
 {
     private const string AgentOrchestrationModuleId = "sharpclaw_agent_orchestration";
-    private const string EditorCommonModuleId = "sharpclaw_editor_common";
-    private const string LlamaSharpModuleId = "sharpclaw_providers_llamasharp";
 
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
@@ -50,30 +48,6 @@ public sealed class BundledModuleStorageGateway(IServiceProvider services) : IMo
                 "list_ids",
                 "lookup_items"),
             "Parent-backed Agent Orchestration skill storage."),
-        new(
-            EditorCommonModuleId,
-            "editor_sessions",
-            Operations(
-                "create",
-                "get",
-                "list",
-                "update",
-                "delete",
-                "active_connections",
-                "list_ids",
-                "lookup_items"),
-            "Parent-backed editor session storage and active bridge state."),
-        new(
-            LlamaSharpModuleId,
-            "local_models",
-            Operations(
-                "list",
-                "delete",
-                "set_mmproj",
-                "list_available_files",
-                "ready_file_path",
-                "source_url"),
-            "Parent-backed LlamaSharp local model records and lookup operations."),
     ];
 
     public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() => Contracts;
@@ -90,10 +64,6 @@ public sealed class BundledModuleStorageGateway(IServiceProvider services) : IMo
                 InvokeScheduledJobsAsync(operation, parameters, ct),
             (AgentOrchestrationModuleId, "skills") =>
                 InvokeSkillsAsync(operation, parameters, ct),
-            (EditorCommonModuleId, "editor_sessions") =>
-                InvokeEditorSessionsAsync(operation, parameters, ct),
-            (LlamaSharpModuleId, "local_models") =>
-                InvokeLocalModelsAsync(operation, parameters, ct),
             _ => throw new NotSupportedException(
                 $"Module storage '{moduleId}/{storageName}' is not registered."),
         };

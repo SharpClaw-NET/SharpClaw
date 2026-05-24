@@ -1,4 +1,3 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Editor;
 using SharpClaw.Modules.EditorCommon.Models;
 
@@ -9,7 +8,7 @@ namespace SharpClaw.Modules.EditorCommon.Services;
 /// typically auto-created when an IDE extension connects via the
 /// <see cref="EditorBridgeService"/>, but can also be managed manually.
 /// </summary>
-public sealed class EditorSessionService(EditorCommonDbContext db)
+public sealed class EditorSessionService(EditorSessionStore store)
 {
     public async Task<EditorSessionResponse> CreateAsync(
         CreateEditorSessionRequest request, CancellationToken ct = default)
@@ -25,24 +24,20 @@ public sealed class EditorSessionService(EditorCommonDbContext db)
             Description = request.Description
         };
 
-        db.EditorSessions.Add(session);
-        await db.SaveChangesAsync(ct);
-        return ToResponse(session);
+        return ToResponse(await store.CreateAsync(session, ct));
     }
 
     public async Task<IReadOnlyList<EditorSessionResponse>> ListAsync(
         CancellationToken ct = default)
     {
-        var sessions = await db.EditorSessions
-            .OrderByDescending(s => s.CreatedAt)
-            .ToListAsync(ct);
-        return sessions.Select(ToResponse).ToList();
+        var sessions = await store.ListAsync(ct);
+        return [.. sessions.OrderByDescending(s => s.CreatedAt).Select(ToResponse)];
     }
 
     public async Task<EditorSessionResponse?> GetByIdAsync(
         Guid id, CancellationToken ct = default)
     {
-        var session = await db.EditorSessions.FindAsync([id], ct);
+        var session = await store.GetByIdAsync(id, ct);
         return session is null ? null : ToResponse(session);
     }
 
@@ -50,26 +45,17 @@ public sealed class EditorSessionService(EditorCommonDbContext db)
         Guid id, UpdateEditorSessionRequest request,
         CancellationToken ct = default)
     {
-        var session = await db.EditorSessions.FindAsync([id], ct);
-        if (session is null) return null;
-
-        if (request.Name is not null) session.Name = request.Name;
-        if (request.Description is not null) session.Description = request.Description;
-
-        await db.SaveChangesAsync(ct);
-        return ToResponse(session);
+        var session = await store.UpdateAsync(id, session =>
+        {
+            if (request.Name is not null) session.Name = request.Name;
+            if (request.Description is not null) session.Description = request.Description;
+        }, ct);
+        return session is null ? null : ToResponse(session);
     }
 
     public async Task<bool> DeleteAsync(
         Guid id, CancellationToken ct = default)
-    {
-        var session = await db.EditorSessions.FindAsync([id], ct);
-        if (session is null) return false;
-
-        db.EditorSessions.Remove(session);
-        await db.SaveChangesAsync(ct);
-        return true;
-    }
+        => await store.DeleteAsync(id, ct);
 
     /// <summary>
     /// Finds an existing session by workspace path + editor type, or
@@ -82,32 +68,14 @@ public sealed class EditorSessionService(EditorCommonDbContext db)
         string? editorVersion,
         string? workspacePath,
         CancellationToken ct = default)
+        => await store.GetOrCreateAsync(name, editorType, editorVersion, workspacePath, ct);
+
+    public async Task SetConnectionIdAsync(
+        Guid id,
+        string? connectionId,
+        CancellationToken ct = default)
     {
-        // Try to find an existing session with the same workspace + editor type
-        var existing = await db.EditorSessions
-            .FirstOrDefaultAsync(s =>
-                s.EditorType == editorType &&
-                s.WorkspacePath == workspacePath, ct);
-
-        if (existing is not null)
-        {
-            // Update version in case it changed
-            existing.EditorVersion = editorVersion;
-            await db.SaveChangesAsync(ct);
-            return existing;
-        }
-
-        var session = new EditorSessionDB
-        {
-            Name = name,
-            EditorType = editorType,
-            EditorVersion = editorVersion,
-            WorkspacePath = workspacePath
-        };
-
-        db.EditorSessions.Add(session);
-        await db.SaveChangesAsync(ct);
-        return session;
+        await store.UpdateAsync(id, session => session.ConnectionId = connectionId, ct);
     }
 
     internal static EditorSessionResponse ToResponse(EditorSessionDB s) =>

@@ -1,11 +1,10 @@
 using System.Text.Json;
 
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.DependencyInjection.Extensions;
 
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Modules.EditorCommon.Models;
-using SharpClaw.Modules.EditorCommon.Services;
+using SharpClaw.Contracts.DTOs.Editor;
 
 namespace SharpClaw.Modules.VSCodeEditor;
 
@@ -14,22 +13,30 @@ namespace SharpClaw.Modules.VSCodeEditor;
 /// diagnostics, builds, and terminal commands through a connected
 /// VS Code extension. All platforms.
 /// </summary>
-public sealed class VSCodeEditorModule : ISharpClawModule
+public sealed class VSCodeEditorModule : ISharpClawModule, IForeignModuleProtocolContractModule
 {
+    private const string EditorBridgeContractName = "editor_bridge";
+    private const string EditorSessionContractName = "editor_session";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
     public string Id => "sharpclaw_vscode_editor";
     public string DisplayName => "VS Code Editor";
     public string ToolPrefix => "vsc";
 
     // ═══════════════════════════════════════════════════════════════
-    // Contract Dependencies
+    // Protocol Contract Dependencies
     // ═══════════════════════════════════════════════════════════════
 
-    public IReadOnlyList<ModuleContractRequirement> RequiredContracts =>
+    public IReadOnlyList<ForeignModuleProtocolContractExport> ExportedProtocolContracts => [];
+
+    public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts =>
     [
-        new("editor_bridge", typeof(EditorBridgeService),
-            Description: "WebSocket bridge for IDE communication"),
-        new("editor_session", typeof(EditorSessionService),
-            Description: "Editor session management"),
+        new(EditorBridgeContractName, Description: "WebSocket bridge for IDE communication."),
+        new(EditorSessionContractName, Description: "Editor session management."),
     ];
 
     // ═══════════════════════════════════════════════════════════════
@@ -201,7 +208,7 @@ public sealed class VSCodeEditorModule : ISharpClawModule
         AgentJobContext job, IServiceProvider scopedServices,
         CancellationToken ct)
     {
-        var bridge = scopedServices.GetRequiredService<EditorBridgeService>();
+        var bridge = ResolveEditorBridge(scopedServices);
 
         // Strip the "vsc_" prefix to get the WebSocket action name.
         var actionName = toolName.StartsWith("vsc_", StringComparison.Ordinal)
@@ -215,11 +222,14 @@ public sealed class VSCodeEditorModule : ISharpClawModule
                 "Missing or invalid 'targetId' parameter.");
 
         // Validate the session is a VS Code session.
-        var conn = bridge.GetConnection(sessionId);
-        if (conn is not null && conn.EditorType != EditorType.VisualStudioCode)
+        var conn = await GetConnectionAsync(bridge, sessionId, ct);
+        if (conn.Exists
+            && !string.Equals(conn.EditorKey, "VisualStudioCode", StringComparison.Ordinal))
+        {
             throw new InvalidOperationException(
-                $"Session {sessionId} is connected to {conn.EditorType}, "
+                $"Session {sessionId} is connected to {conn.EditorKey}, "
                 + "not VisualStudioCode. Use the VS 2026 editor module instead.");
+        }
 
         // Build parameter dict for the WebSocket request (exclude targetId).
         var paramDict = new Dictionary<string, object?>();
@@ -238,9 +248,12 @@ public sealed class VSCodeEditorModule : ISharpClawModule
             };
         }
 
-        var response = await bridge.SendRequestAsync(
-            sessionId, actionName,
-            paramDict.Count > 0 ? paramDict : null, ct);
+        var response = await SendRequestAsync(
+            bridge,
+            sessionId,
+            actionName,
+            paramDict.Count > 0 ? paramDict : null,
+            ct);
 
         if (!response.Success)
             throw new InvalidOperationException(
@@ -267,4 +280,49 @@ public sealed class VSCodeEditorModule : ISharpClawModule
             "required": ["targetId"]
         }
         """);
+
+    private static IForeignModuleProtocolContractInvoker ResolveEditorBridge(IServiceProvider services) =>
+        services.GetRequiredService<IForeignModuleProtocolContractResolver>()
+            .Resolve(EditorBridgeContractName)
+        ?? throw new InvalidOperationException("The editor bridge protocol contract is not available.");
+
+    private static async Task<EditorConnectionProtocolResponse> GetConnectionAsync(
+        IForeignModuleProtocolContractInvoker bridge,
+        Guid sessionId,
+        CancellationToken ct)
+    {
+        var result = await bridge.InvokeAsync(
+            "get_connection",
+            ToElement(new { sessionId }),
+            ct);
+        return result.Deserialize<EditorConnectionProtocolResponse>(JsonOptions)
+            ?? new EditorConnectionProtocolResponse(false);
+    }
+
+    private static async Task<EditorActionResponse> SendRequestAsync(
+        IForeignModuleProtocolContractInvoker bridge,
+        Guid sessionId,
+        string action,
+        Dictionary<string, object?>? parameters,
+        CancellationToken ct)
+    {
+        var result = await bridge.InvokeAsync(
+            "send_request",
+            ToElement(new EditorBridgeSendRequest(sessionId, action, parameters)),
+            ct);
+        return result.Deserialize<EditorActionResponse>(JsonOptions)
+            ?? throw new InvalidOperationException("Editor bridge returned an empty response.");
+    }
+
+    private static JsonElement ToElement<T>(T value) =>
+        JsonSerializer.SerializeToElement(value, JsonOptions);
+
+    private sealed record EditorBridgeSendRequest(
+        Guid SessionId,
+        string Action,
+        Dictionary<string, object?>? Params);
+
+    private sealed record EditorConnectionProtocolResponse(
+        bool Exists,
+        string? EditorKey = null);
 }

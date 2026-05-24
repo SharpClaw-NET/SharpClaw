@@ -9,12 +9,12 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\EditorCommon\SharpClaw.Modules.EditorCommon.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
     <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
   <ItemGroup>
-    <Content Include="module.json" Link="modules\vscode_editor\module.json" CopyToOutputDirectory="PreserveNewest" />
+    <Content Include="module.json" Link="modules\sharpclaw_vscode_editor\module.json" CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

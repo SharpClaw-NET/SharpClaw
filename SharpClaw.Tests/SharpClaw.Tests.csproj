@@ -36,6 +36,9 @@
     <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />
     <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj" />
     <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj" />
+    <ProjectReference Include="..\DefaultModules\EditorCommon\SharpClaw.Modules.EditorCommon.csproj" />
+    <ProjectReference Include="..\DefaultModules\VS2026Editor\SharpClaw.Modules.VS2026Editor.csproj" />
+    <ProjectReference Include="..\DefaultModules\VSCodeEditor\SharpClaw.Modules.VSCodeEditor.csproj" />
     <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj" />
     <ProjectReference Include="..\SharpClaw.Tests.ExternalModule\SharpClaw.Tests.ExternalModule.csproj" />
     <ProjectReference Include="..\SharpClaw.Tests.ForeignSidecar\SharpClaw.Tests.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />

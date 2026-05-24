@@ -3,21 +3,15 @@
   "displayName": "VS 2026 Editor",
   "version": "0.1.0-beta",
   "toolPrefix": "vs26",
+  "runtime": "dotnet",
+  "hostMode": "sidecar",
   "entryAssembly": "SharpClaw.Modules.VS2026Editor.dll",
+  "moduleType": "SharpClaw.Modules.VS2026Editor.VS2026EditorModule",
   "minHostVersion": "0.1.0-beta",
   "author": "mkn8rn",
   "description": "Visual Studio 2026 editor integration via WebSocket bridge for code editing, navigation, and solution management.",
   "license": "AGPL-3.0",
   "platforms": [ "windows" ],
   "exports": [],
-  "requires": [
-    {
-      "contractName": "editor_bridge",
-      "serviceType": "SharpClaw.Modules.EditorCommon.Services.EditorBridgeService"
-    },
-    {
-      "contractName": "editor_session",
-      "serviceType": "SharpClaw.Modules.EditorCommon.Services.EditorSessionService"
-    }
-  ]
+  "requires": []
 }
