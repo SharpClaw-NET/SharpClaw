@@ -8,6 +8,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Serilog;
 using SharpClaw.Application.API.Handlers;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Application.Infrastructure.Tasks;
 using SharpClaw.Application.Infrastructure.Tasks.Models;
 using SharpClaw.Application.Services;
@@ -3382,6 +3383,12 @@ public static class CliDispatcher
 
         try
         {
+            if (runtimeHost is IForeignModuleRuntimeHost)
+            {
+                await cmd.Handler(args, hostSp, CancellationToken.None);
+                return;
+            }
+
             using var scope = runtimeHost.CreateScope();
             await cmd.Handler(args, scope.ServiceProvider, CancellationToken.None);
         }
