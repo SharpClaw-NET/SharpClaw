@@ -17,6 +17,7 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
     private readonly StreamWriter _logWriter;
     private readonly StreamWriter _debugWriter;
     private readonly StreamWriter _exceptionWriter;
+    private readonly SemaphoreSlim _writerGate = new(1, 1);
     private int _disposeState;
 
     /// <summary>
@@ -175,6 +176,7 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
         await _logWriter.DisposeAsync().ConfigureAwait(false);
         await _debugWriter.DisposeAsync().ConfigureAwait(false);
         await _exceptionWriter.DisposeAsync().ConfigureAwait(false);
+        _writerGate.Dispose();
         _cts.Dispose();
     }
 
@@ -241,10 +243,18 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
                 _ => _logWriter,
             };
 
-            await writer.WriteLineAsync(entry.Message).ConfigureAwait(false);
+            await _writerGate.WaitAsync().ConfigureAwait(false);
+            try
+            {
+                await writer.WriteLineAsync(entry.Message).ConfigureAwait(false);
 
-            if (entry.FlushImmediately)
-                await FlushWritersAsync().ConfigureAwait(false);
+                if (entry.FlushImmediately)
+                    await FlushWritersCoreAsync().ConfigureAwait(false);
+            }
+            finally
+            {
+                _writerGate.Release();
+            }
         }
     }
 
@@ -257,6 +267,19 @@ public sealed class SessionLogWriter : IAsyncDisposable, IDisposable
     }
 
     private async Task FlushWritersAsync()
+    {
+        await _writerGate.WaitAsync().ConfigureAwait(false);
+        try
+        {
+            await FlushWritersCoreAsync().ConfigureAwait(false);
+        }
+        finally
+        {
+            _writerGate.Release();
+        }
+    }
+
+    private async Task FlushWritersCoreAsync()
     {
         await _logWriter.FlushAsync().ConfigureAwait(false);
         await _debugWriter.FlushAsync().ConfigureAwait(false);

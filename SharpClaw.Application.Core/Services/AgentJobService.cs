@@ -11,6 +11,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Jobs;
@@ -582,9 +583,22 @@ public sealed class AgentJobService(
                 if (stream is not null)
                 {
                     var sb = new StringBuilder();
-                    await foreach (var chunk in stream.WithCancellation(cts.Token))
-                        sb.Append(chunk);
-                    result = sb.ToString();
+                    try
+                    {
+                        await foreach (var chunk in stream.WithCancellation(cts.Token))
+                            sb.Append(chunk);
+                        result = sb.ToString();
+                    }
+                    catch (ForeignModuleProtocolException ex) when (ex.StatusCode == HttpStatusCode.NotFound)
+                    {
+                        _logger.LogDebug(
+                            "Module tool {ModuleId}.{ToolName} is not streaming; falling back to normal execution for job {JobId}.",
+                            envelope.Module,
+                            envelope.Tool,
+                            job.Id);
+                        result = await module.ExecuteToolAsync(
+                            envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+                    }
                 }
                 else
                 {

@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 using SharpClaw.Modules.AgentOrchestration.Services;
@@ -72,11 +73,13 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         services.AddSingleton<ITaskTriggerSource, FileChangedTriggerSource>();
 
         // ── Context tools (rolled in from sharpclaw_context_tools) ─────────────
-        services.TryAddScoped<ContextDataReader>();
         services.TryAddScoped<IContextDataReader>(sp =>
             HostContextDataReaderAdapter.TryCreate() is { } hostReader
                 ? hostReader
-                : sp.GetRequiredService<ContextDataReader>());
+                : sp.GetService<ISharpClawDataContext>() is { } data
+                    ? new ContextDataReader(data)
+                    : throw new InvalidOperationException(
+                        "Context tools require either SharpClaw host capabilities or ISharpClawDataContext."));
         services.TryAddScoped<ContextToolsService>();
     }
 

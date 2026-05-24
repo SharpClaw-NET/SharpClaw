@@ -105,6 +105,7 @@ internal sealed class DotNetSidecarHost
         builder.WebHost.UseUrls(controlAddress.ToString());
         builder.Services.AddHttpClient();
         builder.Services.TryAddSingleton(TimeProvider.System);
+        builder.Services.TryAddSingleton<ICliIdResolver, SidecarCliIdResolver>();
         DotNetSidecarHostCapabilityProxies.Register(builder.Services);
         module.ConfigureServices(builder.Services);
         RegisterTaskStepDescriptorProviders(builder.Services, module.GetType().Assembly);

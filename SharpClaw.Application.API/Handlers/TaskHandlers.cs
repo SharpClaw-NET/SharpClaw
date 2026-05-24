@@ -221,6 +221,10 @@ public static class TaskTriggerHandlers
     /// </summary>
     [MapGet("/trigger-sources")]
     public static IResult ListTriggerSources(
+        ITaskTriggerSourceRegistry sourceRegistry) =>
+        ListTriggerSources(sourceRegistry.Sources);
+
+    public static IResult ListTriggerSources(
         IEnumerable<ITaskTriggerSource> sources)
     {
         var sourceList = sources.Select(s => new TaskTriggerSourceResponse(

@@ -2713,8 +2713,8 @@ public static class CliDispatcher
 
     private static IResult HandleTaskTriggerSources(IServiceProvider sp)
     {
-        var sources = sp.GetServices<ITaskTriggerSource>();
-        return TaskTriggerHandlers.ListTriggerSources(sources);
+        var sourceRegistry = sp.GetRequiredService<ITaskTriggerSourceRegistry>();
+        return TaskTriggerHandlers.ListTriggerSources(sourceRegistry.Sources);
     }
 
     private static async Task<IResult> HandleTaskCreate(string sourceFilePath, TaskService svc)

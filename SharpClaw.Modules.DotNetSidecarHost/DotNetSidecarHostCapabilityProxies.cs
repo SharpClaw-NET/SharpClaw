@@ -14,6 +14,8 @@ internal static class DotNetSidecarHostCapabilityProxies
 {
     public static void Register(IServiceCollection services)
     {
+        services.TryAddSingleton<ISharpClawEventSinkRegistry, NoOpEventSinkRegistry>();
+
         var client = DotNetSidecarHostCapabilityClient.TryCreateFromEnvironment();
         if (client is null)
             return;
@@ -32,7 +34,6 @@ internal static class DotNetSidecarHostCapabilityProxies
         services.TryAddSingleton<IForeignModuleProtocolContractResolver, ProtocolContractResolverProxy>();
         services.TryAddSingleton<IModuleStorageGateway, ModuleStorageGatewayProxy>();
         services.TryAddSingleton<IAgentJobController, AgentJobControllerProxy>();
-        services.TryAddSingleton<ISharpClawEventSinkRegistry, NoOpEventSinkRegistry>();
     }
 
     private sealed class NoOpEventSinkRegistry : ISharpClawEventSinkRegistry

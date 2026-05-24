@@ -140,6 +140,115 @@ public sealed class TestHarnessModule : ISharpClawModule
             DefaultResourceKey: TestHarnessConstants.DefaultResourceKey)
     ];
 
+    public IReadOnlyList<ModuleCliCommand> GetCliCommands() =>
+    [
+        new(
+            Name: "testharness",
+            Aliases: ["tharness"],
+            Scope: ModuleCliScope.TopLevel,
+            Description: "Configure deterministic Test Harness scenarios",
+            UsageLines:
+            [
+                "testharness reset",
+                "testharness provider-tool-then-final <providerKey> <toolName> <argumentsJson> <finalContent>",
+            ],
+            Handler: HandleCliCommandAsync)
+    ];
+
+    private static Task HandleCliCommandAsync(
+        string[] args, IServiceProvider sp, CancellationToken ct)
+    {
+        _ = ct;
+        var state = sp.GetRequiredService<TestHarnessState>();
+
+        if (args.Length < 2)
+        {
+            PrintCliUsage();
+            return Task.CompletedTask;
+        }
+
+        switch (args[1].ToLowerInvariant())
+        {
+            case "reset":
+                state.Reset();
+                Console.WriteLine("Test Harness state reset.");
+                break;
+
+            case "provider-tool-then-final" when args.Length >= 6:
+                ConfigureProviderToolThenFinal(
+                    state,
+                    args[2],
+                    args[3],
+                    args[4],
+                    string.Join(' ', args[5..]));
+                break;
+
+            case "provider-tool-then-final":
+                Console.Error.WriteLine(
+                    "Usage: testharness provider-tool-then-final <providerKey> <toolName> <argumentsJson> <finalContent>");
+                break;
+
+            default:
+                PrintCliUsage();
+                break;
+        }
+
+        return Task.CompletedTask;
+    }
+
+    private static void ConfigureProviderToolThenFinal(
+        TestHarnessState state,
+        string providerKey,
+        string toolName,
+        string argumentsJson,
+        string finalContent)
+    {
+        try
+        {
+            using var _ = JsonDocument.Parse(argumentsJson);
+        }
+        catch (JsonException ex)
+        {
+            Console.Error.WriteLine($"Invalid tool arguments JSON: {ex.Message}");
+            return;
+        }
+
+        state.ConfigureProvider(
+            providerKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn
+                    {
+                        ToolCalls = [new ChatToolCall("call-1", toolName, argumentsJson)],
+                        Usage = new TokenUsage(3, 2)
+                    },
+                    new TestHarnessProviderTurn
+                    {
+                        Content = finalContent,
+                        Usage = new TokenUsage(4, 3)
+                    }
+                ]
+            });
+
+        Console.WriteLine(JsonSerializer.Serialize(
+            new
+            {
+                ProviderKey = providerKey,
+                ToolName = toolName,
+                FinalContent = finalContent
+            },
+            new JsonSerializerOptions { WriteIndented = true }));
+    }
+
+    private static void PrintCliUsage()
+    {
+        Console.Error.WriteLine("Usage:");
+        Console.Error.WriteLine("  testharness reset");
+        Console.Error.WriteLine("  testharness provider-tool-then-final <providerKey> <toolName> <argumentsJson> <finalContent>");
+    }
+
     public async Task<string> ExecuteInlineToolAsync(
         string toolName,
         JsonElement parameters,

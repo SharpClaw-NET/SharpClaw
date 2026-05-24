@@ -202,7 +202,6 @@ public sealed class ModuleService(
             state.Enabled = true;
             state.Version = manifest?.Version;
         }
-        await db.SaveChangesAsync(ct);
 
         // Register + initialize if not already active
         if (registry.GetModule(moduleId) is null)
@@ -254,6 +253,12 @@ public sealed class ModuleService(
             // resource types and global flags into existing permission sets.
             await ReconcilePermissionsForModuleAsync(module, ct);
         }
+        else if (registry.GetModule(moduleId) is { } activeModule)
+        {
+            module = activeModule;
+        }
+
+        await db.SaveChangesAsync(ct);
 
         InvalidateModuleRuntimeState();
         eventDispatcher.InvalidateSinkCache();
