@@ -40,10 +40,7 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_module_dev"] = [],
         ["sharpclaw_providers_anthropic"] = [],
         ["sharpclaw_providers_google"] = [],
-        ["sharpclaw_providers_llamasharp"] =
-        [
-            "storage.module_dbcontexts",
-        ],
+        ["sharpclaw_providers_llamasharp"] = [],
         ["sharpclaw_providers_ollama"] = [],
         ["sharpclaw_providers_openai_compat"] = [],
         ["sharpclaw_test_harness"] = [],
@@ -93,6 +90,7 @@ public sealed class SidecarReadinessInventoryTests
                 "sharpclaw_module_dev",
                 "sharpclaw_providers_anthropic",
                 "sharpclaw_providers_google",
+                "sharpclaw_providers_llamasharp",
                 "sharpclaw_providers_ollama",
                 "sharpclaw_providers_openai_compat",
                 "sharpclaw_test_harness",

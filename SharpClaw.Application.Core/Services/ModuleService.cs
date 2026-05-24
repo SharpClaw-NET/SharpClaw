@@ -847,7 +847,33 @@ public sealed class ModuleService(
         foreach (var file in payloadFiles)
             CopyIfChanged(file, Path.Combine(stagingDir, Path.GetFileName(file)));
 
+        foreach (var file in Directory.EnumerateFiles(baseDir, "*.dll")
+                     .Where(file => IsBundledSidecarManagedDependency(file, manifest.EntryAssembly)))
+        {
+            CopyIfChanged(file, Path.Combine(stagingDir, Path.GetFileName(file)));
+        }
+
         return stagingDir;
+    }
+
+    private static bool IsBundledSidecarManagedDependency(string file, string entryAssembly)
+    {
+        var name = Path.GetFileName(file);
+        if (string.Equals(name, entryAssembly, StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (name.StartsWith("SharpClaw.Modules.", StringComparison.OrdinalIgnoreCase))
+            return false;
+
+        if (name.StartsWith("SharpClaw.Application.", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("SharpClaw.Migrations.", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("SharpClaw.Gateway", StringComparison.OrdinalIgnoreCase)
+            || name.StartsWith("SharpClaw.Tests", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return true;
     }
 
     private static void CopyIfChanged(string source, string destination)

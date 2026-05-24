@@ -113,7 +113,7 @@ public sealed class HostModelInfoProvider(
 /// Host-side <see cref="IModelRegistrar"/> impl over the host
 /// <see cref="SharpClawDbContext"/>. Modules call into this to upsert
 /// <c>ProviderDB</c> / <c>ModelDB</c> rows when they own additional
-/// related state (e.g. LlamaSharp module owning <c>LocalModelFileDB</c>).
+/// related runtime state outside the host schema.
 /// </summary>
 public sealed class HostModelRegistrar(IServiceScopeFactory scopeFactory) : IModelRegistrar
 {

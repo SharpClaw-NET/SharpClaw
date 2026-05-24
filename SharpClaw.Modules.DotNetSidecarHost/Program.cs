@@ -26,6 +26,7 @@ internal sealed class DotNetSidecarHost
     };
 
     private readonly WebApplication _app;
+    private readonly ModuleLoadContext _loadContext;
     private readonly ISharpClawModule _module;
     private readonly ModuleManifest _manifest;
     private readonly ModuleManifestRuntimeInfo _runtimeInfo;
@@ -33,12 +34,14 @@ internal sealed class DotNetSidecarHost
 
     private DotNetSidecarHost(
         WebApplication app,
+        ModuleLoadContext loadContext,
         ISharpClawModule module,
         ModuleManifest manifest,
         ModuleManifestRuntimeInfo runtimeInfo,
         string controlToken)
     {
         _app = app;
+        _loadContext = loadContext;
         _module = module;
         _manifest = manifest;
         _runtimeInfo = runtimeInfo;
@@ -121,7 +124,7 @@ internal sealed class DotNetSidecarHost
         });
 
         module.MapEndpoints(app);
-        var host = new DotNetSidecarHost(app, module, manifest, runtimeInfo, controlToken);
+        var host = new DotNetSidecarHost(app, loadContext, module, manifest, runtimeInfo, controlToken);
         host.MapControlEndpoints();
         return host;
     }

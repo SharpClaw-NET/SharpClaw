@@ -173,6 +173,7 @@ public sealed class BundledDotNetSidecarDefaultTests
             "sharpclaw_module_dev",
             "sharpclaw_providers_anthropic",
             "sharpclaw_providers_google",
+            "sharpclaw_providers_llamasharp",
             "sharpclaw_providers_ollama",
             "sharpclaw_providers_openai_compat",
             TestHarnessConstants.ModuleId,

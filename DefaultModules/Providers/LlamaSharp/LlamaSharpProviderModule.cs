@@ -4,7 +4,6 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Modules.Providers.LlamaSharp.Cli;
 using SharpClaw.Modules.Providers.LlamaSharp.Clients;
@@ -18,9 +17,9 @@ namespace SharpClaw.Modules.Providers.LlamaSharp;
 
 /// <summary>
 /// Default module: registers the LlamaSharp (in-process llama.cpp)
-/// provider plugin, owns the <c>LocalModelFile</c> entity in
-/// <see cref="LlamaSharpDbContext"/>, and exposes <c>/models/local</c>
-/// REST + <c>localmodel</c> CLI surfaces.
+/// provider plugin, owns local-model records through host-backed module
+/// config, and exposes <c>/models/local</c> REST + <c>localmodel</c>
+/// CLI surfaces.
 /// </summary>
 public sealed class LlamaSharpProviderModule : ISharpClawModule
 {
@@ -51,9 +50,7 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
                 });
         }
 
-        // Module-owned DbContext.
-        services.AddScoped(sp => sp.GetRequiredService<IModuleDbContextFactory>()
-            .CreateDbContext<LlamaSharpDbContext>());
+        services.AddScoped<LocalModelStore>();
 
         // Process manager (singleton, configured from Local:* keys).
         services.AddSingleton(sp =>
@@ -92,7 +89,7 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
                 "llamasharp",
                 "LlamaSharp (local)",
                 requiresEndpoint: false,
-                _ => new LocalInferenceApiClient(pm),
+                _ => new LocalInferenceApiClient(pm, scopeFactory),
                 caps,
                 parameterSpec: ProviderParameterSpecs.LlamaSharp,
                 costFeed: LocalProviderCostFeed.Instance,

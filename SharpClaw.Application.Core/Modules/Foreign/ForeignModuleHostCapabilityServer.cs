@@ -299,6 +299,14 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await SetAgentHeaderAsync(services, Deserialize<ForeignModuleSetHeaderRequest>(request), ct),
             ForeignModuleHostCapabilityProtocol.ChannelSetHeaderPath =>
                 await SetChannelHeaderAsync(services, Deserialize<ForeignModuleSetHeaderRequest>(request), ct),
+            ForeignModuleHostCapabilityProtocol.ModelEnsureProviderPath =>
+                await EnsureProviderAsync(services, Deserialize<ForeignModuleModelEnsureProviderRequest>(request), ct),
+            ForeignModuleHostCapabilityProtocol.ModelEnsureModelPath =>
+                await EnsureModelAsync(services, Deserialize<ForeignModuleModelEnsureModelRequest>(request), ct),
+            ForeignModuleHostCapabilityProtocol.ModelMetadataPath =>
+                await GetModelMetadataAsync(services, Deserialize<ForeignModuleModelMetadataRequest>(request), ct),
+            ForeignModuleHostCapabilityProtocol.ModelDeletePath =>
+                await DeleteModelAsync(services, Deserialize<ForeignModuleModelDeleteRequest>(request), ct),
             ForeignModuleHostCapabilityProtocol.ModulesExternalRootPath =>
                 new ForeignModuleExternalModulesRootResponse(ResolveModuleLifecycle(services).ExternalModulesDir),
             ForeignModuleHostCapabilityProtocol.ModulesInfoListPath =>
@@ -797,6 +805,55 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         return new ForeignModuleCapabilityAck();
     }
 
+    private static async Task<ForeignModuleGuidResponse> EnsureProviderAsync(
+        IServiceProvider services,
+        ForeignModuleModelEnsureProviderRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.ProviderKey))
+            throw new ArgumentException("Provider key is required.", nameof(request));
+        if (string.IsNullOrWhiteSpace(request.DisplayName))
+            throw new ArgumentException("Provider display name is required.", nameof(request));
+
+        return new ForeignModuleGuidResponse(
+            await ResolveModelRegistrar(services)
+                .EnsureProviderAsync(request.ProviderKey, request.DisplayName, ct));
+    }
+
+    private static async Task<ForeignModuleGuidResponse> EnsureModelAsync(
+        IServiceProvider services,
+        ForeignModuleModelEnsureModelRequest request,
+        CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(request.ModelName))
+            throw new ArgumentException("Model name is required.", nameof(request));
+        RequireId(request.ProviderId, "Provider ID is required.");
+
+        return new ForeignModuleGuidResponse(
+            await ResolveModelRegistrar(services)
+                .EnsureModelAsync(request.ModelName, request.ProviderId, request.CapabilityTags, ct));
+    }
+
+    private static async Task<ForeignModuleModelMetadataResponse> GetModelMetadataAsync(
+        IServiceProvider services,
+        ForeignModuleModelMetadataRequest request,
+        CancellationToken ct)
+    {
+        RequireId(request.ModelId, "Model ID is required.");
+        return new ForeignModuleModelMetadataResponse(
+            await ResolveModelRegistrar(services).GetModelMetadataAsync(request.ModelId, ct));
+    }
+
+    private static async Task<ForeignModuleBooleanResponse> DeleteModelAsync(
+        IServiceProvider services,
+        ForeignModuleModelDeleteRequest request,
+        CancellationToken ct)
+    {
+        RequireId(request.ModelId, "Model ID is required.");
+        return new ForeignModuleBooleanResponse(
+            await ResolveModelRegistrar(services).DeleteModelAsync(request.ModelId, ct));
+    }
+
     private static ForeignModuleRegisteredResponse IsModuleRegistered(
         IServiceProvider services,
         ForeignModuleRegisteredRequest request)
@@ -963,6 +1020,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static IAgentManager ResolveAgentManager(IServiceProvider services) =>
         services.GetService<IAgentManager>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide agent management.");
+
+    private static IModelRegistrar ResolveModelRegistrar(IServiceProvider services) =>
+        services.GetService<IModelRegistrar>()
+        ?? throw new NotSupportedException("The SharpClaw host did not provide model registration.");
 
     private static IModuleLifecycleManager ResolveModuleLifecycle(IServiceProvider services) =>
         services.GetService<IModuleLifecycleManager>()

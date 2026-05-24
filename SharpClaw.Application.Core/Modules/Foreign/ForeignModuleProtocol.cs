@@ -122,6 +122,10 @@ public static class ForeignModuleHostCapabilityProtocol
     public const string AgentUpdatePath = "/.sharpclaw/host/agents/update";
     public const string AgentSetHeaderPath = "/.sharpclaw/host/agents/set-header";
     public const string ChannelSetHeaderPath = "/.sharpclaw/host/channels/set-header";
+    public const string ModelEnsureProviderPath = "/.sharpclaw/host/models/ensure-provider";
+    public const string ModelEnsureModelPath = "/.sharpclaw/host/models/ensure-model";
+    public const string ModelMetadataPath = "/.sharpclaw/host/models/metadata";
+    public const string ModelDeletePath = "/.sharpclaw/host/models/delete";
     public const string ModulesExternalRootPath = "/.sharpclaw/host/modules/external-root";
     public const string ModulesInfoListPath = "/.sharpclaw/host/modules/info/list";
     public const string ModuleRegisteredPath = "/.sharpclaw/host/modules/registered";

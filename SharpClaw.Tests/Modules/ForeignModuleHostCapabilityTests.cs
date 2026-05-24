@@ -385,6 +385,60 @@ public sealed class ForeignModuleHostCapabilityTests
         storage.LastInvocation!.Value.Parameters.GetProperty("id").GetString().Should().Be("sample");
     }
 
+    [Test]
+    public async Task HostCapabilityServerForwardsModelRegistrarCapabilities()
+    {
+        var registrar = new RecordingModelRegistrar();
+        await using var services = new ServiceCollection()
+            .AddSingleton<IModelRegistrar>(registrar)
+            .BuildServiceProvider();
+        await using var server = ForeignModuleHostCapabilityServer.Start("sample_module", services);
+        using var client = CreateClient(server);
+        var modelId = Guid.NewGuid();
+
+        using var ensureProviderResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModelEnsureProviderPath,
+            new { providerKey = "local", displayName = "Local" });
+        using var ensureModelResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModelEnsureModelPath,
+            new
+            {
+                modelName = "demo.gguf",
+                providerId = registrar.ProviderId,
+                capabilityTags = new[] { "chat" },
+            });
+        using var metadataResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModelMetadataPath,
+            new { modelId });
+        using var deleteResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ModelDeletePath,
+            new { modelId });
+
+        ensureProviderResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        ensureModelResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        metadataResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var providerPayload = JsonDocument.Parse(await ensureProviderResponse.Content.ReadAsStringAsync());
+        providerPayload.RootElement.GetProperty("id").GetGuid().Should().Be(registrar.ProviderId);
+        var modelPayload = JsonDocument.Parse(await ensureModelResponse.Content.ReadAsStringAsync());
+        modelPayload.RootElement.GetProperty("id").GetGuid().Should().Be(registrar.ModelId);
+        var metadataPayload = JsonDocument.Parse(await metadataResponse.Content.ReadAsStringAsync());
+        metadataPayload.RootElement.GetProperty("metadata").GetProperty("name").GetString()
+            .Should()
+            .Be("demo.gguf");
+        var deletePayload = JsonDocument.Parse(await deleteResponse.Content.ReadAsStringAsync());
+        deletePayload.RootElement.GetProperty("value").GetBoolean().Should().BeTrue();
+
+        registrar.EnsureProviderCall.Should().Be(("local", "Local"));
+        registrar.EnsureModelCall.Should().NotBeNull();
+        registrar.EnsureModelCall!.Value.ModelName.Should().Be("demo.gguf");
+        registrar.EnsureModelCall!.Value.ProviderId.Should().Be(registrar.ProviderId);
+        registrar.EnsureModelCall!.Value.CapabilityTags.Should().Equal("chat");
+        registrar.MetadataModelId.Should().Be(modelId);
+        registrar.DeletedModelId.Should().Be(modelId);
+    }
+
     private static HttpClient CreateClient(ForeignModuleHostCapabilityServer server)
     {
         var client = new HttpClient { BaseAddress = server.Address };
@@ -763,6 +817,56 @@ public sealed class ForeignModuleHostCapabilityTests
             {
                 value = parameters.GetProperty("id").GetString() + ":" + operation,
             }));
+        }
+    }
+
+    private sealed class RecordingModelRegistrar : IModelRegistrar
+    {
+        public Guid ProviderId { get; } = Guid.NewGuid();
+        public Guid ModelId { get; } = Guid.NewGuid();
+        public (string ProviderKey, string DisplayName)? EnsureProviderCall { get; private set; }
+        public (string ModelName, Guid ProviderId, IReadOnlyList<string> CapabilityTags)? EnsureModelCall { get; private set; }
+        public Guid? MetadataModelId { get; private set; }
+        public Guid? DeletedModelId { get; private set; }
+
+        public Task<Guid> EnsureProviderAsync(
+            string providerKey,
+            string displayName,
+            CancellationToken ct = default)
+        {
+            EnsureProviderCall = (providerKey, displayName);
+            return Task.FromResult(ProviderId);
+        }
+
+        public Task<Guid> EnsureModelAsync(
+            string modelName,
+            Guid providerId,
+            IReadOnlyList<string> capabilityTags,
+            CancellationToken ct = default)
+        {
+            EnsureModelCall = (modelName, providerId, capabilityTags);
+            return Task.FromResult(ModelId);
+        }
+
+        public Task<ModelMetadata?> GetModelMetadataAsync(
+            Guid modelId,
+            CancellationToken ct = default)
+        {
+            MetadataModelId = modelId;
+            return Task.FromResult<ModelMetadata?>(
+                new(
+                    "demo.gguf",
+                    ProviderId,
+                    "Local",
+                    "local",
+                    CustomId: null,
+                    CapabilityTags: new HashSet<string>(StringComparer.Ordinal) { "chat" }));
+        }
+
+        public Task<bool> DeleteModelAsync(Guid modelId, CancellationToken ct = default)
+        {
+            DeletedModelId = modelId;
+            return Task.FromResult(true);
         }
     }
 

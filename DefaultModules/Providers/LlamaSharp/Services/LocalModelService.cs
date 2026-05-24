@@ -1,6 +1,4 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
-using SharpClaw.Modules.Providers.LlamaSharp.Models;
 using SharpClaw.Providers.Common;
 using SharpClaw.Providers.LocalCommon;
 using SharpClaw.Modules.Providers.LlamaSharp.LocalModels;
@@ -13,7 +11,7 @@ using SharpClaw.Utils.Security;
 namespace SharpClaw.Modules.Providers.LlamaSharp.Services;
 
 public sealed class LocalModelService(
-    LlamaSharpDbContext db,
+    LocalModelStore store,
     HuggingFaceUrlResolver urlResolver,
     ModelDownloadManager downloadManager,
     LocalInferenceProcessManager processManager,
@@ -56,7 +54,7 @@ public sealed class LocalModelService(
         var (modelId, fileId) = await CreateOrReuseDownloadPlaceholderAsync(
             modelName, providerId, defaultCapability, target, ct);
 
-        var dbProgress = new ThrottledDbProgressWriter(db, fileId, progress);
+        var dbProgress = new ThrottledDbProgressWriter(store, fileId, progress);
         try
         {
             await downloadManager.DownloadAsync(target.DownloadUrl, target.DestPath, dbProgress, ct);
@@ -102,62 +100,28 @@ public sealed class LocalModelService(
 
         var modelId = await registrar.EnsureModelAsync(modelName, providerId, tags, ct);
 
-        var file = await db.LocalModelFiles
-            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct);
-        if (file is null)
-        {
-            file = new LocalModelFileDB
-            {
-                ModelId = modelId,
-                SourceUrl = target.RequestUrl,
-                FilePath = target.DestPath,
-                FileSizeBytes = 0,
-                Quantization = target.Target.Quantization,
-                Status = LocalModelStatus.Downloading,
-                DownloadProgress = 0.0,
-            };
-            db.LocalModelFiles.Add(file);
-        }
-        else if (file.Status == LocalModelStatus.Downloading)
-        {
-            throw new InvalidOperationException(
-                $"A download for model '{modelName}' is already in progress.");
-        }
-        else
-        {
-            file.SourceUrl = target.RequestUrl;
-            file.FilePath = target.DestPath;
-            file.Quantization = target.Target.Quantization;
-            file.Status = LocalModelStatus.Downloading;
-            file.DownloadProgress = 0.0;
-            file.FileSizeBytes = 0;
-        }
-
-        await db.SaveChangesAsync(ct);
-        return (modelId, file.Id);
+        return await store.CreateOrReuseDownloadPlaceholderAsync(
+            modelId,
+            target.Target,
+            target.RequestUrl,
+            target.DestPath,
+            ct);
     }
 
     private async Task MarkDownloadFailedAsync(Guid fileId, CancellationToken ct)
     {
-        _ = ct;
-        var file = await db.LocalModelFiles.FirstOrDefaultAsync(f => f.Id == fileId, CancellationToken.None);
-        if (file is null) return;
-        file.Status = LocalModelStatus.Failed;
-        await db.SaveChangesAsync(CancellationToken.None);
+        await store.MarkDownloadFailedAsync(fileId, ct);
     }
 
     private async Task<ModelResponse> FinaliseDownloadAsync(
         Guid modelId, Guid fileId, ResolvedDownloadTarget target, CancellationToken ct)
     {
-        var file = await db.LocalModelFiles.FirstAsync(f => f.Id == fileId, ct);
-
-        file.FilePath = target.DestPath;
-        file.FileSizeBytes = new FileInfo(target.DestPath).Length;
-        file.Status = LocalModelStatus.Ready;
-        file.DownloadProgress = 1.0;
-        file.Quantization = target.Target.Quantization;
-
-        await db.SaveChangesAsync(ct);
+        await store.FinaliseDownloadAsync(
+            fileId,
+            target.Target,
+            target.DestPath,
+            new FileInfo(target.DestPath).Length,
+            ct);
 
         var meta = await registrar.GetModelMetadataAsync(modelId, ct)
             ?? throw new InvalidOperationException($"Model {modelId} disappeared during finalisation.");
@@ -170,7 +134,7 @@ public sealed class LocalModelService(
         ResolvedModelFile Target, string DownloadUrl, string DestPath, string RequestUrl);
 
     private sealed class ThrottledDbProgressWriter(
-        LlamaSharpDbContext db,
+        LocalModelStore store,
         Guid fileId,
         IProgress<double>? inner) : IProgress<double>
     {
@@ -194,11 +158,7 @@ public sealed class LocalModelService(
         {
             try
             {
-                var file = await db.LocalModelFiles
-                    .FirstOrDefaultAsync(f => f.Id == fileId);
-                if (file is null) return;
-                file.DownloadProgress = value;
-                await db.SaveChangesAsync();
+                await store.UpdateDownloadProgressAsync(fileId, value);
             }
             catch
             {
@@ -212,8 +172,7 @@ public sealed class LocalModelService(
     public async Task LoadModelAsync(
         Guid modelId, LoadModelRequest request, CancellationToken ct = default)
     {
-        var localFile = await db.LocalModelFiles
-            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct)
+        var localFile = await store.GetByModelIdAsync(modelId, ct)
             ?? throw new ArgumentException("No local file found for this model.");
 
         if (localFile.Status != LocalModelStatus.Ready)
@@ -234,8 +193,7 @@ public sealed class LocalModelService(
 
     public async Task EnsureReadyForChatAsync(Guid modelId, CancellationToken ct)
     {
-        var localFile = await db.LocalModelFiles
-            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct)
+        var localFile = await store.GetByModelIdAsync(modelId, ct)
             ?? throw new InvalidOperationException("No local file found for this model.");
 
         if (localFile.Status != LocalModelStatus.Ready)
@@ -258,7 +216,7 @@ public sealed class LocalModelService(
     public async Task<IReadOnlyList<LocalModelFileResponse>> ListLocalModelsAsync(
         CancellationToken ct = default)
     {
-        var files = await db.LocalModelFiles.ToListAsync(ct);
+        var files = await store.ListAsync(ct);
 
         var results = new List<LocalModelFileResponse>(files.Count);
         foreach (var f in files)
@@ -276,25 +234,19 @@ public sealed class LocalModelService(
 
     public async Task SetMmprojPathAsync(Guid modelId, string? mmprojPath, CancellationToken ct = default)
     {
-        var localFile = await db.LocalModelFiles
-            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct)
-            ?? throw new ArgumentException("No local file found for this model.");
-
-        localFile.MmprojPath = mmprojPath;
-        await db.SaveChangesAsync(ct);
+        await store.SetMmprojPathAsync(modelId, mmprojPath, ct);
     }
 
     public async Task<bool> DeleteLocalModelAsync(Guid modelId, CancellationToken ct = default)
     {
-        var localFile = await db.LocalModelFiles
-            .FirstOrDefaultAsync(f => f.ModelId == modelId, ct);
+        var localFile = await store.GetByModelIdAsync(modelId, ct);
 
         if (localFile is null) return false;
 
         processManager.Unload(modelId);
 
-        var sharedCount = await db.LocalModelFiles
-            .CountAsync(f => f.FilePath == localFile.FilePath && f.ModelId != modelId, ct);
+        var sharedCount = (await store.ListAsync(ct))
+            .Count(f => f.FilePath == localFile.FilePath && f.ModelId != modelId);
 
         if (sharedCount == 0 && File.Exists(localFile.FilePath))
         {
@@ -302,8 +254,7 @@ public sealed class LocalModelService(
             File.Delete(localFile.FilePath);
         }
 
-        db.LocalModelFiles.Remove(localFile);
-        await db.SaveChangesAsync(ct);
+        await store.DeleteByModelIdAsync(modelId, ct);
 
         await registrar.DeleteModelAsync(modelId, ct);
         return true;

@@ -4,9 +4,8 @@ namespace SharpClaw.Contracts.Modules;
 /// Host→module write adapter exposing a minimal surface for upserting
 /// <c>ProviderDB</c> and <c>ModelDB</c> rows. Implemented by the host
 /// (<c>HostModelRegistrar</c> in <c>Application.Core.Modules</c>) and
-/// consumed by modules that need to register provider/model rows when
-/// they own additional state in their own DbContext (e.g. the LlamaSharp
-/// module owning <c>LocalModelFileDB</c>).
+/// consumed by modules that need to register provider/model rows while
+/// keeping their own runtime state out of the host schema.
 /// </summary>
 public interface IModelRegistrar
 {

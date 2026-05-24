@@ -242,6 +242,35 @@ internal sealed record ForeignModuleSetHeaderRequest
     public string? Header { get; init; }
 }
 
+internal sealed record ForeignModuleModelEnsureProviderRequest
+{
+    public string ProviderKey { get; init; } = string.Empty;
+    public string DisplayName { get; init; } = string.Empty;
+}
+
+internal sealed record ForeignModuleModelEnsureModelRequest
+{
+    public string ModelName { get; init; } = string.Empty;
+    public Guid ProviderId { get; init; }
+    public IReadOnlyList<string> CapabilityTags { get; init; } = [];
+}
+
+internal sealed record ForeignModuleModelMetadataRequest
+{
+    public Guid ModelId { get; init; }
+}
+
+internal sealed record ForeignModuleModelDeleteRequest
+{
+    public Guid ModelId { get; init; }
+}
+
+internal sealed record ForeignModuleGuidResponse(Guid Id);
+
+internal sealed record ForeignModuleModelMetadataResponse(ModelMetadata? Metadata);
+
+internal sealed record ForeignModuleBooleanResponse(bool Value);
+
 internal sealed record ForeignModuleExternalModulesRootResponse(string Directory);
 
 internal sealed record ForeignModuleRegisteredRequest

@@ -26,6 +26,7 @@ internal static class DotNetSidecarHostCapabilityProxies
         services.TryAddSingleton<IHostAgentBridge, HostAgentBridgeProxy>();
         services.TryAddSingleton<ICoreEntityIdProvider, CoreEntityIdProviderProxy>();
         services.TryAddSingleton<IAgentManager, AgentManagerProxy>();
+        services.TryAddSingleton<IModelRegistrar, ModelRegistrarProxy>();
         services.TryAddSingleton<IModuleInfoProvider, ModuleInfoProviderProxy>();
         services.TryAddSingleton<IModuleLifecycleManager, ModuleLifecycleManagerProxy>();
         services.TryAddSingleton<IForeignModuleProtocolContractResolver, ProtocolContractResolverProxy>();
@@ -433,6 +434,51 @@ internal static class DotNetSidecarHostCapabilityProxies
                 .GetAwaiter()
                 .GetResult()
                 .Modules;
+    }
+
+    private sealed class ModelRegistrarProxy(DotNetSidecarHostCapabilityClient client) : IModelRegistrar
+    {
+        public async Task<Guid> EnsureProviderAsync(
+            string providerKey,
+            string displayName,
+            CancellationToken ct = default) =>
+            (await client.PostAsync<ForeignModuleModelEnsureProviderRequest, ForeignModuleGuidResponse>(
+                ForeignModuleHostCapabilityProtocol.ModelEnsureProviderPath,
+                new ForeignModuleModelEnsureProviderRequest
+                {
+                    ProviderKey = providerKey,
+                    DisplayName = displayName,
+                },
+                ct)).Id;
+
+        public async Task<Guid> EnsureModelAsync(
+            string modelName,
+            Guid providerId,
+            IReadOnlyList<string> capabilityTags,
+            CancellationToken ct = default) =>
+            (await client.PostAsync<ForeignModuleModelEnsureModelRequest, ForeignModuleGuidResponse>(
+                ForeignModuleHostCapabilityProtocol.ModelEnsureModelPath,
+                new ForeignModuleModelEnsureModelRequest
+                {
+                    ModelName = modelName,
+                    ProviderId = providerId,
+                    CapabilityTags = capabilityTags,
+                },
+                ct)).Id;
+
+        public async Task<ModelMetadata?> GetModelMetadataAsync(
+            Guid modelId,
+            CancellationToken ct = default) =>
+            (await client.PostAsync<ForeignModuleModelMetadataRequest, ForeignModuleModelMetadataResponse>(
+                ForeignModuleHostCapabilityProtocol.ModelMetadataPath,
+                new ForeignModuleModelMetadataRequest { ModelId = modelId },
+                ct)).Metadata;
+
+        public async Task<bool> DeleteModelAsync(Guid modelId, CancellationToken ct = default) =>
+            (await client.PostAsync<ForeignModuleModelDeleteRequest, ForeignModuleBooleanResponse>(
+                ForeignModuleHostCapabilityProtocol.ModelDeletePath,
+                new ForeignModuleModelDeleteRequest { ModelId = modelId },
+                ct)).Value;
     }
 
     private sealed class ModuleLifecycleManagerProxy(DotNetSidecarHostCapabilityClient client) : IModuleLifecycleManager
