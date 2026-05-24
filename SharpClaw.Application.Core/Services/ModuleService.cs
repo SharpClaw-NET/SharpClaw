@@ -44,7 +44,6 @@ public sealed class ModuleService(
     ModuleDbContextOptions moduleDbContextOptions,
     ModuleJsonPersistenceService? moduleJsonPersistence,
     ModuleEventDispatcher eventDispatcher,
-    ILoggerFactory loggerFactory,
     ILogger<ModuleService> logger,
     ChatCache chatCache,
     IConfiguration? configuration = null,
@@ -465,26 +464,7 @@ public sealed class ModuleService(
         await host.DisposeAsync();
         InvalidateModuleRuntimeState();
 
-        if (host is ExternalModuleHost externalHost)
-        {
-            var (attempts, delay) = ResolveUnloadVerifyOptions();
-            var unloaded = await externalHost.VerifyUnloadedAsync(attempts, delay, ct);
-            logger.LogInformation(
-                "External module '{ModuleId}' unloaded (GC verified: {Verified})", moduleId, unloaded);
-        }
-        else
-        {
-            logger.LogInformation("External module '{ModuleId}' unloaded", moduleId);
-        }
-    }
-
-    private (int Attempts, TimeSpan Delay) ResolveUnloadVerifyOptions()
-    {
-        var attempts = configuration?.GetValue("Modules:UnloadVerifyMaxAttempts", 10) ?? 10;
-        var delayMs = configuration?.GetValue("Modules:UnloadVerifyDelayMs", 100) ?? 100;
-        if (attempts < 1) attempts = 1;
-        if (delayMs < 0) delayMs = 0;
-        return (attempts, TimeSpan.FromMilliseconds(delayMs));
+        logger.LogInformation("External module '{ModuleId}' unloaded", moduleId);
     }
 
     /// <summary>Unload then re-load an external module from its original directory.</summary>
@@ -689,9 +669,7 @@ public sealed class ModuleService(
             return (bundledModule, null);
 
         var runtimeInfo = LoadRuntimeInfo(manifest);
-        runtimeInfo = ResolveBundledDotNetRuntimeInfo(manifest, bundledModule, runtimeInfo);
-        if (!ShouldUseDotNetSidecar(runtimeInfo))
-            return (bundledModule, null);
+        runtimeInfo = ResolveBundledRuntimeInfo(manifest, bundledModule, runtimeInfo);
 
         var moduleDir = PrepareBundledSidecarModuleDirectory(manifest);
         var host = await CreateRuntimeHostAsync(moduleDir, manifest, runtimeInfo, rootServices, ct);
@@ -705,9 +683,8 @@ public sealed class ModuleService(
         IServiceProvider hostServices,
         CancellationToken ct)
     {
-        runtimeInfo = ResolveExternalDotNetRuntimeInfo(manifest, runtimeInfo);
-
-        if (ShouldUseDotNetSidecar(runtimeInfo))
+        runtimeInfo = ResolveExternalRuntimeInfo(manifest, runtimeInfo);
+        if (runtimeInfo.IsDotNet)
         {
             return await ForeignModuleHost.StartAsync(
                 manifest,
@@ -716,13 +693,12 @@ public sealed class ModuleService(
                 ct);
         }
 
-        return ExternalModuleHost.Load(moduleDir, manifest, runtimeInfo, hostServices, loggerFactory);
+        throw new NotSupportedException(
+            $"External module '{manifest.Id}' declares runtime '{runtimeInfo.Runtime}', but production module loading " +
+            "currently has a launcher only for .NET sidecar modules.");
     }
 
-    private bool ShouldUseDotNetSidecar(ModuleManifestRuntimeInfo runtimeInfo) =>
-        runtimeInfo.IsDotNet && runtimeInfo.IsSidecarHostMode;
-
-    private ModuleManifestRuntimeInfo ResolveBundledDotNetRuntimeInfo(
+    private ModuleManifestRuntimeInfo ResolveBundledRuntimeInfo(
         ModuleManifest manifest,
         ISharpClawModule bundledModule,
         ModuleManifestRuntimeInfo runtimeInfo)
@@ -730,20 +706,19 @@ public sealed class ModuleService(
         if (!runtimeInfo.IsDotNet)
             return runtimeInfo;
 
-        var mode = DotNetModuleHostingModeOptions.Resolve(configuration);
-        if (mode == DotNetModuleHostingMode.SidecarOnly)
+        DotNetModuleHostingModeOptions.Resolve(configuration);
+        if (!runtimeInfo.IsSidecarHostMode)
         {
-            EnsureBundledModuleReadyForDotNetSidecar(manifest, bundledModule);
-            return runtimeInfo with { HostMode = ModuleManifestRuntimeInfo.HostModeSidecar };
+            throw new InvalidOperationException(
+                $"Bundled .NET module '{manifest.Id}' must declare \"hostMode\": \"sidecar\". " +
+                "In-process bundled module loading has been removed.");
         }
 
-        if (runtimeInfo.IsSidecarHostMode)
-            EnsureBundledModuleReadyForDotNetSidecar(manifest, bundledModule);
-
+        EnsureBundledModuleReadyForDotNetSidecar(manifest, bundledModule);
         return runtimeInfo;
     }
 
-    private ModuleManifestRuntimeInfo ResolveExternalDotNetRuntimeInfo(
+    private ModuleManifestRuntimeInfo ResolveExternalRuntimeInfo(
         ModuleManifest manifest,
         ModuleManifestRuntimeInfo runtimeInfo)
     {

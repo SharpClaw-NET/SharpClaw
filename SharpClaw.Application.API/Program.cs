@@ -401,10 +401,9 @@ try
     builder.Services.AddHostedService(sp => sp.GetRequiredService<ModuleHealthCheckService>());
 
     // ──────── PHASE 11 ─── Bundled-module discovery + ConfigureServices ────
-    // Discover bundled modules. Modules that declare sidecar host mode are
-    // kept out of parent DI composition by default; legacy in-process modules
-    // still register services before builder.Build() because the container is
-    // sealed after this point.
+    // Discover bundled modules from manifests only. Bundled implementation
+    // assemblies stay out of parent DI; their services are projected later by
+    // sidecar discovery.
     var moduleLoader = ModuleLoader.DiscoverBundled(builder.Configuration);
 
     foreach (var bundledModule in moduleLoader.GetAllBundled())
@@ -518,11 +517,8 @@ try
     var registeredBundledCount = 0;
     var disabledBundledCount = 0;
 
-    // DbContext registry must be populated for every in-process bundled module,
-    // not just enabled ones. Sidecar-manifest modules do not contribute parent
-    // DbContexts here; their services live behind the runtime host. Legacy
-    // in-process modules still need type-table registration so optional
-    // dependencies can resolve lazily without request-time surprises.
+    // Bundled modules no longer contribute parent DbContexts. Any module-owned
+    // state must be surfaced through the sidecar runtime host.
     using (var scope = app.Services.CreateScope())
     {
         var moduleSvc = scope.ServiceProvider.GetRequiredService<ModuleService>();

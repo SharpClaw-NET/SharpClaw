@@ -371,7 +371,7 @@ public sealed class ModuleRegistry
             if (runtimeHost is not null)
                 _runtimeHosts[module.Id] = runtimeHost;
 
-            if (isExternal || runtimeHost is ExternalModuleHost)
+            if (isExternal)
                 _externalModuleIds.Add(module.Id);
 
             _toolDefsCache = null; // Invalidate
@@ -1051,7 +1051,7 @@ public sealed class ModuleRegistry
 
     /// <summary>
     /// Get the runtime host for a module that executes outside the parent host,
-    /// or <c>null</c> if the module is in-process or not registered.
+    /// or <c>null</c> if the module is not registered.
     /// </summary>
     public IModuleRuntimeHost? GetRuntimeHost(string moduleId)
     {
@@ -1066,13 +1066,6 @@ public sealed class ModuleRegistry
         }
     }
 
-    /// <summary>
-    /// Get the <see cref="ExternalModuleHost"/> for a .NET hot-loaded module,
-    /// or <c>null</c> if the module is bundled, foreign-hosted, or not registered.
-    /// </summary>
-    public ExternalModuleHost? GetExternalHost(string moduleId) =>
-        GetRuntimeHost(moduleId) as ExternalModuleHost;
-
     /// <summary>Get all currently registered runtime hosts.</summary>
     public IReadOnlyList<IModuleRuntimeHost> GetRuntimeHosts()
     {
@@ -1080,20 +1073,6 @@ public sealed class ModuleRegistry
         try
         {
             return [.. _runtimeHosts.Values];
-        }
-        finally
-        {
-            _lock.ExitReadLock();
-        }
-    }
-
-    /// <summary>Get all currently registered .NET external module hosts.</summary>
-    public IReadOnlyList<ExternalModuleHost> GetExternalHosts()
-    {
-        _lock.EnterReadLock();
-        try
-        {
-            return [.. _runtimeHosts.Values.OfType<ExternalModuleHost>()];
         }
         finally
         {

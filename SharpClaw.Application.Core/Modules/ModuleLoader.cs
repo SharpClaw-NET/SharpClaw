@@ -1,4 +1,3 @@
-using System.Reflection;
 using System.Text.Json;
 
 using Microsoft.Extensions.Configuration;
@@ -9,9 +8,9 @@ using SharpClaw.Utils.Security;
 namespace SharpClaw.Application.Core.Modules;
 
 /// <summary>
-/// Singleton that holds all bundled (default) module instances and provides
-/// manifest loading. Modules are always instantiated, but only registered
-/// with <see cref="ModuleRegistry"/> when enabled.
+/// Singleton that holds bundled (default) module manifest metadata and provides
+/// manifest loading. Production bundled modules are represented as manifest-only
+/// entries so the parent host never loads their implementation assemblies.
 /// </summary>
 public sealed class ModuleLoader
 {
@@ -36,9 +35,8 @@ public sealed class ModuleLoader
     }
 
     /// <summary>
-    /// Discover bundled modules from manifests and in-process module assemblies.
-    /// Sidecar-manifest modules are represented by manifest metadata so the
-    /// parent host does not load them into its own DI container.
+    /// Discover bundled modules from manifests. Bundled implementation assemblies
+    /// are no longer loaded into the parent process during normal startup.
     /// </summary>
     public static ModuleLoader DiscoverBundled(IConfiguration? configuration = null)
     {
@@ -46,63 +44,21 @@ public sealed class ModuleLoader
         var runtimeInfos = LoadBundledRuntimeInfosFromDisk();
         DotNetModuleHostingModeOptions.Resolve(configuration);
         var manifestOnlyManifests = manifests.Values
-            .Where(manifest =>
-                runtimeInfos.TryGetValue(manifest.Id, out var runtimeInfo)
-                && IsDotNetSidecarManifest(runtimeInfo))
+            .Select(manifest =>
+            {
+                var runtimeInfo = runtimeInfos.TryGetValue(manifest.Id, out var info)
+                    ? info
+                    : ModuleManifestRuntimeInfo.DotNetDefault;
+                EnsureBundledManifestRunsOutOfProcess(manifest, runtimeInfo);
+                return manifest;
+            })
             .ToArray();
         var manifestOnlyIds = manifestOnlyManifests
             .Select(manifest => manifest.Id)
             .ToHashSet(StringComparer.Ordinal);
-        var manifestOnlyAssemblyNames = manifestOnlyManifests
-            .Select(manifest => Path.GetFileNameWithoutExtension(manifest.EntryAssembly))
-            .Where(name => !string.IsNullOrWhiteSpace(name))
-            .ToHashSet(StringComparer.OrdinalIgnoreCase);
-
-        // Module assemblies are only present in the output directory via ProjectReference
-        // but are NOT loaded into the AppDomain unless something forces type resolution.
-        // Explicitly load matching DLLs for modules that still require in-process composition.
-        var baseDir = ResolveApplicationBaseDirectory();
-        foreach (var dll in Directory.GetFiles(baseDir, "SharpClaw.Modules.*.dll"))
-        {
-            try
-            {
-                var assemblyName = Path.GetFileNameWithoutExtension(dll);
-                if (manifestOnlyAssemblyNames.Contains(assemblyName))
-                    continue;
-
-                // Validate the enumerated path stays inside the base directory.
-                var safeDll = PathGuard.EnsureContainedIn(dll, baseDir);
-                Assembly.LoadFrom(safeDll);
-            }
-            catch
-            {
-                // Skip assemblies that fail to load (e.g. native-only, already loaded
-                // under a different identity, or missing transitive dependencies).
-            }
-        }
-
-        var moduleType = typeof(ISharpClawModule);
-        var modules = AppDomain.CurrentDomain.GetAssemblies()
-            .Where(a => !a.IsDynamic)
-            .Where(a => !manifestOnlyAssemblyNames.Contains(a.GetName().Name ?? ""))
-            .SelectMany(a =>
-            {
-                try { return a.GetTypes(); }
-                catch (ReflectionTypeLoadException ex) { return ex.Types.Where(t => t is not null)!; }
-            })
-            .Where(t => t is { IsClass: true, IsAbstract: false }
-                        && moduleType.IsAssignableFrom(t)
-                        && t.GetConstructor(Type.EmptyTypes) is not null)
-            .Select(t => (ISharpClawModule)Activator.CreateInstance(t!)!)
+        var modules = manifestOnlyManifests
+            .Select(manifest => (ISharpClawModule)new ManifestOnlyBundledModule(manifest))
             .ToList();
-
-        foreach (var manifest in manifestOnlyManifests)
-        {
-            if (modules.Any(module => string.Equals(module.Id, manifest.Id, StringComparison.Ordinal)))
-                continue;
-
-            modules.Add(new ManifestOnlyBundledModule(manifest));
-        }
 
         return new ModuleLoader(modules, manifests, manifestOnlyIds);
     }
@@ -233,8 +189,20 @@ public sealed class ModuleLoader
         return all.GetValueOrDefault(moduleId);
     }
 
-    private static bool IsDotNetSidecarManifest(ModuleManifestRuntimeInfo runtimeInfo) =>
-        runtimeInfo.IsDotNet && runtimeInfo.IsSidecarHostMode;
+    private static void EnsureBundledManifestRunsOutOfProcess(
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo)
+    {
+        if (runtimeInfo.IsDotNet && runtimeInfo.IsSidecarHostMode)
+            return;
+
+        if (!runtimeInfo.IsDotNet)
+            return;
+
+        throw new InvalidOperationException(
+            $"Bundled .NET module '{manifest.Id}' must declare \"runtime\": \"dotnet\" and " +
+            "\"hostMode\": \"sidecar\". In-process bundled module loading has been removed.");
+    }
 
     private static string ResolveApplicationBaseDirectory() =>
         Path.GetDirectoryName(typeof(ModuleLoader).Assembly.Location)!;

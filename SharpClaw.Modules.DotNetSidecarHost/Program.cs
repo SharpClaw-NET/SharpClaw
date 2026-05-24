@@ -79,7 +79,7 @@ internal sealed class DotNetSidecarHost
 
         var loadContext = new ModuleLoadContext(entryAssemblyPath);
         var assembly = loadContext.LoadFromAssemblyPath(Path.GetFullPath(entryAssemblyPath));
-        var module = ExternalModuleHost.CreateModuleInstance(
+        var module = DotNetModuleAssemblyLoader.CreateModuleInstance(
             assembly,
             manifest,
             runtimeInfo,

@@ -1,11 +1,10 @@
-using System.Reflection;
 using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
@@ -45,36 +44,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
     }
 
     [Test]
-    public async Task ExternalModuleHostRejectsUnsupportedForeignRuntimeClearly()
-    {
-        await using var host = ChatHarnessHost.Create();
-        var moduleDir = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "foreign-runtime-modules",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
-        var manifest = new ModuleManifest(
-            "synthetic_node_module",
-            "Synthetic Node Module",
-            "1.0.0",
-            "snm",
-            "server.js",
-            "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.Node, "server.js");
-
-        var act = () => ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            runtimeInfo,
-            host.Services,
-            host.Services.GetRequiredService<ILoggerFactory>());
-
-        act.Should()
-            .Throw<NotSupportedException>()
-            .WithMessage("*runtime 'node'*only supports 'dotnet'*not implemented yet*");
-    }
-
-    [Test]
     public async Task NuGetPackageWithForeignRuntimeFailsWithUnsupportedRuntime()
     {
         var packageSource = Path.Combine(
@@ -101,16 +70,12 @@ public sealed class SyntheticExternalModuleLifecycleTests
     }
 
     [Test]
-    public async Task NuGetPackageModuleMaterializesAndLoadsThroughExternalModuleHost()
+    public async Task NuGetPackageModuleMaterializesAndLoadsThroughSidecarModuleService()
     {
-        await using var host = ChatHarnessHost.Create();
+        await using var host = CreateSidecarHarness();
         var packageSource = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "nuget-module-source",
-            Guid.NewGuid().ToString("N"));
-        var packageCache = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "nuget-module-cache",
             Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageSource);
 
@@ -118,25 +83,21 @@ public sealed class SyntheticExternalModuleLifecycleTests
         const string version = "1.0.0";
         CreateSyntheticExternalModulePackage(packageSource, packageId, version);
         var registry = host.Services.GetRequiredService<ModuleRegistry>();
-        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
-            new NuGetModulePackageReference(packageId, version, packageSource),
-            packageCache);
-        var manifest = JsonSerializer.Deserialize<ModuleManifest>(
-            await File.ReadAllTextAsync(Path.Combine(moduleDir, "module.json")),
-            SecureJsonOptions.Manifest)!;
-        var moduleHost = ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            host.Services,
-            host.Services.GetRequiredService<ILoggerFactory>());
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
 
         try
         {
-            registry.Register(moduleHost.Module, moduleHost);
-            await moduleHost.Module.InitializeAsync(moduleHost.Services, CancellationToken.None);
+            var response = await moduleService.LoadExternalPackageAsync(
+                new NuGetModulePackageReference(packageId, version, packageSource),
+                host.RootServices,
+                CancellationToken.None);
 
+            response.ModuleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
             registry.GetModule(SyntheticExternalLifecycleModule.ModuleId).Should().NotBeNull();
+            registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+                .Should()
+                .BeAssignableTo<IForeignModuleRuntimeHost>();
             registry.TryResolve(SyntheticExternalLifecycleModule.JobTool, out var moduleId, out var toolName)
                 .Should().BeTrue();
             moduleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
@@ -145,32 +106,32 @@ public sealed class SyntheticExternalModuleLifecycleTests
         finally
         {
             if (registry.GetModule(SyntheticExternalLifecycleModule.ModuleId) is not null)
-            {
-                await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-                await moduleHost.Module.ShutdownAsync();
-                registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-            }
-
-            await moduleHost.DisposeAsync();
+                await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
         }
     }
 
     [Test]
     public async Task ExternalModuleUnloadRemovesModuleOwnedSurfacesAndKeepsCoreState()
     {
-        await using var host = ChatHarnessHost.Create();
+        await using var host = CreateSidecarHarness();
         var registry = host.Services.GetRequiredService<ModuleRegistry>();
         var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
         var triggerRegistry = new TaskTriggerSourceRegistry([], moduleRegistry: registry);
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
 
-        var moduleHost = LoadSyntheticExternalModule(host.Services);
-        registry.Register(moduleHost.Module, moduleHost);
-        await moduleHost.Module.InitializeAsync(moduleHost.Services, CancellationToken.None);
+        var moduleDir = CreateSyntheticExternalModuleDirectory();
+        await moduleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            host.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
 
         try
         {
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
-            registry.GetExternalHost(SyntheticExternalLifecycleModule.ModuleId).Should().BeSameAs(moduleHost);
+            registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+                .Should()
+                .BeAssignableTo<IForeignModuleRuntimeHost>();
             registry.GetHeaderTag(SyntheticExternalLifecycleModule.HeaderTag).Should().NotBeNull();
             registry.IsInlineTool(SyntheticExternalLifecycleModule.InlineTool).Should().BeTrue();
             registry.TryResolve(SyntheticExternalLifecycleModule.JobTool, out var moduleId, out var toolName)
@@ -213,10 +174,7 @@ public sealed class SyntheticExternalModuleLifecycleTests
                     endDate: DateTimeOffset.UnixEpoch.AddDays(1));
             costs!.TotalCost.Should().Be(3.21m);
 
-            await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-            await moduleHost.Module.ShutdownAsync();
-            registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-            await moduleHost.DisposeAsync();
+            await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
 
             registry.GetModule(SyntheticExternalLifecycleModule.ModuleId).Should().BeNull();
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeFalse();
@@ -240,16 +198,11 @@ public sealed class SyntheticExternalModuleLifecycleTests
         finally
         {
             if (registry.GetModule(SyntheticExternalLifecycleModule.ModuleId) is not null)
-            {
-                await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-                await moduleHost.Module.ShutdownAsync();
-                registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-                await moduleHost.DisposeAsync();
-            }
+                await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
         }
     }
 
-    private static ExternalModuleHost LoadSyntheticExternalModule(IServiceProvider hostServices)
+    private static string CreateSyntheticExternalModuleDirectory()
     {
         var assemblyPath = typeof(SyntheticExternalLifecycleModule).Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
@@ -265,22 +218,11 @@ public sealed class SyntheticExternalModuleLifecycleTests
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
             File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
 
-        var manifest = new ModuleManifest(
-            SyntheticExternalLifecycleModule.ModuleId,
-            "Synthetic External Lifecycle",
-            "1.0.0",
-            SyntheticExternalLifecycleModule.ToolPrefixValue,
-            Path.GetFileName(assemblyPath),
-            "0.0.0");
         File.WriteAllText(
             Path.Combine(moduleDir, "module.json"),
-            JsonSerializer.Serialize(manifest));
+            SyntheticExternalManifestJson("1.0.0", Path.GetFileName(assemblyPath)));
 
-        return ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            hostServices,
-            hostServices.GetRequiredService<ILoggerFactory>());
+        return moduleDir;
     }
 
     private static void CreateSyntheticExternalModulePackage(
@@ -291,16 +233,12 @@ public sealed class SyntheticExternalModuleLifecycleTests
         var assemblyPath = typeof(SyntheticExternalLifecycleModule).Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
         var packagePath = Path.Combine(packageSource, $"{packageId}.{version}.nupkg");
-        var manifest = new ModuleManifest(
-            SyntheticExternalLifecycleModule.ModuleId,
-            "Synthetic External Lifecycle",
-            version,
-            SyntheticExternalLifecycleModule.ToolPrefixValue,
-            Path.GetFileName(assemblyPath),
-            "0.0.0");
 
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
-        WriteTextEntry(archive, "module.json", JsonSerializer.Serialize(manifest));
+        WriteTextEntry(
+            archive,
+            "module.json",
+            SyntheticExternalManifestJson(version, Path.GetFileName(assemblyPath)));
         WriteTextEntry(
             archive,
             $"{packageId}.nuspec",
@@ -366,5 +304,57 @@ public sealed class SyntheticExternalModuleLifecycleTests
         var entry = archive.CreateEntry(entryName);
         using var writer = new StreamWriter(entry.Open());
         writer.Write(text);
+    }
+
+    private static ChatHarnessHost CreateSidecarHarness() =>
+        ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Modules:DotNetSidecarHostPath"] = ResolveDotNetSidecarHostPath(),
+        });
+
+    private static string SyntheticExternalManifestJson(string version, string entryAssembly) =>
+        $$"""
+        {
+          "id": "{{SyntheticExternalLifecycleModule.ModuleId}}",
+          "displayName": "Synthetic External Lifecycle",
+          "version": "{{version}}",
+          "toolPrefix": "{{SyntheticExternalLifecycleModule.ToolPrefixValue}}",
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "{{entryAssembly}}",
+          "moduleType": "{{typeof(SyntheticExternalLifecycleModule).FullName}}",
+          "minHostVersion": "0.0.0"
+        }
+        """;
+
+    private static string ResolveDotNetSidecarHostPath()
+    {
+        var root = ResolveRepoRoot();
+        var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
+        var hostPath = Path.Combine(
+            root,
+            "SharpClaw.Modules.DotNetSidecarHost",
+            "bin",
+            configuration,
+            "net10.0",
+            "SharpClaw.Modules.DotNetSidecarHost.dll");
+
+        File.Exists(hostPath).Should().BeTrue(
+            $"shared .NET sidecar host must be built before tests run: '{hostPath}'");
+        return hostPath;
+    }
+
+    private static string ResolveRepoRoot()
+    {
+        var current = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "Directory.Packages.props")))
+                return current.FullName;
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate SharpClaw repository root.");
     }
 }

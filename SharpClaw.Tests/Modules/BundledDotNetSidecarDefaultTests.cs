@@ -67,7 +67,7 @@ public sealed class BundledDotNetSidecarDefaultTests
 
         act.Should()
             .Throw<InvalidOperationException>()
-            .WithMessage("*Allowed values are manifest and sidecar-only*");
+            .WithMessage("*Allowed values are sidecar-only, default, and auto*");
     }
 
     [Test]

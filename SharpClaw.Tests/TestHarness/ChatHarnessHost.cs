@@ -7,6 +7,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
 using SharpClaw.Contracts.Entities;
@@ -15,9 +16,13 @@ using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Infrastructure.Persistence.JSON;
+using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Modules.TestHarness;
+using SharpClaw.Utils.Instances;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -25,13 +30,16 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 {
     private readonly ServiceProvider _root;
     private readonly AsyncServiceScope _scope;
+    private readonly string _instanceRoot;
 
-    private ChatHarnessHost(ServiceProvider root, AsyncServiceScope scope)
+    private ChatHarnessHost(ServiceProvider root, AsyncServiceScope scope, string instanceRoot)
     {
         _root = root;
         _scope = scope;
+        _instanceRoot = instanceRoot;
     }
 
+    public IServiceProvider RootServices => _root;
     public IServiceProvider Services => _scope.ServiceProvider;
     public SharpClawDbContext Db => Services.GetRequiredService<SharpClawDbContext>();
     public ChatService Chat => Services.GetRequiredService<ChatService>();
@@ -50,11 +58,20 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
             .Build();
+        var instanceRoot = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "chat-harness",
+            Guid.NewGuid().ToString("N"));
+        var instancePaths = new SharpClawInstancePaths(
+            SharpClawInstanceKind.Backend,
+            explicitInstanceRoot: instanceRoot);
+        instancePaths.EnsureDirectories();
 
         var services = new ServiceCollection();
         var databaseRoot = new InMemoryDatabaseRoot();
         var databaseName = "SharpClawHarness_" + Guid.NewGuid().ToString("N");
         services.AddSingleton<IConfiguration>(configuration);
+        services.AddSingleton(instancePaths);
         services.AddLogging();
         services.AddHttpClient();
         services.AddSingleton(new EncryptionOptions
@@ -70,11 +87,27 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             options => options.UseInMemoryDatabase(
                 databaseName,
                 databaseRoot));
+        services.AddSingleton(new ModuleLoader(module));
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ThreadActivitySignal>();
         services.AddSingleton<ChatCache>();
         services.AddSingleton<ProviderApiClientFactory>();
+        services.AddSingleton<RuntimeModuleDbContextRegistry>();
+        services.AddSingleton<ModulePersistenceRegistrationFactory>();
+        services.AddSingleton(new ModuleDbContextOptions
+        {
+            StorageMode = StorageMode.SQLite,
+            ConnectionString = "Data Source=:memory:",
+        });
+        services.AddSingleton(new JsonFileOptions
+        {
+            DataDirectory = Path.Combine(instanceRoot, "Data"),
+        });
+        services.AddSingleton<IPersistenceFileSystem, InMemoryPersistenceFileSystem>();
+        services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
+        services.AddSingleton<ModuleJsonPersistenceService>();
+        services.AddSingleton<ForeignModuleTaskContextRegistry>();
         services.AddSingleton<CountingPersistenceEntityResolver>();
         services.AddScoped<TokenService>();
         services.AddScoped<AuthService>();
@@ -93,13 +126,22 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();
+        services.AddScoped<ModuleService>();
         services.AddScoped<ModuleExecutionContext>();
+        services.AddScoped<IModuleConfigStore>(sp =>
+        {
+            var context = sp.GetRequiredService<ModuleExecutionContext>();
+            var db = sp.GetRequiredService<SharpClawDbContext>();
+            return new ModuleConfigStore(db, context.ModuleId ?? "");
+        });
         services.AddScoped<ISharpClawDataContext>(
             sp => sp.GetRequiredService<SharpClawDbContext>());
         services.AddSingleton<ModuleEventDispatcher>(sp => new ModuleEventDispatcher(
             sp,
             sp.GetRequiredService<IConfiguration>(),
             NullLogger<ModuleEventDispatcher>.Instance));
+        services.AddSingleton<ISharpClawEventSinkRegistry>(
+            sp => sp.GetRequiredService<ModuleEventDispatcher>());
 
         module.ConfigureServices(services);
 
@@ -107,7 +149,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         var registry = root.GetRequiredService<ModuleRegistry>();
         registry.Register(module);
 
-        return new ChatHarnessHost(root, root.CreateAsyncScope());
+        return new ChatHarnessHost(root, root.CreateAsyncScope(), instanceRoot);
     }
 
     public async Task<SeededChat> SeedChatAsync(
@@ -223,8 +265,20 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        foreach (var runtimeHost in _root.GetRequiredService<ModuleRegistry>().GetRuntimeHosts())
+            await runtimeHost.DisposeAsync();
+
         await _scope.DisposeAsync();
         await _root.DisposeAsync();
+
+        try
+        {
+            if (Directory.Exists(_instanceRoot))
+                Directory.Delete(_instanceRoot, recursive: true);
+        }
+        catch
+        {
+        }
     }
 }
 
