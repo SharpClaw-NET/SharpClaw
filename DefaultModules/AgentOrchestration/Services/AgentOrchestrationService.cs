@@ -1,9 +1,6 @@
 using System.Text.Json;
 
-using Microsoft.EntityFrameworkCore;
-
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Modules.AgentOrchestration.Models;
 
 namespace SharpClaw.Modules.AgentOrchestration.Services;
 
@@ -12,14 +9,10 @@ namespace SharpClaw.Modules.AgentOrchestration.Services;
 /// for the Agent Orchestration module.
 /// </summary>
 internal sealed class AgentOrchestrationService(
-    AgentOrchestrationDbContext db,
+    ScheduledJobStore scheduledJobs,
+    SkillStore skills,
     IAgentManager agentManager)
 {
-    private static readonly JsonSerializerOptions PayloadOptions = new()
-    {
-        PropertyNameCaseInsensitive = true
-    };
-
     // ═══════════════════════════════════════════════════════════════
     // CREATE SUB-AGENT
     // ═══════════════════════════════════════════════════════════════
@@ -74,40 +67,37 @@ internal sealed class AgentOrchestrationService(
     public async Task<string> EditTaskAsync(
         Guid resourceId, JsonElement parameters, CancellationToken ct)
     {
-        var task = await db.ScheduledJobs
-            .FirstOrDefaultAsync(t => t.Id == resourceId, ct)
+        var changes = new List<string>();
+        var task = await scheduledJobs.UpdateAsync(resourceId, storedTask =>
+        {
+            if (parameters.TryGetProperty("name", out var nameProp)
+                && nameProp.GetString() is { Length: > 0 } newName)
+            {
+                storedTask.Name = newName;
+                changes.Add($"name='{newName}'");
+            }
+
+            if (parameters.TryGetProperty("repeatIntervalMinutes", out var intervalProp)
+                && intervalProp.TryGetInt32(out var intervalMinutes))
+            {
+                storedTask.RepeatInterval = intervalMinutes > 0
+                    ? TimeSpan.FromMinutes(intervalMinutes)
+                    : null;
+                changes.Add($"repeatInterval={storedTask.RepeatInterval?.ToString() ?? "none"}");
+            }
+
+            if (parameters.TryGetProperty("maxRetries", out var retriesProp)
+                && retriesProp.TryGetInt32(out var retries))
+            {
+                storedTask.MaxRetries = retries;
+                changes.Add($"maxRetries={retries}");
+            }
+        }, ct)
             ?? throw new InvalidOperationException(
                 $"ScheduledJob {resourceId} not found.");
 
-        var changes = new List<string>();
-
-        if (parameters.TryGetProperty("name", out var nameProp)
-            && nameProp.GetString() is { Length: > 0 } newName)
-        {
-            task.Name = newName;
-            changes.Add($"name='{newName}'");
-        }
-
-        if (parameters.TryGetProperty("repeatIntervalMinutes", out var intervalProp)
-            && intervalProp.TryGetInt32(out var intervalMinutes))
-        {
-            task.RepeatInterval = intervalMinutes > 0
-                ? TimeSpan.FromMinutes(intervalMinutes)
-                : null;
-            changes.Add($"repeatInterval={task.RepeatInterval?.ToString() ?? "none"}");
-        }
-
-        if (parameters.TryGetProperty("maxRetries", out var retriesProp)
-            && retriesProp.TryGetInt32(out var retries))
-        {
-            task.MaxRetries = retries;
-            changes.Add($"maxRetries={retries}");
-        }
-
         if (changes.Count == 0)
             return $"Task '{task.Name}' (id={task.Id}) — no changes applied.";
-
-        await db.SaveChangesAsync(ct);
 
         var summary = string.Join(", ", changes);
         return $"Updated task '{task.Name}' (id={task.Id}): {summary}.";
@@ -120,8 +110,7 @@ internal sealed class AgentOrchestrationService(
     public async Task<string> AccessSkillAsync(
         Guid resourceId, CancellationToken ct)
     {
-        var skill = await db.Skills
-            .FirstOrDefaultAsync(s => s.Id == resourceId, ct)
+        var skill = await skills.GetByIdAsync(resourceId, ct)
             ?? throw new InvalidOperationException(
                 $"Skill {resourceId} not found.");
 

@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
@@ -72,13 +71,11 @@ public sealed class ScheduledJobWorker(
     internal async Task ProcessDueJobsAsync(CancellationToken ct)
     {
         using var scope = scopeFactory.CreateScope();
-        var db = scope.ServiceProvider.GetRequiredService<AgentOrchestrationDbContext>();
+        var store = scope.ServiceProvider.GetRequiredService<ScheduledJobStore>();
 
         var now = DateTimeOffset.UtcNow;
 
-        var dueJobs = await db.ScheduledJobs
-            .Where(t => t.Status == ScheduledTaskStatus.Pending && t.NextRunAt <= now)
-            .ToListAsync(ct);
+        var dueJobs = await store.ListDueAsync(now, ct);
 
         var missedThreshold = TimeSpan.FromMinutes(
             configuration.GetValue("Scheduler:MissedFireThresholdMinutes", 60));
@@ -88,14 +85,15 @@ public sealed class ScheduledJobWorker(
             bool wasMissed = (now - job.NextRunAt) > missedThreshold;
             if (job.MissedFirePolicy == MissedFirePolicy.Skip && wasMissed)
             {
-                AdvanceNextRunAt(job, now);
-                await db.SaveChangesAsync(ct);
+                await store.UpdateAsync(job.Id, storedJob => AdvanceNextRunAt(storedJob, now), ct);
                 continue;
             }
 
-            job.Status = ScheduledTaskStatus.Running;
-            job.LastRunAt = now;
-            await db.SaveChangesAsync(ct);
+            await store.UpdateAsync(job.Id, storedJob =>
+            {
+                storedJob.Status = ScheduledTaskStatus.Running;
+                storedJob.LastRunAt = now;
+            }, ct);
 
             try
             {
@@ -123,35 +121,45 @@ public sealed class ScheduledJobWorker(
                         job.Name, job.Id, instanceId);
                 }
 
-                job.Status = ScheduledTaskStatus.Completed;
-                job.RetryCount = 0;
-                job.LastError = null;
-
-                AdvanceNextRunAt(job, now);
+                await store.UpdateAsync(job.Id, storedJob =>
+                {
+                    storedJob.Status = ScheduledTaskStatus.Completed;
+                    storedJob.RetryCount = 0;
+                    storedJob.LastError = null;
+                    AdvanceNextRunAt(storedJob, now);
+                }, ct);
 
                 logger.LogInformation("Scheduled job {Name} ({Id}) completed.", job.Name, job.Id);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
-                job.RetryCount++;
-                job.LastError = ex.Message;
+                var updated = await store.UpdateAsync(job.Id, storedJob =>
+                {
+                    storedJob.RetryCount++;
+                    storedJob.LastError = ex.Message;
 
-                if (job.RetryCount < job.MaxRetries)
+                    if (storedJob.RetryCount < storedJob.MaxRetries)
+                    {
+                        storedJob.Status = ScheduledTaskStatus.Pending;
+                        storedJob.NextRunAt = now.AddSeconds(30 * storedJob.RetryCount);
+                    }
+                    else
+                    {
+                        storedJob.Status = ScheduledTaskStatus.Failed;
+                    }
+                }, ct);
+
+                if (updated is not null && updated.Status == ScheduledTaskStatus.Pending)
                 {
-                    job.Status = ScheduledTaskStatus.Pending;
-                    job.NextRunAt = now.AddSeconds(30 * job.RetryCount);
                     logger.LogWarning(ex, "Scheduled job {Name} failed (attempt {Attempt}/{Max}), retrying.",
-                        job.Name, job.RetryCount, job.MaxRetries);
+                        updated.Name, updated.RetryCount, updated.MaxRetries);
                 }
-                else
+                else if (updated is not null)
                 {
-                    job.Status = ScheduledTaskStatus.Failed;
                     logger.LogError(ex, "Scheduled job {Name} failed permanently after {Max} attempts.",
-                        job.Name, job.MaxRetries);
+                        updated.Name, updated.MaxRetries);
                 }
             }
-
-            await db.SaveChangesAsync(ct);
         }
     }
 

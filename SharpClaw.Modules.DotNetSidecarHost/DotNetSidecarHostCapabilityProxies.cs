@@ -32,6 +32,14 @@ internal static class DotNetSidecarHostCapabilityProxies
         services.TryAddSingleton<IForeignModuleProtocolContractResolver, ProtocolContractResolverProxy>();
         services.TryAddSingleton<IModuleStorageGateway, ModuleStorageGatewayProxy>();
         services.TryAddSingleton<IAgentJobController, AgentJobControllerProxy>();
+        services.TryAddSingleton<ISharpClawEventSinkRegistry, NoOpEventSinkRegistry>();
+    }
+
+    private sealed class NoOpEventSinkRegistry : ISharpClawEventSinkRegistry
+    {
+        public void InvalidateCache()
+        {
+        }
     }
 
     private sealed class ModuleConfigStoreProxy(DotNetSidecarHostCapabilityClient client) : IModuleConfigStore

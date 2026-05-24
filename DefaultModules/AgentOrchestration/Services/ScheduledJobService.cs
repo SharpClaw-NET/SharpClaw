@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Modules.AgentOrchestration.Models;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
@@ -13,7 +12,7 @@ namespace SharpClaw.Modules.AgentOrchestration.Services;
 /// task/job runs.
 /// </summary>
 public sealed class ScheduledJobService(
-    AgentOrchestrationDbContext db,
+    ScheduledJobStore store,
     ILogger<ScheduledJobService> logger) : IScheduledJobService
 {
     public const string ErrBothSchedules = "SCHED001";
@@ -62,74 +61,70 @@ public sealed class ScheduledJobService(
             MaxRetries          = request.MaxRetries,
         };
 
-        db.ScheduledJobs.Add(entity);
-        await db.SaveChangesAsync(ct);
-        return ToResponse(entity);
+        return ToResponse(await store.CreateAsync(entity, ct));
     }
 
     public async Task<ScheduledJobResponse?> GetByIdAsync(
         Guid id, CancellationToken ct = default)
     {
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
+        var entity = await store.GetByIdAsync(id, ct);
         return entity is null ? null : ToResponse(entity);
     }
 
     public async Task<IReadOnlyList<ScheduledJobResponse>> ListAsync(
         CancellationToken ct = default)
-        => await db.ScheduledJobs
-            .OrderBy(j => j.NextRunAt)
-            .Select(j => ToResponse(j))
-            .ToListAsync(ct);
+    {
+        var jobs = await store.ListAsync(ct);
+        return [.. jobs.OrderBy(j => j.NextRunAt).Select(ToResponse)];
+    }
 
     public async Task<ScheduledJobResponse?> UpdateAsync(
         Guid id, UpdateScheduledJobRequest request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
-        if (entity is null) return null;
-
-        var effectiveCron     = request.CronExpression  ?? entity.CronExpression;
-        var effectiveTz       = request.CronTimezone    ?? entity.CronTimezone;
-        var effectiveInterval = request.RepeatInterval  ?? entity.RepeatInterval;
-        var effectiveNext     = request.NextRunAt       ?? entity.NextRunAt;
-
-        if (request.CronExpression is not null || request.CronTimezone is not null ||
-            request.RepeatInterval is not null || request.NextRunAt is not null)
+        var warnings = new List<(string Name, string Warning)>();
+        var entity = await store.UpdateAsync(id, storedJob =>
         {
-            var (nextRunAt, warnings) = ValidateCronFields(
-                effectiveCron, effectiveTz, effectiveInterval, effectiveNext);
+            var effectiveCron     = request.CronExpression  ?? storedJob.CronExpression;
+            var effectiveTz       = request.CronTimezone    ?? storedJob.CronTimezone;
+            var effectiveInterval = request.RepeatInterval  ?? storedJob.RepeatInterval;
+            var effectiveNext     = request.NextRunAt       ?? storedJob.NextRunAt;
 
-            foreach (var w in warnings)
-                logger.LogWarning("Scheduled job '{Name}' update: {Warning}", entity.Name, w);
+            if (request.CronExpression is not null || request.CronTimezone is not null ||
+                request.RepeatInterval is not null || request.NextRunAt is not null)
+            {
+                var (nextRunAt, validationWarnings) = ValidateCronFields(
+                    effectiveCron, effectiveTz, effectiveInterval, effectiveNext);
 
-            entity.NextRunAt = nextRunAt;
-        }
+                foreach (var warning in validationWarnings)
+                    warnings.Add((storedJob.Name, warning));
 
-        if (request.Name           is not null) entity.Name              = request.Name;
-        if (request.RepeatInterval.HasValue)    entity.RepeatInterval    = request.RepeatInterval;
-        if (request.CronExpression is not null) entity.CronExpression    = request.CronExpression;
-        if (request.CronTimezone   is not null) entity.CronTimezone      = request.CronTimezone;
-        if (request.MissedFirePolicy.HasValue)  entity.MissedFirePolicy  = request.MissedFirePolicy.Value;
-        if (request.MaxRetries.HasValue)        entity.MaxRetries        = request.MaxRetries.Value;
-        if (request.CallerAgentId.HasValue)     entity.CallerAgentId     = request.CallerAgentId;
-        if (request.ParameterValues is not null)
-            entity.ParameterValuesJson = request.ParameterValues.Count > 0
-                ? JsonSerializer.Serialize(request.ParameterValues)
-                : null;
+                storedJob.NextRunAt = nextRunAt;
+            }
 
-        await db.SaveChangesAsync(ct);
-        return ToResponse(entity);
+            if (request.Name           is not null) storedJob.Name              = request.Name;
+            if (request.RepeatInterval.HasValue)    storedJob.RepeatInterval    = request.RepeatInterval;
+            if (request.CronExpression is not null) storedJob.CronExpression    = request.CronExpression;
+            if (request.CronTimezone   is not null) storedJob.CronTimezone      = request.CronTimezone;
+            if (request.MissedFirePolicy.HasValue)  storedJob.MissedFirePolicy  = request.MissedFirePolicy.Value;
+            if (request.MaxRetries.HasValue)        storedJob.MaxRetries        = request.MaxRetries.Value;
+            if (request.CallerAgentId.HasValue)     storedJob.CallerAgentId     = request.CallerAgentId;
+            if (request.ParameterValues is not null)
+                storedJob.ParameterValuesJson = request.ParameterValues.Count > 0
+                    ? JsonSerializer.Serialize(request.ParameterValues)
+                    : null;
+        }, ct);
+
+        foreach (var (name, warning) in warnings)
+            logger.LogWarning("Scheduled job '{Name}' update: {Warning}", name, warning);
+
+        return entity is null ? null : ToResponse(entity);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
     {
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
-        if (entity is null) return false;
-
-        db.ScheduledJobs.Remove(entity);
-        await db.SaveChangesAsync(ct);
-        return true;
+        return await store.DeleteAsync(id, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -139,50 +134,43 @@ public sealed class ScheduledJobService(
     public async Task<ScheduledJobResponse?> PauseAsync(
         Guid id, CancellationToken ct = default)
     {
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
-        if (entity is null) return null;
-
-        if (entity.Status == ScheduledTaskStatus.Pending)
+        var entity = await store.UpdateAsync(id, storedJob =>
         {
-            entity.Status = ScheduledTaskStatus.Paused;
-            await db.SaveChangesAsync(ct);
-        }
-
-        return ToResponse(entity);
+            if (storedJob.Status == ScheduledTaskStatus.Pending)
+                storedJob.Status = ScheduledTaskStatus.Paused;
+        }, ct);
+        return entity is null ? null : ToResponse(entity);
     }
 
     public async Task<ScheduledJobResponse?> ResumeAsync(
         Guid id, CancellationToken ct = default)
     {
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
-        if (entity is null) return null;
-
-        if (entity.Status == ScheduledTaskStatus.Paused)
+        var entity = await store.UpdateAsync(id, storedJob =>
         {
-            entity.Status = ScheduledTaskStatus.Pending;
-
-            if (!string.IsNullOrEmpty(entity.CronExpression))
+            if (storedJob.Status == ScheduledTaskStatus.Paused)
             {
-                var next = CronEvaluator.GetNextOccurrence(
-                    entity.CronExpression,
-                    DateTimeOffset.UtcNow,
-                    entity.CronTimezone);
+                storedJob.Status = ScheduledTaskStatus.Pending;
 
-                if (next.HasValue)
-                    entity.NextRunAt = next.Value;
-                else
-                    entity.Status = ScheduledTaskStatus.Completed;
+                if (!string.IsNullOrEmpty(storedJob.CronExpression))
+                {
+                    var next = CronEvaluator.GetNextOccurrence(
+                        storedJob.CronExpression,
+                        DateTimeOffset.UtcNow,
+                        storedJob.CronTimezone);
+
+                    if (next.HasValue)
+                        storedJob.NextRunAt = next.Value;
+                    else
+                        storedJob.Status = ScheduledTaskStatus.Completed;
+                }
+                else if (storedJob.RepeatInterval.HasValue &&
+                         storedJob.NextRunAt < DateTimeOffset.UtcNow)
+                {
+                    storedJob.NextRunAt = DateTimeOffset.UtcNow.Add(storedJob.RepeatInterval.Value);
+                }
             }
-            else if (entity.RepeatInterval.HasValue &&
-                     entity.NextRunAt < DateTimeOffset.UtcNow)
-            {
-                entity.NextRunAt = DateTimeOffset.UtcNow.Add(entity.RepeatInterval.Value);
-            }
-
-            await db.SaveChangesAsync(ct);
-        }
-
-        return ToResponse(entity);
+        }, ct);
+        return entity is null ? null : ToResponse(entity);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -192,7 +180,7 @@ public sealed class ScheduledJobService(
     public async Task<CronPreviewResponse?> PreviewJobAsync(
         Guid id, int count = 10, CancellationToken ct = default)
     {
-        var entity = await db.ScheduledJobs.FindAsync([id], ct);
+        var entity = await store.GetByIdAsync(id, ct);
         if (entity is null || string.IsNullOrEmpty(entity.CronExpression))
             return null;
 

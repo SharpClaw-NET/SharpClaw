@@ -1,3 +1,5 @@
+using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 
 using SharpClaw.Contracts.Enums;
@@ -16,6 +18,25 @@ internal sealed record ChatMessageSummary(
     string Sender,
     DateTimeOffset Timestamp);
 
+internal interface IContextDataReader
+{
+    Task<ThreadSummary?> GetAccessibleThreadAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        Guid threadId,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ChatMessageSummary>> GetThreadMessagesAsync(
+        Guid threadId,
+        int maxMessages,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        CancellationToken ct = default);
+}
+
 /// <summary>
 /// Module-owned read service that backs the context-tools inline tools.
 /// Reads directly from the host's <see cref="ISharpClawDataContext"/>
@@ -24,7 +45,7 @@ internal sealed record ChatMessageSummary(
 /// that owns them. Rolled into agent-orchestration from the former
 /// <c>sharpclaw_context_tools</c> module.
 /// </summary>
-internal sealed class ContextDataReader(ISharpClawDataContext data)
+internal sealed class ContextDataReader(ISharpClawDataContext data) : IContextDataReader
 {
     public async Task<ThreadSummary?> GetAccessibleThreadAsync(
         Guid agentId, Guid currentChannelId, Guid threadId, CancellationToken ct = default)
@@ -112,4 +133,144 @@ internal sealed class ContextDataReader(ISharpClawDataContext data)
             .Select(t => new ThreadSummary(t.Id, t.Name, t.ChannelId, channelTitles[t.ChannelId]))
             .ToList();
     }
+}
+
+internal sealed class HostContextDataReaderAdapter : IContextDataReader
+{
+    private const string AddressEnv = "SHARPCLAW_HOST_CAPABILITIES_ADDRESS";
+    private const string TokenEnv = "SHARPCLAW_HOST_CAPABILITIES_TOKEN";
+    private const string TokenHeaderName = "X-SharpClaw-Control-Token";
+    private const string AccessibleThreadsPath = "/.sharpclaw/host/context/threads/accessible";
+    private const string ThreadMessagesPath = "/.sharpclaw/host/context/threads/messages";
+
+    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
+    {
+        PropertyNameCaseInsensitive = true,
+    };
+
+    private readonly HttpClient _client;
+    private readonly string _token;
+
+    private HostContextDataReaderAdapter(Uri address, string token)
+    {
+        _client = new HttpClient
+        {
+            BaseAddress = address,
+            Timeout = Timeout.InfiniteTimeSpan,
+        };
+        _token = token;
+    }
+
+    public static HostContextDataReaderAdapter? TryCreate()
+    {
+        var address = Environment.GetEnvironmentVariable(AddressEnv);
+        var token = Environment.GetEnvironmentVariable(TokenEnv);
+        return string.IsNullOrWhiteSpace(address) || string.IsNullOrWhiteSpace(token)
+            ? null
+            : new HostContextDataReaderAdapter(new Uri(address), token);
+    }
+
+    public async Task<ThreadSummary?> GetAccessibleThreadAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        Guid threadId,
+        CancellationToken ct = default)
+    {
+        var accessibleThreads = await GetAccessibleThreadsAsync(agentId, currentChannelId, ct);
+        return accessibleThreads.FirstOrDefault(t => t.ThreadId == threadId);
+    }
+
+    public async Task<IReadOnlyList<ChatMessageSummary>> GetThreadMessagesAsync(
+        Guid threadId,
+        int maxMessages,
+        CancellationToken ct = default)
+    {
+        var messages = (await PostAsync<HostContextThreadMessagesRequest, HostContextMessagesResponse>(
+            ThreadMessagesPath,
+            new HostContextThreadMessagesRequest
+            {
+                ThreadId = threadId,
+                MaxMessages = maxMessages,
+            },
+            ct)).Messages;
+
+        return [.. messages.Select(message => new ChatMessageSummary(
+            message.Role,
+            message.Content,
+            message.Sender,
+            message.Timestamp))];
+    }
+
+    public Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        CancellationToken ct = default) =>
+        ReadAccessibleThreadsAsync(agentId, currentChannelId, ct);
+
+    private async Task<IReadOnlyList<ThreadSummary>> ReadAccessibleThreadsAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        CancellationToken ct)
+    {
+        var response = await PostAsync<HostContextAccessibleThreadsRequest, HostContextThreadsResponse>(
+            AccessibleThreadsPath,
+            new HostContextAccessibleThreadsRequest
+            {
+                AgentId = agentId,
+                CurrentChannelId = currentChannelId,
+                CrossThreadPermissionKey = ContextToolsPermissionKeys.CanReadCrossThreadHistory,
+            },
+            ct);
+
+        return response.Threads;
+    }
+
+    private async Task<TResponse> PostAsync<TRequest, TResponse>(
+        string path,
+        TRequest request,
+        CancellationToken ct)
+    {
+        using var message = new HttpRequestMessage(HttpMethod.Post, path)
+        {
+            Content = JsonContent.Create(request, options: JsonOptions),
+        };
+        message.Headers.TryAddWithoutValidation(TokenHeaderName, _token);
+
+        using var response = await _client.SendAsync(message, ct);
+        var body = response.Content is null
+            ? null
+            : await response.Content.ReadAsStringAsync(ct);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new InvalidOperationException(
+                $"SharpClaw host context call {path} failed with HTTP {(int)response.StatusCode}: {body}");
+        }
+
+        return JsonSerializer.Deserialize<TResponse>(body ?? "{}", JsonOptions)
+            ?? throw new JsonException($"Host context call {path} returned invalid JSON.");
+    }
+
+    private sealed record HostContextAccessibleThreadsRequest
+    {
+        public Guid AgentId { get; init; }
+        public Guid CurrentChannelId { get; init; }
+        public string CrossThreadPermissionKey { get; init; } = string.Empty;
+    }
+
+    private sealed record HostContextThreadMessagesRequest
+    {
+        public Guid ThreadId { get; init; }
+        public int MaxMessages { get; init; } = 50;
+    }
+
+    private sealed record HostContextThreadsResponse(IReadOnlyList<ThreadSummary> Threads);
+
+    private sealed record HostContextMessagesResponse(
+        IReadOnlyList<HostContextChatMessageSummary> Messages);
+
+    private sealed record HostContextChatMessageSummary(
+        string Role,
+        string Content,
+        string Sender,
+        DateTimeOffset Timestamp);
 }

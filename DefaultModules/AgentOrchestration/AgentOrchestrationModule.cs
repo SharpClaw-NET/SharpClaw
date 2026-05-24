@@ -1,10 +1,8 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 using SharpClaw.Modules.AgentOrchestration.Services;
@@ -36,8 +34,8 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddScoped(sp => sp.GetRequiredService<IModuleDbContextFactory>()
-            .CreateDbContext<AgentOrchestrationDbContext>());
+        services.AddSingleton<ScheduledJobStore>();
+        services.AddSingleton<SkillStore>();
         services.TryAddScoped<AgentOrchestrationService>();
         services.AddScoped<ITaskStepExecutorExtension, AgentOrchestrationTaskStepExecutor>();
 
@@ -75,6 +73,10 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
         // ── Context tools (rolled in from sharpclaw_context_tools) ─────────────
         services.TryAddScoped<ContextDataReader>();
+        services.TryAddScoped<IContextDataReader>(sp =>
+            HostContextDataReaderAdapter.TryCreate() is { } hostReader
+                ? hostReader
+                : sp.GetRequiredService<ContextDataReader>());
         services.TryAddScoped<ContextToolsService>();
     }
 
@@ -115,24 +117,24 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         DefaultResourceKey: "agent"),
         new("AoTask", "EditTask", "EditTaskAsync", static async (sp, ct) =>
         {
-            var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
-            return await db.ScheduledJobs.Select(t => t.Id).ToListAsync(ct);
+            var store = sp.GetRequiredService<ScheduledJobStore>();
+            return [.. (await store.ListAsync(ct)).Select(t => t.Id)];
         },
         LoadLookupItems: static async (sp, ct) =>
         {
-            var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
-            return await db.ScheduledJobs.Select(t => new ValueTuple<Guid, string>(t.Id, t.Name)).ToListAsync(ct);
+            var store = sp.GetRequiredService<ScheduledJobStore>();
+            return [.. (await store.ListAsync(ct)).Select(t => new ValueTuple<Guid, string>(t.Id, t.Name))];
         },
         DefaultResourceKey: "task"),
         new("AoSkill", "AccessSkill", "AccessSkillAsync", static async (sp, ct) =>
         {
-            var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
-            return await db.Skills.Select(s => s.Id).ToListAsync(ct);
+            var store = sp.GetRequiredService<SkillStore>();
+            return [.. (await store.ListAsync(ct)).Select(s => s.Id)];
         },
         LoadLookupItems: static async (sp, ct) =>
         {
-            var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
-            return await db.Skills.Select(s => new ValueTuple<Guid, string>(s.Id, s.Name)).ToListAsync(ct);
+            var store = sp.GetRequiredService<SkillStore>();
+            return [.. (await store.ListAsync(ct)).Select(s => new ValueTuple<Guid, string>(s.Id, s.Name))];
         },
         DefaultResourceKey: "skill"),
         new("AoAgentHeader", "EditAgentHeader", "EditAgentHeaderAsync", static async (sp, ct) =>
@@ -377,7 +379,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         string[] args, IServiceProvider sp, CancellationToken ct)
     {
         var ids = sp.GetRequiredService<ICliIdResolver>();
-        var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
+        var store = sp.GetRequiredService<ScheduledJobStore>();
 
         if (args.Length < 3)
         {
@@ -402,8 +404,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
                     MaxRetries = ParseInt(flags, "max-retries") ?? 3,
                 };
 
-                db.ScheduledJobs.Add(task);
-                await db.SaveChangesAsync(ct);
+                await store.CreateAsync(task, ct);
                 ids.PrintJson(ToAoTaskDto(task));
                 break;
             }
@@ -413,7 +414,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "get" when args.Length >= 4:
             {
-                var task = await db.ScheduledJobs.FirstOrDefaultAsync(t => t.Id == ids.Resolve(args[3]), ct);
+                var task = await store.GetByIdAsync(ids.Resolve(args[3]), ct);
                 if (task is not null)
                     ids.PrintJson(ToAoTaskDto(task));
                 else
@@ -426,32 +427,30 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "list":
             {
-                var tasks = await db.ScheduledJobs.OrderBy(t => t.Name).ToListAsync(ct);
+                var tasks = (await store.ListAsync(ct)).OrderBy(t => t.Name).ToList();
                 ids.PrintJson(tasks.Select(ToAoTaskDto).ToList());
                 break;
             }
 
             case "update" when args.Length >= 4:
             {
-                var task = await db.ScheduledJobs.FirstOrDefaultAsync(t => t.Id == ids.Resolve(args[3]), ct);
+                var flags = ParseFlags(args, 4);
+                var task = await store.UpdateAsync(ids.Resolve(args[3]), storedTask =>
+                {
+                    if (flags.TryGetValue("name", out var name) && !string.IsNullOrWhiteSpace(name))
+                        storedTask.Name = name;
+                    if (flags.TryGetValue("repeat-minutes", out _))
+                        storedTask.RepeatInterval = ParsePositiveMinutes(flags, "repeat-minutes");
+                    if (flags.TryGetValue("max-retries", out _))
+                        storedTask.MaxRetries = ParseInt(flags, "max-retries") ?? storedTask.MaxRetries;
+                    if (flags.TryGetValue("next-run", out _))
+                        storedTask.NextRunAt = ParseDateTimeOffset(flags, "next-run") ?? storedTask.NextRunAt;
+                }, ct);
                 if (task is null)
                 {
                     Console.Error.WriteLine("Not found.");
                     break;
                 }
-
-                var flags = ParseFlags(args, 4);
-                if (flags.TryGetValue("name", out var name) && !string.IsNullOrWhiteSpace(name))
-                    task.Name = name;
-                if (flags.TryGetValue("repeat-minutes", out _))
-                    task.RepeatInterval = ParsePositiveMinutes(flags, "repeat-minutes");
-                if (flags.TryGetValue("max-retries", out _))
-                    task.MaxRetries = ParseInt(flags, "max-retries") ?? task.MaxRetries;
-                if (flags.TryGetValue("next-run", out _))
-                    task.NextRunAt = ParseDateTimeOffset(flags, "next-run") ?? task.NextRunAt;
-
-                task.UpdatedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(ct);
                 ids.PrintJson(ToAoTaskDto(task));
                 break;
             }
@@ -461,16 +460,8 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "delete" when args.Length >= 4:
             {
-                var task = await db.ScheduledJobs.FirstOrDefaultAsync(t => t.Id == ids.Resolve(args[3]), ct);
-                if (task is null)
-                {
-                    Console.WriteLine("Not found.");
-                    break;
-                }
-
-                db.ScheduledJobs.Remove(task);
-                await db.SaveChangesAsync(ct);
-                Console.WriteLine("Done.");
+                var deleted = await store.DeleteAsync(ids.Resolve(args[3]), ct);
+                Console.WriteLine(deleted ? "Done." : "Not found.");
                 break;
             }
             case "delete":
@@ -488,7 +479,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
         string[] args, IServiceProvider sp, CancellationToken ct)
     {
         var ids = sp.GetRequiredService<ICliIdResolver>();
-        var db = sp.GetRequiredService<AgentOrchestrationDbContext>();
+        var store = sp.GetRequiredService<SkillStore>();
 
         if (args.Length < 3)
         {
@@ -519,8 +510,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
                     SkillText = skillText,
                 };
 
-                db.Skills.Add(skill);
-                await db.SaveChangesAsync(ct);
+                await store.CreateAsync(skill, ct);
                 ids.PrintJson(ToAoSkillDto(skill));
                 break;
             }
@@ -530,7 +520,7 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "get" when args.Length >= 4:
             {
-                var skill = await db.Skills.FirstOrDefaultAsync(s => s.Id == ids.Resolve(args[3]), ct);
+                var skill = await store.GetByIdAsync(ids.Resolve(args[3]), ct);
                 if (skill is not null)
                     ids.PrintJson(ToAoSkillDto(skill));
                 else
@@ -543,30 +533,28 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "list":
             {
-                var skills = await db.Skills.OrderBy(s => s.Name).ToListAsync(ct);
+                var skills = (await store.ListAsync(ct)).OrderBy(s => s.Name).ToList();
                 ids.PrintJson(skills.Select(ToAoSkillDto).ToList());
                 break;
             }
 
             case "update" when args.Length >= 4:
             {
-                var skill = await db.Skills.FirstOrDefaultAsync(s => s.Id == ids.Resolve(args[3]), ct);
+                var flags = ParseFlags(args, 4);
+                var skill = await store.UpdateAsync(ids.Resolve(args[3]), storedSkill =>
+                {
+                    if (flags.TryGetValue("name", out var name) && !string.IsNullOrWhiteSpace(name))
+                        storedSkill.Name = name;
+                    if (flags.TryGetValue("description", out var description))
+                        storedSkill.Description = description;
+                    if (flags.TryGetValue("text", out var text) && !string.IsNullOrWhiteSpace(text))
+                        storedSkill.SkillText = text;
+                }, ct);
                 if (skill is null)
                 {
                     Console.Error.WriteLine("Not found.");
                     break;
                 }
-
-                var flags = ParseFlags(args, 4);
-                if (flags.TryGetValue("name", out var name) && !string.IsNullOrWhiteSpace(name))
-                    skill.Name = name;
-                if (flags.TryGetValue("description", out var description))
-                    skill.Description = description;
-                if (flags.TryGetValue("text", out var text) && !string.IsNullOrWhiteSpace(text))
-                    skill.SkillText = text;
-
-                skill.UpdatedAt = DateTimeOffset.UtcNow;
-                await db.SaveChangesAsync(ct);
                 ids.PrintJson(ToAoSkillDto(skill));
                 break;
             }
@@ -576,16 +564,8 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
             case "delete" when args.Length >= 4:
             {
-                var skill = await db.Skills.FirstOrDefaultAsync(s => s.Id == ids.Resolve(args[3]), ct);
-                if (skill is null)
-                {
-                    Console.WriteLine("Not found.");
-                    break;
-                }
-
-                db.Skills.Remove(skill);
-                await db.SaveChangesAsync(ct);
-                Console.WriteLine("Done.");
+                var deleted = await store.DeleteAsync(ids.Resolve(args[3]), ct);
+                Console.WriteLine(deleted ? "Done." : "Not found.");
                 break;
             }
             case "delete":

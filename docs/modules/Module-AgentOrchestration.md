@@ -275,8 +275,10 @@ Use these commands under the Core CLI's module-resource dispatch surface:
 
 ### AoTask
 
-`AoTask` rows live in `AgentOrchestrationDbContext.ScheduledJobs`. They are
-separate from Core host scheduled jobs managed by `task schedule ...`.
+`AoTask` resources live in the Agent Orchestration module's persistent
+scheduled-job store. The store is owned by the module and follows it into the
+sidecar process, while Core host task definitions and task schedule commands
+remain separate.
 
 ```text
 resource aotask add <name> [--next-run <timestamp>] [--repeat-minutes <n>] [--max-retries <n>]
@@ -293,7 +295,9 @@ Use `resource aotask add` to create a target resource before testing
 
 ### AoSkill
 
-`AoSkill` rows live in `AgentOrchestrationDbContext.Skills`.
+`AoSkill` resources live in the Agent Orchestration module's persistent skill
+store. The skill text is still retrieved through the module-owned
+`access_skill` tool, but it no longer depends on an in-process EF context.
 
 ```text
 resource aoskill add <name> --text <skillText> [--description <description>]

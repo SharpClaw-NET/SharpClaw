@@ -32,7 +32,7 @@ public sealed class BundledDotNetSidecarDefaultTests
             .NotBeOfType<TestHarnessModule>();
         loader.IsManifestOnlyBundledModule("sharpclaw_agent_orchestration")
             .Should()
-            .BeFalse("agent orchestration still has sidecar readiness blockers");
+            .BeTrue("agent orchestration no longer has sidecar readiness blockers");
     }
 
     [Test]
@@ -169,6 +169,7 @@ public sealed class BundledDotNetSidecarDefaultTests
             .ToArray();
         bundledModules.Select(module => module.Id).Should().Equal(
         [
+            "sharpclaw_agent_orchestration",
             "sharpclaw_editor_common",
             "sharpclaw_metrics",
             "sharpclaw_module_dev",
@@ -264,7 +265,7 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
-    public async Task SidecarOnlyModeRejectsBundledModulesWithReadinessBlockers()
+    public async Task SidecarOnlyModeRunsAgentOrchestrationOutOfProcess()
     {
         var settings = new Dictionary<string, string?>
         {
@@ -275,18 +276,18 @@ public sealed class BundledDotNetSidecarDefaultTests
             settings,
             moduleLoader: ModuleLoader.DiscoverBundled(configuration));
 
-        var act = async () => await harness.ModuleService.EnableAsync(
+        var response = await harness.ModuleService.EnableAsync(
             "sharpclaw_agent_orchestration",
             harness.RootServices,
             CancellationToken.None);
 
-        var assertion = await act.Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Sidecar readiness blocker*");
-        assertion.Which.Message.Should().Contain("storage.module_dbcontexts");
-
-        harness.Registry.GetModule("sharpclaw_agent_orchestration").Should().BeNull();
-        harness.Registry.GetRuntimeHost("sharpclaw_agent_orchestration").Should().BeNull();
+        response.Enabled.Should().BeTrue();
+        harness.Registry.GetRuntimeHost("sharpclaw_agent_orchestration")
+            .Should()
+            .BeAssignableTo<IForeignModuleRuntimeHost>();
+        harness.Registry.GetModule("sharpclaw_agent_orchestration")
+            .Should()
+            .NotBeNull();
     }
 
     [Test]

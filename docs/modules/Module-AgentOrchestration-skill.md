@@ -119,8 +119,9 @@ and removed from `task trigger-sources`.
 ────────────────────────────────────────
 MODULE-OWNED CLI RESOURCES
 ────────────────────────────────────────
-AoTask resources live in AgentOrchestrationDbContext.ScheduledJobs. They are
-created and managed by this module, separately from Core task schedule rows.
+AoTask resources live in the Agent Orchestration module's persistent
+scheduled-job store. The store is owned by the module and follows it into the
+sidecar process, separately from Core task schedule rows.
 
   resource aotask add <name> [--next-run <timestamp>] [--repeat-minutes <n>] [--max-retries <n>]
   resource aotask get <id>
@@ -130,7 +131,9 @@ created and managed by this module, separately from Core task schedule rows.
 
 Alias: resource aot ...
 
-AoSkill resources live in AgentOrchestrationDbContext.Skills.
+AoSkill resources live in the Agent Orchestration module's persistent skill
+store. The skill text is still retrieved through the module-owned
+access_skill tool, but it no longer depends on an in-process EF context.
 
   resource aoskill add <name> --text <skillText> [--description <description>]
   resource aoskill get <id>

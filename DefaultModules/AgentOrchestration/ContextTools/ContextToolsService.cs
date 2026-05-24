@@ -9,7 +9,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// <c>sharpclaw_context_tools</c> module.
 /// </summary>
 internal sealed class ContextToolsService(
-    ContextDataReader dataReader,
+    IContextDataReader dataReader,
     IConfiguration? configuration = null)
 {
     public static async Task<string> WaitAsync(

@@ -27,10 +27,7 @@ public sealed class SidecarReadinessInventoryTests
 
     private static readonly Dictionary<string, string[]> ExpectedBlockerKeys = new(StringComparer.Ordinal)
     {
-        ["sharpclaw_agent_orchestration"] =
-        [
-            "storage.module_dbcontexts",
-        ],
+        ["sharpclaw_agent_orchestration"] = [],
         ["sharpclaw_editor_common"] = [],
         ["sharpclaw_metrics"] = [],
         ["sharpclaw_module_dev"] = [],
@@ -76,6 +73,7 @@ public sealed class SidecarReadinessInventoryTests
             .Should()
             .Equal(
             [
+                "sharpclaw_agent_orchestration",
                 "sharpclaw_editor_common",
                 "sharpclaw_metrics",
                 "sharpclaw_module_dev",

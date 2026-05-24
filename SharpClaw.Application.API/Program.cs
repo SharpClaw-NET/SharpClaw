@@ -350,6 +350,7 @@ try
     builder.Services.AddSingleton<ChatCache>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
+    builder.Services.AddScoped<IHostContextDataReader, HostContextDataReader>();
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
     builder.Services.AddSingleton<IModuleInfoProvider, HostModuleInfoProvider>();
     builder.Services.AddSingleton<IForeignModuleProtocolContractResolver, HostModuleProtocolContractResolver>();

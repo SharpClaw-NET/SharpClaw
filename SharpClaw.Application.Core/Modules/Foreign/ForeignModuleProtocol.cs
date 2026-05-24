@@ -101,6 +101,8 @@ public static class ForeignModuleHostCapabilityProtocol
     public const string CoreChannelIdsPath = "/.sharpclaw/host/core/channels/ids";
     public const string CoreAgentLookupPath = "/.sharpclaw/host/core/agents/lookup";
     public const string CoreChannelLookupPath = "/.sharpclaw/host/core/channels/lookup";
+    public const string ContextAccessibleThreadsPath = "/.sharpclaw/host/context/threads/accessible";
+    public const string ContextThreadMessagesPath = "/.sharpclaw/host/context/threads/messages";
     public const string QueueMetricsPath = "/.sharpclaw/host/metrics/queue";
     public const string HostAgentChatPath = "/.sharpclaw/host/agent-bridge/chat";
     public const string HostAgentChatStreamPath = "/.sharpclaw/host/agent-bridge/chat-stream";

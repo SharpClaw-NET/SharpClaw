@@ -212,6 +212,16 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
             ForeignModuleHostCapabilityProtocol.CoreChannelLookupPath =>
                 new ForeignModuleLookupItemsResponse([.. (await ResolveCoreEntityIds(services).GetChannelLookupItemsAsync(ct))
                     .Select(item => new ForeignModuleLookupItem(item.Id, item.Name))]),
+            ForeignModuleHostCapabilityProtocol.ContextAccessibleThreadsPath =>
+                await GetAccessibleContextThreadsAsync(
+                    services,
+                    Deserialize<ForeignModuleContextAccessibleThreadsRequest>(request),
+                    ct),
+            ForeignModuleHostCapabilityProtocol.ContextThreadMessagesPath =>
+                await GetContextThreadMessagesAsync(
+                    services,
+                    Deserialize<ForeignModuleContextThreadMessagesRequest>(request),
+                    ct),
             ForeignModuleHostCapabilityProtocol.QueueMetricsPath =>
                 await GetQueueMetricsAsync(services, ct),
             ForeignModuleHostCapabilityProtocol.HostAgentChatPath =>
@@ -626,6 +636,37 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         }
     }
 
+    private static async Task<ForeignModuleContextThreadsResponse> GetAccessibleContextThreadsAsync(
+        IServiceProvider services,
+        ForeignModuleContextAccessibleThreadsRequest request,
+        CancellationToken ct)
+    {
+        RequireId(request.AgentId, "Agent ID is required.");
+        RequireId(request.CurrentChannelId, "Current channel ID is required.");
+        if (string.IsNullOrWhiteSpace(request.CrossThreadPermissionKey))
+            throw new ArgumentException("Cross-thread permission key is required.", nameof(request));
+
+        return new ForeignModuleContextThreadsResponse(
+            await ResolveHostContextDataReader(services).GetAccessibleThreadsAsync(
+                request.AgentId,
+                request.CurrentChannelId,
+                request.CrossThreadPermissionKey,
+                ct));
+    }
+
+    private static async Task<ForeignModuleContextMessagesResponse> GetContextThreadMessagesAsync(
+        IServiceProvider services,
+        ForeignModuleContextThreadMessagesRequest request,
+        CancellationToken ct)
+    {
+        RequireId(request.ThreadId, "Thread ID is required.");
+        return new ForeignModuleContextMessagesResponse(
+            await ResolveHostContextDataReader(services).GetThreadMessagesAsync(
+                request.ThreadId,
+                request.MaxMessages,
+                ct));
+    }
+
     private static async Task<ForeignModuleQueueMetricsResponse> GetQueueMetricsAsync(
         IServiceProvider services,
         CancellationToken ct)
@@ -1004,6 +1045,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static ICoreEntityIdProvider ResolveCoreEntityIds(IServiceProvider services) =>
         services.GetService<ICoreEntityIdProvider>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide core entity lookup.");
+
+    private static IHostContextDataReader ResolveHostContextDataReader(IServiceProvider services) =>
+        services.GetService<IHostContextDataReader>()
+        ?? throw new NotSupportedException("The SharpClaw host did not provide context data reading.");
 
     private static IHostQueueMetrics ResolveQueueMetrics(IServiceProvider services) =>
         services.GetService<IHostQueueMetrics>()

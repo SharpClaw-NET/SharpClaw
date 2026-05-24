@@ -128,6 +128,24 @@ internal sealed record ForeignModuleLookupItemsResponse(IReadOnlyList<ForeignMod
 
 internal sealed record ForeignModuleLookupItem(Guid Id, string Name);
 
+internal sealed record ForeignModuleContextAccessibleThreadsRequest
+{
+    public Guid AgentId { get; init; }
+    public Guid CurrentChannelId { get; init; }
+    public string CrossThreadPermissionKey { get; init; } = string.Empty;
+}
+
+internal sealed record ForeignModuleContextThreadMessagesRequest
+{
+    public Guid ThreadId { get; init; }
+    public int MaxMessages { get; init; } = 50;
+}
+
+internal sealed record ForeignModuleContextThreadsResponse(IReadOnlyList<ThreadSummary> Threads);
+
+internal sealed record ForeignModuleContextMessagesResponse(
+    IReadOnlyList<HostContextChatMessageSummary> Messages);
+
 internal sealed record ForeignModuleQueueMetricsResponse(
     double PendingJobCount,
     double PendingTaskCount,

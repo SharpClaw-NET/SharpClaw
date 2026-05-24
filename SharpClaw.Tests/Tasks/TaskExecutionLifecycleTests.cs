@@ -8,6 +8,7 @@ using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
@@ -183,7 +184,7 @@ public sealed class TaskExecutionLifecycleTests
         var taskDefinitionId = Guid.NewGuid();
         var callerAgentId = Guid.NewGuid();
         var due = DateTimeOffset.UtcNow.AddSeconds(-1);
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
+        await host.Store.CreateAsync(new ScheduledJobDB
         {
             Id = Guid.NewGuid(),
             Name = "due-job",
@@ -193,7 +194,6 @@ public sealed class TaskExecutionLifecycleTests
             NextRunAt = due,
             RepeatInterval = TimeSpan.FromMinutes(5)
         });
-        await host.Db.SaveChangesAsync();
 
         await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
 
@@ -222,7 +222,7 @@ public sealed class TaskExecutionLifecycleTests
                 ["Scheduler:MissedFireThresholdMinutes"] = "1"
             });
         var missedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
+        await host.Store.CreateAsync(new ScheduledJobDB
         {
             Id = Guid.NewGuid(),
             Name = "missed-job",
@@ -231,7 +231,6 @@ public sealed class TaskExecutionLifecycleTests
             RepeatInterval = TimeSpan.FromMinutes(5),
             MissedFirePolicy = MissedFirePolicy.Skip
         });
-        await host.Db.SaveChangesAsync();
 
         await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
 
@@ -248,7 +247,7 @@ public sealed class TaskExecutionLifecycleTests
         await using var host = ScheduledJobHost.Create();
         host.Launcher.ThrowOnLaunch = true;
         var jobId = Guid.NewGuid();
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
+        await host.Store.CreateAsync(new ScheduledJobDB
         {
             Id = jobId,
             Name = "retry-job",
@@ -256,7 +255,6 @@ public sealed class TaskExecutionLifecycleTests
             NextRunAt = DateTimeOffset.UtcNow.AddSeconds(-1),
             MaxRetries = 2
         });
-        await host.Db.SaveChangesAsync();
 
         await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
         var firstAttempt = await host.ReadScheduledJobAsync("retry-job");
@@ -264,9 +262,9 @@ public sealed class TaskExecutionLifecycleTests
         firstAttempt.RetryCount.Should().Be(1);
         firstAttempt.LastError.Should().Contain("forced launch failure");
 
-        var trackedRetry = await host.Db.ScheduledJobs.SingleAsync(j => j.Id == jobId);
-        trackedRetry.NextRunAt = DateTimeOffset.UtcNow.AddSeconds(-1);
-        await host.Db.SaveChangesAsync();
+        await host.Store.UpdateAsync(
+            jobId,
+            job => job.NextRunAt = DateTimeOffset.UtcNow.AddSeconds(-1));
         await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
 
         var secondAttempt = await host.ReadScheduledJobAsync("retry-job");
@@ -442,21 +440,21 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
         _scope = scope;
     }
 
-    public AgentOrchestrationDbContext Db => _scope.ServiceProvider.GetRequiredService<AgentOrchestrationDbContext>();
+    public ScheduledJobStore Store => _scope.ServiceProvider.GetRequiredService<ScheduledJobStore>();
     public ScheduledJobWorker Worker => _root.GetRequiredService<ScheduledJobWorker>();
     public RecordingTaskInstanceLauncher Launcher => _root.GetRequiredService<RecordingTaskInstanceLauncher>();
 
     public static ScheduledJobHost Create(IReadOnlyDictionary<string, string?>? settings = null)
     {
         var services = new ServiceCollection();
-        var databaseName = "SharpClawScheduledJobs_" + Guid.NewGuid().ToString("N");
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
             .Build();
 
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
-        services.AddDbContext<AgentOrchestrationDbContext>(options => options.UseInMemoryDatabase(databaseName));
+        services.AddSingleton<IModuleConfigStore, InMemoryModuleConfigStore>();
+        services.AddSingleton<ScheduledJobStore>();
         services.AddSingleton<RecordingTaskInstanceLauncher>();
         services.AddSingleton<ITaskInstanceLauncher>(sp => sp.GetRequiredService<RecordingTaskInstanceLauncher>());
         services.AddSingleton<ScheduledJobWorker>();
@@ -467,11 +465,8 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
 
     public async Task<ScheduledJobDB> ReadScheduledJobAsync(string name)
     {
-        await using var scope = _root.CreateAsyncScope();
-        return await scope.ServiceProvider
-            .GetRequiredService<AgentOrchestrationDbContext>()
-            .ScheduledJobs
-            .SingleAsync(j => j.Name == name);
+        var jobs = await Store.ListAsync();
+        return jobs.Single(j => j.Name == name);
     }
 
     public async ValueTask DisposeAsync()
@@ -479,6 +474,37 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
         await _scope.DisposeAsync();
         await _root.DisposeAsync();
     }
+}
+
+internal sealed class InMemoryModuleConfigStore : IModuleConfigStore
+{
+    private readonly Dictionary<string, string> _values = new(StringComparer.Ordinal);
+
+    public Task<string?> GetAsync(string key, CancellationToken ct = default) =>
+        Task.FromResult(_values.GetValueOrDefault(key));
+
+    public Task<T?> GetAsync<T>(string key, CancellationToken ct = default)
+        where T : IParsable<T>
+    {
+        return Task.FromResult(
+            _values.TryGetValue(key, out var value)
+            && T.TryParse(value, null, out var parsed)
+                ? parsed
+                : default);
+    }
+
+    public Task SetAsync(string key, string? value, CancellationToken ct = default)
+    {
+        if (value is null)
+            _values.Remove(key);
+        else
+            _values[key] = value;
+        return Task.CompletedTask;
+    }
+
+    public Task<IReadOnlyDictionary<string, string>> GetAllAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyDictionary<string, string>>(
+            new Dictionary<string, string>(_values, StringComparer.Ordinal));
 }
 
 internal sealed class RecordingTaskInstanceLauncher : ITaskInstanceLauncher

@@ -1,4 +1,3 @@
-using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.API;
 
 namespace SharpClaw.Tests.Modules;
@@ -7,25 +6,12 @@ namespace SharpClaw.Tests.Modules;
 public sealed class BundledModuleStorageGatewayTests
 {
     [Test]
-    public void BundledModuleStorageGatewayListsCurrentParentBackedStorageContracts()
+    public void BundledModuleStorageGatewayHasNoParentBackedStorageContracts()
     {
-        using var services = new ServiceCollection().BuildServiceProvider();
-        var gateway = new BundledModuleStorageGateway(services);
+        var gateway = new BundledModuleStorageGateway();
 
         var contracts = gateway.ListContracts();
 
-        contracts.Select(contract => $"{contract.ModuleId}/{contract.StorageName}")
-            .Should()
-            .BeEquivalentTo(
-            [
-                "sharpclaw_agent_orchestration/scheduled_jobs",
-                "sharpclaw_agent_orchestration/skills",
-            ]);
-
-        contracts.Single(contract => contract.StorageName == "scheduled_jobs")
-            .Operations.Select(operation => operation.Name)
-            .Should()
-            .Contain(["create", "list", "pause", "resume", "lookup_items"]);
-
+        contracts.Should().BeEmpty();
     }
 }

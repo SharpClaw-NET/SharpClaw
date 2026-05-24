@@ -18,6 +18,26 @@ using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Application.Core.Modules;
 
+public interface IHostContextDataReader
+{
+    Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        string crossThreadPermissionKey,
+        CancellationToken ct = default);
+
+    Task<IReadOnlyList<HostContextChatMessageSummary>> GetThreadMessagesAsync(
+        Guid threadId,
+        int maxMessages,
+        CancellationToken ct = default);
+}
+
+public sealed record HostContextChatMessageSummary(
+    string Role,
+    string Content,
+    string Sender,
+    DateTimeOffset Timestamp);
+
 public sealed class HostAgentManager(
     AgentService agents,
     SharpClawDbContext db) : IAgentManager
@@ -206,6 +226,100 @@ public sealed class HostThreadResolver(ThreadService threads) : IThreadResolver
             ct);
 
         return created.Id;
+    }
+}
+
+public sealed class HostContextDataReader(SharpClawDbContext db) : IHostContextDataReader
+{
+    public async Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
+        Guid agentId,
+        Guid currentChannelId,
+        string crossThreadPermissionKey,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(crossThreadPermissionKey))
+            return [];
+
+        var agentWithRole = await db.Agents
+            .Include(a => a.Role)
+                .ThenInclude(r => r!.PermissionSet)
+                    .ThenInclude(ps => ps!.GlobalFlags)
+            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+
+        var agentPs = agentWithRole?.Role?.PermissionSet;
+        if (agentPs is null || !agentPs.GlobalFlags.Any(f => f.FlagKey == crossThreadPermissionKey))
+            return [];
+
+        var isIndependent = (agentPs.GlobalFlags
+            .FirstOrDefault(f => f.FlagKey == crossThreadPermissionKey)
+            ?.Clearance ?? PermissionClearance.Unset) == PermissionClearance.Independent;
+
+        var channels = await db.Channels
+            .Include(c => c.AllowedAgents)
+            .Include(c => c.PermissionSet)
+                .ThenInclude(ps => ps!.GlobalFlags)
+            .Include(c => c.AgentContext)
+                .ThenInclude(ctx => ctx!.PermissionSet)
+                    .ThenInclude(ps => ps!.GlobalFlags)
+            .Include(c => c.AgentContext)
+                .ThenInclude(ctx => ctx!.AllowedAgents)
+            .Where(c => c.Id != currentChannelId)
+            .Where(c =>
+                c.AgentId == agentId ||
+                c.AllowedAgents.Any(a => a.Id == agentId) ||
+                (c.AgentId == null && c.AgentContext != null && c.AgentContext.AgentId == agentId) ||
+                (!c.AllowedAgents.Any() && c.AgentContext != null &&
+                    c.AgentContext.AllowedAgents.Any(a => a.Id == agentId)))
+            .ToListAsync(ct);
+
+        if (!isIndependent)
+        {
+            channels = channels
+                .Where(c =>
+                {
+                    var effectivePs = c.PermissionSet ?? c.AgentContext?.PermissionSet;
+                    return effectivePs?.GlobalFlags.Any(f => f.FlagKey == crossThreadPermissionKey) == true;
+                })
+                .ToList();
+        }
+
+        if (channels.Count == 0)
+            return [];
+
+        var channelIds = channels.Select(c => c.Id).ToList();
+        var channelTitles = channels.ToDictionary(c => c.Id, c => c.Title);
+
+        var threads = await db.ChatThreads
+            .Where(t => channelIds.Contains(t.ChannelId))
+            .OrderByDescending(t => t.UpdatedAt)
+            .Select(t => new { t.Id, t.Name, t.ChannelId })
+            .ToListAsync(ct);
+
+        return [.. threads.Select(t => new ThreadSummary(
+            t.Id,
+            t.Name,
+            t.ChannelId,
+            channelTitles[t.ChannelId]))];
+    }
+
+    public async Task<IReadOnlyList<HostContextChatMessageSummary>> GetThreadMessagesAsync(
+        Guid threadId,
+        int maxMessages,
+        CancellationToken ct = default)
+    {
+        maxMessages = Math.Clamp(maxMessages, 1, 200);
+
+        return await db.ChatMessages
+            .Where(m => m.ThreadId == threadId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(maxMessages)
+            .OrderBy(m => m.CreatedAt)
+            .Select(m => new HostContextChatMessageSummary(
+                m.Role,
+                m.Content,
+                m.SenderUsername ?? m.SenderAgentName ?? "unknown",
+                m.CreatedAt))
+            .ToListAsync(ct);
     }
 }
 
