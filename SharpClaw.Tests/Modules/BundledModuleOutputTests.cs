@@ -1,47 +1,46 @@
+using System.Diagnostics;
 using System.Reflection;
+using System.Text.Json;
 
 namespace SharpClaw.Tests.Modules;
 
 /// <summary>
-/// Verifies that all bundled module DLLs are present in the API project output directory.
+/// Verifies that bundled module payloads are present in API build and publish output.
 /// This test will fail if the CopyBundledModules MSBuild target in
 /// SharpClaw.Application.API.csproj is broken or a module project is removed.
 /// </summary>
 [TestFixture]
 public class BundledModuleOutputTests
 {
-    private static readonly string[] ExpectedModuleDlls =
-    [
-        "SharpClaw.Modules.AgentOrchestration.dll",
-        "SharpClaw.Modules.EditorCommon.dll",
-        "SharpClaw.Modules.Metrics.dll",
-        "SharpClaw.Modules.ModuleDev.dll",
-        "SharpClaw.Modules.Providers.Anthropic.dll",
-        "SharpClaw.Modules.Providers.Google.dll",
-        "SharpClaw.Modules.Providers.LlamaSharp.dll",
-        "SharpClaw.Modules.Providers.Ollama.dll",
-        "SharpClaw.Modules.Providers.OpenAICompatible.dll",
-        "SharpClaw.Modules.TestHarness.dll",
-        "SharpClaw.Modules.VS2026Editor.dll",
-        "SharpClaw.Modules.VSCodeEditor.dll",
-    ];
-
-    /// <summary>
-    /// Resolves the API project output directory by walking up from the test assembly
-    /// location and finding the sibling API bin folder at the same configuration/TFM.
-    /// </summary>
-    private static string ResolveApiOutputDirectory()
+    private sealed class BundledModuleExpectation
     {
-        // Test assembly lives at: …/SharpClaw.Tests/bin/<config>/net10.0/
-        // API output lives at:    …/SharpClaw.Application.API/bin/<config>/net10.0/
-        var testBinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        // Walk up to the solution root (four levels: net10.0 → <config> → bin → project)
-        var solutionRoot = Path.GetFullPath(Path.Combine(testBinDir, "..", "..", "..", ".."));
-        var config = new DirectoryInfo(testBinDir).Parent!.Name; // Debug or Release
-        var tfm = new DirectoryInfo(testBinDir).Name;            // net10.0
+        public BundledModuleExpectation(
+            string id,
+            string runtime,
+            string hostMode,
+            string entryAssembly,
+            string manifestPath)
+        {
+            Id = id;
+            Runtime = runtime;
+            HostMode = hostMode;
+            EntryAssembly = entryAssembly;
+            ManifestPath = manifestPath;
+        }
 
-        return Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+        public string Id { get; }
+
+        public string Runtime { get; }
+
+        public string HostMode { get; }
+
+        public string EntryAssembly { get; }
+
+        public string ManifestPath { get; }
     }
+
+    private static IEnumerable<string> ExpectedModuleDlls()
+        => ReadBundledModuleExpectations().Select(module => module.EntryAssembly);
 
     [Test]
     public void AllBundledModuleDllsArePresentInApiOutput()
@@ -52,8 +51,9 @@ public class BundledModuleOutputTests
         Directory.Exists(apiOutputDir).Should().BeTrue(
             $"API output directory should exist at '{apiOutputDir}'");
 
-        var missing = ExpectedModuleDlls
-            .Where(dll => !File.Exists(Path.Combine(apiOutputDir, dll)))
+        var missing = ReadBundledModuleExpectations()
+            .Where(module => !File.Exists(Path.Combine(apiOutputDir, module.EntryAssembly)))
+            .Select(module => $"{module.Id} ({module.EntryAssembly})")
             .ToList();
 
         missing.Should().BeEmpty(
@@ -83,5 +83,195 @@ public class BundledModuleOutputTests
 
         implementations.Should().NotBeEmpty(
             $"'{dllName}' must contain at least one public parameterless ISharpClawModule implementation");
+    }
+
+    [Test]
+    public void ApiOutputContainsBundledSidecarLayout()
+    {
+        AssertBundledSidecarLayout(ResolveApiOutputDirectory());
+    }
+
+    [Test]
+    public async Task PublishedApiOutputContainsBundledSidecarPayload()
+    {
+        var publishDir = Path.Combine(
+            Path.GetTempPath(),
+            "sharpclaw-publish-layout-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            var result = await PublishApiNoBuildAsync(publishDir);
+
+            result.ExitCode.Should().Be(
+                0,
+                $"dotnet publish should succeed. Output:{Environment.NewLine}{result.Output}");
+
+            AssertBundledSidecarLayout(publishDir);
+        }
+        finally
+        {
+            TryDeleteDirectory(publishDir);
+        }
+    }
+
+    private static void AssertBundledSidecarLayout(string outputDir)
+    {
+        Directory.Exists(outputDir).Should().BeTrue(
+            $"output directory should exist at '{outputDir}'");
+
+        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.dll"))
+            .Should().BeTrue("the shared .NET sidecar host DLL must be present");
+        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.deps.json"))
+            .Should().BeTrue("the shared .NET sidecar host deps file must be present");
+        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.runtimeconfig.json"))
+            .Should().BeTrue("the shared .NET sidecar host runtimeconfig must be present");
+
+        foreach (var module in ReadBundledModuleExpectations())
+        {
+            module.Runtime.Should().Be("dotnet", $"{module.ManifestPath} must describe a .NET module");
+            module.HostMode.Should().Be("sidecar", $"{module.ManifestPath} must opt into sidecar hosting");
+
+            var entryAssemblyPath = Path.Combine(outputDir, module.EntryAssembly);
+            File.Exists(entryAssemblyPath).Should().BeTrue(
+                $"bundled module '{module.Id}' entry assembly must be present at '{entryAssemblyPath}'");
+
+            var outputManifestPath = Path.Combine(outputDir, "modules", module.Id, "module.json");
+            File.Exists(outputManifestPath).Should().BeTrue(
+                $"bundled module '{module.Id}' manifest must be present at '{outputManifestPath}'");
+
+            var outputManifest = ReadBundledModuleExpectation(outputManifestPath);
+            outputManifest.Id.Should().Be(module.Id);
+            outputManifest.Runtime.Should().Be(module.Runtime);
+            outputManifest.HostMode.Should().Be(module.HostMode);
+            outputManifest.EntryAssembly.Should().Be(module.EntryAssembly);
+        }
+    }
+
+    private static string ResolveApiOutputDirectory()
+    {
+        var testBinDir = ResolveTestOutputDirectory();
+        var solutionRoot = ResolveSolutionRoot();
+        var config = ResolveConfiguration();
+        var tfm = new DirectoryInfo(testBinDir).Name;
+
+        return Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+    }
+
+    private static IReadOnlyList<BundledModuleExpectation> ReadBundledModuleExpectations()
+    {
+        var defaultModulesDir = Path.Combine(ResolveSolutionRoot(), "DefaultModules");
+
+        return Directory.EnumerateFiles(defaultModulesDir, "module.json", SearchOption.AllDirectories)
+            .Where(path => !IsBuildOutputPath(path))
+            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+            .Select(ReadBundledModuleExpectation)
+            .ToArray();
+    }
+
+    private static BundledModuleExpectation ReadBundledModuleExpectation(string manifestPath)
+    {
+        using var document = JsonDocument.Parse(File.ReadAllText(manifestPath));
+        var root = document.RootElement;
+
+        return new BundledModuleExpectation(
+            RequiredString(root, "id", manifestPath),
+            RequiredString(root, "runtime", manifestPath),
+            RequiredString(root, "hostMode", manifestPath),
+            RequiredString(root, "entryAssembly", manifestPath),
+            manifestPath);
+    }
+
+    private static string RequiredString(JsonElement root, string propertyName, string manifestPath)
+    {
+        root.TryGetProperty(propertyName, out var property).Should().BeTrue(
+            $"{manifestPath} must contain '{propertyName}'");
+
+        var value = property.GetString();
+        value.Should().NotBeNullOrWhiteSpace(
+            $"{manifestPath} must contain a non-empty '{propertyName}'");
+
+        return value!;
+    }
+
+    private static bool IsBuildOutputPath(string path)
+    {
+        var binSegment = $"{Path.DirectorySeparatorChar}bin{Path.DirectorySeparatorChar}";
+        var objSegment = $"{Path.DirectorySeparatorChar}obj{Path.DirectorySeparatorChar}";
+        return path.Contains(binSegment, StringComparison.OrdinalIgnoreCase)
+               || path.Contains(objSegment, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static async Task<(int ExitCode, string Output)> PublishApiNoBuildAsync(string publishDir)
+    {
+        var apiProject = Path.Combine(
+            ResolveSolutionRoot(),
+            "SharpClaw.Application.API",
+            "SharpClaw.Application.API.csproj");
+
+        var startInfo = new ProcessStartInfo("dotnet")
+        {
+            UseShellExecute = false,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            CreateNoWindow = true,
+        };
+        startInfo.ArgumentList.Add("publish");
+        startInfo.ArgumentList.Add(apiProject);
+        startInfo.ArgumentList.Add("-c");
+        startInfo.ArgumentList.Add(ResolveConfiguration());
+        startInfo.ArgumentList.Add("--no-build");
+        startInfo.ArgumentList.Add("-o");
+        startInfo.ArgumentList.Add(publishDir);
+
+        using var process = Process.Start(startInfo)
+            ?? throw new InvalidOperationException("Failed to start dotnet publish.");
+
+        var stdout = process.StandardOutput.ReadToEndAsync();
+        var stderr = process.StandardError.ReadToEndAsync();
+
+        if (!process.WaitForExit(120_000))
+        {
+            try
+            {
+                process.Kill(entireProcessTree: true);
+            }
+            catch
+            {
+                // The process may have exited between the timeout and Kill.
+            }
+
+            throw new TimeoutException("dotnet publish did not finish within 120 seconds.");
+        }
+
+        var output = string.Join(Environment.NewLine, await stdout, await stderr);
+        TestContext.Progress.WriteLine(output);
+
+        return (process.ExitCode, output);
+    }
+
+    private static string ResolveTestOutputDirectory()
+        => Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+
+    private static string ResolveConfiguration()
+        => new DirectoryInfo(ResolveTestOutputDirectory()).Parent!.Name;
+
+    private static string ResolveSolutionRoot()
+    {
+        var testBinDir = ResolveTestOutputDirectory();
+        return Path.GetFullPath(Path.Combine(testBinDir, "..", "..", "..", ".."));
+    }
+
+    private static void TryDeleteDirectory(string path)
+    {
+        try
+        {
+            if (Directory.Exists(path))
+                Directory.Delete(path, recursive: true);
+        }
+        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException)
+        {
+            TestContext.Progress.WriteLine(
+                $"Could not delete temporary publish directory '{path}': {ex.Message}");
+        }
     }
 }

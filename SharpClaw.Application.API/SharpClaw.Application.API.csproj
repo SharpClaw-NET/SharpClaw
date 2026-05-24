@@ -106,8 +106,9 @@
     SkipUnchangedFiles avoids unnecessary copies on incremental builds. Both top-level
     (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module layouts are matched.
   -->
-  <Target Name="CopyBundledModules" AfterTargets="Build">
+  <Target Name="_ResolveBundledModuleOutputFiles">
     <ItemGroup>
+      <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
@@ -115,12 +116,23 @@
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_BundledHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Providers.LocalCommon\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Providers.LocalCommon.dll" />
+      <_DotNetSidecarHostFile Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost"
+                              Condition="Exists('$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost')" />
       <_DotNetSidecarHostFile Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost.*" />
+      <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_DotNetSidecarHostFile)" />
     </ItemGroup>
-    <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_NonHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_BundledHostDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
-    <Copy SourceFiles="@(_DotNetSidecarHostFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyBundledModules"
+          AfterTargets="Build"
+          DependsOnTargets="_ResolveBundledModuleOutputFiles">
+    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+  </Target>
+
+  <Target Name="CopyBundledModulesToPublish"
+          AfterTargets="Publish"
+          DependsOnTargets="_ResolveBundledModuleOutputFiles">
+    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">
