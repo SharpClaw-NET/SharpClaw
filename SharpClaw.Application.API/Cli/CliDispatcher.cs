@@ -3362,7 +3362,8 @@ public static class CliDispatcher
     /// <summary>
     /// Invokes a module-provided CLI handler. Runtime-hosted modules receive a
     /// service provider drawn from their own DI container so module-internal
-    /// services resolve correctly. In-process modules receive the host provider.
+    /// services resolve correctly. A missing runtime host is retained for
+    /// test-only direct module registration.
     /// </summary>
     private static async Task InvokeModuleCliHandlerAsync(
         string moduleId, ModuleCliCommand cmd, string[] args,

@@ -406,36 +406,11 @@ try
     // sidecar discovery.
     var moduleLoader = ModuleLoader.DiscoverBundled(builder.Configuration);
 
-    foreach (var bundledModule in moduleLoader.GetAllBundled())
-    {
-        if (moduleLoader.IsManifestOnlyBundledModule(bundledModule.Id))
-            continue;
-
-        bundledModule.ConfigureServices(builder.Services);
-        if (bundledModule is ITaskParserAware parserAware)
-            TaskScriptParser.RegisterModule(parserAware.ParserExtension);
-
-        // Discover and register task-step descriptor providers from the
-        // module's assembly so the central registry is populated before
-        // any task script is parsed.
-        var providerTypes = bundledModule.GetType().Assembly.GetTypes()
-            .Where(t => !t.IsAbstract
-                     && !t.IsInterface
-                     && typeof(ITaskStepDescriptorProvider).IsAssignableFrom(t)
-                     && t.GetConstructor(Type.EmptyTypes) is not null);
-        foreach (var providerType in providerTypes)
-        {
-            var provider = (ITaskStepDescriptorProvider)Activator.CreateInstance(providerType)!;
-            foreach (var descriptor in provider.Descriptors)
-                TaskStepRegistry.Default.Register(descriptor);
-        }
-    }
-
     builder.Services.AddSingleton(moduleLoader);
     builder.Services.AddScoped<ModuleService>();
 
     // ──────── PHASE 12 ─── Misc post-module singletons ─────────────────────
-    // (The legacy in-process scheduled-job loop has moved to
+    // (The scheduled-job loop has moved to
     //  DefaultModules/AgentOrchestration/ScheduledJobWorker; it is started
     //  from that module's InitializeAsync, not here.)
     builder.Services.AddSingleton<DatabaseInitializationGate>();
