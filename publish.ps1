@@ -9,7 +9,7 @@
       +-------------+---------------------------------------------------+
       | Type        | Description                                       |
       +-------------+---------------------------------------------------+
-      | Desktop     | Self-contained folder + zip (GitHub Releases).    |
+      | Uno         | Uno app + Core API + Gateway for end users.       |
       |             | Platforms: win-x64, linux-x64, linux-arm64,       |
       |             | osx-x64, osx-arm64.                               |
       | MSIX        | Windows MSIX (sideload + store). Windows only.    |
@@ -24,19 +24,20 @@
     By default, publishes everything. Use -Include / -Exclude to filter.
     Outputs are placed under publish\ (configurable via -OutputDir).
 
-    The gateway is always bundled alongside the backend in Desktop and
+    The gateway is always bundled alongside the backend in Uno and
     MSIX builds. For Server builds the gateway is a peer to the API.
 
 .PARAMETER Include
     Comma-separated list of build types to include.
-    Values: Desktop, MSIX, Server, Core, WASM, All (default: All).
+    Values: Uno, MSIX, Server, Core, WASM, All (default: All).
+    Desktop is accepted as a compatibility alias for Uno.
 
 .PARAMETER Exclude
     Comma-separated list of build types to skip.
     Applied after -Include. Example: -Exclude MSIX,WASM
 
 .PARAMETER Rid
-    Runtime identifier(s) for Desktop builds.
+    Runtime identifier(s) for Uno builds.
     Default: all.  Shorthands: win, linux, osx, all.
 
 .PARAMETER MsixMode
@@ -64,20 +65,20 @@
     Root output directory. Default: publish\ at repo root.
 
 .PARAMETER SkipZip
-    If set, skips creating zip archives for Desktop and Server builds.
+    If set, skips creating zip archives for Uno, Server, and Core builds.
 
 .PARAMETER Package
     Comma-separated post-stage packaging targets to run after staging
-    Desktop, Server, or Core builds. Each target warns-and-skips when its
+    Uno, Server, or Core builds. Each target warns-and-skips when its
     tooling or host OS is unavailable.
     Values: Snap, Flatpak, Deb, Rpm, Pkg, Container, All, None.
     Default: None.
 
-      Snap       -> Linux .snap (desktop variant for Desktop, server variant
+      Snap       -> Linux .snap (desktop variant for Uno, server variant
                     for Server/Core). Requires snapcraft.
-      Flatpak    -> Linux .flatpak (Desktop only). Requires flatpak-builder.
+      Flatpak    -> Linux .flatpak (Uno only). Requires flatpak-builder.
       Deb / Rpm  -> Linux native packages for Server/Core. Requires fpm.
-      Pkg        -> macOS .pkg installer (Server/Core/Desktop). Requires
+      Pkg        -> macOS .pkg installer (Server/Core/Uno). Requires
                     pkgbuild (macOS host).
       Container  -> SDK container publish for API + Gateway (Server only,
                     linux-x64/linux-arm64). Requires Docker.
@@ -86,7 +87,7 @@
     If set, all post-stage packaging is bypassed regardless of -Package.
 
 .PARAMETER Parallel
-    If set, publishes multiple RIDs concurrently (Desktop + Server).
+    If set, publishes multiple RIDs concurrently (Uno + Server + Core).
     Reduces wall-clock time on multi-core machines but uses more RAM.
 
 .PARAMETER CertPassword
@@ -104,9 +105,9 @@
 
 .EXAMPLE
     .\publish.ps1                                    # Everything
-    .\publish.ps1 -Include Desktop -Rid win          # Desktop win-x64 only
-    .\publish.ps1 -Include Desktop,Server -Rid all   # Desktop + Server, all RIDs
-    .\publish.ps1 -Exclude WASM,MSIX                 # Desktop + Server only
+    .\publish.ps1 -Include Uno -Rid win              # Uno win-x64 only
+    .\publish.ps1 -Include Uno,Server -Rid all       # Uno + Server, all RIDs
+    .\publish.ps1 -Exclude WASM,MSIX                 # Uno + Server + Core only
     .\publish.ps1 -Include MSIX -MsixMode Sideload   # MSIX sideload only
     .\publish.ps1 -Include Server -ServerRid linux    # Headless server for Linux
     .\publish.ps1 -Include WASM                       # WASM static site only
@@ -126,7 +127,7 @@ param(
     [string]$OutputDir             = (Join-Path $PSScriptRoot "publish"),
     [switch]$SkipZip,
     [switch]$Parallel,
-    # Comma-separated packaging targets to run after staging Desktop/Server/Core builds.
+    # Comma-separated packaging targets to run after staging Uno/Server/Core builds.
     # Values: Snap, Flatpak, Deb, Rpm, Pkg, Container, All, None. Default: None.
     # Each target warns-and-skips when its tooling or host OS isn't available.
     [string]$Package               = "None",
@@ -169,40 +170,45 @@ $apiProject     = Join-Path (Join-Path $repoRoot "SharpClaw.Application.API") "S
 $gatewayProject = Join-Path (Join-Path $repoRoot "SharpClaw.Gateway") "SharpClaw.Gateway.csproj"
 $signingDir     = Join-Path $repoRoot "signing"
 
-$desktopTfm = "net10.0-desktop"
-$wasmTfm    = "net10.0-browserwasm"
-$serverTfm  = "net10.0"
+$unoTfm    = "net10.0-desktop"
+$wasmTfm   = "net10.0-browserwasm"
+$serverTfm = "net10.0"
 
-$supportedDesktopRids = @("win-x64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
-$supportedServerRids  = @("win-x64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
-
-$ridGroups = @{
-    "win"   = @("win-x64")
-    "linux" = @("linux-x64", "linux-arm64")
-    "osx"   = @("osx-x64", "osx-arm64")
-    "all"   = $null  # filled per-context
-}
+$supportedUnoRids    = @("win-x64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
+$supportedServerRids = @("win-x64", "linux-x64", "linux-arm64", "osx-x64", "osx-arm64")
 
 # ===================================================================
 #  Resolve build types
 # ===================================================================
 
-$allTypes = @("Desktop", "MSIX", "Server", "Core", "WASM")
+$allTypes = @("Uno", "MSIX", "Server", "Core", "WASM")
+
+function Normalize-BuildType {
+    param([string]$Type)
+
+    $name = $Type.Trim()
+    if ($name -eq "Desktop") { return "Uno" }
+    return $name
+}
 
 function Resolve-Types {
     param([string]$Inc, [string]$Exc)
-    $set = if ($Inc -eq "All") { $allTypes } else { $Inc -split ',' | ForEach-Object { $_.Trim() } }
+    $set = if ($Inc -eq "All") {
+        $allTypes
+    } else {
+        $Inc -split ',' | ForEach-Object { Normalize-BuildType $_ }
+    }
     if ($Exc) {
-        $excSet = $Exc -split ',' | ForEach-Object { $_.Trim() }
+        $excSet = $Exc -split ',' | ForEach-Object { Normalize-BuildType $_ }
         $set = $set | Where-Object { $_ -notin $excSet }
     }
     foreach ($t in $set) {
         if ($t -notin $allTypes) {
-            Write-Error "Unknown build type '$t'. Valid: $($allTypes -join ', '), All"
+            Write-Error "Unknown build type '$t'. Valid: $($allTypes -join ', '), All. Desktop is an alias for Uno."
             exit 1
         }
     }
-    return @($set)
+    return @($set | Select-Object -Unique)
 }
 
 $buildTypes = Resolve-Types $Include $Exclude
@@ -286,18 +292,18 @@ function New-ZipArchive {
 }
 
 # ===================================================================
-#  Desktop: self-contained folder + zip for GitHub Releases
+#  Uno: app + Core API + Gateway folder + zip for GitHub Releases
 # ===================================================================
 
-function Publish-Desktop {
+function Publish-Uno {
     param([string]$TargetRid)
 
-    $label    = "Desktop/$TargetRid"
-    $stageDir = Join-Path $OutputDir "SharpClaw-$TargetRid"
-    $zipPath  = Join-Path $OutputDir "SharpClaw-$TargetRid.zip"
+    $label    = "Uno/$TargetRid"
+    $stageDir = Join-Path $OutputDir "SharpClaw-Uno-$TargetRid"
+    $zipPath  = Join-Path $OutputDir "SharpClaw-Uno-$TargetRid.zip"
 
     Write-Host ""
-    Write-Host "-- Desktop: $TargetRid ------------------------------" -ForegroundColor Green
+    Write-Host "-- Uno: $TargetRid ----------------------------------" -ForegroundColor Green
 
     if (Test-Path $stageDir) { Remove-Item $stageDir -Recurse -Force }
     if (Test-Path $zipPath)  { Remove-Item $zipPath -Force }
@@ -305,7 +311,7 @@ function Publish-Desktop {
     $publishArgs = @(
         "publish", $unoProject,
         "-c", $Configuration,
-        "-f", $desktopTfm,
+        "-f", $unoTfm,
         "-r", $TargetRid,
         "--self-contained",
         "-p:BundleBackend=true",
@@ -317,7 +323,7 @@ function Publish-Desktop {
     & dotnet @publishArgs
     if ($LASTEXITCODE -ne 0) {
         Write-Host "  [X] Publish failed (exit $LASTEXITCODE)" -ForegroundColor Red
-        Add-Result "Desktop" $TargetRid $false
+        Add-Result "Uno" $TargetRid $false
         return
     }
 
@@ -325,18 +331,18 @@ function Publish-Desktop {
     $backendExe = Join-Path (Join-Path $stageDir "backend") (Get-ExeName "SharpClaw.Application.API" $TargetRid)
     if (-not (Test-Path $backendExe)) {
         Write-Host "  [X] Backend not found at $backendExe" -ForegroundColor Red
-        Add-Result "Desktop" $TargetRid $false
+        Add-Result "Uno" $TargetRid $false
         return
     }
     Write-Host "  Backend:  $backendExe" -ForegroundColor DarkGray
 
-    # Verify gateway (non-fatal)
     $gatewayExe = Join-Path (Join-Path $stageDir "gateway") (Get-ExeName "SharpClaw.Gateway" $TargetRid)
-    if (Test-Path $gatewayExe) {
-        Write-Host "  Gateway:  $gatewayExe" -ForegroundColor DarkGray
-    } else {
-        Write-Warning "  Gateway not found -- will not be available in this build."
+    if (-not (Test-Path $gatewayExe)) {
+        Write-Host "  [X] Gateway not found at $gatewayExe" -ForegroundColor Red
+        Add-Result "Uno" $TargetRid $false
+        return
     }
+    Write-Host "  Gateway:  $gatewayExe" -ForegroundColor DarkGray
 
     Strip-ForeignNatives $stageDir $TargetRid
 
@@ -348,10 +354,10 @@ function Publish-Desktop {
         $zipMB = New-ZipArchive $stageDir $zipPath
     }
 
-    Write-Host "  [OK] Desktop/$TargetRid complete" -ForegroundColor Green
-    Add-Result "Desktop" $TargetRid $true $stageDir $totalMB
+    Write-Host "  [OK] Uno/$TargetRid complete" -ForegroundColor Green
+    Add-Result "Uno" $TargetRid $true $stageDir $totalMB
 
-    Invoke-PostStagePackaging "Desktop" $stageDir $TargetRid
+    Invoke-PostStagePackaging "Uno" $stageDir $TargetRid
 }
 
 # ===================================================================
@@ -436,7 +442,7 @@ function Publish-MSIX {
     $publishArgs = @(
         "publish", $unoProject,
         "-c", $Configuration,
-        "-f", $desktopTfm,
+        "-f", $unoTfm,
         "-r", $MsixRid,
         "--self-contained",
         "-p:BundleBackend=true",
@@ -815,7 +821,7 @@ function Get-ProjectVersion {
 }
 
 # Snap (Linux): warns-and-skips when snapcraft is missing.
-# $Profile selects the snap template variant: "desktop" (Uno + backend + gateway)
+# $Profile selects the snap template variant: "desktop" (Uno + Core API + Gateway)
 # or "server" (headless API + optional gateway, daemon-style).
 function Package-Snap {
     param([string]$StageDir, [string]$TargetRid, [string]$Profile = "desktop")
@@ -875,7 +881,7 @@ function Package-Snap {
     }
 }
 
-# Flatpak (Linux desktop only): warns-and-skips when flatpak-builder is missing.
+# Flatpak (Linux Uno only): warns-and-skips when flatpak-builder is missing.
 function Package-Flatpak {
     param([string]$StageDir, [string]$TargetRid)
 
@@ -1100,7 +1106,7 @@ function Package-Container {
 
 function Invoke-PostStagePackaging {
     param(
-        [string]$ProfileName,   # Desktop | Server | Core
+        [string]$ProfileName,   # Uno | Server | Core
         [string]$StageDir,
         [string]$TargetRid
     )
@@ -1111,11 +1117,11 @@ function Invoke-PostStagePackaging {
     foreach ($t in $packageTargets) {
         switch ($t) {
             "Snap" {
-                $variant = if ($ProfileName -eq "Desktop") { "desktop" } else { "server" }
+                $variant = if ($ProfileName -eq "Uno") { "desktop" } else { "server" }
                 Package-Snap $StageDir $TargetRid $variant
             }
             "Flatpak" {
-                if ($ProfileName -eq "Desktop") { Package-Flatpak $StageDir $TargetRid }
+                if ($ProfileName -eq "Uno") { Package-Flatpak $StageDir $TargetRid }
             }
             "Deb" {
                 if ($ProfileName -in @("Server", "Core")) {
@@ -1128,7 +1134,7 @@ function Invoke-PostStagePackaging {
                 }
             }
             "Pkg" {
-                if ($ProfileName -in @("Server", "Core", "Desktop")) {
+                if ($ProfileName -in @("Server", "Core", "Uno")) {
                     Package-MacPkg $StageDir $TargetRid $ProfileName
                 }
             }
@@ -1154,20 +1160,20 @@ Write-Host "+======================================================+" -Foregroun
 
 if (-not (Test-Path $OutputDir)) { New-Item $OutputDir -ItemType Directory -Force | Out-Null }
 
-# -- Desktop -----------------------------------------------------
-if ("Desktop" -in $buildTypes) {
-    $desktopRids = Resolve-Rids $Rid $supportedDesktopRids
+# -- Uno ---------------------------------------------------------
+if ("Uno" -in $buildTypes) {
+    $unoRids = Resolve-Rids $Rid $supportedUnoRids
 
-    if ($Parallel -and $desktopRids.Count -gt 1) {
+    if ($Parallel -and $unoRids.Count -gt 1) {
         Write-Host ""
-        Write-Host "Launching $($desktopRids.Count) Desktop builds in parallel ..." -ForegroundColor Cyan
+        Write-Host "Launching $($unoRids.Count) Uno builds in parallel ..." -ForegroundColor Cyan
 
         $jobs = @()
-        foreach ($dRid in $desktopRids) {
+        foreach ($uRid in $unoRids) {
             $jobs += Start-Job -ScriptBlock {
                 param($Script, $TargetRid, $Config, $Out, $NoZip)
-                & $Script -Include Desktop -Rid $TargetRid -Configuration $Config -OutputDir $Out $(if ($NoZip) { "-SkipZip" })
-            } -ArgumentList (Join-Path $repoRoot "publish.ps1"), $dRid, $Configuration, $OutputDir, $SkipZip.IsPresent
+                & $Script -Include Uno -Rid $TargetRid -Configuration $Config -OutputDir $Out $(if ($NoZip) { "-SkipZip" })
+            } -ArgumentList (Join-Path $repoRoot "publish.ps1"), $uRid, $Configuration, $OutputDir, $SkipZip.IsPresent
         }
 
         $jobs | Wait-Job | ForEach-Object {
@@ -1175,8 +1181,8 @@ if ("Desktop" -in $buildTypes) {
             Remove-Job $_
         }
     } else {
-        foreach ($dRid in $desktopRids) {
-            Publish-Desktop $dRid
+        foreach ($uRid in $unoRids) {
+            Publish-Uno $uRid
         }
     }
 }

@@ -57,57 +57,60 @@ Visual Studio or VS Code bridge, a Neovim adapter, a legacy desktop app, or a
 provider that is not OpenAI-compatible. A sufficiently trusted agent can even
 help build and hot-load new modules while SharpClaw is running.
 
-## Tasks As Structural Backpressure
-
-SharpClaw tasks are C# scripts, which means they can do more than describe work
-for an agent to attempt. They can become structural backpressure inside the same
-language you are already shipping. A prompt can remind a model to preserve an
-invariant, but a task can compile, run, call typed APIs, assert facts about the
-result, and refuse the artifact in the same practical way a test refuses broken
-code.
-
-That matters for AI coding loops because the important rule is often not "try
-harder" but "make the wrong path expensive to take by accident." A release task
-can check that generated routes still require the expected permission. A
-maintenance task can launch the product, exercise the gateway, inspect persisted
-state, and fail when the resulting shape is wrong. A migration assistant can
-ask an agent to make a change, run the code that proves the change is safe in
-your application terms, and feed the concrete failure back into the next
-iteration. The task is not a note in the prompt. It is executable pressure on
-the artifact.
-
-Because tasks live as ordinary C# source, they can share DTOs, helpers,
-contracts, and assertions with the rest of the system. They can look like
-workflow automation when the goal is to get work done, and they can look like
-tests when the goal is to prove that a model, module, or user change still
-respects a project invariant. The useful line is not between "task" and "test."
-The useful line is between rules the model is asked to remember and rules the
-runtime can make it confront.
-
 ## Add Your Own Features
 
-SharpClaw is designed so new capabilities do not have to wait for Core to grow
-them. If you need Computer Use, you can add a module that owns the screen,
-mouse, keyboard, capture, policy, and approval surface you actually trust. If
-you need integration with a specific program, that module can wrap its API, CLI,
-IPC channel, COM surface, file format, or desktop automation path and expose it
-as typed tools and task steps. Once it exists, the same capability can be shared
-with other users instead of being trapped in one local script.
+SharpClaw is designed so new capabilities do not have to wait for Core to grow.
+Modules put specific features at the edge while Core keeps owning identity,
+permissions, persistence, task execution, provider routing, and audit trails.
 
-That is what makes modules more than mods. A module can contribute providers,
-tools, resources, task steps, triggers, gateway endpoints, metrics, and desktop
-UI hooks. It can be a small adapter around a single command, or it can be a
-whole product surface with its own routes, screens, background workers, and
-agent-facing contract. In practice, a SharpClaw module can be an integration, a
-policy layer, an automation pack, a development tool, or a complete web app
-that happens to run inside the same permissioned agent runtime.
+| Want to add this feature? | Build it as this kind of module |
+| --- | --- |
+| Computer Use | A desktop-control module with screen capture, mouse, keyboard, policy, approvals, and task steps. |
+| A browser agent | A browser module with tabs, navigation, page extraction, downloads, screenshots, and per-site permissions. |
+| A Visual Studio, VS Code, or Neovim bridge | An editor module with file context, diagnostics, selections, commands, terminal access, and review tools. |
+| A legacy desktop app integration | An app module that wraps COM, IPC, CLI commands, files, windows, or automation hooks as typed tools. |
+| A model provider that does not match existing APIs | A provider module with model sync, request translation, streaming, cost data, and parameter validation. |
+| A domain workflow such as intake, release, or triage | An automation module with triggers, task steps, shared resources, logs, and optional gateway endpoints. |
+| A customer-facing product surface | A gateway or frontend module with routes, UI hooks, background workers, resources, and agent contracts. |
+| A capability unique to your team or industry | A purpose-built module with the tools, policies, screens, and task steps your agents need. |
 
-The result is a runtime that can stay small at the center while the edge becomes
-highly specific. A hospital, game studio, law office, robotics lab, or solo
-developer can each add the tools and workflows that match their world without
-turning every agent into an unrestricted shell. SharpClaw gives those features
-a place to live, a permission model to stand behind, and a way to be reused by
-people who need the same capability later.
+Once a module exists, the same feature can be permissioned, reused, hot-loaded,
+audited, exposed to tasks, and shared with other users instead of being trapped
+inside one local script.
+
+## Tasks As Structural Backpressure
+
+SharpClaw tasks are C# scripts. They can ask an agent to do work, then run the
+application-specific checks that decide whether the result is allowed to move
+forward.
+
+```mermaid
+flowchart TD
+    Trigger["PR changes an API route"]
+    Task["Task script owns the invariant:<br/>route needs permission X"]
+    Agent["Agent edits route, policy, tests,<br/>or module endpoint metadata"]
+    Build["Build API + gateway"]
+    Launch["Launch test host"]
+    Probe["Call endpoint as admin,<br/>member, and anonymous"]
+    Inspect["Read endpoint metadata<br/>and persisted policy"]
+    Gate{"Only the allowed role succeeds?"}
+    Continue["Continue release task"]
+    Reject["Reject artifact with facts:<br/>anonymous got 200,<br/>or permission key is missing"]
+
+    Trigger --> Task
+    Task --> Agent
+    Agent --> Build
+    Build --> Launch
+    Launch --> Probe
+    Probe --> Inspect
+    Inspect --> Gate
+    Gate -- yes --> Continue
+    Gate -- no --> Reject
+    Reject --> Agent
+```
+
+The model is not merely reminded to protect the route. The task makes the
+unsafe shape fail and sends the specific failure back into the next attempt.
 
 ## Runtime Shape
 
@@ -128,15 +131,34 @@ features.
 
 ## Getting Started
 
+Most users should start from the
+[GitHub Releases page](https://github.com/mkn8rn/SharpClaw/releases) instead
+of building the project in Visual Studio 2026 or from source. Release archives
+are published by runtime shape and by platform, so pick the smallest bundle
+that matches how you want to run SharpClaw.
+
+| Release family | Includes | Best fit |
+| --- | --- | --- |
+| Core | Core API only. | You already have a reverse proxy, service wrapper, or container host and only need the internal API. |
+| Server | Core API and Gateway. | You want a headless deployment that can expose public routes, webhooks, bots, or module-contributed gateway endpoints. |
+| Uno | Uno desktop client, Core API, and Gateway. | You want the local app experience with the bundled backend and optional gateway managed from the UI. |
+
+Each family is published for supported Windows, Linux, and macOS runtime
+identifiers such as `win-x64`, `linux-x64`, `linux-arm64`, `osx-x64`, and
+`osx-arm64` when the platform supports that shape.
+
+Developers who want to run from source can still build and start the Core API
+directly:
+
 ```bash
 dotnet build SharpClaw.Application.API/SharpClaw.Application.API.csproj
 dotnet run --project SharpClaw.Application.API/SharpClaw.Application.API.csproj
 ```
 
-Then launch the Uno client, create the first admin account, add a provider,
-sync models, create an agent, open a channel, and start chatting. Local
-environment templates live under each process's `Environment` folder and are
-copied into place when no local `.env` exists.
+Then launch the Uno client separately, create the first admin account, add a
+provider, sync models, create an agent, open a channel, and start chatting.
+Local environment templates live under each process's `Environment` folder and
+are copied into place when no local `.env` exists.
 
 ## Documentation
 
