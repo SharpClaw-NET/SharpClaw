@@ -80,37 +80,47 @@ inside one local script.
 
 ## Tasks As Structural Backpressure
 
-SharpClaw tasks are C# scripts. They can ask an agent to do work, then run the
-application-specific checks that decide whether the result is allowed to move
-forward.
+SharpClaw tasks are C# scripts. In everyday terms, a task is a fixed workflow
+that gives an agent the exact tools for one job, watches the handoffs, and
+keeps the work from drifting until a real finish condition is reached.
+
+This inbox flow is just one example of that pattern.
 
 ```mermaid
 flowchart TD
-    Trigger["PR changes an API route"]
-    Task["Task script owns the invariant:<br/>route needs permission X"]
-    Agent["Agent edits route, policy, tests,<br/>or module endpoint metadata"]
-    Build["Build API + gateway"]
-    Launch["Launch test host"]
-    Probe["Call endpoint as admin,<br/>member, and anonymous"]
-    Inspect["Read endpoint metadata<br/>and persisted policy"]
-    Gate{"Only the allowed role succeeds?"}
-    Continue["Continue release task"]
-    Reject["Reject artifact with facts:<br/>anonymous got 200,<br/>or permission key is missing"]
+    Email["New email arrives"]
+    Trigger["Task is triggered<br/>for this inbox rule"]
+    Reviewer["Reviewer agent reads it<br/>and chooses next actions"]
+    Toolbelt["Task-specific tools only:<br/>read thread, search records,<br/>open ticket, draft reply"]
+    Plan["Reviewer splits the work"]
+    Agents["Smaller agents handle pieces:<br/>billing check, schedule lookup,<br/>policy search, summary"]
+    Reports["Agents report results<br/>back to reviewer"]
+    Done{"Reviewer confirms<br/>the work is complete?"}
+    More["Reviewer sends them back<br/>with specific missing items"]
+    Reply["Reviewer drafts and sends<br/>the email response"]
+    Close["Reviewer manually ends<br/>the task"]
 
-    Trigger --> Task
-    Task --> Agent
-    Agent --> Build
-    Build --> Launch
-    Launch --> Probe
-    Probe --> Inspect
-    Inspect --> Gate
-    Gate -- yes --> Continue
-    Gate -- no --> Reject
-    Reject --> Agent
+    Email --> Trigger
+    Trigger --> Reviewer
+    Trigger --> Toolbelt
+    Toolbelt --> Reviewer
+    Reviewer --> Plan
+    Plan --> Agents
+    Agents --> Reports
+    Reports --> Done
+    Done -- no --> More
+    More --> Agents
+    Done -- yes --> Reply
+    Reply --> Close
 ```
 
-The model is not merely reminded to protect the route. The task makes the
-unsafe shape fail and sends the specific failure back into the next attempt.
+The task is the structure around the agent. It decides when the work starts,
+which tools are visible, how smaller agents are assigned, what counts as done,
+and when the loop is allowed to stop. The same shape can handle technical work
+such as release checks, dependency upgrades, incident review, migration
+planning, benchmark follow-up, and codebase maintenance, or everyday work such
+as support triage, appointment scheduling, invoice follow-up, document intake,
+meeting preparation, and status reporting.
 
 ## Runtime Shape
 
