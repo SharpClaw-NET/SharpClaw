@@ -22,6 +22,7 @@ host = create_sharpclaw_host(
             "handler": ping,
         }
     ],
+    storage_contracts=[],
     initialize=lambda _context: "initialized",
     shutdown=lambda _context: "stopping",
     health=lambda _context: {"isHealthy": True, "message": "ready"},

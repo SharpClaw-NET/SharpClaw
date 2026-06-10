@@ -15,6 +15,7 @@ const host = createSharpClawHost({
       })
     }
   ],
+  storageContracts: [],
   initialize: async () => 'initialized',
   shutdown: async () => 'stopping',
   health: async () => ({ isHealthy: true, message: 'ready' })

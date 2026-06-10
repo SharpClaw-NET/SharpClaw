@@ -36,8 +36,87 @@ export const hostCapabilityPaths = {
   jobComplete: '/.sharpclaw/host/job/complete',
   jobFail: '/.sharpclaw/host/job/fail',
   jobCancel: '/.sharpclaw/host/job/cancel',
+  jobCancelStaleByActionPrefix: '/.sharpclaw/host/job/cancel-stale-by-action-prefix',
+  jobGet: '/.sharpclaw/host/job/get',
+  jobListByActionPrefix: '/.sharpclaw/host/job/list-by-action-prefix',
+  jobListSummariesByActionPrefix: '/.sharpclaw/host/job/list-summaries-by-action-prefix',
+  jobExistsWithActionPrefix: '/.sharpclaw/host/job/exists-with-action-prefix',
   contractsList: '/.sharpclaw/host/contracts/list',
-  contractInvoke: '/.sharpclaw/host/contracts/invoke'
+  contractInvoke: '/.sharpclaw/host/contracts/invoke',
+  taskValidate: '/.sharpclaw/host/tasks/validate',
+  taskCreate: '/.sharpclaw/host/tasks/create',
+  taskGet: '/.sharpclaw/host/tasks/get',
+  taskList: '/.sharpclaw/host/tasks/list',
+  taskUpdate: '/.sharpclaw/host/tasks/update',
+  taskDelete: '/.sharpclaw/host/tasks/delete',
+  taskLaunch: '/.sharpclaw/host/tasks/launch',
+  taskContextExecuteSteps: '/.sharpclaw/host/tasks/context/execute-steps',
+  taskContextExecuteEventHandler: '/.sharpclaw/host/tasks/context/event-handler/execute',
+  coreAgentIds: '/.sharpclaw/host/core/agents/ids',
+  coreChannelIds: '/.sharpclaw/host/core/channels/ids',
+  coreAgentLookup: '/.sharpclaw/host/core/agents/lookup',
+  coreChannelLookup: '/.sharpclaw/host/core/channels/lookup',
+  contextAccessibleThreads: '/.sharpclaw/host/context/threads/accessible',
+  contextThreadMessages: '/.sharpclaw/host/context/threads/messages',
+  queueMetrics: '/.sharpclaw/host/metrics/queue',
+  hostAgentChat: '/.sharpclaw/host/agent-bridge/chat',
+  hostAgentChatStream: '/.sharpclaw/host/agent-bridge/chat-stream',
+  hostAgentChatToThread: '/.sharpclaw/host/agent-bridge/chat-to-thread',
+  hostAgentParseStructuredResponse: '/.sharpclaw/host/agent-bridge/parse-structured-response',
+  hostAgentFindModel: '/.sharpclaw/host/agent-bridge/find-model',
+  hostAgentFindProvider: '/.sharpclaw/host/agent-bridge/find-provider',
+  hostAgentFindAgent: '/.sharpclaw/host/agent-bridge/find-agent',
+  hostAgentFindRole: '/.sharpclaw/host/agent-bridge/find-role',
+  hostAgentFindChannel: '/.sharpclaw/host/agent-bridge/find-channel',
+  hostAgentCreateAgent: '/.sharpclaw/host/agent-bridge/create-agent',
+  hostAgentCreateThread: '/.sharpclaw/host/agent-bridge/create-thread',
+  hostAgentCreateRole: '/.sharpclaw/host/agent-bridge/create-role',
+  hostAgentSetRolePermissions: '/.sharpclaw/host/agent-bridge/set-role-permissions',
+  hostAgentAssignRole: '/.sharpclaw/host/agent-bridge/assign-role',
+  hostAgentCreateChannel: '/.sharpclaw/host/agent-bridge/create-channel',
+  hostAgentAddAllowedAgent: '/.sharpclaw/host/agent-bridge/add-allowed-agent',
+  agentCreateSubAgent: '/.sharpclaw/host/agents/create-sub-agent',
+  agentUpdate: '/.sharpclaw/host/agents/update',
+  agentSetHeader: '/.sharpclaw/host/agents/set-header',
+  channelSetHeader: '/.sharpclaw/host/channels/set-header',
+  modelEnsureProvider: '/.sharpclaw/host/models/ensure-provider',
+  modelEnsureModel: '/.sharpclaw/host/models/ensure-model',
+  modelProviderInfo: '/.sharpclaw/host/models/provider-info',
+  modelLocalFilePath: '/.sharpclaw/host/models/local-file-path',
+  modelMetadata: '/.sharpclaw/host/models/metadata',
+  modelDelete: '/.sharpclaw/host/models/delete',
+  modulesExternalRoot: '/.sharpclaw/host/modules/external-root',
+  modulesInfoList: '/.sharpclaw/host/modules/info/list',
+  moduleRegistered: '/.sharpclaw/host/modules/registered',
+  moduleToolPrefixRegistered: '/.sharpclaw/host/modules/tool-prefix-registered',
+  moduleLoad: '/.sharpclaw/host/modules/load',
+  moduleUnload: '/.sharpclaw/host/modules/unload',
+  moduleReload: '/.sharpclaw/host/modules/reload',
+  moduleToolInvoke: '/.sharpclaw/host/modules/tools/invoke',
+  moduleStorageList: '/.sharpclaw/host/modules/storage/list',
+  moduleStorageInvoke: '/.sharpclaw/host/modules/storage/invoke'
+};
+
+export const storageOperations = {
+  get: 'get',
+  upsert: 'upsert',
+  batchUpsert: 'batchUpsert',
+  delete: 'delete',
+  batchDelete: 'batchDelete',
+  list: 'list',
+  query: 'query',
+  claim: 'claim'
+};
+
+export const storageComparisonOperators = {
+  equalTo: 'equals',
+  lessThanOrEqual: 'lessThanOrEqual',
+  greaterThanOrEqual: 'greaterThanOrEqual'
+};
+
+export const storageSortDirections = {
+  ascending: 'asc',
+  descending: 'desc'
 };
 
 export function createSharpClawHost(definition, options = {}) {
@@ -127,7 +206,8 @@ export function createSharpClawHost(definition, options = {}) {
         inlineTools: normalized.inlineTools.map(toInlineToolDescriptor),
         protocolContracts:
           normalized.protocolContracts.map(toProtocolContractDescriptor),
-        requiredProtocolContracts: normalized.requiredProtocolContracts
+        requiredProtocolContracts: normalized.requiredProtocolContracts,
+        storageContracts: normalized.storageContracts
       });
       return;
     }
@@ -348,6 +428,7 @@ export function createHostCapabilitiesClient(options = {}) {
   }
 
   return {
+    invoke: call,
     getConfig: async key => (await call(hostCapabilityPaths.configGet, { key }))?.value,
     setConfig: (key, value) => call(hostCapabilityPaths.configSet, { key, value }),
     getAllConfig: async () => (await call(hostCapabilityPaths.configAll))?.values ?? {},
@@ -360,6 +441,15 @@ export function createHostCapabilitiesClient(options = {}) {
       call(hostCapabilityPaths.jobFail, { jobId, message, details }),
     cancelJob: (jobId, message = null) =>
       call(hostCapabilityPaths.jobCancel, { jobId, message }),
+    cancelStaleJobsByActionPrefix: (actionKeyPrefix, resourceId = null) =>
+      call(hostCapabilityPaths.jobCancelStaleByActionPrefix, { actionKeyPrefix, resourceId }),
+    getJob: async jobId => (await call(hostCapabilityPaths.jobGet, { id: jobId }))?.job,
+    listJobsByActionPrefix: async (actionKeyPrefix, resourceId = null) =>
+      (await call(hostCapabilityPaths.jobListByActionPrefix, { actionKeyPrefix, resourceId }))?.jobs ?? [],
+    listJobSummariesByActionPrefix: async (actionKeyPrefix, resourceId = null) =>
+      (await call(hostCapabilityPaths.jobListSummariesByActionPrefix, { actionKeyPrefix, resourceId }))?.jobs ?? [],
+    jobExistsWithActionPrefix: async (jobId, actionKeyPrefix) =>
+      (await call(hostCapabilityPaths.jobExistsWithActionPrefix, { jobId, actionKeyPrefix }))?.value ?? false,
     listProtocolContracts: async () =>
       (await call(hostCapabilityPaths.contractsList))?.contracts ?? [],
     invokeProtocolContract: async (contractName, operation, parameters = {}) =>
@@ -367,8 +457,245 @@ export function createHostCapabilitiesClient(options = {}) {
         contractName,
         operation,
         parameters
+      }))?.result,
+    validateTask: sourceText => call(hostCapabilityPaths.taskValidate, { sourceText }),
+    createTask: async sourceText =>
+      (await call(hostCapabilityPaths.taskCreate, { sourceText }))?.definition,
+    getTask: async id => (await call(hostCapabilityPaths.taskGet, { id }))?.definition,
+    listTasks: async () => (await call(hostCapabilityPaths.taskList))?.definitions ?? [],
+    updateTask: async (id, values = {}) =>
+      (await call(hostCapabilityPaths.taskUpdate, { id, ...values }))?.definition,
+    deleteTask: async id => (await call(hostCapabilityPaths.taskDelete, { id }))?.deleted ?? false,
+    launchTask: async (taskDefinitionId, values = {}) =>
+      (await call(hostCapabilityPaths.taskLaunch, { taskDefinitionId, ...values }))?.instanceId,
+    executeTaskContextSteps: async parameters =>
+      await call(hostCapabilityPaths.taskContextExecuteSteps, parameters),
+    executeTaskContextEventHandler: async parameters =>
+      await call(hostCapabilityPaths.taskContextExecuteEventHandler, parameters),
+    getAgentIds: async () => (await call(hostCapabilityPaths.coreAgentIds))?.ids ?? [],
+    getChannelIds: async () => (await call(hostCapabilityPaths.coreChannelIds))?.ids ?? [],
+    getAgentLookupItems: async () => (await call(hostCapabilityPaths.coreAgentLookup))?.items ?? [],
+    getChannelLookupItems: async () => (await call(hostCapabilityPaths.coreChannelLookup))?.items ?? [],
+    getAccessibleThreads: async parameters =>
+      (await call(hostCapabilityPaths.contextAccessibleThreads, parameters))?.threads ?? [],
+    getThreadMessages: async parameters =>
+      (await call(hostCapabilityPaths.contextThreadMessages, parameters))?.messages ?? [],
+    getQueueMetrics: () => call(hostCapabilityPaths.queueMetrics),
+    hostAgentChat: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentChat, parameters))?.text,
+    hostAgentChatStream: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentChatStream, parameters))?.text,
+    hostAgentChatToThread: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentChatToThread, parameters))?.text,
+    parseStructuredResponse: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentParseStructuredResponse, parameters))?.text,
+    findModel: async search =>
+      (await call(hostCapabilityPaths.hostAgentFindModel, { search }))?.id,
+    findProvider: async search =>
+      (await call(hostCapabilityPaths.hostAgentFindProvider, { search }))?.id,
+    findAgent: async search =>
+      (await call(hostCapabilityPaths.hostAgentFindAgent, { search }))?.id,
+    findRole: async search =>
+      (await call(hostCapabilityPaths.hostAgentFindRole, { search }))?.id,
+    findChannel: async search =>
+      (await call(hostCapabilityPaths.hostAgentFindChannel, { search }))?.id,
+    createAgent: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentCreateAgent, parameters))?.id,
+    createThread: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentCreateThread, parameters))?.id,
+    createRole: async roleName =>
+      (await call(hostCapabilityPaths.hostAgentCreateRole, { roleName }))?.id,
+    setRolePermissions: parameters =>
+      call(hostCapabilityPaths.hostAgentSetRolePermissions, parameters),
+    assignRole: parameters =>
+      call(hostCapabilityPaths.hostAgentAssignRole, parameters),
+    createChannel: async parameters =>
+      (await call(hostCapabilityPaths.hostAgentCreateChannel, parameters))?.id,
+    addAllowedAgent: parameters =>
+      call(hostCapabilityPaths.hostAgentAddAllowedAgent, parameters),
+    createSubAgent: async parameters =>
+      await call(hostCapabilityPaths.agentCreateSubAgent, parameters),
+    updateAgent: async parameters =>
+      await call(hostCapabilityPaths.agentUpdate, parameters),
+    setAgentHeader: (id, header) =>
+      call(hostCapabilityPaths.agentSetHeader, { id, header }),
+    setChannelHeader: (id, header) =>
+      call(hostCapabilityPaths.channelSetHeader, { id, header }),
+    ensureProvider: async parameters =>
+      (await call(hostCapabilityPaths.modelEnsureProvider, parameters))?.id,
+    ensureModel: async parameters =>
+      (await call(hostCapabilityPaths.modelEnsureModel, parameters))?.id,
+    getModelProviderInfo: async modelId =>
+      (await call(hostCapabilityPaths.modelProviderInfo, { modelId }))?.info,
+    getLocalModelFilePath: async modelId =>
+      (await call(hostCapabilityPaths.modelLocalFilePath, { modelId }))?.path,
+    getModelMetadata: async modelId =>
+      (await call(hostCapabilityPaths.modelMetadata, { modelId }))?.metadata,
+    deleteModel: async modelId =>
+      (await call(hostCapabilityPaths.modelDelete, { modelId }))?.value ?? false,
+    getExternalModulesRoot: async () =>
+      (await call(hostCapabilityPaths.modulesExternalRoot))?.directory,
+    listModules: async () =>
+      (await call(hostCapabilityPaths.modulesInfoList))?.modules ?? [],
+    isModuleRegistered: async moduleId =>
+      (await call(hostCapabilityPaths.moduleRegistered, { moduleId }))?.isRegistered ?? false,
+    isToolPrefixRegistered: async toolPrefix =>
+      (await call(hostCapabilityPaths.moduleToolPrefixRegistered, { toolPrefix }))?.isRegistered ?? false,
+    loadModule: async moduleDir =>
+      (await call(hostCapabilityPaths.moduleLoad, { moduleDir }))?.state,
+    unloadModule: moduleId =>
+      call(hostCapabilityPaths.moduleUnload, { moduleId }),
+    reloadModule: async moduleId =>
+      (await call(hostCapabilityPaths.moduleReload, { moduleId }))?.state,
+    invokeModuleTool: async (toolName, parameters = {}, timeoutSeconds = null) =>
+      (await call(hostCapabilityPaths.moduleToolInvoke, { toolName, parameters, timeoutSeconds }))?.result,
+    listStorageContracts: async () =>
+      (await call(hostCapabilityPaths.moduleStorageList))?.contracts ?? [],
+    invokeStorage: async (storageName, operation, parameters = {}) =>
+      (await call(hostCapabilityPaths.moduleStorageInvoke, {
+        storageName,
+        operation,
+        parameters
       }))?.result
   };
+}
+
+export function createDocumentStore(hostCapabilities, storageName) {
+  if (!hostCapabilities || typeof hostCapabilities.invokeStorage !== 'function') {
+    throw new TypeError('SharpClaw document stores require host storage capabilities.');
+  }
+
+  const invoke = (operation, parameters = {}) =>
+    hostCapabilities.invokeStorage(storageName, operation, parameters);
+
+  const records = response =>
+    Array.isArray(response?.records)
+      ? response.records
+          .filter(record => record && Object.hasOwn(record, 'value'))
+          .map(record => record.value)
+      : [];
+
+  return {
+    get: async key => {
+      const response = await invoke(storageOperations.get, { key });
+      return response?.found === true ? response.value : null;
+    },
+    list: async options => records(await invoke(storageOperations.list, options ?? {})),
+    upsert: async (key, value, indexes = null) => {
+      const payload = { key, value };
+      if (indexes !== null && indexes !== undefined) payload.indexes = indexes;
+      return await invoke(storageOperations.upsert, payload);
+    },
+    upsertMany: async writes => {
+      const response = await invoke(storageOperations.batchUpsert, { records: Array.from(writes ?? []) });
+      return response?.saved ?? 0;
+    },
+    delete: async key => {
+      const response = await invoke(storageOperations.delete, { key });
+      return response?.deleted === true;
+    },
+    deleteMany: async keys => {
+      const response = await invoke(storageOperations.batchDelete, { keys: Array.from(keys ?? []) });
+      return response?.deleted ?? 0;
+    },
+    query: () => createStorageQueryBuilder(async payload =>
+      records(await invoke(storageOperations.query, payload))),
+    claim: () => createStorageClaimBuilder(async payload =>
+      records(await invoke(storageOperations.claim, payload)))
+  };
+}
+
+function createStorageQueryBuilder(execute) {
+  const payload = {
+    filters: [],
+    orderBy: null,
+    limit: null
+  };
+
+  const builder = {
+    whereIndex: indexName => ({
+      equalTo: value => addFilter(builder, payload, indexName, storageComparisonOperators.equalTo, value),
+      lessThanOrEqual: value =>
+        addFilter(builder, payload, indexName, storageComparisonOperators.lessThanOrEqual, value),
+      greaterThanOrEqual: value =>
+        addFilter(builder, payload, indexName, storageComparisonOperators.greaterThanOrEqual, value)
+    }),
+    orderByIndex: indexName => setOrder(builder, payload, indexName, storageSortDirections.ascending),
+    orderByIndexDescending: indexName =>
+      setOrder(builder, payload, indexName, storageSortDirections.descending),
+    take: limit => {
+      payload.limit = limit;
+      return builder;
+    },
+    toList: () => execute(cleanPayload(payload)),
+    toListAsync: () => execute(cleanPayload(payload))
+  };
+
+  return builder;
+}
+
+function createStorageClaimBuilder(execute) {
+  const payload = {
+    filters: [],
+    orderBy: null,
+    limit: null,
+    patch: null,
+    indexes: null
+  };
+
+  const builder = {
+    whereIndex: indexName => ({
+      equalTo: value => addFilter(builder, payload, indexName, storageComparisonOperators.equalTo, value),
+      lessThanOrEqual: value =>
+        addFilter(builder, payload, indexName, storageComparisonOperators.lessThanOrEqual, value),
+      greaterThanOrEqual: value =>
+        addFilter(builder, payload, indexName, storageComparisonOperators.greaterThanOrEqual, value)
+    }),
+    orderByIndex: indexName => setOrder(builder, payload, indexName, storageSortDirections.ascending),
+    orderByIndexDescending: indexName =>
+      setOrder(builder, payload, indexName, storageSortDirections.descending),
+    take: limit => {
+      payload.limit = limit;
+      return builder;
+    },
+    patch: (patch, indexes = null) => {
+      payload.patch = patch;
+      payload.indexes = indexes;
+      return builder;
+    },
+    toList: () => {
+      if (payload.patch === null || payload.patch === undefined) {
+        throw new Error('SharpClaw storage claim requires a patch before execution.');
+      }
+
+      return execute(cleanPayload(payload));
+    },
+    toListAsync: () => {
+      if (payload.patch === null || payload.patch === undefined) {
+        throw new Error('SharpClaw storage claim requires a patch before execution.');
+      }
+
+      return execute(cleanPayload(payload));
+    }
+  };
+
+  return builder;
+}
+
+function addFilter(builder, payload, indexName, operator, value) {
+  payload.filters.push({ indexName, operator, value });
+  return builder;
+}
+
+function setOrder(builder, payload, indexName, direction) {
+  payload.orderBy = { indexName, direction };
+  return builder;
+}
+
+function cleanPayload(payload) {
+  return Object.fromEntries(
+    Object.entries(payload)
+      .filter(([, value]) => value !== null && value !== undefined));
 }
 
 function normalizeDefinition(definition) {
@@ -397,6 +724,9 @@ function normalizeDefinition(definition) {
       : [],
     requiredProtocolContracts: Array.isArray(definition.requiredProtocolContracts)
       ? definition.requiredProtocolContracts
+      : [],
+    storageContracts: Array.isArray(definition.storageContracts)
+      ? definition.storageContracts
       : [],
     initialize: definition.initialize ?? noop,
     shutdown: definition.shutdown ?? noop,

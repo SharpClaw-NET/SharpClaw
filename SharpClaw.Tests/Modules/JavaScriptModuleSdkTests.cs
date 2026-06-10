@@ -39,9 +39,16 @@ public sealed class JavaScriptModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("createHostCapabilitiesClient");
+        source.Should().Contain("createDocumentStore");
         source.Should().Contain("inlineTools");
         source.Should().Contain("protocolContracts");
+        source.Should().Contain("storageContracts");
+        source.Should().Contain("invokeStorage");
+        source.Should().Contain("batchUpsert");
+        source.Should().Contain("lessThanOrEqual");
         source.Should().Contain("supportsStreaming");
     }
 
@@ -65,6 +72,13 @@ public sealed class JavaScriptModuleSdkTests
         packageTemplate.Should().Contain("\"@sharpclaw/module-host\": \"0.1.0-beta\"");
         manifestTemplate.Should().Contain("\"runtime\": \"node\"");
         manifestTemplate.Should().Contain("\"entrypoint\": \"module.mjs\"");
+        var moduleTemplate = await File.ReadAllTextAsync(Path.Combine(
+            repoRoot,
+            "DefaultModules",
+            "ModuleDev",
+            "Templates",
+            "NodeModule.mjs.template"));
+        moduleTemplate.Should().Contain("storageContracts: []");
     }
 
     private static string FindRepoRoot()

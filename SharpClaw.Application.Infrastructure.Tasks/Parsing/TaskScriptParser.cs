@@ -40,6 +40,7 @@ public sealed class TaskScriptParser
         = new(StringComparer.Ordinal);
     private static readonly Lock _registryLock = new();
     private static TaskParserPrimitives? _primitives;
+    private static string? _primitivesOwnerKey;
 
     /// <summary>
     /// Wire-format step keys for statement-shaped primitives, supplied by
@@ -95,7 +96,10 @@ public sealed class TaskScriptParser
 
             if (extension.Primitives is { } primitives)
             {
-                if (_primitives is not null && !_primitives.Equals(primitives))
+                var ownerKey = ResolveParserExtensionOwnerKey(extension);
+                if (_primitives is not null
+                    && (!_primitives.Equals(primitives)
+                        || !string.Equals(_primitivesOwnerKey, ownerKey, StringComparison.Ordinal)))
                 {
                     throw new InvalidOperationException(
                         "Task script parser primitives have already been registered " +
@@ -103,6 +107,56 @@ public sealed class TaskScriptParser
                         "statement step keys.");
                 }
                 _primitives = primitives;
+                _primitivesOwnerKey = ownerKey;
+            }
+        }
+    }
+
+    public static void UnregisterModule(ITaskParserModuleExtension extension)
+    {
+        ArgumentNullException.ThrowIfNull(extension);
+        lock (_registryLock)
+        {
+            foreach (var (method, entry) in extension.StepKeyMappings)
+            {
+                if (_moduleStepKeys.TryGetValue(method, out var registered)
+                    && string.Equals(registered.StepKey, entry.StepKey, StringComparison.Ordinal)
+                    && string.Equals(registered.ModuleId, entry.ModuleId, StringComparison.Ordinal))
+                {
+                    _moduleStepKeys.Remove(method);
+                }
+            }
+
+            foreach (var method in extension.SingleArgExpressionMethods)
+            {
+                if (!_moduleStepKeys.ContainsKey(method))
+                    _moduleSingleArgMethods.Remove(method);
+            }
+
+            foreach (var (method, entry) in extension.EventTriggerMappings)
+            {
+                if (_moduleEventTriggers.TryGetValue(method, out var registered)
+                    && string.Equals(registered.TriggerKey, entry.TriggerKey, StringComparison.Ordinal)
+                    && string.Equals(registered.ModuleId, entry.ModuleId, StringComparison.Ordinal))
+                {
+                    _moduleEventTriggers.Remove(method);
+                }
+            }
+
+            foreach (var (attrName, handler) in extension.TriggerAttributeHandlers)
+            {
+                UnregisterTriggerAttributeHandler(attrName, handler);
+                if (!attrName.EndsWith("Attribute", StringComparison.Ordinal))
+                    UnregisterTriggerAttributeHandler(attrName + "Attribute", handler);
+            }
+
+            if (extension.Primitives is { } primitives
+                && _primitives is not null
+                && _primitives.Equals(primitives)
+                && string.Equals(_primitivesOwnerKey, ResolveParserExtensionOwnerKey(extension), StringComparison.Ordinal))
+            {
+                _primitives = null;
+                _primitivesOwnerKey = null;
             }
         }
     }
@@ -139,6 +193,26 @@ public sealed class TaskScriptParser
         _moduleTriggerAttributeHandlerOwners[attrName] = ownerKey;
     }
 
+    private static void UnregisterTriggerAttributeHandler(string attrName, ITaskTriggerAttributeHandler handler)
+    {
+        if (!_moduleTriggerAttributeHandlers.TryGetValue(attrName, out var existing))
+            return;
+
+        var ownerKey = ResolveTriggerAttributeOwnerKey(handler);
+        var existingOwnerKey = _moduleTriggerAttributeHandlerOwners.TryGetValue(attrName, out var storedOwnerKey)
+            ? storedOwnerKey
+            : ResolveTriggerAttributeOwnerKey(existing);
+
+        if (!ReferenceEquals(existing, handler)
+            && !string.Equals(existingOwnerKey, ownerKey, StringComparison.Ordinal))
+        {
+            return;
+        }
+
+        _moduleTriggerAttributeHandlers.Remove(attrName);
+        _moduleTriggerAttributeHandlerOwners.Remove(attrName);
+    }
+
     private static string ResolveTriggerAttributeOwnerKey(ITaskTriggerAttributeHandler handler)
     {
         if (handler is ITaskTriggerAttributeHandlerOwnerHint hint
@@ -150,6 +224,22 @@ public sealed class TaskScriptParser
         return handler.GetType().Assembly.GetName().Name
             ?? handler.GetType().FullName
             ?? "<unknown>";
+    }
+
+    private static string ResolveParserExtensionOwnerKey(ITaskParserModuleExtension extension)
+    {
+        var ownerIds = extension.StepKeyMappings.Values
+            .Select(entry => entry.ModuleId)
+            .Concat(extension.EventTriggerMappings.Values.Select(entry => entry.ModuleId))
+            .Where(moduleId => !string.IsNullOrWhiteSpace(moduleId))
+            .Distinct(StringComparer.Ordinal)
+            .ToArray();
+
+        return ownerIds.Length == 1
+            ? ownerIds[0]
+            : extension.GetType().Assembly.GetName().Name
+              ?? extension.GetType().FullName
+              ?? "<unknown>";
     }
 
     /// <summary>

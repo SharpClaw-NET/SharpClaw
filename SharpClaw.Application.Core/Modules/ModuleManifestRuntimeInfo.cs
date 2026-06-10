@@ -25,6 +25,9 @@ internal sealed record ModuleManifestRuntimeInfo(
     };
 
     public bool IsDotNet => string.Equals(Runtime, DotNet, StringComparison.Ordinal);
+    public bool IsNode => string.Equals(Runtime, Node, StringComparison.Ordinal);
+    public bool IsPython => string.Equals(Runtime, Python, StringComparison.Ordinal);
+    public bool IsScriptRuntime => IsNode || IsPython;
     public bool IsSidecarHostMode => string.Equals(HostMode, HostModeSidecar, StringComparison.Ordinal);
 
     public static ModuleManifestRuntimeInfo FromJson(string json)
@@ -74,6 +77,37 @@ internal sealed record ModuleManifestRuntimeInfo(
 
         PathGuard.EnsureFileName(manifest.EntryAssembly, nameof(manifest.EntryAssembly));
         PathGuard.EnsureExtension(manifest.EntryAssembly, ".dll");
+
+        if (!string.IsNullOrWhiteSpace(ModuleType)
+            && ModuleType.Any(char.IsControl))
+        {
+            throw new InvalidOperationException(
+                $"Module '{manifest.Id}' declares an invalid moduleType.");
+        }
+    }
+
+    public void EnsureScriptEntrypoint(ModuleManifest manifest)
+    {
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        if (!IsScriptRuntime)
+        {
+            throw new NotSupportedException(
+                $"Module '{manifest.Id}' declares runtime '{Runtime}', but script entrypoints are only supported for " +
+                $"'{Node}' and '{Python}' modules.");
+        }
+
+        if (string.IsNullOrWhiteSpace(Entrypoint))
+        {
+            throw new InvalidOperationException(
+                $"Module '{manifest.Id}' declares runtime '{Runtime}' but has no entrypoint.");
+        }
+
+        if (Entrypoint.Any(char.IsControl) || Path.IsPathRooted(Entrypoint))
+        {
+            throw new InvalidOperationException(
+                $"Module '{manifest.Id}' declares an invalid script entrypoint.");
+        }
 
         if (!string.IsNullOrWhiteSpace(ModuleType)
             && ModuleType.Any(char.IsControl))

@@ -49,8 +49,87 @@ HOST_CAPABILITY_PATHS = {
     "job_complete": "/.sharpclaw/host/job/complete",
     "job_fail": "/.sharpclaw/host/job/fail",
     "job_cancel": "/.sharpclaw/host/job/cancel",
+    "job_cancel_stale_by_action_prefix": "/.sharpclaw/host/job/cancel-stale-by-action-prefix",
+    "job_get": "/.sharpclaw/host/job/get",
+    "job_list_by_action_prefix": "/.sharpclaw/host/job/list-by-action-prefix",
+    "job_list_summaries_by_action_prefix": "/.sharpclaw/host/job/list-summaries-by-action-prefix",
+    "job_exists_with_action_prefix": "/.sharpclaw/host/job/exists-with-action-prefix",
     "contracts_list": "/.sharpclaw/host/contracts/list",
     "contract_invoke": "/.sharpclaw/host/contracts/invoke",
+    "task_validate": "/.sharpclaw/host/tasks/validate",
+    "task_create": "/.sharpclaw/host/tasks/create",
+    "task_get": "/.sharpclaw/host/tasks/get",
+    "task_list": "/.sharpclaw/host/tasks/list",
+    "task_update": "/.sharpclaw/host/tasks/update",
+    "task_delete": "/.sharpclaw/host/tasks/delete",
+    "task_launch": "/.sharpclaw/host/tasks/launch",
+    "task_context_execute_steps": "/.sharpclaw/host/tasks/context/execute-steps",
+    "task_context_execute_event_handler": "/.sharpclaw/host/tasks/context/event-handler/execute",
+    "core_agent_ids": "/.sharpclaw/host/core/agents/ids",
+    "core_channel_ids": "/.sharpclaw/host/core/channels/ids",
+    "core_agent_lookup": "/.sharpclaw/host/core/agents/lookup",
+    "core_channel_lookup": "/.sharpclaw/host/core/channels/lookup",
+    "context_accessible_threads": "/.sharpclaw/host/context/threads/accessible",
+    "context_thread_messages": "/.sharpclaw/host/context/threads/messages",
+    "queue_metrics": "/.sharpclaw/host/metrics/queue",
+    "host_agent_chat": "/.sharpclaw/host/agent-bridge/chat",
+    "host_agent_chat_stream": "/.sharpclaw/host/agent-bridge/chat-stream",
+    "host_agent_chat_to_thread": "/.sharpclaw/host/agent-bridge/chat-to-thread",
+    "host_agent_parse_structured_response": "/.sharpclaw/host/agent-bridge/parse-structured-response",
+    "host_agent_find_model": "/.sharpclaw/host/agent-bridge/find-model",
+    "host_agent_find_provider": "/.sharpclaw/host/agent-bridge/find-provider",
+    "host_agent_find_agent": "/.sharpclaw/host/agent-bridge/find-agent",
+    "host_agent_find_role": "/.sharpclaw/host/agent-bridge/find-role",
+    "host_agent_find_channel": "/.sharpclaw/host/agent-bridge/find-channel",
+    "host_agent_create_agent": "/.sharpclaw/host/agent-bridge/create-agent",
+    "host_agent_create_thread": "/.sharpclaw/host/agent-bridge/create-thread",
+    "host_agent_create_role": "/.sharpclaw/host/agent-bridge/create-role",
+    "host_agent_set_role_permissions": "/.sharpclaw/host/agent-bridge/set-role-permissions",
+    "host_agent_assign_role": "/.sharpclaw/host/agent-bridge/assign-role",
+    "host_agent_create_channel": "/.sharpclaw/host/agent-bridge/create-channel",
+    "host_agent_add_allowed_agent": "/.sharpclaw/host/agent-bridge/add-allowed-agent",
+    "agent_create_sub_agent": "/.sharpclaw/host/agents/create-sub-agent",
+    "agent_update": "/.sharpclaw/host/agents/update",
+    "agent_set_header": "/.sharpclaw/host/agents/set-header",
+    "channel_set_header": "/.sharpclaw/host/channels/set-header",
+    "model_ensure_provider": "/.sharpclaw/host/models/ensure-provider",
+    "model_ensure_model": "/.sharpclaw/host/models/ensure-model",
+    "model_provider_info": "/.sharpclaw/host/models/provider-info",
+    "model_local_file_path": "/.sharpclaw/host/models/local-file-path",
+    "model_metadata": "/.sharpclaw/host/models/metadata",
+    "model_delete": "/.sharpclaw/host/models/delete",
+    "modules_external_root": "/.sharpclaw/host/modules/external-root",
+    "modules_info_list": "/.sharpclaw/host/modules/info/list",
+    "module_registered": "/.sharpclaw/host/modules/registered",
+    "module_tool_prefix_registered": "/.sharpclaw/host/modules/tool-prefix-registered",
+    "module_load": "/.sharpclaw/host/modules/load",
+    "module_unload": "/.sharpclaw/host/modules/unload",
+    "module_reload": "/.sharpclaw/host/modules/reload",
+    "module_tool_invoke": "/.sharpclaw/host/modules/tools/invoke",
+    "module_storage_list": "/.sharpclaw/host/modules/storage/list",
+    "module_storage_invoke": "/.sharpclaw/host/modules/storage/invoke",
+}
+
+STORAGE_OPERATIONS = {
+    "get": "get",
+    "upsert": "upsert",
+    "batch_upsert": "batchUpsert",
+    "delete": "delete",
+    "batch_delete": "batchDelete",
+    "list": "list",
+    "query": "query",
+    "claim": "claim",
+}
+
+STORAGE_COMPARISON_OPERATORS = {
+    "equal_to": "equals",
+    "less_than_or_equal": "lessThanOrEqual",
+    "greater_than_or_equal": "greaterThanOrEqual",
+}
+
+STORAGE_SORT_DIRECTIONS = {
+    "ascending": "asc",
+    "descending": "desc",
 }
 
 Handler = Callable[["RequestContext"], Any | Awaitable[Any]]
@@ -62,6 +141,9 @@ class HostCapabilitiesClient:
     def __init__(self, *, address: str, token: str) -> None:
         self.address = address.rstrip("/") + "/"
         self.token = token
+
+    def invoke(self, path: str, payload: dict[str, Any] | None = None) -> dict[str, Any]:
+        return self._post_json(path, payload or {})
 
     def get_config(self, key: str) -> str | None:
         return self._post_json(HOST_CAPABILITY_PATHS["config_get"], {"key": key}).get("value")
@@ -109,6 +191,47 @@ class HostCapabilitiesClient:
             {"jobId": job_id, "message": message},
         )
 
+    def cancel_stale_jobs_by_action_prefix(
+        self,
+        action_key_prefix: str,
+        resource_id: str | None = None,
+    ) -> dict[str, Any]:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["job_cancel_stale_by_action_prefix"],
+            {"actionKeyPrefix": action_key_prefix, "resourceId": resource_id},
+        )
+
+    def get_job(self, job_id: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["job_get"], {"id": job_id}).get("job")
+
+    def list_jobs_by_action_prefix(
+        self,
+        action_key_prefix: str,
+        resource_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["job_list_by_action_prefix"],
+            {"actionKeyPrefix": action_key_prefix, "resourceId": resource_id},
+        ).get("jobs", [])
+
+    def list_job_summaries_by_action_prefix(
+        self,
+        action_key_prefix: str,
+        resource_id: str | None = None,
+    ) -> list[dict[str, Any]]:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["job_list_summaries_by_action_prefix"],
+            {"actionKeyPrefix": action_key_prefix, "resourceId": resource_id},
+        ).get("jobs", [])
+
+    def job_exists_with_action_prefix(self, job_id: str, action_key_prefix: str) -> bool:
+        return bool(
+            self._post_json(
+                HOST_CAPABILITY_PATHS["job_exists_with_action_prefix"],
+                {"jobId": job_id, "actionKeyPrefix": action_key_prefix},
+            ).get("value", False)
+        )
+
     def list_protocol_contracts(self) -> list[dict[str, Any]]:
         return self._post_json(HOST_CAPABILITY_PATHS["contracts_list"], {}).get("contracts", [])
 
@@ -122,6 +245,197 @@ class HostCapabilitiesClient:
             HOST_CAPABILITY_PATHS["contract_invoke"],
             {
                 "contractName": contract_name,
+                "operation": operation,
+                "parameters": parameters or {},
+            },
+        ).get("result")
+
+    def validate_task(self, source_text: str) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_validate"], {"sourceText": source_text})
+
+    def create_task(self, source_text: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_create"], {"sourceText": source_text}).get("definition")
+
+    def get_task(self, task_id: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_get"], {"id": task_id}).get("definition")
+
+    def list_tasks(self) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_list"], {}).get("definitions", [])
+
+    def update_task(self, task_id: str, **values: Any) -> dict[str, Any] | None:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["task_update"],
+            {"id": task_id, **values},
+        ).get("definition")
+
+    def delete_task(self, task_id: str) -> bool:
+        return bool(self._post_json(HOST_CAPABILITY_PATHS["task_delete"], {"id": task_id}).get("deleted", False))
+
+    def launch_task(self, task_definition_id: str, **values: Any) -> str | None:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["task_launch"],
+            {"taskDefinitionId": task_definition_id, **values},
+        ).get("instanceId")
+
+    def execute_task_context_steps(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_context_execute_steps"], parameters)
+
+    def execute_task_context_event_handler(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["task_context_execute_event_handler"], parameters)
+
+    def get_agent_ids(self) -> list[str]:
+        return self._post_json(HOST_CAPABILITY_PATHS["core_agent_ids"], {}).get("ids", [])
+
+    def get_channel_ids(self) -> list[str]:
+        return self._post_json(HOST_CAPABILITY_PATHS["core_channel_ids"], {}).get("ids", [])
+
+    def get_agent_lookup_items(self) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["core_agent_lookup"], {}).get("items", [])
+
+    def get_channel_lookup_items(self) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["core_channel_lookup"], {}).get("items", [])
+
+    def get_accessible_threads(self, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["context_accessible_threads"], parameters).get("threads", [])
+
+    def get_thread_messages(self, parameters: dict[str, Any]) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["context_thread_messages"], parameters).get("messages", [])
+
+    def get_queue_metrics(self) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["queue_metrics"], {})
+
+    def host_agent_chat(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_chat"], parameters).get("text")
+
+    def host_agent_chat_stream(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_chat_stream"], parameters).get("text")
+
+    def host_agent_chat_to_thread(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_chat_to_thread"], parameters).get("text")
+
+    def parse_structured_response(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["host_agent_parse_structured_response"],
+            parameters,
+        ).get("text")
+
+    def find_model(self, search: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_find_model"], {"search": search}).get("id")
+
+    def find_provider(self, search: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_find_provider"], {"search": search}).get("id")
+
+    def find_agent(self, search: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_find_agent"], {"search": search}).get("id")
+
+    def find_role(self, search: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_find_role"], {"search": search}).get("id")
+
+    def find_channel(self, search: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_find_channel"], {"search": search}).get("id")
+
+    def create_agent(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_create_agent"], parameters).get("id")
+
+    def create_thread(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_create_thread"], parameters).get("id")
+
+    def create_role(self, role_name: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_create_role"], {"roleName": role_name}).get("id")
+
+    def set_role_permissions(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_set_role_permissions"], parameters)
+
+    def assign_role(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_assign_role"], parameters)
+
+    def create_channel(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_create_channel"], parameters).get("id")
+
+    def add_allowed_agent(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["host_agent_add_allowed_agent"], parameters)
+
+    def create_sub_agent(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["agent_create_sub_agent"], parameters)
+
+    def update_agent(self, parameters: dict[str, Any]) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["agent_update"], parameters)
+
+    def set_agent_header(self, entity_id: str, header: str | None) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["agent_set_header"], {"id": entity_id, "header": header})
+
+    def set_channel_header(self, entity_id: str, header: str | None) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["channel_set_header"], {"id": entity_id, "header": header})
+
+    def ensure_provider(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["model_ensure_provider"], parameters).get("id")
+
+    def ensure_model(self, parameters: dict[str, Any]) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["model_ensure_model"], parameters).get("id")
+
+    def get_model_provider_info(self, model_id: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["model_provider_info"], {"modelId": model_id}).get("info")
+
+    def get_local_model_file_path(self, model_id: str) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["model_local_file_path"], {"modelId": model_id}).get("path")
+
+    def get_model_metadata(self, model_id: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["model_metadata"], {"modelId": model_id}).get("metadata")
+
+    def delete_model(self, model_id: str) -> bool:
+        return bool(self._post_json(HOST_CAPABILITY_PATHS["model_delete"], {"modelId": model_id}).get("value", False))
+
+    def get_external_modules_root(self) -> str | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["modules_external_root"], {}).get("directory")
+
+    def list_modules(self) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["modules_info_list"], {}).get("modules", [])
+
+    def is_module_registered(self, module_id: str) -> bool:
+        return bool(
+            self._post_json(HOST_CAPABILITY_PATHS["module_registered"], {"moduleId": module_id})
+            .get("isRegistered", False)
+        )
+
+    def is_tool_prefix_registered(self, tool_prefix: str) -> bool:
+        return bool(
+            self._post_json(HOST_CAPABILITY_PATHS["module_tool_prefix_registered"], {"toolPrefix": tool_prefix})
+            .get("isRegistered", False)
+        )
+
+    def load_module(self, module_dir: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["module_load"], {"moduleDir": module_dir}).get("state")
+
+    def unload_module(self, module_id: str) -> dict[str, Any]:
+        return self._post_json(HOST_CAPABILITY_PATHS["module_unload"], {"moduleId": module_id})
+
+    def reload_module(self, module_id: str) -> dict[str, Any] | None:
+        return self._post_json(HOST_CAPABILITY_PATHS["module_reload"], {"moduleId": module_id}).get("state")
+
+    def invoke_module_tool(
+        self,
+        tool_name: str,
+        parameters: dict[str, Any] | None = None,
+        timeout_seconds: int | None = None,
+    ) -> str | None:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["module_tool_invoke"],
+            {"toolName": tool_name, "parameters": parameters or {}, "timeoutSeconds": timeout_seconds},
+        ).get("result")
+
+    def list_storage_contracts(self) -> list[dict[str, Any]]:
+        return self._post_json(HOST_CAPABILITY_PATHS["module_storage_list"], {}).get("contracts", [])
+
+    def invoke_storage(
+        self,
+        storage_name: str,
+        operation: str,
+        parameters: dict[str, Any] | None = None,
+    ) -> Any:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["module_storage_invoke"],
+            {
+                "storageName": storage_name,
                 "operation": operation,
                 "parameters": parameters or {},
             },
@@ -162,6 +476,192 @@ def create_host_capabilities_client(
         return None
 
     return HostCapabilitiesClient(address=resolved_address, token=resolved_token)
+
+
+class ModuleDocumentStore:
+    def __init__(self, host_capabilities: HostCapabilitiesClient, storage_name: str) -> None:
+        if host_capabilities is None:
+            raise ValueError("SharpClaw document stores require host storage capabilities.")
+
+        self.host_capabilities = host_capabilities
+        self.storage_name = storage_name
+
+    def get(self, key: str) -> Any:
+        response = self._invoke(STORAGE_OPERATIONS["get"], {"key": key})
+        return response.get("value") if response.get("found") is True else None
+
+    def list(self, **options: Any) -> list[Any]:
+        return _record_values(self._invoke(STORAGE_OPERATIONS["list"], options))
+
+    def upsert(self, key: str, value: Any, indexes: dict[str, Any] | None = None) -> dict[str, Any]:
+        payload: dict[str, Any] = {"key": key, "value": value}
+        if indexes is not None:
+            payload["indexes"] = indexes
+        return self._invoke(STORAGE_OPERATIONS["upsert"], payload)
+
+    def upsert_many(self, records: list[dict[str, Any]]) -> int:
+        response = self._invoke(STORAGE_OPERATIONS["batch_upsert"], {"records": records})
+        return int(response.get("saved", 0))
+
+    def delete(self, key: str) -> bool:
+        response = self._invoke(STORAGE_OPERATIONS["delete"], {"key": key})
+        return response.get("deleted") is True
+
+    def delete_many(self, keys: list[str]) -> int:
+        response = self._invoke(STORAGE_OPERATIONS["batch_delete"], {"keys": keys})
+        return int(response.get("deleted", 0))
+
+    def query(self) -> "ModuleDocumentQuery":
+        return ModuleDocumentQuery(self)
+
+    def claim(self) -> "ModuleDocumentClaim":
+        return ModuleDocumentClaim(self)
+
+    def _invoke(self, operation: str, parameters: dict[str, Any]) -> dict[str, Any]:
+        result = self.host_capabilities.invoke_storage(
+            self.storage_name,
+            operation,
+            parameters,
+        )
+        return result if isinstance(result, dict) else {}
+
+
+class ModuleDocumentQuery:
+    def __init__(self, store: ModuleDocumentStore) -> None:
+        self.store = store
+        self.filters: list[dict[str, Any]] = []
+        self.order_by: dict[str, Any] | None = None
+        self.limit: int | None = None
+
+    def where_index(self, index_name: str) -> "ModuleDocumentIndexFilterBuilder":
+        return ModuleDocumentIndexFilterBuilder(self, index_name)
+
+    def order_by_index(self, index_name: str) -> "ModuleDocumentQuery":
+        self.order_by = {"indexName": index_name, "direction": STORAGE_SORT_DIRECTIONS["ascending"]}
+        return self
+
+    def order_by_index_descending(self, index_name: str) -> "ModuleDocumentQuery":
+        self.order_by = {"indexName": index_name, "direction": STORAGE_SORT_DIRECTIONS["descending"]}
+        return self
+
+    def take(self, limit: int) -> "ModuleDocumentQuery":
+        self.limit = limit
+        return self
+
+    def to_list(self) -> list[Any]:
+        return _record_values(self.store._invoke(STORAGE_OPERATIONS["query"], self._payload()))
+
+    def _add_filter(self, index_name: str, operator: str, value: Any) -> "ModuleDocumentQuery":
+        self.filters.append({"indexName": index_name, "operator": operator, "value": value})
+        return self
+
+    def _payload(self) -> dict[str, Any]:
+        payload: dict[str, Any] = {"filters": self.filters}
+        if self.order_by is not None:
+            payload["orderBy"] = self.order_by
+        if self.limit is not None:
+            payload["limit"] = self.limit
+        return payload
+
+
+class ModuleDocumentClaim:
+    def __init__(self, store: ModuleDocumentStore) -> None:
+        self.store = store
+        self.filters: list[dict[str, Any]] = []
+        self.order_by: dict[str, Any] | None = None
+        self.limit: int | None = None
+        self.patch_value: dict[str, Any] | None = None
+        self.indexes: dict[str, Any] | None = None
+
+    def where_index(self, index_name: str) -> "ModuleDocumentIndexFilterBuilder":
+        return ModuleDocumentIndexFilterBuilder(self, index_name)
+
+    def order_by_index(self, index_name: str) -> "ModuleDocumentClaim":
+        self.order_by = {"indexName": index_name, "direction": STORAGE_SORT_DIRECTIONS["ascending"]}
+        return self
+
+    def order_by_index_descending(self, index_name: str) -> "ModuleDocumentClaim":
+        self.order_by = {"indexName": index_name, "direction": STORAGE_SORT_DIRECTIONS["descending"]}
+        return self
+
+    def take(self, limit: int) -> "ModuleDocumentClaim":
+        self.limit = limit
+        return self
+
+    def patch(
+        self,
+        patch: dict[str, Any],
+        indexes: dict[str, Any] | None = None,
+    ) -> "ModuleDocumentClaim":
+        self.patch_value = patch
+        self.indexes = indexes
+        return self
+
+    def to_list(self) -> list[Any]:
+        if self.patch_value is None:
+            raise RuntimeError("SharpClaw storage claim requires a patch before execution.")
+
+        payload: dict[str, Any] = {
+            "filters": self.filters,
+            "patch": self.patch_value,
+        }
+        if self.order_by is not None:
+            payload["orderBy"] = self.order_by
+        if self.limit is not None:
+            payload["limit"] = self.limit
+        if self.indexes is not None:
+            payload["indexes"] = self.indexes
+        return _record_values(self.store._invoke(STORAGE_OPERATIONS["claim"], payload))
+
+    def _add_filter(self, index_name: str, operator: str, value: Any) -> "ModuleDocumentClaim":
+        self.filters.append({"indexName": index_name, "operator": operator, "value": value})
+        return self
+
+
+class ModuleDocumentIndexFilterBuilder:
+    def __init__(
+        self,
+        query: ModuleDocumentQuery | ModuleDocumentClaim,
+        index_name: str,
+    ) -> None:
+        self.query = query
+        self.index_name = index_name
+
+    def equal_to(self, value: Any) -> ModuleDocumentQuery | ModuleDocumentClaim:
+        return self.query._add_filter(
+            self.index_name,
+            STORAGE_COMPARISON_OPERATORS["equal_to"],
+            value,
+        )
+
+    def less_than_or_equal(self, value: Any) -> ModuleDocumentQuery | ModuleDocumentClaim:
+        return self.query._add_filter(
+            self.index_name,
+            STORAGE_COMPARISON_OPERATORS["less_than_or_equal"],
+            value,
+        )
+
+    def greater_than_or_equal(self, value: Any) -> ModuleDocumentQuery | ModuleDocumentClaim:
+        return self.query._add_filter(
+            self.index_name,
+            STORAGE_COMPARISON_OPERATORS["greater_than_or_equal"],
+            value,
+        )
+
+
+def create_document_store(
+    host_capabilities: HostCapabilitiesClient,
+    storage_name: str,
+) -> ModuleDocumentStore:
+    return ModuleDocumentStore(host_capabilities, storage_name)
+
+
+def _record_values(response: dict[str, Any]) -> list[Any]:
+    return [
+        record["value"]
+        for record in response.get("records", [])
+        if isinstance(record, dict) and "value" in record
+    ]
 
 
 @dataclass(slots=True)
@@ -224,6 +724,7 @@ class SharpClawHost:
         inline_tools: list[dict[str, Any]] | None = None,
         protocol_contracts: list[dict[str, Any]] | None = None,
         required_protocol_contracts: list[dict[str, Any]] | None = None,
+        storage_contracts: list[dict[str, Any]] | None = None,
         initialize: Handler | None = None,
         shutdown: Handler | None = None,
         health: Handler | None = None,
@@ -251,6 +752,7 @@ class SharpClawHost:
             for contract in protocol_contracts or []
         ]
         self.required_protocol_contracts = required_protocol_contracts or []
+        self.storage_contracts = storage_contracts or []
         self.initialize = initialize or _noop
         self.shutdown = shutdown or _noop
         self.health = health or (lambda _: {"isHealthy": True, "message": "ready"})
@@ -337,6 +839,7 @@ class SharpClawHost:
                         for contract in self.protocol_contracts
                     ],
                     "requiredProtocolContracts": self.required_protocol_contracts,
+                    "storageContracts": self.storage_contracts,
                 }
             )
 

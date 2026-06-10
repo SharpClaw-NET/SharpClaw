@@ -53,6 +53,7 @@ public sealed class ModuleDevScaffoldTests
         var moduleText = await File.ReadAllTextAsync(Path.Combine(result.ModuleDir, "module.mjs"));
         moduleText.Should().Contain("createSharpClawHost");
         moduleText.Should().Contain("/modules/sample_node/ping");
+        moduleText.Should().Contain("storageContracts: []");
 
         var packageText = await File.ReadAllTextAsync(Path.Combine(result.ModuleDir, "package.json"));
         packageText.Should().Contain("\"@sharpclaw/module-host\": \"0.1.0-beta\"");
@@ -82,6 +83,7 @@ public sealed class ModuleDevScaffoldTests
         var moduleText = await File.ReadAllTextAsync(Path.Combine(result.ModuleDir, "module.py"));
         moduleText.Should().Contain("create_sharpclaw_host");
         moduleText.Should().Contain("/modules/sample_python/ping");
+        moduleText.Should().Contain("storage_contracts=[]");
 
         var projectText = await File.ReadAllTextAsync(Path.Combine(result.ModuleDir, "pyproject.toml"));
         projectText.Should().Contain("sharpclaw-module-host==0.1.0b0");

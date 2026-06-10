@@ -40,9 +40,17 @@ public sealed class PythonModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("HostCapabilitiesClient");
+        source.Should().Contain("ModuleDocumentStore");
+        source.Should().Contain("create_document_store");
         source.Should().Contain("InlineToolExecutionContext");
         source.Should().Contain("ProtocolContractContext");
+        source.Should().Contain("storageContracts");
+        source.Should().Contain("invoke_storage");
+        source.Should().Contain("batchUpsert");
+        source.Should().Contain("lessThanOrEqual");
         source.Should().Contain("supportsStreaming");
         source.Should().Contain("asgi_app");
     }
@@ -67,6 +75,13 @@ public sealed class PythonModuleSdkTests
         projectTemplate.Should().Contain("sharpclaw-module-host==0.1.0b0");
         manifestTemplate.Should().Contain("\"runtime\": \"python\"");
         manifestTemplate.Should().Contain("\"entrypoint\": \"module.py\"");
+        var moduleTemplate = await File.ReadAllTextAsync(Path.Combine(
+            repoRoot,
+            "DefaultModules",
+            "ModuleDev",
+            "Templates",
+            "PythonModule.py.template"));
+        moduleTemplate.Should().Contain("storage_contracts=[]");
     }
 
     private static string FindRepoRoot()

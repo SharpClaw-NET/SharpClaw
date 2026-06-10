@@ -31,6 +31,31 @@ public sealed class TaskStepRegistry
         }
     }
 
+    public void UnregisterOwner(string ownerId)
+    {
+        if (string.IsNullOrWhiteSpace(ownerId))
+            return;
+
+        lock (_lock)
+        {
+            foreach (var methodName in _byMethod
+                         .Where(pair => string.Equals(pair.Value.OwnerId, ownerId, StringComparison.Ordinal))
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                _byMethod.Remove(methodName);
+            }
+
+            foreach (var stepKey in _byKey
+                         .Where(pair => string.Equals(pair.Value.OwnerId, ownerId, StringComparison.Ordinal))
+                         .Select(pair => pair.Key)
+                         .ToArray())
+            {
+                _byKey.Remove(stepKey);
+            }
+        }
+    }
+
     /// <summary>
     /// Register a step descriptor. Duplicate method names or step keys from
     /// different owners are rejected with <see cref="InvalidOperationException"/>.

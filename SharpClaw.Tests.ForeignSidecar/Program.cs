@@ -266,6 +266,44 @@ async Task HandleAsync(TcpClient client)
                             },
                         },
                     },
+                    storageContracts = new[]
+                    {
+                        new
+                        {
+                            moduleId,
+                            storageName = "sample_records",
+                            operations = new[]
+                            {
+                                new { name = "get" },
+                                new { name = "upsert" },
+                                new { name = "batchUpsert" },
+                                new { name = "delete" },
+                                new { name = "batchDelete" },
+                                new { name = "list" },
+                                new { name = "query" },
+                                new { name = "claim" },
+                            },
+                            indexes = new[]
+                            {
+                                new
+                                {
+                                    name = "status",
+                                    valueKind = "String",
+                                    allowsEquality = true,
+                                    allowsRange = false,
+                                },
+                                new
+                                {
+                                    name = "updatedAt",
+                                    valueKind = "DateTime",
+                                    allowsEquality = true,
+                                    allowsRange = true,
+                                },
+                            },
+                            maxDocumentBytes = 65536,
+                            maxBatchSize = 100,
+                        },
+                    },
                     cliCommands = new[]
                     {
                         new

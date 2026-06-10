@@ -231,6 +231,7 @@ public sealed class ModuleService(
                     var names = string.Join(", ",
                         unsatisfied.Select(r => r.ContractName)
                             .Concat(unsatisfiedProtocol.Select(r => r.ContractName)));
+                    UnregisterTaskRuntimeContributions(module);
                     moduleDbContextRegistry.UnregisterModule(moduleId);
                     registry.Unregister(moduleId);
                     throw new InvalidOperationException(
@@ -242,6 +243,7 @@ public sealed class ModuleService(
             catch
             {
                 // Rollback: unregister if init failed
+                UnregisterTaskRuntimeContributions(module);
                 moduleDbContextRegistry.UnregisterModule(moduleId);
                 registry.Unregister(moduleId);
                 if (runtimeHost is not null)
@@ -282,15 +284,17 @@ public sealed class ModuleService(
         var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
         var manifest = loader.GetManifest(moduleId);
+        ISharpClawModule? module = null;
         IModuleRuntimeHost? runtimeHost = null;
 
         try
         {
-            var (module, host) = await CreateBundledRuntimeAsync(
+            var (createdModule, host) = await CreateBundledRuntimeAsync(
                 bundledModule,
                 manifest,
                 rootServices,
                 ct);
+            module = createdModule;
             runtimeHost = host;
 
             registry.Register(module, runtimeHost);
@@ -302,6 +306,9 @@ public sealed class ModuleService(
         }
         catch
         {
+            if (module is not null)
+                UnregisterTaskRuntimeContributions(module);
+            registry.Unregister(moduleId);
             if (runtimeHost is not null)
                 await runtimeHost.DisposeAsync();
             throw;
@@ -355,6 +362,7 @@ public sealed class ModuleService(
             {
                 logger.LogWarning(ex, "Module '{ModuleId}' shutdown error during disable", moduleId);
             }
+            UnregisterTaskRuntimeContributions(module);
             moduleDbContextRegistry.UnregisterModule(moduleId);
             registry.Unregister(moduleId);
             if (runtimeHost is not null)
@@ -444,6 +452,7 @@ public sealed class ModuleService(
         }
         catch
         {
+            UnregisterTaskRuntimeContributions(host.Module);
             registry.Unregister(manifest.Id);
             moduleDbContextRegistry.UnregisterModule(manifest.Id);
             await host.DisposeAsync();
@@ -464,6 +473,7 @@ public sealed class ModuleService(
 
         await host.DrainAsync(TimeSpan.FromSeconds(30), ct);
         await host.Module.ShutdownAsync();
+        UnregisterTaskRuntimeContributions(host.Module);
         moduleDbContextRegistry.UnregisterModule(moduleId);
         registry.Unregister(moduleId);
         await host.DisposeAsync();
@@ -597,6 +607,7 @@ public sealed class ModuleService(
         }
         catch
         {
+            UnregisterTaskRuntimeContributions(host.Module);
             registry.Unregister(manifest.Id);
             moduleDbContextRegistry.UnregisterModule(manifest.Id);
             await host.DisposeAsync();
@@ -650,6 +661,17 @@ public sealed class ModuleService(
         }
     }
 
+    private static void UnregisterTaskRuntimeContributions(ISharpClawModule module)
+    {
+        if (module is ForeignModuleProxy foreignModule)
+        {
+            if (foreignModule is ITaskParserAware parserAware)
+                TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
+
+            TaskStepRegistry.Default.UnregisterOwner(module.Id);
+        }
+    }
+
     public async Task LoadModulePersistenceAsync(ISharpClawModule module, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(module);
@@ -676,7 +698,7 @@ public sealed class ModuleService(
         var runtimeInfo = LoadRuntimeInfo(manifest);
         runtimeInfo = ResolveBundledRuntimeInfo(manifest, bundledModule, runtimeInfo);
 
-        var moduleDir = PrepareBundledSidecarModuleDirectory(manifest);
+        var moduleDir = PrepareBundledSidecarModuleDirectory(manifest, runtimeInfo);
         var host = await CreateRuntimeHostAsync(moduleDir, manifest, runtimeInfo, rootServices, ct);
         return (host.Module, host);
     }
@@ -698,9 +720,18 @@ public sealed class ModuleService(
                 ct);
         }
 
+        if (runtimeInfo.IsScriptRuntime)
+        {
+            return await ForeignModuleHost.StartAsync(
+                manifest,
+                runtimeInfo,
+                CreateScriptSidecarLaunchOptions(moduleDir, manifest, runtimeInfo, hostServices),
+                ct);
+        }
+
         throw new NotSupportedException(
-            $"External module '{manifest.Id}' declares runtime '{runtimeInfo.Runtime}', but production module loading " +
-            "currently has a launcher only for .NET sidecar modules.");
+            $"Module '{manifest.Id}' declares unsupported runtime '{runtimeInfo.Runtime}'. Supported runtimes are " +
+            $"'{ModuleManifestRuntimeInfo.DotNet}', '{ModuleManifestRuntimeInfo.Node}', and '{ModuleManifestRuntimeInfo.Python}'.");
     }
 
     private ModuleManifestRuntimeInfo ResolveBundledRuntimeInfo(
@@ -728,7 +759,10 @@ public sealed class ModuleService(
         ModuleManifestRuntimeInfo runtimeInfo)
     {
         if (!runtimeInfo.IsDotNet)
+        {
+            runtimeInfo.EnsureScriptEntrypoint(manifest);
             return runtimeInfo;
+        }
 
         if (!runtimeInfo.IsSidecarHostMode)
         {
@@ -786,7 +820,30 @@ public sealed class ModuleService(
         };
     }
 
-    private string PrepareBundledSidecarModuleDirectory(ModuleManifest manifest)
+    private ForeignModuleHostLaunchOptions CreateScriptSidecarLaunchOptions(
+        string moduleDir,
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo,
+        IServiceProvider hostServices)
+    {
+        var command = ResolveScriptSidecarLaunchCommand(moduleDir, manifest, runtimeInfo);
+        return new ForeignModuleHostLaunchOptions
+        {
+            ExecutablePath = command.ExecutablePath,
+            Arguments = command.Arguments,
+            WorkingDirectory = command.WorkingDirectory,
+            ModuleDirectory = moduleDir,
+            ModuleDataDirectory = ResolveModuleDataDirectory(manifest.Id),
+            ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
+            ControlToken = CreateControlToken(),
+            HostVersion = ResolveHostVersion(),
+            HostServices = hostServices,
+        };
+    }
+
+    private string PrepareBundledSidecarModuleDirectory(
+        ModuleManifest manifest,
+        ModuleManifestRuntimeInfo runtimeInfo)
     {
         var sourceDir = ResolveBundledModuleDirectory(manifest.Id);
         var sourceManifest = Path.Combine(sourceDir, ModuleFileNames.ManifestFile);
@@ -797,14 +854,21 @@ public sealed class ModuleService(
                 sourceManifest);
         }
 
-        ModuleManifestRuntimeInfo.DotNetDefault.EnsureDotNetEntryAssembly(manifest);
-
         var stagingDir = Path.Combine(
             ResolveRuntimeDirectory(),
             "module-sidecars",
             manifest.Id);
         Directory.CreateDirectory(stagingDir);
         CopyIfChanged(sourceManifest, Path.Combine(stagingDir, ModuleFileNames.ManifestFile));
+
+        if (!runtimeInfo.IsDotNet)
+        {
+            runtimeInfo.EnsureScriptEntrypoint(manifest);
+            CopyDirectoryContentsIfChanged(sourceDir, stagingDir);
+            return stagingDir;
+        }
+
+        runtimeInfo.EnsureDotNetEntryAssembly(manifest);
 
         var baseDir = ResolveApplicationBaseDirectory();
         var entryName = Path.GetFileNameWithoutExtension(manifest.EntryAssembly);
@@ -834,6 +898,21 @@ public sealed class ModuleService(
         }
 
         return stagingDir;
+    }
+
+    private static void CopyDirectoryContentsIfChanged(string sourceDir, string destinationDir)
+    {
+        foreach (var directory in Directory.EnumerateDirectories(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, directory);
+            Directory.CreateDirectory(Path.Combine(destinationDir, relative));
+        }
+
+        foreach (var file in Directory.EnumerateFiles(sourceDir, "*", SearchOption.AllDirectories))
+        {
+            var relative = Path.GetRelativePath(sourceDir, file);
+            CopyIfChanged(file, Path.Combine(destinationDir, relative));
+        }
     }
 
     private static bool IsBundledSidecarManagedDependency(string file, string entryAssembly)
@@ -935,6 +1014,46 @@ public sealed class ModuleService(
         throw new FileNotFoundException(
             "The shared .NET sidecar host is missing from the application output.",
             hostPath);
+    }
+
+    private (string ExecutablePath, IReadOnlyList<string> Arguments, string WorkingDirectory)
+        ResolveScriptSidecarLaunchCommand(
+            string moduleDir,
+            ModuleManifest manifest,
+            ModuleManifestRuntimeInfo runtimeInfo)
+    {
+        runtimeInfo.EnsureScriptEntrypoint(manifest);
+
+        var entrypoint = PathGuard.EnsureContainedIn(
+            Path.Combine(moduleDir, runtimeInfo.Entrypoint!),
+            moduleDir);
+        if (!File.Exists(entrypoint))
+        {
+            throw new FileNotFoundException(
+                $"Script module entrypoint '{runtimeInfo.Entrypoint}' was not found.",
+                entrypoint);
+        }
+
+        if (runtimeInfo.IsNode)
+        {
+            var executable = configuration?["Modules:NodeExecutablePath"];
+            return (
+                string.IsNullOrWhiteSpace(executable) ? "node" : executable.Trim(),
+                [entrypoint],
+                moduleDir);
+        }
+
+        if (runtimeInfo.IsPython)
+        {
+            var executable = configuration?["Modules:PythonExecutablePath"];
+            return (
+                string.IsNullOrWhiteSpace(executable) ? "python" : executable.Trim(),
+                [entrypoint],
+                moduleDir);
+        }
+
+        throw new NotSupportedException(
+            $"Script sidecar launch is not supported for runtime '{runtimeInfo.Runtime}'.");
     }
 
     private static string CreateControlToken() =>
