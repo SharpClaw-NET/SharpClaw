@@ -353,6 +353,8 @@ try
     builder.Services.AddScoped<IHostContextDataReader, HostContextDataReader>();
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
     builder.Services.AddSingleton<IModuleInfoProvider, HostModuleInfoProvider>();
+    builder.Services.AddSingleton<IModuleStorageContractProvider>(sp => sp.GetRequiredService<ModuleRegistry>());
+    builder.Services.AddSingleton<IModuleStorageTelemetry, ModuleStorageTelemetry>();
     builder.Services.AddSingleton<IForeignModuleProtocolContractResolver, HostModuleProtocolContractResolver>();
     builder.Services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
 
@@ -388,6 +390,7 @@ try
     // hooks try to register dependencies on them.
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
+    builder.Services.AddSingleton<IModuleCapabilityTelemetry, ModuleCapabilityTelemetry>();
     builder.Services.AddSingleton<ModuleEventDispatcher>();
     builder.Services.AddSingleton<ISharpClawEventSinkRegistry>(sp => sp.GetRequiredService<ModuleEventDispatcher>());
     builder.Services.AddScoped<ModuleExecutionContext>();

@@ -15,7 +15,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// (single-threaded); reads happen concurrently from HTTP request threads.
 /// A <see cref="ReaderWriterLockSlim"/> protects all mutable state.
 /// </summary>
-public sealed class ModuleRegistry
+public sealed class ModuleRegistry : IModuleStorageContractProvider
 {
     private readonly Dictionary<string, ISharpClawModule> _modules = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string ModuleId, string ToolName)> _toolIndex = new(StringComparer.Ordinal);
@@ -23,6 +23,8 @@ public sealed class ModuleRegistry
     private readonly Dictionary<(string ModuleId, string ToolName), ModuleToolPermission?> _permissionDescriptorIndex = new();
     private readonly Dictionary<(string ModuleId, string ToolName), int?> _toolTimeoutIndex = new();
     private readonly Dictionary<string, ModuleManifest> _manifestCache = new(StringComparer.Ordinal);
+    private readonly Dictionary<(string ModuleId, string StorageName), ModuleStorageContractDescriptor> _storageContracts =
+        new();
 
     // Contract name → (providing module ID, service type).
     // Only one module may export a given contract at a time.
@@ -94,6 +96,10 @@ public sealed class ModuleRegistry
         @"^[a-z][a-z0-9]{0,19}$", RegexOptions.Compiled);
     private static readonly Regex ContractNamePattern = new(
         @"^[a-z][a-z0-9_]{0,59}$", RegexOptions.Compiled);
+    private static readonly Regex StorageNamePattern = new(
+        @"^[a-z][A-Za-z0-9_]{0,127}$", RegexOptions.Compiled);
+    private static readonly Regex StorageOperationPattern = new(
+        @"^[a-z][A-Za-z0-9_]{0,63}$", RegexOptions.Compiled);
 
     /// <summary>
     /// Register a module. Validates ID format, prefix uniqueness, tool name
@@ -138,6 +144,7 @@ public sealed class ModuleRegistry
             var protocolExports = protocolModule?.ExportedProtocolContracts ?? [];
             var protocolRequirements = protocolModule?.RequiredProtocolContracts ?? [];
             var cliCommands = module.GetCliCommands() ?? [];
+            var storageContracts = module.GetStorageContracts();
 
             // Validate job-pipeline tool names and aliases.
             foreach (var tool in toolDefs)
@@ -279,6 +286,21 @@ public sealed class ModuleRegistry
                         "collides with a resource type delegate from another module.");
             }
 
+            // Validate host-owned storage contracts.
+            var seenStorageContracts = new HashSet<string>(StringComparer.Ordinal);
+            foreach (var contract in storageContracts)
+            {
+                ValidateStorageContract(module.Id, contract);
+                if (!seenStorageContracts.Add(contract.StorageName))
+                    throw new InvalidOperationException(
+                        $"Storage contract '{contract.StorageName}' is declared more than once by module '{module.Id}'.");
+
+                if (_storageContracts.ContainsKey((module.Id, contract.StorageName)))
+                    throw new InvalidOperationException(
+                        $"Storage contract '{contract.StorageName}' from module '{module.Id}' " +
+                        "collides with an existing storage registration.");
+            }
+
             // Validate header tags.
             var headerTags = module.GetHeaderTags() ?? [];
             foreach (var tag in headerTags)
@@ -324,6 +346,9 @@ public sealed class ModuleRegistry
 
             foreach (var export in exports)
                 _contractProviders[export.ContractName] = (module.Id, export.ServiceType);
+
+            foreach (var contract in storageContracts)
+                _storageContracts[(module.Id, contract.StorageName)] = contract;
 
             if (module is IForeignModuleProtocolContractExporter protocolExporter)
             {
@@ -422,6 +447,9 @@ public sealed class ModuleRegistry
             // Remove any contracts this module exported.
             foreach (var export in module.ExportedContracts)
                 _contractProviders.Remove(export.ContractName);
+
+            foreach (var contract in module.GetStorageContracts())
+                _storageContracts.Remove((moduleId, contract.StorageName));
 
             if (module is IForeignModuleProtocolContractModule protocolModule)
             {
@@ -667,6 +695,28 @@ public sealed class ModuleRegistry
     }
 
     // ═══════════════════════════════════════════════════════════════
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts()
+    {
+        _lock.EnterReadLock();
+        try { return [.. _storageContracts.Values]; }
+        finally { _lock.ExitReadLock(); }
+    }
+
+    public ModuleStorageContractDescriptor? FindStorageContract(
+        string moduleId,
+        string storageName)
+    {
+        _lock.EnterReadLock();
+        try
+        {
+            return _storageContracts.GetValueOrDefault((moduleId, storageName));
+        }
+        finally
+        {
+            _lock.ExitReadLock();
+        }
+    }
+
     // CLI command resolution
     // ═══════════════════════════════════════════════════════════════
 
@@ -1373,6 +1423,73 @@ public sealed class ModuleRegistry
         Dictionary<string, string> protocolContractOwners) =>
         protocolContractOwners.TryGetValue(requirement.ContractName, out var providerId)
         && eligible.Contains(providerId);
+
+    private static void ValidateStorageContract(
+        string moduleId,
+        ModuleStorageContractDescriptor contract)
+    {
+        if (!string.Equals(contract.ModuleId, moduleId, StringComparison.Ordinal))
+        {
+            throw new InvalidOperationException(
+                $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                $"declares owner '{contract.ModuleId}'.");
+        }
+
+        if (!StorageNamePattern.IsMatch(contract.StorageName))
+            throw new InvalidOperationException(
+                $"Storage contract name '{contract.StorageName}' from module '{moduleId}' is invalid.");
+
+        if (contract.MaxDocumentBytes <= 0)
+            throw new InvalidOperationException(
+                $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                "must declare a positive MaxDocumentBytes value.");
+
+        if (contract.MaxBatchSize <= 0)
+            throw new InvalidOperationException(
+                $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                "must declare a positive MaxBatchSize value.");
+
+        if (contract.Operations.Count == 0)
+            throw new InvalidOperationException(
+                $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                "must declare at least one operation.");
+
+        var seenOperations = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var operation in contract.Operations)
+        {
+            if (!StorageOperationPattern.IsMatch(operation.Name))
+                throw new InvalidOperationException(
+                    $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                    $"declares invalid operation '{operation.Name}'.");
+
+            if (!seenOperations.Add(operation.Name))
+                throw new InvalidOperationException(
+                    $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                    $"declares operation '{operation.Name}' more than once.");
+        }
+
+        var seenIndexes = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var index in contract.Indexes ?? [])
+        {
+            if (!StorageNamePattern.IsMatch(index.Name))
+                throw new InvalidOperationException(
+                    $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                    $"declares invalid index '{index.Name}'.");
+
+            if (!seenIndexes.Add(index.Name))
+                throw new InvalidOperationException(
+                    $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                    $"declares index '{index.Name}' more than once.");
+
+            if (index.AllowsRange
+                && index.ValueKind is ModuleStorageIndexValueKind.String or ModuleStorageIndexValueKind.Bool)
+            {
+                throw new InvalidOperationException(
+                    $"Storage contract '{contract.StorageName}' from module '{moduleId}' " +
+                    $"declares range comparisons for non-range index '{index.Name}'.");
+            }
+        }
+    }
 
     private static void ValidateProtocolContractOperations(
         string moduleId,

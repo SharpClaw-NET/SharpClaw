@@ -15,7 +15,8 @@
   </ItemGroup>
 
   <ItemGroup>
-    <PackageReference Include="SharpClaw.Contracts" />
+    <ProjectReference Include="..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" Condition="'$(UseLocalContractsProject)' == 'true'" />
+    <PackageReference Include="SharpClaw.Contracts" Condition="'$(UseLocalContractsProject)' != 'true'" />
     <ProjectReference Include="..\SharpClaw.Gateway.Abstractions\SharpClaw.Gateway.Abstractions.csproj" />
     <ProjectReference Include="..\SharpClaw.Modules.Hosting\SharpClaw.Modules.Hosting.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />

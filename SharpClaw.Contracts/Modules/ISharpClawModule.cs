@@ -159,6 +159,13 @@ public interface ISharpClawModule
     IReadOnlyList<ModuleFrontendContribution> GetFrontendContributions() => [];
 
     /// <summary>
+    /// Optional. Return host-owned storage contracts this module uses.
+    /// The host rejects storage operations, indexes, range filters, document
+    /// sizes, and batch sizes that are not declared here.
+    /// </summary>
+    IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() => [];
+
+    /// <summary>
     /// Optional. Return CLI commands this module provides.
     /// Commands are registered in the CLI REPL at their declared
     /// <see cref="ModuleCliScope"/> (top-level verb or resource type).

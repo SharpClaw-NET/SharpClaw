@@ -73,11 +73,10 @@ public sealed class EditorSessionStore
         CancellationToken ct = default)
     {
         var workspaceKey = WorkspaceIndex(editorType, workspacePath);
-        var existing = (await _store.QueryAsync(
-                "editorWorkspace",
-                equals: workspaceKey,
-                limit: 1,
-                ct: ct))
+        var existing = (await _store.Query()
+                .WhereIndex("editorWorkspace").EqualTo(workspaceKey)
+                .Take(1)
+                .ToListAsync(ct))
             .FirstOrDefault();
 
         if (existing is not null)

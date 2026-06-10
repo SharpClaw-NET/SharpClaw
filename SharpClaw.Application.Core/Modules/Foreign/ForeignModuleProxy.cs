@@ -31,6 +31,7 @@ internal sealed class ForeignModuleProxy(
     private IReadOnlyList<ForeignModuleGlobalFlagDescriptor> _globalFlags = [];
     private IReadOnlyList<ModuleUiContribution> _uiContributions = [];
     private IReadOnlyList<ModuleFrontendContribution> _frontendContributions = [];
+    private IReadOnlyList<ModuleStorageContractDescriptor> _storageContracts = [];
     private IReadOnlyList<ForeignModuleCliCommandDescriptor> _cliCommands = [];
     private ForeignModuleTaskParserDescriptor? _taskParser;
     private IReadOnlyList<TaskStepDescriptor> _taskStepDescriptors = [];
@@ -112,6 +113,8 @@ internal sealed class ForeignModuleProxy(
 
     public IReadOnlyList<ModuleFrontendContribution> GetFrontendContributions() => _frontendContributions;
 
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() => _storageContracts;
+
     public IReadOnlyList<ModuleCliCommand>? GetCliCommands() =>
         [.. _cliCommands.Select(command => command.ToModuleCliCommand(manifest, client))];
 
@@ -137,6 +140,7 @@ internal sealed class ForeignModuleProxy(
         _globalFlags = discovery.GlobalFlags ?? [];
         _uiContributions = discovery.UiContributions ?? [];
         _frontendContributions = discovery.FrontendContributions ?? [];
+        _storageContracts = discovery.StorageContracts ?? [];
         _cliCommands = discovery.CliCommands ?? [];
         _taskParser = discovery.TaskParser;
         _taskStepDescriptors = discovery.TaskStepDescriptors ?? [];

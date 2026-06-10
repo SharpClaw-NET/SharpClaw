@@ -107,6 +107,23 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
         });
     }
 
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
+    [
+        new(
+            Id,
+            "local_models",
+            StorageOperations(),
+            "Local GGUF model file records owned by the LlamaSharp provider module.",
+            [
+                new("modelId", ModuleStorageIndexValueKind.String),
+                new("status", ModuleStorageIndexValueKind.String),
+                new("sourceUrl", ModuleStorageIndexValueKind.String),
+                new("updatedAt", ModuleStorageIndexValueKind.DateTime, AllowsRange: true),
+            ],
+            MaxDocumentBytes: 131_072,
+            MaxBatchSize: 100),
+    ];
+
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
 
     public IReadOnlyList<ModuleFrontendContribution> GetFrontendContributions() =>
@@ -163,6 +180,17 @@ public sealed class LlamaSharpProviderModule : ISharpClawModule
         IServiceProvider sp, CancellationToken ct)
         => throw new InvalidOperationException(
             $"Module '{Id}' does not register any tools.");
+
+    private static IReadOnlyList<ModuleStorageOperationDescriptor> StorageOperations() =>
+    [
+        new(ModuleStorageOperations.Get),
+        new(ModuleStorageOperations.Upsert),
+        new(ModuleStorageOperations.BatchUpsert),
+        new(ModuleStorageOperations.Delete),
+        new(ModuleStorageOperations.BatchDelete),
+        new(ModuleStorageOperations.List),
+        new(ModuleStorageOperations.Query),
+    ];
 
     public async Task ShutdownAsync()
     {

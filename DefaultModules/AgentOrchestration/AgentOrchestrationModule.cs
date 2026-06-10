@@ -89,6 +89,32 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
 
     public IReadOnlyList<ModuleContractExport> ExportedContracts => [];
 
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
+    [
+        new(
+            ModuleIdValue,
+            "scheduled_jobs",
+            StorageOperations(includeClaim: true),
+            "Scheduled job records claimed by the module scheduler through host-owned indexes.",
+            [
+                new("name", ModuleStorageIndexValueKind.String),
+                new("status", ModuleStorageIndexValueKind.String),
+                new("nextRunAt", ModuleStorageIndexValueKind.DateTime, AllowsRange: true),
+            ],
+            MaxDocumentBytes: 65_536,
+            MaxBatchSize: 100),
+        new(
+            ModuleIdValue,
+            "skills",
+            StorageOperations(includeClaim: false),
+            "Reusable agent skill records.",
+            [
+                new("name", ModuleStorageIndexValueKind.String),
+            ],
+            MaxDocumentBytes: 524_288,
+            MaxBatchSize: 100),
+    ];
+
     public IReadOnlyList<ModuleHeaderTag>? GetHeaderTags() =>
     [
         new ModuleHeaderTag(
@@ -983,6 +1009,25 @@ public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAwar
     // ═══════════════════════════════════════════════════════════════
     // Lifecycle
     // ═══════════════════════════════════════════════════════════════
+
+    private static IReadOnlyList<ModuleStorageOperationDescriptor> StorageOperations(bool includeClaim)
+    {
+        var operations = new List<ModuleStorageOperationDescriptor>
+        {
+            new(ModuleStorageOperations.Get),
+            new(ModuleStorageOperations.Upsert),
+            new(ModuleStorageOperations.BatchUpsert),
+            new(ModuleStorageOperations.Delete),
+            new(ModuleStorageOperations.BatchDelete),
+            new(ModuleStorageOperations.List),
+            new(ModuleStorageOperations.Query),
+        };
+
+        if (includeClaim)
+            operations.Add(new ModuleStorageOperationDescriptor(ModuleStorageOperations.Claim));
+
+        return operations;
+    }
 
     private ScheduledJobWorker? _scheduledJobWorker;
 

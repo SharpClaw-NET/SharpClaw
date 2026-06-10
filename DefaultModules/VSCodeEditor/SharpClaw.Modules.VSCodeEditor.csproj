@@ -10,7 +10,8 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
-    <PackageReference Include="SharpClaw.Contracts" />
+    <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" Condition="'$(UseLocalContractsProject)' == 'true'" />
+    <PackageReference Include="SharpClaw.Contracts" Condition="'$(UseLocalContractsProject)' != 'true'" />
   </ItemGroup>
 
   <ItemGroup>

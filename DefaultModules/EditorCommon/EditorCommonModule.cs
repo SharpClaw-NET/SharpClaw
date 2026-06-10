@@ -31,6 +31,23 @@ public sealed class EditorCommonModule : ISharpClawModule, IForeignModuleProtoco
 
     public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts => [];
 
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
+    [
+        new(
+            Id,
+            "editor_sessions",
+            StorageOperations(),
+            "Editor session records keyed by connected editor workspace.",
+            [
+                new("name", ModuleStorageIndexValueKind.String),
+                new("editorType", ModuleStorageIndexValueKind.String),
+                new("workspacePath", ModuleStorageIndexValueKind.String),
+                new("editorWorkspace", ModuleStorageIndexValueKind.String),
+            ],
+            MaxDocumentBytes: 131_072,
+            MaxBatchSize: 100),
+    ];
+
     // ═══════════════════════════════════════════════════════════════
     // DI Registration
     // ═══════════════════════════════════════════════════════════════
@@ -178,4 +195,15 @@ public sealed class EditorCommonModule : ISharpClawModule, IForeignModuleProtoco
         CancellationToken ct) =>
         throw new NotSupportedException(
             $"EditorCommon does not expose LLM-callable tools (received '{toolName}').");
+
+    private static IReadOnlyList<ModuleStorageOperationDescriptor> StorageOperations() =>
+    [
+        new(ModuleStorageOperations.Get),
+        new(ModuleStorageOperations.Upsert),
+        new(ModuleStorageOperations.BatchUpsert),
+        new(ModuleStorageOperations.Delete),
+        new(ModuleStorageOperations.BatchDelete),
+        new(ModuleStorageOperations.List),
+        new(ModuleStorageOperations.Query),
+    ];
 }

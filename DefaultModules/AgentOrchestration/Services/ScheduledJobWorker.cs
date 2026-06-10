@@ -75,7 +75,11 @@ public sealed class ScheduledJobWorker(
 
         var now = DateTimeOffset.UtcNow;
 
-        var dueJobs = await store.ListDueAsync(now, ct);
+        var claimBatchSize = Math.Clamp(
+            configuration.GetValue("Scheduler:ClaimBatchSize", 100),
+            1,
+            1_000);
+        var dueJobs = await store.ClaimDueAsync(now, claimBatchSize, ct);
 
         var missedThreshold = TimeSpan.FromMinutes(
             configuration.GetValue("Scheduler:MissedFireThresholdMinutes", 60));
@@ -89,11 +93,7 @@ public sealed class ScheduledJobWorker(
                 continue;
             }
 
-            await store.UpdateAsync(job.Id, storedJob =>
-            {
-                storedJob.Status = ScheduledTaskStatus.Running;
-                storedJob.LastRunAt = now;
-            }, ct);
+            await store.UpdateAsync(job.Id, storedJob => storedJob.LastRunAt = now, ct);
 
             try
             {

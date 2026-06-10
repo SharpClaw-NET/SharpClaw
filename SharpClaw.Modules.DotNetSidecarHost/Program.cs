@@ -669,6 +669,7 @@ internal sealed class DotNetSidecarHost
                 flag.DelegateMethodName))],
             UiContributions: _module.GetUiContributions(),
             FrontendContributions: _module.GetFrontendContributions(),
+            StorageContracts: _module.GetStorageContracts(),
             CliCommands: [.. (_module.GetCliCommands() ?? []).Select(command => new ForeignModuleCliCommandDescriptor(
                 command.Name,
                 command.Aliases,

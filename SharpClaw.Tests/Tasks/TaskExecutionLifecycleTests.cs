@@ -457,6 +457,8 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
         services.AddDbContext<SharpClawDbContext>(options => options.UseInMemoryDatabase(databaseName, databaseRoot));
+        services.AddSingleton<IModuleStorageContractProvider>(
+            new StaticModuleStorageContractProvider(new AgentOrchestrationModule().GetStorageContracts()));
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
         services.AddScoped<ScheduledJobStore>();
         services.AddSingleton<RecordingTaskInstanceLauncher>();
@@ -478,6 +480,18 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
         await _scope.DisposeAsync();
         await _root.DisposeAsync();
     }
+}
+
+internal sealed class StaticModuleStorageContractProvider(
+    IReadOnlyList<ModuleStorageContractDescriptor> contracts) : IModuleStorageContractProvider
+{
+    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() => contracts;
+
+    public ModuleStorageContractDescriptor? FindStorageContract(
+        string moduleId,
+        string storageName) =>
+        contracts.FirstOrDefault(contract =>
+            contract.ModuleId == moduleId && contract.StorageName == storageName);
 }
 
 internal sealed class RecordingTaskInstanceLauncher : ITaskInstanceLauncher

@@ -180,7 +180,7 @@ public sealed class TestHarnessArchitectureTests
     }
 
     [Test]
-    public void HostProjectsReferenceContractsOnce()
+    public void HostProjectsUseConditionalContractsReferenceWorkflow()
     {
         var root = FindSolutionRoot();
         var projectRelativePaths = new[]
@@ -205,9 +205,29 @@ public sealed class TestHarnessArchitectureTests
                 .ToList();
 
             contractProjectReferences
-                .Concat(contractPackageReferences)
+                .Should()
+                .ContainSingle()
+                .Which
+                .Should()
+                .Contain("SharpClaw.Contracts");
+            contractPackageReferences
                 .Should()
                 .ContainSingle();
+
+            project.Descendants("ProjectReference")
+                .Single(e => (e.Attribute("Include")?.Value ?? "")
+                    .Contains("SharpClaw.Contracts", StringComparison.OrdinalIgnoreCase))
+                .Attribute("Condition")?.Value
+                .Should()
+                .Be("'$(UseLocalContractsProject)' == 'true'");
+            project.Descendants("PackageReference")
+                .Single(e => string.Equals(
+                    e.Attribute("Include")?.Value,
+                    "SharpClaw.Contracts",
+                    StringComparison.Ordinal))
+                .Attribute("Condition")?.Value
+                .Should()
+                .Be("'$(UseLocalContractsProject)' != 'true'");
         }
     }
 

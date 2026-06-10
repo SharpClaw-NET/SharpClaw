@@ -172,7 +172,9 @@ public sealed class LocalModelStore
     private async Task<IReadOnlyList<LocalModelFileRecord>> RecordsByModelIdAsync(
         Guid modelId,
         CancellationToken ct) =>
-        await _store.QueryAsync("modelId", equals: modelId.ToString("N"), ct: ct);
+        await _store.Query()
+            .WhereIndex("modelId").EqualTo(modelId.ToString("N"))
+            .ToListAsync(ct);
 
     private Task<LocalModelFileRecord?> GetByFileIdAsync(Guid fileId, CancellationToken ct) =>
         _store.GetAsync(Key(fileId), ct);

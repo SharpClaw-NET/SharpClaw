@@ -1,4 +1,5 @@
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.AgentOrchestration.Models;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
@@ -12,6 +13,7 @@ public sealed class ScheduledJobStore
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     private readonly ModuleDocumentStore<ScheduledJobDB> _store;
@@ -49,13 +51,41 @@ public sealed class ScheduledJobStore
         DateTimeOffset now,
         CancellationToken ct = default)
     {
-        var due = await _store.QueryAsync(
-            "nextRunAt",
-            lessThanOrEqual: now,
-            order: "asc",
-            ct: ct);
+        var due = await _store.Query()
+            .WhereIndex("status").EqualTo(ScheduledTaskStatus.Pending.ToString())
+            .WhereIndex("nextRunAt").LessThanOrEqual(now)
+            .OrderByIndex("nextRunAt")
+            .ToListAsync(ct);
+
         return [.. due
             .Where(job => job.Status == ScheduledTaskStatus.Pending && job.NextRunAt <= now)
+            .OrderBy(job => job.NextRunAt)];
+    }
+
+    public async Task<IReadOnlyList<ScheduledJobDB>> ClaimDueAsync(
+        DateTimeOffset now,
+        int limit,
+        CancellationToken ct = default)
+    {
+        var claimed = await _store.Claim()
+            .WhereIndex("status").EqualTo(ScheduledTaskStatus.Pending.ToString())
+            .WhereIndex("nextRunAt").LessThanOrEqual(now)
+            .OrderByIndex("nextRunAt")
+            .Take(limit)
+            .Patch(
+                new
+                {
+                    status = ScheduledTaskStatus.Running,
+                    updatedAt = now,
+                },
+                new
+                {
+                    status = ScheduledTaskStatus.Running.ToString(),
+                })
+            .ToListAsync(ct);
+
+        return [.. claimed
+            .Where(job => job.Status == ScheduledTaskStatus.Running && job.NextRunAt <= now)
             .OrderBy(job => job.NextRunAt)];
     }
 

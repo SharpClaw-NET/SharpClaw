@@ -2,6 +2,7 @@ using System.Buffers;
 using System.Net;
 using System.Net.Sockets;
 using System.Security.Cryptography;
+using System.Diagnostics;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -149,6 +150,32 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     }
 
     private async Task<object> HandleRequestAsync(CapabilityHttpRequest request, CancellationToken ct)
+    {
+        var telemetry = _services.GetService<IModuleCapabilityTelemetry>();
+        var started = Stopwatch.GetTimestamp();
+
+        try
+        {
+            var response = await DispatchRequestAsync(request, ct);
+            telemetry?.Record(new ModuleCapabilityTelemetryEvent(
+                _moduleId,
+                request.Path,
+                Success: true,
+                Stopwatch.GetElapsedTime(started)));
+            return response;
+        }
+        catch
+        {
+            telemetry?.Record(new ModuleCapabilityTelemetryEvent(
+                _moduleId,
+                request.Path,
+                Success: false,
+                Stopwatch.GetElapsedTime(started)));
+            throw;
+        }
+    }
+
+    private async Task<object> DispatchRequestAsync(CapabilityHttpRequest request, CancellationToken ct)
     {
         using var scope = _services.GetService<IServiceScopeFactory>()?.CreateScope();
         var services = scope?.ServiceProvider ?? _services;

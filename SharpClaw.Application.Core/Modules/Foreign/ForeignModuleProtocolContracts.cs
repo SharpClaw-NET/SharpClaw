@@ -53,6 +53,7 @@ public sealed record ForeignModuleDiscoveryResponse(
     IReadOnlyList<ForeignModuleGlobalFlagDescriptor>? GlobalFlags = null,
     IReadOnlyList<ModuleUiContribution>? UiContributions = null,
     IReadOnlyList<ModuleFrontendContribution>? FrontendContributions = null,
+    IReadOnlyList<ModuleStorageContractDescriptor>? StorageContracts = null,
     IReadOnlyList<ForeignModuleCliCommandDescriptor>? CliCommands = null,
     ForeignModuleTaskParserDescriptor? TaskParser = null,
     IReadOnlyList<TaskStepDescriptor>? TaskStepDescriptors = null,
