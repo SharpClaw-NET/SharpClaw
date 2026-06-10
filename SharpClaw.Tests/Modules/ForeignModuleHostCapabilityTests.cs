@@ -523,7 +523,7 @@ public sealed class ForeignModuleHostCapabilityTests
 
         var providerInfoPayload = JsonDocument.Parse(await providerInfoResponse.Content.ReadAsStringAsync());
         var info = providerInfoPayload.RootElement.GetProperty("info");
-        info.GetProperty("modelName").GetString().Should().Be("whisper-large-v3");
+        info.GetProperty("modelName").GetString().Should().Be("capability-test-model");
         info.GetProperty("providerKey").GetString().Should().Be("groq");
         info.GetProperty("decryptedApiKey").GetString().Should().Be("secret-key");
 
@@ -1045,7 +1045,7 @@ public sealed class ForeignModuleHostCapabilityTests
         {
             ProviderInfoModelId = modelId;
             return Task.FromResult<ModelProviderInfo?>(
-                new("whisper-large-v3", "groq", "secret-key"));
+                new("capability-test-model", "groq", "secret-key"));
         }
 
         public Task<string?> GetLocalModelFilePathAsync(
