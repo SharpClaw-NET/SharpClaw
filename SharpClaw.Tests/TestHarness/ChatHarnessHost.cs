@@ -126,6 +126,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();
+        services.AddScoped<IConversationSteering, HostConversationSteering>();
         services.AddScoped<ModuleService>();
         services.AddScoped<ModuleExecutionContext>();
         services.AddScoped<IModuleConfigStore>(sp =>

@@ -8,6 +8,7 @@ using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Tasks;
@@ -270,6 +271,16 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await GetContextThreadMessagesAsync(
                     services,
                     Deserialize<ForeignModuleContextThreadMessagesRequest>(request),
+                    ct),
+            ForeignModuleHostCapabilityProtocol.ConversationSteerPath =>
+                await AddConversationSteeringAsync(
+                    services,
+                    Deserialize<ConversationSteeringRequest>(request),
+                    ct),
+            ForeignModuleHostCapabilityProtocol.ConversationSteeringListPath =>
+                await ListConversationSteeringAsync(
+                    services,
+                    Deserialize<ForeignModuleConversationSteeringListRequest>(request),
                     ct),
             ForeignModuleHostCapabilityProtocol.QueueMetricsPath =>
                 await GetQueueMetricsAsync(services, ct),
@@ -775,6 +786,23 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 ct));
     }
 
+    private static async Task<ForeignModuleConversationSteerResponse> AddConversationSteeringAsync(
+        IServiceProvider services,
+        ConversationSteeringRequest request,
+        CancellationToken ct) =>
+        new(await ResolveConversationSteering(services).AddAsync(request, ct));
+
+    private static async Task<ForeignModuleConversationSteeringListResponse> ListConversationSteeringAsync(
+        IServiceProvider services,
+        ForeignModuleConversationSteeringListRequest request,
+        CancellationToken ct)
+    {
+        RequireId(request.ChannelId, "Channel ID is required.");
+        return new ForeignModuleConversationSteeringListResponse(
+            await ResolveConversationSteering(services)
+                .ListAsync(request.ChannelId, request.ThreadId, request.Limit, ct));
+    }
+
     private static async Task<ForeignModuleQueueMetricsResponse> GetQueueMetricsAsync(
         IServiceProvider services,
         CancellationToken ct)
@@ -1187,6 +1215,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static IHostContextDataReader ResolveHostContextDataReader(IServiceProvider services) =>
         services.GetService<IHostContextDataReader>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide context data reading.");
+
+    private static IConversationSteering ResolveConversationSteering(IServiceProvider services) =>
+        services.GetService<IConversationSteering>()
+        ?? throw new NotSupportedException("The SharpClaw host did not provide conversation steering.");
 
     private static IHostQueueMetrics ResolveQueueMetrics(IServiceProvider services) =>
         services.GetService<IHostQueueMetrics>()

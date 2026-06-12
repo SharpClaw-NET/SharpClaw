@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.DTOs.Tasks;
@@ -164,6 +165,19 @@ internal sealed record ForeignModuleContextThreadsResponse(IReadOnlyList<ThreadS
 
 internal sealed record ForeignModuleContextMessagesResponse(
     IReadOnlyList<HostContextChatMessageSummary> Messages);
+
+internal sealed record ForeignModuleConversationSteerResponse(
+    ConversationSteeringResponse Steering);
+
+internal sealed record ForeignModuleConversationSteeringListRequest
+{
+    public Guid ChannelId { get; init; }
+    public Guid? ThreadId { get; init; }
+    public int Limit { get; init; } = 20;
+}
+
+internal sealed record ForeignModuleConversationSteeringListResponse(
+    IReadOnlyList<ConversationSteeringResponse> Steering);
 
 internal sealed record ForeignModuleQueueMetricsResponse(
     double PendingJobCount,

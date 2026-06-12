@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.DTOs.AgentActions;
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
@@ -332,6 +333,59 @@ public sealed class ForeignModuleHostCapabilityTests
         agents.ChannelHeader.Should().NotBeNull();
         agents.ChannelHeader!.Value.ChannelId.Should().Be(agents.ChannelId);
         agents.ChannelHeader!.Value.Header.Should().Be("channel header");
+    }
+
+    [Test]
+    public async Task HostCapabilityServerForwardsConversationSteering()
+    {
+        var steering = new RecordingConversationSteering();
+        await using var services = new ServiceCollection()
+            .AddSingleton<IConversationSteering>(steering)
+            .BuildServiceProvider();
+        await using var server = ForeignModuleHostCapabilityServer.Start("sample_module", services);
+        using var client = CreateClient(server);
+        var channelId = Guid.Parse("10101010-1010-1010-1010-101010101010");
+        var threadId = Guid.Parse("20202020-2020-2020-2020-202020202020");
+
+        using var steerResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ConversationSteerPath,
+            new
+            {
+                channelId,
+                threadId,
+                summary = "Build failed with CS1002.",
+                source = "module_dev",
+                category = "build",
+                details = "Fix Module.cs line 12.",
+                clientType = "module-dev",
+            });
+        using var listResponse = await client.PostAsJsonAsync(
+            ForeignModuleHostCapabilityProtocol.ConversationSteeringListPath,
+            new { channelId, threadId, limit = 5 });
+
+        steerResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+        steering.LastAdd.Should().NotBeNull();
+        steering.LastAdd!.ChannelId.Should().Be(channelId);
+        steering.LastAdd.ThreadId.Should().Be(threadId);
+        steering.LastAdd.Summary.Should().Be("Build failed with CS1002.");
+        steering.LastList.Should().NotBeNull();
+        steering.LastList!.Value.ChannelId.Should().Be(channelId);
+        steering.LastList.Value.ThreadId.Should().Be(threadId);
+        steering.LastList.Value.Limit.Should().Be(5);
+
+        var steerPayload = JsonDocument.Parse(await steerResponse.Content.ReadAsStringAsync());
+        steerPayload.RootElement.GetProperty("steering")
+            .GetProperty("source")
+            .GetString()
+            .Should()
+            .Be("module_dev");
+        var listPayload = JsonDocument.Parse(await listResponse.Content.ReadAsStringAsync());
+        listPayload.RootElement.GetProperty("steering")[0]
+            .GetProperty("content")
+            .GetString()
+            .Should()
+            .Contain("listed steering");
     }
 
     [Test]
@@ -887,6 +941,50 @@ public sealed class ForeignModuleHostCapabilityTests
         public Task<double> GetPendingJobCountAsync(CancellationToken ct) => Task.FromResult(2d);
         public Task<double> GetPendingTaskCountAsync(CancellationToken ct) => Task.FromResult(3d);
         public Task<double> GetSchedulerPendingJobCountAsync(CancellationToken ct) => Task.FromResult(5d);
+    }
+
+    private sealed class RecordingConversationSteering : IConversationSteering
+    {
+        private readonly Guid _messageId = Guid.Parse("30303030-3030-3030-3030-303030303030");
+
+        public ConversationSteeringRequest? LastAdd { get; private set; }
+        public (Guid ChannelId, Guid? ThreadId, int Limit)? LastList { get; private set; }
+
+        public Task<ConversationSteeringResponse> AddAsync(
+            ConversationSteeringRequest request,
+            CancellationToken ct = default)
+        {
+            LastAdd = request;
+            return Task.FromResult(new ConversationSteeringResponse(
+                _messageId,
+                request.ChannelId,
+                request.ThreadId,
+                request.Summary,
+                DateTimeOffset.UnixEpoch,
+                request.Source,
+                request.Category));
+        }
+
+        public Task<IReadOnlyList<ConversationSteeringResponse>> ListAsync(
+            Guid channelId,
+            Guid? threadId = null,
+            int limit = 20,
+            CancellationToken ct = default)
+        {
+            LastList = (channelId, threadId, limit);
+            IReadOnlyList<ConversationSteeringResponse> rows =
+            [
+                new(
+                    _messageId,
+                    channelId,
+                    threadId,
+                    "listed steering",
+                    DateTimeOffset.UnixEpoch,
+                    "module_dev",
+                    "build"),
+            ];
+            return Task.FromResult(rows);
+        }
     }
 
     private sealed class RecordingAgentManager : IAgentManager

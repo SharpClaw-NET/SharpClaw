@@ -40,11 +40,15 @@ public sealed class PythonModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/conversation/steer");
+        source.Should().Contain("/.sharpclaw/host/conversation/steering/list");
         source.Should().Contain("/.sharpclaw/host/modules/storage/list");
         source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("HostCapabilitiesClient");
         source.Should().Contain("ModuleDocumentStore");
         source.Should().Contain("create_document_store");
+        source.Should().Contain("add_conversation_steering");
+        source.Should().Contain("list_conversation_steering");
         source.Should().Contain("InlineToolExecutionContext");
         source.Should().Contain("ProtocolContractContext");
         source.Should().Contain("storageContracts");

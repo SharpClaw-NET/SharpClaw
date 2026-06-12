@@ -58,6 +58,8 @@ export const hostCapabilityPaths = {
   coreChannelLookup: '/.sharpclaw/host/core/channels/lookup',
   contextAccessibleThreads: '/.sharpclaw/host/context/threads/accessible',
   contextThreadMessages: '/.sharpclaw/host/context/threads/messages',
+  conversationSteer: '/.sharpclaw/host/conversation/steer',
+  conversationSteeringList: '/.sharpclaw/host/conversation/steering/list',
   queueMetrics: '/.sharpclaw/host/metrics/queue',
   hostAgentChat: '/.sharpclaw/host/agent-bridge/chat',
   hostAgentChatStream: '/.sharpclaw/host/agent-bridge/chat-stream',
@@ -480,6 +482,10 @@ export function createHostCapabilitiesClient(options = {}) {
       (await call(hostCapabilityPaths.contextAccessibleThreads, parameters))?.threads ?? [],
     getThreadMessages: async parameters =>
       (await call(hostCapabilityPaths.contextThreadMessages, parameters))?.messages ?? [],
+    addConversationSteering: async parameters =>
+      (await call(hostCapabilityPaths.conversationSteer, parameters))?.steering,
+    listConversationSteering: async (channelId, threadId = null, limit = 20) =>
+      (await call(hostCapabilityPaths.conversationSteeringList, { channelId, threadId, limit }))?.steering ?? [],
     getQueueMetrics: () => call(hostCapabilityPaths.queueMetrics),
     hostAgentChat: async parameters =>
       (await call(hostCapabilityPaths.hostAgentChat, parameters))?.text,

@@ -1,10 +1,14 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Contracts.Chat;
+using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
@@ -37,6 +41,201 @@ public sealed record HostContextChatMessageSummary(
     string Content,
     string Sender,
     DateTimeOffset Timestamp);
+
+public sealed class HostConversationSteering(
+    SharpClawDbContext db,
+    ThreadActivitySignal threadActivity) : IConversationSteering
+{
+    private const int MaxSummaryCharacters = 8000;
+    private const int MaxDetailsCharacters = 16000;
+    private const string MetadataKind = "sharpclaw.conversation_steering";
+    private const string ContentPrefix = "[SharpClaw conversation steering]";
+
+    private static readonly JsonSerializerOptions MetadataJsonOptions = new(JsonSerializerDefaults.Web);
+
+    public async Task<ConversationSteeringResponse> AddAsync(
+        ConversationSteeringRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        var summary = RequireText(request.Summary, nameof(request.Summary), MaxSummaryCharacters);
+        var details = NormalizeOptionalText(request.Details, MaxDetailsCharacters);
+
+        await ValidateTargetAsync(request.ChannelId, request.ThreadId, ct);
+
+        var metadata = new ConversationSteeringMetadata(
+            MetadataKind,
+            NormalizeOptionalText(request.Source, 128),
+            NormalizeOptionalText(request.Category, 128));
+
+        var content = FormatContent(summary, details, metadata);
+        var message = new ChatMessageDB
+        {
+            Role = ChatRoles.System,
+            Origin = MessageOrigin.System,
+            Content = content,
+            ChannelId = request.ChannelId,
+            ThreadId = request.ThreadId,
+            ClientType = string.IsNullOrWhiteSpace(request.ClientType)
+                ? WellKnownClientKeys.Api
+                : request.ClientType.Trim(),
+            ProviderMetadataJson = JsonSerializer.Serialize(metadata, MetadataJsonOptions),
+        };
+
+        db.ChatMessages.Add(message);
+        await db.SaveChangesAsync(ct);
+
+        if (request.ThreadId is { } threadId)
+            threadActivity.Publish(threadId, new ThreadActivityEvent(
+                ThreadActivityEventType.NewMessages,
+                message.ClientType));
+
+        return ToResponse(message, metadata);
+    }
+
+    public async Task<IReadOnlyList<ConversationSteeringResponse>> ListAsync(
+        Guid channelId,
+        Guid? threadId = null,
+        int limit = 20,
+        CancellationToken ct = default)
+    {
+        await ValidateTargetAsync(channelId, threadId, ct);
+        limit = Math.Clamp(limit, 1, 100);
+
+        var query = db.ChatMessages
+            .AsNoTracking()
+            .Where(message =>
+                message.ChannelId == channelId
+                && message.ThreadId == threadId
+                && message.Role == ChatRoles.System
+                && message.Content.StartsWith(ContentPrefix));
+
+        var rows = await query
+            .OrderByDescending(message => message.CreatedAt)
+            .Take(limit)
+            .ToListAsync(ct);
+
+        return rows
+            .OrderBy(message => message.CreatedAt)
+            .ThenBy(message => message.Id)
+            .Select(message => ToResponse(message, ParseMetadata(message.ProviderMetadataJson)))
+            .ToList();
+    }
+
+    private async Task ValidateTargetAsync(
+        Guid channelId,
+        Guid? threadId,
+        CancellationToken ct)
+    {
+        if (channelId == Guid.Empty)
+            throw new ArgumentException("channelId is required.", nameof(channelId));
+
+        if (threadId is null)
+        {
+            var channelExists = await db.Channels.AnyAsync(channel => channel.Id == channelId, ct);
+            if (!channelExists)
+                throw new InvalidOperationException($"Channel '{channelId}' was not found.");
+            return;
+        }
+
+        var thread = await db.ChatThreads
+            .AsNoTracking()
+            .Where(row => row.Id == threadId.Value)
+            .Select(row => new { row.Id, row.ChannelId })
+            .FirstOrDefaultAsync(ct)
+            ?? throw new InvalidOperationException($"Thread '{threadId}' was not found.");
+
+        if (thread.ChannelId != channelId)
+        {
+            throw new InvalidOperationException(
+                $"Thread '{threadId}' belongs to channel '{thread.ChannelId}', not '{channelId}'.");
+        }
+    }
+
+    private static string FormatContent(
+        string summary,
+        string? details,
+        ConversationSteeringMetadata metadata)
+    {
+        var parts = new List<string> { ContentPrefix };
+        if (!string.IsNullOrWhiteSpace(metadata.Source))
+            parts.Add($"Source: {metadata.Source}");
+        if (!string.IsNullOrWhiteSpace(metadata.Category))
+            parts.Add($"Category: {metadata.Category}");
+        parts.Add("Summary:");
+        parts.Add(summary);
+
+        if (!string.IsNullOrWhiteSpace(details))
+        {
+            parts.Add("Details:");
+            parts.Add(details);
+        }
+
+        return string.Join(Environment.NewLine, parts);
+    }
+
+    private static ConversationSteeringResponse ToResponse(
+        ChatMessageDB message,
+        ConversationSteeringMetadata? metadata) =>
+        new(
+            message.Id,
+            message.ChannelId,
+            message.ThreadId,
+            message.Content,
+            message.CreatedAt,
+            metadata?.Source,
+            metadata?.Category);
+
+    private static ConversationSteeringMetadata? ParseMetadata(string? json)
+    {
+        if (string.IsNullOrWhiteSpace(json))
+            return null;
+
+        try
+        {
+            var metadata = JsonSerializer.Deserialize<ConversationSteeringMetadata>(
+                json,
+                MetadataJsonOptions);
+            return string.Equals(metadata?.Kind, MetadataKind, StringComparison.Ordinal)
+                ? metadata
+                : null;
+        }
+        catch (JsonException)
+        {
+            return null;
+        }
+    }
+
+    private static string RequireText(string value, string name, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException($"{name} is required.", name);
+
+        return value.Trim().Length <= maxLength
+            ? value.Trim()
+            : throw new ArgumentException(
+                $"{name} must be {maxLength} characters or less.",
+                name);
+    }
+
+    private static string? NormalizeOptionalText(string? value, int maxLength)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            return null;
+
+        var trimmed = value.Trim();
+        return trimmed.Length <= maxLength
+            ? trimmed
+            : throw new ArgumentException(
+                $"Value must be {maxLength} characters or less.",
+                nameof(value));
+    }
+
+    private sealed record ConversationSteeringMetadata(
+        string Kind,
+        string? Source,
+        string? Category);
+}
 
 public sealed class HostAgentManager(
     AgentService agents,

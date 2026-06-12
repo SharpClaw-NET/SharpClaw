@@ -351,6 +351,7 @@ try
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
     builder.Services.AddScoped<IHostContextDataReader, HostContextDataReader>();
+    builder.Services.AddScoped<IConversationSteering, HostConversationSteering>();
     builder.Services.AddSingleton<IModuleLifecycleManager, HostModuleLifecycleManager>();
     builder.Services.AddSingleton<IModuleInfoProvider, HostModuleInfoProvider>();
     builder.Services.AddSingleton<IModuleStorageContractProvider>(sp => sp.GetRequiredService<ModuleRegistry>());

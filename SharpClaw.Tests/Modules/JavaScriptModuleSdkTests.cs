@@ -39,10 +39,14 @@ public sealed class JavaScriptModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/conversation/steer");
+        source.Should().Contain("/.sharpclaw/host/conversation/steering/list");
         source.Should().Contain("/.sharpclaw/host/modules/storage/list");
         source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("createHostCapabilitiesClient");
         source.Should().Contain("createDocumentStore");
+        source.Should().Contain("addConversationSteering");
+        source.Should().Contain("listConversationSteering");
         source.Should().Contain("inlineTools");
         source.Should().Contain("protocolContracts");
         source.Should().Contain("storageContracts");

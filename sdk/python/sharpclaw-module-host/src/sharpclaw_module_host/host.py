@@ -71,6 +71,8 @@ HOST_CAPABILITY_PATHS = {
     "core_channel_lookup": "/.sharpclaw/host/core/channels/lookup",
     "context_accessible_threads": "/.sharpclaw/host/context/threads/accessible",
     "context_thread_messages": "/.sharpclaw/host/context/threads/messages",
+    "conversation_steer": "/.sharpclaw/host/conversation/steer",
+    "conversation_steering_list": "/.sharpclaw/host/conversation/steering/list",
     "queue_metrics": "/.sharpclaw/host/metrics/queue",
     "host_agent_chat": "/.sharpclaw/host/agent-bridge/chat",
     "host_agent_chat_stream": "/.sharpclaw/host/agent-bridge/chat-stream",
@@ -300,6 +302,40 @@ class HostCapabilitiesClient:
 
     def get_thread_messages(self, parameters: dict[str, Any]) -> list[dict[str, Any]]:
         return self._post_json(HOST_CAPABILITY_PATHS["context_thread_messages"], parameters).get("messages", [])
+
+    def add_conversation_steering(
+        self,
+        channel_id: str,
+        summary: str,
+        thread_id: str | None = None,
+        source: str | None = None,
+        category: str | None = None,
+        details: str | None = None,
+        client_type: str | None = None,
+    ) -> dict[str, Any] | None:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["conversation_steer"],
+            {
+                "channelId": channel_id,
+                "threadId": thread_id,
+                "summary": summary,
+                "source": source,
+                "category": category,
+                "details": details,
+                "clientType": client_type,
+            },
+        ).get("steering")
+
+    def list_conversation_steering(
+        self,
+        channel_id: str,
+        thread_id: str | None = None,
+        limit: int = 20,
+    ) -> list[dict[str, Any]]:
+        return self._post_json(
+            HOST_CAPABILITY_PATHS["conversation_steering_list"],
+            {"channelId": channel_id, "threadId": thread_id, "limit": limit},
+        ).get("steering", [])
 
     def get_queue_metrics(self) -> dict[str, Any]:
         return self._post_json(HOST_CAPABILITY_PATHS["queue_metrics"], {})
