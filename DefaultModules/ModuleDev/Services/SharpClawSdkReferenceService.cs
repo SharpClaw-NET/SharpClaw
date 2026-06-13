@@ -14,9 +14,12 @@ internal sealed class SharpClawSdkReferenceService
                 workspace, or mdk_apply_module_files when you already know the
                 file contents and want to write several files in one operation.
                 The module workflow writes the files, detects the runtime from
-                module.json, builds .NET modules by default, hot-loads the
-                module when requested, optionally invokes test tools, and writes
-                a system-role conversation steering message for the next turn.
+                module.json, builds .NET modules by default, verifies
+                JavaScript and Python modules before load, optionally invokes
+                test tools, and writes a system-role conversation steering
+                message for the next turn. Verification fails before hot-load,
+                so the next turn gets syntax, dependency, or declared verify
+                diagnostics instead of a vague sidecar startup failure.
 
                 A task follows the same pattern with mdk_apply_task_source. The
                 tool validates the raw task source first. If validation fails it
@@ -36,6 +39,7 @@ internal sealed class SharpClawSdkReferenceService
                       "content": "from sharpclaw_module_host import create_sharpclaw_host\n"
                     }
                   ],
+                  "verify": true,
                   "load": true,
                   "conversation": {
                     "channel_id": "00000000-0000-0000-0000-000000000000",
@@ -92,6 +96,14 @@ internal sealed class SharpClawSdkReferenceService
                 hostCapabilities.invokeModuleTool when an agent workflow needs
                 to test another loaded module tool.
 
+                ModuleDev verifies JavaScript modules with node --check against
+                the manifest entrypoint before hot-load. If package.json
+                declares scripts.sharpclawVerify and run_declared_verify is not
+                false, ModuleDev then runs npm run sharpclawVerify. Dependency
+                installation is not implicit. Set install_dependencies only
+                when the workflow should run npm ci or npm install inside the
+                module workspace before verification.
+
                 Minimal module:
 
                 ```javascript
@@ -121,6 +133,15 @@ internal sealed class SharpClawSdkReferenceService
                 host-owned indexed storage, add_conversation_steering for
                 next-turn feedback, and invoke_module_tool for test calls across
                 the sidecar boundary.
+
+                ModuleDev verifies Python modules with python -m py_compile
+                against the manifest entrypoint before hot-load. If pyproject.toml
+                contains [tool.sharpclaw] verify-command = "python -m module"
+                and run_declared_verify is not false, ModuleDev runs that command
+                without a shell. Dependency installation is not implicit. Set
+                install_dependencies only when the workflow should create a
+                module-local .sharpclaw-venv and install requirements.txt or the
+                pyproject package before verification.
 
                 Minimal module:
 

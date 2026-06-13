@@ -78,6 +78,52 @@ public sealed class ConversationSteeringTests
         results[0].Content.Should().Contain("manifest entrypoint");
     }
 
+    [Test]
+    public async Task AddAsync_RejectsThreadFromDifferentChannel()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.PlainProviderKey);
+        var thread = await CreateThreadAsync(host, seeded.Channel.Id);
+        var steering = host.Services.GetRequiredService<IConversationSteering>();
+        var wrongChannelId = Guid.NewGuid();
+
+        var act = async () => await steering.AddAsync(new ConversationSteeringRequest(
+            wrongChannelId,
+            thread.Id,
+            "This should not be stored.",
+            Source: "module_dev"));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage($"*belongs to channel '{seeded.Channel.Id}'*not '{wrongChannelId}'*");
+        host.Db.ChatMessages.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task ListAsync_PerformanceShape_ClampsLimitToNewestOneHundredSteeringMessages()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.PlainProviderKey);
+        var thread = await CreateThreadAsync(host, seeded.Channel.Id);
+        var steering = host.Services.GetRequiredService<IConversationSteering>();
+
+        for (var i = 0; i < 105; i++)
+        {
+            await steering.AddAsync(new ConversationSteeringRequest(
+                seeded.Channel.Id,
+                thread.Id,
+                $"Steering message {i:D3}.",
+                Source: "module_dev",
+                Category: "load"));
+        }
+
+        var results = await steering.ListAsync(seeded.Channel.Id, thread.Id, limit: 500);
+
+        results.Should().HaveCount(100);
+        results.Should().OnlyContain(row => row.ThreadId == thread.Id);
+        results.Should().OnlyContain(row => row.Source == "module_dev");
+        results.Should().OnlyContain(row => row.Category == "load");
+    }
+
     private static async Task<ChatThreadDB> CreateThreadAsync(
         ChatHarnessHost host,
         Guid channelId)

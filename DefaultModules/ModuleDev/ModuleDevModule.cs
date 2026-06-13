@@ -30,6 +30,8 @@ public sealed class ModuleDevModule : ISharpClawModule
     {
         services.AddScoped<ModuleWorkspaceService>();
         services.AddScoped<ModuleBuildService>();
+        services.AddSingleton<IModuleRuntimeCommandRunner, ModuleRuntimeCommandRunner>();
+        services.AddScoped<ModuleRuntimeVerificationService>();
         services.AddScoped<ModuleScaffoldService>();
         services.AddSingleton<SharpClawSdkReferenceService>();
         services.AddScoped<DevEnvironmentService>();
@@ -316,7 +318,7 @@ public sealed class ModuleDevModule : ISharpClawModule
                 BuildSdkReferenceSchema(), sdk),
 
             new("apply_module_files",
-                "Write a batch of module files, build .NET modules when appropriate, hot-load the module, optionally invoke test tools, and persist conversation steering for the next turn.",
+                "Write a batch of module files, build or verify the runtime, hot-load the module, optionally invoke test tools, and persist conversation steering for the next turn.",
                 BuildApplyModuleFilesSchema(), workflow, TimeoutSeconds: 180),
 
             new("record_conversation_steering",
@@ -640,6 +642,7 @@ public sealed class ModuleDevModule : ISharpClawModule
         var target = ReadWorkflowSteeringTarget(p, job);
         var workspace = sp.GetRequiredService<ModuleWorkspaceService>();
         var build = sp.GetRequiredService<ModuleBuildService>();
+        var verifier = sp.GetRequiredService<ModuleRuntimeVerificationService>();
         var lifecycle = sp.GetRequiredService<IModuleLifecycleManager>();
         var moduleId = Str(p, "module_id") ?? throw new InvalidOperationException("module_id is required.");
         var configuration = Str(p, "configuration") ?? "Debug";
@@ -668,7 +671,10 @@ public sealed class ModuleDevModule : ISharpClawModule
             var moduleDir = workspace.ResolveModuleDir(moduleId);
             var runtime = DetectRuntime(moduleDir, p);
             var buildRequested = Bool(p, "build") ?? runtime == ModuleScaffoldService.DotNetRuntime;
+            var verifyRequested = Bool(p, "verify")
+                ?? runtime is ModuleScaffoldService.NodeRuntime or ModuleScaffoldService.PythonRuntime;
             ModuleBuildService.BuildResult? buildResult = null;
+            ModuleRuntimeVerificationResult? verificationResult = null;
 
             if (buildRequested)
             {
@@ -689,6 +695,39 @@ public sealed class ModuleDevModule : ISharpClawModule
                         runtime,
                         files = written,
                         build = buildResult,
+                        verification = verificationResult,
+                        steering,
+                    }, ToolJsonOpts);
+                }
+            }
+
+            if (verifyRequested)
+            {
+                verificationResult = await verifier.VerifyAsync(
+                    moduleId,
+                    runtime,
+                    new ModuleRuntimeVerificationRequest(
+                        InstallDependencies: Bool(p, "install_dependencies") ?? false,
+                        RunDeclaredVerify: Bool(p, "run_declared_verify") ?? true,
+                        TimeoutSeconds: Int(p, "verification_timeout_seconds")),
+                    ct);
+                if (!verificationResult.Success)
+                {
+                    var steering = await AddSteeringAsync(
+                        sp,
+                        target,
+                        "module_verify",
+                        $"Module '{moduleId}' runtime verification failed.",
+                        FormatVerificationDiagnostics(verificationResult),
+                        ct);
+                    return JsonSerializer.Serialize(new
+                    {
+                        success = false,
+                        module_id = moduleId,
+                        runtime,
+                        files = written,
+                        build = buildResult,
+                        verification = verificationResult,
                         steering,
                     }, ToolJsonOpts);
                 }
@@ -708,8 +747,8 @@ public sealed class ModuleDevModule : ISharpClawModule
                 sp,
                 target,
                 "module_workflow",
-                BuildModuleWorkflowSummary(moduleId, runtime, buildResult, state, testResults),
-                BuildModuleWorkflowDetails(moduleId, written, buildResult, state, testResults),
+                BuildModuleWorkflowSummary(moduleId, runtime, buildResult, verificationResult, state, testResults),
+                BuildModuleWorkflowDetails(moduleId, written, buildResult, verificationResult, state, testResults),
                 ct);
 
             return JsonSerializer.Serialize(new
@@ -719,6 +758,7 @@ public sealed class ModuleDevModule : ISharpClawModule
                 runtime,
                 files = written,
                 build = buildResult,
+                verification = verificationResult,
                 load = state,
                 tests = testResults,
                 steering = steeringResponse,
@@ -1134,6 +1174,10 @@ public sealed class ModuleDevModule : ISharpClawModule
                 "runtime":       { "type": "string", "enum": ["dotnet", "node", "python"], "description": "Optional runtime override. Otherwise read from module.json or inferred from a csproj." },
                 "configuration": { "type": "string", "description": "Debug or Release for dotnet builds. Defaults to Debug." },
                 "build":         { "type": "boolean", "description": "Override whether to run dotnet build. Defaults to true for dotnet and false for node/python." },
+                "verify":        { "type": "boolean", "description": "Override runtime verification. Defaults to true for node/python and false for dotnet." },
+                "install_dependencies": { "type": "boolean", "description": "Install runtime dependencies before verification. Defaults to false. Node uses npm ci/install. Python uses a module-local .sharpclaw-venv." },
+                "run_declared_verify": { "type": "boolean", "description": "Run declared verify hooks after syntax checks. Defaults to true. Node uses npm run sharpclawVerify. Python uses [tool.sharpclaw] verify-command = \"python -m module\"." },
+                "verification_timeout_seconds": { "type": "integer", "description": "Per verification command timeout, clamped between 1 and 120 seconds. Defaults to 30." },
                 "load":          { "type": "boolean", "description": "Hot-load or reload the module after build/write. Defaults to true." },
                 "files": {
                     "type": "array",
@@ -1363,6 +1407,7 @@ public sealed class ModuleDevModule : ISharpClawModule
         string moduleId,
         string runtime,
         ModuleBuildService.BuildResult? build,
+        ModuleRuntimeVerificationResult? verification,
         ModuleStateResponse? state,
         IReadOnlyList<WorkflowToolTestResult> tests)
     {
@@ -1371,7 +1416,12 @@ public sealed class ModuleDevModule : ISharpClawModule
             return $"Module '{moduleId}' loaded but {failedTests} workflow test(s) failed.";
 
         if (state is not null)
-            return $"Module '{moduleId}' ({runtime}) was applied and hot-loaded successfully.";
+            return verification is { Ran: true }
+                ? $"Module '{moduleId}' ({runtime}) was verified and hot-loaded successfully."
+                : $"Module '{moduleId}' ({runtime}) was applied and hot-loaded successfully.";
+
+        if (verification is { Ran: true })
+            return $"Module '{moduleId}' ({runtime}) was applied and verified successfully.";
 
         if (build is not null)
             return $"Module '{moduleId}' ({runtime}) was applied and built successfully.";
@@ -1383,6 +1433,7 @@ public sealed class ModuleDevModule : ISharpClawModule
         string moduleId,
         IReadOnlyList<object> files,
         ModuleBuildService.BuildResult? build,
+        ModuleRuntimeVerificationResult? verification,
         ModuleStateResponse? state,
         IReadOnlyList<WorkflowToolTestResult> tests)
     {
@@ -1391,6 +1442,7 @@ public sealed class ModuleDevModule : ISharpClawModule
             module_id = moduleId,
             files,
             build,
+            verification,
             load = state,
             tests,
         }, ToolJsonOpts));
@@ -1408,6 +1460,26 @@ public sealed class ModuleDevModule : ISharpClawModule
             Environment.NewLine,
             diagnostics.Select(diagnostic =>
                 $"{diagnostic.File}({diagnostic.Line},{diagnostic.Column}) {diagnostic.Code}: {diagnostic.Message}"));
+    }
+
+    private static string FormatVerificationDiagnostics(ModuleRuntimeVerificationResult verification)
+    {
+        var failed = verification.Steps.FirstOrDefault(step => !step.Success);
+        if (failed is null)
+            return !string.IsNullOrWhiteSpace(verification.Error)
+                ? verification.Error
+                : "Runtime verification failed without a failing step.";
+
+        return TruncateForSteering(JsonSerializer.Serialize(new
+        {
+            step = failed.Name,
+            command = failed.Command,
+            exit_code = failed.ExitCode,
+            timed_out = failed.TimedOut,
+            error = verification.Error,
+            stdout = failed.Stdout,
+            stderr = failed.Stderr,
+        }, ToolJsonOpts));
     }
 
     private static string FormatTaskDiagnostics(TaskValidationResponse validation)

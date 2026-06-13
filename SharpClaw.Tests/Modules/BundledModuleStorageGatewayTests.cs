@@ -145,6 +145,72 @@ public sealed class BundledModuleStorageGatewayTests
     }
 
     [Test]
+    public async Task BatchUpsert_RejectsOverContractBatchSizeBeforeWritingRecords()
+    {
+        await using var db = CreateDbContext();
+        var gateway = CreateGateway(db);
+
+        var act = async () => await InvokeAsync(gateway, "batchUpsert", new
+        {
+            records = Enumerable.Range(0, 11)
+                .Select(i => new
+                {
+                    key = $"job-{i:D2}",
+                    value = new { name = $"Job {i}" },
+                    indexes = new { name = $"Job {i}" },
+                })
+                .ToArray(),
+        });
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*cannot exceed 10 records*");
+        db.ModuleStorageRecords.Should().BeEmpty();
+        db.ModuleStorageIndexEntries.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task Upsert_RejectsDocumentsOverDeclaredStorageQuota()
+    {
+        await using var db = CreateDbContext();
+        var gateway = CreateGateway(db);
+
+        var act = async () => await InvokeAsync(gateway, "upsert", new
+        {
+            key = "huge",
+            value = new { content = new string('x', 70_000) },
+            indexes = new { name = "Huge" },
+        });
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*exceeds the declared 65536 byte limit*");
+        db.ModuleStorageRecords.Should().BeEmpty();
+        db.ModuleStorageIndexEntries.Should().BeEmpty();
+    }
+
+    [Test]
+    public async Task BatchDelete_RemovesManyRecordsAndIndexesWithOneGatewayOperation()
+    {
+        await using var db = CreateDbContext();
+        var gateway = CreateGateway(db);
+        await UpsertJobAsync(gateway, "first", DateTimeOffset.Parse("2026-06-10T10:00:00Z"));
+        await UpsertJobAsync(gateway, "second", DateTimeOffset.Parse("2026-06-10T11:00:00Z"));
+        await UpsertJobAsync(gateway, "third", DateTimeOffset.Parse("2026-06-10T12:00:00Z"));
+        var telemetry = new RecordingStorageTelemetry();
+        gateway = CreateGateway(db, telemetry);
+
+        var result = await InvokeAsync(gateway, "batchDelete", new
+        {
+            keys = new[] { "first", "second", "third" },
+        });
+
+        result.GetProperty("deleted").GetInt32().Should().Be(3);
+        db.ModuleStorageRecords.Should().BeEmpty();
+        db.ModuleStorageIndexEntries.Should().BeEmpty();
+        telemetry.Events.Should().ContainSingle(e =>
+            e.Operation == ModuleStorageOperations.BatchDelete && e.Success);
+    }
+
+    [Test]
     public async Task Claim_PatchesMatchingRecordsAndReplacesClaimIndexes()
     {
         await using var db = CreateDbContext();
@@ -194,6 +260,97 @@ public sealed class BundledModuleStorageGatewayTests
             .StringValue
             .Should()
             .Be("Running");
+    }
+
+    [Test]
+    public async Task Claim_RejectsIndexedFieldPatchWithoutReplacementIndex()
+    {
+        await using var db = CreateDbContext();
+        var gateway = CreateGateway(db);
+        await UpsertJobAsync(
+            gateway,
+            "due",
+            DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
+            status: "Pending");
+
+        var act = async () => await InvokeAsync(gateway, "claim", new
+        {
+            filters = new object[]
+            {
+                new { indexName = "status", @operator = "equals", value = "Pending" },
+            },
+            patch = new
+            {
+                status = "Running",
+            },
+        });
+
+        await act.Should().ThrowAsync<ArgumentException>()
+            .WithMessage("*changes indexed field 'status' without replacing that index value*");
+        db.ModuleStorageRecords.Single().ValueJson.Should().Contain("\"Pending\"");
+        db.ModuleStorageIndexEntries.Single(index =>
+                index.RecordKey == "due" && index.IndexName == "status")
+            .StringValue
+            .Should()
+            .Be("Pending");
+    }
+
+    [Test]
+    public async Task Query_PerformanceShape_ReturnsLimitedIndexOrderedPageFromLargeStore()
+    {
+        await using var db = CreateDbContext();
+        var gateway = CreateGateway(db);
+        var baseTime = DateTimeOffset.Parse("2026-06-10T00:00:00Z");
+
+        for (var batch = 0; batch < 100; batch++)
+        {
+            await InvokeAsync(gateway, "batchUpsert", new
+            {
+                records = Enumerable.Range(batch * 10, 10)
+                    .Select(i => new
+                    {
+                        key = $"job-{i:D4}",
+                        value = new
+                        {
+                            key = $"job-{i:D4}",
+                            status = i % 2 == 0 ? "Pending" : "Done",
+                            nextRunAt = baseTime.AddMinutes(i),
+                        },
+                        indexes = new
+                        {
+                            status = i % 2 == 0 ? "Pending" : "Done",
+                            nextRunAt = baseTime.AddMinutes(i),
+                        },
+                    })
+                    .ToArray(),
+            });
+        }
+
+        var result = await InvokeAsync(gateway, "query", new
+        {
+            filters = new object[]
+            {
+                new { indexName = "status", @operator = "equals", value = "Pending" },
+                new
+                {
+                    indexName = "nextRunAt",
+                    @operator = "lessThanOrEqual",
+                    value = baseTime.AddMinutes(20),
+                },
+            },
+            orderBy = new
+            {
+                indexName = "nextRunAt",
+                direction = "desc",
+            },
+            limit = 5,
+        });
+
+        result.GetProperty("records")
+            .EnumerateArray()
+            .Select(record => record.GetProperty("key").GetString())
+            .Should()
+            .Equal("job-0020", "job-0018", "job-0016", "job-0014", "job-0012");
     }
 
     [Test]
