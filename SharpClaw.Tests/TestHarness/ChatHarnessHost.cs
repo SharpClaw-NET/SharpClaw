@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
+using SharpClaw.Application.API;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
@@ -89,6 +90,8 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
                 databaseRoot));
         services.AddSingleton(new ModuleLoader(module));
         services.AddSingleton<ModuleRegistry>();
+        services.AddSingleton<IModuleStorageContractProvider>(
+            sp => sp.GetRequiredService<ModuleRegistry>());
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ThreadActivitySignal>();
         services.AddSingleton<ChatCache>();
@@ -116,6 +119,8 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<SessionService>();
         services.AddScoped<AgentActionService>();
         services.AddScoped<AgentJobService>();
+        services.AddScoped<IAgentJobController, HostAgentJobController>();
+        services.AddScoped<IAgentJobReader, HostAgentJobReader>();
         services.AddScoped<AgentService>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();
@@ -129,6 +134,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<IConversationSteering, HostConversationSteering>();
         services.AddScoped<ModuleService>();
         services.AddScoped<ModuleExecutionContext>();
+        services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
         services.AddScoped<IModuleConfigStore>(sp =>
         {
             var context = sp.GetRequiredService<ModuleExecutionContext>();
