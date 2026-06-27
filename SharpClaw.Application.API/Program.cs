@@ -723,6 +723,30 @@ try
     app.UseRouting();
     app.UseMiddleware<ApiKeyMiddleware>();
     app.UseMiddleware<JwtSessionMiddleware>();
+    app.Use(async (context, next) =>
+    {
+        var moduleServices = context.GetEndpoint()
+            ?.Metadata.GetMetadata<ModuleRequestServicesMetadata>()
+            ?.Services;
+
+        if (moduleServices is null)
+        {
+            await next();
+            return;
+        }
+
+        var originalServices = context.RequestServices;
+        await using var scope = moduleServices.CreateAsyncScope();
+        context.RequestServices = scope.ServiceProvider;
+        try
+        {
+            await next();
+        }
+        finally
+        {
+            context.RequestServices = originalServices;
+        }
+    });
 
     // Migration gate — pauses requests during manual migrations (relational only).
     if (storageMode != StorageMode.JsonFile)
@@ -869,9 +893,11 @@ internal sealed class ModuleEndpointRouteBuilder(
     IEndpointRouteBuilder inner,
     IServiceProvider moduleServices) : IEndpointRouteBuilder
 {
+    private readonly ModuleEndpointDataSources _dataSources = new(inner.DataSources, moduleServices);
+
     public IServiceProvider ServiceProvider => moduleServices;
 
-    public ICollection<EndpointDataSource> DataSources => inner.DataSources;
+    public ICollection<EndpointDataSource> DataSources => _dataSources;
 
     public IApplicationBuilder CreateApplicationBuilder()
     {
@@ -879,4 +905,92 @@ internal sealed class ModuleEndpointRouteBuilder(
         builder.ApplicationServices = moduleServices;
         return builder;
     }
+
+    private sealed class ModuleEndpointDataSources(
+        ICollection<EndpointDataSource> innerDataSources,
+        IServiceProvider moduleServices) : ICollection<EndpointDataSource>
+    {
+        private readonly List<EndpointDataSource> _moduleDataSources = [];
+        private readonly Dictionary<EndpointDataSource, EndpointDataSource> _attachedDataSources = [];
+
+        public int Count => _moduleDataSources.Count;
+        public bool IsReadOnly => false;
+
+        public void Add(EndpointDataSource item)
+        {
+            _moduleDataSources.Add(item);
+
+            var attached = new ModuleEndpointDataSource(item, moduleServices);
+            _attachedDataSources[item] = attached;
+            innerDataSources.Add(attached);
+        }
+
+        public void Clear()
+        {
+            foreach (var item in _moduleDataSources.ToArray())
+            {
+                if (_attachedDataSources.Remove(item, out var attached))
+                    innerDataSources.Remove(attached);
+            }
+
+            _moduleDataSources.Clear();
+        }
+
+        public bool Contains(EndpointDataSource item) => _moduleDataSources.Contains(item);
+
+        public void CopyTo(EndpointDataSource[] array, int arrayIndex) =>
+            _moduleDataSources.CopyTo(array, arrayIndex);
+
+        public IEnumerator<EndpointDataSource> GetEnumerator() =>
+            _moduleDataSources.GetEnumerator();
+
+        public bool Remove(EndpointDataSource item)
+        {
+            var removed = _moduleDataSources.Remove(item);
+            if (removed && _attachedDataSources.Remove(item, out var attached))
+                innerDataSources.Remove(attached);
+
+            return removed;
+        }
+
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() =>
+            GetEnumerator();
+    }
+
+    private sealed class ModuleEndpointDataSource(
+        EndpointDataSource inner,
+        IServiceProvider moduleServices) : EndpointDataSource
+    {
+        private readonly ModuleRequestServicesMetadata _metadata = new(moduleServices);
+
+        public override IReadOnlyList<Endpoint> Endpoints =>
+            [.. inner.Endpoints.Select(AttachMetadata)];
+
+        public override Microsoft.Extensions.Primitives.IChangeToken GetChangeToken() =>
+            inner.GetChangeToken();
+
+        private Endpoint AttachMetadata(Endpoint endpoint)
+        {
+            if (endpoint.Metadata.GetMetadata<ModuleRequestServicesMetadata>() is not null)
+                return endpoint;
+
+            var metadata = endpoint.Metadata.ToList();
+            metadata.Add(_metadata);
+            var endpointMetadata = new EndpointMetadataCollection(metadata);
+
+            if (endpoint is RouteEndpoint routeEndpoint)
+            {
+                return new RouteEndpoint(
+                    routeEndpoint.RequestDelegate!,
+                    routeEndpoint.RoutePattern,
+                    routeEndpoint.Order,
+                    endpointMetadata,
+                    routeEndpoint.DisplayName);
+            }
+
+            return new Endpoint(endpoint.RequestDelegate, endpointMetadata, endpoint.DisplayName);
+        }
+    }
 }
+
+internal sealed record ModuleRequestServicesMetadata(IServiceProvider Services);
