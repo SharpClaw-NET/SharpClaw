@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Application.API;
 using SharpClaw.Application.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
@@ -13,6 +14,7 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
+using SharpClaw.Tests.ExternalModule;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Instances;
 
@@ -54,7 +56,7 @@ public sealed class BundledDotNetSidecarDefaultTests
     }
 
     [Test]
-    public void InProcessDotNetHostingModeIsRejected()
+    public void InProcessDotNetHostingModeIsAcceptedByDiscovery()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -63,11 +65,13 @@ public sealed class BundledDotNetSidecarDefaultTests
             })
             .Build();
 
-        var act = () => ModuleLoader.DiscoverBundled(configuration);
+        var loader = ModuleLoader.DiscoverBundled(configuration);
 
-        act.Should()
-            .Throw<InvalidOperationException>()
-            .WithMessage("*Allowed values are sidecar-only, default, and auto*");
+        loader.IsManifestOnlyBundledModule(TestHarnessConstants.ModuleId).Should().BeTrue();
+        loader.GetBundledModule(TestHarnessConstants.ModuleId)
+            .Should()
+            .NotBeOfType<TestHarnessModule>(
+                "discovery remains manifest-only; enabling the module chooses the runtime host");
     }
 
     [Test]
@@ -157,6 +161,102 @@ public sealed class BundledDotNetSidecarDefaultTests
         harness.Registry.GetModule(TestHarnessConstants.ModuleId)
             .Should()
             .NotBeOfType<TestHarnessModule>();
+    }
+
+    [Test]
+    public async Task InProcessModeKeepsExplicitBundledSidecarManifestOutOfProcess()
+    {
+        var settings = new Dictionary<string, string?>
+        {
+            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+        };
+        var configuration = BuildConfiguration(settings);
+        await using var harness = ModuleServiceHarness.Create(
+            settings,
+            moduleLoader: ModuleLoader.DiscoverBundled(configuration));
+
+        var response = await harness.ModuleService.EnableAsync(
+            TestHarnessConstants.ModuleId,
+            harness.RootServices,
+            CancellationToken.None);
+
+        response.Enabled.Should().BeTrue();
+        var runtimeHost = harness.Registry.GetRuntimeHost(TestHarnessConstants.ModuleId)
+            .Should()
+            .BeAssignableTo<IForeignModuleRuntimeHost>()
+            .Subject;
+        var module = harness.Registry.GetModule(TestHarnessConstants.ModuleId);
+        module.Should().NotBeNull();
+        module!.Id.Should().Be(TestHarnessConstants.ModuleId);
+        module.Should().NotBeOfType<TestHarnessModule>();
+        harness.Registry.IsExternal(TestHarnessConstants.ModuleId).Should().BeFalse();
+
+        using var parameters = JsonDocument.Parse("""{"result":"in-process tool"}""");
+        var result = await module!.ExecuteToolAsync(
+            TestHarnessConstants.JobPermissionedTool,
+            parameters.RootElement,
+            new AgentJobContext(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                ResourceId: null,
+                ActionKey: TestHarnessConstants.JobPermissionedTool),
+            runtimeHost.Services,
+            CancellationToken.None);
+
+        result.Should().Be("in-process tool");
+    }
+
+    [Test]
+    public async Task InProcessStorageGatewayRejectsOtherModuleStorageRequests()
+    {
+        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        {
+            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+        });
+        var moduleDir = CreateExternalModuleDirectory(
+            typeof(InProcessStorageFixtureModule),
+            InProcessStorageFixtureModule.ModuleId,
+            "Synthetic In-Process Storage",
+            InProcessStorageFixtureModule.ToolPrefixValue);
+
+        var response = await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            harness.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
+
+        response.Enabled.Should().BeTrue();
+        var runtimeHost = harness.Registry.GetRuntimeHost(InProcessStorageFixtureModule.ModuleId)
+            .Should()
+            .BeOfType<InProcessModuleHost>()
+            .Subject;
+
+        using var scope = runtimeHost.CreateScope();
+        var gateway = scope.ServiceProvider.GetRequiredService<IModuleStorageGateway>();
+        gateway.ListContracts().Should().NotBeEmpty();
+        gateway.ListContracts().Should().OnlyContain(contract =>
+            string.Equals(contract.ModuleId, InProcessStorageFixtureModule.ModuleId, StringComparison.Ordinal));
+        scope.ServiceProvider.GetServices<IModuleStorageGateway>().Should().ContainSingle(
+            "module-owned fake gateway registrations are replaced by the host-owned wrapper");
+        scope.ServiceProvider.GetService<SharpClawDbContext>().Should().BeNull(
+            "in-process modules must not receive the raw host DbContext");
+
+        var restricted = new ModuleServiceScope(scope.ServiceProvider, InProcessStorageFixtureModule.ModuleId);
+        var blockedRawDb = () => restricted.GetRequiredService<SharpClawDbContext>();
+        blockedRawDb.Should().Throw<InvalidOperationException>()
+            .WithMessage("*blocked service*SharpClawDbContext*");
+
+        using var parameters = JsonDocument.Parse("{}");
+        var act = async () => await gateway.InvokeAsync(
+            TestHarnessConstants.ModuleId,
+            InProcessStorageFixtureModule.StorageName,
+            ModuleStorageOperations.List,
+            parameters.RootElement,
+            CancellationToken.None);
+
+        await act.Should().ThrowAsync<UnauthorizedAccessException>()
+            .WithMessage("*cannot access storage owned by module*");
     }
 
     [Test]
@@ -347,6 +447,51 @@ public sealed class BundledDotNetSidecarDefaultTests
         harness.Registry.GetModule("synthetic_external_inprocess").Should().BeNull();
     }
 
+    [Test]
+    public async Task ExternalDotNetModuleWithoutSidecarHostModeLoadsWhenInProcessModeIsForced()
+    {
+        await using var harness = ModuleServiceHarness.Create(new Dictionary<string, string?>
+        {
+            [DotNetModuleHostingModeOptions.ConfigKey] = "in-process",
+        });
+        var moduleDir = CreateExternalModuleDirectory(
+            typeof(SyntheticExternalLifecycleModule),
+            SyntheticExternalLifecycleModule.ModuleId,
+            "Synthetic External Lifecycle",
+            SyntheticExternalLifecycleModule.ToolPrefixValue);
+
+        var response = await harness.ModuleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            harness.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
+
+        response.ModuleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
+        harness.Registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
+        var runtimeHost = harness.Registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+            .Should()
+            .BeOfType<InProcessModuleHost>()
+            .Subject;
+        var module = harness.Registry.GetModule(SyntheticExternalLifecycleModule.ModuleId);
+        module.Should().NotBeNull();
+
+        using var scope = runtimeHost.CreateScope();
+        using var parameters = JsonDocument.Parse("""{"value":"forced"}""");
+        var result = await module!.ExecuteToolAsync(
+            SyntheticExternalLifecycleModule.JobTool,
+            parameters.RootElement,
+            new AgentJobContext(
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                Guid.NewGuid(),
+                ResourceId: null,
+                ActionKey: SyntheticExternalLifecycleModule.JobTool),
+            scope.ServiceProvider,
+            CancellationToken.None);
+
+        result.Should().Be("external job forced");
+    }
+
     private sealed class ModuleServiceHarness : IAsyncDisposable
     {
         private ModuleServiceHarness(
@@ -407,6 +552,7 @@ public sealed class BundledDotNetSidecarDefaultTests
                     : ModuleLoader.DiscoverBundled(configuration));
             services.AddSingleton(loader);
             services.AddSingleton<ModuleRegistry>();
+            services.AddSingleton<IModuleStorageContractProvider>(sp => sp.GetRequiredService<ModuleRegistry>());
             services.AddSingleton<ProviderApiClientFactory>();
             services.AddSingleton<RuntimeModuleDbContextRegistry>();
             services.AddSingleton<ModulePersistenceRegistrationFactory>();
@@ -432,6 +578,9 @@ public sealed class BundledDotNetSidecarDefaultTests
                 sp,
                 sp.GetRequiredService<IConfiguration>(),
                 sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ModuleEventDispatcher>>()));
+            services.AddSingleton<ISharpClawEventSinkRegistry>(
+                sp => sp.GetRequiredService<ModuleEventDispatcher>());
+            services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
             services.AddScoped<ModuleService>();
 
             var root = services.BuildServiceProvider();
@@ -481,6 +630,44 @@ public sealed class BundledDotNetSidecarDefaultTests
         File.Exists(hostPath).Should().BeTrue(
             $"shared .NET sidecar host must be built before tests run: '{hostPath}'");
         return hostPath;
+    }
+
+    private static string CreateExternalModuleDirectory(
+        Type moduleType,
+        string moduleId,
+        string displayName,
+        string toolPrefix)
+    {
+        var assemblyPath = moduleType.Assembly.Location;
+        var sourceDir = Path.GetDirectoryName(assemblyPath)!;
+        var moduleDir = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "external-inprocess-modules",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(moduleDir);
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*.dll"))
+            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+
+        foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
+            File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
+
+        File.WriteAllText(
+            Path.Combine(moduleDir, "module.json"),
+            $$"""
+            {
+              "id": "{{moduleId}}",
+              "displayName": "{{displayName}}",
+              "version": "1.0.0",
+              "toolPrefix": "{{toolPrefix}}",
+              "runtime": "dotnet",
+              "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
+              "type": "{{moduleType.FullName}}",
+              "minHostVersion": "0.0.0"
+            }
+            """);
+
+        return moduleDir;
     }
 
     private static string ResolveRepoRoot()

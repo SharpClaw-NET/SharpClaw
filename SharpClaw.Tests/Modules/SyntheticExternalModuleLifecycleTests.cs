@@ -44,6 +44,28 @@ public sealed class SyntheticExternalModuleLifecycleTests
     }
 
     [Test]
+    public void ModuleManifestRuntimeInfoAcceptsLegacyTypeProperty()
+    {
+        const string json =
+            """
+            {
+              "id": "synthetic_external_lifecycle",
+              "displayName": "Synthetic External Lifecycle",
+              "version": "1.0.0",
+              "toolPrefix": "sel",
+              "entryAssembly": "SharpClaw.Tests.ExternalModule.dll",
+              "type": "SharpClaw.Tests.ExternalModule.SyntheticExternalLifecycleModule",
+              "minHostVersion": "0.0.0"
+            }
+            """;
+
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
+
+        runtimeInfo.ModuleType.Should()
+            .Be("SharpClaw.Tests.ExternalModule.SyntheticExternalLifecycleModule");
+    }
+
+    [Test]
     public async Task NuGetPackageWithForeignRuntimeMaterializesScriptEntrypoint()
     {
         var packageSource = Path.Combine(

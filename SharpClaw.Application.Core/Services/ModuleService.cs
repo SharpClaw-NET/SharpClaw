@@ -216,7 +216,7 @@ public sealed class ModuleService(
                     ct);
 
                 registry.Register(module, runtimeHost);
-                RegisterTaskRuntimeContributions(module);
+                RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
                 RegisterModulePersistence(module);
                 await LoadModulePersistenceAsync(module, ct);
 
@@ -298,9 +298,10 @@ public sealed class ModuleService(
             runtimeHost = host;
 
             registry.Register(module, runtimeHost);
-            RegisterTaskRuntimeContributions(module);
+            RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
             if (manifest is not null)
                 registry.CacheManifest(moduleId, manifest);
+            await LoadModulePersistenceAsync(module, ct);
 
             return module;
         }
@@ -433,7 +434,7 @@ public sealed class ModuleService(
         try
         {
             registry.Register(host.Module, host, isExternal: true);
-            RegisterTaskRuntimeContributions(host.Module);
+            RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
             await LoadModulePersistenceAsync(host.Module, ct);
@@ -587,7 +588,7 @@ public sealed class ModuleService(
         try
         {
             registry.Register(host.Module, host, isExternal: true);
-            RegisterTaskRuntimeContributions(host.Module);
+            RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
             await LoadModulePersistenceAsync(host.Module, ct);
@@ -649,27 +650,35 @@ public sealed class ModuleService(
             moduleDbContextRegistry.Register(registration);
     }
 
-    private static void RegisterTaskRuntimeContributions(ISharpClawModule module)
+    private static void RegisterTaskRuntimeContributions(
+        ISharpClawModule module,
+        IServiceProvider? moduleServices = null)
     {
+        if (module is ITaskParserAware parserAware)
+            TaskScriptParser.RegisterModule(parserAware.ParserExtension);
+
         if (module is ForeignModuleProxy foreignModule)
         {
-            if (foreignModule is ITaskParserAware parserAware)
-                TaskScriptParser.RegisterModule(parserAware.ParserExtension);
-
             foreach (var descriptor in foreignModule.TaskStepDescriptors)
                 TaskStepRegistry.Default.Register(descriptor);
+        }
+
+        if (moduleServices is not null)
+        {
+            foreach (var provider in moduleServices.GetServices<ITaskStepDescriptorProvider>())
+            {
+                foreach (var descriptor in provider.Descriptors)
+                    TaskStepRegistry.Default.Register(descriptor);
+            }
         }
     }
 
     private static void UnregisterTaskRuntimeContributions(ISharpClawModule module)
     {
-        if (module is ForeignModuleProxy foreignModule)
-        {
-            if (foreignModule is ITaskParserAware parserAware)
-                TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
+        if (module is ITaskParserAware parserAware)
+            TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
 
-            TaskStepRegistry.Default.UnregisterOwner(module.Id);
-        }
+        TaskStepRegistry.Default.UnregisterOwner(module.Id);
     }
 
     public async Task LoadModulePersistenceAsync(ISharpClawModule module, CancellationToken ct = default)
@@ -698,9 +707,20 @@ public sealed class ModuleService(
         var runtimeInfo = LoadRuntimeInfo(manifest);
         runtimeInfo = ResolveBundledRuntimeInfo(manifest, bundledModule, runtimeInfo);
 
+        if (runtimeInfo.IsDotNet && runtimeInfo.IsInProcessHostMode)
+        {
+            var host = InProcessModuleHost.Load(
+                ResolveBundledModuleDirectory(manifest.Id),
+                ResolveApplicationBaseDirectory(),
+                manifest,
+                runtimeInfo,
+                rootServices);
+            return (host.Module, host);
+        }
+
         var moduleDir = PrepareBundledSidecarModuleDirectory(manifest, runtimeInfo);
-        var host = await CreateRuntimeHostAsync(moduleDir, manifest, runtimeInfo, rootServices, ct);
-        return (host.Module, host);
+        var sidecarHost = await CreateRuntimeHostAsync(moduleDir, manifest, runtimeInfo, rootServices, ct);
+        return (sidecarHost.Module, sidecarHost);
     }
 
     private async Task<IModuleRuntimeHost> CreateRuntimeHostAsync(
@@ -713,6 +733,16 @@ public sealed class ModuleService(
         runtimeInfo = ResolveExternalRuntimeInfo(manifest, runtimeInfo);
         if (runtimeInfo.IsDotNet)
         {
+            if (runtimeInfo.IsInProcessHostMode)
+            {
+                return InProcessModuleHost.Load(
+                    moduleDir,
+                    moduleDir,
+                    manifest,
+                    runtimeInfo,
+                    hostServices);
+            }
+
             return await ForeignModuleHost.StartAsync(
                 manifest,
                 runtimeInfo,
@@ -742,12 +772,26 @@ public sealed class ModuleService(
         if (!runtimeInfo.IsDotNet)
             return runtimeInfo;
 
-        DotNetModuleHostingModeOptions.Resolve(configuration);
+        var hostingMode = DotNetModuleHostingModeOptions.Resolve(configuration);
+        if (hostingMode == DotNetModuleHostingMode.InProcess && !runtimeInfo.IsSidecarHostMode)
+            return runtimeInfo with { HostMode = ModuleManifestRuntimeInfo.HostModeInProcess };
+
+        if (runtimeInfo.IsInProcessHostMode)
+        {
+            if (hostingMode == DotNetModuleHostingMode.AllowInProcess)
+                return runtimeInfo;
+
+            throw new InvalidOperationException(
+                $"Bundled .NET module '{manifest.Id}' declares \"hostMode\": \"in-process\", but in-process hosting is disabled. " +
+                $"Set {DotNetModuleHostingModeOptions.EnvironmentKey}=allow-in-process or " +
+                $"{DotNetModuleHostingModeOptions.EnvironmentKey}=in-process to allow it.");
+        }
+
         if (!runtimeInfo.IsSidecarHostMode)
         {
             throw new InvalidOperationException(
-                $"Bundled .NET module '{manifest.Id}' must declare \"hostMode\": \"sidecar\". " +
-                "In-process bundled module loading has been removed.");
+                $"Bundled .NET module '{manifest.Id}' must declare \"hostMode\": \"sidecar\" " +
+                $"unless {DotNetModuleHostingModeOptions.EnvironmentKey}=in-process is set.");
         }
 
         EnsureBundledModuleReadyForDotNetSidecar(manifest, bundledModule);
@@ -764,11 +808,26 @@ public sealed class ModuleService(
             return runtimeInfo;
         }
 
+        var hostingMode = DotNetModuleHostingModeOptions.Resolve(configuration);
+        if (hostingMode == DotNetModuleHostingMode.InProcess && !runtimeInfo.IsSidecarHostMode)
+            return runtimeInfo with { HostMode = ModuleManifestRuntimeInfo.HostModeInProcess };
+
+        if (runtimeInfo.IsInProcessHostMode)
+        {
+            if (hostingMode == DotNetModuleHostingMode.AllowInProcess)
+                return runtimeInfo;
+
+            throw new InvalidOperationException(
+                $"External .NET module '{manifest.Id}' declares \"hostMode\": \"in-process\", but in-process hosting is disabled. " +
+                $"Set {DotNetModuleHostingModeOptions.EnvironmentKey}=allow-in-process or " +
+                $"{DotNetModuleHostingModeOptions.EnvironmentKey}=in-process to allow it.");
+        }
+
         if (!runtimeInfo.IsSidecarHostMode)
         {
             throw new InvalidOperationException(
                 $"External .NET module '{manifest.Id}' must declare \"hostMode\": \"sidecar\". " +
-                "SharpClaw no longer hot-loads third-party .NET modules into the parent process.");
+                $"Set {DotNetModuleHostingModeOptions.EnvironmentKey}=in-process to force .NET modules into the parent process.");
         }
 
         return runtimeInfo;

@@ -4,7 +4,7 @@ using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Application.Core.Modules;
 
-internal sealed record ModuleManifestRuntimeInfo(
+public sealed record ModuleManifestRuntimeInfo(
     string Runtime,
     string? Entrypoint,
     string? ModuleType = null,
@@ -29,6 +29,7 @@ internal sealed record ModuleManifestRuntimeInfo(
     public bool IsPython => string.Equals(Runtime, Python, StringComparison.Ordinal);
     public bool IsScriptRuntime => IsNode || IsPython;
     public bool IsSidecarHostMode => string.Equals(HostMode, HostModeSidecar, StringComparison.Ordinal);
+    public bool IsInProcessHostMode => string.Equals(HostMode, HostModeInProcess, StringComparison.Ordinal);
 
     public static ModuleManifestRuntimeInfo FromJson(string json)
     {
@@ -36,7 +37,8 @@ internal sealed record ModuleManifestRuntimeInfo(
         var root = doc.RootElement;
         var runtime = TryGetString(root, "runtime");
         var entrypoint = TryGetString(root, "entrypoint");
-        var moduleType = TryGetString(root, "moduleType");
+        var moduleType = TryGetString(root, "moduleType")
+            ?? TryGetString(root, "type");
         var hostMode = NormalizeHostMode(TryGetString(root, "hostMode"));
 
         return new ModuleManifestRuntimeInfo(Normalize(runtime), entrypoint, moduleType, hostMode);

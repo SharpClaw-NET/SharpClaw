@@ -84,8 +84,33 @@ public sealed class ModuleEventDispatcher(
     {
         lock (_sinkLock)
         {
-            _sinks ??= rootServices.GetServices<ISharpClawEventSink>().ToList();
+            _sinks ??= ResolveSinks();
             return _sinks;
         }
+    }
+
+    private IReadOnlyList<ISharpClawEventSink> ResolveSinks()
+    {
+        var sinks = rootServices.GetServices<ISharpClawEventSink>().ToList();
+        var registry = rootServices.GetService<ModuleRegistry>();
+        if (registry is null)
+            return sinks;
+
+        foreach (var runtimeHost in registry.GetRuntimeHosts())
+        {
+            try
+            {
+                sinks.AddRange(runtimeHost.Services.GetServices<ISharpClawEventSink>());
+            }
+            catch (Exception ex)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Failed to resolve event sinks for module '{ModuleId}'.",
+                    runtimeHost.Module.Id);
+            }
+        }
+
+        return sinks;
     }
 }

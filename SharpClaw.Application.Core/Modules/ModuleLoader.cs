@@ -9,8 +9,9 @@ namespace SharpClaw.Application.Core.Modules;
 
 /// <summary>
 /// Singleton that holds bundled (default) module manifest metadata and provides
-/// manifest loading. Production bundled modules are represented as manifest-only
-/// entries so the parent host never loads their implementation assemblies.
+/// manifest loading. Bundled modules are represented as manifest-only entries
+/// during discovery; a runtime host loads implementation assemblies only when a
+/// module is enabled.
 /// </summary>
 public sealed class ModuleLoader
 {
@@ -36,20 +37,20 @@ public sealed class ModuleLoader
 
     /// <summary>
     /// Discover bundled modules from manifests. Bundled implementation assemblies
-    /// are no longer loaded into the parent process during normal startup.
+    /// are not loaded during discovery.
     /// </summary>
     public static ModuleLoader DiscoverBundled(IConfiguration? configuration = null)
     {
         var manifests = LoadBundledManifestsFromDisk();
         var runtimeInfos = LoadBundledRuntimeInfosFromDisk();
-        DotNetModuleHostingModeOptions.Resolve(configuration);
+        var hostingMode = DotNetModuleHostingModeOptions.Resolve(configuration);
         var manifestOnlyManifests = manifests.Values
             .Select(manifest =>
             {
                 var runtimeInfo = runtimeInfos.TryGetValue(manifest.Id, out var info)
                     ? info
                     : ModuleManifestRuntimeInfo.DotNetDefault;
-                EnsureBundledManifestRunsOutOfProcess(manifest, runtimeInfo);
+                EnsureBundledManifestAllowedByHostingMode(manifest, runtimeInfo, hostingMode);
                 return manifest;
             })
             .ToArray();
@@ -88,8 +89,8 @@ public sealed class ModuleLoader
     public bool IsDefaultModule(string moduleId) => _bundled.ContainsKey(moduleId);
 
     /// <summary>
-    /// Whether the bundled module is represented only by manifest metadata in
-    /// the parent host and must be launched through its sidecar runtime.
+    /// Whether the bundled module is represented only by manifest metadata
+    /// during discovery and must be launched through a runtime host when enabled.
     /// </summary>
     public bool IsManifestOnlyBundledModule(string moduleId) =>
         _manifestOnlyBundledIds.Contains(moduleId);
@@ -189,19 +190,26 @@ public sealed class ModuleLoader
         return all.GetValueOrDefault(moduleId);
     }
 
-    private static void EnsureBundledManifestRunsOutOfProcess(
+    private static void EnsureBundledManifestAllowedByHostingMode(
         ModuleManifest manifest,
-        ModuleManifestRuntimeInfo runtimeInfo)
+        ModuleManifestRuntimeInfo runtimeInfo,
+        DotNetModuleHostingMode hostingMode)
     {
-        if (runtimeInfo.IsDotNet && runtimeInfo.IsSidecarHostMode)
-            return;
-
         if (!runtimeInfo.IsDotNet)
             return;
 
+        if (hostingMode == DotNetModuleHostingMode.InProcess)
+            return;
+
+        if (runtimeInfo.IsSidecarHostMode)
+            return;
+
+        if (runtimeInfo.IsInProcessHostMode && hostingMode == DotNetModuleHostingMode.AllowInProcess)
+            return;
+
         throw new InvalidOperationException(
-            $"Bundled .NET module '{manifest.Id}' must declare \"runtime\": \"dotnet\" and " +
-            "\"hostMode\": \"sidecar\". In-process bundled module loading has been removed.");
+            $"Bundled .NET module '{manifest.Id}' declares hostMode '{runtimeInfo.HostMode ?? "(none)"}', " +
+            $"but {DotNetModuleHostingModeOptions.EnvironmentKey} is not set to allow .NET in-process hosting.");
     }
 
     private static string ResolveApplicationBaseDirectory() =>

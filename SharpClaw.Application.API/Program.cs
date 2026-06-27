@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
@@ -525,9 +526,13 @@ try
 
         var manifest = moduleLoader.GetManifest(bundledModule.Id);
         var version = manifest?.Version ?? "unknown";
-        var runtimeLabel = registry.GetRuntimeHost(bundledModule.Id) is null
-            ? "bundled"
-            : "bundled-sidecar";
+        var runtimeLabel = registry.GetRuntimeHost(bundledModule.Id) switch
+        {
+            InProcessModuleHost => "bundled-in-process",
+            IForeignModuleRuntimeHost => "bundled-sidecar",
+            null => "bundled",
+            _ => "bundled-runtime",
+        };
         Log.Information("Module '{ModuleId}' ({DisplayName}) registered [{Runtime}, v{Version}]",
             registeredModule.Id, registeredModule.DisplayName, runtimeLabel, version);
     }
@@ -603,7 +608,8 @@ try
 
         try
         {
-            await module.InitializeAsync(app.Services, CancellationToken.None);
+            var runtimeHost = registry.GetRuntimeHost(moduleId);
+            await module.InitializeAsync(runtimeHost?.Services ?? app.Services, CancellationToken.None);
             Log.Information("Module '{ModuleId}' initialized successfully [bundled]", moduleId);
             initializedCount++;
         }
@@ -739,7 +745,10 @@ try
     {
         try
         {
-            module.MapEndpoints(app);
+            IEndpointRouteBuilder endpointHost = registry.GetRuntimeHost(module.Id) is InProcessModuleHost inProcessHost
+                ? new ModuleEndpointRouteBuilder(app, inProcessHost.Services)
+                : app;
+            module.MapEndpoints(endpointHost);
         }
         catch (Exception ex)
         {
@@ -854,4 +863,20 @@ catch (Exception ex)
 finally
 {
     await Log.CloseAndFlushAsync();
+}
+
+internal sealed class ModuleEndpointRouteBuilder(
+    IEndpointRouteBuilder inner,
+    IServiceProvider moduleServices) : IEndpointRouteBuilder
+{
+    public IServiceProvider ServiceProvider => moduleServices;
+
+    public ICollection<EndpointDataSource> DataSources => inner.DataSources;
+
+    public IApplicationBuilder CreateApplicationBuilder()
+    {
+        var builder = inner.CreateApplicationBuilder();
+        builder.ApplicationServices = moduleServices;
+        return builder;
+    }
 }
