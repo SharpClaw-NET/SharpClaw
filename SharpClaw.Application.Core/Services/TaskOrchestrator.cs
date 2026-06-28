@@ -10,6 +10,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Compilation;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Core.Tasks.Runtime;
@@ -43,6 +44,7 @@ public sealed class TaskOrchestrator(
 {
     private readonly IReadOnlyList<ITaskStepExecutorExtension> _stepExtensions = [.. stepExtensions];
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
+    private readonly TaskAdministrationEngine _tasks = new();
 
     // ═══════════════════════════════════════════════════════════════
     // Public API
@@ -88,9 +90,7 @@ public sealed class TaskOrchestrator(
         if (compilationResult.Plan is null)
         {
             var errors = string.Join("; ", compilationResult.Diagnostics.Select(d => d.Message));
-            instance.Status = TaskInstanceStatus.Failed;
-            instance.ErrorMessage = $"Compilation failed: {errors}";
-            instance.CompletedAt = DateTimeOffset.UtcNow;
+            _tasks.ApplyCompilationFailure(instance, errors);
             await startupDb.SaveChangesAsync(ct);
             logger.LogDebug(
                 "Task instance {InstanceId} compilation failed after {ElapsedMs}ms with {DiagnosticCount} diagnostic(s).",
@@ -341,16 +341,8 @@ public sealed class TaskOrchestrator(
         var instance = await db.TaskInstances.FindAsync(instanceId);
         if (instance is not null)
         {
-            instance.OutputSnapshotJson = outputJson;
-
-            // Persist to output history table
             var seq = runtime.IncrementSequence();
-            db.TaskOutputEntries.Add(new TaskOutputEntryDB
-            {
-                TaskInstanceId = instanceId,
-                Sequence = seq,
-                Data = outputJson,
-            });
+            db.TaskOutputEntries.Add(_tasks.ApplyOutput(instance, seq, outputJson));
 
             await db.SaveChangesAsync();
         }
@@ -364,8 +356,7 @@ public sealed class TaskOrchestrator(
         var instance = await db.TaskInstances.FindAsync(instanceId);
         if (instance is not null)
         {
-            instance.Status = status;
-            instance.CompletedAt = DateTimeOffset.UtcNow;
+            _tasks.ApplyTerminalStatus(instance, status);
             await db.SaveChangesAsync();
         }
 
@@ -379,9 +370,7 @@ public sealed class TaskOrchestrator(
         var instance = await db.TaskInstances.FindAsync(instanceId);
         if (instance is not null)
         {
-            instance.Status = TaskInstanceStatus.Failed;
-            instance.ErrorMessage = error;
-            instance.CompletedAt = DateTimeOffset.UtcNow;
+            _tasks.ApplyFailure(instance, error);
             await db.SaveChangesAsync();
         }
 

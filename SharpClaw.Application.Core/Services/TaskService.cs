@@ -1,8 +1,7 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core.Tasks;
+using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Models;
-using SharpClaw.Core.Tasks;
 using SharpClaw.Application.Core.Services.Triggers;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
@@ -24,29 +23,13 @@ public sealed class TaskService(
     TaskTriggerHostService? triggerHostService = null,
     ITaskTriggerSourceRegistry? triggerSourceRegistry = null) : ITaskAuthoring
 {
+    private readonly TaskAdministrationEngine _tasks = new();
+
     /// <summary>
     /// Parse and validate a task definition without persisting it.
     /// </summary>
     public TaskValidationResponse ValidateDefinition(string sourceText)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(sourceText);
-
-        var parseResult = TaskScriptEngine.Parse(sourceText);
-        if (!parseResult.Success || parseResult.Definition is null)
-        {
-            return new TaskValidationResponse(
-                false,
-                parseResult.Diagnostics.Select(ToDiagnosticResponse).ToList());
-        }
-
-        var validation = TaskScriptEngine.Validate(parseResult.Definition);
-        var diagnostics = parseResult.Diagnostics
-            .Concat(validation.Diagnostics)
-            .Select(ToDiagnosticResponse)
-            .ToList();
-
-        return new TaskValidationResponse(validation.IsValid, diagnostics);
-    }
+        => _tasks.ValidateDefinition(sourceText);
 
     // ═══════════════════════════════════════════════════════════════
     // Definitions
@@ -60,43 +43,20 @@ public sealed class TaskService(
         CreateTaskDefinitionRequest request,
         CancellationToken ct = default)
     {
-        var parseResult = TaskScriptEngine.Parse(request.SourceText);
-        if (!parseResult.Success || parseResult.Definition is null)
-        {
-            var errors = string.Join("; ", parseResult.Diagnostics.Select(FormatDiagnostic));
-            throw new InvalidOperationException($"Task script parse failed: {errors}");
-        }
-
-        var validation = TaskScriptEngine.Validate(parseResult.Definition);
-        if (!validation.IsValid)
-        {
-            var errors = string.Join("; ", validation.Diagnostics.Select(FormatDiagnostic));
-            throw new InvalidOperationException($"Task script validation failed: {errors}");
-        }
+        var prepared = _tasks.PrepareDefinition(request);
 
         var existing = await db.TaskDefinitions
-            .AnyAsync(d => d.Name == parseResult.Definition.Name, ct);
-        if (existing)
-            throw new InvalidOperationException(
-                $"Task definition '{parseResult.Definition.Name}' already exists.");
+            .AnyAsync(d => d.Name == prepared.Entity.Name, ct);
+        _tasks.EnsureDefinitionNameAvailable(prepared.Entity.Name, existing);
 
-        var entity = new TaskDefinitionDB
-        {
-            Name = parseResult.Definition.Name,
-            Description = parseResult.Definition.Description,
-            SourceText = request.SourceText,
-            OutputTypeName = parseResult.Definition.OutputType?.Name,
-            ParametersJson  = SerializeParameters(parseResult.Definition.Parameters),
-            RequirementsJson = SerializeRequirements(parseResult.Definition.Requirements),
-            TriggersJson     = SerializeTriggers(parseResult.Definition.TriggerDefinitions),
-        };
+        var entity = prepared.Entity;
 
         db.TaskDefinitions.Add(entity);
         await db.SaveChangesAsync(ct);
 
         if (triggerRegistrar is not null)
         {
-            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, parseResult.Definition.TriggerDefinitions, ct);
+            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, prepared.Definition.TriggerDefinitions, ct);
             if (bindingsChanged)
             {
                 await db.SaveChangesAsync(ct);
@@ -106,9 +66,9 @@ public sealed class TaskService(
         }
 
         return ToDefinitionResponse(entity,
-            parseResult.Definition.Parameters,
-            parseResult.Definition.Requirements,
-            parseResult.Definition.TriggerDefinitions);
+            prepared.Definition.Parameters,
+            prepared.Definition.Requirements,
+            prepared.Definition.TriggerDefinitions);
     }
 
     public async Task<TaskDefinitionResponse?> GetDefinitionAsync(
@@ -117,9 +77,9 @@ public sealed class TaskService(
         var entity = await db.TaskDefinitions.FindAsync([id], ct);
         if (entity is null) return null;
         return ToDefinitionResponse(entity,
-            DeserializeParameters(entity.ParametersJson),
-            DeserializeRequirements(entity.RequirementsJson),
-            DeserializeTriggers(entity.TriggersJson));
+            _tasks.DeserializeParameters(entity.ParametersJson),
+            _tasks.DeserializeRequirements(entity.RequirementsJson),
+            _tasks.DeserializeTriggers(entity.TriggersJson));
     }
 
     /// <summary>
@@ -129,7 +89,7 @@ public sealed class TaskService(
         Guid id, CancellationToken ct = default)
     {
         var entity = await db.TaskDefinitions.FindAsync([id], ct);
-        return entity is null ? null : DeserializeRequirements(entity.RequirementsJson);
+        return entity is null ? null : _tasks.DeserializeRequirements(entity.RequirementsJson);
     }
 
     /// <summary>
@@ -139,7 +99,7 @@ public sealed class TaskService(
         Guid id, CancellationToken ct = default)
     {
         var entity = await db.TaskDefinitions.FindAsync([id], ct);
-        return entity is null ? null : DeserializeTriggers(entity.TriggersJson);
+        return entity is null ? null : _tasks.DeserializeTriggers(entity.TriggersJson);
     }
 
     public async Task<IReadOnlyList<TaskDefinitionResponse>> ListDefinitionsAsync(
@@ -151,9 +111,9 @@ public sealed class TaskService(
 
         return entities
             .Select(e => ToDefinitionResponse(e,
-                DeserializeParameters(e.ParametersJson),
-                DeserializeRequirements(e.RequirementsJson),
-                DeserializeTriggers(e.TriggersJson)))
+                _tasks.DeserializeParameters(e.ParametersJson),
+                _tasks.DeserializeRequirements(e.RequirementsJson),
+                _tasks.DeserializeTriggers(e.TriggersJson)))
             .ToList();
     }
 
@@ -165,44 +125,13 @@ public sealed class TaskService(
         var entity = await db.TaskDefinitions.FindAsync([id], ct);
         if (entity is null) return null;
 
-        IReadOnlyList<TaskParameterDefinition>? parameters = null;
-        IReadOnlyList<TaskTriggerDefinition>? parsedTriggers = null;
-
-        if (request.SourceText is not null)
-        {
-            var parseResult = TaskScriptEngine.Parse(request.SourceText);
-            if (!parseResult.Success || parseResult.Definition is null)
-            {
-                var errors = string.Join("; ", parseResult.Diagnostics.Select(FormatDiagnostic));
-                throw new InvalidOperationException($"Task script parse failed: {errors}");
-            }
-
-            var validation = TaskScriptEngine.Validate(parseResult.Definition);
-            if (!validation.IsValid)
-            {
-                var errors = string.Join("; ", validation.Diagnostics.Select(FormatDiagnostic));
-                throw new InvalidOperationException($"Task script validation failed: {errors}");
-            }
-
-            entity.Name = parseResult.Definition.Name;
-            entity.Description = parseResult.Definition.Description;
-            entity.SourceText = request.SourceText;
-            entity.OutputTypeName = parseResult.Definition.OutputType?.Name;
-            entity.ParametersJson  = SerializeParameters(parseResult.Definition.Parameters);
-            entity.RequirementsJson = SerializeRequirements(parseResult.Definition.Requirements);
-            entity.TriggersJson     = SerializeTriggers(parseResult.Definition.TriggerDefinitions);
-            parameters = parseResult.Definition.Parameters;
-            parsedTriggers = parseResult.Definition.TriggerDefinitions;
-        }
-
-        if (request.IsActive is not null)
-            entity.IsActive = request.IsActive.Value;
+        var updated = _tasks.ApplyDefinitionUpdate(entity, request);
 
         await db.SaveChangesAsync(ct);
 
-        if (triggerRegistrar is not null && parsedTriggers is not null)
+        if (triggerRegistrar is not null && updated.SourceWasUpdated)
         {
-            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, parsedTriggers, ct);
+            var bindingsChanged = await triggerRegistrar.SyncTriggersAsync(entity, updated.Triggers, ct);
             if (bindingsChanged)
             {
                 await db.SaveChangesAsync(ct);
@@ -212,9 +141,9 @@ public sealed class TaskService(
         }
 
         return ToDefinitionResponse(entity,
-            parameters ?? DeserializeParameters(entity.ParametersJson),
-            DeserializeRequirements(entity.RequirementsJson),
-            DeserializeTriggers(entity.TriggersJson));
+            updated.Parameters,
+            updated.Requirements,
+            updated.Triggers);
     }
 
     public async Task<bool> DeleteDefinitionAsync(Guid id, CancellationToken ct = default)
@@ -273,19 +202,10 @@ public sealed class TaskService(
             ?? throw new InvalidOperationException(
                 $"Task definition {request.TaskDefinitionId} not found.");
 
-        if (!definition.IsActive)
-            throw new InvalidOperationException(
-                $"Task definition '{definition.Name}' is not active.");
-
-        var requirements = DeserializeRequirements(definition.RequirementsJson);
+        var requirements = _tasks.DeserializeRequirements(definition.RequirementsJson);
         if (requirements.Count > 0)
         {
-            var paramMap = request.ParameterValues is not null
-                ? request.ParameterValues.ToDictionary(
-                    kv => kv.Key,
-                    kv => (object?)kv.Value,
-                    StringComparer.Ordinal)
-                : (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?>();
+            var paramMap = _tasks.ToPreflightParameterMap(request.ParameterValues);
 
             var preflightResult = await preflight.CheckRuntimeAsync(
                 requirements, paramMap, callerAgentId, ct);
@@ -293,23 +213,12 @@ public sealed class TaskService(
                 throw new PreflightBlockedException(preflightResult);
         }
 
-        var instance = new TaskInstanceDB
-        {
-            TaskDefinitionId = definition.Id,
-            Status = TaskInstanceStatus.Queued,
-            ParameterValuesJson = request.ParameterValues is not null
-                ? JsonSerializer.Serialize(request.ParameterValues)
-                : null,
-            ChannelId = request.ChannelId,
-            ContextId = request.ContextId,
-            CallerUserId = callerUserId,
-            CallerAgentId = callerAgentId,
-        };
+        var instance = _tasks.CreateInstance(definition, request, callerUserId, callerAgentId);
 
         db.TaskInstances.Add(instance);
         await db.SaveChangesAsync(ct);
 
-        return ToInstanceResponse(instance, definition.Name);
+        return _tasks.ToInstanceResponse(instance, definition.Name);
     }
 
     /// <summary>
@@ -318,12 +227,11 @@ public sealed class TaskService(
     public async Task<bool> PauseInstanceAsync(Guid id, CancellationToken ct = default)
     {
         var instance = await FindTrackedOrColdInstanceAsync(id, ct);
-        if (instance is null || instance.Status != TaskInstanceStatus.Running)
+        if (instance is null || !_tasks.TryPauseInstance(instance))
         {
             return false;
         }
 
-        instance.Status = TaskInstanceStatus.Paused;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -334,12 +242,11 @@ public sealed class TaskService(
     public async Task<bool> ResumeInstanceAsync(Guid id, CancellationToken ct = default)
     {
         var instance = await FindTrackedOrColdInstanceAsync(id, ct);
-        if (instance is null || instance.Status != TaskInstanceStatus.Paused)
+        if (instance is null || !_tasks.TryResumeInstance(instance))
         {
             return false;
         }
 
-        instance.Status = TaskInstanceStatus.Running;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -350,15 +257,11 @@ public sealed class TaskService(
     public async Task<bool> TryMarkInstanceRunningAsync(Guid id, CancellationToken ct = default)
     {
         var instance = await FindTrackedOrColdInstanceAsync(id, ct);
-        if (instance is null || instance.Status != TaskInstanceStatus.Queued)
+        if (instance is null || !_tasks.TryMarkInstanceRunning(instance))
         {
             return false;
         }
 
-        instance.Status = TaskInstanceStatus.Running;
-        instance.StartedAt = DateTimeOffset.UtcNow;
-        instance.CompletedAt = null;
-        instance.ErrorMessage = null;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -369,13 +272,11 @@ public sealed class TaskService(
     public async Task<bool> StopInstanceAsync(Guid id, CancellationToken ct = default)
     {
         var instance = await FindTrackedOrColdInstanceAsync(id, ct);
-        if (instance is null || instance.Status is not (TaskInstanceStatus.Running or TaskInstanceStatus.Paused))
+        if (instance is null || !_tasks.TryStopInstance(instance))
         {
             return false;
         }
 
-        instance.Status = TaskInstanceStatus.Cancelled;
-        instance.CompletedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -396,7 +297,7 @@ public sealed class TaskService(
             hint: new PersistenceQueryHint("TaskInstanceId", id),
             ct: ct)).OrderBy(l => l.CreatedAt).ToList();
 
-        return ToInstanceResponse(instance, defName);
+        return _tasks.ToInstanceResponse(instance, defName);
     }
 
     public async Task<IReadOnlyList<TaskInstanceSummaryResponse>> ListInstancesAsync(
@@ -423,14 +324,9 @@ public sealed class TaskService(
 
         return instances
             .OrderByDescending(i => i.CreatedAt)
-            .Select(i => new TaskInstanceSummaryResponse(
-                i.Id,
-                i.TaskDefinitionId,
-                defNames.GetValueOrDefault(i.TaskDefinitionId, "(unknown)"),
-                i.Status,
-                i.CreatedAt,
-                i.StartedAt,
-                i.CompletedAt))
+            .Select(i => _tasks.ToSummaryResponse(
+                i,
+                defNames.GetValueOrDefault(i.TaskDefinitionId, "(unknown)")))
             .ToList();
     }
 
@@ -442,11 +338,9 @@ public sealed class TaskService(
         var instance = await FindTrackedOrColdInstanceAsync(id, ct);
         if (instance is null) return false;
 
-        if (instance.Status is not (TaskInstanceStatus.Queued or TaskInstanceStatus.Running or TaskInstanceStatus.Paused))
+        if (!_tasks.TryCancelInstance(instance))
             return false;
 
-        instance.Status = TaskInstanceStatus.Cancelled;
-        instance.CompletedAt = DateTimeOffset.UtcNow;
         await db.SaveChangesAsync(ct);
         return true;
     }
@@ -460,12 +354,7 @@ public sealed class TaskService(
         string level = "Info",
         CancellationToken ct = default)
     {
-        db.TaskExecutionLogs.Add(new TaskExecutionLogDB
-        {
-            TaskInstanceId = instanceId,
-            Message = message,
-            Level = level,
-        });
+        db.TaskExecutionLogs.Add(_tasks.AddLog(null, instanceId, message, level));
         await db.SaveChangesAsync(ct);
     }
 
@@ -489,7 +378,7 @@ public sealed class TaskService(
 
         return entries
             .OrderBy(o => o.Sequence)
-            .Select(o => new TaskOutputEntryResponse(o.Id, o.Sequence, o.Data, o.CreatedAt))
+            .Select(_tasks.ToOutputResponse)
             .ToList();
     }
 
@@ -497,46 +386,18 @@ public sealed class TaskService(
     // Mapping
     // ═══════════════════════════════════════════════════════════════
 
-    private static string FormatDiagnostic(TaskDiagnostic d)
-        => d.Line > 0 ? $"[Line {d.Line}] {d.Message}" : d.Message;
-
-    private static TaskDiagnosticResponse ToDiagnosticResponse(TaskDiagnostic diagnostic)
-        => new(
-            diagnostic.Severity.ToString(),
-            diagnostic.Code,
-            diagnostic.Message,
-            diagnostic.Line,
-            diagnostic.Column);
-
     private TaskDefinitionResponse ToDefinitionResponse(
         TaskDefinitionDB entity,
         IReadOnlyList<TaskParameterDefinition> parameters,
         IReadOnlyList<TaskRequirementDefinition> requirements,
         IReadOnlyList<TaskTriggerDefinition> triggers)
-    {
-        return new TaskDefinitionResponse(
-            entity.Id,
-            entity.Name,
-            entity.Description,
-            entity.OutputTypeName,
-            entity.IsActive,
-            parameters.Select(p => new TaskParameterResponse(
-                p.Name, p.TypeName, p.Description, p.DefaultValue, p.IsRequired)).ToList(),
-            requirements.Select(r => new TaskRequirementResponse(
-                r.Kind.ToString(),
-                r.Severity.ToString(),
-                r.Value,
-                r.CapabilityValue,
-                r.ParameterName)).ToList(),
-            triggers.Select(t => new TaskTriggerResponse(
-                t.TriggerKey ?? string.Empty,
-                TriggerValueFor(t),
-                TriggerFilterFor(t),
-                IsEnabled: true)).ToList(),
-            entity.CreatedAt,
-            entity.UpdatedAt,
-            entity.CustomId);
-    }
+        => _tasks.ToDefinitionResponse(
+            entity,
+            parameters,
+            requirements,
+            triggers,
+            TriggerValueFor,
+            TriggerFilterFor);
 
     /// <summary>
     /// Computes the response-shaped <c>TriggerValue</c> by delegating to the
@@ -552,144 +413,6 @@ public sealed class TaskService(
     private string? TriggerFilterFor(TaskTriggerDefinition t) =>
         triggerSourceRegistry?.ResolveByKey(t.TriggerKey)?.GetBindingFilter(t);
 
-    private static TaskInstanceResponse ToInstanceResponse(
-        TaskInstanceDB instance,
-        string taskName)
-    {
-        return new TaskInstanceResponse(
-            instance.Id,
-            instance.TaskDefinitionId,
-            taskName,
-            instance.Status,
-            instance.OutputSnapshotJson,
-            instance.ErrorMessage,
-            instance.LogEntries
-                .Select(l => new TaskExecutionLogResponse(l.Message, l.Level, l.CreatedAt))
-                .ToList(),
-            instance.CreatedAt,
-            instance.StartedAt,
-            instance.CompletedAt,
-            instance.ChannelId,
-            ContextId: instance.ContextId);
-    }
-
     private async Task<TaskInstanceDB?> FindTrackedOrColdInstanceAsync(Guid id, CancellationToken ct)
         => await entities.FindAsync<TaskInstanceDB>(db, id, ct);
-
-    // ═══════════════════════════════════════════════════════════════
-    // Parameter serialisation
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// JSON shape persisted in <c>TaskDefinitionDB.ParametersJson</c>.
-    /// Property names mirror <see cref="TaskParameterDefinition"/> so
-    /// existing on-disk data round-trips unchanged. Defined as a typed
-    /// DTO so a rename on the source record produces a compile error
-    /// rather than a silent deserialisation drop.
-    /// </summary>
-    private sealed record ParameterDto(
-        string Name,
-        string TypeName,
-        string? Description,
-        string? DefaultValue,
-        bool IsRequired);
-
-    private static string SerializeParameters(IReadOnlyList<TaskParameterDefinition> parameters)
-    {
-        var dtos = parameters
-            .Select(p => new ParameterDto(p.Name, p.TypeName, p.Description, p.DefaultValue, p.IsRequired))
-            .ToList();
-        return JsonSerializer.Serialize(dtos);
-    }
-
-    private static IReadOnlyList<TaskParameterDefinition> DeserializeParameters(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-
-        var dtos = JsonSerializer.Deserialize<List<ParameterDto>>(json) ?? [];
-        return dtos
-            .Select(d => new TaskParameterDefinition(
-                Name: d.Name ?? "",
-                TypeName: d.TypeName ?? "string",
-                Description: d.Description,
-                DefaultValue: d.DefaultValue,
-                IsRequired: d.IsRequired))
-            .ToList();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Requirement serialisation
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// JSON shape persisted in <c>TaskDefinitionDB.RequirementsJson</c>.
-    /// <see cref="Kind"/> and <see cref="Severity"/> are stored as their
-    /// enum names (string) for forward/back compatibility with existing
-    /// data files. Unknown names parse to the enum's default value, and
-    /// a missing <see cref="Severity"/> defaults to
-    /// <see cref="TaskDiagnosticSeverity.Error"/>.
-    /// </summary>
-    private sealed record RequirementDto(
-        string? Kind,
-        string? Severity,
-        string? Value,
-        string? CapabilityValue,
-        string? ParameterName,
-        int Line);
-
-    private static string SerializeRequirements(IReadOnlyList<TaskRequirementDefinition> requirements)
-    {
-        var dtos = requirements
-            .Select(r => new RequirementDto(
-                r.Kind.ToString(),
-                r.Severity.ToString(),
-                r.Value,
-                r.CapabilityValue,
-                r.ParameterName,
-                r.Line))
-            .ToList();
-        return JsonSerializer.Serialize(dtos);
-    }
-
-    private static IReadOnlyList<TaskRequirementDefinition> DeserializeRequirements(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-
-        var dtos = JsonSerializer.Deserialize<List<RequirementDto>>(json) ?? [];
-        return dtos
-            .Select(d =>
-            {
-                Enum.TryParse<TaskRequirementKind>(d.Kind ?? string.Empty, out var kind);
-                Enum.TryParse<TaskDiagnosticSeverity>(
-                    d.Severity ?? nameof(TaskDiagnosticSeverity.Error),
-                    out var severity);
-
-                return new TaskRequirementDefinition
-                {
-                    Kind            = kind,
-                    Severity        = severity,
-                    Value           = d.Value,
-                    CapabilityValue = d.CapabilityValue,
-                    ParameterName   = d.ParameterName,
-                    Line            = d.Line,
-                };
-            })
-            .ToList();
-    }
-    // ═══════════════════════════════════════════════════════════════
-    // Trigger serialisation
-    // ═══════════════════════════════════════════════════════════════
-
-    private static string SerializeTriggers(IReadOnlyList<TaskTriggerDefinition> triggers)
-        => JsonSerializer.Serialize(triggers);
-
-    private static IReadOnlyList<TaskTriggerDefinition> DeserializeTriggers(string? json)
-    {
-        if (string.IsNullOrWhiteSpace(json))
-            return [];
-
-        return JsonSerializer.Deserialize<List<TaskTriggerDefinition>>(json) ?? [];
-    }
 }
