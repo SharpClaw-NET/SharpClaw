@@ -3,6 +3,7 @@ using System.Text.Json.Serialization;
 using Microsoft.AspNetCore.Http;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
+using SharpClaw.Core.Threads;
 
 namespace SharpClaw.Application.API.Handlers;
 

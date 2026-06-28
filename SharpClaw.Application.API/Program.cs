@@ -40,9 +40,11 @@ using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Core.Chat;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Resources;
+using SharpClaw.Core.Threads;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
