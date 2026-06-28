@@ -12,6 +12,7 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Permissions;
 
 namespace SharpClaw.Tests.Services;
 
@@ -131,7 +132,7 @@ public sealed class AgentJobTokenAccountingTests
         return new AgentJobService(
             db,
             new EfPersistenceEntityResolver(),
-            new AgentActionService(db, registry),
+            new AgentActionService(db, registry, new PermissionEvaluationEngine()),
             new SessionService(),
             registry,
             new ModuleMetricsCollector(),
@@ -157,6 +158,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<PermissionEvaluationEngine>();
         services.AddSingleton<ModuleEventDispatcher>(sp =>
             new ModuleEventDispatcher(
                 sp,

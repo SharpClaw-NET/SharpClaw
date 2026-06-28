@@ -40,6 +40,7 @@ using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Core.Permissions;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
@@ -328,6 +329,7 @@ try
     // Provider plugins are contributed by modules (e.g. LlamaSharp module).
     // The factory resolves over IEnumerable<IProviderPlugin>.
     builder.Services.AddSingleton<ProviderApiClientFactory>();
+    builder.Services.AddSingleton<PermissionEvaluationEngine>();
 
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();
