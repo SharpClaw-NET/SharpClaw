@@ -38,6 +38,7 @@ using SharpClaw.Utils.Security;
 using Serilog.Events;
 using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Core.Agents;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
 using SharpClaw.Core.Chat;
@@ -336,6 +337,7 @@ try
     // Provider plugins are contributed by modules (e.g. LlamaSharp module).
     // The factory resolves over IEnumerable<IProviderPlugin>.
     builder.Services.AddSingleton<ProviderApiClientFactory>();
+    builder.Services.AddSingleton<AgentAdministrationEngine>();
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();

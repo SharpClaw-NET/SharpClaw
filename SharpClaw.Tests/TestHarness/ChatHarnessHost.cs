@@ -11,6 +11,7 @@ using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Application.Services;
 using SharpClaw.Application.Services.Auth;
+using SharpClaw.Core.Agents;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Permissions;
@@ -103,6 +104,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ThreadActivitySignal>();
         services.AddSingleton<ChatCache>();
         services.AddSingleton<ProviderApiClientFactory>();
+        services.AddSingleton<AgentAdministrationEngine>();
         services.AddSingleton<PermissionEvaluationEngine>();
         services.AddSingleton<RolePermissionAdministrationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
