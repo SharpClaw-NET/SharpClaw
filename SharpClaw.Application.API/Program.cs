@@ -42,6 +42,7 @@ using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Jobs;
+using SharpClaw.Core.Resources;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
@@ -332,6 +333,7 @@ try
     builder.Services.AddSingleton<ProviderApiClientFactory>();
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
+    builder.Services.AddSingleton<DefaultResourceEngine>();
 
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();

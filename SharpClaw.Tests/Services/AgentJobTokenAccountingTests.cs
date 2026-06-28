@@ -14,6 +14,7 @@ using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Permissions;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Tests.Services;
 
@@ -142,6 +143,7 @@ public sealed class AgentJobTokenAccountingTests
             configuration,
             new ChatCache(configuration),
             new AgentJobLifecycleEngine(),
+            new DefaultResourceEngine(),
             NullLogger<AgentJobService>.Instance);
     }
 
@@ -162,6 +164,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<ChatCache>();
         services.AddSingleton<PermissionEvaluationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
+        services.AddSingleton<DefaultResourceEngine>();
         services.AddSingleton<ModuleEventDispatcher>(sp =>
             new ModuleEventDispatcher(
                 sp,

@@ -26,6 +26,8 @@ using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Permissions;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Application.Services;
 
@@ -45,6 +47,7 @@ public sealed class AgentJobService(
     IConfiguration configuration,
     ChatCache chatCache,
     AgentJobLifecycleEngine lifecycle,
+    DefaultResourceEngine defaultResources,
     ILogger<AgentJobService> logger)
 {
     private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
@@ -749,27 +752,19 @@ public sealed class AgentJobService(
         CancellationToken ct)
     {
         var delegateTo = ResolveDelegateTo(actionKey);
+        var defaultResourceKey = delegateTo is null
+            ? null
+            : moduleRegistry.GetDefaultResourceKeyForDelegate(delegateTo);
+        var resourceType = delegateTo is null
+            ? null
+            : moduleRegistry.ResolveResourceType(delegateTo);
 
         var ch = await db.Channels
             .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .Include(c => c.AgentContext!).ThenInclude(ctx => ctx.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct);
 
-        // 1. Channel's DefaultResourceSet
-        if (ch?.DefaultResourceSet is { } chDrs)
-        {
-            var id = ExtractFromDefaultResourceSet(chDrs, delegateTo, moduleRegistry);
-            if (id.HasValue) return id;
-        }
-
-        // 2. Context's DefaultResourceSet
-        if (ch?.AgentContext?.DefaultResourceSet is { } ctxDrs)
-        {
-            var id = ExtractFromDefaultResourceSet(ctxDrs, delegateTo, moduleRegistry);
-            if (id.HasValue) return id;
-        }
-
-        // 3. Fall back to permission set defaults (channel → context → role).
+        // Host loads permission snapshots in Core's fallback order.
         var permissionSetIds = new List<Guid>(3);
 
         if (ch?.PermissionSetId is { } chPsId)
@@ -785,56 +780,33 @@ public sealed class AgentJobService(
         if (agent?.Role?.PermissionSetId is { } rolePsId)
             permissionSetIds.Add(rolePsId);
 
-        if (permissionSetIds.Count == 0)
-            return null;
-
-        var permissionSets = await db.PermissionSets
-            .Where(p => permissionSetIds.Contains(p.Id))
-            .Include(p => p.ResourceAccesses)
-            .ToListAsync(ct);
-
-        foreach (var psId in permissionSetIds)
+        var permissionSetSnapshots = new List<PermissionSetSnapshot>(permissionSetIds.Count);
+        if (permissionSetIds.Count > 0)
         {
-            var ps = permissionSets.FirstOrDefault(p => p.Id == psId);
-            if (ps is null) continue;
+            var permissionSets = await db.PermissionSets
+                .Where(p => permissionSetIds.Contains(p.Id))
+                .Include(p => p.ResourceAccesses)
+                .ToListAsync(ct);
 
-            var resourceId = ExtractDefaultResourceId(ps, delegateTo);
-            if (resourceId.HasValue)
-                return resourceId;
+            foreach (var psId in permissionSetIds)
+            {
+                var ps = permissionSets.FirstOrDefault(p => p.Id == psId);
+                if (ps is not null)
+                    permissionSetSnapshots.Add(PermissionSetSnapshot.FromPermissionSet(ps));
+            }
         }
 
-        return null;
-    }
-
-    private static Guid? ExtractFromDefaultResourceSet(
-        DefaultResourceSetDB drs, string? delegateTo,
-        ModuleRegistry registry)
-    {
-        if (delegateTo is null) return null;
-        var key = registry.GetDefaultResourceKeyForDelegate(delegateTo);
-        if (key is null) return null;
-        var entry = drs.Entries.FirstOrDefault(
-            e => string.Equals(e.ResourceKey, key, StringComparison.OrdinalIgnoreCase));
-        return entry?.ResourceId;
-    }
-
-    /// <summary>
-    /// Returns the resource ID from the matching default access entry on
-    /// a permission set, or <c>null</c> if no default is configured.
-    /// </summary>
-    private Guid? ExtractDefaultResourceId(
-        PermissionSetDB permissionSet, string? delegateTo)
-    {
-        if (delegateTo is null)
-            return null;
-
-        var resourceType = moduleRegistry.ResolveResourceType(delegateTo);
-        if (resourceType is null)
-            return null;
-
-        return permissionSet.ResourceAccesses
-            .FirstOrDefault(a => a.ResourceType == resourceType && a.IsDefault)
-            ?.ResourceId;
+        return defaultResources.ResolveDefaultResource(
+            new DefaultResourceResolutionRequest(
+                defaultResourceKey,
+                resourceType,
+                ch?.DefaultResourceSet is { } channelDefaults
+                    ? DefaultResourceSetSnapshot.FromDefaultResourceSet(channelDefaults)
+                    : null,
+                ch?.AgentContext?.DefaultResourceSet is { } contextDefaults
+                    ? DefaultResourceSetSnapshot.FromDefaultResourceSet(contextDefaults)
+                    : null,
+                permissionSetSnapshots));
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -4,6 +4,7 @@ using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Application.Services;
 
@@ -33,7 +34,10 @@ public sealed class DefaultResourceSetService(
 
         if (ch is null) return null;
 
-        return Merge(ch.Id, ch.DefaultResourceSet, ch.AgentContext?.DefaultResourceSet);
+        return DefaultResourceEngine.Merge(
+            ch.Id,
+            Snapshot(ch.DefaultResourceSet),
+            Snapshot(ch.AgentContext?.DefaultResourceSet));
     }
 
     /// <summary>
@@ -49,8 +53,9 @@ public sealed class DefaultResourceSetService(
         if (ctx is null) return null;
 
         return ctx.DefaultResourceSet is { } drs
-            ? ToResponse(drs)
-            : EmptyResponse(Guid.Empty);
+            ? DefaultResourceEngine.ToResponse(
+                DefaultResourceSetSnapshot.FromDefaultResourceSet(drs))
+            : DefaultResourceEngine.EmptyResponse(Guid.Empty);
     }
 
     // -- Bulk writes ------------------------------------------------
@@ -75,7 +80,8 @@ public sealed class DefaultResourceSetService(
         Apply(ch.DefaultResourceSet, request);
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
-        return ToResponse(ch.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
 
     /// <summary>
@@ -98,7 +104,8 @@ public sealed class DefaultResourceSetService(
         Apply(ctx.DefaultResourceSet, request);
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return ToResponse(ctx.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
     }
 
     // -- Per-key operations -----------------------------------------
@@ -128,7 +135,8 @@ public sealed class DefaultResourceSetService(
         ApplyKey(ch.DefaultResourceSet, key, resourceId);
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
-        return ToResponse(ch.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
 
     /// <summary>
@@ -141,12 +149,14 @@ public sealed class DefaultResourceSetService(
             .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct);
         if (ch is null) return null;
-        if (ch.DefaultResourceSet is null) return EmptyResponse(Guid.Empty);
+        if (ch.DefaultResourceSet is null)
+            return DefaultResourceEngine.EmptyResponse(Guid.Empty);
 
         ApplyKey(ch.DefaultResourceSet, key, null);
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
-        return ToResponse(ch.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
 
     /// <summary>
@@ -167,7 +177,8 @@ public sealed class DefaultResourceSetService(
         ApplyKey(ctx.DefaultResourceSet, key, resourceId);
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return ToResponse(ctx.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
     }
 
     /// <summary>
@@ -180,12 +191,14 @@ public sealed class DefaultResourceSetService(
             .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .FirstOrDefaultAsync(c => c.Id == contextId, ct);
         if (ctx is null) return null;
-        if (ctx.DefaultResourceSet is null) return EmptyResponse(Guid.Empty);
+        if (ctx.DefaultResourceSet is null)
+            return DefaultResourceEngine.EmptyResponse(Guid.Empty);
 
         ApplyKey(ctx.DefaultResourceSet, key, null);
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return ToResponse(ctx.DefaultResourceSet);
+        return DefaultResourceEngine.ToResponse(
+            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
     }
 
     // -- Helpers ----------------------------------------------------
@@ -208,7 +221,7 @@ public sealed class DefaultResourceSetService(
 
     private void ApplyKey(DefaultResourceSetDB drs, string key, Guid? value)
     {
-        var normalised = key.ToLowerInvariant();
+        var normalised = DefaultResourceEngine.NormalizeKey(key);
         var existing = drs.Entries.FirstOrDefault(
             e => string.Equals(e.ResourceKey, normalised, StringComparison.OrdinalIgnoreCase));
 
@@ -238,18 +251,6 @@ public sealed class DefaultResourceSetService(
         }
     }
 
-    private static DefaultResourcesResponse ToResponse(DefaultResourceSetDB drs)
-    {
-        var entries = drs.Entries.ToDictionary(
-            e => e.ResourceKey,
-            e => e.ResourceId,
-            StringComparer.OrdinalIgnoreCase);
-        return new(drs.Id, entries);
-    }
-
-    private static DefaultResourcesResponse EmptyResponse(Guid id) =>
-        new(id, new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase));
-
     private async Task InvalidateContextDefaultResourcesAsync(
         Guid contextId, CancellationToken ct)
     {
@@ -262,30 +263,6 @@ public sealed class DefaultResourceSetService(
             chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
     }
 
-    /// <summary>
-    /// Merges channel and context default resource sets.
-    /// Channel values take precedence; context fills in any gaps.
-    /// </summary>
-    private static DefaultResourcesResponse Merge(
-        Guid primaryId,
-        DefaultResourceSetDB? ch,
-        DefaultResourceSetDB? ctx)
-    {
-        if (ch is null && ctx is null)
-            return EmptyResponse(Guid.Empty);
-
-        if (ch is null) return ToResponse(ctx!);
-        if (ctx is null) return ToResponse(ch);
-
-        var merged = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var e in ctx.Entries)
-            merged[e.ResourceKey] = e.ResourceId;
-
-        // Channel overrides context.
-        foreach (var e in ch.Entries)
-            merged[e.ResourceKey] = e.ResourceId;
-
-        return new(primaryId, merged);
-    }
+    private static DefaultResourceSetSnapshot? Snapshot(DefaultResourceSetDB? drs) =>
+        drs is null ? null : DefaultResourceSetSnapshot.FromDefaultResourceSet(drs);
 }
