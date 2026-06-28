@@ -114,6 +114,65 @@ public sealed class ConversationTopologyEngineTests
     }
 
     [Test]
+    public void ResolveRequestedAgent_WhenChannelHasAllowedOverride_ReturnsRequestedAgent()
+    {
+        var defaultAgent = Agent("Default");
+        var requestedAgent = Agent("Requested");
+        var channel = new ChannelDB
+        {
+            Id = Guid.NewGuid(),
+            Title = "Channel",
+            Agent = defaultAgent,
+            AgentId = defaultAgent.Id
+        };
+        channel.AllowedAgents.Add(requestedAgent);
+
+        var resolved = _engine.ResolveRequestedAgent(channel, requestedAgent.Id);
+
+        resolved.Should().BeSameAs(requestedAgent);
+    }
+
+    [Test]
+    public void ResolveRequestedAgent_WhenChannelUsesContextFallback_ReturnsContextAgent()
+    {
+        var contextAgent = Agent("Context");
+        var channel = new ChannelDB
+        {
+            Id = Guid.NewGuid(),
+            Title = "Channel",
+            AgentContext = new ChannelContextDB
+            {
+                Name = "Context",
+                Agent = contextAgent,
+                AgentId = contextAgent.Id
+            }
+        };
+
+        var resolved = _engine.ResolveRequestedAgent(
+            channel,
+            requestedAgentId: null);
+
+        resolved.Should().BeSameAs(contextAgent);
+    }
+
+    [Test]
+    public void ResolveRequestedAgent_WhenOverrideIsDisallowed_Throws()
+    {
+        var requestedAgentId = Guid.NewGuid();
+        var channel = new ChannelDB
+        {
+            Id = Guid.NewGuid(),
+            Title = "Channel",
+            Agent = Agent("Default")
+        };
+
+        var act = () => _engine.ResolveRequestedAgent(channel, requestedAgentId);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage($"Agent {requestedAgentId} is not allowed on channel {channel.Id}*");
+    }
+
+    [Test]
     public void EnsureContextNameAvailable_WhenDuplicateAfterTrimAndCase_Throws()
     {
         var act = () => _engine.EnsureContextNameAvailable(

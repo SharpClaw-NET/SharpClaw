@@ -13,6 +13,7 @@ using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
@@ -44,6 +45,8 @@ public sealed class ChatService(
     ModuleMetricsCollector metricsCollector,
     ChatCache chatCache,
     ChatCostEngine chatCosts,
+    ChatPromptEngine chatPrompts,
+    ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
     IServiceProvider serviceProvider,
@@ -109,7 +112,7 @@ public sealed class ChatService(
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
-        var agent = ResolveAgent(channel, request.AgentId);
+        var agent = conversation.ResolveRequestedAgent(channel, request.AgentId);
         var model = agent.Model
             ?? throw new InvalidOperationException(
                 $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
@@ -169,11 +172,17 @@ public sealed class ChatService(
         var useNativeTools = client.SupportsNativeToolCalling;
         var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
         var enableTools = !disableTools && useNativeTools;
-        var systemPrompt = BuildEffectiveSystemPrompt(agent.SystemPrompt, enableTools);
+        var systemPrompt = chatPrompts.BuildEffectiveSystemPrompt(
+            agent.SystemPrompt,
+            enableTools,
+            _disableDefaultSystemPrompt);
 
         // Resolve completion parameters early so they can feed the chat header
         // (reasoning-effort informational notice) as well as the wire payload.
-        var completionParams = BuildCompletionParameters(agent, model.Id, threadId);
+        var completionParams = chatPrompts.BuildCompletionParameters(
+            agent,
+            model.Id,
+            threadId);
         CompletionParameterValidator.ValidateOrThrow(
             completionParams, clientFactory.GetParameterSpec(provider.ProviderKey), provider.ProviderKey);
 
@@ -506,36 +515,6 @@ public sealed class ChatService(
         return snapshot is null
             ? (null, null, null)
             : (snapshot.Username, snapshot.RoleId, snapshot.RoleName);
-    }
-
-    /// <summary>
-    /// Resolves the effective agent for a channel operation.  If no
-    /// override is specified, the channel's default agent is used.
-    /// If the channel has no default agent, the context's agent is
-    /// used as fallback.  When an override is specified it must be
-    /// the default agent or one of the channel's allowed agents
-    /// (falling back to the context's allowed agents when the channel
-    /// has none).
-    /// </summary>
-    private static AgentDB ResolveAgent(ChannelDB channel, Guid? requestedAgentId)
-    {
-        var defaultAgent = channel.Agent ?? channel.AgentContext?.Agent;
-
-        if (requestedAgentId is null || requestedAgentId == defaultAgent?.Id)
-            return defaultAgent
-                ?? throw new InvalidOperationException(
-                    $"Channel {channel.Id} has no agent and no context agent.");
-
-        // Check channel-level allowed agents first, then context-level.
-        var effectiveAllowed = channel.AllowedAgents.Count > 0
-            ? channel.AllowedAgents
-            : (IEnumerable<AgentDB>)(channel.AgentContext?.AllowedAgents ?? []);
-
-        var allowed = effectiveAllowed.FirstOrDefault(a => a.Id == requestedAgentId);
-        return allowed
-            ?? throw new InvalidOperationException(
-                $"Agent {requestedAgentId} is not allowed on channel {channel.Id}. " +
-                "Add it to the channel's or context's allowed agents first.");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -980,7 +959,7 @@ public sealed class ChatService(
             .FirstOrDefaultAsync(c => c.Id == channelId, ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
-        var agent = ResolveAgent(channel, request.AgentId);
+        var agent = conversation.ResolveRequestedAgent(channel, request.AgentId);
         var model = agent.Model
             ?? throw new InvalidOperationException(
                 $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
@@ -1038,11 +1017,17 @@ public sealed class ChatService(
         var apiKey = requiresApiKey ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key) : "local";
         var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
         var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
-        var systemPrompt = BuildEffectiveSystemPrompt(agent.SystemPrompt, !disableTools);
+        var systemPrompt = chatPrompts.BuildEffectiveSystemPrompt(
+            agent.SystemPrompt,
+            !disableTools,
+            _disableDefaultSystemPrompt);
 
         // Resolve completion parameters early so they can feed the chat header
         // (reasoning-effort informational notice) as well as the wire payload.
-        var completionParams = BuildCompletionParameters(agent, model.Id, threadId);
+        var completionParams = chatPrompts.BuildCompletionParameters(
+            agent,
+            model.Id,
+            threadId);
         CompletionParameterValidator.ValidateOrThrow(
             completionParams, clientFactory.GetParameterSpec(provider.ProviderKey), provider.ProviderKey);
 
@@ -2320,42 +2305,6 @@ public sealed class ChatService(
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // System prompt & tool definitions (loaded from embedded resources)
-    // ═══════════════════════════════════════════════════════════════
-
-    private string BuildEffectiveSystemPrompt(string? agentPrompt, bool includeCorePrompt)
-    {
-        if (!includeCorePrompt || _disableDefaultSystemPrompt)
-            return agentPrompt ?? "";
-
-        return BuildSystemPrompt(agentPrompt);
-    }
-
-    private static string BuildSystemPrompt(string? agentPrompt)
-    {
-        if (string.IsNullOrEmpty(agentPrompt))
-            return NativeToolSystemSuffix;
-
-        return agentPrompt + "\n\n" + NativeToolSystemSuffix;
-    }
-
-    private static readonly string NativeToolSystemSuffix =
-        LoadEmbeddedResource("SharpClaw.Application.Core.tool-instructions-native-suffix.md");
-
-    // ═══════════════════════════════════════════════════════════════
-    // Embedded resource loader
-    // ═══════════════════════════════════════════════════════════════
-
-    private static string LoadEmbeddedResource(string name)
-    {
-        using var stream = typeof(ChatService).Assembly.GetManifestResourceStream(name)
-            ?? throw new InvalidOperationException(
-                $"Embedded resource '{name}' not found in {typeof(ChatService).Assembly.FullName}.");
-        using var reader = new StreamReader(stream);
-        return reader.ReadToEnd();
-    }
-
-    // ═══════════════════════════════════════════════════════════════
     // Internal types
     // ═══════════════════════════════════════════════════════════════
 
@@ -2406,29 +2355,4 @@ public sealed class ChatService(
     private static string FormatTaskToolNotation(string toolName)
         => ToolNotationFormatter.ForTaskTool(toolName);
 
-    /// <summary>
-    /// Maps the typed provider parameter fields from <see cref="AgentDB"/> into
-    /// a <see cref="CompletionParameters"/> instance and stamps the host model
-    /// id and (optional) thread id so providers that need either to manage
-    /// internal state — currently the LlamaSharp sidecar client for model
-    /// acquire/release and KV-cache reuse — can resolve them from the call
-    /// parameters instead of relying on out-of-band ambient state.
-    /// </summary>
-    private static CompletionParameters BuildCompletionParameters(AgentDB agent, Guid modelId, Guid? threadId)
-    {
-        return new CompletionParameters
-        {
-            Temperature = agent.Temperature,
-            TopP = agent.TopP,
-            TopK = agent.TopK,
-            FrequencyPenalty = agent.FrequencyPenalty,
-            PresencePenalty = agent.PresencePenalty,
-            Stop = agent.Stop,
-            Seed = agent.Seed,
-            ResponseFormat = agent.ResponseFormat,
-            ReasoningEffort = agent.ReasoningEffort,
-            ModelId = modelId,
-            ThreadId = threadId,
-        };
-    }
 }
