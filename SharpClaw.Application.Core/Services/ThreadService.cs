@@ -1,11 +1,15 @@
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.Threads;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class ThreadService(SharpClawDbContext db, ChatCache chatCache)
+public sealed class ThreadService(
+    SharpClawDbContext db,
+    ConversationTopologyEngine conversation,
+    ChatCache chatCache)
 {
     public async Task<ThreadResponse> CreateAsync(
         Guid channelId, CreateThreadRequest request, CancellationToken ct = default)
@@ -13,40 +17,34 @@ public sealed class ThreadService(SharpClawDbContext db, ChatCache chatCache)
         var channel = await db.Channels.FindAsync([channelId], ct)
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
-        var thread = new ChatThreadDB
-        {
-            Name = request.Name ?? $"Thread {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
-            MaxMessages = request.MaxMessages,
-            MaxCharacters = request.MaxCharacters,
-            ChannelId = channel.Id,
-            CustomId = request.CustomId,
-        };
+        var thread = conversation.CreateThread(
+            channel.Id,
+            request,
+            DateTimeOffset.UtcNow);
 
         db.ChatThreads.Add(thread);
         await db.SaveChangesAsync(ct);
         InvalidateThreadRuntimeState(thread.Id);
 
-        return ToResponse(thread);
+        return conversation.ToThreadResponse(thread);
     }
 
     public async Task<ThreadResponse?> GetByIdAsync(
         Guid threadId, CancellationToken ct = default)
     {
         var thread = await db.ChatThreads.FindAsync([threadId], ct);
-        return thread is not null ? ToResponse(thread) : null;
+        return thread is not null ? conversation.ToThreadResponse(thread) : null;
     }
 
     public async Task<IReadOnlyList<ThreadResponse>> ListAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        return await db.ChatThreads
+        var threads = await db.ChatThreads
             .Where(t => t.ChannelId == channelId)
             .OrderByDescending(t => t.UpdatedAt)
-            .Select(t => new ThreadResponse(
-                t.Id, t.Name, t.ChannelId,
-                t.MaxMessages, t.MaxCharacters,
-                t.CreatedAt, t.UpdatedAt, t.CustomId))
             .ToListAsync(ct);
+
+        return threads.Select(conversation.ToThreadResponse).ToList();
     }
 
     public async Task<ThreadResponse?> UpdateAsync(
@@ -55,18 +53,11 @@ public sealed class ThreadService(SharpClawDbContext db, ChatCache chatCache)
         var thread = await db.ChatThreads.FindAsync([threadId], ct);
         if (thread is null) return null;
 
-        if (request.Name is not null)
-            thread.Name = request.Name;
-        if (request.MaxMessages is not null)
-            thread.MaxMessages = request.MaxMessages.Value == 0 ? null : request.MaxMessages;
-        if (request.MaxCharacters is not null)
-            thread.MaxCharacters = request.MaxCharacters.Value == 0 ? null : request.MaxCharacters;
-        if (request.CustomId is not null)
-            thread.CustomId = request.CustomId;
+        conversation.ApplyThreadUpdate(thread, request);
 
         await db.SaveChangesAsync(ct);
         InvalidateThreadRuntimeState(threadId);
-        return ToResponse(thread);
+        return conversation.ToThreadResponse(thread);
     }
 
     public async Task<bool> DeleteAsync(Guid threadId, CancellationToken ct = default)
@@ -85,8 +76,4 @@ public sealed class ThreadService(SharpClawDbContext db, ChatCache chatCache)
         chatCache.Remove(ChatCache.KeyThreadHistoryLimits(threadId));
     }
 
-    private static ThreadResponse ToResponse(ChatThreadDB thread) =>
-        new(thread.Id, thread.Name, thread.ChannelId,
-            thread.MaxMessages, thread.MaxCharacters,
-            thread.CreatedAt, thread.UpdatedAt, thread.CustomId);
 }

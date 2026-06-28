@@ -12,6 +12,7 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
 using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Cli;
@@ -258,6 +259,7 @@ public sealed class ChannelCliCommandTests
             options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<ConversationTopologyEngine>();
         services.AddScoped<SessionService>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();

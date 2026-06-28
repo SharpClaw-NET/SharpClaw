@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Channels;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
@@ -11,6 +11,7 @@ namespace SharpClaw.Application.Services;
 public sealed class ChannelService(
     SharpClawDbContext db,
     IConfiguration configuration,
+    ConversationTopologyEngine conversation,
     ChatCache chatCache)
 {
     /// <summary>
@@ -43,43 +44,35 @@ public sealed class ChannelService(
                 ?? throw new ArgumentException($"Context {ctxId} not found.");
         }
 
-        // At least one source of agent is required.
-        if (agent is null && context is null)
-            throw new ArgumentException(
-                "Either an AgentId or a ContextId (with an agent) is required.");
-
-        var title = request.Title ?? $"Channel {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}";
+        var now = DateTimeOffset.UtcNow;
+        var title = request.Title
+            ?? ConversationTopologyEngine.BuildDefaultChannelTitle(now);
 
         if (IsUniqueChannelNamesEnforced())
             await EnsureChannelTitleUniqueAsync(title, excludeId: null, ct);
 
-        var channel = new ChannelDB
-        {
-            Title = title,
-            AgentId = agent?.Id,
-            AgentContextId = context?.Id,
-            PermissionSetId = request.PermissionSetId,
-            DisableChatHeader = request.DisableChatHeader ?? false,
-            CustomId = request.CustomId,
-            ToolAwarenessSetId = request.ToolAwarenessSetId,
-            DisableToolSchemas = request.DisableToolSchemas ?? false,
-        };
+        IReadOnlyList<AgentDB>? allowed = null;
 
         if (request.AllowedAgentIds is { Count: > 0 } agentIds)
         {
-            var allowed = await db.Agents
+            allowed = await db.Agents
                 .Include(a => a.Model).ThenInclude(m => m.Provider)
                 .Include(a => a.Role)
                 .Where(a => agentIds.Contains(a.Id))
                 .ToListAsync(ct);
-            foreach (var a in allowed)
-                channel.AllowedAgents.Add(a);
         }
+
+        var channel = conversation.CreateChannel(
+            request with { Title = title },
+            agent,
+            context,
+            allowed,
+            now);
 
         db.Channels.Add(channel);
         await db.SaveChangesAsync(ct);
 
-        return ToResponse(channel, agent, context);
+        return conversation.ToChannelResponse(channel);
     }
 
     public async Task<ChannelResponse?> GetByIdAsync(
@@ -88,7 +81,7 @@ public sealed class ChannelService(
         var channel = await LoadChannelAsync(id, ct);
         if (channel is null) return null;
 
-        return ToResponse(channel, channel.Agent, channel.AgentContext);
+        return conversation.ToChannelResponse(channel);
     }
 
     /// <summary>
@@ -119,7 +112,7 @@ public sealed class ChannelService(
             .ToListAsync(ct);
 
         return channels
-            .Select(c => ToResponse(c, c.Agent, c.AgentContext))
+            .Select(conversation.ToChannelResponse)
             .ToList();
     }
 
@@ -133,65 +126,34 @@ public sealed class ChannelService(
         {
             if (IsUniqueChannelNamesEnforced() && !request.Title.Trim().Equals(channel.Title.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureChannelTitleUniqueAsync(request.Title, excludeId: id, ct);
-            channel.Title = request.Title;
         }
 
-        // Allow moving into / out of a context
+        ChannelContextDB? context = null;
         if (request.ContextId is not null)
         {
-            if (request.ContextId == Guid.Empty)
+            if (request.ContextId != Guid.Empty)
             {
-                channel.AgentContextId = null;
-                channel.AgentContext = null;
-            }
-            else
-            {
-                var ctx = await db.AgentContexts
+                context = await db.AgentContexts
                     .FirstOrDefaultAsync(c => c.Id == request.ContextId, ct)
                     ?? throw new ArgumentException($"Context {request.ContextId} not found.");
-                channel.AgentContextId = ctx.Id;
-                channel.AgentContext = ctx;
             }
         }
 
-        // Allow explicit set/unset of permission set
-        if (request.PermissionSetId is not null)
-            channel.PermissionSetId = request.PermissionSetId == Guid.Empty
-                ? null
-                : request.PermissionSetId;
-
-        // Replace the allowed-agents set when provided.
+        IReadOnlyList<AgentDB>? allowed = null;
         if (request.AllowedAgentIds is not null)
         {
-            channel.AllowedAgents.Clear();
-            if (request.AllowedAgentIds.Count > 0)
-            {
-                var allowed = await db.Agents
+            allowed = request.AllowedAgentIds.Count > 0
+                ? await db.Agents
                     .Where(a => request.AllowedAgentIds.Contains(a.Id))
-                    .ToListAsync(ct);
-                foreach (var a in allowed)
-                    channel.AllowedAgents.Add(a);
-            }
+                    .ToListAsync(ct)
+                : [];
         }
 
-        if (request.DisableChatHeader is not null)
-            channel.DisableChatHeader = request.DisableChatHeader.Value;
-
-        if (request.CustomId is not null)
-            channel.CustomId = request.CustomId;
-
-        if (request.CustomChatHeader is not null)
-            channel.CustomChatHeader = request.CustomChatHeader.Length > 0 ? request.CustomChatHeader : null;
-
-        if (request.ToolAwarenessSetId is not null)
-            channel.ToolAwarenessSetId = request.ToolAwarenessSetId == Guid.Empty ? null : request.ToolAwarenessSetId;
-
-        if (request.DisableToolSchemas is not null)
-            channel.DisableToolSchemas = request.DisableToolSchemas.Value;
+        conversation.ApplyChannelUpdate(channel, request, context, allowed);
 
         await db.SaveChangesAsync(ct);
         InvalidateChannelRuntimeState(id);
-        return ToResponse(channel, channel.Agent, channel.AgentContext);
+        return conversation.ToChannelResponse(channel);
     }
 
     /// <summary>
@@ -230,7 +192,7 @@ public sealed class ChannelService(
         }
 
         if (channel is null) return null;
-        return ToResponse(channel, channel.Agent, channel.AgentContext);
+        return conversation.ToChannelResponse(channel);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -263,11 +225,10 @@ public sealed class ChannelService(
             .FirstOrDefaultAsync(a => a.Id == agentId, ct)
             ?? throw new ArgumentException($"Agent {agentId} not found.");
 
-        channel.AgentId = agent.Id;
-        channel.Agent = agent;
+        conversation.SetChannelAgent(channel, agent);
         await db.SaveChangesAsync(ct);
         InvalidateChannelRuntimeState(channelId);
-        return ToResponse(channel, channel.Agent, channel.AgentContext);
+        return conversation.ToChannelResponse(channel);
     }
 
     /// <summary>
@@ -280,14 +241,7 @@ public sealed class ChannelService(
         var channel = await LoadChannelAsync(channelId, ct);
         if (channel is null) return null;
 
-        var effectiveAgent = channel.Agent ?? channel.AgentContext?.Agent;
-        var effectiveAllowed = channel.AllowedAgents.Count > 0
-            ? channel.AllowedAgents
-            : channel.AgentContext?.AllowedAgents ?? (ICollection<AgentDB>)[];
-
-        return new(channelId,
-            effectiveAgent is not null ? ToSummary(effectiveAgent) : null,
-            effectiveAllowed.Select(ToSummary).ToList());
+        return conversation.ToChannelAllowedAgentsResponse(channel);
     }
 
     /// <summary>
@@ -299,19 +253,19 @@ public sealed class ChannelService(
         var channel = await LoadChannelAsync(channelId, ct);
         if (channel is null) return null;
 
-        if (channel.AllowedAgents.Any(a => a.Id == agentId))
-            return await ListAllowedAgentsAsync(channelId, ct);
-
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
             .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Id == agentId, ct)
             ?? throw new ArgumentException($"Agent {agentId} not found.");
 
-        channel.AllowedAgents.Add(agent);
-        await db.SaveChangesAsync(ct);
-        InvalidateChannelRuntimeState(channelId);
-        return await ListAllowedAgentsAsync(channelId, ct);
+        if (conversation.AddChannelAllowedAgent(channel, agent))
+        {
+            await db.SaveChangesAsync(ct);
+            InvalidateChannelRuntimeState(channelId);
+        }
+
+        return conversation.ToChannelAllowedAgentsResponse(channel);
     }
 
     /// <summary>
@@ -323,15 +277,13 @@ public sealed class ChannelService(
         var channel = await LoadChannelAsync(channelId, ct);
         if (channel is null) return null;
 
-        var agent = channel.AllowedAgents.FirstOrDefault(a => a.Id == agentId);
-        if (agent is not null)
+        if (conversation.RemoveChannelAllowedAgent(channel, agentId))
         {
-            channel.AllowedAgents.Remove(agent);
             await db.SaveChangesAsync(ct);
             InvalidateChannelRuntimeState(channelId);
         }
 
-        return await ListAllowedAgentsAsync(channelId, ct);
+        return conversation.ToChannelAllowedAgentsResponse(channel);
     }
 
     // ── Private helpers ───────────────────────────────────────────
@@ -354,64 +306,18 @@ public sealed class ChannelService(
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
     }
 
-    private static ChannelResponse ToResponse(
-        ChannelDB channel, AgentDB? agent, ChannelContextDB? context)
-    {
-        // Effective agent: channel's own agent, or the context's agent.
-        var effectiveAgent = agent ?? context?.Agent;
-
-        // Effective allowed agents: channel's own, falling back to context's.
-        var effectiveAllowed = channel.AllowedAgents.Count > 0
-            ? channel.AllowedAgents
-            : context?.AllowedAgents ?? (ICollection<AgentDB>)[];
-
-        return new(channel.Id,
-            channel.Title,
-            effectiveAgent is not null ? ToSummary(effectiveAgent) : null,
-            context?.Id,
-            context?.Name,
-            channel.PermissionSetId,
-            channel.PermissionSetId ?? context?.PermissionSetId,
-            effectiveAllowed.Select(ToSummary).ToList(),
-            channel.DisableChatHeader,
-            channel.CreatedAt,
-            channel.UpdatedAt,
-            channel.CustomId,
-            channel.CustomChatHeader,
-            channel.ToolAwarenessSetId,
-            channel.DisableToolSchemas);
-    }
-
-    internal static AgentSummary ToSummary(AgentDB agent) =>
-        new(agent.Id,
-            agent.Name,
-            agent.ModelId,
-            agent.Model?.Name ?? "unknown",
-            agent.Model?.Provider?.Name ?? "unknown",
-            agent.RoleId,
-            agent.Role?.Name,
-            agent.MaxCompletionTokens,
-            agent.CustomId,
-            agent.Temperature, agent.TopP, agent.TopK,
-            agent.FrequencyPenalty, agent.PresencePenalty, agent.Stop,
-            agent.Seed, agent.ResponseFormat, agent.ReasoningEffort,
-            agent.ProviderParameters, agent.CustomChatHeader, agent.ToolAwarenessSetId,
-            agent.DisableToolSchemas);
-
     private bool IsUniqueChannelNamesEnforced()
     {
-        var value = configuration["UniqueNames:Channels"];
-        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+        return ConversationTopologyEngine.IsUniqueNameEnforced(
+            configuration["UniqueNames:Channels"]);
     }
 
     private async Task EnsureChannelTitleUniqueAsync(string title, Guid? excludeId, CancellationToken ct)
     {
-        var normalized = title.Trim();
         var titles = await db.Channels
             .Where(c => excludeId == null || c.Id != excludeId)
             .Select(c => c.Title)
             .ToListAsync(ct);
-        if (titles.Any(t => t.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"A channel named '{title}' already exists.");
+        conversation.EnsureChannelTitleAvailable(title, titles);
     }
 }

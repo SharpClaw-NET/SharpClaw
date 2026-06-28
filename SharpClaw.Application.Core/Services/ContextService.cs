@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.Contexts;
 using SharpClaw.Contracts.Entities.Core;
@@ -10,6 +11,7 @@ namespace SharpClaw.Application.Services;
 public sealed class ContextService(
     SharpClawDbContext db,
     IConfiguration configuration,
+    ConversationTopologyEngine conversation,
     ChatCache chatCache)
 {
     public async Task<ContextResponse> CreateAsync(
@@ -24,36 +26,34 @@ public sealed class ContextService(
             .FirstOrDefaultAsync(a => a.Id == request.AgentId, ct)
             ?? throw new ArgumentException($"Agent {request.AgentId} not found.");
 
-        var context = new ChannelContextDB
-        {
-            Name = request.Name ?? $"Context {DateTimeOffset.UtcNow:yyyy-MM-dd HH:mm}",
-            AgentId = agent.Id,
-            PermissionSetId = request.PermissionSetId,
-            DisableChatHeader = request.DisableChatHeader ?? false
-        };
+        IReadOnlyList<AgentDB>? allowed = null;
 
         if (request.AllowedAgentIds is { Count: > 0 } agentIds)
         {
-            var allowed = await db.Agents
+            allowed = await db.Agents
                 .Include(a => a.Model).ThenInclude(m => m.Provider)
                 .Include(a => a.Role)
                 .Where(a => agentIds.Contains(a.Id))
                 .ToListAsync(ct);
-            foreach (var a in allowed)
-                context.AllowedAgents.Add(a);
         }
+
+        var context = conversation.CreateContext(
+            request,
+            agent,
+            allowed,
+            DateTimeOffset.UtcNow);
 
         db.AgentContexts.Add(context);
         await db.SaveChangesAsync(ct);
 
-        return ToResponse(context, agent);
+        return conversation.ToContextResponse(context);
     }
 
     public async Task<ContextResponse?> GetByIdAsync(
         Guid id, CancellationToken ct = default)
     {
         var context = await LoadContextAsync(id, ct);
-        return context is null ? null : ToResponse(context, context.Agent);
+        return context is null ? null : conversation.ToContextResponse(context);
     }
 
     public async Task<IReadOnlyList<ContextResponse>> ListAsync(
@@ -73,7 +73,7 @@ public sealed class ContextService(
             .OrderByDescending(c => c.UpdatedAt)
             .ToListAsync(ct);
 
-        return contexts.Select(c => ToResponse(c, c.Agent)).ToList();
+        return contexts.Select(conversation.ToContextResponse).ToList();
     }
 
     public async Task<ContextResponse?> UpdateAsync(
@@ -86,35 +86,23 @@ public sealed class ContextService(
         {
             if (IsUniqueContextNamesEnforced() && !request.Name.Trim().Equals(context.Name.Trim(), StringComparison.OrdinalIgnoreCase))
                 await EnsureContextNameUniqueAsync(request.Name, excludeId: id, ct);
-            context.Name = request.Name;
         }
 
-        // Allow explicit set/unset of permission set
-        if (request.PermissionSetId is not null)
-            context.PermissionSetId = request.PermissionSetId == Guid.Empty
-                ? null
-                : request.PermissionSetId;
-
-        if (request.DisableChatHeader is not null)
-            context.DisableChatHeader = request.DisableChatHeader.Value;
-
-        // Replace the allowed-agents set when provided.
+        IReadOnlyList<AgentDB>? allowed = null;
         if (request.AllowedAgentIds is not null)
         {
-            context.AllowedAgents.Clear();
-            if (request.AllowedAgentIds.Count > 0)
-            {
-                var allowed = await db.Agents
+            allowed = request.AllowedAgentIds.Count > 0
+                ? await db.Agents
                     .Where(a => request.AllowedAgentIds.Contains(a.Id))
-                    .ToListAsync(ct);
-                foreach (var a in allowed)
-                    context.AllowedAgents.Add(a);
-            }
+                    .ToListAsync(ct)
+                : [];
         }
+
+        conversation.ApplyContextUpdate(context, request, allowed);
 
         await db.SaveChangesAsync(ct);
         await InvalidateContextRuntimeStateAsync(id, ct);
-        return ToResponse(context, context.Agent);
+        return conversation.ToContextResponse(context);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -135,19 +123,17 @@ public sealed class ContextService(
 
     private bool IsUniqueContextNamesEnforced()
     {
-        var value = configuration["UniqueNames:Contexts"];
-        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+        return ConversationTopologyEngine.IsUniqueNameEnforced(
+            configuration["UniqueNames:Contexts"]);
     }
 
     private async Task EnsureContextNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var normalized = name.Trim();
         var names = await db.AgentContexts
             .Where(c => excludeId == null || c.Id != excludeId)
             .Select(c => c.Name)
             .ToListAsync(ct);
-        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"A context named '{name}' already exists.");
+        conversation.EnsureContextNameAvailable(name, names);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -163,9 +149,7 @@ public sealed class ContextService(
         var context = await LoadContextAsync(contextId, ct);
         if (context is null) return null;
 
-        return new(contextId,
-            ChannelService.ToSummary(context.Agent),
-            context.AllowedAgents.Select(ChannelService.ToSummary).ToList());
+        return conversation.ToContextAllowedAgentsResponse(context);
     }
 
     /// <summary>
@@ -177,19 +161,19 @@ public sealed class ContextService(
         var context = await LoadContextAsync(contextId, ct);
         if (context is null) return null;
 
-        if (context.AllowedAgents.Any(a => a.Id == agentId))
-            return await ListAllowedAgentsAsync(contextId, ct);
-
         var agent = await db.Agents
             .Include(a => a.Model).ThenInclude(m => m.Provider)
             .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Id == agentId, ct)
             ?? throw new ArgumentException($"Agent {agentId} not found.");
 
-        context.AllowedAgents.Add(agent);
-        await db.SaveChangesAsync(ct);
-        await InvalidateContextRuntimeStateAsync(contextId, ct);
-        return await ListAllowedAgentsAsync(contextId, ct);
+        if (conversation.AddContextAllowedAgent(context, agent))
+        {
+            await db.SaveChangesAsync(ct);
+            await InvalidateContextRuntimeStateAsync(contextId, ct);
+        }
+
+        return conversation.ToContextAllowedAgentsResponse(context);
     }
 
     /// <summary>
@@ -201,15 +185,13 @@ public sealed class ContextService(
         var context = await LoadContextAsync(contextId, ct);
         if (context is null) return null;
 
-        var agent = context.AllowedAgents.FirstOrDefault(a => a.Id == agentId);
-        if (agent is not null)
+        if (conversation.RemoveContextAllowedAgent(context, agentId))
         {
-            context.AllowedAgents.Remove(agent);
             await db.SaveChangesAsync(ct);
             await InvalidateContextRuntimeStateAsync(contextId, ct);
         }
 
-        return await ListAllowedAgentsAsync(contextId, ct);
+        return conversation.ToContextAllowedAgentsResponse(context);
     }
 
     private async Task<ChannelContextDB?> LoadContextAsync(Guid id, CancellationToken ct) =>
@@ -239,13 +221,4 @@ public sealed class ContextService(
         }
     }
 
-    private static ContextResponse ToResponse(ChannelContextDB context, AgentDB agent) =>
-        new(context.Id,
-            context.Name,
-            ChannelService.ToSummary(agent),
-            context.PermissionSetId,
-            context.DisableChatHeader,
-            context.AllowedAgents.Select(ChannelService.ToSummary).ToList(),
-            context.CreatedAt,
-            context.UpdatedAt);
 }

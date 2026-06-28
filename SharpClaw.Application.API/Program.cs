@@ -41,11 +41,13 @@ using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
 using SharpClaw.Core.Chat;
+using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
 using SharpClaw.Core.Threads;
+using SharpClaw.Core.Tools;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
@@ -338,8 +340,10 @@ try
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
     builder.Services.AddSingleton<DefaultResourceEngine>();
+    builder.Services.AddSingleton<ConversationTopologyEngine>();
     builder.Services.AddSingleton<ProviderCatalogEngine>();
     builder.Services.AddSingleton<ModelCatalogEngine>();
+    builder.Services.AddSingleton<ToolAwarenessSetEngine>();
 
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();

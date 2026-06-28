@@ -1,41 +1,40 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Core.Tools;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
-public sealed class ToolAwarenessSetService(SharpClawDbContext db, ChatCache chatCache)
+public sealed class ToolAwarenessSetService(
+    SharpClawDbContext db,
+    ToolAwarenessSetEngine toolAwareness,
+    ChatCache chatCache)
 {
     public async Task<ToolAwarenessSetResponse> CreateAsync(
         CreateToolAwarenessSetRequest request, CancellationToken ct = default)
     {
-        var entity = new ToolAwarenessSetDB
-        {
-            Name = request.Name,
-            Tools = request.Tools ?? new()
-        };
+        var entity = toolAwareness.Create(request);
 
         db.ToolAwarenessSets.Add(entity);
         await db.SaveChangesAsync(ct);
-        return ToResponse(entity);
+        return toolAwareness.ToResponse(entity);
     }
 
     public async Task<ToolAwarenessSetResponse?> GetByIdAsync(
         Guid id, CancellationToken ct = default)
     {
         var entity = await db.ToolAwarenessSets.FindAsync([id], ct);
-        return entity is null ? null : ToResponse(entity);
+        return entity is null ? null : toolAwareness.ToResponse(entity);
     }
 
     public async Task<IReadOnlyList<ToolAwarenessSetResponse>> ListAsync(
         CancellationToken ct = default)
     {
-        return await db.ToolAwarenessSets
+        var sets = await db.ToolAwarenessSets
             .OrderBy(t => t.Name)
-            .Select(t => new ToolAwarenessSetResponse(
-                t.Id, t.Name, t.Tools, t.CreatedAt, t.UpdatedAt))
             .ToListAsync(ct);
+
+        return sets.Select(toolAwareness.ToResponse).ToList();
     }
 
     public async Task<ToolAwarenessSetResponse?> UpdateAsync(
@@ -44,12 +43,11 @@ public sealed class ToolAwarenessSetService(SharpClawDbContext db, ChatCache cha
         var entity = await db.ToolAwarenessSets.FindAsync([id], ct);
         if (entity is null) return null;
 
-        if (request.Name is not null) entity.Name = request.Name;
-        if (request.Tools is not null) entity.Tools = request.Tools;
+        toolAwareness.ApplyUpdate(entity, request);
 
         await db.SaveChangesAsync(ct);
         chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
-        return ToResponse(entity);
+        return toolAwareness.ToResponse(entity);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -63,6 +61,4 @@ public sealed class ToolAwarenessSetService(SharpClawDbContext db, ChatCache cha
         return true;
     }
 
-    private static ToolAwarenessSetResponse ToResponse(ToolAwarenessSetDB entity) =>
-        new(entity.Id, entity.Name, entity.Tools, entity.CreatedAt, entity.UpdatedAt);
 }
