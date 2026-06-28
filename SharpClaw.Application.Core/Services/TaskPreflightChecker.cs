@@ -1,8 +1,8 @@
-using System.Runtime.InteropServices;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Models;
+using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Clients;
 using SharpClaw.Contracts.Providers;
@@ -24,6 +24,8 @@ public sealed class TaskPreflightChecker(
     ModuleRegistry moduleRegistry,
     ProviderApiClientFactory clientFactory)
 {
+    private readonly TaskPreflightEngine _preflight = new();
+
     // ═══════════════════════════════════════════════════════════════
     // Static check (no DB access)
     // ═══════════════════════════════════════════════════════════════
@@ -33,32 +35,7 @@ public sealed class TaskPreflightChecker(
     /// so platform mismatches are surfaced without DB access.
     /// </summary>
     public TaskPreflightResult CheckStatic(IReadOnlyList<TaskRequirementDefinition> requirements)
-    {
-        var findings = new List<TaskPreflightFinding>();
-
-        foreach (var req in requirements)
-        {
-            if (req.Kind != TaskRequirementKind.RequiresPlatform)
-                continue;
-
-            if (!Enum.TryParse<TaskPlatform>(req.Value, ignoreCase: false, out var platform))
-            {
-                // Invalid name — already caught by TASK401 at validation time; skip silently.
-                continue;
-            }
-
-            var passed = IsPlatformSatisfied(platform);
-            findings.Add(new TaskPreflightFinding(
-                req.Kind.ToString(),
-                req.Severity,
-                passed,
-                passed
-                    ? $"Platform '{req.Value}' is satisfied on the current host."
-                    : $"Platform '{req.Value}' is not satisfied on the current host."));
-        }
-
-        return BuildResult(findings);
-    }
+        => _preflight.CheckStatic(requirements);
 
     // ═══════════════════════════════════════════════════════════════
     // Runtime check (full DB access)
@@ -83,12 +60,8 @@ public sealed class TaskPreflightChecker(
                 case TaskRequirementKind.RequiresPlatform:
                 {
                     var passed = Enum.TryParse<TaskPlatform>(req.Value, out var platform)
-                                 && IsPlatformSatisfied(platform);
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed,
-                        passed
-                            ? $"Platform '{req.Value}' is satisfied."
-                            : $"Platform '{req.Value}' is not satisfied on the current host."));
+                                 && _preflight.IsPlatformSatisfied(platform);
+                    findings.Add(_preflight.CreateRuntimePlatformFinding(req, passed));
                     break;
                 }
 
@@ -251,17 +224,12 @@ public sealed class TaskPreflightChecker(
             }
         }
 
-        return BuildResult(findings);
+        return _preflight.BuildResult(findings);
     }
 
     // ═══════════════════════════════════════════════════════════════
     // Helpers
     // ═══════════════════════════════════════════════════════════════
-
-    private static bool IsPlatformSatisfied(TaskPlatform platform)
-        => (platform.HasFlag(TaskPlatform.Windows) && RuntimeInformation.IsOSPlatform(OSPlatform.Windows))
-        || (platform.HasFlag(TaskPlatform.Linux)   && RuntimeInformation.IsOSPlatform(OSPlatform.Linux))
-        || (platform.HasFlag(TaskPlatform.MacOS)   && RuntimeInformation.IsOSPlatform(OSPlatform.OSX));
 
     private async Task<bool> IsModuleEnabledAsync(string moduleId, CancellationToken ct)
     {
@@ -292,10 +260,4 @@ public sealed class TaskPreflightChecker(
                         && f.Clearance != PermissionClearance.Unset, ct);
     }
 
-    private static TaskPreflightResult BuildResult(List<TaskPreflightFinding> findings)
-    {
-        var isBlocked = findings.Any(f =>
-            f.Severity == TaskDiagnosticSeverity.Error && !f.Passed);
-        return new TaskPreflightResult(isBlocked, findings);
-    }
 }
