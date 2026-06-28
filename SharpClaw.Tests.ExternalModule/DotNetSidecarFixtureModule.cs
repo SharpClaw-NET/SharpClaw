@@ -10,7 +10,7 @@ using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Tests.ExternalModule;
 
-public sealed class DotNetSidecarFixtureModule : ISharpClawModule, ITaskParserAware
+public sealed class DotNetSidecarFixtureModule : ISharpClawRuntimeModule, ITaskParserAware
 {
     public const string ModuleId = "synthetic_dotnet_sidecar";
     public const string ToolPrefixValue = "sds";

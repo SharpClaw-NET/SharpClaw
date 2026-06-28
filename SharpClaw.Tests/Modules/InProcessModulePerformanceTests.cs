@@ -95,7 +95,7 @@ public sealed class InProcessModulePerformanceTests
         private InProcessPerformanceHarness(
             ChatHarnessHost host,
             InProcessModuleHost runtimeHost,
-            ISharpClawModule module,
+            ISharpClawCoreModule module,
             SeededChat seeded)
         {
             _host = host;
@@ -105,7 +105,7 @@ public sealed class InProcessModulePerformanceTests
         }
 
         private InProcessModuleHost RuntimeHost { get; }
-        private ISharpClawModule Module { get; }
+        private ISharpClawCoreModule Module { get; }
         private SeededChat Seeded { get; }
         private ModuleRegistry Registry => _host.RootServices.GetRequiredService<ModuleRegistry>();
 
@@ -137,7 +137,7 @@ public sealed class InProcessModulePerformanceTests
                     .Should()
                     .NotBeNull()
                     .And
-                    .BeAssignableTo<ISharpClawModule>()
+                    .BeAssignableTo<ISharpClawCoreModule>()
                     .Subject;
                 var seeded = await host.SeedChatAsync(
                     TestHarnessConstants.PlainProviderKey,

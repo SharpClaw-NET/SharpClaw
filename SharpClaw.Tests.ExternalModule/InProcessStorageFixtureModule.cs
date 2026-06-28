@@ -4,7 +4,7 @@ using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Tests.ExternalModule;
 
-public sealed class InProcessStorageFixtureModule : ISharpClawModule
+public sealed class InProcessStorageFixtureModule : ISharpClawCoreModule
 {
     public const string ModuleId = "synthetic_inprocess_storage";
     public const string ToolPrefixValue = "sis";

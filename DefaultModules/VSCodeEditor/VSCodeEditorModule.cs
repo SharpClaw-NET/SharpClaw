@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.VSCodeEditor;
 /// diagnostics, builds, and terminal commands through a connected
 /// VS Code extension. All platforms.
 /// </summary>
-public sealed class VSCodeEditorModule : ISharpClawModule, IForeignModuleProtocolContractModule
+public sealed class VSCodeEditorModule : ISharpClawCoreModule, IForeignModuleProtocolContractModule
 {
     private const string EditorBridgeContractName = "editor_bridge";
     private const string EditorSessionContractName = "editor_session";

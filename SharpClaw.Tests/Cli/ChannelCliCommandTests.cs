@@ -357,7 +357,7 @@ public sealed class ChannelCliCommandTests
         return (channel.Id, agent.Id, context.Id, toolSet.Id);
     }
 
-    private sealed class TestDefaultResourceModule : ISharpClawModule
+    private sealed class TestDefaultResourceModule : ISharpClawCoreModule
     {
         public string Id => "test_default_resources";
 
@@ -371,7 +371,7 @@ public sealed class ChannelCliCommandTests
 
         public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
 
-        Task<string> ISharpClawModule.ExecuteToolAsync(
+        Task<string> ISharpClawCoreModule.ExecuteToolAsync(
             string toolName,
             JsonElement parameters,
             SharpClaw.Contracts.Modules.AgentJobContext job,

@@ -38,9 +38,18 @@ public sealed class TaskScriptParser
         = new(StringComparer.Ordinal);
     private static readonly Dictionary<string, string> _moduleTriggerAttributeHandlerOwners
         = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> _moduleTriggerAttributeHandlerCounts
+        = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> _moduleStepKeyCounts
+        = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> _moduleEventTriggerCounts
+        = new(StringComparer.Ordinal);
+    private static readonly Dictionary<string, int> _moduleSingleArgMethodCounts
+        = new(StringComparer.Ordinal);
     private static readonly Lock _registryLock = new();
     private static TaskParserPrimitives? _primitives;
     private static string? _primitivesOwnerKey;
+    private static int _primitivesRegistrationCount;
 
     /// <summary>
     /// Wire-format step keys for statement-shaped primitives, supplied by
@@ -57,7 +66,7 @@ public sealed class TaskScriptParser
     /// <summary>
     /// Register a module's parser extension. Safe to call multiple times
     /// (duplicate method names for the same module are ignored).
-    /// Call from <c>ISharpClawModule.ConfigureServices</c>.
+    /// Call from <c>ISharpClawCoreModule.ConfigureServices</c>.
     /// </summary>
     public static void RegisterModule(ITaskParserModuleExtension extension)
     {
@@ -66,23 +75,60 @@ public sealed class TaskScriptParser
         {
             foreach (var (method, entry) in extension.StepKeyMappings)
             {
-                _moduleStepKeys.TryAdd(method, entry);
+                if (_moduleStepKeys.TryGetValue(method, out var existingEntry))
+                {
+                    if (string.Equals(existingEntry.StepKey, entry.StepKey, StringComparison.Ordinal)
+                        && string.Equals(existingEntry.ModuleId, entry.ModuleId, StringComparison.Ordinal))
+                    {
+                        IncrementCount(_moduleStepKeyCounts, method);
+                    }
+                }
+                else
+                {
+                    _moduleStepKeys[method] = entry;
+                    _moduleStepKeyCounts[method] = 1;
+                }
 
                 // Register a descriptor in the unified step registry so that
                 // TryParseContextApiCall resolves module steps through the same
-                // path as core steps.
-                TaskStepRegistry.Default.Register(new TaskStepDescriptor
+                // path as core steps. Foreign modules can provide richer
+                // descriptors through the protocol; keep those when they have
+                // already claimed the same method/key/owner.
+                var existingDescriptor = TaskStepRegistry.Default.FindByMethod(method);
+                if (existingDescriptor is null
+                    || !string.Equals(existingDescriptor.StepKey, entry.StepKey, StringComparison.Ordinal)
+                    || !string.Equals(existingDescriptor.OwnerId, entry.ModuleId, StringComparison.Ordinal))
                 {
-                    MethodName           = method,
-                    StepKey              = entry.StepKey,
-                    OwnerId              = entry.ModuleId,
-                    FirstArgIsExpression = extension.SingleArgExpressionMethods.Contains(method),
-                });
+                    TaskStepRegistry.Default.Register(new TaskStepDescriptor
+                    {
+                        MethodName           = method,
+                        StepKey              = entry.StepKey,
+                        OwnerId              = entry.ModuleId,
+                        FirstArgIsExpression = extension.SingleArgExpressionMethods.Contains(method),
+                    });
+                }
             }
             foreach (var (method, entry) in extension.EventTriggerMappings)
-                _moduleEventTriggers.TryAdd(method, entry);
+            {
+                if (_moduleEventTriggers.TryGetValue(method, out var existingEntry))
+                {
+                    if (string.Equals(existingEntry.TriggerKey, entry.TriggerKey, StringComparison.Ordinal)
+                        && string.Equals(existingEntry.ModuleId, entry.ModuleId, StringComparison.Ordinal))
+                    {
+                        IncrementCount(_moduleEventTriggerCounts, method);
+                    }
+                }
+                else
+                {
+                    _moduleEventTriggers[method] = entry;
+                    _moduleEventTriggerCounts[method] = 1;
+                }
+            }
             foreach (var method in extension.SingleArgExpressionMethods)
+            {
                 _moduleSingleArgMethods.Add(method);
+                IncrementCount(_moduleSingleArgMethodCounts, method);
+            }
 
             foreach (var (attrName, handler) in extension.TriggerAttributeHandlers)
             {
@@ -106,8 +152,17 @@ public sealed class TaskScriptParser
                         "by another module. Only one module may own the scripting-language " +
                         "statement step keys.");
                 }
-                _primitives = primitives;
-                _primitivesOwnerKey = ownerKey;
+
+                if (_primitives is null)
+                {
+                    _primitives = primitives;
+                    _primitivesOwnerKey = ownerKey;
+                    _primitivesRegistrationCount = 1;
+                }
+                else
+                {
+                    _primitivesRegistrationCount++;
+                }
             }
         }
     }
@@ -123,14 +178,18 @@ public sealed class TaskScriptParser
                     && string.Equals(registered.StepKey, entry.StepKey, StringComparison.Ordinal)
                     && string.Equals(registered.ModuleId, entry.ModuleId, StringComparison.Ordinal))
                 {
-                    _moduleStepKeys.Remove(method);
+                    if (DecrementCount(_moduleStepKeyCounts, method) == 0)
+                        _moduleStepKeys.Remove(method);
                 }
             }
 
             foreach (var method in extension.SingleArgExpressionMethods)
             {
-                if (!_moduleStepKeys.ContainsKey(method))
+                if (DecrementCount(_moduleSingleArgMethodCounts, method) == 0
+                    && !_moduleStepKeys.ContainsKey(method))
+                {
                     _moduleSingleArgMethods.Remove(method);
+                }
             }
 
             foreach (var (method, entry) in extension.EventTriggerMappings)
@@ -139,7 +198,8 @@ public sealed class TaskScriptParser
                     && string.Equals(registered.TriggerKey, entry.TriggerKey, StringComparison.Ordinal)
                     && string.Equals(registered.ModuleId, entry.ModuleId, StringComparison.Ordinal))
                 {
-                    _moduleEventTriggers.Remove(method);
+                    if (DecrementCount(_moduleEventTriggerCounts, method) == 0)
+                        _moduleEventTriggers.Remove(method);
                 }
             }
 
@@ -155,10 +215,35 @@ public sealed class TaskScriptParser
                 && _primitives.Equals(primitives)
                 && string.Equals(_primitivesOwnerKey, ResolveParserExtensionOwnerKey(extension), StringComparison.Ordinal))
             {
-                _primitives = null;
-                _primitivesOwnerKey = null;
+                _primitivesRegistrationCount = Math.Max(0, _primitivesRegistrationCount - 1);
+                if (_primitivesRegistrationCount == 0)
+                {
+                    _primitives = null;
+                    _primitivesOwnerKey = null;
+                }
             }
         }
+    }
+
+    private static void IncrementCount(Dictionary<string, int> counts, string key)
+    {
+        counts[key] = counts.TryGetValue(key, out var count) ? count + 1 : 1;
+    }
+
+    private static int DecrementCount(Dictionary<string, int> counts, string key)
+    {
+        if (!counts.TryGetValue(key, out var count))
+            return 0;
+
+        count--;
+        if (count <= 0)
+        {
+            counts.Remove(key);
+            return 0;
+        }
+
+        counts[key] = count;
+        return count;
     }
 
     private static void RegisterTriggerAttributeHandler(string attrName, ITaskTriggerAttributeHandler handler)
@@ -187,10 +272,13 @@ public sealed class TaskScriptParser
                     "check for stale module DLLs in the host's base directory or " +
                     "two modules exporting the same attribute name.");
             }
+
+            IncrementCount(_moduleTriggerAttributeHandlerCounts, attrName);
             return;
         }
         _moduleTriggerAttributeHandlers[attrName] = handler;
         _moduleTriggerAttributeHandlerOwners[attrName] = ownerKey;
+        _moduleTriggerAttributeHandlerCounts[attrName] = 1;
     }
 
     private static void UnregisterTriggerAttributeHandler(string attrName, ITaskTriggerAttributeHandler handler)
@@ -208,6 +296,9 @@ public sealed class TaskScriptParser
         {
             return;
         }
+
+        if (DecrementCount(_moduleTriggerAttributeHandlerCounts, attrName) > 0)
+            return;
 
         _moduleTriggerAttributeHandlers.Remove(attrName);
         _moduleTriggerAttributeHandlerOwners.Remove(attrName);

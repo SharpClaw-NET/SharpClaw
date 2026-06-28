@@ -14,7 +14,7 @@ internal sealed class ForeignModuleProxy(
     ModuleManifest manifest,
     ForeignModuleProtocolClient client,
     Func<Task> shutdown)
-    : ISharpClawModule, IForeignModuleProtocolContractExporter, ITaskParserAware
+    : ISharpClawRuntimeModule, IForeignModuleProtocolContractExporter, ITaskParserAware
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {

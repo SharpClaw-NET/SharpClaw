@@ -617,7 +617,7 @@ public sealed class HostModuleLifecycleManager(
     public bool IsToolPrefixRegistered(string toolPrefix) =>
         registry.GetModuleByPrefix(toolPrefix) is not null;
 
-    public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName) =>
+    public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName) =>
         registry.FindToolByName(toolName);
 
     public async Task<Contracts.Modules.ModuleStateResponse> LoadExternalAsync(

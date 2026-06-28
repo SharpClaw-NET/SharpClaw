@@ -28,7 +28,7 @@ internal sealed class DotNetSidecarHost
 
     private readonly WebApplication _app;
     private readonly ModuleLoadContext _loadContext;
-    private readonly ISharpClawModule _module;
+    private readonly ISharpClawCoreModule _module;
     private readonly ModuleManifest _manifest;
     private readonly ModuleManifestRuntimeInfo _runtimeInfo;
     private readonly string _controlToken;
@@ -36,7 +36,7 @@ internal sealed class DotNetSidecarHost
     private DotNetSidecarHost(
         WebApplication app,
         ModuleLoadContext loadContext,
-        ISharpClawModule module,
+        ISharpClawCoreModule module,
         ModuleManifest manifest,
         ModuleManifestRuntimeInfo runtimeInfo,
         string controlToken)
@@ -125,7 +125,8 @@ internal sealed class DotNetSidecarHost
             await next();
         });
 
-        module.MapEndpoints(app);
+        if (module is ISharpClawRuntimeModule runtimeModule)
+            runtimeModule.MapEndpoints(app);
         var host = new DotNetSidecarHost(app, loadContext, module, manifest, runtimeInfo, controlToken);
         host.MapControlEndpoints();
         return host;
@@ -313,7 +314,10 @@ internal sealed class DotNetSidecarHost
             ForeignModuleCliExecutionRequest request,
             CancellationToken ct) =>
         {
-            var command = (_module.GetCliCommands() ?? [])
+            if (_module is not ISharpClawRuntimeModule runtimeModule)
+                return Results.NotFound(new { error = $"CLI command '{request.CommandName}' not found." });
+
+            var command = (runtimeModule.GetCliCommands() ?? [])
                 .FirstOrDefault(candidate => string.Equals(candidate.Name, request.CommandName, StringComparison.OrdinalIgnoreCase)
                                              || candidate.Aliases.Any(alias => string.Equals(alias, request.CommandName, StringComparison.OrdinalIgnoreCase)));
             if (command is null)
@@ -642,6 +646,7 @@ internal sealed class DotNetSidecarHost
     private ForeignModuleDiscoveryResponse BuildDiscovery()
     {
         var protocolModule = _module as IForeignModuleProtocolContractModule;
+        var runtimeModule = _module as ISharpClawRuntimeModule;
         using var scope = _app.Services.CreateScope();
         var services = scope.ServiceProvider;
         var taskStepDescriptors = services.GetServices<ITaskStepDescriptorProvider>()
@@ -667,10 +672,10 @@ internal sealed class DotNetSidecarHost
                 flag.DisplayName,
                 flag.Description,
                 flag.DelegateMethodName))],
-            UiContributions: _module.GetUiContributions(),
-            FrontendContributions: _module.GetFrontendContributions(),
+            UiContributions: runtimeModule?.GetUiContributions() ?? [],
+            FrontendContributions: runtimeModule?.GetFrontendContributions() ?? [],
             StorageContracts: _module.GetStorageContracts(),
-            CliCommands: [.. (_module.GetCliCommands() ?? []).Select(command => new ForeignModuleCliCommandDescriptor(
+            CliCommands: [.. (runtimeModule?.GetCliCommands() ?? []).Select(command => new ForeignModuleCliCommandDescriptor(
                 command.Name,
                 command.Aliases,
                 command.Scope,
@@ -768,11 +773,15 @@ internal sealed class DotNetSidecarHost
             ForeignModuleCapability.HostCapabilities,
         };
 
-        if (DiscoverMappedEndpoints().Count > 0) capabilities.Add(ForeignModuleCapability.Endpoints);
+        var runtimeModule = _module as ISharpClawRuntimeModule;
+        if (runtimeModule is not null && DiscoverMappedEndpoints().Count > 0)
+            capabilities.Add(ForeignModuleCapability.Endpoints);
         if (_module.GetToolDefinitions().Count > 0) capabilities.Add(ForeignModuleCapability.JobTools);
         if (_module.GetInlineToolDefinitions().Count > 0) capabilities.Add(ForeignModuleCapability.InlineTools);
-        if (_module.GetFrontendContributions().Count > 0) capabilities.Add(ForeignModuleCapability.FrontendContributions);
-        if (_module.GetUiContributions().Count > 0) capabilities.Add(ForeignModuleCapability.ModuleContributionDescriptors);
+        if (runtimeModule?.GetFrontendContributions().Count > 0)
+            capabilities.Add(ForeignModuleCapability.FrontendContributions);
+        if (runtimeModule?.GetUiContributions().Count > 0)
+            capabilities.Add(ForeignModuleCapability.ModuleContributionDescriptors);
         using var scope = _app.Services.CreateScope();
         var services = scope.ServiceProvider;
         if (_module is ITaskParserAware || HasTaskRuntimeContributions(services))
@@ -908,10 +917,10 @@ internal sealed class DotNetSidecarHost
             SupportsCostFeed: plugin.CostFeed is not null);
     }
 
-    private static bool HasStreamingOverride(ISharpClawModule module) =>
+    private static bool HasStreamingOverride(ISharpClawCoreModule module) =>
         module.GetType()
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
-            .Any(method => method.Name == nameof(ISharpClawModule.ExecuteToolStreamingAsync));
+            .Any(method => method.Name == nameof(ISharpClawCoreModule.ExecuteToolStreamingAsync));
 
     private static bool HasTaskRuntimeContributions(IServiceProvider services) =>
         services.GetServices<ITaskStepDescriptorProvider>().Any()
@@ -959,10 +968,10 @@ internal sealed class DotNetSidecarHost
             services.AddSingleton(typeof(ITaskStepDescriptorProvider), providerType);
     }
 
-    private static bool HasCompletionBehaviorOverride(ISharpClawModule module) =>
+    private static bool HasCompletionBehaviorOverride(ISharpClawCoreModule module) =>
         module.GetType()
             .GetMethods(BindingFlags.Instance | BindingFlags.Public | BindingFlags.DeclaredOnly)
-            .Any(method => method.Name == nameof(ISharpClawModule.GetJobCompletionBehavior));
+            .Any(method => method.Name == nameof(ISharpClawCoreModule.GetJobCompletionBehavior));
 
     private static string ResolveRuntimeVersion(Assembly moduleAssembly)
     {

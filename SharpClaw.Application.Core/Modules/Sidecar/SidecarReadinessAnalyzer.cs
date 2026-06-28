@@ -25,32 +25,34 @@ public sealed class SidecarReadinessAnalyzer
         typeof(ISharpClawEventSink)
     ];
 
-    public ModuleSidecarReadinessReport Analyze(ISharpClawModule module)
+    public ModuleSidecarReadinessReport Analyze(ISharpClawCoreModule module)
     {
         ArgumentNullException.ThrowIfNull(module);
 
         var moduleType = module.GetType();
         var protocolModule = module as IForeignModuleProtocolContractModule;
+        var runtimeModule = module as ISharpClawRuntimeModule;
         var contributionInventory = new ModuleContributionInventory(
             ToolCount: module.GetToolDefinitions().Count,
             InlineToolCount: module.GetInlineToolDefinitions().Count,
             ResourceTypeDescriptorCount: module.GetResourceTypeDescriptors().Count,
             GlobalFlagDescriptorCount: module.GetGlobalFlagDescriptors().Count,
             HeaderTagCount: module.GetHeaderTags()?.Count ?? 0,
-            UiContributionCount: module.GetUiContributions().Count,
-            FrontendContributionCount: module.GetFrontendContributions().Count,
-            CliCommandCount: module.GetCliCommands()?.Count ?? 0,
+            UiContributionCount: runtimeModule?.GetUiContributions().Count ?? 0,
+            FrontendContributionCount: runtimeModule?.GetFrontendContributions().Count ?? 0,
+            CliCommandCount: runtimeModule?.GetCliCommands()?.Count ?? 0,
             ExportedClrContractCount: module.ExportedContracts.Count,
             RequiredClrContractCount: module.RequiredContracts.Count,
             ExportedProtocolContractCount: protocolModule?.ExportedProtocolContracts.Count ?? 0,
             RequiredProtocolContractCount: protocolModule?.RequiredProtocolContracts.Count ?? 0,
-            MapsEndpoints: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.MapEndpoints)),
-            OverridesInitialize: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.InitializeAsync)),
-            OverridesShutdown: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.ShutdownAsync)),
-            OverridesSeedData: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.SeedDataAsync)),
-            OverridesHealthCheck: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.HealthCheckAsync)),
-            OverridesStreamingTools: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.ExecuteToolStreamingAsync)),
-            OverridesJobCompletionBehavior: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawModule.GetJobCompletionBehavior)),
+            MapsEndpoints: runtimeModule is not null
+                && DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawRuntimeModule.MapEndpoints)),
+            OverridesInitialize: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.InitializeAsync)),
+            OverridesShutdown: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.ShutdownAsync)),
+            OverridesSeedData: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.SeedDataAsync)),
+            OverridesHealthCheck: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.HealthCheckAsync)),
+            OverridesStreamingTools: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.ExecuteToolStreamingAsync)),
+            OverridesJobCompletionBehavior: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.GetJobCompletionBehavior)),
             IsTaskParserAware: module is ITaskParserAware);
 
         var serviceInventory = InspectServices(module);
@@ -67,10 +69,10 @@ public sealed class SidecarReadinessAnalyzer
             findings);
     }
 
-    public IReadOnlyList<ModuleSidecarReadinessReport> AnalyzeAll(IEnumerable<ISharpClawModule> modules) =>
+    public IReadOnlyList<ModuleSidecarReadinessReport> AnalyzeAll(IEnumerable<ISharpClawCoreModule> modules) =>
         [.. modules.Select(Analyze).OrderBy(report => report.ModuleId, StringComparer.Ordinal)];
 
-    private static ModuleServiceInventory InspectServices(ISharpClawModule module)
+    private static ModuleServiceInventory InspectServices(ISharpClawCoreModule module)
     {
         var services = new ServiceCollection();
         string? configureError = null;
@@ -144,7 +146,7 @@ public sealed class SidecarReadinessAnalyzer
     private static IReadOnlyList<SidecarReadinessFinding> BuildFindings(
         ModuleContributionInventory contributions,
         ModuleServiceInventory services,
-        ISharpClawModule module)
+        ISharpClawCoreModule module)
     {
         var findings = new List<SidecarReadinessFinding>();
 

@@ -471,7 +471,10 @@ public static class ModuleHandlers
 
         foreach (var module in registry.GetAllModules())
         {
-            var items = module.GetUiContributions();
+            if (module is not ISharpClawRuntimeModule runtimeModule)
+                continue;
+
+            var items = runtimeModule.GetUiContributions();
             if (items is not { Count: > 0 }) continue;
 
             foreach (var item in items)
@@ -509,6 +512,7 @@ public static class ModuleHandlers
     public static IResult GetFrontendContributions(ModuleRegistry registry)
     {
         var contributions = registry.GetAllModules()
+            .OfType<ISharpClawRuntimeModule>()
             .SelectMany(module => module.GetFrontendContributions()
                 .Select(item => item with
                 {

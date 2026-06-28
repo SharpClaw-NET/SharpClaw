@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.Metrics;
 /// Phase 1 of the trigger-extraction plan; <c>MetricTriggerSource</c> and the
 /// three providers from <c>BuiltInMetricProviders.cs</c> move here in Phase 4.
 /// </summary>
-public sealed class MetricsModule : ISharpClawModule, ITaskParserAware
+public sealed class MetricsModule : ISharpClawCoreModule, ITaskParserAware
 {
     public ITaskParserModuleExtension ParserExtension => MetricsParserExtension.Instance;
 

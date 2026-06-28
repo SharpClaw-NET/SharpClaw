@@ -61,7 +61,7 @@ public class BundledModuleOutputTests
     }
 
     [TestCaseSource(nameof(ExpectedModuleDlls))]
-    public void ModuleDllContainsISharpClawModuleImplementation(string dllName)
+    public void ModuleDllContainsISharpClawCoreModuleImplementation(string dllName)
     {
         var apiOutputDir = ResolveApiOutputDirectory();
         var dllPath = Path.Combine(apiOutputDir, dllName);
@@ -70,7 +70,7 @@ public class BundledModuleOutputTests
 
         var assembly = Assembly.LoadFrom(dllPath);
         var moduleType = Type.GetType(
-            "SharpClaw.Contracts.Modules.ISharpClawModule, SharpClaw.Contracts",
+            "SharpClaw.Contracts.Modules.ISharpClawCoreModule, SharpClaw.Contracts",
             throwOnError: false);
 
         moduleType.Should().NotBeNull("SharpClaw.Contracts must be loaded");
@@ -82,7 +82,7 @@ public class BundledModuleOutputTests
             .ToList();
 
         implementations.Should().NotBeEmpty(
-            $"'{dllName}' must contain at least one public parameterless ISharpClawModule implementation");
+            $"'{dllName}' must contain at least one public parameterless ISharpClawCoreModule implementation");
     }
 
     [Test]

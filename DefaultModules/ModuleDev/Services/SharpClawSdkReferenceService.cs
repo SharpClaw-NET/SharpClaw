@@ -53,7 +53,7 @@ internal sealed class SharpClawSdkReferenceService
                 SharpClaw .NET module SDK.
 
                 The .NET SDK surface is SharpClaw.Contracts. A module implements
-                ISharpClawModule and returns descriptors for tools, inline
+                ISharpClawCoreModule and returns descriptors for tools, inline
                 tools, contracts, resources, flags, header tags, endpoints, and
                 CLI commands. Keep module code behind SharpClaw.Contracts and
                 SharpClaw.Utils references. Do not reference

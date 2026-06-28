@@ -272,7 +272,26 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
-        foreach (var runtimeHost in _root.GetRequiredService<ModuleRegistry>().GetRuntimeHosts())
+        var registry = _root.GetRequiredService<ModuleRegistry>();
+        var loader = _root.GetRequiredService<ModuleLoader>();
+        var moduleService = _scope.ServiceProvider.GetRequiredService<ModuleService>();
+        var runtimeBackedModuleIds = registry.GetAllModules()
+            .Select(module => module.Id)
+            .Where(moduleId => registry.GetRuntimeHost(moduleId) is not null)
+            .ToArray();
+
+        foreach (var moduleId in runtimeBackedModuleIds)
+        {
+            if (registry.GetModule(moduleId) is null)
+                continue;
+
+            if (registry.IsExternal(moduleId))
+                await moduleService.UnloadExternalAsync(moduleId, CancellationToken.None);
+            else if (loader.IsDefaultModule(moduleId))
+                await moduleService.DisableAsync(moduleId, CancellationToken.None);
+        }
+
+        foreach (var runtimeHost in registry.GetRuntimeHosts())
             await runtimeHost.DisposeAsync();
 
         await _scope.DisposeAsync();

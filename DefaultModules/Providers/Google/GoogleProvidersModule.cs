@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.Providers.Google;
 /// OpenAI-compatible shim — that lives in
 /// <c>SharpClaw.Modules.Providers.OpenAICompatible</c>).
 /// </summary>
-public sealed class GoogleProvidersModule : ISharpClawModule
+public sealed class GoogleProvidersModule : ISharpClawCoreModule
 {
     public string Id => "sharpclaw_providers_google";
     public string DisplayName => "Google Native Providers";

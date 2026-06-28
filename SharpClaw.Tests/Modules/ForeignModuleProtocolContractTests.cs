@@ -52,7 +52,7 @@ public sealed class ForeignModuleProtocolContractTests
             Manifest(),
             RuntimeInfo(),
             CreateLaunchOptions(workspace));
-        var module = foreignHost.Module;
+        var module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeModule>().Subject;
 
         var headerTag = module.GetHeaderTags().Should().ContainSingle().Subject;
         var resource = module.GetResourceTypeDescriptors().Should().ContainSingle().Subject;
@@ -587,7 +587,7 @@ public sealed class ForeignModuleProtocolContractTests
             Diagnostics.Add((severity, code, message));
     }
 
-    private sealed class ProtocolProviderModule : ISharpClawModule, IForeignModuleProtocolContractExporter
+    private sealed class ProtocolProviderModule : ISharpClawCoreModule, IForeignModuleProtocolContractExporter
     {
         private readonly ForeignModuleProtocolContractExport _export = EditorBridgeExport();
 
@@ -615,7 +615,7 @@ public sealed class ForeignModuleProtocolContractTests
             new StaticProtocolContractInvoker(_export);
     }
 
-    private sealed class ProtocolConsumerModule : ISharpClawModule, IForeignModuleProtocolContractModule
+    private sealed class ProtocolConsumerModule : ISharpClawCoreModule, IForeignModuleProtocolContractModule
     {
         public string Id => "protocol_consumer";
         public string DisplayName => "Protocol Consumer";

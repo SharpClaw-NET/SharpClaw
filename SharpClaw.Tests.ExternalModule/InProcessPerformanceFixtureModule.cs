@@ -8,7 +8,7 @@ using SharpClaw.Contracts.Persistence;
 
 namespace SharpClaw.Tests.ExternalModule;
 
-public sealed class InProcessPerformanceFixtureModule : ISharpClawModule
+public sealed class InProcessPerformanceFixtureModule : ISharpClawCoreModule
 {
     public const string ModuleId = "synthetic_inprocess_perf";
     public const string ToolPrefixValue = "sip";

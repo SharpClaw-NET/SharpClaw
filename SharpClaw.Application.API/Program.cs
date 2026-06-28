@@ -767,12 +767,15 @@ try
     // Module-registered endpoints: each module maps its own REST routes.
     foreach (var module in registry.GetAllModules())
     {
+        if (module is not ISharpClawRuntimeModule runtimeModule)
+            continue;
+
         try
         {
             IEndpointRouteBuilder endpointHost = registry.GetRuntimeHost(module.Id) is InProcessModuleHost inProcessHost
                 ? new ModuleEndpointRouteBuilder(app, inProcessHost.Services)
                 : app;
-            module.MapEndpoints(endpointHost);
+            runtimeModule.MapEndpoints(endpointHost);
         }
         catch (Exception ex)
         {

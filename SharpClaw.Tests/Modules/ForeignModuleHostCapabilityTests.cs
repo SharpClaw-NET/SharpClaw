@@ -1041,7 +1041,7 @@ public sealed class ForeignModuleHostCapabilityTests
 
         public bool IsModuleRegistered(string moduleId) => moduleId == "loaded_module";
         public bool IsToolPrefixRegistered(string toolPrefix) => toolPrefix == "lm";
-        public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName) =>
+        public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName) =>
             toolName == "echo_tool" ? (_module, "echo_tool") : null;
 
         public Task<ModuleStateResponse> LoadExternalAsync(
@@ -1180,7 +1180,7 @@ public sealed class ForeignModuleHostCapabilityTests
         }
     }
 
-    private sealed class EchoModule : ISharpClawModule
+    private sealed class EchoModule : ISharpClawCoreModule
     {
         public string Id => "echo_module";
         public string DisplayName => "Echo Module";

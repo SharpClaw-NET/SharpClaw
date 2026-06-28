@@ -184,7 +184,7 @@ public sealed class ForeignModuleEndpointParityTests
         var registry = new ModuleRegistry();
         TestWorkspace? workspace = null;
         IAsyncDisposable? runtimeHost = null;
-        ISharpClawModule module;
+        ISharpClawRuntimeModule module;
 
         if (runtime == RuntimeKind.CSharp)
         {
@@ -199,7 +199,7 @@ public sealed class ForeignModuleEndpointParityTests
                 RuntimeInfo(runtime),
                 CreateLaunchOptions(workspace, runtime));
             runtimeHost = foreignHost;
-            module = foreignHost.Module;
+            module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeModule>().Subject;
             registry.Register(module, foreignHost);
         }
 
@@ -216,7 +216,7 @@ public sealed class ForeignModuleEndpointParityTests
         builder.Services.AddSingleton(registry);
         var app = builder.Build();
         app.UseWebSockets();
-        foreach (var module in registry.GetAllModules())
+        foreach (var module in registry.GetAllModules().OfType<ISharpClawRuntimeModule>())
             module.MapEndpoints(app);
         app.MapForeignModuleEndpoints(registry);
         await app.StartAsync();
@@ -338,13 +338,13 @@ public sealed class ForeignModuleEndpointParityTests
 
     private sealed class ParitySurfaceHost(
         ModuleRegistry registry,
-        ISharpClawModule module,
+        ISharpClawRuntimeModule module,
         TestApiHost api,
         IAsyncDisposable? runtimeHost,
         TestWorkspace? workspace) : IAsyncDisposable
     {
         public ModuleRegistry Registry => registry;
-        public ISharpClawModule Module => module;
+        public ISharpClawRuntimeModule Module => module;
         public TestApiHost Api => api;
 
         public async ValueTask DisposeAsync()
@@ -391,7 +391,7 @@ public sealed class ForeignModuleEndpointParityTests
         }
     }
 
-    private sealed class NativeParityModule : ISharpClawModule
+    private sealed class NativeParityModule : ISharpClawRuntimeModule
     {
         public string Id => "sample_csharp_module";
         public string DisplayName => "Sample C# Module";

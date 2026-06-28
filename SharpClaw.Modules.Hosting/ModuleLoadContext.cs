@@ -20,7 +20,7 @@ public sealed class ModuleLoadContext : AssemblyLoadContext
     /// every module share the same <see cref="Type"/> identity. If any of these were
     /// resolved by <see cref="AssemblyDependencyResolver"/> from the module directory,
     /// the runtime would load a second copy and casts like
-    /// <c>obj is ISharpClawModule</c> would silently fail with a type mismatch.
+    /// <c>obj is ISharpClawCoreModule</c> would silently fail with a type mismatch.
     /// </summary>
     private static readonly string[] HostSharedPrefixes =
     {
@@ -55,8 +55,8 @@ public sealed class ModuleLoadContext : AssemblyLoadContext
         // Always delegate host-shared assemblies to the default ALC. Without this
         // guard, AssemblyDependencyResolver would happily return a copy that the
         // module ships next to itself (e.g. SharpClaw.Contracts.dll), causing an
-        // ALC collision: the host's ISharpClawModule and the module's
-        // ISharpClawModule would be two distinct types.
+        // ALC collision: the host's ISharpClawCoreModule and the module's
+        // ISharpClawCoreModule would be two distinct types.
         if (name.Name is { Length: > 0 } shortName)
         {
             for (var i = 0; i < HostSharedPrefixes.Length; i++)

@@ -8,7 +8,7 @@ using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.Tests.ExternalModule;
 
-public sealed class SyntheticExternalLifecycleModule : ISharpClawModule
+public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
 {
     public const string ModuleId = "synthetic_external_lifecycle";
     public const string ToolPrefixValue = "sel";

@@ -17,7 +17,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// </summary>
 public sealed class ModuleRegistry : IModuleStorageContractProvider
 {
-    private readonly Dictionary<string, ISharpClawModule> _modules = new(StringComparer.Ordinal);
+    private readonly Dictionary<string, ISharpClawCoreModule> _modules = new(StringComparer.Ordinal);
     private readonly Dictionary<string, (string ModuleId, string ToolName)> _toolIndex = new(StringComparer.Ordinal);
     private readonly HashSet<string> _inlineToolIndex = new(StringComparer.Ordinal);
     private readonly Dictionary<(string ModuleId, string ToolName), ModuleToolPermission?> _permissionDescriptorIndex = new();
@@ -108,7 +108,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
     /// left in a partially-registered state.
     /// </summary>
     public void Register(
-        ISharpClawModule module,
+        ISharpClawCoreModule module,
         IModuleRuntimeHost? runtimeHost = null,
         bool isExternal = false)
     {
@@ -143,7 +143,8 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
             var protocolModule = module as IForeignModuleProtocolContractModule;
             var protocolExports = protocolModule?.ExportedProtocolContracts ?? [];
             var protocolRequirements = protocolModule?.RequiredProtocolContracts ?? [];
-            var cliCommands = module.GetCliCommands() ?? [];
+            var runtimeModule = module as ISharpClawRuntimeModule;
+            var cliCommands = runtimeModule?.GetCliCommands() ?? [];
             var storageContracts = module.GetStorageContracts();
 
             // Validate job-pipeline tool names and aliases.
@@ -461,7 +462,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
             }
 
             // Remove any CLI commands this module provided.
-            foreach (var cmd in module.GetCliCommands() ?? [])
+            foreach (var cmd in (module as ISharpClawRuntimeModule)?.GetCliCommands() ?? [])
             {
                 var target = cmd.Scope == ModuleCliScope.TopLevel ? _cliTopLevel : _cliResourceTypes;
                 target.Remove(cmd.Name);
@@ -546,7 +547,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
     }
 
     /// <summary>Get a module by ID.</summary>
-    public ISharpClawModule? GetModule(string moduleId)
+    public ISharpClawCoreModule? GetModule(string moduleId)
     {
         _lock.EnterReadLock();
         try { return _modules.GetValueOrDefault(moduleId); }
@@ -554,7 +555,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
     }
 
     /// <summary>Find a module by its tool prefix, or <c>null</c> if no module uses that prefix.</summary>
-    public ISharpClawModule? GetModuleByPrefix(string toolPrefix)
+    public ISharpClawCoreModule? GetModuleByPrefix(string toolPrefix)
     {
         _lock.EnterReadLock();
         try { return _modules.Values.FirstOrDefault(m => m.ToolPrefix == toolPrefix); }
@@ -565,7 +566,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
     /// Resolve a tool name (or alias) to its owning module and canonical tool name.
     /// Returns <c>null</c> if the tool is not registered by any loaded module.
     /// </summary>
-    public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName)
+    public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName)
     {
         _lock.EnterReadLock();
         try
@@ -581,7 +582,7 @@ public sealed class ModuleRegistry : IModuleStorageContractProvider
     }
 
     /// <summary>Get all loaded modules.</summary>
-    public IReadOnlyList<ISharpClawModule> GetAllModules()
+    public IReadOnlyList<ISharpClawCoreModule> GetAllModules()
     {
         _lock.EnterReadLock();
         try { return [.. _modules.Values]; }

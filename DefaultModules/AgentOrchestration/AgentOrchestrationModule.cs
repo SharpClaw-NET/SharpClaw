@@ -14,7 +14,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// Default module: agent lifecycle (create sub-agent, manage agent),
 /// task editing, and skill access. All tools flow through the job pipeline.
 /// </summary>
-public sealed class AgentOrchestrationModule : ISharpClawModule, ITaskParserAware
+public sealed class AgentOrchestrationModule : ISharpClawRuntimeModule, ITaskParserAware
 {
     public const string ModuleIdValue = "sharpclaw_agent_orchestration";
 

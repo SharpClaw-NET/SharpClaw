@@ -105,7 +105,7 @@ public sealed class ModuleService(
     /// <summary>Get enriched detail for a single module, including manifest and tool/contract info.</summary>
     public async Task<ModuleDetailResponse?> GetDetailAsync(string moduleId, CancellationToken ct = default)
     {
-        ISharpClawModule? module = loader.GetBundledModule(moduleId);
+        ISharpClawCoreModule? module = loader.GetBundledModule(moduleId);
         ModuleStateDB? state = null;
         ModuleManifest? manifest;
         bool isExternal = false;
@@ -185,7 +185,7 @@ public sealed class ModuleService(
         // Update DB
         var state = await db.ModuleStates.FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
         var manifest = loader.GetManifest(moduleId);
-        ISharpClawModule module = bundledModule;
+        ISharpClawCoreModule module = bundledModule;
 
         if (state is null)
         {
@@ -273,7 +273,7 @@ public sealed class ModuleService(
         return ToResponse(module, state, manifest);
     }
 
-    public async Task<ISharpClawModule> RegisterBundledRuntimeAsync(
+    public async Task<ISharpClawCoreModule> RegisterBundledRuntimeAsync(
         string moduleId,
         IServiceProvider rootServices,
         CancellationToken ct = default)
@@ -284,7 +284,7 @@ public sealed class ModuleService(
         var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
         var manifest = loader.GetManifest(moduleId);
-        ISharpClawModule? module = null;
+        ISharpClawCoreModule? module = null;
         IModuleRuntimeHost? runtimeHost = null;
 
         try
@@ -638,7 +638,7 @@ public sealed class ModuleService(
             persistDisabledEnvEntry: false);
     }
 
-    public void RegisterModulePersistence(ISharpClawModule module)
+    public void RegisterModulePersistence(ISharpClawCoreModule module)
     {
         ArgumentNullException.ThrowIfNull(module);
 
@@ -651,13 +651,10 @@ public sealed class ModuleService(
     }
 
     private static void RegisterTaskRuntimeContributions(
-        ISharpClawModule module,
+        ISharpClawCoreModule module,
         IServiceProvider? moduleServices = null)
     {
-        if (module is ITaskParserAware parserAware)
-            TaskScriptParser.RegisterModule(parserAware.ParserExtension);
-
-        if (module is ForeignModuleProxy foreignModule)
+        if (module is ForeignModuleProxy foreignModule && moduleServices is null)
         {
             foreach (var descriptor in foreignModule.TaskStepDescriptors)
                 TaskStepRegistry.Default.Register(descriptor);
@@ -671,9 +668,12 @@ public sealed class ModuleService(
                     TaskStepRegistry.Default.Register(descriptor);
             }
         }
+
+        if (module is ITaskParserAware parserAware)
+            TaskScriptParser.RegisterModule(parserAware.ParserExtension);
     }
 
-    private static void UnregisterTaskRuntimeContributions(ISharpClawModule module)
+    private static void UnregisterTaskRuntimeContributions(ISharpClawCoreModule module)
     {
         if (module is ITaskParserAware parserAware)
             TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
@@ -681,7 +681,7 @@ public sealed class ModuleService(
         TaskStepRegistry.Default.UnregisterOwner(module.Id);
     }
 
-    public async Task LoadModulePersistenceAsync(ISharpClawModule module, CancellationToken ct = default)
+    public async Task LoadModulePersistenceAsync(ISharpClawCoreModule module, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(module);
 
@@ -695,8 +695,8 @@ public sealed class ModuleService(
         }
     }
 
-    private async Task<(ISharpClawModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(
-        ISharpClawModule bundledModule,
+    private async Task<(ISharpClawCoreModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(
+        ISharpClawCoreModule bundledModule,
         ModuleManifest? manifest,
         IServiceProvider rootServices,
         CancellationToken ct)
@@ -766,7 +766,7 @@ public sealed class ModuleService(
 
     private ModuleManifestRuntimeInfo ResolveBundledRuntimeInfo(
         ModuleManifest manifest,
-        ISharpClawModule bundledModule,
+        ISharpClawCoreModule bundledModule,
         ModuleManifestRuntimeInfo runtimeInfo)
     {
         if (!runtimeInfo.IsDotNet)
@@ -835,7 +835,7 @@ public sealed class ModuleService(
 
     private static void EnsureBundledModuleReadyForDotNetSidecar(
         ModuleManifest manifest,
-        ISharpClawModule module)
+        ISharpClawCoreModule module)
     {
         var report = new SidecarReadinessAnalyzer().Analyze(module);
         if (report.IsReadyForSidecarDefault)
@@ -1456,7 +1456,7 @@ public sealed class ModuleService(
     /// to its resource types and global flags.
     /// </summary>
     private async Task ReconcilePermissionsForModuleAsync(
-        ISharpClawModule module, CancellationToken ct)
+        ISharpClawCoreModule module, CancellationToken ct)
     {
         var newResourceTypes = module.GetResourceTypeDescriptors()
             .Select(d => d.ResourceType)
@@ -1533,7 +1533,7 @@ public sealed class ModuleService(
     // ═══════════════════════════════════════════════════════════════
 
     private static ModuleStateResponse ToResponse(
-        ISharpClawModule module, ModuleStateDB? state, ModuleManifest? manifest,
+        ISharpClawCoreModule module, ModuleStateDB? state, ModuleManifest? manifest,
         bool isExternal = false)
     {
         return new ModuleStateResponse(

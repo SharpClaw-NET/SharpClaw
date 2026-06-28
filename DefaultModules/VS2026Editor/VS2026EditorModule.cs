@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.VS2026Editor;
 /// diagnostics, builds, and terminal commands through a connected
 /// VS 2026 extension. Windows only.
 /// </summary>
-public sealed class VS2026EditorModule : ISharpClawModule, IForeignModuleProtocolContractModule
+public sealed class VS2026EditorModule : ISharpClawCoreModule, IForeignModuleProtocolContractModule
 {
     private const string EditorBridgeContractName = "editor_bridge";
     private const string EditorSessionContractName = "editor_session";

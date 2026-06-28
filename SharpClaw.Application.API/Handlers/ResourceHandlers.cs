@@ -7,7 +7,8 @@ namespace SharpClaw.Application.API.Handlers;
 
 /// <summary>
 /// Universal resource lookup endpoint.  Type-specific CRUD endpoints
-/// are registered by their owning modules via <see cref="SharpClaw.Contracts.Modules.ISharpClawModule.MapEndpoints"/>.
+/// are registered by their owning runtime modules via
+/// <see cref="SharpClaw.Contracts.Modules.ISharpClawRuntimeModule.MapEndpoints"/>.
 /// </summary>
 [RouteGroup("/resources")]
 public static class ResourceHandlers

@@ -16,7 +16,7 @@ namespace SharpClaw.Modules.ModuleDev;
 /// hot-load, and iterate on new SharpClaw modules, plus inspect live processes
 /// and the host development environment.
 /// </summary>
-public sealed class ModuleDevModule : ISharpClawModule
+public sealed class ModuleDevModule : ISharpClawRuntimeModule
 {
     public string Id => "sharpclaw_module_dev";
     public string DisplayName => "Module Development Kit";
@@ -367,7 +367,7 @@ public sealed class ModuleDevModule : ISharpClawModule
     public IReadOnlyList<ModuleInlineToolDefinition> GetInlineToolDefinitions() =>
     [
         new("describe_module_system",
-            "Return a concise reference card of the SharpClaw module contract: ISharpClawModule interface, tool definitions, permissions, contract system, and manifest format.",
+            "Return a concise reference card of the SharpClaw module contract: ISharpClawCoreModule interface, tool definitions, permissions, contract system, and manifest format.",
             BuildEmptySchema()),
 
         new("list_loaded_modules",
@@ -943,8 +943,8 @@ public sealed class ModuleDevModule : ISharpClawModule
 
             # SharpClaw Module System Reference
 
-            ## ISharpClawModule Interface
-            Every module implements `ISharpClawModule` from `SharpClaw.Contracts.Modules`.
+            ## ISharpClawCoreModule Interface
+            Every module implements `ISharpClawCoreModule` from `SharpClaw.Contracts.Modules`.
 
             Required members:
             - `string Id` — unique module identifier (e.g. "my_module")

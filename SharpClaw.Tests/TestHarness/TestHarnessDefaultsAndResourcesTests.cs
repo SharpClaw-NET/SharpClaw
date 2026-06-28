@@ -246,7 +246,7 @@ public sealed class TestHarnessDefaultsAndResourcesTests
         });
     }
 
-    private sealed class ShadowCoreAgentDefaultModule : ISharpClawModule
+    private sealed class ShadowCoreAgentDefaultModule : ISharpClawCoreModule
     {
         public string Id => "shadow_core_agent_default";
         public string DisplayName => "Shadow Core Agent Default";

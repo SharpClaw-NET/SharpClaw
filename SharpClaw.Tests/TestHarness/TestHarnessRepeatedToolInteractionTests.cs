@@ -793,7 +793,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             $"descriptorBuilds={DescriptorBuilds}, max={InterCallStats.Max}, p95={InterCallStats.P95}, p99={InterCallStats.P99}";
     }
 
-    private sealed class LifecycleInlineToolModule : ISharpClawModule
+    private sealed class LifecycleInlineToolModule : ISharpClawCoreModule
     {
         public const string ModuleId = "sharpclaw_lifecycle_test";
         public const string ToolName = "lifecycle_permissioned";

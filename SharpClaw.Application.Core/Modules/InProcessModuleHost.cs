@@ -40,7 +40,7 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
 
     private InProcessModuleHost(
         ModuleLoadContext loadContext,
-        ISharpClawModule module,
+        ISharpClawCoreModule module,
         ServiceProvider serviceProvider,
         string sourceDirectory)
     {
@@ -51,7 +51,7 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         SourceDirectory = sourceDirectory;
     }
 
-    public ISharpClawModule Module { get; }
+    public ISharpClawCoreModule Module { get; }
     public string SourceDirectory { get; }
     public IServiceProvider Services => _serviceProvider;
 
@@ -183,7 +183,7 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
     }
 
     private static ServiceProvider BuildServices(
-        ISharpClawModule module,
+        ISharpClawCoreModule module,
         Assembly moduleAssembly,
         IServiceProvider hostServices)
     {

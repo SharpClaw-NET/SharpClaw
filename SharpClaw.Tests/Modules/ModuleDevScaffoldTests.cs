@@ -144,7 +144,7 @@ public sealed class ModuleDevScaffoldTests
 
         public bool IsToolPrefixRegistered(string toolPrefix) => false;
 
-        public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName) => null;
+        public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName) => null;
 
         public Task<ModuleStateResponse> LoadExternalAsync(
             string moduleDir,

@@ -57,7 +57,7 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         Module = _moduleProxy;
     }
 
-    public ISharpClawModule Module { get; }
+    public ISharpClawCoreModule Module { get; }
     public string SourceDirectory { get; }
     public IServiceProvider Services => _serviceProvider;
     public ForeignModuleProtocolClient ProtocolClient { get; }

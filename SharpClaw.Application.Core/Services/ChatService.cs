@@ -1764,7 +1764,7 @@ public sealed class ChatService(
     /// Dispatches an inline module tool call.  Resolves the owning module
     /// from <see cref="ModuleRegistry"/>, creates a restricted
     /// <see cref="ModuleServiceScope"/>, and calls
-    /// <see cref="ISharpClawModule.ExecuteInlineToolAsync"/>.
+    /// <see cref="ISharpClawCoreModule.ExecuteInlineToolAsync"/>.
     /// </summary>
     private async Task<string> HandleInlineModuleToolAsync(
         ChatToolCall toolCall,

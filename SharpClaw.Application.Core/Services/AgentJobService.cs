@@ -506,7 +506,7 @@ public sealed class AgentJobService(
     /// Executes a module job by resolving the <c>ActionKey</c> through
     /// <see cref="ModuleRegistry"/>, deserializing the <see cref="ModuleEnvelope"/>
     /// from <c>ScriptJson</c>, and calling
-    /// <see cref="ISharpClawModule.ExecuteToolAsync"/> inside a restricted
+    /// <see cref="ISharpClawCoreModule.ExecuteToolAsync"/> inside a restricted
     /// <see cref="ModuleServiceScope"/> with a per-manifest timeout.
     /// </summary>
     private async Task<AgentJobExecutionOutcome> DispatchModuleExecutionAsync(

@@ -11,7 +11,7 @@ namespace SharpClaw.Modules.Providers.Anthropic;
 /// Default module: registers the native Anthropic provider plugin.
 /// Uses Anthropic's <c>/v1/messages</c> wire format (not OpenAI-compatible).
 /// </summary>
-public sealed class AnthropicProviderModule : ISharpClawModule
+public sealed class AnthropicProviderModule : ISharpClawCoreModule
 {
     public string Id => "sharpclaw_providers_anthropic";
     public string DisplayName => "Anthropic Provider";

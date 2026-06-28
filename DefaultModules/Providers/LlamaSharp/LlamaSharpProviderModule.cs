@@ -21,7 +21,7 @@ namespace SharpClaw.Modules.Providers.LlamaSharp;
 /// config, and exposes <c>/models/local</c> REST + <c>localmodel</c>
 /// CLI surfaces.
 /// </summary>
-public sealed class LlamaSharpProviderModule : ISharpClawModule
+public sealed class LlamaSharpProviderModule : ISharpClawRuntimeModule
 {
     private static int _nativeBackendConfigured;
 

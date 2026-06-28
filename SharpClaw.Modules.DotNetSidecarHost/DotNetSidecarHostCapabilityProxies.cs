@@ -543,7 +543,7 @@ internal static class DotNetSidecarHostCapabilityProxies
                 .GetResult()
                 .IsRegistered;
 
-        public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName) =>
+        public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName) =>
             (_remoteToolModule, toolName);
 
         public async Task<ModuleStateResponse> LoadExternalAsync(
@@ -782,7 +782,7 @@ internal static class DotNetSidecarHostCapabilityProxies
                 ct)).Result;
     }
 
-    private sealed class RemoteToolModule(DotNetSidecarHostCapabilityClient client) : ISharpClawModule
+    private sealed class RemoteToolModule(DotNetSidecarHostCapabilityClient client) : ISharpClawCoreModule
     {
         public string Id => "sharpclaw_host_tools";
         public string DisplayName => "SharpClaw Host Tools";

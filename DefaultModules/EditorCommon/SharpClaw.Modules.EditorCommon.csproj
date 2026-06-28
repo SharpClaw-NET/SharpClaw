@@ -14,8 +14,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
-    <ProjectReference Include="..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" Condition="'$(UseLocalContractsProject)' == 'true'" />
-    <PackageReference Include="SharpClaw.Contracts" Condition="'$(UseLocalContractsProject)' != 'true'" />
+    <PackageReference Include="SharpClaw.Contracts" />
   </ItemGroup>
 
   <ItemGroup>

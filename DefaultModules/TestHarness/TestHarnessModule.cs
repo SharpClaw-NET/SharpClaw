@@ -8,7 +8,7 @@ using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Modules.TestHarness;
 
-public sealed class TestHarnessModule : ISharpClawModule
+public sealed class TestHarnessModule : ISharpClawRuntimeModule
 {
     private int _permissionDescriptorBuilds;
 

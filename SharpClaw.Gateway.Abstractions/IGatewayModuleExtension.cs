@@ -6,7 +6,7 @@ namespace SharpClaw.Gateway.Abstractions;
 /// Implemented by a module class (or a sibling class in the same assembly)
 /// to publish a slice of the module's surface through the SharpClaw gateway
 /// process. The gateway loader discovers <see cref="IGatewayModuleExtension"/>
-/// instances independently of <c>ISharpClawModule</c>; a module that has no
+/// instances independently of <c>ISharpClawCoreModule</c>; a module that has no
 /// public surface simply does not implement this contract.
 /// </summary>
 public interface IGatewayModuleExtension

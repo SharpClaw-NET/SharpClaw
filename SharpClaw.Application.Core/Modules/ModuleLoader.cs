@@ -15,18 +15,18 @@ namespace SharpClaw.Application.Core.Modules;
 /// </summary>
 public sealed class ModuleLoader
 {
-    private readonly Dictionary<string, ISharpClawModule> _bundled;
+    private readonly Dictionary<string, ISharpClawCoreModule> _bundled;
     private readonly HashSet<string> _manifestOnlyBundledIds;
     private Dictionary<string, ModuleManifest>? _manifestsCache;
     private IServiceProvider? _rootServices;
 
-    public ModuleLoader(params ISharpClawModule[] modules)
+    public ModuleLoader(params ISharpClawCoreModule[] modules)
         : this(modules, manifests: null, manifestOnlyBundledIds: [])
     {
     }
 
     private ModuleLoader(
-        IEnumerable<ISharpClawModule> modules,
+        IEnumerable<ISharpClawCoreModule> modules,
         Dictionary<string, ModuleManifest>? manifests,
         IEnumerable<string> manifestOnlyBundledIds)
     {
@@ -58,7 +58,7 @@ public sealed class ModuleLoader
             .Select(manifest => manifest.Id)
             .ToHashSet(StringComparer.Ordinal);
         var modules = manifestOnlyManifests
-            .Select(manifest => (ISharpClawModule)new ManifestOnlyBundledModule(manifest))
+            .Select(manifest => (ISharpClawCoreModule)new ManifestOnlyBundledModule(manifest))
             .ToList();
 
         return new ModuleLoader(modules, manifests, manifestOnlyIds);
@@ -79,11 +79,11 @@ public sealed class ModuleLoader
     }
 
     /// <summary>Get a bundled module by its ID, or <c>null</c> if unknown.</summary>
-    public ISharpClawModule? GetBundledModule(string moduleId)
+    public ISharpClawCoreModule? GetBundledModule(string moduleId)
         => _bundled.GetValueOrDefault(moduleId);
 
     /// <summary>Get all bundled module instances (regardless of enabled state).</summary>
-    public IReadOnlyList<ISharpClawModule> GetAllBundled() => [.. _bundled.Values];
+    public IReadOnlyList<ISharpClawCoreModule> GetAllBundled() => [.. _bundled.Values];
 
     /// <summary>Whether a module ID refers to a known default module.</summary>
     public bool IsDefaultModule(string moduleId) => _bundled.ContainsKey(moduleId);
@@ -215,7 +215,7 @@ public sealed class ModuleLoader
     private static string ResolveApplicationBaseDirectory() =>
         Path.GetDirectoryName(typeof(ModuleLoader).Assembly.Location)!;
 
-    private sealed class ManifestOnlyBundledModule(ModuleManifest manifest) : ISharpClawModule
+    private sealed class ManifestOnlyBundledModule(ModuleManifest manifest) : ISharpClawCoreModule
     {
         public string Id => manifest.Id;
         public string DisplayName => manifest.DisplayName;

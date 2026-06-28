@@ -15,7 +15,7 @@ namespace SharpClaw.Modules.Providers.OpenAICompatible;
 /// as the wire-format base; the heuristics are imported from
 /// <see cref="ProviderCapabilityHeuristics"/>.
 /// </summary>
-public sealed class OpenAICompatibleProvidersModule : ISharpClawModule
+public sealed class OpenAICompatibleProvidersModule : ISharpClawCoreModule
 {
     public string Id => "sharpclaw_providers_openai_compat";
     public string DisplayName => "OpenAI-Compatible Providers";

@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.Providers.Ollama;
 /// user-managed Ollama server and overrides model listing to use
 /// Ollama's <c>/api/tags</c> endpoint).
 /// </summary>
-public sealed class OllamaProviderModule : ISharpClawModule
+public sealed class OllamaProviderModule : ISharpClawCoreModule
 {
     public string Id => "sharpclaw_providers_ollama";
     public string DisplayName => "Ollama Provider";

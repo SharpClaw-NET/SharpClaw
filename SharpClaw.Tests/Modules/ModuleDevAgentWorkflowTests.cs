@@ -449,7 +449,7 @@ public sealed class ModuleDevAgentWorkflowTests
 
         public bool IsModuleRegistered(string moduleId) => false;
         public bool IsToolPrefixRegistered(string toolPrefix) => false;
-        public (ISharpClawModule Module, string ToolName)? FindToolByName(string toolName) => null;
+        public (ISharpClawCoreModule Module, string ToolName)? FindToolByName(string toolName) => null;
 
         public Task<ModuleStateResponse> LoadExternalAsync(
             string moduleDir,

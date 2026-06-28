@@ -9,7 +9,7 @@ namespace SharpClaw.Application.Core.Modules;
 /// </summary>
 public interface IModuleRuntimeHost : IAsyncDisposable
 {
-    ISharpClawModule Module { get; }
+    ISharpClawCoreModule Module { get; }
     string SourceDirectory { get; }
     IServiceProvider Services { get; }
 

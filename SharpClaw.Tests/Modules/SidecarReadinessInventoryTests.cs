@@ -158,11 +158,11 @@ public sealed class SidecarReadinessInventoryTests
         return analyzer.AnalyzeAll(modules);
     }
 
-    private static IReadOnlyList<ISharpClawModule> LoadBundledModules()
+    private static IReadOnlyList<ISharpClawCoreModule> LoadBundledModules()
     {
         var apiOutputDir = ResolveApiOutputDirectory();
-        var moduleType = typeof(ISharpClawModule);
-        var modules = new List<ISharpClawModule>();
+        var moduleType = typeof(ISharpClawCoreModule);
+        var modules = new List<ISharpClawCoreModule>();
 
         foreach (var dllName in ExpectedModuleDlls)
         {
@@ -177,9 +177,9 @@ public sealed class SidecarReadinessInventoryTests
                 .ToList();
 
             implementations.Should().ContainSingle(
-                $"'{dllName}' must contain exactly one public parameterless ISharpClawModule implementation");
+                $"'{dllName}' must contain exactly one public parameterless ISharpClawCoreModule implementation");
 
-            modules.Add((ISharpClawModule)Activator.CreateInstance(implementations[0])!);
+            modules.Add((ISharpClawCoreModule)Activator.CreateInstance(implementations[0])!);
         }
 
         return modules.OrderBy(module => module.Id, StringComparer.Ordinal).ToArray();

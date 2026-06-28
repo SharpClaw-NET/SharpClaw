@@ -16,7 +16,7 @@ namespace SharpClaw.Modules.EditorCommon;
 /// No LLM-callable tools — this module provides only DI services,
 /// protocol contract exports, and REST/WebSocket endpoints.
 /// </summary>
-public sealed class EditorCommonModule : ISharpClawModule, IForeignModuleProtocolContractModule
+public sealed class EditorCommonModule : ISharpClawRuntimeModule, IForeignModuleProtocolContractModule
 {
     public string Id => "sharpclaw_editor_common";
     public string DisplayName => "Editor Common";

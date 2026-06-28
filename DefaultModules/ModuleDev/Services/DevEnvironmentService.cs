@@ -50,7 +50,7 @@ internal sealed class DevEnvironmentService(
     {
         get
         {
-            var contractsAssembly = typeof(ISharpClawModule).Assembly;
+            var contractsAssembly = typeof(ISharpClawCoreModule).Assembly;
             return contractsAssembly.Location;
         }
     }
@@ -70,7 +70,7 @@ internal sealed class DevEnvironmentService(
         var runtimes = ParseLines(await runtimesTask);
         var tools = ParseLines(await toolsTask);
 
-        var contractsAssembly = typeof(ISharpClawModule).Assembly;
+        var contractsAssembly = typeof(ISharpClawCoreModule).Assembly;
         var contractsVersion = contractsAssembly.GetName().Version?.ToString() ?? "unknown";
         var contractsPath = contractsAssembly.Location;
 

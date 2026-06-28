@@ -180,7 +180,7 @@ public sealed class TestHarnessArchitectureTests
     }
 
     [Test]
-    public void HostProjectsUseConditionalContractsReferenceWorkflow()
+    public void HostProjectsUsePackagedCoreContractsWorkflow()
     {
         var root = FindSolutionRoot();
         var projectRelativePaths = new[]
@@ -206,20 +206,11 @@ public sealed class TestHarnessArchitectureTests
 
             contractProjectReferences
                 .Should()
-                .ContainSingle()
-                .Which
-                .Should()
-                .Contain("SharpClaw.Contracts");
+                .BeEmpty("contracts are now consumed only through the published SharpClaw.Contracts package");
             contractPackageReferences
                 .Should()
                 .ContainSingle();
 
-            project.Descendants("ProjectReference")
-                .Single(e => (e.Attribute("Include")?.Value ?? "")
-                    .Contains("SharpClaw.Contracts", StringComparison.OrdinalIgnoreCase))
-                .Attribute("Condition")?.Value
-                .Should()
-                .Be("'$(UseLocalContractsProject)' == 'true'");
             project.Descendants("PackageReference")
                 .Single(e => string.Equals(
                     e.Attribute("Include")?.Value,
@@ -227,8 +218,17 @@ public sealed class TestHarnessArchitectureTests
                     StringComparison.Ordinal))
                 .Attribute("Condition")?.Value
                 .Should()
-                .Be("'$(UseLocalContractsProject)' != 'true'");
+                .BeNull("there is no local contracts-project escape hatch anymore");
         }
+
+        var appCoreProject = XDocument.Load(Path.Combine(
+            root,
+            "SharpClaw.Application.Core",
+            "SharpClaw.Application.Core.csproj"));
+        appCoreProject.Descendants("PackageReference")
+            .Select(e => e.Attribute("Include")?.Value)
+            .Should()
+            .Contain("SharpClaw.Core");
     }
 
     [Test]

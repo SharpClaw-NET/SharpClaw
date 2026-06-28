@@ -513,7 +513,7 @@ public sealed class BundledDotNetSidecarDefaultTests
 
         public static ModuleServiceHarness Create(
             Dictionary<string, string?>? configurationOverrides = null,
-            ISharpClawModule[]? modules = null,
+            ISharpClawCoreModule[]? modules = null,
             ModuleLoader? moduleLoader = null)
         {
             var instanceRoot = Path.Combine(
@@ -593,6 +593,23 @@ public sealed class BundledDotNetSidecarDefaultTests
 
         public async ValueTask DisposeAsync()
         {
+            var loader = Root.GetRequiredService<ModuleLoader>();
+            var runtimeBackedModuleIds = Registry.GetAllModules()
+                .Select(module => module.Id)
+                .Where(moduleId => Registry.GetRuntimeHost(moduleId) is not null)
+                .ToArray();
+
+            foreach (var moduleId in runtimeBackedModuleIds)
+            {
+                if (Registry.GetModule(moduleId) is null)
+                    continue;
+
+                if (Registry.IsExternal(moduleId))
+                    await ModuleService.UnloadExternalAsync(moduleId, CancellationToken.None);
+                else if (loader.IsDefaultModule(moduleId))
+                    await ModuleService.DisableAsync(moduleId, CancellationToken.None);
+            }
+
             foreach (var runtimeHost in Registry.GetRuntimeHosts())
                 await runtimeHost.DisposeAsync();
 

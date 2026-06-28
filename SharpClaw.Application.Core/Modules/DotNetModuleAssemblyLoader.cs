@@ -5,20 +5,20 @@ namespace SharpClaw.Application.Core.Modules;
 
 internal static class DotNetModuleAssemblyLoader
 {
-    public static ISharpClawModule CreateModuleInstance(
+    public static ISharpClawCoreModule CreateModuleInstance(
         Assembly assembly,
         ModuleManifest manifest,
         ModuleManifestRuntimeInfo runtimeInfo,
         string dllPath)
     {
         var moduleTypes = assembly.GetTypes()
-            .Where(t => t.IsAssignableTo(typeof(ISharpClawModule)) && !t.IsAbstract)
+            .Where(t => t.IsAssignableTo(typeof(ISharpClawCoreModule)) && !t.IsAbstract)
             .ToArray();
 
         if (moduleTypes.Length == 0)
         {
             throw new InvalidOperationException(
-                $"No ISharpClawModule implementation found in '{Path.GetFileName(dllPath)}'.");
+                $"No ISharpClawCoreModule implementation found in '{Path.GetFileName(dllPath)}'.");
         }
 
         if (!string.IsNullOrWhiteSpace(runtimeInfo.ModuleType))
@@ -35,18 +35,18 @@ internal static class DotNetModuleAssemblyLoader
                     $"but that type was not found in '{Path.GetFileName(dllPath)}'.");
             }
 
-            return (ISharpClawModule)Activator.CreateInstance(explicitType)!;
+            return (ISharpClawCoreModule)Activator.CreateInstance(explicitType)!;
         }
 
         foreach (var moduleType in moduleTypes)
         {
-            var candidate = (ISharpClawModule)Activator.CreateInstance(moduleType)!;
+            var candidate = (ISharpClawCoreModule)Activator.CreateInstance(moduleType)!;
             if (string.Equals(candidate.Id, manifest.Id, StringComparison.Ordinal))
                 return candidate;
         }
 
         throw new InvalidOperationException(
-            $"No ISharpClawModule implementation in '{Path.GetFileName(dllPath)}' " +
+            $"No ISharpClawCoreModule implementation in '{Path.GetFileName(dllPath)}' " +
             $"declares module id '{manifest.Id}'. Add moduleType to module.json when an assembly contains multiple modules.");
     }
 }
