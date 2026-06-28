@@ -1,5 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Core.Permissions;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts;
@@ -16,6 +17,7 @@ namespace SharpClaw.Application.Services;
 public sealed class RoleService(
     SharpClawDbContext db,
     IConfiguration configuration,
+    RolePermissionAdministrationEngine rolePermissions,
     ChatCache chatCache)
 {
     // ═══════════════════════════════════════════════════════════════
@@ -104,8 +106,7 @@ public sealed class RoleService(
             // Load caller's own permission set for validation.
             var callerPs = await LoadCallerPermissionSetAsync(callerUserId, ct);
 
-            ValidateGlobalFlags(request, callerPs);
-            ValidateResourceGrants(request, callerPs);
+            rolePermissions.ValidateRequestedGrants(request, callerPs);
         }
 
         // Reconcile the permission set via incremental diff — never deletes wildcard grants.
@@ -124,81 +125,12 @@ public sealed class RoleService(
             role.PermissionSetId = ps.Id;
         }
 
-        ReconcileGlobalFlags(ps, request.GlobalFlags);
-        ReconcileResourceAccesses(ps, request.ResourceGrants);
+        rolePermissions.ReconcilePermissionSet(ps, request);
 
         await db.SaveChangesAsync(ct);
         InvalidatePermissionRuntimeState();
 
         return ToResponse(role, ps);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Validation — you can only grant what you hold
-    // ═══════════════════════════════════════════════════════════════
-
-    private static void ValidateGlobalFlags(
-        SetRolePermissionsRequest request, PermissionSetDB? callerPs)
-    {
-        if (request.GlobalFlags is null or { Count: 0 })
-            return;
-
-        if (callerPs is null)
-            throw new UnauthorizedAccessException(
-                "You have no permissions — cannot grant any global flags.");
-
-        foreach (var (flagKey, _) in request.GlobalFlags)
-        {
-            if (!callerPs.GlobalFlags.Any(f => f.FlagKey == flagKey))
-                throw new UnauthorizedAccessException(
-                    $"Cannot grant {flagKey} — you do not hold this permission.");
-        }
-    }
-
-    private static void ValidateResourceGrants(
-        SetRolePermissionsRequest request, PermissionSetDB? callerPs)
-    {
-        if (request.ResourceGrants is null or { Count: 0 })
-            return;
-
-        foreach (var (resourceType, grants) in request.ResourceGrants)
-            ValidateGrants(resourceType, resourceType, grants, callerPs);
-    }
-
-    /// <summary>
-    /// For each requested grant, the caller must hold either the exact
-    /// resource ID or the <see cref="WellKnownIds.AllResources"/> wildcard.
-    /// </summary>
-    private static void ValidateGrants(
-        string name,
-        string resourceType,
-        IReadOnlyList<ResourceGrant>? requested,
-        PermissionSetDB? callerPs)
-    {
-        if (requested is null or { Count: 0 })
-            return;
-
-        var callerGrants = callerPs?.ResourceAccesses
-            .Where(a => a.ResourceType == resourceType)
-            .Select(a => a.ResourceId)
-            .ToHashSet();
-
-        if (callerGrants is null or { Count: 0 })
-            throw new UnauthorizedAccessException(
-                $"Cannot grant {name} — you hold no grants of this type.");
-
-        var hasWildcard = callerGrants.Contains(WellKnownIds.AllResources);
-
-        foreach (var grant in requested)
-        {
-            if (hasWildcard)
-                continue;
-
-            if (!callerGrants.Contains(grant.ResourceId))
-                throw new UnauthorizedAccessException(
-                    $"Cannot grant {name} for resource {grant.ResourceId} " +
-                    "— you do not hold this permission.");
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -307,8 +239,8 @@ public sealed class RoleService(
 
     private bool IsUniqueRoleNamesEnforced()
     {
-        var value = configuration["UniqueNames:Roles"];
-        return value is null || !bool.TryParse(value, out var enforced) || enforced;
+        return RolePermissionAdministrationEngine.IsUniqueRoleNameEnforced(
+            configuration["UniqueNames:Roles"]);
     }
 
     private void InvalidatePermissionRuntimeState()
@@ -320,98 +252,10 @@ public sealed class RoleService(
 
     private async Task EnsureRoleNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var normalized = name.Trim();
         var names = await db.Roles
             .Where(r => excludeId == null || r.Id != excludeId)
             .Select(r => r.Name)
             .ToListAsync(ct);
-        if (names.Any(n => n.Trim().Equals(normalized, StringComparison.OrdinalIgnoreCase)))
-            throw new InvalidOperationException($"A role named '{name}' already exists.");
-    }
-
-    /// <summary>
-    /// Reconciles global flags in place: adds new flags, updates changed clearances,
-    /// removes absent flags. Global flags carry no wildcard semantics.
-    /// </summary>
-    private static void ReconcileGlobalFlags(
-        PermissionSetDB ps,
-        IReadOnlyDictionary<string, PermissionClearance>? requested)
-    {
-        var requestedMap = requested ?? new Dictionary<string, PermissionClearance>();
-
-        foreach (var existing in ps.GlobalFlags.ToList())
-        {
-            if (!requestedMap.TryGetValue(existing.FlagKey, out var newClearance))
-                ps.GlobalFlags.Remove(existing);
-            else if (existing.Clearance != newClearance)
-                existing.Clearance = newClearance;
-            // else: unchanged — leave untouched, no EF state change.
-        }
-
-        var existingKeys = ps.GlobalFlags.Select(f => f.FlagKey).ToHashSet();
-        foreach (var (key, clearance) in requestedMap)
-            if (!existingKeys.Contains(key))
-                ps.GlobalFlags.Add(new GlobalFlagDB { FlagKey = key, Clearance = clearance });
-    }
-
-    /// <summary>
-    /// Reconciles resource-access grants in place.
-    /// Wildcard grants (<see cref="WellKnownIds.AllResources"/>) are preserved and
-    /// cannot be removed or have their clearance changed through this endpoint.
-    /// Non-wildcard grants may be freely added, updated, or removed.
-    /// </summary>
-    private static void ReconcileResourceAccesses(
-        PermissionSetDB ps,
-        IReadOnlyDictionary<string, IReadOnlyList<ResourceGrant>>? requested)
-    {
-        // Build a flat lookup of the requested grants.
-        var requestedMap = requested?
-            .SelectMany(kvp => kvp.Value.Select(g => (ResourceType: kvp.Key, g.ResourceId, g.Clearance)))
-            .ToDictionary(t => (t.ResourceType, t.ResourceId), t => t.Clearance)
-            ?? [];
-
-        // Pass 1: handle existing rows — remove absent ones, update changed clearances.
-        foreach (var access in ps.ResourceAccesses.ToList())
-        {
-            var key = (access.ResourceType, access.ResourceId);
-            if (!requestedMap.TryGetValue(key, out var newClearance))
-            {
-                // Wildcard grants cannot be silently removed by omission from
-                // the request payload — that would be a footgun where a partial
-                // update accidentally revokes universal access. Operators who
-                // genuinely want to demote a wildcard should do so through a
-                // dedicated explicit path, not by leaving it out of a PUT body.
-                if (access.ResourceId == WellKnownIds.AllResources)
-                    throw new InvalidOperationException(
-                        $"Wildcard grant for '{access.ResourceType}' is immutable and cannot be removed.");
-
-                ps.ResourceAccesses.Remove(access);
-            }
-            else if (access.Clearance != newClearance)
-            {
-                // Clearance on a wildcard grant IS adjustable — operators
-                // legitimately need to tune clearance over time (e.g. raise
-                // from Unset to Independent, lower from Independent to a
-                // restricted level). The wildcard's identity (ResourceType,
-                // ResourceId) stays immutable; only the disposition changes.
-                access.Clearance = newClearance;
-            }
-            // else: unchanged — leave the row untouched, no EF state change.
-        }
-
-        // Pass 2: add rows that are in the request but not yet in the set.
-        var existingKeys = ps.ResourceAccesses
-            .Select(a => (a.ResourceType, a.ResourceId))
-            .ToHashSet();
-
-        foreach (var (resourceType, grants) in requested ?? new Dictionary<string, IReadOnlyList<ResourceGrant>>())
-            foreach (var grant in grants)
-                if (!existingKeys.Contains((resourceType, grant.ResourceId)))
-                    ps.ResourceAccesses.Add(new ResourceAccessDB
-                    {
-                        ResourceType = resourceType,
-                        ResourceId = grant.ResourceId,
-                        Clearance = grant.Clearance,
-                    });
+        rolePermissions.EnsureRoleNameAvailable(name, names);
     }
 }

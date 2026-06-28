@@ -335,6 +335,7 @@ try
     // The factory resolves over IEnumerable<IProviderPlugin>.
     builder.Services.AddSingleton<ProviderApiClientFactory>();
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
+    builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
     builder.Services.AddSingleton<DefaultResourceEngine>();
     builder.Services.AddSingleton<ProviderCatalogEngine>();
