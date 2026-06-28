@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Core.Tasks.Runtime;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
@@ -64,15 +65,10 @@ public sealed class TaskRuntimeHost(
     /// </summary>
     public TaskRuntimeInstance Register(Guid instanceId, CancellationToken linkedToken)
     {
-        var cts = CancellationTokenSource.CreateLinkedTokenSource(linkedToken);
-        var channel = Channel.CreateUnbounded<TaskOutputEvent>(
-            new UnboundedChannelOptions { SingleReader = false, SingleWriter = true });
-        var pauseGate = new PauseGate();
-
-        var entry = new TaskRuntimeEntry(cts, channel, pauseGate);
+        var entry = TaskRuntimeEntry.Create(linkedToken);
         _entries[instanceId] = entry;
 
-        return new TaskRuntimeInstance(instanceId, entry, this);
+        return entry.CreateInstance(instanceId);
     }
 
     /// <summary>
@@ -83,8 +79,8 @@ public sealed class TaskRuntimeHost(
     {
         if (_entries.TryRemove(instanceId, out var entry))
         {
-            entry.OutputChannel.Writer.TryComplete();
-            entry.Cts.Dispose();
+            entry.CompleteOutput();
+            entry.Dispose();
         }
     }
 
@@ -100,7 +96,7 @@ public sealed class TaskRuntimeHost(
     /// Returns <c>null</c> when no active entry exists.
     /// </summary>
     public ChannelReader<TaskOutputEvent>? GetOutputReader(Guid instanceId)
-        => _entries.TryGetValue(instanceId, out var e) ? e.OutputChannel.Reader : null;
+        => _entries.TryGetValue(instanceId, out var e) ? e.OutputReader : null;
 
     /// <summary>
     /// Cancel and stop a running instance.
@@ -109,8 +105,8 @@ public sealed class TaskRuntimeHost(
     {
         if (_entries.TryGetValue(instanceId, out var entry))
         {
-            entry.PauseGate.Resume(); // unblock if paused so cancel propagates
-            await entry.Cts.CancelAsync();
+            entry.Resume(); // unblock if paused so cancel propagates
+            await entry.CancelAsync();
         }
 
         // Persist the stop through the service (status → Cancelled)
@@ -134,9 +130,9 @@ public sealed class TaskRuntimeHost(
         if (!await svc.PauseInstanceAsync(instanceId, ct))
             return false;
 
-        entry.PauseGate.Pause();
+        entry.Pause();
         await svc.AppendLogAsync(instanceId, "Task paused.", ct: ct);
-        await WriteEventAsync(instanceId, TaskOutputEventType.StatusChange, "Paused");
+        await entry.WriteEventAsync(TaskOutputEventType.StatusChange, "Paused", ct);
         return true;
     }
 
@@ -155,34 +151,10 @@ public sealed class TaskRuntimeHost(
         if (!await svc.ResumeInstanceAsync(instanceId, ct))
             return false;
 
-        entry.PauseGate.Resume();
+        entry.Resume();
         await svc.AppendLogAsync(instanceId, "Task resumed.", ct: ct);
-        await WriteEventAsync(instanceId, TaskOutputEventType.StatusChange, "Running");
+        await entry.WriteEventAsync(TaskOutputEventType.StatusChange, "Running", ct);
         return true;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Internal helpers (used via TaskRuntimeInstance)
-    // ═══════════════════════════════════════════════════════════════
-
-    internal long IncrementSequence(Guid instanceId)
-        => _entries.TryGetValue(instanceId, out var e)
-            ? Interlocked.Increment(ref e.SequenceCounter)
-            : 1;
-
-    internal Task WaitIfPausedAsync(Guid instanceId, CancellationToken ct)
-        => _entries.TryGetValue(instanceId, out var e)
-            ? e.PauseGate.WaitIfPausedAsync(ct)
-            : Task.CompletedTask;
-
-    internal async Task WriteEventAsync(Guid instanceId, TaskOutputEventType type, string? data)
-    {
-        if (!_entries.TryGetValue(instanceId, out var entry))
-            return;
-
-        var seq = IncrementSequence(instanceId);
-        var evt = new TaskOutputEvent(type, seq, DateTimeOffset.UtcNow, data);
-        await entry.OutputChannel.Writer.WriteAsync(evt);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -243,8 +215,8 @@ public sealed class TaskRuntimeHost(
             return;
         try
         {
-            entry.PauseGate.Resume();
-            await entry.Cts.CancelAsync();
+            entry.Resume();
+            await entry.CancelAsync();
         }
         catch (Exception ex)
         {
@@ -252,89 +224,6 @@ public sealed class TaskRuntimeHost(
         }
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Inner types
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>All host-owned state for one active task instance.</summary>
-    internal sealed class TaskRuntimeEntry(
-        CancellationTokenSource cts,
-        Channel<TaskOutputEvent> outputChannel,
-        PauseGate pauseGate)
-    {
-        public CancellationTokenSource Cts { get; } = cts;
-        public Channel<TaskOutputEvent> OutputChannel { get; } = outputChannel;
-        public PauseGate PauseGate { get; } = pauseGate;
-        public long SequenceCounter;
-    }
-
-    /// <summary>Cooperative async pause gate.</summary>
-    internal sealed class PauseGate
-    {
-        private volatile TaskCompletionSource _signal = Signaled();
-
-        public void Pause()
-        {
-            if (_signal.Task.IsCompleted)
-                Interlocked.Exchange(ref _signal, Paused());
-        }
-
-        public void Resume()
-        {
-            var next = Signaled();
-            Interlocked.Exchange(ref _signal, next).TrySetResult();
-        }
-
-        public Task WaitIfPausedAsync(CancellationToken ct)
-            => _signal.Task.WaitAsync(ct);
-
-        private static TaskCompletionSource Paused()
-            => new(TaskCreationOptions.RunContinuationsAsynchronously);
-
-        private static TaskCompletionSource Signaled()
-        {
-            var s = Paused();
-            s.TrySetResult();
-            return s;
-        }
-    }
-}
-
-/// <summary>
-/// A lightweight handle passed to <see cref="TaskOrchestrator"/> for one
-/// running instance.  Delegates all operations to <see cref="TaskRuntimeHost"/>.
-/// </summary>
-public sealed class TaskRuntimeInstance
-{
-    private readonly TaskRuntimeHost.TaskRuntimeEntry _entry;
-    private readonly TaskRuntimeHost _host;
-    private readonly Guid _instanceId;
-
-    internal TaskRuntimeInstance(
-        Guid instanceId,
-        TaskRuntimeHost.TaskRuntimeEntry entry,
-        TaskRuntimeHost host)
-    {
-        _instanceId = instanceId;
-        _entry = entry;
-        _host = host;
-    }
-    /// <summary>The cancellation token for this instance's execution.</summary>
-    public CancellationToken CancellationToken => _entry.Cts.Token;
-
-    /// <summary>Write a structured event to the instance's output channel.</summary>
-    public Task WriteEventAsync(TaskOutputEventType type, string? data)
-        => _host.WriteEventAsync(_instanceId, type, data);
-
-    /// <summary>
-    /// Wait if the instance has been cooperatively paused.
-    /// Returns immediately when the instance is running.
-    /// </summary>
-    public Task WaitIfPausedAsync(CancellationToken ct)
-        => _host.WaitIfPausedAsync(_instanceId, ct);
-
-    /// <summary>Increment and return the next output sequence number.</summary>
-    public long IncrementSequence() => _host.IncrementSequence(_instanceId);
 }
 
 internal static class CancellationTokenExtensions
