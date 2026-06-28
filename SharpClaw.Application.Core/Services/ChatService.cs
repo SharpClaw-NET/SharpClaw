@@ -47,6 +47,7 @@ public sealed class ChatService(
     ChatCache chatCache,
     ChatCostEngine chatCosts,
     ChatPromptEngine chatPrompts,
+    ChatToolResultEngine chatToolResults,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -1961,10 +1962,9 @@ public sealed class ChatService(
 
             if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
             {
-                // Compose final content: tool notation followed by model text
-                var finalContent = toolNotation.Length > 0
-                    ? toolNotation.ToString() + "\n" + (result.Content ?? "")
-                    : result.Content ?? "";
+                var finalContent = chatToolResults.BuildFinalAssistantContent(
+                    toolNotation.ToString(),
+                    result.Content);
                 return new ToolLoopResult(
                     finalContent,
                     jobResults,
@@ -2097,9 +2097,9 @@ public sealed class ChatService(
                         finalResult.Content?.Length ?? 0,
                         totalTiming?.ElapsedMilliseconds);
                 }
-                var finalContent = toolNotation.Length > 0
-                    ? toolNotation.ToString() + "\n" + (finalResult.Content ?? "")
-                    : finalResult.Content ?? "";
+                var finalContent = chatToolResults.BuildFinalAssistantContent(
+                    toolNotation.ToString(),
+                    finalResult.Content);
                 return new ToolLoopResult(
                     finalContent,
                     jobResults,
@@ -2123,29 +2123,17 @@ public sealed class ChatService(
     /// failure.
     /// </para>
     /// </summary>
-    private static ToolLoopResult BuildEnvelopeFailureResult(
+    private ToolLoopResult BuildEnvelopeFailureResult(
         StringBuilder toolNotation,
         List<AgentJobResponse> jobResults,
         int totalPromptTokens,
         int totalCompletionTokens,
         LocalInferenceEnvelopeException ex)
     {
-        var message = new StringBuilder();
-        if (toolNotation.Length > 0)
-            message.Append(toolNotation).Append("\n");
-
-        message.Append(
-            "Error: the local model returned malformed tool-loop output after a tool call. " +
-            "The model likely lost the required JSON envelope format for the follow-up response. ");
-
-        if (!string.IsNullOrWhiteSpace(ex.PayloadPreview))
-        {
-            message.Append("Preview: ");
-            message.Append(ex.PayloadPreview.Trim());
-        }
-
         return new ToolLoopResult(
-            message.ToString(),
+            chatToolResults.BuildMalformedEnvelopeAssistantContent(
+                toolNotation.ToString(),
+                ex.PayloadPreview),
             jobResults,
             totalPromptTokens,
             totalCompletionTokens);
@@ -2250,28 +2238,6 @@ public sealed class ChatService(
     // Screenshot extraction & vision-aware tool results
     // ═══════════════════════════════════════════════════════════════
 
-    private const string ScreenshotMarker = "[SCREENSHOT_BASE64]";
-
-    /// <summary>
-    /// If the job's <see cref="AgentJobResponse.ResultData"/> contains a
-    /// <c>[SCREENSHOT_BASE64]</c> marker, splits it into the descriptive
-    /// text and the raw base64 data. Otherwise returns the original
-    /// <see cref="AgentJobResponse.ResultData"/> with no image.
-    /// </summary>
-    private static (string? TextResult, string? ImageBase64) ExtractScreenshotData(AgentJobResponse job)
-    {
-        if (job.ResultData is null)
-            return (null, null);
-
-        var markerIndex = job.ResultData.IndexOf(ScreenshotMarker, StringComparison.Ordinal);
-        if (markerIndex < 0)
-            return (job.ResultData, null);
-
-        var textPart = job.ResultData[..markerIndex].TrimEnd();
-        var base64Part = job.ResultData[(markerIndex + ScreenshotMarker.Length)..];
-        return (textPart, base64Part);
-    }
-
     /// <summary>
     /// Builds a <see cref="ToolAwareMessage"/> for a tool result. When the
     /// result contains screenshot data and the model supports vision, the
@@ -2279,31 +2245,12 @@ public sealed class ChatService(
     /// text portion is included (the base64 blob is omitted for non-vision
     /// models to avoid wasting context).
     /// </summary>
-    private static ToolAwareMessage BuildToolResultMessage(
+    private ToolAwareMessage BuildToolResultMessage(
         string toolCallId, AgentJobResponse job, bool supportsVision)
-    {
-        var (textResult, imageBase64) = ExtractScreenshotData(job);
-
-        var resultContent =
-            $"status={job.Status}" +
-            (textResult is not null ? $" result={textResult}" : "") +
-            (job.ErrorLog is not null ? $" error={job.ErrorLog}" : "");
-
-        if (imageBase64 is not null && supportsVision)
-        {
-            return ToolAwareMessage.ToolResultWithImage(
-                toolCallId, resultContent, imageBase64, "image/png");
-        }
-
-        // Non-vision model: append a note that the screenshot was captured
-        // but cannot be displayed, so the model knows it succeeded.
-        if (imageBase64 is not null)
-        {
-            resultContent += " (screenshot captured successfully)";
-        }
-
-        return ToolAwareMessage.ToolResult(toolCallId, resultContent);
-    }
+        => chatToolResults.BuildToolResultMessage(
+            toolCallId,
+            job,
+            supportsVision);
 
     // ═══════════════════════════════════════════════════════════════
     // Internal types
