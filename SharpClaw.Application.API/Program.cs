@@ -350,6 +350,7 @@ try
     builder.Services.AddSingleton<ChatCostEngine>();
     builder.Services.AddSingleton<ChatPromptEngine>();
     builder.Services.AddSingleton<ChatHistoryEngine>();
+    builder.Services.AddSingleton<ChatDefaultHeaderEngine>();
     builder.Services.AddSingleton<ChatHeaderGrantFormatter>();
     builder.Services.AddSingleton<ChatToolResultEngine>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();

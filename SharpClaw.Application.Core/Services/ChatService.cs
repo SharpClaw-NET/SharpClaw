@@ -48,6 +48,7 @@ public sealed class ChatService(
     ChatCostEngine chatCosts,
     ChatPromptEngine chatPrompts,
     ChatHistoryEngine chatHistory,
+    ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
     ChatToolResultEngine chatToolResults,
     ConversationTopologyEngine conversation,
@@ -597,16 +598,12 @@ public sealed class ChatService(
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        // Channel-level flag takes precedence; fall back to context.
-        var disabled = channel.DisableChatHeader
-            || (channel.AgentContext?.DisableChatHeader ?? false);
-
-        if (disabled)
+        if (chatHeaders.IsHeaderDisabled(channel))
             return null;
 
         // Custom headers are explicit operator configuration and remain
         // available when the generated default header is disabled globally.
-        var customTemplate = channel.CustomChatHeader ?? agent.CustomChatHeader;
+        var customTemplate = chatHeaders.ResolveCustomTemplate(channel, agent);
         if (customTemplate is not null)
         {
             var userId2 = jobService.GetSessionUserId();
@@ -615,36 +612,32 @@ public sealed class ChatService(
                 completionParameters, providerKey);
         }
 
-        if (_disableDefaultChatHeaders)
+        if (!chatHeaders.ShouldBuildDefaultHeader(_disableDefaultChatHeaders))
             return null;
 
         // ── Task-sourced message: lightweight header, no user lookup ──
         if (taskContext is not null)
         {
-            var taskSb = new StringBuilder();
-            taskSb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
-            taskSb.Append(" | source: automated task");
-            taskSb.Append(" | task: ").Append(taskContext.TaskName);
-
             var store = TaskSharedData.Get(taskContext.InstanceId);
+            string? lightText = null;
+            IReadOnlyList<ChatTaskBigDataReference> bigEntries = [];
             if (store is not null)
             {
-                var lightText = store.LightData;
-                if (lightText is not null)
-                    taskSb.Append(" | shared-data: ").Append(lightText);
-
-                var bigEntries = store.ListBig();
-                if (bigEntries.Count > 0)
-                {
-                    taskSb.Append(" | big-data-ids: [");
-                    taskSb.Append(string.Join(", ", bigEntries.Select(e => $"{e.Id}:\"{e.Title}\"")));
-                    taskSb.Append(']');
-                }
+                lightText = store.LightData;
+                bigEntries = store.ListBig()
+                    .Select(static e => new ChatTaskBigDataReference(e.Id, e.Title))
+                    .ToArray();
             }
 
-            await AppendAgentSuffixAsync(taskSb, agent.Id, channel.Id, ct,
+            var suffix = await LoadAgentSuffixAsync(agent.Id, channel.Id, ct,
                 completionParameters, providerKey);
-            return taskSb.ToString();
+            return chatHeaders.BuildTaskHeader(
+                new ChatTaskHeaderFacts(
+                    taskContext.TaskName,
+                    lightText,
+                    bigEntries),
+                suffix,
+                DateTimeOffset.UtcNow);
         }
 
         var userId = jobService.GetSessionUserId();
@@ -652,16 +645,15 @@ public sealed class ChatService(
         // ── External user (bot-forwarded message): no DB session ─────
         if (userId is null && externalUsername is not null)
         {
-            var extSb = new StringBuilder();
-            extSb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
-            extSb.Append(" | user: ").Append(externalDisplayName ?? externalUsername);
-            if (externalDisplayName is not null && externalUsername != externalDisplayName)
-                extSb.Append(" (@").Append(externalUsername).Append(')');
-            extSb.Append(" | via: ").Append(clientType);
-
-            await AppendAgentSuffixAsync(extSb, agent.Id, channel.Id, ct,
+            var suffix = await LoadAgentSuffixAsync(agent.Id, channel.Id, ct,
                 completionParameters, providerKey);
-            return extSb.ToString();
+            return chatHeaders.BuildExternalUserHeader(
+                new ChatExternalUserHeaderFacts(
+                    externalUsername,
+                    externalDisplayName,
+                    clientType),
+                suffix,
+                DateTimeOffset.UtcNow);
         }
 
         if (userId is null)
@@ -676,26 +668,17 @@ public sealed class ChatService(
         if (userState is null)
             return null;
 
-        var sb = new StringBuilder();
-        sb.Append("[time: ").Append(DateTimeOffset.UtcNow.ToString("yyyy-MM-dd HH:mm:ss 'UTC'"));
-        sb.Append(" | user: ").Append(userState.Username);
-        sb.Append(" | via: ").Append(clientType);
-
-        if (userState.RoleName is not null)
-        {
-            if (userState.Grants.Count > 0)
-                sb.Append(" | role: ").Append(userState.RoleName)
-                  .Append(" (").Append(string.Join(", ", userState.Grants)).Append(')');
-            else
-                sb.Append(" | role: ").Append(userState.RoleName);
-        }
-
-        if (!string.IsNullOrWhiteSpace(userState.Bio))
-            sb.Append(" | bio: ").Append(userState.Bio);
-
-        await AppendAgentSuffixAsync(sb, agent.Id, channel.Id, ct,
+        var userSuffix = await LoadAgentSuffixAsync(agent.Id, channel.Id, ct,
             completionParameters, providerKey);
-        return sb.ToString();
+        return chatHeaders.BuildAuthenticatedUserHeader(
+            new ChatAuthenticatedUserHeaderFacts(
+                userState.Username,
+                clientType,
+                userState.RoleName,
+                userState.Grants,
+                userState.Bio),
+            userSuffix,
+            DateTimeOffset.UtcNow);
     }
 
     private async Task<UserHeaderState?> LoadUserHeaderStateAsync(
@@ -744,13 +727,13 @@ public sealed class ChatService(
            + ChatCache.EstimateString(state.Bio)
            + ChatCache.EstimateStringCollection(state.Grants);
 
-    private async Task AppendAgentSuffixAsync(
-        StringBuilder sb, Guid agentId, Guid channelId,
+    private async Task<string?> LoadAgentSuffixAsync(
+        Guid agentId, Guid channelId,
         CancellationToken ct,
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        var suffix = await chatCache.GetOrCreateAsync(
+        return await chatCache.GetOrCreateAsync(
             ChatCache.KeyHeaderAgentSuffix(
                 agentId,
                 channelId,
@@ -760,8 +743,6 @@ public sealed class ChatService(
                 agentId, channelId, innerCt, completionParameters, providerKey),
             ChatCache.EstimateString,
             ct);
-
-        sb.Append(suffix ?? "]");
     }
 
     /// <summary>
@@ -775,13 +756,14 @@ public sealed class ChatService(
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        var sb = new StringBuilder();
         var agentWithRole = await db.Agents
             .AsNoTracking()
             .Include(a => a.Role)
             .ThenInclude(r => r!.PermissionSet)
             .FirstOrDefaultAsync(a => a.Id == agentId, ct);
 
+        string? roleName = null;
+        IReadOnlyList<string> grants = [];
         if (agentWithRole?.Role is { } agentRole)
         {
             PermissionSetDB? agentPs = null;
@@ -795,40 +777,20 @@ public sealed class ChatService(
                         .FirstOrDefaultAsync(p => p.Id == agentPsId, ct);
             }
 
-            sb.Append(" | agent-role: ").Append(agentRole.Name);
+            roleName = agentRole.Name;
             if (agentPs is not null)
             {
-                var agentGrants = await headerGrantFormatter.FormatGrantNamesWithResourcesAsync(
+                grants = await headerGrantFormatter.FormatGrantNamesWithResourcesAsync(
                     agentPs,
                     serviceProvider,
                     ct);
-                if (agentGrants.Count > 0)
-                    sb.Append(" (").Append(string.Join(", ", agentGrants)).Append(')');
-            }
-        }
-        else
-        {
-            sb.Append(" | agent-role: (none)");
-        }
-
-        sb.Append(" | policy: unlisted-resource/GUID=denied; disclose gaps to user");
-
-        // Informational notice: surfaced when the provider accepts
-        // reasoningEffort but cannot mechanically act on it (see
-        // CompletionParameterSpec.ReasoningEffortInformationalOnly).
-        if (completionParameters?.ReasoningEffort is { } effort)
-        {
-            var spec = clientFactory.GetParameterSpec(providerKey);
-            if (spec.ReasoningEffortInformationalOnly)
-            {
-                var notice = ChatHeaderNotices.FormatReasoningEffortNotice(effort);
-                if (notice.Length > 0)
-                    sb.Append(" | ").Append(notice);
             }
         }
 
-        sb.AppendLine("]");
-        return sb.ToString();
+        return chatHeaders.BuildAgentSuffix(
+            new ChatAgentHeaderSuffixFacts(roleName, grants),
+            completionParameters,
+            providerKey);
     }
 
     // ═══════════════════════════════════════════════════════════════
