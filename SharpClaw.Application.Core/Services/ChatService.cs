@@ -47,6 +47,7 @@ public sealed class ChatService(
     ChatCache chatCache,
     ChatCostEngine chatCosts,
     ChatPromptEngine chatPrompts,
+    ChatHistoryEngine chatHistory,
     ChatToolResultEngine chatToolResults,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
@@ -54,9 +55,6 @@ public sealed class ChatService(
     IServiceProvider serviceProvider,
     IConfiguration configuration)
 {
-    private const int MaxHistoryMessages = 50;
-    private const int MaxHistoryCharacters = 100_000;
-
     /// <summary>
     /// Maximum number of tool-call round-trips before forcing a final
     /// response.  Prevents infinite loops when the model keeps emitting
@@ -527,8 +525,7 @@ public sealed class ChatService(
     /// Loads messages for a thread, respecting the thread's per-thread
     /// <see cref="ChatThreadDB.MaxMessages"/> and
     /// <see cref="ChatThreadDB.MaxCharacters"/> limits.
-    /// Falls back to system defaults (<see cref="MaxHistoryMessages"/>
-    /// and <see cref="MaxHistoryCharacters"/>).
+    /// Falls back to Core default history limits.
     /// When both limits are set, only messages fitting within both are
     /// returned.
     /// </summary>
@@ -536,39 +533,26 @@ public sealed class ChatService(
         Guid threadId, CancellationToken ct)
     {
         var limits = await LoadThreadHistoryLimitsAsync(threadId, ct);
-        var maxMessages = limits.MaxMessages;
-        var maxChars = limits.MaxCharacters;
-
         var cold = await entities.QueryAsync<ChatMessageDB>(
             db,
             m => m.ThreadId == threadId,
-            limit: maxMessages,
+            limit: limits.MaxMessages,
             hint: new PersistenceQueryHint("ThreadId", threadId),
             ct: ct);
 
-        var messages = cold
-            .OrderBy(m => m.CreatedAt)
-            .Select(m => new ChatCompletionMessage(m.Role, m.Content)
-            {
-                ProviderMetadataJson = m.ProviderMetadataJson
-            })
+        var messages = chatHistory.BuildProviderHistory(
+                cold.Select(static m => new ChatHistoryMessage(
+                    m.CreatedAt,
+                    m.Role,
+                    m.Content,
+                    m.ProviderMetadataJson)),
+                limits)
             .ToList();
 
-        // Trim oldest messages until the total character count fits.
-        var totalChars = 0;
-        for (var i = messages.Count - 1; i >= 0; i--)
-            totalChars += messages[i].Content.Length;
-
-        while (messages.Count > 0 && totalChars > maxChars)
-        {
-            totalChars -= messages[0].Content.Length;
-            messages.RemoveAt(0);
-        }
-
-        return (messages, maxMessages, maxChars);
+        return (messages, limits.MaxMessages, limits.MaxCharacters);
     }
 
-    private async Task<ThreadHistoryLimits> LoadThreadHistoryLimitsAsync(
+    private async Task<ChatHistoryLimits> LoadThreadHistoryLimitsAsync(
         Guid threadId, CancellationToken ct)
     {
         return await chatCache.GetOrCreateAsync(
@@ -578,18 +562,20 @@ public sealed class ChatService(
                 var limits = await db.ChatThreads
                     .AsNoTracking()
                     .Where(t => t.Id == threadId)
-                    .Select(t => new ThreadHistoryLimits(
-                        t.MaxMessages ?? MaxHistoryMessages,
-                        t.MaxCharacters ?? MaxHistoryCharacters))
+                    .Select(t => new
+                    {
+                        t.MaxMessages,
+                        t.MaxCharacters
+                    })
                     .FirstOrDefaultAsync(innerCt);
 
-                return limits ?? new ThreadHistoryLimits(
-                    MaxHistoryMessages,
-                    MaxHistoryCharacters);
+                return chatHistory.ResolveLimits(
+                    limits?.MaxMessages,
+                    limits?.MaxCharacters);
             },
             static _ => 16,
             ct)
-            ?? new ThreadHistoryLimits(MaxHistoryMessages, MaxHistoryCharacters);
+            ?? chatHistory.ResolveLimits(null, null);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -2280,10 +2266,6 @@ public sealed class ChatService(
         string? RoleName,
         IReadOnlyList<string> Grants,
         string? Bio);
-
-    private sealed record ThreadHistoryLimits(
-        int MaxMessages,
-        int MaxCharacters);
 
     // ═══════════════════════════════════════════════════════════════
     // Tool call notation (persisted in assistant message content)
