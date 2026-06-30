@@ -37,7 +37,7 @@ public sealed class AgentJobService(
     SessionService session,
     ModuleRegistry moduleRegistry,
     ModuleToolExecutionPlanner moduleExecutionPlanner,
-    ModuleToolPermissionPlanner modulePermissionPlanner,
+    ModuleToolPermissionExecutor modulePermissionExecutor,
     ModuleJobToolExecutor moduleJobToolExecutor,
     ModuleEventDispatcher eventDispatcher,
     IServiceScopeFactory serviceScopeFactory,
@@ -449,67 +449,34 @@ public sealed class AgentJobService(
 
     /// <summary>
     /// Permission check for module-provided tool calls.
-    /// Resolves the module tool's <see cref="ModuleToolPermission"/> descriptor
-    /// and evaluates it:
-    /// <list type="bullet">
-    ///   <item>If <see cref="ModuleToolPermission.Check"/> is set, calls it directly.</item>
-    ///   <item>If <see cref="ModuleToolPermission.DelegateTo"/> is set, routes to the
-    ///         named <see cref="AgentActionService"/> method via the delegation map.</item>
-    ///   <item>Otherwise, the action is denied (no permission descriptor = no access).</item>
-    /// </list>
     /// </summary>
     private async Task<AgentActionResult> DispatchModulePermissionCheckAsync(
         Guid agentId, Guid? resourceId, ActionCaller caller,
         string? actionKey, CancellationToken ct,
         Guid? channelPsId = null, Guid? contextPsId = null)
     {
-        var plan = modulePermissionPlanner.BuildPlan(
-            actionKey,
-            resourceId,
-            moduleRegistry);
-
-        if (plan.Kind == ModuleToolPermissionPlanKind.Denied)
-        {
-            if (plan.DenialReason == ModuleToolPermissionDenialReason.MissingResourceId)
-            {
-                Debug.WriteLine(
-                    $"[PermissionCheck] DENIED: ResourceId is null for per-resource tool '{actionKey}'",
-                    "SharpClaw.CLI");
-            }
-
-            return plan.DeniedResult
-                ?? AgentActionResult.Denied("Module permission plan denied without a reason.");
-        }
-
-        Debug.WriteLine(
-            $"[PermissionCheck] Tool='{plan.ActionKey}' AgentId={agentId} ResourceId={resourceId} DelegateTo='{plan.DelegateTo}'",
-            "SharpClaw.CLI");
-
-        if (plan.Kind == ModuleToolPermissionPlanKind.DirectCheck)
-        {
-            if (plan.DirectCheck is null)
-                throw new InvalidOperationException(
-                    "Module permission plan requested direct check without a callback.");
-
-            return await plan.DirectCheck(agentId, resourceId, caller, ct);
-        }
-
-        if (plan.Kind == ModuleToolPermissionPlanKind.DelegateToHost)
-        {
-            if (string.IsNullOrWhiteSpace(plan.DelegateTo))
-                throw new InvalidOperationException(
-                    "Module permission plan requested host delegate without a delegate name.");
-
-            var result = actions.TryEvaluateByDelegateNameAsync(
-                plan.DelegateTo, agentId, resourceId, caller, ct,
-                channelPsId: channelPsId, contextPsId: contextPsId);
-            if (result is not null) return await result;
-
-            return plan.CreateUnrecognizedDelegateDeniedResult();
-        }
-
-        throw new InvalidOperationException(
-            $"Unsupported module permission plan kind '{plan.Kind}'.");
+        return await modulePermissionExecutor.ExecuteAsync(
+            new ModuleToolPermissionExecutionRequest(
+                actionKey,
+                resourceId,
+                agentId,
+                caller,
+                moduleRegistry,
+                async (delegateName, targetAgentId, targetResourceId,
+                    targetCaller, innerCt) =>
+                {
+                    var result = actions.TryEvaluateByDelegateNameAsync(
+                        delegateName,
+                        targetAgentId,
+                        targetResourceId,
+                        targetCaller,
+                        innerCt,
+                        channelPsId: channelPsId,
+                        contextPsId: contextPsId);
+                    return result is null ? null : await result;
+                },
+                message => Debug.WriteLine(message, "SharpClaw.CLI")),
+            ct);
     }
 
     // ═══════════════════════════════════════════════════════════════

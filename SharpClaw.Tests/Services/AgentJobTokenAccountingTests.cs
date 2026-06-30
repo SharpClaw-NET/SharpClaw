@@ -140,7 +140,7 @@ public sealed class AgentJobTokenAccountingTests
             new SessionService(),
             registry,
             new ModuleToolExecutionPlanner(),
-            new ModuleToolPermissionPlanner(),
+            new ModuleToolPermissionExecutor(new ModuleToolPermissionPlanner()),
             new ModuleJobToolExecutor(
                 new ModuleMetricsCollector(),
                 NullLogger<ModuleJobToolExecutor>.Instance),
@@ -171,6 +171,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleToolExecutionPlanner>();
         services.AddSingleton<ModuleToolPermissionPlanner>();
+        services.AddSingleton<ModuleToolPermissionExecutor>();
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ModuleJobToolExecutor>();
         services.AddSingleton<ChatCache>();

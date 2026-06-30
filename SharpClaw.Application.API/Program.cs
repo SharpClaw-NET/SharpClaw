@@ -432,6 +432,7 @@ try
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleToolExecutionPlanner>();
     builder.Services.AddSingleton<ModuleToolPermissionPlanner>();
+    builder.Services.AddSingleton<ModuleToolPermissionExecutor>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
     builder.Services.AddSingleton<IModuleCapabilityTelemetry, ModuleCapabilityTelemetry>();
     builder.Services.AddSingleton<ModuleEventDispatcher>();
