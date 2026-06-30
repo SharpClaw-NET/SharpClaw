@@ -354,6 +354,7 @@ try
     builder.Services.AddSingleton<ChatDefaultHeaderEngine>();
     builder.Services.AddSingleton<ChatHeaderGrantFormatter>();
     builder.Services.AddSingleton<ChatToolResultEngine>();
+    builder.Services.AddSingleton<ChatMessageEngine>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();
 
     builder.Services.AddScoped<ProviderService>();

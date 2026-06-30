@@ -51,6 +51,7 @@ public sealed class ChatService(
     ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
     ChatToolResultEngine chatToolResults,
+    ChatMessageEngine chatMessages,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -213,19 +214,14 @@ public sealed class ChatService(
         var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
             senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
 
-        var userMessage = new ChatMessageDB
-        {
-            Role = ChatRoles.User,
-            Origin = MessageOrigin.User,
-            Content = request.Message,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderUserId = senderUserId,
-            SenderUsername = senderUserSnapshot.Username,
-            PermissionRoleId = senderUserSnapshot.RoleId,
-            PermissionRoleName = senderUserSnapshot.RoleName,
-            ClientType = request.ClientType
-        };
+        var userMessage = chatMessages.CreateUserMessage(
+            channelId,
+            threadId,
+            request,
+            senderUserId,
+            senderUserSnapshot.Username,
+            senderUserSnapshot.RoleId,
+            senderUserSnapshot.RoleName);
 
         db.ChatMessages.Add(userMessage);
         await db.SaveChangesAsync(CancellationToken.None);
@@ -255,22 +251,15 @@ public sealed class ChatService(
         }
 
         // Persist assistant message after LLM completes
-        var assistantMessage = new ChatMessageDB
-        {
-            Role = ChatRoles.Assistant,
-            Origin = MessageOrigin.Assistant,
-            Content = loopResult.AssistantContent,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderAgentId = agent.Id,
-            SenderAgentName = agent.Name,
-            PermissionRoleId = agent.RoleId,
-            PermissionRoleName = agent.Role?.Name,
-            ClientType = request.ClientType,
-            PromptTokens = loopResult.TotalPromptTokens > 0 ? loopResult.TotalPromptTokens : null,
-            CompletionTokens = loopResult.TotalCompletionTokens > 0 ? loopResult.TotalCompletionTokens : null,
-            ProviderMetadataJson = loopResult.ProviderMetadataJson
-        };
+        var assistantMessage = chatMessages.CreateAssistantMessage(
+            channelId,
+            threadId,
+            request,
+            agent,
+            loopResult.AssistantContent,
+            loopResult.TotalPromptTokens,
+            loopResult.TotalCompletionTokens,
+            loopResult.ProviderMetadataJson);
 
         db.ChatMessages.Add(assistantMessage);
         var assistantSaveTiming = Stopwatch.StartNew();
@@ -316,8 +305,8 @@ public sealed class ChatService(
         }
 
         return new ChatResponse(
-            ToMessageResponse(userMessage),
-            ToMessageResponse(assistantMessage),
+            chatMessages.ToResponse(userMessage),
+            chatMessages.ToResponse(assistantMessage),
             loopResult.JobResults.Count > 0 ? loopResult.JobResults : null,
             channelCost,
             threadCost,
@@ -372,22 +361,8 @@ public sealed class ChatService(
             hint,
             ct);
 
-        return messages
-            .OrderBy(m => m.CreatedAt)
-            .ThenBy(m => m.Id)
-            .Select(m => new ChatMessageResponse(
-                m.Role, m.Content, m.CreatedAt,
-                m.SenderUserId, m.SenderUsername,
-                m.SenderAgentId, m.SenderAgentName,
-                m.ClientType != null ? m.ClientType.ToString() : null))
-            .ToList();
+        return chatMessages.ToOrderedHistoryResponses(messages);
     }
-
-    private static ChatMessageResponse ToMessageResponse(ChatMessageDB m) =>
-        new(m.Role, m.Content, m.CreatedAt,
-            m.SenderUserId, m.SenderUsername,
-            m.SenderAgentId, m.SenderAgentName,
-            m.ClientType?.ToString());
 
     // ═══════════════════════════════════════════════════════════════
     // Token cost aggregation
@@ -932,19 +907,14 @@ public sealed class ChatService(
         var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
             senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
 
-        var userMessage = new ChatMessageDB
-        {
-            Role = ChatRoles.User,
-            Origin = MessageOrigin.User,
-            Content = request.Message,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderUserId = senderUserId,
-            SenderUsername = senderUserSnapshot.Username,
-            PermissionRoleId = senderUserSnapshot.RoleId,
-            PermissionRoleName = senderUserSnapshot.RoleName,
-            ClientType = request.ClientType
-        };
+        var userMessage = chatMessages.CreateUserMessage(
+            channelId,
+            threadId,
+            request,
+            senderUserId,
+            senderUserSnapshot.Username,
+            senderUserSnapshot.RoleId,
+            senderUserSnapshot.RoleName);
 
         db.ChatMessages.Add(userMessage);
         await db.SaveChangesAsync(CancellationToken.None);
@@ -1150,22 +1120,15 @@ public sealed class ChatService(
         // Persist assistant message after LLM completes
         var assistantContent = fullContent.ToString();
 
-        var assistantMessage = new ChatMessageDB
-        {
-            Role = ChatRoles.Assistant,
-            Origin = MessageOrigin.Assistant,
-            Content = assistantContent,
-            ChannelId = channelId,
-            ThreadId = threadId,
-            SenderAgentId = agent.Id,
-            SenderAgentName = agent.Name,
-            PermissionRoleId = agent.RoleId,
-            PermissionRoleName = agent.Role?.Name,
-            ClientType = request.ClientType,
-            PromptTokens = totalPromptTokens > 0 ? totalPromptTokens : null,
-            CompletionTokens = totalCompletionTokens > 0 ? totalCompletionTokens : null,
-            ProviderMetadataJson = finalProviderMetadataJson
-        };
+        var assistantMessage = chatMessages.CreateAssistantMessage(
+            channelId,
+            threadId,
+            request,
+            agent,
+            assistantContent,
+            totalPromptTokens,
+            totalCompletionTokens,
+            finalProviderMetadataJson);
 
         db.ChatMessages.Add(assistantMessage);
         var assistantSaveTiming = Stopwatch.StartNew();
@@ -1214,8 +1177,8 @@ public sealed class ChatService(
         }
 
         yield return ChatStreamEvent.Complete(new ChatResponse(
-            ToMessageResponse(userMessage),
-            ToMessageResponse(assistantMessage),
+            chatMessages.ToResponse(userMessage),
+            chatMessages.ToResponse(assistantMessage),
             jobResults.Count > 0 ? jobResults : null,
             channelCost,
             threadCost,
@@ -1266,22 +1229,15 @@ public sealed class ChatService(
     {
         try
         {
-            var assistantMessage = new ChatMessageDB
-            {
-                Role = ChatRoles.Assistant,
-                Origin = MessageOrigin.Assistant,
-                Content = content,
-                ChannelId = channelId,
-                ThreadId = threadId,
-                SenderAgentId = agent.Id,
-                SenderAgentName = agent.Name,
-                PermissionRoleId = agent.RoleId,
-                PermissionRoleName = agent.Role?.Name,
-                ClientType = request.ClientType,
-                PromptTokens = totalPromptTokens is > 0 ? totalPromptTokens : null,
-                CompletionTokens = totalCompletionTokens is > 0 ? totalCompletionTokens : null,
-                ProviderMetadataJson = providerMetadataJson
-            };
+            var assistantMessage = chatMessages.CreateAssistantMessage(
+                channelId,
+                threadId,
+                request,
+                agent,
+                content,
+                totalPromptTokens,
+                totalCompletionTokens,
+                providerMetadataJson);
 
             db.ChatMessages.Add(assistantMessage);
             await db.SaveChangesAsync(CancellationToken.None);
@@ -1320,30 +1276,21 @@ public sealed class ChatService(
                 var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
                     senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
 
-                db.ChatMessages.Add(new ChatMessageDB
-                {
-                    Role = ChatRoles.User,
-                    Origin = MessageOrigin.User,
-                    Content = request.Message,
-                    ChannelId = channelId,
-                    ThreadId = threadId,
-                    SenderUserId = senderUserId,
-                    SenderUsername = senderUserSnapshot.Username,
-                    PermissionRoleId = senderUserSnapshot.RoleId,
-                    PermissionRoleName = senderUserSnapshot.RoleName,
-                    ClientType = request.ClientType
-                });
+                db.ChatMessages.Add(chatMessages.CreateUserMessage(
+                    channelId,
+                    threadId,
+                    request,
+                    senderUserId,
+                    senderUserSnapshot.Username,
+                    senderUserSnapshot.RoleId,
+                    senderUserSnapshot.RoleName));
             }
 
-            db.ChatMessages.Add(new ChatMessageDB
-            {
-                Role = ChatRoles.System,
-                Origin = MessageOrigin.System,
-                Content = $"⚠ Error: {ex.Message}",
-                ChannelId = channelId,
-                ThreadId = threadId,
-                ClientType = request.ClientType
-            });
+            db.ChatMessages.Add(chatMessages.CreateSystemErrorMessage(
+                channelId,
+                threadId,
+                request,
+                ex.Message));
 
             await db.SaveChangesAsync(ct);
         }
@@ -1384,30 +1331,21 @@ public sealed class ChatService(
                 var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
                     senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
 
-                db.ChatMessages.Add(new ChatMessageDB
-                {
-                    Role = ChatRoles.User,
-                    Origin = MessageOrigin.User,
-                    Content = request.Message,
-                    ChannelId = channelId,
-                    ThreadId = threadId,
-                    SenderUserId = senderUserId,
-                    SenderUsername = senderUserSnapshot.Username,
-                    PermissionRoleId = senderUserSnapshot.RoleId,
-                    PermissionRoleName = senderUserSnapshot.RoleName,
-                    ClientType = request.ClientType
-                });
+                db.ChatMessages.Add(chatMessages.CreateUserMessage(
+                    channelId,
+                    threadId,
+                    request,
+                    senderUserId,
+                    senderUserSnapshot.Username,
+                    senderUserSnapshot.RoleId,
+                    senderUserSnapshot.RoleName));
             }
 
-            db.ChatMessages.Add(new ChatMessageDB
-            {
-                Role = ChatRoles.System,
-                Origin = MessageOrigin.System,
-                Content = $"⚠ Error: {errorMessage}",
-                ChannelId = channelId,
-                ThreadId = threadId,
-                ClientType = request.ClientType
-            });
+            db.ChatMessages.Add(chatMessages.CreateSystemErrorMessage(
+                channelId,
+                threadId,
+                request,
+                errorMessage));
 
             await db.SaveChangesAsync(ct);
         }
