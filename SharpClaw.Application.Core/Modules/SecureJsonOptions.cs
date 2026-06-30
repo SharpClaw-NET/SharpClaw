@@ -8,14 +8,6 @@ namespace SharpClaw.Application.Core.Modules;
 /// </summary>
 internal static class SecureJsonOptions
 {
-    public static readonly JsonSerializerOptions Envelope = new()
-    {
-        MaxDepth = 32,
-        AllowTrailingCommas = false,
-        ReadCommentHandling = JsonCommentHandling.Disallow,
-        PropertyNameCaseInsensitive = true,
-    };
-
     public static readonly JsonSerializerOptions Manifest = new()
     {
         MaxDepth = 8,

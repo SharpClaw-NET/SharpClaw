@@ -3,8 +3,6 @@ using System.Diagnostics;
 using System.Net;
 using System.Net.Http;
 using System.Text;
-using System.Text.Json;
-using System.Text.Json.Serialization;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -41,6 +39,7 @@ public sealed class AgentJobService(
     AgentActionService actions,
     SessionService session,
     ModuleRegistry moduleRegistry,
+    ModuleToolExecutionPlanner moduleExecutionPlanner,
     ModuleMetricsCollector metricsCollector,
     ModuleEventDispatcher eventDispatcher,
     IServiceScopeFactory serviceScopeFactory,
@@ -407,10 +406,14 @@ public sealed class AgentJobService(
 
     private async Task<AgentJobExecutionOutcome> DispatchExecutionAsync(AgentJobDB job, CancellationToken ct)
     {
-        // Try ActionKey-based dispatch first (synthesizes envelope from raw params).
-        // Falls back to full envelope deserialization.
-        var actionKeyResult = await TryDispatchByActionKeyAsync(job, ct);
-        return actionKeyResult ?? await DispatchModuleExecutionAsync(job, ct);
+        var maxEnvelopeSize = SecureJsonOptions.GetMaxEnvelopeSize(_configuration);
+        var plan = moduleExecutionPlanner.BuildPlan(
+            job.ActionKey,
+            job.ScriptJson,
+            maxEnvelopeSize,
+            moduleRegistry);
+
+        return await DispatchModuleExecutionAsync(job, plan, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -418,34 +421,20 @@ public sealed class AgentJobService(
     // ═══════════════════════════════════════════════════════════════
 
     /// <summary>
-    /// Executes a module job by resolving the <c>ActionKey</c> through
-    /// <see cref="ModuleRegistry"/>, deserializing the <see cref="ModuleEnvelope"/>
-    /// from <c>ScriptJson</c>, and calling
+    /// Executes a module job from a Core-built execution plan by calling
     /// <see cref="ISharpClawCoreModule.ExecuteToolAsync"/> inside a restricted
     /// <see cref="ModuleServiceScope"/> with a per-manifest timeout.
     /// </summary>
     private async Task<AgentJobExecutionOutcome> DispatchModuleExecutionAsync(
-        AgentJobDB job, CancellationToken ct)
+        AgentJobDB job,
+        ModuleToolExecutionPlan plan,
+        CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(job.ScriptJson))
-            throw new InvalidOperationException(
-                "Module action requires a ScriptJson envelope.");
-
-        var maxEnvelopeSize = SecureJsonOptions.GetMaxEnvelopeSize(_configuration);
-        if (job.ScriptJson.Length > maxEnvelopeSize)
-            throw new InvalidOperationException(
-                $"ScriptJson exceeds maximum envelope size ({maxEnvelopeSize} bytes).");
-
-        var envelope = JsonSerializer.Deserialize<ModuleEnvelope>(
-            job.ScriptJson, SecureJsonOptions.Envelope)
+        var module = moduleRegistry.GetModule(plan.ModuleId)
             ?? throw new InvalidOperationException(
-                "Failed to deserialize module envelope from ScriptJson.");
+                $"Module '{plan.ModuleId}' is not loaded.");
 
-        var module = moduleRegistry.GetModule(envelope.Module)
-            ?? throw new InvalidOperationException(
-                $"Module '{envelope.Module}' is not loaded.");
-
-        var prefixedToolName = $"{module.ToolPrefix}_{envelope.Tool}";
+        var prefixedToolName = $"{module.ToolPrefix}_{plan.ToolName}";
 
         var jobContext = new AgentJobContext(
             JobId: job.Id,
@@ -456,10 +445,10 @@ public sealed class AgentJobService(
 
         // Runtime-hosted modules use their own per-module DI container;
         // bundled modules use the host's scope.
-        var runtimeHost = moduleRegistry.GetRuntimeHost(envelope.Module);
+        var runtimeHost = moduleRegistry.GetRuntimeHost(plan.ModuleId);
         if (runtimeHost is not null && !runtimeHost.TryAcquireExecution())
             throw new InvalidOperationException(
-                $"Module '{envelope.Module}' is unloading — cannot execute tools.");
+                $"Module '{plan.ModuleId}' is unloading - cannot execute tools.");
 
         var sw = Stopwatch.StartNew();
         try
@@ -474,17 +463,17 @@ public sealed class AgentJobService(
 
             var restrictedScope = new ModuleServiceScope(scope.ServiceProvider, module.Id);
             var completionBehavior = module.GetJobCompletionBehavior(
-                envelope.Tool, envelope.Params, jobContext);
+                plan.ToolName, plan.Parameters, jobContext);
 
             // Timeout: per-tool override → manifest default → 30s.
-            var manifest = moduleRegistry.GetManifest(envelope.Module);
-            var toolTimeout = moduleRegistry.GetToolTimeout(envelope.Module, envelope.Tool);
+            var manifest = moduleRegistry.GetManifest(plan.ModuleId);
+            var toolTimeout = moduleRegistry.GetToolTimeout(plan.ModuleId, plan.ToolName);
             var timeoutSeconds = toolTimeout ?? manifest?.ExecutionTimeoutSeconds ?? 30;
             AddLog(job,
-                $"Module dispatch resolved: {job.ActionKey ?? envelope.Tool} -> {envelope.Module}.{envelope.Tool} (timeout {timeoutSeconds}s).");
+                $"Module dispatch resolved: {job.ActionKey ?? plan.ToolName} -> {plan.ModuleId}.{plan.ToolName} (timeout {timeoutSeconds}s).");
             _logger.LogInformation(
                 "Dispatching agent job {JobId}: action {ActionKey} -> module {ModuleId}.{ToolName} with timeout {TimeoutSeconds}s.",
-                job.Id, job.ActionKey, envelope.Module, envelope.Tool, timeoutSeconds);
+                job.Id, job.ActionKey, plan.ModuleId, plan.ToolName, timeoutSeconds);
             using var cts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
@@ -492,7 +481,7 @@ public sealed class AgentJobService(
             {
                 // Try streaming variant first; fall back to non-streaming.
                 var stream = module.ExecuteToolStreamingAsync(
-                    envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+                    plan.ToolName, plan.Parameters, jobContext, restrictedScope, cts.Token);
 
                 string? result;
                 if (stream is not null)
@@ -508,25 +497,25 @@ public sealed class AgentJobService(
                     {
                         _logger.LogDebug(
                             "Module tool {ModuleId}.{ToolName} is not streaming; falling back to normal execution for job {JobId}.",
-                            envelope.Module,
-                            envelope.Tool,
+                            plan.ModuleId,
+                            plan.ToolName,
                             job.Id);
                         result = await module.ExecuteToolAsync(
-                            envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+                            plan.ToolName, plan.Parameters, jobContext, restrictedScope, cts.Token);
                     }
                 }
                 else
                 {
                     result = await module.ExecuteToolAsync(
-                        envelope.Tool, envelope.Params, jobContext, restrictedScope, cts.Token);
+                        plan.ToolName, plan.Parameters, jobContext, restrictedScope, cts.Token);
                 }
 
                 sw.Stop();
                 metricsCollector.RecordSuccess(prefixedToolName, sw.Elapsed);
                 _logger.LogDebug(
                     "Module tool {ModuleId}.{ToolName} completed in {ElapsedMs}ms for job {JobId}. CompletionBehavior={CompletionBehavior}",
-                    PathGuard.SanitizeForLog(envelope.Module),
-                    PathGuard.SanitizeForLog(envelope.Tool),
+                    PathGuard.SanitizeForLog(plan.ModuleId),
+                    PathGuard.SanitizeForLog(plan.ToolName),
                     sw.ElapsedMilliseconds,
                     job.Id, completionBehavior);
                 return new AgentJobExecutionOutcome(result, completionBehavior);
@@ -537,9 +526,9 @@ public sealed class AgentJobService(
                 metricsCollector.RecordTimeout(prefixedToolName);
                 _logger.LogWarning(
                     "Module tool {ModuleId}.{ToolName} timed out after {TimeoutSeconds}s for job {JobId}.",
-                    envelope.Module, envelope.Tool, timeoutSeconds, job.Id);
+                    plan.ModuleId, plan.ToolName, timeoutSeconds, job.Id);
                 throw new InvalidOperationException(
-                    $"Module tool '{envelope.Module}.{envelope.Tool}' " +
+                    $"Module tool '{plan.ModuleId}.{plan.ToolName}' " +
                     $"exceeded timeout ({timeoutSeconds}s).");
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not InvalidOperationException)
@@ -548,10 +537,10 @@ public sealed class AgentJobService(
                 metricsCollector.RecordFailure(prefixedToolName);
                 _logger.LogError(ex,
                     "Module tool {ModuleId}.{ToolName} failed for job {JobId}.",
-                    envelope.Module, envelope.Tool, job.Id);
+                    plan.ModuleId, plan.ToolName, job.Id);
                 throw new InvalidOperationException(
                     $"[{ex.GetType().Name}] " +
-                    ExceptionSanitizer.Sanitize(envelope.Module, envelope.Tool, ex.Message),
+                    ExceptionSanitizer.Sanitize(plan.ModuleId, plan.ToolName, ex.Message),
                     ex);
             }
         }
@@ -617,59 +606,6 @@ public sealed class AgentJobService(
         }
 
         return AgentActionResult.Denied($"Module tool '{actionKey}' has no permission check configured.");
-    }
-
-    /// <summary>
-    /// Attempts to dispatch a job to a module-provided tool using the
-    /// explicit <see cref="AgentJobDB.ActionKey"/>.
-    /// Returns <c>null</c> if no module owns the resolved tool name.
-    /// </summary>
-    private async Task<AgentJobExecutionOutcome?> TryDispatchByActionKeyAsync(
-        AgentJobDB job, CancellationToken ct)
-    {
-        var actionKey = job.ActionKey;
-
-        if (string.IsNullOrWhiteSpace(actionKey))
-            return null;
-
-        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
-            return null;
-
-        // Parse the raw ScriptJson into tool parameters.  When ScriptJson
-        // is already a full ModuleEnvelope (created by ParseNativeToolCall),
-        // extract only the nested "params" element to avoid double-wrapping.
-        JsonElement paramsElement;
-        if (!string.IsNullOrWhiteSpace(job.ScriptJson))
-        {
-            using var doc = JsonDocument.Parse(job.ScriptJson);
-            var root = doc.RootElement;
-            if ((root.TryGetProperty("module", out _) || root.TryGetProperty("Module", out _)) &&
-                (root.TryGetProperty("tool", out _) || root.TryGetProperty("Tool", out _)) &&
-                (root.TryGetProperty("params", out var nested) || root.TryGetProperty("Params", out nested)))
-                paramsElement = nested.Clone();
-            else
-                paramsElement = root.Clone();
-        }
-        else
-        {
-            paramsElement = JsonDocument.Parse("{}").RootElement.Clone();
-        }
-
-        // Build a ModuleEnvelope from the job's existing data.
-        var envelope = new ModuleEnvelope(moduleId, toolName, paramsElement);
-        var syntheticJson = JsonSerializer.Serialize(envelope, SecureJsonOptions.Envelope);
-
-        // Temporarily patch ScriptJson so DispatchModuleExecutionAsync can deserialize it.
-        var original = job.ScriptJson;
-        job.ScriptJson = syntheticJson;
-        try
-        {
-            return await DispatchModuleExecutionAsync(job, ct);
-        }
-        finally
-        {
-            job.ScriptJson = original;
-        }
     }
 
     // ═══════════════════════════════════════════════════════════════

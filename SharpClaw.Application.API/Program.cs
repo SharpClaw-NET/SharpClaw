@@ -421,6 +421,7 @@ try
     // yet — and must exist before PHASE 11's per-module ConfigureServices
     // hooks try to register dependencies on them.
     builder.Services.AddSingleton<ModuleRegistry>();
+    builder.Services.AddSingleton<ModuleToolExecutionPlanner>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
     builder.Services.AddSingleton<IModuleCapabilityTelemetry, ModuleCapabilityTelemetry>();
     builder.Services.AddSingleton<ModuleEventDispatcher>();

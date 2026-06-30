@@ -98,6 +98,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
                 databaseRoot));
         services.AddSingleton(new ModuleLoader(module));
         services.AddSingleton<ModuleRegistry>();
+        services.AddSingleton<ModuleToolExecutionPlanner>();
         services.AddSingleton<IModuleStorageContractProvider>(
             sp => sp.GetRequiredService<ModuleRegistry>());
         services.AddSingleton<ModuleMetricsCollector>();

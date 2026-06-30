@@ -137,6 +137,7 @@ public sealed class AgentJobTokenAccountingTests
             new AgentActionService(db, registry, new PermissionEvaluationEngine()),
             new SessionService(),
             registry,
+            new ModuleToolExecutionPlanner(),
             new ModuleMetricsCollector(),
             eventDispatcher,
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
@@ -161,6 +162,7 @@ public sealed class AgentJobTokenAccountingTests
             options => options.UseInMemoryDatabase(databaseName, root));
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddSingleton<ModuleRegistry>();
+        services.AddSingleton<ModuleToolExecutionPlanner>();
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ChatCache>();
         services.AddSingleton<PermissionEvaluationEngine>();

@@ -42,6 +42,7 @@ public sealed class ChatService(
     HeaderTagProcessor headerTagProcessor,
     ThreadActivitySignal threadActivity,
     ModuleRegistry moduleRegistry,
+    ModuleToolExecutionPlanner moduleExecutionPlanner,
     ModuleMetricsCollector metricsCollector,
     ChatCache chatCache,
     ChatCostEngine chatCosts,
@@ -2043,11 +2044,10 @@ public sealed class ChatService(
                 $"[ParseToolCall] Module tool: {toolCall.Name} → {moduleId}.{toolName}",
                 "SharpClaw.CLI");
 
-            // Build the module envelope as ScriptJson so DispatchModuleExecutionAsync
-            // can deserialize it on the job pipeline side.
-            var envelope = JsonSerializer.Serialize(
-                new { module = moduleId, tool = toolName, @params = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}").RootElement },
-                SecureJsonOptions.Envelope);
+            var envelope = moduleExecutionPlanner.CreateEnvelopeJson(
+                moduleId,
+                toolName,
+                toolCall.ArgumentsJson);
 
             // Attempt to extract resourceId from the arguments using well-known
             // generic argument names. Module-owned tools should use "resource_id"
