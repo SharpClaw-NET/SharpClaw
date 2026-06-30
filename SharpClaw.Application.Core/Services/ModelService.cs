@@ -20,19 +20,12 @@ public sealed class ModelService(
         if (IsUniqueModelNamesEnforced())
             await EnsureModelNameUniqueAsync(request.Name, excludeId: null, ct);
 
-        var model = new ModelDB
-        {
-            Name = request.Name,
-            ProviderId = provider.Id,
-            CustomId = request.CustomId,
-            CapabilityTagsRaw = modelCatalog.SerializeCapabilityTags(request.CapabilityTags)
-        };
+        var model = modelCatalog.Create(request, provider);
 
         db.Models.Add(model);
         await db.SaveChangesAsync(ct);
 
-        return new ModelResponse(model.Id, model.Name, provider.Id, provider.Name,
-            model.CustomId, model.CapabilityTags);
+        return modelCatalog.ToResponse(model, provider);
     }
 
     public async Task<IReadOnlyList<ModelResponse>> ListAsync(Guid? providerId = null, CancellationToken ct = default)
@@ -45,16 +38,14 @@ public sealed class ModelService(
             query = query.Where(m => m.ProviderId == providerId);
 
         return await query
-            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name,
-                m.CustomId, m.CapabilityTags))
+            .Select(modelCatalog.ToResponseProjection())
             .ToListAsync(ct);
     }
 
     public async Task<ModelResponse?> GetByIdAsync(Guid id, CancellationToken ct = default)
     {
         var m = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == id, ct);
-        return m is null ? null : new ModelResponse(m.Id, m.Name, m.ProviderId, m.Provider.Name,
-            m.CustomId, m.CapabilityTags);
+        return m is null ? null : modelCatalog.ToResponse(m);
     }
 
     public async Task<ModelResponse?> UpdateAsync(Guid id, UpdateModelRequest request, CancellationToken ct = default)
@@ -62,19 +53,19 @@ public sealed class ModelService(
         var model = await db.Models.Include(m => m.Provider).FirstOrDefaultAsync(m => m.Id == id, ct);
         if (model is null) return null;
 
-        if (request.Name is not null)
-        {
-            if (IsUniqueModelNamesEnforced())
-                await EnsureModelNameUniqueAsync(request.Name, excludeId: id, ct);
-            model.Name = request.Name;
-        }
-        if (request.CustomId is not null) model.CustomId = request.CustomId;
-        if (request.CapabilityTags is not null)
-            model.CapabilityTagsRaw = modelCatalog.SerializeCapabilityTags(request.CapabilityTags);
+        var enforceUniqueNames = IsUniqueModelNamesEnforced();
+        var nameExists = request.Name is not null && enforceUniqueNames
+            ? await ModelNameExistsAsync(request.Name, excludeId: id, ct)
+            : false;
+
+        modelCatalog.ApplyUpdate(
+            model,
+            request,
+            enforceUniqueNames,
+            nameExists);
 
         await db.SaveChangesAsync(ct);
-        return new ModelResponse(model.Id, model.Name, model.ProviderId, model.Provider.Name,
-            model.CustomId, model.CapabilityTags);
+        return modelCatalog.ToResponse(model);
     }
 
     public async Task<bool> DeleteAsync(Guid id, CancellationToken ct = default)
@@ -95,8 +86,17 @@ public sealed class ModelService(
 
     private async Task EnsureModelNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)
     {
-        var exists = await db.Models.AnyAsync(
+        modelCatalog.EnsureModelNameAvailable(
+            name,
+            await ModelNameExistsAsync(name, excludeId, ct));
+    }
+
+    private async Task<bool> ModelNameExistsAsync(
+        string name,
+        Guid? excludeId,
+        CancellationToken ct)
+    {
+        return await db.Models.AnyAsync(
             m => m.Name == name && (excludeId == null || m.Id != excludeId), ct);
-        modelCatalog.EnsureModelNameAvailable(name, exists);
     }
 }

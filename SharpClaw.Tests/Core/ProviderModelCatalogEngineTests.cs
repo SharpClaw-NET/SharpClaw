@@ -1,5 +1,7 @@
 using System.Text.Json;
+using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Tests.Core;
@@ -149,6 +151,125 @@ public sealed class ProviderModelCatalogEngineTests
     }
 
     [Test]
+    public void Create_MapsRequestProviderAndSerializedCapabilities()
+    {
+        var provider = Provider();
+
+        var model = _models.Create(
+            new CreateModelRequest(
+                "gpt-test",
+                provider.Id,
+                CustomId: "primary",
+                CapabilityTags: new HashSet<string> { "chat", "vision" }),
+            provider);
+
+        model.Name.Should().Be("gpt-test");
+        model.ProviderId.Should().Be(provider.Id);
+        model.Provider.Should().BeSameAs(provider);
+        model.CustomId.Should().Be("primary");
+        model.CapabilityTagsRaw.Should().Be("chat,vision");
+    }
+
+    [Test]
+    public void ApplyUpdate_WhenNameDuplicatesAndUniqueIsEnforced_Throws()
+    {
+        var model = new ModelDB
+        {
+            Name = "old",
+            ProviderId = Guid.NewGuid()
+        };
+
+        var act = () => _models.ApplyUpdate(
+            model,
+            new UpdateModelRequest(Name: "duplicate"),
+            enforceUniqueNames: true,
+            nameExists: true);
+
+        act.Should().Throw<InvalidOperationException>()
+            .WithMessage("A model named 'duplicate' already exists.");
+    }
+
+    [Test]
+    public void ApplyUpdate_WhenCapabilitiesAreEmpty_ClearsPersistedTags()
+    {
+        var model = new ModelDB
+        {
+            Name = "old",
+            ProviderId = Guid.NewGuid(),
+            CapabilityTagsRaw = "chat"
+        };
+
+        _models.ApplyUpdate(
+            model,
+            new UpdateModelRequest(
+                Name: "new",
+                CustomId: "custom",
+                CapabilityTags: new HashSet<string>()),
+            enforceUniqueNames: false,
+            nameExists: false);
+
+        model.Name.Should().Be("new");
+        model.CustomId.Should().Be("custom");
+        model.CapabilityTagsRaw.Should().BeNull();
+    }
+
+    [Test]
+    public void RefreshCapabilityTags_WhenResolverChangesTags_UpdatesAndReturnsTrue()
+    {
+        var model = new ModelDB
+        {
+            Name = "vision-model",
+            ProviderId = Guid.NewGuid(),
+            CapabilityTagsRaw = "chat"
+        };
+        var resolver = new Capabilities(["chat", "vision"]);
+
+        _models.RefreshCapabilityTags(model, resolver).Should().BeTrue();
+
+        model.CapabilityTagsRaw.Should().Be("chat,vision");
+        _models.RefreshCapabilityTags(model, resolver).Should().BeFalse();
+    }
+
+    [Test]
+    public void BuildMissingModels_CreatesModelsForProviderIdsNotAlreadyKnown()
+    {
+        var providerId = Guid.NewGuid();
+        var resolver = new Capabilities(["chat"]);
+
+        var models = _models.BuildMissingModels(
+            providerId,
+            ["known", "new-model"],
+            new HashSet<string>(["known"], StringComparer.Ordinal),
+            resolver);
+
+        models.Should().ContainSingle();
+        models[0].Name.Should().Be("new-model");
+        models[0].ProviderId.Should().Be(providerId);
+        models[0].CapabilityTagsRaw.Should().Be("chat");
+    }
+
+    [Test]
+    public void ToResponse_UsesLoadedProviderAndParsedCapabilityTags()
+    {
+        var provider = Provider();
+        var model = new ModelDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "model",
+            ProviderId = provider.Id,
+            Provider = provider,
+            CustomId = "custom",
+            CapabilityTagsRaw = "chat,vision"
+        };
+
+        var response = _models.ToResponse(model);
+
+        response.ProviderName.Should().Be(provider.Name);
+        response.CustomId.Should().Be("custom");
+        response.CapabilityTags.Should().BeEquivalentTo("chat", "vision");
+    }
+
+    [Test]
     public void UniqueNameEnforcement_DefaultsToTrueUnlessExplicitFalse()
     {
         ProviderCatalogEngine.IsUniqueNameEnforced(null).Should().BeTrue();
@@ -174,9 +295,20 @@ public sealed class ProviderModelCatalogEngineTests
         public IReadOnlyList<ProviderCostSeed> CostSeeds => [];
     }
 
-    private sealed class Capabilities : IModelCapabilityResolver
+    private static ProviderDB Provider() => new()
     {
-        public HashSet<string> Resolve(string modelName) => [];
+        Id = Guid.NewGuid(),
+        Name = "Provider",
+        ProviderKey = "provider"
+    };
+
+    private sealed class Capabilities(IReadOnlyCollection<string>? tags = null)
+        : IModelCapabilityResolver
+    {
+        public HashSet<string> Resolve(string modelName) =>
+            tags is null
+                ? []
+                : new HashSet<string>(tags, StringComparer.OrdinalIgnoreCase);
     }
 
     private sealed class DeviceCode : IDeviceCodeFlow

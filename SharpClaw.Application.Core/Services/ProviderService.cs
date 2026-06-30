@@ -190,13 +190,8 @@ public sealed class ProviderService(
         var updated = 0;
         foreach (var model in models)
         {
-            var tags = resolver.Resolve(model.Name);
-            var tagsRaw = modelCatalog.SerializeCapabilityTags(tags);
-            if (model.CapabilityTagsRaw != tagsRaw)
-            {
-                model.CapabilityTagsRaw = tagsRaw;
+            if (modelCatalog.RefreshCapabilityTags(model, resolver))
                 updated++;
-            }
         }
 
         if (updated > 0)
@@ -232,19 +227,11 @@ public sealed class ProviderService(
         var modelIds = await client.ListModelIdsAsync(httpClient, apiKey, ct);
 
         var existingNames = provider.Models.Select(m => m.Name).ToHashSet();
-        var newModels = modelIds
-            .Where(id => !existingNames.Contains(id))
-            .Select(id =>
-            {
-                var tags = plugin.Capabilities.Resolve(id);
-                return new ModelDB
-                {
-                    Name = id,
-                    ProviderId = provider.Id,
-                    CapabilityTagsRaw = modelCatalog.SerializeCapabilityTags(tags)
-                };
-            })
-            .ToList();
+        var newModels = modelCatalog.BuildMissingModels(
+            provider.Id,
+            modelIds,
+            existingNames,
+            plugin.Capabilities);
 
         if (newModels.Count > 0)
         {
@@ -252,10 +239,12 @@ public sealed class ProviderService(
             await db.SaveChangesAsync(ct);
         }
 
-        return await db.Models
+        var models = await db.Models
             .Where(m => m.ProviderId == providerId)
-            .Select(m => new ModelResponse(m.Id, m.Name, m.ProviderId, provider.Name,
-                m.CustomId, m.CapabilityTags))
             .ToListAsync(ct);
+
+        return models
+            .Select(m => modelCatalog.ToResponse(m, provider))
+            .ToList();
     }
 }
