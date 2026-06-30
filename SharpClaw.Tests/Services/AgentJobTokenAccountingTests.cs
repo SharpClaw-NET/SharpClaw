@@ -138,6 +138,7 @@ public sealed class AgentJobTokenAccountingTests
             new SessionService(),
             registry,
             new ModuleToolExecutionPlanner(),
+            new ModuleToolPermissionPlanner(),
             new ModuleMetricsCollector(),
             eventDispatcher,
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
@@ -163,6 +164,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleToolExecutionPlanner>();
+        services.AddSingleton<ModuleToolPermissionPlanner>();
         services.AddSingleton<ModuleMetricsCollector>();
         services.AddSingleton<ChatCache>();
         services.AddSingleton<PermissionEvaluationEngine>();

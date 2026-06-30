@@ -422,6 +422,7 @@ try
     // hooks try to register dependencies on them.
     builder.Services.AddSingleton<ModuleRegistry>();
     builder.Services.AddSingleton<ModuleToolExecutionPlanner>();
+    builder.Services.AddSingleton<ModuleToolPermissionPlanner>();
     builder.Services.AddSingleton<ModuleMetricsCollector>();
     builder.Services.AddSingleton<IModuleCapabilityTelemetry, ModuleCapabilityTelemetry>();
     builder.Services.AddSingleton<ModuleEventDispatcher>();

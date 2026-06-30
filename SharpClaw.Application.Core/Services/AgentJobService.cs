@@ -40,6 +40,7 @@ public sealed class AgentJobService(
     SessionService session,
     ModuleRegistry moduleRegistry,
     ModuleToolExecutionPlanner moduleExecutionPlanner,
+    ModuleToolPermissionPlanner modulePermissionPlanner,
     ModuleMetricsCollector metricsCollector,
     ModuleEventDispatcher eventDispatcher,
     IServiceScopeFactory serviceScopeFactory,
@@ -566,46 +567,53 @@ public sealed class AgentJobService(
         string? actionKey, CancellationToken ct,
         Guid? channelPsId = null, Guid? contextPsId = null)
     {
-        if (string.IsNullOrWhiteSpace(actionKey))
-            return AgentActionResult.Denied("Module action requires an ActionKey to resolve permissions.");
+        var plan = modulePermissionPlanner.BuildPlan(
+            actionKey,
+            resourceId,
+            moduleRegistry);
 
-        if (!moduleRegistry.TryResolve(actionKey, out var moduleId, out var toolName))
-            return AgentActionResult.Denied($"No module registered for tool '{actionKey}'.");
-
-        var descriptor = moduleRegistry.GetPermissionDescriptor(moduleId, toolName);
-        if (descriptor is null)
-            return AgentActionResult.Denied($"Module tool '{actionKey}' has no permission descriptor.");
-
-        if (descriptor.IsPerResource && !resourceId.HasValue)
+        if (plan.Kind == ModuleToolPermissionPlanKind.Denied)
         {
-            Debug.WriteLine(
-                $"[PermissionCheck] DENIED: ResourceId is null for per-resource tool '{actionKey}'",
-                "SharpClaw.CLI");
-            return AgentActionResult.Denied($"ResourceId is required for module tool '{actionKey}'.");
+            if (plan.DenialReason == ModuleToolPermissionDenialReason.MissingResourceId)
+            {
+                Debug.WriteLine(
+                    $"[PermissionCheck] DENIED: ResourceId is null for per-resource tool '{actionKey}'",
+                    "SharpClaw.CLI");
+            }
+
+            return plan.DeniedResult
+                ?? AgentActionResult.Denied("Module permission plan denied without a reason.");
         }
 
         Debug.WriteLine(
-            $"[PermissionCheck] Tool='{actionKey}' AgentId={agentId} ResourceId={resourceId} DelegateTo='{descriptor.DelegateTo}'",
+            $"[PermissionCheck] Tool='{plan.ActionKey}' AgentId={agentId} ResourceId={resourceId} DelegateTo='{plan.DelegateTo}'",
             "SharpClaw.CLI");
 
-        // Direct callback takes priority.
-        if (descriptor.Check is not null)
-            return await descriptor.Check(agentId, resourceId, caller, ct);
-
-        // Delegate to a named AgentActionService method.
-        if (!string.IsNullOrWhiteSpace(descriptor.DelegateTo))
+        if (plan.Kind == ModuleToolPermissionPlanKind.DirectCheck)
         {
+            if (plan.DirectCheck is null)
+                throw new InvalidOperationException(
+                    "Module permission plan requested direct check without a callback.");
+
+            return await plan.DirectCheck(agentId, resourceId, caller, ct);
+        }
+
+        if (plan.Kind == ModuleToolPermissionPlanKind.DelegateToHost)
+        {
+            if (string.IsNullOrWhiteSpace(plan.DelegateTo))
+                throw new InvalidOperationException(
+                    "Module permission plan requested host delegate without a delegate name.");
+
             var result = actions.TryEvaluateByDelegateNameAsync(
-                descriptor.DelegateTo, agentId, resourceId, caller, ct,
+                plan.DelegateTo, agentId, resourceId, caller, ct,
                 channelPsId: channelPsId, contextPsId: contextPsId);
             if (result is not null) return await result;
 
-            return AgentActionResult.Denied(
-                $"Module tool '{actionKey}' delegates to '{descriptor.DelegateTo}' "
-                + "which is not a recognised permission check method.");
+            return plan.CreateUnrecognizedDelegateDeniedResult();
         }
 
-        return AgentActionResult.Denied($"Module tool '{actionKey}' has no permission check configured.");
+        throw new InvalidOperationException(
+            $"Unsupported module permission plan kind '{plan.Kind}'.");
     }
 
     // ═══════════════════════════════════════════════════════════════
