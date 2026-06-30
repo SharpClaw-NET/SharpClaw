@@ -52,6 +52,7 @@ public sealed class ChatService(
     ChatToolResultEngine chatToolResults,
     ChatMessageEngine chatMessages,
     ChatToolSelectionEngine chatToolSelection,
+    ChatNativeToolCallParser chatToolCallParser,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -1052,11 +1053,11 @@ public sealed class ChatService(
                 if (parsed is null)
                 {
                     messages.Add(ToolAwareMessage.ToolResult(tc.Id,
-                        "Error: unrecognized tool or malformed arguments."));
+                        ChatNativeToolCallParser.MalformedToolCallResult));
                     continue;
                 }
 
-                var jobRequest = await BuildJobRequestAsync(parsed, agent.Id, ct);
+                var jobRequest = chatToolCallParser.BuildJobRequest(parsed, agent.Id);
                 var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
                 roundJobIds.Add(jobResponse.Id);
 
@@ -1572,19 +1573,6 @@ public sealed class ChatService(
         }
     }
 
-    /// <summary>
-    /// Builds a <see cref="SubmitAgentJobRequest"/> from a parsed tool call.
-    /// </summary>
-    private async Task<SubmitAgentJobRequest> BuildJobRequestAsync(
-        ParsedToolCall parsed, Guid agentId, CancellationToken ct)
-    {
-        return new SubmitAgentJobRequest(
-            ActionKey: parsed.ActionKey,
-            ResourceId: parsed.ResourceId,
-            CallerAgentId: agentId,
-            ScriptJson: parsed.ScriptJson);
-    }
-
     // ═══════════════════════════════════════════════════════════════
     // Tool-call loop implementations
     // ═══════════════════════════════════════════════════════════════
@@ -1741,12 +1729,13 @@ public sealed class ChatService(
                 var parsed = await ParseNativeToolCallAsync(tc, ct);
                 if (parsed is null)
                 {
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id,
-                        "Error: unrecognized tool or malformed arguments."));
+                    messages.Add(ToolAwareMessage.ToolResult(
+                        tc.Id,
+                        ChatNativeToolCallParser.MalformedToolCallResult));
                     continue;
                 }
 
-                var jobRequest = await BuildJobRequestAsync(parsed, agentId, ct);
+                var jobRequest = chatToolCallParser.BuildJobRequest(parsed, agentId);
 
                 var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
                 roundJobIds.Add(jobResponse.Id);
@@ -1907,68 +1896,44 @@ public sealed class ChatService(
 
     /// <summary>
     /// Parses a native <see cref="ChatToolCall"/> into the internal
-    /// <see cref="ParsedToolCall"/> representation. Returns <see langword="null"/>
+    /// <see cref="ParsedChatToolCall"/> representation. Returns <see langword="null"/>
     /// if the tool name is unrecognized or the arguments are malformed.
     /// All tool definitions are resolved via <see cref="ModuleRegistry"/>.
     /// </summary>
-    private async Task<ParsedToolCall?> ParseNativeToolCallAsync(
+    private async Task<ParsedChatToolCall?> ParseNativeToolCallAsync(
         ChatToolCall toolCall,
         CancellationToken ct)
     {
-        if (moduleRegistry.TryResolve(toolCall.Name, out var moduleId, out var toolName))
+        var plan = chatToolCallParser.BuildParsePlan(
+            toolCall,
+            moduleRegistry,
+            moduleExecutionPlanner);
+        if (plan is null)
+            return null;
+
+        Debug.WriteLine(
+            $"[ParseToolCall] Module tool: {plan.ActionKey} \u2192 {plan.ModuleId}.{plan.ToolName}",
+            "SharpClaw.CLI");
+
+        Guid? resourceId = plan.DirectResourceId;
+        if (resourceId is null && plan.RequiresResourceExtractor)
         {
-            Debug.WriteLine(
-                $"[ParseToolCall] Module tool: {toolCall.Name} → {moduleId}.{toolName}",
-                "SharpClaw.CLI");
-
-            var envelope = moduleExecutionPlanner.CreateEnvelopeJson(
-                moduleId,
-                toolName,
-                toolCall.ArgumentsJson);
-
-            // Attempt to extract resourceId from the arguments using well-known
-            // generic argument names. Module-owned tools should use "resource_id"
-            // or "resourceId". Legacy aliases "targetId" remain supported.
-            // For tools that require sandbox-name-to-resource-id translation, the
-            // owning module must contribute a tool resource-id extractor hook.
-            Guid? modResourceId = null;
-            try
+            var extractor = moduleRegistry.GetResourceIdExtractor(plan.ActionKey);
+            if (extractor is not null)
             {
-                using var doc = JsonDocument.Parse(toolCall.ArgumentsJson ?? "{}");
-                if ((doc.RootElement.TryGetProperty("resourceId", out var rp)
-                     || doc.RootElement.TryGetProperty("resource_id", out rp)
-                     || doc.RootElement.TryGetProperty("targetId", out rp))
-                    && Guid.TryParse(rp.GetString(), out var mrid))
-                    modResourceId = mrid;
-
-                // If no direct resource id, ask the registry for a module-contributed extractor.
-                if (!modResourceId.HasValue)
-                {
-                    var extractor = moduleRegistry.GetResourceIdExtractor(toolCall.Name);
-                    if (extractor is not null)
-                    {
-                        await using var extractorScope = serviceScopeFactory.CreateAsyncScope();
-                        modResourceId = await extractor(
-                            extractorScope.ServiceProvider,
-                            toolCall.ArgumentsJson ?? "{}",
-                            ct);
-                    }
-                }
+                await using var extractorScope = serviceScopeFactory.CreateAsyncScope();
+                resourceId = await extractor(
+                    extractorScope.ServiceProvider,
+                    plan.ArgumentsJson,
+                    ct);
             }
-            catch (JsonException) { /* non-critical */ }
-
-            Debug.WriteLine(
-                $"[ParseToolCall] ResourceId={modResourceId?.ToString() ?? "(null)"} from args: {toolCall.ArgumentsJson}",
-                "SharpClaw.CLI");
-
-            return new ParsedToolCall(
-                toolCall.Id,
-                modResourceId,
-                ScriptJson: envelope,
-                ActionKey: toolCall.Name);
         }
 
-        return null;
+        Debug.WriteLine(
+            $"[ParseToolCall] ResourceId={resourceId?.ToString() ?? "(null)"} from args: {toolCall.ArgumentsJson}",
+            "SharpClaw.CLI");
+
+        return chatToolCallParser.CompleteParse(plan, resourceId);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1992,13 +1957,6 @@ public sealed class ChatService(
     // ═══════════════════════════════════════════════════════════════
     // Internal types
     // ═══════════════════════════════════════════════════════════════
-
-    private sealed record ParsedToolCall(
-        string CallId,
-        Guid? ResourceId,
-        string? ScriptJson,
-        string? RawJson = null,
-        string? ActionKey = null);
 
     private readonly record struct InlineToolPermissionCacheKey(
         Guid AgentId,
