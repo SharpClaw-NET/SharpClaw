@@ -51,7 +51,7 @@ public sealed class ChatService(
     ChatToolResultEngine chatToolResults,
     ChatMessageEngine chatMessages,
     ChatToolSelectionEngine chatToolSelection,
-    ChatNativeToolCallParser chatToolCallParser,
+    ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
@@ -1049,65 +1049,31 @@ public sealed class ChatService(
                     continue;
                 }
 
-                var parsed = await ParseNativeToolCallAsync(tc, ct);
-                if (parsed is null)
-                {
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id,
-                        ChatNativeToolCallParser.MalformedToolCallResult));
+                var nativeTool = await ExecuteNativeJobToolAsync(
+                    tc,
+                    agent.Id,
+                    channelId,
+                    supportsVision,
+                    emitStreamEvents: true,
+                    approvalCallback,
+                    ct);
+
+                messages.Add(nativeTool.ToolResultMessage);
+                if (!nativeTool.Parsed)
                     continue;
-                }
 
-                var jobRequest = chatToolCallParser.BuildJobRequest(parsed, agent.Id);
-                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
-                roundJobIds.Add(jobResponse.Id);
+                if (nativeTool.SubmittedJobId is { } submittedJobId)
+                    roundJobIds.Add(submittedJobId);
 
-                // ── Inline approval ───────────────────────────────
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
-                {
-                    // Check if the session user CAN approve
-                    var canApprove = await CanSessionUserApproveAsync(
-                        agent.Id, jobRequest.ResourceId, ct,
-                        jobRequest.ActionKey);
+                // Core owns native job approval and stream-event selection.
+                foreach (var streamEvent in nativeTool.StreamEvents)
+                    yield return streamEvent;
 
-                    if (canApprove)
-                    {
-                        yield return ChatStreamEvent.NeedsApproval(jobResponse);
+                if (nativeTool.JobResponse is not null)
+                    jobResults.Add(nativeTool.JobResponse);
 
-                        var approved = await approvalCallback(jobResponse, ct);
-
-                        if (approved)
-                        {
-                            jobResponse = await jobService.ApproveAsync(jobResponse.Id, new ApproveAgentJobRequest(), ct)
-                                ?? jobResponse;
-                        }
-                        else
-                        {
-                            jobResponse = await jobService.CancelAsync(jobResponse.Id, ct)
-                                ?? jobResponse;
-                        }
-                    }
-                    else
-                    {
-                        // Auto-deny: user cannot approve
-                        jobResponse = await jobService.CancelAsync(jobResponse.Id, ct)
-                            ?? jobResponse;
-                    }
-
-                    yield return ChatStreamEvent.ApprovalDecision(jobResponse);
-                }
-                else
-                {
-                    yield return ChatStreamEvent.ToolStart(jobResponse);
-                }
-
-                jobResults.Add(jobResponse);
-
-                // Inject standardized tool notation into persisted content
-                var notation = FormatToolNotation(jobResponse);
-                fullContent.Append(notation);
-                streamedContent.Append(notation);
-
-                messages.Add(BuildToolResultMessage(tc.Id, jobResponse, supportsVision));
+                fullContent.Append(nativeTool.ToolNotation);
+                streamedContent.Append(nativeTool.ToolNotation);
             }
 
             // Distribute this round's token usage across jobs submitted in the round
@@ -1687,49 +1653,29 @@ public sealed class ChatService(
                     continue;
                 }
 
-                var parsed = await ParseNativeToolCallAsync(tc, ct);
-                if (parsed is null)
-                {
-                    messages.Add(ToolAwareMessage.ToolResult(
-                        tc.Id,
-                        ChatNativeToolCallParser.MalformedToolCallResult));
+                var nativeTool = await ExecuteNativeJobToolAsync(
+                    tc,
+                    agentId,
+                    channelId,
+                    supportsVision,
+                    emitStreamEvents: false,
+                    approvalCallback,
+                    ct);
+
+                messages.Add(nativeTool.ToolResultMessage);
+                if (!nativeTool.Parsed)
                     continue;
-                }
 
-                var jobRequest = chatToolCallParser.BuildJobRequest(parsed, agentId);
+                if (nativeTool.SubmittedJobId is { } submittedJobId)
+                    roundJobIds.Add(submittedJobId);
 
-                var jobResponse = await jobService.SubmitAsync(channelId, jobRequest, ct);
-                roundJobIds.Add(jobResponse.Id);
+                // Core owns native job approval and unresolved-approval detection.
+                if (nativeTool.JobResponse is not null)
+                    jobResults.Add(nativeTool.JobResponse);
 
-                // ── Inline approval (when callback available) ────
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval
-                    && approvalCallback is not null)
-                {
-                    var canApprove = await CanSessionUserApproveAsync(
-                        agentId, jobRequest.ResourceId, ct,
-                        jobRequest.ActionKey);
+                toolNotation.Append(nativeTool.ToolNotation);
 
-                    if (canApprove)
-                    {
-                        var approved = await approvalCallback(jobResponse, ct);
-                        jobResponse = approved
-                            ? await jobService.ApproveAsync(jobResponse.Id, new ApproveAgentJobRequest(), ct) ?? jobResponse
-                            : await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                    else
-                    {
-                        jobResponse = await jobService.CancelAsync(jobResponse.Id, ct) ?? jobResponse;
-                    }
-                }
-
-                jobResults.Add(jobResponse);
-
-                // Record standardized tool notation for persistence
-                toolNotation.Append(FormatToolNotation(jobResponse));
-
-                messages.Add(BuildToolResultMessage(tc.Id, jobResponse, supportsVision));
-
-                if (jobResponse.Status == AgentJobStatus.AwaitingApproval)
+                if (nativeTool.AwaitingUnresolvableApproval)
                     anyUnresolvableApproval = true;
             }
 
@@ -1861,42 +1807,53 @@ public sealed class ChatService(
     /// if the tool name is unrecognized or the arguments are malformed.
     /// All tool definitions are resolved via <see cref="ModuleRegistry"/>.
     /// </summary>
-    private async Task<ParsedChatToolCall?> ParseNativeToolCallAsync(
+    private Task<ChatNativeJobToolExecutionResult> ExecuteNativeJobToolAsync(
         ChatToolCall toolCall,
+        Guid agentId,
+        Guid channelId,
+        bool supportsVision,
+        bool emitStreamEvents,
+        Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
         CancellationToken ct)
-        => await chatToolCallParser.ResolveAsync(
-            new ChatNativeToolCallResolutionRequest(
-                toolCall,
-                moduleRegistry,
-                moduleExecutionPlanner,
-                async (extraction, innerCt) =>
-                {
-                    await using var extractorScope = serviceScopeFactory.CreateAsyncScope();
-                    return await extraction.Extractor(
-                        extractorScope.ServiceProvider,
-                        extraction.ArgumentsJson,
-                        innerCt);
-                },
-                message => Debug.WriteLine(message, "SharpClaw.CLI")),
+        => chatNativeJobToolExecutor.ExecuteAsync(
+            new ChatNativeJobToolExecutionRequest(
+                BuildNativeToolCallResolutionRequest(toolCall),
+                agentId,
+                channelId,
+                supportsVision,
+                emitStreamEvents,
+                (targetChannelId, jobRequest, innerCt) =>
+                    jobService.SubmitAsync(targetChannelId, jobRequest, innerCt),
+                (targetAgentId, resourceId, actionKey, innerCt) =>
+                    CanSessionUserApproveAsync(
+                        targetAgentId,
+                        resourceId,
+                        innerCt,
+                        actionKey),
+                (jobId, innerCt) => jobService.CancelAsync(jobId, innerCt),
+                approvalCallback,
+                (jobId, innerCt) => jobService.ApproveAsync(
+                    jobId,
+                    new ApproveAgentJobRequest(),
+                    innerCt)),
             ct);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Screenshot extraction & vision-aware tool results
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Builds a <see cref="ToolAwareMessage"/> for a tool result. When the
-    /// result contains screenshot data and the model supports vision, the
-    /// image is attached as a multipart content block. Otherwise, only the
-    /// text portion is included (the base64 blob is omitted for non-vision
-    /// models to avoid wasting context).
-    /// </summary>
-    private ToolAwareMessage BuildToolResultMessage(
-        string toolCallId, AgentJobResponse job, bool supportsVision)
-        => chatToolResults.BuildToolResultMessage(
-            toolCallId,
-            job,
-            supportsVision);
+    private ChatNativeToolCallResolutionRequest BuildNativeToolCallResolutionRequest(
+        ChatToolCall toolCall)
+        => new(
+            toolCall,
+            moduleRegistry,
+            moduleExecutionPlanner,
+            async (extraction, innerCt) =>
+            {
+                await using var extractorScope =
+                    serviceScopeFactory.CreateAsyncScope();
+                return await extraction.Extractor(
+                    extractorScope.ServiceProvider,
+                    extraction.ArgumentsJson,
+                    innerCt);
+            },
+            message => Debug.WriteLine(message, "SharpClaw.CLI"));
 
     // ═══════════════════════════════════════════════════════════════
     // Internal types
@@ -1923,9 +1880,6 @@ public sealed class ChatService(
     // tests, clients, and any non-Core call site share one source of
     // truth for the persisted "⚙ [...] → ..." surface.  These thin
     // wrappers exist only to keep the in-file call sites readable.
-
-    private static string FormatToolNotation(AgentJobResponse job)
-        => ToolNotationFormatter.ForJob(job);
 
     private static string FormatInlineToolNotation(string toolName)
         => ToolNotationFormatter.ForInlineTool(toolName);
