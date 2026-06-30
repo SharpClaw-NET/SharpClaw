@@ -340,6 +340,7 @@ try
     builder.Services.AddSingleton<ProviderApiClientFactory>();
     builder.Services.AddSingleton<AgentAdministrationEngine>();
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
+    builder.Services.AddSingleton<PermissionDelegateEvaluationEngine>();
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();

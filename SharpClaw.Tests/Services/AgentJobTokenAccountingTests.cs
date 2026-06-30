@@ -132,11 +132,17 @@ public sealed class AgentJobTokenAccountingTests
             NullLogger<ModuleEventDispatcher>.Instance);
         var jobAdministration = new AgentJobAdministrationEngine();
         var defaultResources = new DefaultResourceEngine();
+        var permissionEvaluator = new PermissionEvaluationEngine();
 
         return new AgentJobService(
             db,
             new EfPersistenceEntityResolver(),
-            new AgentActionService(db, registry, new PermissionEvaluationEngine()),
+            new AgentActionService(
+                db,
+                registry,
+                permissionEvaluator,
+                new PermissionDelegateEvaluationEngine(
+                    permissionEvaluator)),
             new SessionService(),
             registry,
             new ModuleToolExecutionPlanner(),
@@ -176,6 +182,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<ModuleJobToolExecutor>();
         services.AddSingleton<ChatCache>();
         services.AddSingleton<PermissionEvaluationEngine>();
+        services.AddSingleton<PermissionDelegateEvaluationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
         services.AddSingleton<DefaultResourceEngine>();

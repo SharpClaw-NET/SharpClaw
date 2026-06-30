@@ -112,6 +112,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ProviderApiClientFactory>();
         services.AddSingleton<AgentAdministrationEngine>();
         services.AddSingleton<PermissionEvaluationEngine>();
+        services.AddSingleton<PermissionDelegateEvaluationEngine>();
         services.AddSingleton<RolePermissionAdministrationEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();

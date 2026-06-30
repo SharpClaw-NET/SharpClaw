@@ -16,7 +16,8 @@ namespace SharpClaw.Application.Services;
 public sealed class AgentActionService(
     SharpClawDbContext db,
     ModuleRegistry registry,
-    PermissionEvaluationEngine permissionEvaluator)
+    PermissionEvaluationEngine permissionEvaluator,
+    PermissionDelegateEvaluationEngine permissionDelegates)
 {
     /// <summary>
     /// Evaluate a global-flag permission by its canonical key
@@ -67,43 +68,19 @@ public sealed class AgentActionService(
         Guid? channelPsId = null,
         Guid? contextPsId = null)
     {
-        var plan = PermissionDelegatePlanner.BuildPlan(
-            delegateName,
-            resourceId,
-            registry);
-
-        if (plan.Kind == PermissionDelegatePlanKind.GlobalFlag)
-        {
-            return EvaluateGlobalFlagByKeyAsync(
-                plan.FlagKey
-                    ?? throw new InvalidOperationException(
-                        "Global flag delegate plan has no flag key."),
-                agentId,
+        return permissionDelegates.TryEvaluateAsync(
+            new PermissionDelegateEvaluationRequest(
+                delegateName,
+                resourceId,
                 caller,
-                ct: ct,
-                channelPsId: channelPsId,
-                contextPsId: contextPsId);
-        }
-
-        if (plan.Kind == PermissionDelegatePlanKind.ResourceAccess
-            && plan.ResourceId.HasValue)
-        {
-            var resourceType = plan.ResourceType
-                ?? throw new InvalidOperationException(
-                    "Resource delegate plan has no resource type.");
-
-            return EvaluateResourceAccessAsync(
-                agentId,
-                plan.ResourceId.Value,
-                resourceType,
-                caller,
-                $"{resourceType} access",
-                ct: ct,
-                channelPsId: channelPsId,
-                contextPsId: contextPsId);
-        }
-
-        return null;
+                registry,
+                innerCt => LoadPermissionDelegateSnapshotsAsync(
+                    agentId,
+                    caller,
+                    channelPsId,
+                    contextPsId,
+                    innerCt)),
+            ct);
     }
 
     /// <summary>
@@ -213,6 +190,34 @@ public sealed class AgentActionService(
         }
 
         return null;
+    }
+
+    private async Task<PermissionDelegateSnapshotSet>
+        LoadPermissionDelegateSnapshotsAsync(
+            Guid agentId,
+            ActionCaller caller,
+            Guid? channelPsId,
+            Guid? contextPsId,
+            CancellationToken ct)
+    {
+        var agentPermissions = await LoadAgentPermissionSnapshotAsync(
+            agentId,
+            ct);
+        var channelPermissions = await LoadPermissionSnapshotAsync(
+            channelPsId,
+            ct);
+        var contextPermissions = await LoadPermissionSnapshotAsync(
+            contextPsId,
+            ct);
+        var callerPermissions = await LoadCallerPermissionSnapshotAsync(
+            caller,
+            ct);
+
+        return new PermissionDelegateSnapshotSet(
+            agentPermissions,
+            channelPermissions,
+            contextPermissions,
+            callerPermissions);
     }
 
     private async Task<PermissionSetSnapshot?> LoadPermissionSnapshotAsync(
