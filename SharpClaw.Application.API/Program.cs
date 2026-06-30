@@ -49,6 +49,7 @@ using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
 using SharpClaw.Core.Threads;
 using SharpClaw.Core.Tools;
+using SharpClaw.Core.Tasks.Preflight;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
@@ -356,6 +357,7 @@ try
     builder.Services.AddSingleton<ChatToolResultEngine>();
     builder.Services.AddSingleton<ChatMessageEngine>();
     builder.Services.AddSingleton<ChatToolSelectionEngine>();
+    builder.Services.AddSingleton<TaskPreflightEngine>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();
 
     builder.Services.AddScoped<ProviderService>();

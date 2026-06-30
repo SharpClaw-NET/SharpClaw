@@ -19,6 +19,7 @@ using SharpClaw.Modules.AgentOrchestration.Models;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 using SharpClaw.Modules.AgentOrchestration.Services;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Tasks.Preflight;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -340,6 +341,7 @@ internal sealed class TaskLifecycleHost : IAsyncDisposable
         services.AddDbContext<SharpClawDbContext>(options => options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ProviderApiClientFactory>();
+        services.AddSingleton<TaskPreflightEngine>();
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddScoped<TaskPreflightChecker>();
         services.AddScoped<TaskService>();

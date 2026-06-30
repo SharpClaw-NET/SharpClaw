@@ -32,6 +32,7 @@ using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Instances;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Tasks.Preflight;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -126,6 +127,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatToolResultEngine>();
         services.AddSingleton<ChatMessageEngine>();
         services.AddSingleton<ChatToolSelectionEngine>();
+        services.AddSingleton<TaskPreflightEngine>();
         services.AddSingleton<ToolAwarenessSetEngine>();
         services.AddSingleton<RuntimeModuleDbContextRegistry>();
         services.AddSingleton<ModulePersistenceRegistrationFactory>();

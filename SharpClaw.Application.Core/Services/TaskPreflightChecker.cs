@@ -1,263 +1,163 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Clients;
+using SharpClaw.Core.Modules;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Core.Clients;
-using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Application.Services;
 
 /// <summary>
-/// Evaluates task environment requirements before an instance is created.
-/// Checks are divided into two tiers:
-/// <list type="bullet">
-///   <item><see cref="CheckStatic"/> — platform checks only, no DB access.</item>
-///   <item><see cref="CheckRuntimeAsync"/> — full DB-backed checks performed at instance-creation time.</item>
-/// </list>
+/// Builds host facts for task requirement checks and delegates the
+/// requirement semantics to SharpClaw.Core.
 /// </summary>
 public sealed class TaskPreflightChecker(
     SharpClawDbContext db,
     ModuleRegistry moduleRegistry,
-    ProviderApiClientFactory clientFactory)
+    ProviderApiClientFactory clientFactory,
+    TaskPreflightEngine preflight)
 {
-    private readonly TaskPreflightEngine _preflight = new();
+    public TaskPreflightResult CheckStatic(
+        IReadOnlyList<TaskRequirementDefinition> requirements)
+        => preflight.CheckStatic(requirements);
 
-    // ═══════════════════════════════════════════════════════════════
-    // Static check (no DB access)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Run only static platform checks. Called at definition registration time
-    /// so platform mismatches are surfaced without DB access.
-    /// </summary>
-    public TaskPreflightResult CheckStatic(IReadOnlyList<TaskRequirementDefinition> requirements)
-        => _preflight.CheckStatic(requirements);
-
-    // ═══════════════════════════════════════════════════════════════
-    // Runtime check (full DB access)
-    // ═══════════════════════════════════════════════════════════════
-
-    /// <summary>
-    /// Run all runtime checks. Called at instance-creation time after
-    /// parameter values have been bound.
-    /// </summary>
     public async Task<TaskPreflightResult> CheckRuntimeAsync(
         IReadOnlyList<TaskRequirementDefinition> requirements,
         IReadOnlyDictionary<string, object?> paramValues,
         Guid? callerAgentId,
         CancellationToken ct = default)
     {
-        var findings = new List<TaskPreflightFinding>();
+        var facts = await BuildRuntimeFactsAsync(callerAgentId, ct);
+        return preflight.CheckRuntime(
+            requirements,
+            paramValues,
+            facts,
+            callerAgentId is not null);
+    }
 
-        foreach (var req in requirements)
-        {
-            switch (req.Kind)
+    private async Task<TaskPreflightRuntimeFacts> BuildRuntimeFactsAsync(
+        Guid? callerAgentId,
+        CancellationToken ct)
+    {
+        var providers = await BuildProviderStatesAsync(ct);
+        var models = await BuildModelStatesAsync(ct);
+        var enabledModuleIds = await BuildEnabledModuleSetAsync(ct);
+        var callerPermissionFlags =
+            await BuildCallerPermissionFlagsAsync(callerAgentId, ct);
+
+        return new TaskPreflightRuntimeFacts(
+            providers,
+            models,
+            enabledModuleIds,
+            callerPermissionFlags);
+    }
+
+    private async Task<IReadOnlyList<TaskPreflightProviderState>>
+        BuildProviderStatesAsync(CancellationToken ct)
+    {
+        var configuredProviders = await db.Providers
+            .AsNoTracking()
+            .Select(provider => new
             {
-                case TaskRequirementKind.RequiresPlatform:
-                {
-                    var passed = Enum.TryParse<TaskPlatform>(req.Value, out var platform)
-                                 && _preflight.IsPlatformSatisfied(platform);
-                    findings.Add(_preflight.CreateRuntimePlatformFinding(req, passed));
-                    break;
-                }
+                provider.ProviderKey,
+                provider.EncryptedApiKey
+            })
+            .ToListAsync(ct);
 
-                case TaskRequirementKind.RequiresProvider:
-                {
-                    var value = req.Value ?? string.Empty;
-                    bool passed;
-                    string message;
+        return clientFactory.Plugins
+            .Select(plugin =>
+            {
+                var configured = configuredProviders.FirstOrDefault(
+                    provider => provider.ProviderKey == plugin.ProviderKey);
+                return new TaskPreflightProviderState(
+                    plugin.ProviderKey,
+                    plugin.RequiresApiKey,
+                    configured is not null,
+                    configured?.EncryptedApiKey is not null);
+            })
+            .ToList();
+    }
 
-                    var match = clientFactory.Plugins
-                        .FirstOrDefault(p => p.ProviderKey.Equals(value, StringComparison.OrdinalIgnoreCase));
-                    if (match is not null)
-                    {
-                        var normalised = match.ProviderKey;
-                        passed = await db.Providers
-                            .AnyAsync(p => p.ProviderKey == normalised
-                                          && (!match.RequiresApiKey || p.EncryptedApiKey != null), ct);
-                        message = passed
-                            ? $"Provider '{value}' is configured."
-                            : $"Provider '{value}' is not configured or has no API key.";
-                    }
-                    else
-                    {
-                        passed = false;
-                        message = $"'{value}' is not a recognised provider key.";
-                    }
+    private async Task<IReadOnlyList<TaskPreflightModelState>>
+        BuildModelStatesAsync(CancellationToken ct)
+    {
+        var models = await db.Models
+            .AsNoTracking()
+            .Select(model => new
+            {
+                model.Id,
+                model.Name,
+                model.CustomId,
+                model.CapabilityTagsRaw
+            })
+            .ToListAsync(ct);
 
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed, message));
-                    break;
-                }
+        return models
+            .Select(model => new TaskPreflightModelState(
+                model.Id,
+                model.Name,
+                model.CustomId,
+                ParseCapabilityTags(model.CapabilityTagsRaw)))
+            .ToList();
+    }
 
-                case TaskRequirementKind.RequiresModelCapability:
-                {
-                    var capName = req.CapabilityValue ?? string.Empty;
-                    var tag = capName.ToLowerInvariant();
-                    var passed = await db.Models
-                        .AnyAsync(m => m.CapabilityTagsRaw != null && m.CapabilityTagsRaw.Contains(tag), ct);
-                    var message = passed
-                        ? $"A model with capability tag '{capName}' exists."
-                        : $"No model with capability tag '{capName}' is registered.";
+    private async Task<IReadOnlySet<string>> BuildEnabledModuleSetAsync(
+        CancellationToken ct)
+    {
+        var enabledModuleIds = await db.ModuleStates
+            .AsNoTracking()
+            .Where(state => state.Enabled)
+            .Select(state => state.ModuleId)
+            .ToListAsync(ct);
 
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed, message));
-                    break;
-                }
+        var result = new HashSet<string>(
+            enabledModuleIds,
+            StringComparer.Ordinal);
 
-                case TaskRequirementKind.RequiresModel:
-                {
-                    var value = req.Value ?? string.Empty;
-                    var passed = await db.Models
-                        .AnyAsync(m => m.Name == value || m.CustomId == value, ct);
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed,
-                        passed
-                            ? $"Model '{value}' is available."
-                            : $"Model '{value}' is not registered."));
-                    break;
-                }
-
-                case TaskRequirementKind.RequiresModule:
-                {
-                    var moduleId = req.Value ?? string.Empty;
-                    var passed = await IsModuleEnabledAsync(moduleId, ct);
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed,
-                        passed
-                            ? $"Module '{moduleId}' is enabled."
-                            : $"Module '{moduleId}' is not enabled."));
-                    break;
-                }
-
-                case TaskRequirementKind.RecommendsModule:
-                {
-                    var moduleId = req.Value ?? string.Empty;
-                    var enabled = await IsModuleEnabledAsync(moduleId, ct);
-                    // RecommendsModule is always Warning severity — finding always passes structurally;
-                    // non-enabled state surfaces as a warning, not a block.
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), TaskDiagnosticSeverity.Warning, Passed: enabled,
-                        enabled
-                            ? $"Recommended module '{moduleId}' is enabled."
-                            : $"Recommended module '{moduleId}' is not enabled. The task may have reduced functionality."));
-                    break;
-                }
-
-                case TaskRequirementKind.RequiresPermission:
-                {
-                    // At instance-creation time we check whether the caller agent holds
-                    // the required global flag with any non-Unset clearance.
-                    var flagKey = req.Value ?? string.Empty;
-                    var passed = callerAgentId is not null
-                                 && await AgentHasFlagAsync(callerAgentId.Value, flagKey, ct);
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed,
-                        passed
-                            ? $"Caller agent has permission '{flagKey}'."
-                            : callerAgentId is null
-                                ? $"Permission '{flagKey}' required but no caller agent was supplied."
-                                : $"Caller agent does not have permission '{flagKey}'."));
-                    break;
-                }
-
-                case TaskRequirementKind.ModelIdParameter:
-                {
-                    var paramName = req.ParameterName ?? string.Empty;
-                    if (!paramValues.TryGetValue(paramName, out var rawValue) || rawValue is null)
-                    {
-                        findings.Add(new TaskPreflightFinding(
-                            req.Kind.ToString(), req.Severity, Passed: false,
-                            $"Parameter '{paramName}' is required for model ID resolution but was not provided.",
-                            paramName));
-                        break;
-                    }
-
-                    var modelRef = rawValue.ToString() ?? string.Empty;
-                    var passed = Guid.TryParse(modelRef, out var modelGuid)
-                        ? await db.Models.AnyAsync(m => m.Id == modelGuid, ct)
-                        : await db.Models.AnyAsync(m => m.Name == modelRef || m.CustomId == modelRef, ct);
-
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed,
-                        passed
-                            ? $"Model '{modelRef}' (from parameter '{paramName}') is available."
-                            : $"Model '{modelRef}' (from parameter '{paramName}') is not registered.",
-                        paramName));
-                    break;
-                }
-
-                case TaskRequirementKind.RequiresCapabilityParameter:
-                {
-                    var paramName = req.ParameterName ?? string.Empty;
-                    var capName = req.CapabilityValue ?? string.Empty;
-
-                    if (!paramValues.TryGetValue(paramName, out var rawValue) || rawValue is null)
-                    {
-                        findings.Add(new TaskPreflightFinding(
-                            req.Kind.ToString(), req.Severity, Passed: false,
-                            $"Parameter '{paramName}' is required for capability check but was not provided.",
-                            paramName));
-                        break;
-                    }
-
-                    var modelRef = rawValue.ToString() ?? string.Empty;
-                    var passed = false;
-                    string message;
-
-                    var tag = capName.ToLowerInvariant();
-                    passed = Guid.TryParse(modelRef, out var modelGuid)
-                        ? await db.Models.AnyAsync(m => m.Id == modelGuid && m.CapabilityTagsRaw != null && m.CapabilityTagsRaw.Contains(tag), ct)
-                        : await db.Models.AnyAsync(m => (m.Name == modelRef || m.CustomId == modelRef) && m.CapabilityTagsRaw != null && m.CapabilityTagsRaw.Contains(tag), ct);
-                    message = passed
-                        ? $"Model '{modelRef}' (from parameter '{paramName}') has capability tag '{capName}'."
-                        : $"Model '{modelRef}' (from parameter '{paramName}') does not have capability tag '{capName}'.";
-
-                    findings.Add(new TaskPreflightFinding(
-                        req.Kind.ToString(), req.Severity, passed, message, paramName));
-                    break;
-                }
-            }
+        foreach (var module in moduleRegistry.GetAllModules())
+        {
+            if (moduleRegistry.IsExternal(module.Id))
+                result.Add(module.Id);
         }
 
-        return _preflight.BuildResult(findings);
+        return result;
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task<bool> IsModuleEnabledAsync(string moduleId, CancellationToken ct)
+    private async Task<IReadOnlySet<string>> BuildCallerPermissionFlagsAsync(
+        Guid? callerAgentId,
+        CancellationToken ct)
     {
-        // External (hot-loaded) modules are always enabled while loaded.
-        if (moduleRegistry.GetModule(moduleId) is not null &&
-            moduleRegistry.IsExternal(moduleId))
-            return true;
+        if (callerAgentId is null)
+            return new HashSet<string>(StringComparer.Ordinal);
 
-        var state = await db.ModuleStates
-            .FirstOrDefaultAsync(s => s.ModuleId == moduleId, ct);
-        return state?.Enabled ?? false;
-    }
-
-    private async Task<bool> AgentHasFlagAsync(Guid agentId, string flagKey, CancellationToken ct)
-    {
-        // Resolve agent → role → permission set → global flags
         var agent = await db.Agents
             .AsNoTracking()
-            .Include(a => a.Role)
-            .FirstOrDefaultAsync(a => a.Id == agentId, ct);
+            .Include(agent => agent.Role)
+            .FirstOrDefaultAsync(agent => agent.Id == callerAgentId.Value, ct);
 
-        if (agent?.Role?.PermissionSetId is not { } psId)
-            return false;
+        if (agent?.Role?.PermissionSetId is not { } permissionSetId)
+            return new HashSet<string>(StringComparer.Ordinal);
 
-        return await db.GlobalFlags
-            .AnyAsync(f => f.PermissionSetId == psId
-                        && f.FlagKey == flagKey
-                        && f.Clearance != PermissionClearance.Unset, ct);
+        var flags = await db.GlobalFlags
+            .AsNoTracking()
+            .Where(flag => flag.PermissionSetId == permissionSetId
+                           && flag.Clearance != PermissionClearance.Unset)
+            .Select(flag => flag.FlagKey)
+            .ToListAsync(ct);
+
+        return new HashSet<string>(flags, StringComparer.Ordinal);
     }
 
+    private static IReadOnlySet<string> ParseCapabilityTags(string? tagsRaw)
+    {
+        return string.IsNullOrWhiteSpace(tagsRaw)
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(
+                tagsRaw.Split(
+                    ',',
+                    StringSplitOptions.RemoveEmptyEntries
+                    | StringSplitOptions.TrimEntries),
+                StringComparer.OrdinalIgnoreCase);
+    }
 }
