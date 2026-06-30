@@ -1,5 +1,6 @@
 using FluentAssertions;
 using SharpClaw.Contracts.DTOs.DefaultResources;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Resources;
@@ -127,6 +128,56 @@ public sealed class DefaultResourceEngineTests
         DefaultResourceEngine.NormalizeKey("AoTask").Should().Be("aotask");
     }
 
+    [Test]
+    public void Apply_WhenRequestUpdatesAddsAndClearsEntries_MutatesSet()
+    {
+        var removed = new List<DefaultResourceEntryDB>();
+        var setId = Guid.NewGuid();
+        var oldTask = Guid.NewGuid();
+        var newTask = Guid.NewGuid();
+        var note = Guid.NewGuid();
+        var set = EntitySet(
+            setId,
+            ("Task", oldTask),
+            ("old", Guid.NewGuid()));
+
+        DefaultResourceEngine.Apply(
+            set,
+            new SetDefaultResourcesRequest(
+                new Dictionary<string, Guid?>
+                {
+                    ["TASK"] = newTask,
+                    ["Note"] = note,
+                    ["old"] = null
+                }),
+            removed.Add);
+
+        set.Entries.Should().HaveCount(2);
+        set.Entries.Should().ContainSingle(e =>
+            e.ResourceKey == "Task" && e.ResourceId == newTask);
+        set.Entries.Should().ContainSingle(e =>
+            e.ResourceKey == "note"
+            && e.ResourceId == note
+            && e.DefaultResourceSetId == setId);
+        removed.Should().ContainSingle(e => e.ResourceKey == "old");
+    }
+
+    [Test]
+    public void ApplyKey_WhenClearingMissingKey_DoesNotCallRemove()
+    {
+        var removeCalls = 0;
+        var set = EntitySet(Guid.NewGuid(), ("task", Guid.NewGuid()));
+
+        DefaultResourceEngine.ApplyKey(
+            set,
+            "missing",
+            null,
+            _ => removeCalls++);
+
+        set.Entries.Should().ContainSingle();
+        removeCalls.Should().Be(0);
+    }
+
     private static DefaultResourceSetSnapshot Set(
         params (string Key, Guid ResourceId)[] entries) =>
         new(
@@ -143,4 +194,20 @@ public sealed class DefaultResourceEngineTests
             resources,
             new HashSet<Guid>(),
             new HashSet<Guid>());
+
+    private static DefaultResourceSetDB EntitySet(
+        Guid id,
+        params (string Key, Guid ResourceId)[] entries) =>
+        new()
+        {
+            Id = id,
+            Entries = entries
+                .Select(entry => new DefaultResourceEntryDB
+                {
+                    DefaultResourceSetId = id,
+                    ResourceKey = entry.Key,
+                    ResourceId = entry.ResourceId
+                })
+                .ToList()
+        };
 }

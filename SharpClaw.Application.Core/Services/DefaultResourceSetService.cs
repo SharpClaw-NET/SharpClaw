@@ -77,7 +77,10 @@ public sealed class DefaultResourceSetService(
         ch.DefaultResourceSet ??= await CreateAndAttachAsync(
             setId => ch.DefaultResourceSetId = setId, ct);
 
-        Apply(ch.DefaultResourceSet, request);
+        DefaultResourceEngine.Apply(
+            ch.DefaultResourceSet,
+            request,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
         return DefaultResourceEngine.ToResponse(
@@ -101,7 +104,10 @@ public sealed class DefaultResourceSetService(
         ctx.DefaultResourceSet ??= await CreateAndAttachAsync(
             setId => ctx.DefaultResourceSetId = setId, ct);
 
-        Apply(ctx.DefaultResourceSet, request);
+        DefaultResourceEngine.Apply(
+            ctx.DefaultResourceSet,
+            request,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
         return DefaultResourceEngine.ToResponse(
@@ -132,7 +138,11 @@ public sealed class DefaultResourceSetService(
         ch.DefaultResourceSet ??= await CreateAndAttachAsync(
             setId => ch.DefaultResourceSetId = setId, ct);
 
-        ApplyKey(ch.DefaultResourceSet, key, resourceId);
+        DefaultResourceEngine.ApplyKey(
+            ch.DefaultResourceSet,
+            key,
+            resourceId,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
         return DefaultResourceEngine.ToResponse(
@@ -152,7 +162,11 @@ public sealed class DefaultResourceSetService(
         if (ch.DefaultResourceSet is null)
             return DefaultResourceEngine.EmptyResponse(Guid.Empty);
 
-        ApplyKey(ch.DefaultResourceSet, key, null);
+        DefaultResourceEngine.ApplyKey(
+            ch.DefaultResourceSet,
+            key,
+            null,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
         return DefaultResourceEngine.ToResponse(
@@ -174,7 +188,11 @@ public sealed class DefaultResourceSetService(
         ctx.DefaultResourceSet ??= await CreateAndAttachAsync(
             setId => ctx.DefaultResourceSetId = setId, ct);
 
-        ApplyKey(ctx.DefaultResourceSet, key, resourceId);
+        DefaultResourceEngine.ApplyKey(
+            ctx.DefaultResourceSet,
+            key,
+            resourceId,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
         return DefaultResourceEngine.ToResponse(
@@ -194,7 +212,11 @@ public sealed class DefaultResourceSetService(
         if (ctx.DefaultResourceSet is null)
             return DefaultResourceEngine.EmptyResponse(Guid.Empty);
 
-        ApplyKey(ctx.DefaultResourceSet, key, null);
+        DefaultResourceEngine.ApplyKey(
+            ctx.DefaultResourceSet,
+            key,
+            null,
+            entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
         await InvalidateContextDefaultResourcesAsync(contextId, ct);
         return DefaultResourceEngine.ToResponse(
@@ -211,44 +233,6 @@ public sealed class DefaultResourceSetService(
         await db.SaveChangesAsync(ct);
         assignId(drs.Id);
         return drs;
-    }
-
-    private void Apply(DefaultResourceSetDB drs, SetDefaultResourcesRequest request)
-    {
-        foreach (var (key, value) in request.Entries)
-            ApplyKey(drs, key, value);
-    }
-
-    private void ApplyKey(DefaultResourceSetDB drs, string key, Guid? value)
-    {
-        var normalised = DefaultResourceEngine.NormalizeKey(key);
-        var existing = drs.Entries.FirstOrDefault(
-            e => string.Equals(e.ResourceKey, normalised, StringComparison.OrdinalIgnoreCase));
-
-        if (value is null)
-        {
-            if (existing is not null)
-            {
-                drs.Entries.Remove(existing);
-                db.DefaultResourceEntries.Remove(existing);
-            }
-
-            return;
-        }
-
-        if (existing is not null)
-        {
-            existing.ResourceId = value.Value;
-        }
-        else
-        {
-            drs.Entries.Add(new DefaultResourceEntryDB
-            {
-                DefaultResourceSetId = drs.Id,
-                ResourceKey = normalised,
-                ResourceId = value.Value
-            });
-        }
     }
 
     private async Task InvalidateContextDefaultResourcesAsync(
