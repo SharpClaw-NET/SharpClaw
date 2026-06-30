@@ -45,7 +45,7 @@ public sealed class AgentJobService(
     ChatCache chatCache,
     AgentJobLifecycleEngine lifecycle,
     AgentJobAdministrationEngine jobAdministration,
-    DefaultResourceEngine defaultResources,
+    AgentJobDefaultResourceResolver jobDefaultResources,
     ILogger<AgentJobService> logger)
 {
     private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
@@ -554,14 +554,6 @@ public sealed class AgentJobService(
         string? actionKey, Guid channelId, Guid agentId,
         CancellationToken ct)
     {
-        var delegateTo = jobAdministration.ResolveDelegateTo(moduleRegistry, actionKey);
-        var defaultResourceKey = delegateTo is null
-            ? null
-            : moduleRegistry.GetDefaultResourceKeyForDelegate(delegateTo);
-        var resourceType = delegateTo is null
-            ? null
-            : moduleRegistry.ResolveResourceType(delegateTo);
-
         var ch = await db.Channels
             .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .Include(c => c.AgentContext!).ThenInclude(ctx => ctx.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
@@ -599,10 +591,10 @@ public sealed class AgentJobService(
             }
         }
 
-        return defaultResources.ResolveDefaultResource(
-            new DefaultResourceResolutionRequest(
-                defaultResourceKey,
-                resourceType,
+        return jobDefaultResources.ResolveDefaultResource(
+            new AgentJobDefaultResourceResolutionRequest(
+                actionKey,
+                moduleRegistry,
                 ch?.DefaultResourceSet is { } channelDefaults
                     ? DefaultResourceSetSnapshot.FromDefaultResourceSet(channelDefaults)
                     : null,

@@ -130,6 +130,8 @@ public sealed class AgentJobTokenAccountingTests
             serviceProvider,
             configuration,
             NullLogger<ModuleEventDispatcher>.Instance);
+        var jobAdministration = new AgentJobAdministrationEngine();
+        var defaultResources = new DefaultResourceEngine();
 
         return new AgentJobService(
             db,
@@ -147,8 +149,10 @@ public sealed class AgentJobTokenAccountingTests
             configuration,
             new ChatCache(configuration),
             new AgentJobLifecycleEngine(),
-            new AgentJobAdministrationEngine(),
-            new DefaultResourceEngine(),
+            jobAdministration,
+            new AgentJobDefaultResourceResolver(
+                jobAdministration,
+                defaultResources),
             NullLogger<AgentJobService>.Instance);
     }
 
@@ -174,6 +178,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
         services.AddSingleton<DefaultResourceEngine>();
+        services.AddSingleton<AgentJobDefaultResourceResolver>();
         services.AddSingleton<ModuleEventDispatcher>(sp =>
             new ModuleEventDispatcher(
                 sp,
