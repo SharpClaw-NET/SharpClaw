@@ -6,13 +6,13 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Core.Clients;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Core.Chat;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Messages;
@@ -37,7 +37,6 @@ public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
     IPersistenceEntityResolver entities,
-    ProviderApiClientFactory clientFactory,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
     HeaderTagProcessor headerTagProcessor,
@@ -46,7 +45,7 @@ public sealed class ChatService(
     ModuleMetricsCollector metricsCollector,
     ChatCache chatCache,
     ChatCostEngine chatCosts,
-    ChatPromptEngine chatPrompts,
+    ChatRequestPlanningEngine chatPlanner,
     ChatHistoryEngine chatHistory,
     ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
@@ -115,17 +114,14 @@ public sealed class ChatService(
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
         var agent = conversation.ResolveRequestedAgent(channel, request.AgentId);
-        var model = agent.Model
-            ?? throw new InvalidOperationException(
-                $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
-                "Assign a valid model before using this agent for chat.");
-        var provider = model.Provider
-            ?? throw new InvalidOperationException(
-                $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
-
-        var requiresApiKey = clientFactory.GetPlugin(provider.ProviderKey)?.RequiresApiKey ?? true;
-        if (requiresApiKey && string.IsNullOrEmpty(provider.EncryptedApiKey))
-            throw new InvalidOperationException("Provider does not have an API key configured.");
+        var plan = chatPlanner.BuildBufferedPlan(
+            channel,
+            agent,
+            threadId,
+            _disableDefaultSystemPrompt,
+            _disableCustomProviderParameters);
+        var model = agent.Model!;
+        var provider = model.Provider!;
 
         // Acquire per-thread lock for sequential processing
         IDisposable? threadLock = null;
@@ -169,24 +165,14 @@ public sealed class ChatService(
 
         history.Add(new ChatCompletionMessage(ChatRoles.User, request.Message));
 
-        var apiKey = requiresApiKey ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key) : "local";
-        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
-        var useNativeTools = client.SupportsNativeToolCalling;
-        var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
-        var enableTools = !disableTools && useNativeTools;
-        var systemPrompt = chatPrompts.BuildEffectiveSystemPrompt(
-            agent.SystemPrompt,
-            enableTools,
-            _disableDefaultSystemPrompt);
-
-        // Resolve completion parameters early so they can feed the chat header
-        // (reasoning-effort informational notice) as well as the wire payload.
-        var completionParams = chatPrompts.BuildCompletionParameters(
-            agent,
-            model.Id,
-            threadId);
-        CompletionParameterValidator.ValidateOrThrow(
-            completionParams, clientFactory.GetParameterSpec(provider.ProviderKey), provider.ProviderKey);
+        var apiKey = plan.RequiresApiKey
+            ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
+            : "local";
+        var client = plan.Client;
+        var useNativeTools = plan.UseNativeTools;
+        var enableTools = plan.EnableTools;
+        var systemPrompt = plan.SystemPrompt;
+        var completionParams = plan.CompletionParameters;
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
@@ -201,10 +187,10 @@ public sealed class ChatService(
 
         using var httpClient = httpClientFactory.CreateClient();
 
-        var modelCapabilityTags = model.CapabilityTags;
-        var maxTokens = agent.MaxCompletionTokens;
-        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
-        var toolAwareness = enableTools ? (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools) : null;
+        var modelCapabilityTags = plan.ModelCapabilityTags;
+        var maxTokens = plan.MaxCompletionTokens;
+        var providerParams = plan.ProviderParameters;
+        var toolAwareness = plan.ToolAwareness;
 
         if (logTiming)
         {
@@ -851,17 +837,14 @@ public sealed class ChatService(
             ?? throw new ArgumentException($"Channel {channelId} not found.");
 
         var agent = conversation.ResolveRequestedAgent(channel, request.AgentId);
-        var model = agent.Model
-            ?? throw new InvalidOperationException(
-                $"Agent '{agent.Name}' ({agent.Id}) has no model assigned. " +
-                "Assign a valid model before using this agent for chat.");
-        var provider = model.Provider
-            ?? throw new InvalidOperationException(
-                $"Model '{model.Name}' ({model.Id}) has no provider assigned.");
-
-        var requiresApiKey = clientFactory.GetPlugin(provider.ProviderKey)?.RequiresApiKey ?? true;
-        if (requiresApiKey && string.IsNullOrEmpty(provider.EncryptedApiKey))
-            throw new InvalidOperationException("Provider does not have an API key configured.");
+        var plan = chatPlanner.BuildStreamingPlan(
+            channel,
+            agent,
+            threadId,
+            _disableDefaultSystemPrompt,
+            _disableCustomProviderParameters);
+        var model = agent.Model!;
+        var provider = model.Provider!;
 
         // Acquire per-thread lock for sequential processing
         IDisposable? threadLock = null;
@@ -905,22 +888,12 @@ public sealed class ChatService(
 
         history.Add(new ChatCompletionMessage(ChatRoles.User, request.Message));
 
-        var apiKey = requiresApiKey ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key) : "local";
-        var client = clientFactory.GetClient(provider.ProviderKey, provider.ApiEndpoint);
-        var disableTools = channel.DisableToolSchemas || agent.DisableToolSchemas;
-        var systemPrompt = chatPrompts.BuildEffectiveSystemPrompt(
-            agent.SystemPrompt,
-            !disableTools,
-            _disableDefaultSystemPrompt);
-
-        // Resolve completion parameters early so they can feed the chat header
-        // (reasoning-effort informational notice) as well as the wire payload.
-        var completionParams = chatPrompts.BuildCompletionParameters(
-            agent,
-            model.Id,
-            threadId);
-        CompletionParameterValidator.ValidateOrThrow(
-            completionParams, clientFactory.GetParameterSpec(provider.ProviderKey), provider.ProviderKey);
+        var apiKey = plan.RequiresApiKey
+            ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
+            : "local";
+        var client = plan.Client;
+        var systemPrompt = plan.SystemPrompt;
+        var completionParams = plan.CompletionParameters;
 
         // Build chat header for the user message (if enabled)
         var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
@@ -931,15 +904,13 @@ public sealed class ChatService(
 
         using var httpClient = httpClientFactory.CreateClient();
 
-        var supportsVision = model.CapabilityTags.Contains(WellKnownCapabilityKeys.Vision);
-        var maxTokens = agent.MaxCompletionTokens;
-        var providerParams = _disableCustomProviderParameters ? null : agent.ProviderParameters;
-        var toolAwareness = disableTools
-            ? null
-            : (channel.ToolAwarenessSet?.Tools ?? agent.ToolAwarenessSet?.Tools);
-        var effectiveTools = disableTools
-            ? []
-            : await GetEffectiveToolsAsync(request.TaskContext, toolAwareness, agent.Id, ct);
+        var supportsVision = plan.SupportsVision;
+        var maxTokens = plan.MaxCompletionTokens;
+        var providerParams = plan.ProviderParameters;
+        var toolAwareness = plan.ToolAwareness;
+        var effectiveTools = plan.EnableTools
+            ? await GetEffectiveToolsAsync(request.TaskContext, toolAwareness, agent.Id, ct)
+            : [];
 
         if (logTiming)
         {

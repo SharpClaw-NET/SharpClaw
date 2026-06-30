@@ -349,6 +349,7 @@ try
     builder.Services.AddSingleton<ModelCatalogEngine>();
     builder.Services.AddSingleton<ChatCostEngine>();
     builder.Services.AddSingleton<ChatPromptEngine>();
+    builder.Services.AddSingleton<ChatRequestPlanningEngine>();
     builder.Services.AddSingleton<ChatHistoryEngine>();
     builder.Services.AddSingleton<ChatDefaultHeaderEngine>();
     builder.Services.AddSingleton<ChatHeaderGrantFormatter>();
