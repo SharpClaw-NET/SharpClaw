@@ -67,11 +67,17 @@ public sealed class AgentActionService(
         Guid? channelPsId = null,
         Guid? contextPsId = null)
     {
-        var flagKey = registry.ResolveGlobalFlag(delegateName);
-        if (flagKey is not null)
+        var plan = PermissionDelegatePlanner.BuildPlan(
+            delegateName,
+            resourceId,
+            registry);
+
+        if (plan.Kind == PermissionDelegatePlanKind.GlobalFlag)
         {
             return EvaluateGlobalFlagByKeyAsync(
-                flagKey,
+                plan.FlagKey
+                    ?? throw new InvalidOperationException(
+                        "Global flag delegate plan has no flag key."),
                 agentId,
                 caller,
                 ct: ct,
@@ -79,12 +85,16 @@ public sealed class AgentActionService(
                 contextPsId: contextPsId);
         }
 
-        var resourceType = registry.ResolveResourceType(delegateName);
-        if (resourceType is not null && resourceId.HasValue)
+        if (plan.Kind == PermissionDelegatePlanKind.ResourceAccess
+            && plan.ResourceId.HasValue)
         {
+            var resourceType = plan.ResourceType
+                ?? throw new InvalidOperationException(
+                    "Resource delegate plan has no resource type.");
+
             return EvaluateResourceAccessAsync(
                 agentId,
-                resourceId.Value,
+                plan.ResourceId.Value,
                 resourceType,
                 caller,
                 $"{resourceType} access",
@@ -107,13 +117,12 @@ public sealed class AgentActionService(
         Guid? resourceId)
     {
         var snapshot = PermissionSetSnapshot.FromPermissionSet(ps);
-        var flagKey = registry.ResolveGlobalFlag(delegateName);
-        if (flagKey is not null)
-            return PermissionEvaluationEngine.HasGlobalFlagGrant(snapshot, flagKey);
+        var plan = PermissionDelegatePlanner.BuildPlan(
+            delegateName,
+            resourceId,
+            registry);
 
-        var resourceType = registry.ResolveResourceType(delegateName);
-        return resourceType is not null
-            && PermissionEvaluationEngine.HasResourceGrant(snapshot, resourceType, resourceId);
+        return PermissionDelegatePlanner.HasGrant(snapshot, plan);
     }
 
     /// <summary>
