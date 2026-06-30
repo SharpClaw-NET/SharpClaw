@@ -120,6 +120,96 @@ public sealed class ChatNativeToolCallParserTests
     }
 
     [Test]
+    public async Task ResolveAsync_WhenExtractorIsNeeded_UsesHostExtractionDelegate()
+    {
+        var extractedId = Guid.NewGuid();
+        var parser = new ChatNativeToolCallParser();
+        var registry = CreateRegistry();
+        registry.RegisterResourceIdExtractor(
+            "run",
+            (services, argumentsJson, ct) =>
+            {
+                services.GetRequiredService<ExtractorService>()
+                    .Touched = true;
+                argumentsJson.Should().Be("""{"name":"alpha"}""");
+                return Task.FromResult<Guid?>(extractedId);
+            });
+        using var provider = CreateExtractorProvider();
+        var trace = new List<string>();
+
+        var parsed = await parser.ResolveAsync(
+            new ChatNativeToolCallResolutionRequest(
+                new ChatToolCall("call-1", "run", """{"name":"alpha"}"""),
+                registry,
+                new ModuleToolExecutionPlanner(),
+                async (extraction, ct) =>
+                {
+                    await Task.Yield();
+                    return await extraction.Extractor(
+                        provider,
+                        extraction.ArgumentsJson,
+                        ct);
+                },
+                trace.Add));
+
+        parsed.Should().NotBeNull();
+        parsed!.ResourceId.Should().Be(extractedId);
+        parsed.ActionKey.Should().Be("run");
+        provider.GetRequiredService<ExtractorService>()
+            .Touched
+            .Should()
+            .BeTrue();
+        trace.Should().HaveCount(2);
+        trace[0].Should().Contain("Module tool: run");
+        trace[1].Should().Contain($"ResourceId={extractedId:D}");
+    }
+
+    [Test]
+    public async Task ResolveAsync_WhenDirectResourceIdExists_DoesNotInvokeExtractor()
+    {
+        var resourceId = Guid.NewGuid();
+        var parser = new ChatNativeToolCallParser();
+        var registry = CreateRegistry();
+        var extractorCalls = 0;
+        registry.RegisterResourceIdExtractor(
+            "run",
+            (_, _, _) =>
+            {
+                extractorCalls++;
+                return Task.FromResult<Guid?>(Guid.NewGuid());
+            });
+
+        var parsed = await parser.ResolveAsync(
+            new ChatNativeToolCallResolutionRequest(
+                new ChatToolCall(
+                    "call-1",
+                    "run",
+                    $$"""{"resourceId":"{{resourceId:D}}"}"""),
+                registry,
+                new ModuleToolExecutionPlanner(),
+                (_, _) => throw new InvalidOperationException(
+                    "Extractor delegate should not be called.")));
+
+        parsed.Should().NotBeNull();
+        parsed!.ResourceId.Should().Be(resourceId);
+        extractorCalls.Should().Be(0);
+    }
+
+    [Test]
+    public async Task ResolveAsync_WhenToolDoesNotResolve_ReturnsNull()
+    {
+        var parser = new ChatNativeToolCallParser();
+
+        var parsed = await parser.ResolveAsync(
+            new ChatNativeToolCallResolutionRequest(
+                new ChatToolCall("call-1", "missing", "{}"),
+                CreateRegistry(),
+                new ModuleToolExecutionPlanner()));
+
+        parsed.Should().BeNull();
+    }
+
+    [Test]
     public void BuildJobRequest_MapsParsedToolCallToAgentJobSubmission()
     {
         var callerAgentId = Guid.NewGuid();
@@ -152,6 +242,18 @@ public sealed class ChatNativeToolCallParserTests
     {
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    private static ServiceProvider CreateExtractorProvider()
+    {
+        var services = new ServiceCollection();
+        services.AddSingleton<ExtractorService>();
+        return services.BuildServiceProvider();
+    }
+
+    private sealed class ExtractorService
+    {
+        public bool Touched { get; set; }
     }
 
     private sealed class TestModule : ISharpClawCoreModule

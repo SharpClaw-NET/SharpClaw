@@ -1864,38 +1864,21 @@ public sealed class ChatService(
     private async Task<ParsedChatToolCall?> ParseNativeToolCallAsync(
         ChatToolCall toolCall,
         CancellationToken ct)
-    {
-        var plan = chatToolCallParser.BuildParsePlan(
-            toolCall,
-            moduleRegistry,
-            moduleExecutionPlanner);
-        if (plan is null)
-            return null;
-
-        Debug.WriteLine(
-            $"[ParseToolCall] Module tool: {plan.ActionKey} \u2192 {plan.ModuleId}.{plan.ToolName}",
-            "SharpClaw.CLI");
-
-        Guid? resourceId = plan.DirectResourceId;
-        if (resourceId is null && plan.RequiresResourceExtractor)
-        {
-            var extractor = moduleRegistry.GetResourceIdExtractor(plan.ActionKey);
-            if (extractor is not null)
-            {
-                await using var extractorScope = serviceScopeFactory.CreateAsyncScope();
-                resourceId = await extractor(
-                    extractorScope.ServiceProvider,
-                    plan.ArgumentsJson,
-                    ct);
-            }
-        }
-
-        Debug.WriteLine(
-            $"[ParseToolCall] ResourceId={resourceId?.ToString() ?? "(null)"} from args: {toolCall.ArgumentsJson}",
-            "SharpClaw.CLI");
-
-        return chatToolCallParser.CompleteParse(plan, resourceId);
-    }
+        => await chatToolCallParser.ResolveAsync(
+            new ChatNativeToolCallResolutionRequest(
+                toolCall,
+                moduleRegistry,
+                moduleExecutionPlanner,
+                async (extraction, innerCt) =>
+                {
+                    await using var extractorScope = serviceScopeFactory.CreateAsyncScope();
+                    return await extraction.Extractor(
+                        extractorScope.ServiceProvider,
+                        extraction.ArgumentsJson,
+                        innerCt);
+                },
+                message => Debug.WriteLine(message, "SharpClaw.CLI")),
+            ct);
 
     // ═══════════════════════════════════════════════════════════════
     // Screenshot extraction & vision-aware tool results
