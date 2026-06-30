@@ -8,6 +8,7 @@ using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Tasks;
+using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Runtime;
 using SharpClaw.Contracts;
@@ -33,6 +34,7 @@ public sealed class HostAgentBridge(
     TaskService taskService,
     ChatService chatService,
     IServiceScopeFactory scopeFactory,
+    RolePermissionAdministrationEngine rolePermissions,
     ChatCache chatCache) : IHostAgentBridge
 {
     private readonly TaskStructuredResponseParser _structuredResponses = new();
@@ -213,50 +215,14 @@ public sealed class HostAgentBridge(
             role.PermissionSetId = permissionSet.Id;
         }
 
-        await db.GlobalFlags
-            .Where(f => f.PermissionSetId == permissionSet.Id)
-            .ExecuteDeleteCompatAsync(db, ct);
+        await db.Entry(permissionSet)
+            .Collection(ps => ps.GlobalFlags)
+            .LoadAsync(ct);
+        await db.Entry(permissionSet)
+            .Collection(ps => ps.ResourceAccesses)
+            .LoadAsync(ct);
 
-        await db.ResourceAccesses
-            .Where(a => a.PermissionSetId == permissionSet.Id && a.ResourceId != WellKnownIds.AllResources)
-            .ExecuteDeleteCompatAsync(db, ct);
-
-        foreach (var (flagKey, clearance) in permRequest.GlobalFlags ?? new Dictionary<string, PermissionClearance>())
-        {
-            db.GlobalFlags.Add(new GlobalFlagDB
-            {
-                PermissionSetId = permissionSet.Id,
-                FlagKey = flagKey,
-                Clearance = clearance,
-            });
-        }
-
-        foreach (var (resourceType, grants) in permRequest.ResourceGrants ?? new Dictionary<string, IReadOnlyList<ResourceGrant>>())
-        {
-            foreach (var grant in grants)
-            {
-                var existingWildcard = grant.ResourceId == WellKnownIds.AllResources
-                    ? await db.ResourceAccesses.FirstOrDefaultAsync(a =>
-                        a.PermissionSetId == permissionSet.Id &&
-                        a.ResourceType == resourceType &&
-                        a.ResourceId == WellKnownIds.AllResources, ct)
-                    : null;
-
-                if (existingWildcard is not null)
-                {
-                    existingWildcard.Clearance = grant.Clearance;
-                    continue;
-                }
-
-                db.ResourceAccesses.Add(new ResourceAccessDB
-                {
-                    PermissionSetId = permissionSet.Id,
-                    ResourceType = resourceType,
-                    ResourceId = grant.ResourceId,
-                    Clearance = grant.Clearance,
-                });
-            }
-        }
+        rolePermissions.ReconcilePermissionSet(permissionSet, permRequest);
 
         await db.SaveChangesAsync(ct);
         InvalidatePermissionRuntimeState();
