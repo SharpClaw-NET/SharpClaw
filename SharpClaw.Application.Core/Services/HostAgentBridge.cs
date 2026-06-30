@@ -9,7 +9,7 @@ using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Core.Tasks;
-using SharpClaw.Core.Tasks.Models;
+using SharpClaw.Core.Tasks.Runtime;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Roles;
@@ -35,6 +35,8 @@ public sealed class HostAgentBridge(
     IServiceScopeFactory scopeFactory,
     ChatCache chatCache) : IHostAgentBridge
 {
+    private readonly TaskStructuredResponseParser _structuredResponses = new();
+
     public async Task<string?> ChatAsync(
         Guid instanceId, string taskName, string message, Guid? agentId, CancellationToken ct)
     {
@@ -78,20 +80,7 @@ public sealed class HostAgentBridge(
 
     public string ParseStructuredResponse(Guid instanceId, string text, string? typeName)
     {
-        // The script definition is needed to validate the parsed shape against
-        // the task's declared data types.  We resolve it from the running task
-        // instance's source text by re-loading the compiled plan via the task
-        // service is overkill — instead we parse and validate against the
-        // currently-running plan only when we have access to the definition.
-        // For now, just validate JSON shape; the orchestrator-level definition
-        // check is preserved by routing through the script engine.
-        var jsonText = ExtractJsonObject(text)
-            ?? throw new InvalidOperationException("ParseResponse expected a JSON object in the source text.");
-
-        using var doc = JsonDocument.Parse(jsonText);
-        if (doc.RootElement.ValueKind != JsonValueKind.Object)
-            throw new InvalidOperationException("ParseResponse expected a JSON object payload.");
-
+        IReadOnlyList<SharpClaw.Core.Tasks.Models.TaskDataTypeDefinition>? dataTypes = null;
         if (!string.IsNullOrWhiteSpace(typeName))
         {
             var instance = db.TaskInstances
@@ -100,19 +89,12 @@ public sealed class HostAgentBridge(
             if (instance?.TaskDefinition is not null)
             {
                 var compileResult = TaskScriptEngine.ProcessScript(instance.TaskDefinition.SourceText, null);
-                if (compileResult.Plan is not null)
-                {
-                    var dataType = compileResult.Plan.Definition.DataTypes
-                        .FirstOrDefault(dt => dt.Name == typeName);
-                    if (dataType is not null)
-                        ValidateParsedResponseShape(doc.RootElement, dataType);
-                }
+                dataTypes = compileResult.Plan?.Definition.DataTypes;
             }
         }
 
-        return JsonSerializer.Serialize(doc.RootElement);
+        return _structuredResponses.Parse(text, typeName, dataTypes);
     }
-
     public async Task<Guid?> FindModelAsync(string search, CancellationToken ct)
         => (await db.Models.FirstOrDefaultAsync(m => m.CustomId == search || m.Name == search, ct))?.Id;
 
@@ -410,47 +392,4 @@ public sealed class HostAgentBridge(
         InvalidateAgentRuntimeState();
     }
 
-    private static string? ExtractJsonObject(string text)
-    {
-        var jsonStart = text.IndexOf('{');
-        var jsonEnd = text.LastIndexOf('}');
-        return jsonStart >= 0 && jsonEnd > jsonStart
-            ? text[jsonStart..(jsonEnd + 1)]
-            : null;
-    }
-
-    private static void ValidateParsedResponseShape(JsonElement element, TaskDataTypeDefinition dataType)
-    {
-        foreach (var property in dataType.Properties)
-        {
-            if (!element.TryGetProperty(property.Name, out var propertyElement))
-                throw new InvalidOperationException(
-                    $"ParseResponse<{dataType.Name}> missing property '{property.Name}'.");
-
-            if (property.IsCollection)
-            {
-                if (propertyElement.ValueKind != JsonValueKind.Array)
-                    throw new InvalidOperationException(
-                        $"Property '{property.Name}' must be a JSON array.");
-                continue;
-            }
-
-            if (!IsCompatibleJsonValue(propertyElement, property.TypeName))
-                throw new InvalidOperationException(
-                    $"Property '{property.Name}' does not match declared type '{property.TypeName}'.");
-        }
-    }
-
-    private static bool IsCompatibleJsonValue(JsonElement value, string typeName)
-    {
-        var normalizedType = typeName.TrimEnd('?');
-        return normalizedType switch
-        {
-            "string" => value.ValueKind == JsonValueKind.String,
-            "int" or "long" or "double" or "decimal" => value.ValueKind == JsonValueKind.Number,
-            "bool" => value.ValueKind is JsonValueKind.True or JsonValueKind.False,
-            "Guid" or "DateTime" or "DateTimeOffset" or "TimeSpan" => value.ValueKind == JsonValueKind.String,
-            _ => value.ValueKind == JsonValueKind.Object
-        };
-    }
 }

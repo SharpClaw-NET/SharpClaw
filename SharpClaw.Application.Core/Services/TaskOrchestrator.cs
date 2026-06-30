@@ -1,13 +1,9 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
-using System.Text;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Administration;
@@ -45,6 +41,8 @@ public sealed class TaskOrchestrator(
     private readonly IReadOnlyList<ITaskStepExecutorExtension> _stepExtensions = [.. stepExtensions];
     private readonly IServiceScopeFactory _scopeFactory = scopeFactory;
     private readonly TaskAdministrationEngine _tasks = new();
+    private readonly TaskExpressionEngine _expressions = new();
+    private readonly TaskRuntimeLifecycleEngine _runtimeLifecycle = new();
 
     // ═══════════════════════════════════════════════════════════════
     // Public API
@@ -108,8 +106,12 @@ public sealed class TaskOrchestrator(
             throw new InvalidOperationException($"Task instance {instanceId} could not transition to Running.");
         }
 
-        await startupTaskService.AppendLogAsync(instanceId, "Task started.", ct: ct);
-        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, "Running");
+        await EmitRuntimeEventPlanAsync(
+            instanceId,
+            _runtimeLifecycle.BuildStartedPlan(),
+            startupTaskService,
+            runtime,
+            ct);
         startupTiming.Stop();
         logger.LogDebug(
             "Task instance {InstanceId} compiled and entered Running in {ElapsedMs}ms. TaskName={TaskName} StepCount={StepCount}",
@@ -193,8 +195,11 @@ public sealed class TaskOrchestrator(
                 instance.BigDataSnapshotJson = bigSnapshotJson;
                 await db.SaveChangesAsync();
             }
-            await taskService.AppendLogAsync(instanceId, $"SharedData: {description}");
-            await runtime.WriteEventAsync(TaskOutputEventType.Log, $"SharedData: {description}");
+            await EmitRuntimeEventPlanAsync(
+                instanceId,
+                _runtimeLifecycle.BuildSharedDataChangedPlan(description),
+                taskService,
+                runtime);
         };
 
         // Register custom [ToolCall] hook callbacks
@@ -314,13 +319,15 @@ public sealed class TaskOrchestrator(
         }
 
         // Resolved-argument path: traditional module steps that consume runtime values.
-        var resolvedArgs = step.Arguments?.Select(a => ResolveExpression(a, context)).ToList();
+        var resolvedArgs = step.Arguments?.Select(a => _expressions.ResolveExpression(a, context.Variables)).ToList();
         if (step.TypeName is not null)
         {
             resolvedArgs ??= [];
             resolvedArgs.Insert(0, step.TypeName);
         }
-        var resolvedExpr = step.Expression is not null ? ResolveExpression(step.Expression, context) : null;
+        var resolvedExpr = step.Expression is not null
+            ? _expressions.ResolveExpression(step.Expression, context.Variables)
+            : null;
         var keepGoing = await executor.ExecuteAsync(stepKey, moduleCtx, resolvedArgs, resolvedExpr, step.ResultVariable);
         stepTiming.Stop();
         logger.LogDebug(
@@ -360,9 +367,11 @@ public sealed class TaskOrchestrator(
             await db.SaveChangesAsync();
         }
 
-        await taskService.AppendLogAsync(instanceId, $"Task {status}.");
-        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, status.ToString());
-        await runtime.WriteEventAsync(TaskOutputEventType.Done, null);
+        await EmitRuntimeEventPlanAsync(
+            instanceId,
+            _runtimeLifecycle.BuildTerminalPlan(status),
+            taskService,
+            runtime);
     }
 
     private async Task FailInstanceAsync(Guid instanceId, string error, SharpClawDbContext db, TaskService taskService, TaskRuntimeInstance runtime)
@@ -374,130 +383,28 @@ public sealed class TaskOrchestrator(
             await db.SaveChangesAsync();
         }
 
-        await taskService.AppendLogAsync(instanceId, $"Task failed: {error}", JobLogLevels.Error);
-        await runtime.WriteEventAsync(TaskOutputEventType.StatusChange, $"Failed: {error}");
-        await runtime.WriteEventAsync(TaskOutputEventType.Done, null);
+        await EmitRuntimeEventPlanAsync(
+            instanceId,
+            _runtimeLifecycle.BuildFailurePlan(error),
+            taskService,
+            runtime);
     }
 
 
 
-    private static string ResolveExpression(string? expression, TaskExecutionContext context)
+    private static async Task EmitRuntimeEventPlanAsync(
+        Guid instanceId,
+        TaskRuntimeEventPlan plan,
+        TaskService taskService,
+        TaskRuntimeInstance runtime,
+        CancellationToken ct = default)
     {
-        if (expression is null) return "";
+        if (plan.LogMessage is not null)
+            await taskService.AppendLogAsync(instanceId, plan.LogMessage, plan.LogLevel, ct);
 
-        // Variable substitution — longest names first to avoid partial matches
-        foreach (var (name, value) in context.Variables.OrderByDescending(kv => kv.Key.Length))
-        {
-            expression = expression.Replace(name, value?.ToString() ?? "");
-        }
-
-        // Property access on JSON values: resolve "varName.PropertyName"
-        expression = Regex.Replace(expression, @"(\w+)\.(\w+)", match =>
-        {
-            var varName = match.Groups[1].Value;
-            var propName = match.Groups[2].Value;
-            if (context.Variables.TryGetValue(varName, out var val) && val is string json)
-            {
-                try
-                {
-                    using var doc = JsonDocument.Parse(json);
-                    if (doc.RootElement.TryGetProperty(propName, out var prop))
-                        return prop.ValueKind == JsonValueKind.String
-                            ? prop.GetString() ?? ""
-                            : prop.GetRawText();
-                }
-                catch (JsonException) { }
-            }
-            return match.Value;
-        });
-
-        // Evaluate C# string-literal quotes and '+' concatenation.
-        // The parser extracts raw C# syntax (e.g. "hello"), but the
-        // runtime value should be hello (without quotes).
-        // Handles: "text", "a" + variable, "a" + "b" + variable
-        if (expression.Contains(" + "))
-        {
-            var parts = expression.Split(" + ");
-            var sb = new StringBuilder(expression.Length);
-            foreach (var part in parts)
-            {
-                var trimmed = part.Trim();
-                sb.Append(trimmed.Length >= 2 && trimmed[0] == '"' && trimmed[^1] == '"'
-                    ? trimmed[1..^1]
-                    : trimmed);
-            }
-            expression = sb.ToString();
-        }
-        else if (expression.Length >= 2 && expression[0] == '"' && expression[^1] == '"')
-        {
-            expression = expression[1..^1];
-        }
-
-        return expression;
+        foreach (var evt in plan.OutputEvents)
+            await runtime.WriteEventAsync(evt.Type, evt.Data, ct);
     }
-
-    private static bool EvaluateCondition(string? expression, TaskExecutionContext context)
-    {
-        if (string.IsNullOrWhiteSpace(expression))
-            return false;
-
-        var resolved = ResolveExpression(expression, context);
-
-        // Literal booleans
-        if (string.Equals(resolved, "true", StringComparison.OrdinalIgnoreCase)) return true;
-        if (string.Equals(resolved, "false", StringComparison.OrdinalIgnoreCase)) return false;
-
-        // Null checks: "x != null", "x == null"
-        if (resolved.EndsWith("!= null", StringComparison.Ordinal))
-        {
-            var val = resolved[..^7].Trim();
-            return !string.IsNullOrEmpty(val) && val != "null";
-        }
-        if (resolved.EndsWith("== null", StringComparison.Ordinal))
-        {
-            var val = resolved[..^7].Trim();
-            return string.IsNullOrEmpty(val) || val == "null";
-        }
-
-        // Comparison operators: ==, !=, >=, <=, >, <
-        foreach (var op in new[] { "!=", "==", ">=", "<=", ">", "<" })
-        {
-            var idx = resolved.IndexOf(op, StringComparison.Ordinal);
-            if (idx < 0) continue;
-
-            var left = resolved[..idx].Trim();
-            var right = resolved[(idx + op.Length)..].Trim();
-
-            // Numeric comparison
-            if (double.TryParse(left, out var lNum) && double.TryParse(right, out var rNum))
-            {
-                return op switch
-                {
-                    "==" => Math.Abs(lNum - rNum) < 0.0001,
-                    "!=" => Math.Abs(lNum - rNum) >= 0.0001,
-                    ">"  => lNum > rNum,
-                    "<"  => lNum < rNum,
-                    ">=" => lNum >= rNum,
-                    "<=" => lNum <= rNum,
-                    _    => false
-                };
-            }
-
-            // String comparison
-            return op switch
-            {
-                "==" => string.Equals(left, right, StringComparison.Ordinal),
-                "!=" => !string.Equals(left, right, StringComparison.Ordinal),
-                _    => false
-            };
-        }
-
-        // Truthy: non-empty string
-        return !string.IsNullOrEmpty(resolved);
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Execution context
     // ═══════════════════════════════════════════════════════════════
 
     private sealed class TaskExecutionContext(
@@ -551,7 +458,7 @@ public sealed class TaskOrchestrator(
                .ToList();
 
         public string ResolveExpression(string expression) =>
-            TaskOrchestrator.ResolveExpression(expression, ctx);
+            orchestrator._expressions.ResolveExpression(expression, ctx.Variables);
 
         public Task AppendLogAsync(string message) =>
             taskService.AppendLogAsync(ctx.InstanceId, message, ct: ctx.CancellationToken);
@@ -569,7 +476,7 @@ public sealed class TaskOrchestrator(
             ctx.Runtime.WaitIfPausedAsync(ctx.CancellationToken);
 
         public bool EvaluateCondition(string? expression) =>
-            TaskOrchestrator.EvaluateCondition(expression, ctx);
+            orchestrator._expressions.EvaluateCondition(expression, ctx.Variables);
 
         public void RegisterEventHandler(
             string moduleTriggerKey,

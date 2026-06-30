@@ -6,6 +6,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Runtime;
 using SharpClaw.Infrastructure.Persistence;
 
@@ -24,6 +25,8 @@ public sealed class TaskRuntimeHost(
     private readonly ConcurrentDictionary<Guid, TaskRuntimeEntry> _entries = new();
     private readonly TaskCompletionSource _recoveryComplete =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly TaskAdministrationEngine _tasks = new();
+    private readonly TaskRuntimeLifecycleEngine _runtimeLifecycle = new();
 
     /// <summary>
     /// Completes when startup recovery has finished.  Awaitable in tests and
@@ -131,8 +134,12 @@ public sealed class TaskRuntimeHost(
             return false;
 
         entry.Pause();
-        await svc.AppendLogAsync(instanceId, "Task paused.", ct: ct);
-        await entry.WriteEventAsync(TaskOutputEventType.StatusChange, "Paused", ct);
+        await EmitRuntimeEventPlanAsync(
+            instanceId,
+            _runtimeLifecycle.BuildPausedPlan(),
+            svc,
+            entry,
+            ct);
         return true;
     }
 
@@ -152,8 +159,12 @@ public sealed class TaskRuntimeHost(
             return false;
 
         entry.Resume();
-        await svc.AppendLogAsync(instanceId, "Task resumed.", ct: ct);
-        await entry.WriteEventAsync(TaskOutputEventType.StatusChange, "Running", ct);
+        await EmitRuntimeEventPlanAsync(
+            instanceId,
+            _runtimeLifecycle.BuildResumedPlan(),
+            svc,
+            entry,
+            ct);
         return true;
     }
 
@@ -188,22 +199,17 @@ public sealed class TaskRuntimeHost(
 
         foreach (var instance in stale)
         {
-            var previous = instance.Status;
-            instance.Status = TaskInstanceStatus.Failed;
-            instance.ErrorMessage =
-                $"Instance was {previous} when the application restarted. " +
-                "Manual restart required.";
-            instance.CompletedAt ??= DateTimeOffset.UtcNow;
+            var recovery = _tasks.ApplyRestartRecovery(instance);
 
             await svc.AppendLogAsync(
                 instance.Id,
-                $"Recovery: instance was {previous} at startup — marked Failed.",
+                recovery.LogMessage,
                 "Recovery",
                 ct);
 
             logger.LogInformation(
                 "TaskRuntimeHost: instance {InstanceId} ({Previous}) marked Failed (recovery).",
-                instance.Id, previous);
+                instance.Id, recovery.PreviousStatus);
         }
 
         await db.SaveChangesAsync(ct);
@@ -222,6 +228,20 @@ public sealed class TaskRuntimeHost(
         {
             logger.LogDebug(ex, "Error cancelling entry {InstanceId} during shutdown.", instanceId);
         }
+    }
+
+    private static async Task EmitRuntimeEventPlanAsync(
+        Guid instanceId,
+        TaskRuntimeEventPlan plan,
+        TaskService taskService,
+        TaskRuntimeEntry entry,
+        CancellationToken ct)
+    {
+        if (plan.LogMessage is not null)
+            await taskService.AppendLogAsync(instanceId, plan.LogMessage, plan.LogLevel, ct);
+
+        foreach (var evt in plan.OutputEvents)
+            await entry.WriteEventAsync(evt.Type, evt.Data, ct);
     }
 
 }
