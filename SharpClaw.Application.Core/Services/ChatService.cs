@@ -48,7 +48,6 @@ public sealed class ChatService(
     ChatHistoryEngine chatHistory,
     ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
-    ChatToolResultEngine chatToolResults,
     ChatMessageEngine chatMessages,
     ChatToolSelectionEngine chatToolSelection,
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
@@ -922,175 +921,75 @@ public sealed class ChatService(
         await db.SaveChangesAsync(CancellationToken.None);
         userMessagePersisted = true;
 
-        // Convert history to tool-aware messages
-        var messages = new List<ToolAwareMessage>(history.Count);
-        foreach (var msg in history)
+        ChatNativeToolStreamingLoopResult? streamingResult = null;
+        await foreach (var loopEvent in chatNativeToolLoop.StreamAsync(
+            new ChatNativeToolLoopRequest(
+                client,
+                httpClient,
+                apiKey,
+                model.Name,
+                systemPrompt,
+                history,
+                agent.Id,
+                channelId,
+                plan.ModelCapabilityTags,
+                maxTokens,
+                providerParams,
+                completionParams,
+                effectiveTools,
+                new ChatServiceNativeToolLoopHost(this),
+                ct,
+                approvalCallback,
+                request.TaskContext,
+                toolAwareness,
+                threadId,
+                timingRequestId,
+                () => totalTiming.ElapsedMilliseconds,
+                MaxToolCallRounds),
+            ct))
         {
-            messages.Add(new ToolAwareMessage
+            switch (loopEvent.Kind)
             {
-                Role = msg.Role,
-                Content = msg.Content,
-                ProviderMetadataJson = msg.ProviderMetadataJson
-            });
+                case ChatNativeToolStreamingLoopEventKind.TextDelta:
+                    if (loopEvent.Text is { } textDelta)
+                    {
+                        streamedContent.Append(textDelta);
+                        yield return ChatStreamEvent.TextDelta(textDelta);
+                    }
+                    break;
+                case ChatNativeToolStreamingLoopEventKind.BufferedText:
+                    if (loopEvent.Text is { } bufferedText)
+                        streamedContent.Append(bufferedText);
+                    break;
+                case ChatNativeToolStreamingLoopEventKind.StreamEvent:
+                    if (loopEvent.StreamEventValue is not null)
+                        yield return loopEvent.StreamEventValue;
+                    break;
+                case ChatNativeToolStreamingLoopEventKind.Completed:
+                    streamingResult = loopEvent.Result
+                        ?? throw new InvalidOperationException(
+                            "Core streaming loop completed without a result.");
+                    break;
+                default:
+                    throw new InvalidOperationException(
+                        $"Unknown native chat streaming event kind '{loopEvent.Kind}'.");
+            }
         }
 
-        var jobResults = new List<AgentJobResponse>();
-        var fullContent = new StringBuilder();
-        var rounds = 0;
-        var totalPromptTokens = 0;
-        var totalCompletionTokens = 0;
-        var roundJobIds = new List<Guid>();
-        string? finalProviderMetadataJson = null;
-        var providerRound = 0;
-        var inlinePermissionCache = new Dictionary<ChatInlineToolPermissionCacheKey, AgentActionResult>();
+        if (streamingResult is null)
+            throw new InvalidOperationException(
+                "Core streaming loop ended without a completion event.");
 
-        while (true)
-        {
-            // Stream the current round
-            providerRound++;
-            var providerRoundTiming = Stopwatch.StartNew();
-            ChatCompletionResult? roundResult = null;
-            var roundDeltaContent = new StringBuilder();
-
-            await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct))
-            {
-                if (chunk.Delta is not null)
-                {
-                    roundDeltaContent.Append(chunk.Delta);
-                    streamedContent.Append(chunk.Delta);
-                    yield return ChatStreamEvent.TextDelta(chunk.Delta);
-                }
-
-                if (chunk.IsFinished)
-                    roundResult = chunk.Finished;
-            }
-
-            if (roundResult is null)
-            {
-                fullContent.Append(roundDeltaContent);
-                providerRoundTiming.Stop();
-                if (logTiming)
-                {
-                    logger.LogDebug(
-                        "Streaming chat request {RequestId} provider round {Round} ended without a finished result after {ProviderRoundMs}ms. ElapsedMs={ElapsedMs}",
-                        timingRequestId, providerRound,
-                        providerRoundTiming.ElapsedMilliseconds,
-                        totalTiming.ElapsedMilliseconds);
-                }
-                break;
-            }
-            providerRoundTiming.Stop();
-
-            if (roundResult.Usage is { } roundUsage)
-            {
-                totalPromptTokens += roundUsage.PromptTokens;
-                totalCompletionTokens += roundUsage.CompletionTokens;
-            }
-
-            if (logTiming)
-            {
-                logger.LogDebug(
-                    "Streaming chat request {RequestId} provider round {Round} completed in {ProviderRoundMs}ms. ToolCalls={ToolCalls} PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} ContentChars={ContentChars} ElapsedMs={ElapsedMs}",
-                    timingRequestId, providerRound,
-                    providerRoundTiming.ElapsedMilliseconds,
-                    roundResult.ToolCalls.Count,
-                    roundResult.Usage?.PromptTokens ?? 0,
-                    roundResult.Usage?.CompletionTokens ?? 0,
-                    roundResult.Content?.Length ?? 0,
-                    totalTiming.ElapsedMilliseconds);
-            }
-
-            var roundContent = roundResult.Content;
-            if (string.IsNullOrEmpty(roundContent) && roundDeltaContent.Length > 0)
-                roundContent = roundDeltaContent.ToString();
-            fullContent.Append(roundContent ?? "");
-
-            if (!roundResult.HasToolCalls || ++rounds > MaxToolCallRounds)
-            {
-                finalProviderMetadataJson = roundResult.ProviderMetadataJson;
-                break;
-            }
-
-            // Record assistant turn with tool calls
-            messages.Add(ToolAwareMessage.AssistantWithToolCalls(
-                roundResult.ToolCalls,
-                roundResult.Content,
-                roundResult.ProviderMetadataJson));
-
-            // Reset content for next round (tool results will produce new text)
-            fullContent.Clear();
-            roundJobIds.Clear();
-
-            foreach (var tc in roundResult.ToolCalls)
-            {
-                // â”€â”€ Task-specific tool interception â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                var (handled, taskResult) = await TryHandleTaskToolAsync(
-                    tc, request.TaskContext, ct);
-                if (handled)
-                {
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
-                    var taskNotation = FormatTaskToolNotation(tc.Name);
-                    fullContent.Append(taskNotation);
-                    streamedContent.Append(taskNotation);
-                    yield return ChatStreamEvent.TextDelta(taskNotation);
-                    continue;
-                }
-
-                // â”€â”€ Inline module tool interception â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-                if (moduleRegistry.IsInlineTool(tc.Name))
-                {
-                    var inlineResult = await HandleInlineModuleToolAsync(
-                        tc, agent.Id, channelId, threadId, inlinePermissionCache, ct);
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult));
-                    var inlineNotation = FormatInlineToolNotation(tc.Name);
-                    fullContent.Append(inlineNotation);
-                    streamedContent.Append(inlineNotation);
-                    yield return ChatStreamEvent.TextDelta(inlineNotation);
-                    continue;
-                }
-
-                var nativeTool = await ExecuteNativeJobToolAsync(
-                    tc,
-                    agent.Id,
-                    channelId,
-                    supportsVision,
-                    emitStreamEvents: true,
-                    approvalCallback,
-                    ct);
-
-                messages.Add(nativeTool.ToolResultMessage);
-                if (!nativeTool.Parsed)
-                    continue;
-
-                if (nativeTool.SubmittedJobId is { } submittedJobId)
-                    roundJobIds.Add(submittedJobId);
-
-                // Core owns native job approval and stream-event selection.
-                foreach (var streamEvent in nativeTool.StreamEvents)
-                    yield return streamEvent;
-
-                if (nativeTool.JobResponse is not null)
-                    jobResults.Add(nativeTool.JobResponse);
-
-                fullContent.Append(nativeTool.ToolNotation);
-                streamedContent.Append(nativeTool.ToolNotation);
-            }
-
-            // Distribute this round's token usage across jobs submitted in the round
-            if (roundJobIds.Count > 0 && roundResult.Usage is { } ru)
-            {
-                await jobService.RecordTokensAsync(roundJobIds, ru.PromptTokens, ru.CompletionTokens, ct);
-                chatToolResults.ApplyRoundTokenUsageToJobResponses(
-                    jobResults,
-                    roundJobIds,
-                    ru.PromptTokens,
-                    ru.CompletionTokens);
-            }
-        }
+        var assistantContent = streamingResult.AssistantContent;
+        var totalPromptTokens = streamingResult.TotalPromptTokens;
+        var totalCompletionTokens = streamingResult.TotalCompletionTokens;
+        var finalProviderMetadataJson = streamingResult.ProviderMetadataJson;
+        var providerRound = streamingResult.ProviderRounds;
+        var jobResults = streamingResult.JobResults is List<AgentJobResponse> list
+            ? list
+            : [.. streamingResult.JobResults];
 
         // Persist assistant message after LLM completes
-        var assistantContent = fullContent.ToString();
 
         var assistantMessage = chatMessages.CreateAssistantMessage(
             channelId,
@@ -1738,20 +1637,5 @@ public sealed class ChatService(
         string? RoleName,
         IReadOnlyList<string> Grants,
         string? Bio);
-
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // Tool call notation (persisted in assistant message content)
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    //
-    // The actual format strings live on ToolNotationFormatter so that
-    // tests, clients, and any non-Core call site share one source of
-    // truth for the persisted "âš™ [...] â†’ ..." surface.  These thin
-    // wrappers exist only to keep the in-file call sites readable.
-
-    private static string FormatInlineToolNotation(string toolName)
-        => ToolNotationFormatter.ForInlineTool(toolName);
-
-    private static string FormatTaskToolNotation(string toolName)
-        => ToolNotationFormatter.ForTaskTool(toolName);
 
 }
