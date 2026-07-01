@@ -14,6 +14,7 @@ using SharpClaw.Providers.Common;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Tests.Cli;
 
@@ -262,8 +263,10 @@ public sealed class ChannelCliCommandTests
         services.AddSingleton<ConversationTopologyEngine>();
         services.AddSingleton<ChatRuntimeInvalidationPlanner>();
         services.AddSingleton<ConversationAdministrationEngine>();
+        services.AddSingleton<DefaultResourceAdministrationEngine>();
         services.AddScoped<SessionService>();
         services.AddScoped<EfConversationAdministrationHost>();
+        services.AddScoped<EfDefaultResourceAdministrationHost>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();
         services.AddScoped<DefaultResourceSetService>();

@@ -117,14 +117,17 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<PermissionEvaluationEngine>();
         services.AddSingleton<PermissionDelegateEvaluationEngine>();
         services.AddSingleton<RolePermissionAdministrationEngine>();
+        services.AddSingleton<RoleAdministrationEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobRuntimeEngine>();
         services.AddSingleton<AgentJobDefaultResourceResolver>();
         services.AddSingleton<DefaultResourceEngine>();
+        services.AddSingleton<DefaultResourceAdministrationEngine>();
         services.AddSingleton<ConversationTopologyEngine>();
         services.AddSingleton<ConversationAdministrationEngine>();
         services.AddSingleton<ProviderCatalogEngine>();
+        services.AddSingleton<ProviderModelAdministrationEngine>();
         services.AddSingleton<ProviderCostEngine>();
         services.AddSingleton<ModelCatalogEngine>();
         services.AddSingleton<ChatCostEngine>();
@@ -145,6 +148,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<TaskPreflightEngine>();
         services.AddSingleton<TaskTriggerBindingPlanner>();
         services.AddSingleton<ToolAwarenessSetEngine>();
+        services.AddSingleton<ToolAwarenessAdministrationEngine>();
         services.AddSingleton<RuntimeModuleDbContextRegistry>();
         services.AddSingleton<ModulePersistenceRegistrationFactory>();
         services.AddSingleton(new ModuleDbContextOptions
@@ -175,10 +179,15 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<EfConversationAdministrationHost>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();
+        services.AddScoped<EfDefaultResourceAdministrationHost>();
         services.AddScoped<DefaultResourceSetService>();
         services.AddScoped<ProviderCostService>();
+        services.AddScoped<EfProviderModelAdministrationHost>();
         services.AddScoped<ProviderService>();
+        services.AddScoped<EfRoleAdministrationHost>();
         services.AddScoped<RoleService>();
+        services.AddScoped<EfToolAwarenessAdministrationHost>();
+        services.AddScoped<ToolAwarenessSetService>();
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();

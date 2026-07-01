@@ -345,14 +345,17 @@ try
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
     builder.Services.AddSingleton<PermissionDelegateEvaluationEngine>();
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
+    builder.Services.AddSingleton<RoleAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
     builder.Services.AddSingleton<AgentJobRuntimeEngine>();
     builder.Services.AddSingleton<AgentJobDefaultResourceResolver>();
     builder.Services.AddSingleton<DefaultResourceEngine>();
+    builder.Services.AddSingleton<DefaultResourceAdministrationEngine>();
     builder.Services.AddSingleton<ConversationTopologyEngine>();
     builder.Services.AddSingleton<ConversationAdministrationEngine>();
     builder.Services.AddSingleton<ProviderCatalogEngine>();
+    builder.Services.AddSingleton<ProviderModelAdministrationEngine>();
     builder.Services.AddSingleton<ProviderCostEngine>();
     builder.Services.AddSingleton<ModelCatalogEngine>();
     builder.Services.AddSingleton<ChatCostEngine>();
@@ -372,7 +375,9 @@ try
     builder.Services.AddSingleton<TaskPreflightEngine>();
     builder.Services.AddSingleton<TaskTriggerBindingPlanner>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();
+    builder.Services.AddSingleton<ToolAwarenessAdministrationEngine>();
 
+    builder.Services.AddScoped<EfProviderModelAdministrationHost>();
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();
     builder.Services.AddScoped<ModelService>();
@@ -382,8 +387,11 @@ try
     builder.Services.AddScoped<ChannelService>();
     builder.Services.AddScoped<ThreadService>();
     builder.Services.AddScoped<ContextService>();
+    builder.Services.AddScoped<EfRoleAdministrationHost>();
     builder.Services.AddScoped<DefaultResourceSetService>();
+    builder.Services.AddScoped<EfDefaultResourceAdministrationHost>();
     builder.Services.AddScoped<ToolAwarenessSetService>();
+    builder.Services.AddScoped<EfToolAwarenessAdministrationHost>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<AgentJobService>();
 

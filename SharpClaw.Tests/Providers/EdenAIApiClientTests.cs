@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Core.Clients;
-using SharpClaw.Application.Services;
+using SharpClaw.Core.Providers;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Modules.Providers.OpenAICompatible;
@@ -116,16 +116,8 @@ public sealed class EdenAIApiClientTests
 
         using var serviceProvider = services.BuildServiceProvider();
         var factory = new ProviderApiClientFactory(serviceProvider.GetServices<IProviderPlugin>());
-        var svc = new ProviderService(
-            null!,
-            null!,
-            factory,
-            new ProviderCatalogEngine(),
-            new ModelCatalogEngine(),
-            null!,
-            null!);
 
-        var types = svc.ListAvailableTypes();
+        var types = new ProviderCatalogEngine().ListAvailableTypes(factory.Plugins);
 
         types.Should().ContainSingle(t =>
             t.ProviderKey == "eden-ai"

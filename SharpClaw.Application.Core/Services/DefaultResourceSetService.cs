@@ -1,256 +1,114 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.DTOs.DefaultResources;
-using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Application.Services;
 
 /// <summary>
-/// Manages <see cref="DefaultResourceSetDB"/> entities attached to
-/// channels and contexts.  Valid resource keys come from core defaults
-/// and registered module resource descriptors.
+/// Manages default resources attached to channels and contexts.
 /// </summary>
 public sealed class DefaultResourceSetService(
-    SharpClawDbContext db,
     ModuleRegistry moduleRegistry,
-    ChatRuntimeInvalidationPlanner invalidations,
-    ChatCache chatCache)
+    DefaultResourceAdministrationEngine administration,
+    EfDefaultResourceAdministrationHost administrationHost)
 {
-    // -- Reads ------------------------------------------------------
-
-    /// <summary>
-    /// Gets the default resources for a channel.  Falls through to the
-    /// context set for any unset keys.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> GetForChannelAsync(
-        Guid channelId, CancellationToken ct = default)
+        Guid channelId,
+        CancellationToken ct = default)
     {
-        var ch = await db.Channels
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .Include(c => c.AgentContext!).ThenInclude(ctx => ctx.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
-
-        if (ch is null) return null;
-
-        return DefaultResourceEngine.Merge(
-            ch.Id,
-            Snapshot(ch.DefaultResourceSet),
-            Snapshot(ch.AgentContext?.DefaultResourceSet));
+        return await administration.GetForChannelAsync(
+            channelId,
+            administrationHost,
+            ct);
     }
 
-    /// <summary>
-    /// Gets the default resources for a context.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> GetForContextAsync(
-        Guid contextId, CancellationToken ct = default)
+        Guid contextId,
+        CancellationToken ct = default)
     {
-        var ctx = await db.AgentContexts
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
-
-        if (ctx is null) return null;
-
-        return ctx.DefaultResourceSet is { } drs
-            ? DefaultResourceEngine.ToResponse(
-                DefaultResourceSetSnapshot.FromDefaultResourceSet(drs))
-            : DefaultResourceEngine.EmptyResponse(Guid.Empty);
+        return await administration.GetForContextAsync(
+            contextId,
+            administrationHost,
+            ct);
     }
 
-    // -- Bulk writes ------------------------------------------------
-
-    /// <summary>
-    /// Sets the default resources for a channel (creates or replaces).
-    /// Keys not present in <paramref name="request"/> are left unchanged.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> SetForChannelAsync(
-        Guid channelId, SetDefaultResourcesRequest request,
+        Guid channelId,
+        SetDefaultResourcesRequest request,
         CancellationToken ct = default)
     {
-        var ch = await db.Channels
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
-
-        if (ch is null) return null;
-
-        ch.DefaultResourceSet ??= await CreateAndAttachAsync(
-            setId => ch.DefaultResourceSetId = setId, ct);
-
-        DefaultResourceEngine.Apply(
-            ch.DefaultResourceSet,
+        return await administration.SetForChannelAsync(
+            channelId,
             request,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        invalidations.DefaultResourcesForChannelChanged(channelId)
-            .ApplyTo(chatCache);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
+            administrationHost,
+            ct);
     }
 
-    /// <summary>
-    /// Sets the default resources for a context (creates or replaces).
-    /// Keys not present in <paramref name="request"/> are left unchanged.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> SetForContextAsync(
-        Guid contextId, SetDefaultResourcesRequest request,
+        Guid contextId,
+        SetDefaultResourcesRequest request,
         CancellationToken ct = default)
     {
-        var ctx = await db.AgentContexts
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
-
-        if (ctx is null) return null;
-
-        ctx.DefaultResourceSet ??= await CreateAndAttachAsync(
-            setId => ctx.DefaultResourceSetId = setId, ct);
-
-        DefaultResourceEngine.Apply(
-            ctx.DefaultResourceSet,
+        return await administration.SetForContextAsync(
+            contextId,
             request,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
+            administrationHost,
+            ct);
     }
 
-    // -- Per-key operations -----------------------------------------
-
-    /// <summary>
-    /// Returns <see langword="true"/> when <paramref name="key"/> is a
-    /// default-resource key registered by any loaded module.
-    /// </summary>
     public bool IsValidKey(string key) =>
         moduleRegistry.IsRegisteredDefaultResourceKey(key);
 
-    /// <summary>
-    /// Sets a single default resource by key for a channel.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> SetKeyForChannelAsync(
-        Guid channelId, string key, Guid resourceId,
+        Guid channelId,
+        string key,
+        Guid resourceId,
         CancellationToken ct = default)
     {
-        var ch = await db.Channels
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
-        if (ch is null) return null;
-
-        ch.DefaultResourceSet ??= await CreateAndAttachAsync(
-            setId => ch.DefaultResourceSetId = setId, ct);
-
-        DefaultResourceEngine.ApplyKey(
-            ch.DefaultResourceSet,
+        return await administration.SetKeyForChannelAsync(
+            channelId,
             key,
             resourceId,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        invalidations.DefaultResourcesForChannelChanged(channelId)
-            .ApplyTo(chatCache);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
+            administrationHost,
+            ct);
     }
 
-    /// <summary>
-    /// Clears a single default resource by key for a channel.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> ClearKeyForChannelAsync(
-        Guid channelId, string key, CancellationToken ct = default)
-    {
-        var ch = await db.Channels
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
-        if (ch is null) return null;
-        if (ch.DefaultResourceSet is null)
-            return DefaultResourceEngine.EmptyResponse(Guid.Empty);
-
-        DefaultResourceEngine.ApplyKey(
-            ch.DefaultResourceSet,
-            key,
-            null,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        invalidations.DefaultResourcesForChannelChanged(channelId)
-            .ApplyTo(chatCache);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
-    }
-
-    /// <summary>
-    /// Sets a single default resource by key for a context.
-    /// </summary>
-    public async Task<DefaultResourcesResponse?> SetKeyForContextAsync(
-        Guid contextId, string key, Guid resourceId,
+        Guid channelId,
+        string key,
         CancellationToken ct = default)
     {
-        var ctx = await db.AgentContexts
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
-        if (ctx is null) return null;
+        return await administration.ClearKeyForChannelAsync(
+            channelId,
+            key,
+            administrationHost,
+            ct);
+    }
 
-        ctx.DefaultResourceSet ??= await CreateAndAttachAsync(
-            setId => ctx.DefaultResourceSetId = setId, ct);
-
-        DefaultResourceEngine.ApplyKey(
-            ctx.DefaultResourceSet,
+    public async Task<DefaultResourcesResponse?> SetKeyForContextAsync(
+        Guid contextId,
+        string key,
+        Guid resourceId,
+        CancellationToken ct = default)
+    {
+        return await administration.SetKeyForContextAsync(
+            contextId,
             key,
             resourceId,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
+            administrationHost,
+            ct);
     }
 
-    /// <summary>
-    /// Clears a single default resource by key for a context.
-    /// </summary>
     public async Task<DefaultResourcesResponse?> ClearKeyForContextAsync(
-        Guid contextId, string key, CancellationToken ct = default)
+        Guid contextId,
+        string key,
+        CancellationToken ct = default)
     {
-        var ctx = await db.AgentContexts
-            .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
-            .FirstOrDefaultAsync(c => c.Id == contextId, ct);
-        if (ctx is null) return null;
-        if (ctx.DefaultResourceSet is null)
-            return DefaultResourceEngine.EmptyResponse(Guid.Empty);
-
-        DefaultResourceEngine.ApplyKey(
-            ctx.DefaultResourceSet,
+        return await administration.ClearKeyForContextAsync(
+            contextId,
             key,
-            null,
-            entry => db.DefaultResourceEntries.Remove(entry));
-        await db.SaveChangesAsync(ct);
-        await InvalidateContextDefaultResourcesAsync(contextId, ct);
-        return DefaultResourceEngine.ToResponse(
-            DefaultResourceSetSnapshot.FromDefaultResourceSet(ctx.DefaultResourceSet));
+            administrationHost,
+            ct);
     }
-
-    // -- Helpers ----------------------------------------------------
-
-    private async Task<DefaultResourceSetDB> CreateAndAttachAsync(
-        Action<Guid> assignId, CancellationToken ct)
-    {
-        var drs = new DefaultResourceSetDB();
-        db.DefaultResourceSets.Add(drs);
-        await db.SaveChangesAsync(ct);
-        assignId(drs.Id);
-        return drs;
-    }
-
-    private async Task InvalidateContextDefaultResourcesAsync(
-        Guid contextId, CancellationToken ct)
-    {
-        var channelIds = await db.Channels
-            .Where(c => c.AgentContextId == contextId)
-            .Select(c => c.Id)
-            .ToListAsync(ct);
-
-        invalidations.DefaultResourcesForContextChanged(channelIds)
-            .ApplyTo(chatCache);
-    }
-
-    private static DefaultResourceSetSnapshot? Snapshot(DefaultResourceSetDB? drs) =>
-        drs is null ? null : DefaultResourceSetSnapshot.FromDefaultResourceSet(drs);
 }
