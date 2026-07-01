@@ -126,18 +126,14 @@ public sealed class AgentJobTokenAccountingTests
         var registry = new ModuleRegistry();
         var configuration = new ConfigurationBuilder().Build();
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var eventDispatcher = new ModuleEventDispatcher(
-            serviceProvider,
-            configuration,
-            NullLogger<ModuleEventDispatcher>.Instance);
         var jobAdministration = new AgentJobAdministrationEngine();
         var jobLifecycle = new AgentJobLifecycleEngine();
         var defaultResources = new DefaultResourceEngine();
         var permissionEvaluator = new PermissionEvaluationEngine();
+        var chatCache = new ChatCache(configuration);
 
         return new AgentJobService(
             db,
-            new EfPersistenceEntityResolver(),
             new AgentActionService(
                 db,
                 registry,
@@ -151,12 +147,18 @@ public sealed class AgentJobTokenAccountingTests
             new ModuleJobToolExecutor(
                 new ModuleMetricsCollector(),
                 NullLogger<ModuleJobToolExecutor>.Instance),
-            eventDispatcher,
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             configuration,
-            new ChatCache(configuration),
+            chatCache,
             new AgentJobRuntimeEngine(jobLifecycle, jobAdministration),
-            jobLifecycle,
+            new AgentJobAdministrationWorkflowEngine(
+                jobAdministration,
+                jobLifecycle),
+            new EfAgentJobAdministrationHost(
+                db,
+                new EfPersistenceEntityResolver(),
+                chatCache,
+                jobAdministration),
             jobAdministration,
             new AgentJobDefaultResourceResolver(
                 jobAdministration,
@@ -187,6 +189,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<PermissionDelegateEvaluationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
+        services.AddSingleton<AgentJobAdministrationWorkflowEngine>();
         services.AddSingleton<AgentJobRuntimeEngine>();
         services.AddSingleton<DefaultResourceEngine>();
         services.AddSingleton<AgentJobDefaultResourceResolver>();
@@ -197,6 +200,7 @@ public sealed class AgentJobTokenAccountingTests
                 NullLogger<ModuleEventDispatcher>.Instance));
         services.AddScoped<AgentActionService>();
         services.AddScoped<SessionService>();
+        services.AddScoped<EfAgentJobAdministrationHost>();
         services.AddScoped<AgentJobService>();
         services.AddSingleton<IAgentJobCostTracker, HostAgentJobCostTracker>();
 

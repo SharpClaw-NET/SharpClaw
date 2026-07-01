@@ -1,7 +1,5 @@
-using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Net;
-using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -11,7 +9,6 @@ using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -32,27 +29,24 @@ namespace SharpClaw.Application.Services;
 /// </summary>
 public sealed class AgentJobService(
     SharpClawDbContext db,
-    IPersistenceEntityResolver entities,
     AgentActionService actions,
     SessionService session,
     ModuleRegistry moduleRegistry,
     ModuleToolExecutionPlanner moduleExecutionPlanner,
     ModuleToolPermissionExecutor modulePermissionExecutor,
     ModuleJobToolExecutor moduleJobToolExecutor,
-    ModuleEventDispatcher eventDispatcher,
     IServiceScopeFactory serviceScopeFactory,
     IConfiguration configuration,
     ChatCache chatCache,
     AgentJobRuntimeEngine jobRuntime,
-    AgentJobLifecycleEngine lifecycle,
+    AgentJobAdministrationWorkflowEngine jobWorkflow,
+    EfAgentJobAdministrationHost jobAdministrationHost,
     AgentJobAdministrationEngine jobAdministration,
     AgentJobDefaultResourceResolver jobDefaultResources,
     ILogger<AgentJobService> logger) : IAgentJobRuntimeHost
 {
-    private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
     private readonly IConfiguration _configuration = configuration;
     private readonly ILogger<AgentJobService> _logger = logger;
-    private readonly List<AgentJobLogEntryDB> _pendingCacheLogs = [];
     private static readonly AsyncLocal<Guid?> CurrentExecutionJob = new();
 
     // ═══════════════════════════════════════════════════════════════
@@ -87,7 +81,7 @@ public sealed class AgentJobService(
         ApproveAgentJobRequest request,
         CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
+        var job = await jobAdministrationHost.LoadJobAsync(jobId, ct);
         if (job is null) return null;
 
         return await jobRuntime.ApproveAsync(job, request, this, ct);
@@ -97,32 +91,18 @@ public sealed class AgentJobService(
     public async Task<AgentJobResponse?> CancelAsync(
         Guid jobId, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        if (job is null) return null;
-
-        ApplyLifecycleDecision(job, lifecycle.Cancel(job.Status, DateTimeOffset.UtcNow));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        return await ToResponseAsync(job, ct);
+        return await jobWorkflow.CancelAsync(jobId, jobAdministrationHost, ct);
     }
 
     /// <summary>Stop a long-running job and complete it normally.</summary>
     public async Task<AgentJobResponse?> StopAsync(
         Guid jobId, string? requiredActionPrefix = null, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        if (job is null) return null;
-
-        ApplyLifecycleDecision(
-            job,
-            lifecycle.Stop(
-                job.Status,
-                job.ActionKey,
-                requiredActionPrefix,
-                DateTimeOffset.UtcNow));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        return await ToResponseAsync(job, ct);
+        return await jobWorkflow.StopAsync(
+            jobId,
+            requiredActionPrefix,
+            jobAdministrationHost,
+            ct);
     }
 
     /// <summary>
@@ -132,13 +112,7 @@ public sealed class AgentJobService(
     public async Task<AgentJobResponse?> PauseAsync(
         Guid jobId, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        if (job is null) return null;
-
-        ApplyLifecycleDecision(job, lifecycle.Pause(job.Status));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        return await ToResponseAsync(job, ct);
+        return await jobWorkflow.PauseAsync(jobId, jobAdministrationHost, ct);
     }
 
     /// <summary>
@@ -149,46 +123,31 @@ public sealed class AgentJobService(
     public async Task<AgentJobResponse?> ResumeAsync(
         Guid jobId, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        if (job is null) return null;
-
-        ApplyLifecycleDecision(job, lifecycle.Resume(job.Status));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        return await ToResponseAsync(job, ct);
+        return await jobWorkflow.ResumeAsync(jobId, jobAdministrationHost, ct);
     }
 
     /// <summary>Retrieve a single job by ID.</summary>
     public async Task<AgentJobResponse?> GetAsync(
         Guid jobId, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        return job is null ? null : await ToResponseAsync(job, ct);
+        return await jobWorkflow.GetAsync(jobId, jobAdministrationHost, ct);
     }
 
     /// <summary>Retrieve a single job summary by ID without loading logs.</summary>
     public async Task<AgentJobSummaryResponse?> GetSummaryAsync(
         Guid jobId, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        return job is null ? null : ToSummaryResponse(job);
+        return await jobWorkflow.GetSummaryAsync(
+            jobId,
+            jobAdministrationHost,
+            ct);
     }
 
     /// <summary>List all jobs for a channel, most recent first.</summary>
     public async Task<IReadOnlyList<AgentJobResponse>> ListAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        var jobs = await entities.QueryAsync<AgentJobDB>(
-            db,
-            j => j.ChannelId == channelId,
-            hint: new PersistenceQueryHint("ChannelId", channelId),
-            ct: ct);
-
-        var responses = new List<AgentJobResponse>(jobs.Count);
-        foreach (var job in jobAdministration.OrderMostRecent(jobs))
-            responses.Add(await ToResponseAsync(job, ct));
-
-        return responses;
+        return await jobWorkflow.ListAsync(channelId, jobAdministrationHost, ct);
     }
 
     /// <summary>
@@ -199,16 +158,10 @@ public sealed class AgentJobService(
     public async Task<IReadOnlyList<AgentJobSummaryResponse>> ListSummariesAsync(
         Guid channelId, CancellationToken ct = default)
     {
-        var jobs = await entities.QueryAsync<AgentJobDB>(
-            db,
-            j => j.ChannelId == channelId,
-            hint: new PersistenceQueryHint("ChannelId", channelId),
-            ct: ct);
-
-        return jobAdministration
-            .OrderMostRecent(jobs)
-            .Select(ToSummaryResponse)
-            .ToList();
+        return await jobWorkflow.ListSummariesAsync(
+            channelId,
+            jobAdministrationHost,
+            ct);
     }
 
     public async Task<IReadOnlyList<AgentJobResponse>> ListJobsByActionPrefixAsync(
@@ -216,16 +169,11 @@ public sealed class AgentJobService(
         Guid? resourceId = null,
         CancellationToken ct = default)
     {
-        var jobs = await entities.QueryAsync<AgentJobDB>(
-            db,
-            jobAdministration.BuildActionPrefixPredicate(actionKeyPrefix, resourceId),
-            ct: ct);
-
-        var responses = new List<AgentJobResponse>(jobs.Count);
-        foreach (var job in jobAdministration.OrderMostRecent(jobs))
-            responses.Add(await ToResponseAsync(job, ct));
-
-        return responses;
+        return await jobWorkflow.ListByActionPrefixAsync(
+            actionKeyPrefix,
+            resourceId,
+            jobAdministrationHost,
+            ct);
     }
 
     public async Task<IReadOnlyList<AgentJobSummaryResponse>> ListJobSummariesByActionPrefixAsync(
@@ -233,22 +181,21 @@ public sealed class AgentJobService(
         Guid? resourceId = null,
         CancellationToken ct = default)
     {
-        var jobs = await entities.QueryAsync<AgentJobDB>(
-            db,
-            jobAdministration.BuildActionPrefixPredicate(actionKeyPrefix, resourceId),
-            ct: ct);
-
-        return jobAdministration
-            .OrderMostRecent(jobs)
-            .Select(ToSummaryResponse)
-            .ToList();
+        return await jobWorkflow.ListSummariesByActionPrefixAsync(
+            actionKeyPrefix,
+            resourceId,
+            jobAdministrationHost,
+            ct);
     }
 
     public async Task<bool> JobExistsWithActionPrefixAsync(
         Guid jobId, string actionKeyPrefix, CancellationToken ct = default)
     {
-        var job = await LoadJobAsync(jobId, ct);
-        return jobAdministration.JobMatchesActionPrefix(job, actionKeyPrefix);
+        return await jobWorkflow.JobExistsWithActionPrefixAsync(
+            jobId,
+            actionKeyPrefix,
+            jobAdministrationHost,
+            ct);
     }
 
     /// <summary>Returns the session user ID, or <c>null</c> if not authenticated.</summary>
@@ -304,8 +251,7 @@ public sealed class AgentJobService(
         IReadOnlyList<AgentJobLogEntryDB> logs,
         CancellationToken ct)
     {
-        _pendingCacheLogs.AddRange(logs);
-        await SaveChangesAndCacheLogsAsync(ct);
+        await jobAdministrationHost.SaveAsync(logs, ct);
     }
 
     Task<AgentActionResult> IAgentJobRuntimeHost.DispatchPermissionCheckAsync(
@@ -382,7 +328,7 @@ public sealed class AgentJobService(
     Task<AgentJobResponse> IAgentJobRuntimeHost.BuildResponseAsync(
         AgentJobDB job,
         CancellationToken ct)
-        => ToResponseAsync(job, ct);
+        => jobWorkflow.BuildResponseAsync(job, jobAdministrationHost, ct);
 
     // ═══════════════════════════════════════════════════════════════
     // Execution
@@ -673,77 +619,6 @@ public sealed class AgentJobService(
 
     private sealed record ResolvedDefaultResourceId(Guid? ResourceId);
 
-    private async Task<AgentJobDB?> LoadJobAsync(Guid jobId, CancellationToken ct)
-        => await entities.FindAsync<AgentJobDB>(db, jobId, ct);
-
-    private void ApplyLifecycleDecision(
-        AgentJobDB job,
-        AgentJobLifecycleDecision decision)
-    {
-        _pendingCacheLogs.AddRange(
-            jobAdministration.ApplyLifecycleDecision(job, decision));
-    }
-
-    private void AddLog(AgentJobDB job, string message, string level = JobLogLevels.Info)
-    {
-        _pendingCacheLogs.Add(jobAdministration.AddLog(job, message, level));
-    }
-
-    private async Task SaveChangesAndCacheLogsAsync(CancellationToken ct)
-    {
-        var pendingLogs = _pendingCacheLogs.ToArray();
-        await db.SaveChangesAsync(ct);
-        _pendingCacheLogs.Clear();
-
-        foreach (var log in pendingLogs)
-            chatCache.AppendJobLogIfCached(log.AgentJobId, ToLogResponse(log));
-    }
-
-    private async Task<AgentJobResponse> ToResponseAsync(AgentJobDB job, CancellationToken ct)
-        => ToResponse(job, await GetJobLogsAsync(job, ct));
-
-    private async Task<IReadOnlyList<AgentJobLogResponse>> GetJobLogsAsync(
-        AgentJobDB job,
-        CancellationToken ct)
-    {
-        if (chatCache.TryGetJobLogs(job.Id, out var cached))
-            return cached ?? [];
-
-        var logs = await chatCache.GetJobLogsAsync(
-            job.Id,
-            async innerCt =>
-            {
-                var entries = await entities.QueryAsync<AgentJobLogEntryDB>(
-                    db,
-                    l => l.AgentJobId == job.Id,
-                    hint: new PersistenceQueryHint("AgentJobId", job.Id),
-                    ct: innerCt);
-
-                return ToLogResponses(entries);
-            },
-            ct);
-
-        return logs ?? [];
-    }
-
-    private AgentJobResponse ToResponse(AgentJobDB job)
-        => jobAdministration.ToResponse(job);
-
-    private AgentJobResponse ToResponse(
-        AgentJobDB job,
-        IReadOnlyList<AgentJobLogResponse> logs)
-        => jobAdministration.ToResponse(job, logs);
-
-    private IReadOnlyList<AgentJobLogResponse> ToLogResponses(
-        IEnumerable<AgentJobLogEntryDB> logs)
-        => jobAdministration.ToLogResponses(logs);
-
-    private AgentJobLogResponse ToLogResponse(AgentJobLogEntryDB log)
-        => jobAdministration.ToLogResponse(log);
-
-    private AgentJobSummaryResponse ToSummaryResponse(AgentJobDB job)
-        => jobAdministration.ToSummaryResponse(job);
-
     /// <summary>
     /// Records prompt/completion tokens on a set of jobs that were
     /// submitted during a single LLM round.  Tokens are split evenly
@@ -753,39 +628,12 @@ public sealed class AgentJobService(
         IReadOnlyList<Guid> jobIds, int promptTokens, int completionTokens,
         CancellationToken ct = default)
     {
-        if (jobIds.Count == 0) return;
-
-        // Jobs being recorded are from the current session (just executed),
-        // so they should be in EF. Fall back to cold store + re-attach if
-        // a restart happened mid-flight.
-        var loadedJobs = await db.AgentJobs
-            .Where(j => jobIds.Contains(j.Id))
-            .ToListAsync(ct);
-        var jobsById = loadedJobs.ToDictionary(j => j.Id);
-
-        if (jobsById.Count < jobIds.Count)
-        {
-            foreach (var id in jobIds)
-            {
-                if (jobsById.ContainsKey(id)) continue;
-
-                var job = await entities.FindAsync<AgentJobDB>(db, id, ct);
-                if (job is not null)
-                    jobsById[id] = job;
-            }
-        }
-
-        var jobs = jobIds
-            .Select(id => jobsById.GetValueOrDefault(id))
-            .Where(job => job is not null)
-            .Select(job => job!)
-            .ToList();
-
-        if (jobs.Count == 0) return;
-
-        jobAdministration.ApplyTokenUsage(jobs, promptTokens, completionTokens);
-
-        await SaveChangesAndCacheLogsAsync(ct);
+        await jobWorkflow.RecordTokensAsync(
+            jobIds,
+            promptTokens,
+            completionTokens,
+            jobAdministrationHost,
+            ct);
     }
 
     internal async Task RecordTokensForCurrentExecutionAsync(

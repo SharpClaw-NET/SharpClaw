@@ -348,6 +348,7 @@ try
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<RoleAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobAdministrationEngine>();
+    builder.Services.AddSingleton<AgentJobAdministrationWorkflowEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
     builder.Services.AddSingleton<AgentJobRuntimeEngine>();
     builder.Services.AddSingleton<AgentJobDefaultResourceResolver>();
@@ -395,6 +396,7 @@ try
     builder.Services.AddScoped<ToolAwarenessSetService>();
     builder.Services.AddScoped<EfToolAwarenessAdministrationHost>();
     builder.Services.AddScoped<AgentActionService>();
+    builder.Services.AddScoped<EfAgentJobAdministrationHost>();
     builder.Services.AddScoped<AgentJobService>();
 
     // Host bridges — concrete services that adapt Core/Infrastructure to

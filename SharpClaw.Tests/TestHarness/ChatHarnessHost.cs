@@ -121,6 +121,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<RolePermissionAdministrationEngine>();
         services.AddSingleton<RoleAdministrationEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
+        services.AddSingleton<AgentJobAdministrationWorkflowEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobRuntimeEngine>();
         services.AddSingleton<AgentJobDefaultResourceResolver>();
@@ -174,6 +175,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             sp => sp.GetRequiredService<CountingPersistenceEntityResolver>());
         services.AddScoped<SessionService>();
         services.AddScoped<AgentActionService>();
+        services.AddScoped<EfAgentJobAdministrationHost>();
         services.AddScoped<AgentJobService>();
         services.AddScoped<IAgentJobController, HostAgentJobController>();
         services.AddScoped<IAgentJobReader, HostAgentJobReader>();
