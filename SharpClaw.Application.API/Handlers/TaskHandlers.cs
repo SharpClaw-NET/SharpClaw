@@ -119,7 +119,7 @@ public static class TaskInstanceHandlers
                 request with { TaskDefinitionId = taskId },
                 callerUserId: session.UserId);
         }
-        catch (PreflightBlockedException ex)
+        catch (TaskPreflightBlockedException ex)
         {
             return Results.UnprocessableEntity(TaskPreflightHelpers.ToResponse(ex.PreflightResult));
         }

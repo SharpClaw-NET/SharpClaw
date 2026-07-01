@@ -19,6 +19,7 @@ using SharpClaw.Modules.AgentOrchestration.Models;
 using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
 using SharpClaw.Modules.AgentOrchestration.Services;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Core.Tasks.Runtime;
 
@@ -343,9 +344,12 @@ internal sealed class TaskLifecycleHost : IAsyncDisposable
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ProviderApiClientFactory>();
         services.AddSingleton<TaskPreflightEngine>();
+        services.AddSingleton<TaskAdministrationWorkflowEngine>();
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddScoped<TaskPreflightChecker>();
+        services.AddScoped<EfTaskAdministrationHost>();
         services.AddScoped<TaskService>();
+        services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
         services.AddScoped<TaskPlanExecutionEngine>();
         services.AddScoped<TaskOrchestrator>();
         services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();

@@ -50,6 +50,7 @@ using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
 using SharpClaw.Core.Threads;
 using SharpClaw.Core.Tools;
+using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Core.Tasks.Runtime;
 
@@ -373,6 +374,7 @@ try
     builder.Services.AddSingleton<ChatNativeToolLoopEngine>();
     builder.Services.AddSingleton<ModuleJobToolExecutor>();
     builder.Services.AddSingleton<TaskPreflightEngine>();
+    builder.Services.AddSingleton<TaskAdministrationWorkflowEngine>();
     builder.Services.AddSingleton<TaskTriggerBindingPlanner>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();
     builder.Services.AddSingleton<ToolAwarenessAdministrationEngine>();
@@ -427,6 +429,7 @@ try
     // ──────── PHASE 9 ──── Task runtime + trigger host + host metric probes
     builder.Services.AddScoped<TaskPreflightChecker>();
     builder.Services.AddScoped<TaskTriggerRegistrar>();
+    builder.Services.AddScoped<EfTaskAdministrationHost>();
     builder.Services.AddScoped<TaskService>();
     builder.Services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
     builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();

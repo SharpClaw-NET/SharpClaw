@@ -18,6 +18,8 @@ using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
+using SharpClaw.Core.Tasks.Administration;
+using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Core.Tasks.Triggers;
 using SharpClaw.Core.Tools;
 using SharpClaw.Contracts.Entities;
@@ -28,13 +30,13 @@ using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Instances;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Tasks.Preflight;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -146,6 +148,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatInlineToolExecutor>();
         services.AddSingleton<ChatNativeToolLoopEngine>();
         services.AddSingleton<TaskPreflightEngine>();
+        services.AddSingleton<TaskAdministrationWorkflowEngine>();
         services.AddSingleton<TaskTriggerBindingPlanner>();
         services.AddSingleton<ToolAwarenessSetEngine>();
         services.AddSingleton<ToolAwarenessAdministrationEngine>();
@@ -188,6 +191,12 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<RoleService>();
         services.AddScoped<EfToolAwarenessAdministrationHost>();
         services.AddScoped<ToolAwarenessSetService>();
+        services.AddScoped<TaskPreflightChecker>();
+        services.AddScoped<TaskTriggerRegistrar>();
+        services.AddScoped<EfTaskAdministrationHost>();
+        services.AddScoped<TaskService>();
+        services.AddScoped<ITaskAuthoring>(sp =>
+            sp.GetRequiredService<TaskService>());
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();
