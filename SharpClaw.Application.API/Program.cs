@@ -370,6 +370,7 @@ try
     builder.Services.AddSingleton<ChatHeaderGrantFormatter>();
     builder.Services.AddSingleton<ChatToolResultEngine>();
     builder.Services.AddSingleton<ChatMessageEngine>();
+    builder.Services.AddSingleton<ChatRequestWorkflowEngine>();
     builder.Services.AddSingleton<ChatToolSelectionEngine>();
     builder.Services.AddSingleton<ChatNativeToolCallParser>();
     builder.Services.AddSingleton<ChatNativeJobToolExecutor>();

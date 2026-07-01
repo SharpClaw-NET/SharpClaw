@@ -45,7 +45,7 @@ public sealed class ChatService(
     ChatRequestPlanningEngine chatPlanner,
     ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
-    ChatMessageEngine chatMessages,
+    ChatRequestWorkflowEngine chatWorkflow,
     ChatQueryWorkflowEngine chatQueries,
     EfChatQueryHost chatQueryHost,
     ChatToolSelectionEngine chatToolSelection,
@@ -64,6 +64,13 @@ public sealed class ChatService(
     /// tool calls.
     /// </summary>
     private const int MaxToolCallRounds = 50;
+
+    private readonly SharpClawDbContext _db = db;
+    private readonly AgentJobService _jobService = jobService;
+    private readonly ThreadActivitySignal _threadActivity = threadActivity;
+    private readonly ChatCache _chatCache = chatCache;
+    private readonly ChatQueryWorkflowEngine _chatQueries = chatQueries;
+    private readonly EfChatQueryHost _chatQueryHost = chatQueryHost;
 
     private readonly bool _disableCustomProviderParameters =
         configuration.GetValue<bool>("Agent:DisableCustomProviderParameters");
@@ -98,7 +105,7 @@ public sealed class ChatService(
                 request.Message.Length, ct.IsCancellationRequested);
         }
 
-        var channel = await db.Channels
+        var channel = await _db.Channels
             .AsNoTracking()
             .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent!).ThenInclude(a => a.ToolAwarenessSet)
@@ -124,193 +131,122 @@ public sealed class ChatService(
             _disableCustomProviderParameters);
         var model = agent.Model!;
         var provider = model.Provider!;
-
-        // Acquire per-thread lock for sequential processing
-        IDisposable? threadLock = null;
-        if (threadId is not null)
-        {
-            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
-            threadActivity.Publish(threadId.Value,
-                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
-        }
+        var workflowHost = new ChatServiceRequestWorkflowHost(this);
+        ChatPreparedRequestState? prepared = null;
 
         try
         {
+            var prepareTiming = Stopwatch.StartNew();
+            prepared = await chatWorkflow.BeginPreparedRequestAsync(
+                new ChatPreparedRequest(
+                    channelId,
+                    threadId,
+                    channel,
+                    agent,
+                    plan,
+                    request),
+                workflowHost,
+                ct);
+            prepareTiming.Stop();
+            userMessagePersisted = true;
 
-        // Build history: only when a thread is specified; otherwise a single one-shot.
-        var historyTiming = Stopwatch.StartNew();
-        List<ChatCompletionMessage> history;
-        int? maxHistoryMessages = null;
-        int? maxHistoryCharacters = null;
-        if (threadId is not null)
-        {
-            var historyLoad = await LoadThreadHistoryAsync(threadId.Value, ct);
-            history = historyLoad.Messages;
-            maxHistoryMessages = historyLoad.MaxMessages;
-            maxHistoryCharacters = historyLoad.MaxCharacters;
-        }
-        else
-        {
-            history = [];
-        }
-        historyTiming.Stop();
+            var history = prepared.History;
+            if (logTiming)
+            {
+                logger.LogDebug(
+                    "Chat request {RequestId} prepared request lifecycle in {PrepareMs}ms. ThreadId={ThreadId} HistoryMessages={HistoryMessages} HistoryChars={HistoryChars} MaxHistoryMessages={MaxHistoryMessages} MaxHistoryCharacters={MaxHistoryCharacters} ElapsedMs={ElapsedMs}",
+                    timingRequestId, prepareTiming.ElapsedMilliseconds, threadId,
+                    history.Count, history.Sum(m => m.Content.Length),
+                    prepared.MaxHistoryMessages, prepared.MaxHistoryCharacters,
+                    totalTiming.ElapsedMilliseconds);
+            }
 
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} loaded history in {HistoryLoadMs}ms. ThreadId={ThreadId} HistoryMessages={HistoryMessages} HistoryChars={HistoryChars} MaxHistoryMessages={MaxHistoryMessages} MaxHistoryCharacters={MaxHistoryCharacters} ElapsedMs={ElapsedMs}",
-                timingRequestId, historyTiming.ElapsedMilliseconds, threadId,
-                history.Count, history.Sum(m => m.Content.Length),
-                maxHistoryMessages, maxHistoryCharacters,
-                totalTiming.ElapsedMilliseconds);
-        }
+            var apiKey = plan.RequiresApiKey
+                ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
+                : "local";
+            var client = plan.Client;
+            var useNativeTools = plan.UseNativeTools;
+            var enableTools = plan.EnableTools;
+            var systemPrompt = plan.SystemPrompt;
+            var completionParams = plan.CompletionParameters;
 
-        history.Add(new ChatCompletionMessage(ChatRoles.User, request.Message));
+            using var httpClient = httpClientFactory.CreateClient();
 
-        var apiKey = plan.RequiresApiKey
-            ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
-            : "local";
-        var client = plan.Client;
-        var useNativeTools = plan.UseNativeTools;
-        var enableTools = plan.EnableTools;
-        var systemPrompt = plan.SystemPrompt;
-        var completionParams = plan.CompletionParameters;
+            var modelCapabilityTags = plan.ModelCapabilityTags;
+            var maxTokens = plan.MaxCompletionTokens;
+            var providerParams = plan.ProviderParameters;
+            var toolAwareness = plan.ToolAwareness;
 
-        // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
-            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
-            completionParameters: completionParams, providerKey: provider.ProviderKey);
-        var messageForModel = chatHeader is not null
-            ? chatHeader + request.Message
-            : request.Message;
+            if (logTiming)
+            {
+                logger.LogDebug(
+                    "Chat request {RequestId} prepared provider call. AgentId={AgentId} AgentName={AgentName} ModelId={ModelId} ModelName={ModelName} ProviderKey={ProviderKey} ProviderName={ProviderName} SystemPromptChars={SystemPromptChars} UseNativeTools={UseNativeTools} EnableTools={EnableTools} ToolAwarenessCount={ToolAwarenessCount} MaxCompletionTokens={MaxCompletionTokens} ProviderParametersPresent={ProviderParametersPresent} CompletionParametersPresent={CompletionParametersPresent} ElapsedMs={ElapsedMs}",
+                    timingRequestId, agent.Id, PathGuard.SanitizeForLog(agent.Name),
+                    model.Id, PathGuard.SanitizeForLog(model.Name),
+                    PathGuard.SanitizeForLog(provider.ProviderKey),
+                    PathGuard.SanitizeForLog(provider.Name),
+                    systemPrompt.Length, useNativeTools, enableTools,
+                    toolAwareness?.Count ?? 0, maxTokens,
+                    providerParams is not null, completionParams is not null,
+                    totalTiming.ElapsedMilliseconds);
+            }
 
-        // Replace last history entry with the header-prefixed version for model
-        history[^1] = new ChatCompletionMessage(ChatRoles.User, messageForModel);
+            var providerTiming = Stopwatch.StartNew();
+            var loopResult = enableTools
+                ? await RunNativeToolLoopAsync(
+                    client, httpClient, apiKey, model.Name, systemPrompt,
+                    history, agent.Id, channelId, modelCapabilityTags, maxTokens, providerParams, completionParams, approvalCallback, ct,
+                    taskContext: request.TaskContext, toolAwareness: toolAwareness, threadId: threadId,
+                    timingRequestId: timingRequestId, totalTiming: totalTiming)
+                : await RunPlainCompletionAsync(
+                    client, httpClient, apiKey, model.Name, systemPrompt,
+                    history, maxTokens, providerParams, completionParams, ct);
+            providerTiming.Stop();
 
-        using var httpClient = httpClientFactory.CreateClient();
+            if (logTiming)
+            {
+                logger.LogDebug(
+                    "Chat request {RequestId} provider call completed in {ProviderCallMs}ms. PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} TotalTokens={TotalTokens} JobResults={JobResultCount} AssistantContentChars={AssistantContentChars} CancellationRequested={CancellationRequested} ElapsedMs={ElapsedMs}",
+                    timingRequestId, providerTiming.ElapsedMilliseconds,
+                    loopResult.TotalPromptTokens, loopResult.TotalCompletionTokens,
+                    loopResult.TotalPromptTokens + loopResult.TotalCompletionTokens,
+                    loopResult.JobResults.Count, loopResult.AssistantContent.Length,
+                    ct.IsCancellationRequested, totalTiming.ElapsedMilliseconds);
+            }
 
-        var modelCapabilityTags = plan.ModelCapabilityTags;
-        var maxTokens = plan.MaxCompletionTokens;
-        var providerParams = plan.ProviderParameters;
-        var toolAwareness = plan.ToolAwareness;
+            var completionTiming = Stopwatch.StartNew();
+            var completion = await chatWorkflow.PersistCompletedExchangeAsync(
+                new ChatCompletedExchange(
+                    channelId,
+                    threadId,
+                    request,
+                    agent,
+                    prepared.UserMessage,
+                    loopResult.AssistantContent,
+                    loopResult.JobResults,
+                    loopResult.TotalPromptTokens,
+                    loopResult.TotalCompletionTokens,
+                    loopResult.ProviderMetadataJson),
+                workflowHost,
+                ct);
+            completionTiming.Stop();
 
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} prepared provider call. AgentId={AgentId} AgentName={AgentName} ModelId={ModelId} ModelName={ModelName} ProviderKey={ProviderKey} ProviderName={ProviderName} SystemPromptChars={SystemPromptChars} UseNativeTools={UseNativeTools} EnableTools={EnableTools} ToolAwarenessCount={ToolAwarenessCount} MaxCompletionTokens={MaxCompletionTokens} ProviderParametersPresent={ProviderParametersPresent} CompletionParametersPresent={CompletionParametersPresent} ElapsedMs={ElapsedMs}",
-                timingRequestId, agent.Id, PathGuard.SanitizeForLog(agent.Name),
-                model.Id, PathGuard.SanitizeForLog(model.Name),
-                PathGuard.SanitizeForLog(provider.ProviderKey),
-                PathGuard.SanitizeForLog(provider.Name),
-                systemPrompt.Length, useNativeTools, enableTools,
-                toolAwareness?.Count ?? 0, maxTokens,
-                providerParams is not null, completionParams is not null,
-                totalTiming.ElapsedMilliseconds);
-        }
+            if (logTiming)
+            {
+                logger.LogDebug(
+                    "Chat request {RequestId} persisted assistant exchange in {CompletionPersistMs}ms. AssistantMessageId={AssistantMessageId} ElapsedMs={ElapsedMs}",
+                    timingRequestId, completionTiming.ElapsedMilliseconds,
+                    completion.AssistantMessage.Id, totalTiming.ElapsedMilliseconds);
 
-        // Persist user message immediately so it gets an accurate
-        // CreatedAt and survives crashes during LLM inference.
-        var senderUserId = jobService.GetSessionUserId();
-        var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
-            senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
+                logger.LogDebug(
+                    "Chat request {RequestId} completed in {ElapsedMs}ms. ChannelTokens={ChannelTokens} ThreadTokens={ThreadTokens} AgentTokens={AgentTokens}",
+                    timingRequestId, totalTiming.ElapsedMilliseconds,
+                    completion.Costs.ChannelCost.TotalTokens,
+                    completion.Costs.ThreadCost?.TotalTokens,
+                    completion.Costs.AgentCost?.TotalTokens);
+            }
 
-        var userMessage = chatMessages.CreateUserMessage(
-            channelId,
-            threadId,
-            request,
-            senderUserId,
-            senderUserSnapshot.Username,
-            senderUserSnapshot.RoleId,
-            senderUserSnapshot.RoleName);
-
-        db.ChatMessages.Add(userMessage);
-        await db.SaveChangesAsync(CancellationToken.None);
-        userMessagePersisted = true;
-
-        var providerTiming = Stopwatch.StartNew();
-        var loopResult = enableTools
-            ? await RunNativeToolLoopAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, agent.Id, channelId, modelCapabilityTags, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                taskContext: request.TaskContext, toolAwareness: toolAwareness, threadId: threadId,
-                timingRequestId: timingRequestId, totalTiming: totalTiming)
-            : await RunPlainCompletionAsync(
-                client, httpClient, apiKey, model.Name, systemPrompt,
-                history, maxTokens, providerParams, completionParams, ct);
-        providerTiming.Stop();
-
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} provider call completed in {ProviderCallMs}ms. PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} TotalTokens={TotalTokens} JobResults={JobResultCount} AssistantContentChars={AssistantContentChars} CancellationRequested={CancellationRequested} ElapsedMs={ElapsedMs}",
-                timingRequestId, providerTiming.ElapsedMilliseconds,
-                loopResult.TotalPromptTokens, loopResult.TotalCompletionTokens,
-                loopResult.TotalPromptTokens + loopResult.TotalCompletionTokens,
-                loopResult.JobResults.Count, loopResult.AssistantContent.Length,
-                ct.IsCancellationRequested, totalTiming.ElapsedMilliseconds);
-        }
-
-        // Persist assistant message after LLM completes
-        var assistantMessage = chatMessages.CreateAssistantMessage(
-            channelId,
-            threadId,
-            request,
-            agent,
-            loopResult.AssistantContent,
-            loopResult.TotalPromptTokens,
-            loopResult.TotalCompletionTokens,
-            loopResult.ProviderMetadataJson);
-
-        db.ChatMessages.Add(assistantMessage);
-        var assistantSaveTiming = Stopwatch.StartNew();
-        await db.SaveChangesAsync(CancellationToken.None);
-        assistantSaveTiming.Stop();
-
-        await jobService.RecordTokensForCurrentExecutionAsync(
-            loopResult.TotalPromptTokens, loopResult.TotalCompletionTokens, ct);
-        chatCache.RecordAssistantTokens(
-            channelId,
-            threadId,
-            agent.Id,
-            agent.Name,
-            loopResult.TotalPromptTokens,
-            loopResult.TotalCompletionTokens);
-
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} saved assistant message in {AssistantSaveMs}ms. AssistantMessageId={AssistantMessageId} ElapsedMs={ElapsedMs}",
-                timingRequestId, assistantSaveTiming.ElapsedMilliseconds,
-                assistantMessage.Id, totalTiming.ElapsedMilliseconds);
-        }
-
-        if (threadId is not null)
-            threadActivity.Publish(threadId.Value,
-                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
-
-        // Piggyback cost data on the response so callers don't need
-        // a separate round-trip to the /cost endpoints.
-        var costTiming = Stopwatch.StartNew();
-        var (channelCost, threadCost, agentCost) =
-            await GetResponseCostsAsync(channelId, threadId, agent.Id, agent.Name, ct);
-        costTiming.Stop();
-
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} completed in {ElapsedMs}ms. CostLoadMs={CostLoadMs} ChannelTokens={ChannelTokens} ThreadTokens={ThreadTokens} AgentTokens={AgentTokens}",
-                timingRequestId, totalTiming.ElapsedMilliseconds,
-                costTiming.ElapsedMilliseconds, channelCost.TotalTokens,
-                threadCost?.TotalTokens, agentCost?.TotalTokens);
-        }
-
-        return new ChatResponse(
-            chatMessages.ToResponse(userMessage),
-            chatMessages.ToResponse(assistantMessage),
-            loopResult.JobResults.Count > 0 ? loopResult.JobResults : null,
-            channelCost,
-            threadCost,
-            agentCost);
+            return completion.Response;
 
         }
         catch (OperationCanceledException ex)
@@ -336,23 +272,30 @@ public sealed class ChatService(
                 channelId, threadId, userMessagePersisted,
                 ct.IsCancellationRequested);
 
-            await PersistStreamErrorAsync(channelId, threadId, request, ex,
-                userMessagePersisted, ct);
+            await chatWorkflow.TryPersistExceptionErrorAsync(
+                new ChatExceptionPersistenceRequest(
+                    channelId,
+                    threadId,
+                    request,
+                    ex,
+                    userMessagePersisted),
+                workflowHost,
+                ct);
             throw;
         }
         finally
         {
-            threadLock?.Dispose();
+            prepared?.Dispose();
         }
     }
 
     public async Task<IReadOnlyList<ChatMessageResponse>> GetHistoryAsync(
         Guid channelId, Guid? threadId = null, int limit = 50, CancellationToken ct = default)
-        => await chatQueries.GetHistoryAsync(
+        => await _chatQueries.GetHistoryAsync(
             channelId,
             threadId,
             limit,
-            chatQueryHost,
+            _chatQueryHost,
             ct);
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -361,14 +304,14 @@ public sealed class ChatService(
 
     public async Task<ChannelCostResponse> GetChannelCostAsync(
         Guid channelId, CancellationToken ct = default)
-        => await chatQueries.GetChannelCostAsync(channelId, chatQueryHost, ct);
+        => await _chatQueries.GetChannelCostAsync(channelId, _chatQueryHost, ct);
 
     public async Task<ThreadCostResponse?> GetThreadCostAsync(
         Guid channelId, Guid threadId, CancellationToken ct = default)
-        => await chatQueries.GetThreadCostAsync(
+        => await _chatQueries.GetThreadCostAsync(
             channelId,
             threadId,
-            chatQueryHost,
+            _chatQueryHost,
             ct);
 
     /// <summary>
@@ -377,29 +320,15 @@ public sealed class ChatService(
     /// </summary>
     public async Task<AgentCostResponse?> GetAgentCostAsync(
         Guid agentId, CancellationToken ct = default)
-        => await chatQueries.GetAgentCostAsync(agentId, chatQueryHost, ct);
+        => await _chatQueries.GetAgentCostAsync(agentId, _chatQueryHost, ct);
 
     private async Task<AgentCostResponse?> GetAgentCostForKnownAgentAsync(
         Guid agentId, string agentName, CancellationToken ct)
-        => await chatQueries.GetKnownAgentCostAsync(
+        => await _chatQueries.GetKnownAgentCostAsync(
             agentId,
             agentName,
-            chatQueryHost,
+            _chatQueryHost,
             ct);
-
-    private async Task<(ChannelCostResponse ChannelCost, ThreadCostResponse? ThreadCost, AgentCostResponse? AgentCost)> GetResponseCostsAsync(
-        Guid channelId, Guid? threadId, Guid agentId, string agentName, CancellationToken ct)
-    {
-        var result = await chatQueries.GetResponseCostsAsync(
-            channelId,
-            threadId,
-            agentId,
-            agentName,
-            chatQueryHost,
-            ct);
-
-        return (result.ChannelCost, result.ThreadCost, result.AgentCost);
-    }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Agent resolution
@@ -418,7 +347,7 @@ public sealed class ChatService(
         if (!senderUserId.HasValue)
             return (externalDisplayName ?? externalUsername, null, null);
 
-        var snapshot = await db.Users
+        var snapshot = await _db.Users
             .Where(u => u.Id == senderUserId.Value)
             .Select(u => new { u.Username, u.RoleId, RoleName = u.Role != null ? u.Role.Name : null })
             .FirstOrDefaultAsync(ct);
@@ -426,28 +355,6 @@ public sealed class ChatService(
         return snapshot is null
             ? (null, null, null)
             : (snapshot.Username, snapshot.RoleId, snapshot.RoleName);
-    }
-
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // Thread history loading
-    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-
-    /// <summary>
-    /// Loads messages for a thread, respecting the thread's per-thread
-    /// <see cref="ChatThreadDB.MaxMessages"/> and
-    /// <see cref="ChatThreadDB.MaxCharacters"/> limits.
-    /// Falls back to Core default history limits.
-    /// When both limits are set, only messages fitting within both are
-    /// returned.
-    /// </summary>
-    private async Task<(List<ChatCompletionMessage> Messages, int MaxMessages, int MaxCharacters)> LoadThreadHistoryAsync(
-        Guid threadId, CancellationToken ct)
-    {
-        var result = await chatQueries.GetProviderThreadHistoryAsync(
-            threadId,
-            chatQueryHost,
-            ct);
-        return ([.. result.Messages], result.MaxMessages, result.MaxCharacters);
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -476,7 +383,7 @@ public sealed class ChatService(
         var customTemplate = chatHeaders.ResolveCustomTemplate(channel, agent);
         if (customTemplate is not null)
         {
-            var userId2 = jobService.GetSessionUserId();
+            var userId2 = _jobService.GetSessionUserId();
             return await headerTagProcessor.ExpandAsync(
                 customTemplate, channel, agent, clientType, userId2, ct,
                 completionParameters, providerKey);
@@ -510,7 +417,7 @@ public sealed class ChatService(
                 DateTimeOffset.UtcNow);
         }
 
-        var userId = jobService.GetSessionUserId();
+        var userId = _jobService.GetSessionUserId();
 
         // â”€â”€ External user (bot-forwarded message): no DB session â”€â”€â”€â”€â”€
         if (userId is null && externalUsername is not null)
@@ -529,7 +436,7 @@ public sealed class ChatService(
         if (userId is null)
             return null;
 
-        var userState = await chatCache.GetOrCreateAsync(
+        var userState = await _chatCache.GetOrCreateAsync(
             ChatCache.KeyHeaderUser(userId.Value),
             innerCt => LoadUserHeaderStateAsync(userId.Value, innerCt),
             EstimateUserHeaderState,
@@ -554,7 +461,7 @@ public sealed class ChatService(
     private async Task<UserHeaderState?> LoadUserHeaderStateAsync(
         Guid userId, CancellationToken ct)
     {
-        var user = await db.Users
+        var user = await _db.Users
             .AsNoTracking()
             .Include(u => u.Role)
             .ThenInclude(r => r!.PermissionSet)
@@ -567,7 +474,7 @@ public sealed class ChatService(
         var grants = new List<string>();
         if (user.Role?.PermissionSetId is { } psId)
         {
-            var ps = await db.PermissionSets
+            var ps = await _db.PermissionSets
                 .AsNoTracking()
                 .Include(p => p.GlobalFlags)
                 .Include(p => p.ResourceAccesses)
@@ -603,7 +510,7 @@ public sealed class ChatService(
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        return await chatCache.GetOrCreateAsync(
+        return await _chatCache.GetOrCreateAsync(
             ChatCache.KeyHeaderAgentSuffix(
                 agentId,
                 channelId,
@@ -626,7 +533,7 @@ public sealed class ChatService(
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        var agentWithRole = await db.Agents
+        var agentWithRole = await _db.Agents
             .AsNoTracking()
             .Include(a => a.Role)
             .ThenInclude(r => r!.PermissionSet)
@@ -639,7 +546,7 @@ public sealed class ChatService(
             PermissionSetDB? agentPs = null;
             if (agentRole.PermissionSetId is { } agentPsId)
             {
-                agentPs = await db.PermissionSets
+                agentPs = await _db.PermissionSets
                         .AsNoTracking()
                         .Include(p => p.GlobalFlags)
                         .Include(p => p.ResourceAccesses)
@@ -703,7 +610,7 @@ public sealed class ChatService(
                 request.Message.Length, ct.IsCancellationRequested);
         }
 
-        var channel = await db.Channels
+        var channel = await _db.Channels
             .AsNoTracking()
             .Include(c => c.Agent!).ThenInclude(a => a.Model).ThenInclude(m => m.Provider)
             .Include(c => c.Agent!).ThenInclude(a => a.ToolAwarenessSet)
@@ -729,48 +636,35 @@ public sealed class ChatService(
             _disableCustomProviderParameters);
         var model = agent.Model!;
         var provider = model.Provider!;
-
-        // Acquire per-thread lock for sequential processing
-        IDisposable? threadLock = null;
-        if (threadId is not null)
-        {
-            threadLock = await threadActivity.AcquireThreadLockAsync(threadId.Value, ct);
-            threadActivity.Publish(threadId.Value,
-                new ThreadActivityEvent(ThreadActivityEventType.Processing, request.ClientType));
-        }
+        var workflowHost = new ChatServiceRequestWorkflowHost(this);
+        ChatPreparedRequestState? prepared = null;
 
         try
         {
+        var prepareTiming = Stopwatch.StartNew();
+        prepared = await chatWorkflow.BeginPreparedRequestAsync(
+            new ChatPreparedRequest(
+                channelId,
+                threadId,
+                channel,
+                agent,
+                plan,
+                request),
+            workflowHost,
+            ct);
+        prepareTiming.Stop();
+        userMessagePersisted = true;
 
-        // Build history: only when a thread is specified; otherwise a single one-shot.
-        var historyTiming = Stopwatch.StartNew();
-        List<ChatCompletionMessage> history;
-        int? maxHistoryMessages = null;
-        int? maxHistoryCharacters = null;
-        if (threadId is not null)
-        {
-            var historyLoad = await LoadThreadHistoryAsync(threadId.Value, ct);
-            history = historyLoad.Messages;
-            maxHistoryMessages = historyLoad.MaxMessages;
-            maxHistoryCharacters = historyLoad.MaxCharacters;
-        }
-        else
-        {
-            history = [];
-        }
-        historyTiming.Stop();
-
+        var history = prepared.History;
         if (logTiming)
         {
             logger.LogDebug(
-                "Streaming chat request {RequestId} loaded history in {HistoryLoadMs}ms. ThreadId={ThreadId} HistoryMessages={HistoryMessages} HistoryChars={HistoryChars} MaxHistoryMessages={MaxHistoryMessages} MaxHistoryCharacters={MaxHistoryCharacters} ElapsedMs={ElapsedMs}",
-                timingRequestId, historyTiming.ElapsedMilliseconds, threadId,
+                "Streaming chat request {RequestId} prepared request lifecycle in {PrepareMs}ms. ThreadId={ThreadId} HistoryMessages={HistoryMessages} HistoryChars={HistoryChars} MaxHistoryMessages={MaxHistoryMessages} MaxHistoryCharacters={MaxHistoryCharacters} ElapsedMs={ElapsedMs}",
+                timingRequestId, prepareTiming.ElapsedMilliseconds, threadId,
                 history.Count, history.Sum(m => m.Content.Length),
-                maxHistoryMessages, maxHistoryCharacters,
+                prepared.MaxHistoryMessages, prepared.MaxHistoryCharacters,
                 totalTiming.ElapsedMilliseconds);
         }
-
-        history.Add(new ChatCompletionMessage(ChatRoles.User, request.Message));
 
         var apiKey = plan.RequiresApiKey
             ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
@@ -778,13 +672,6 @@ public sealed class ChatService(
         var client = plan.Client;
         var systemPrompt = plan.SystemPrompt;
         var completionParams = plan.CompletionParameters;
-
-        // Build chat header for the user message (if enabled)
-        var chatHeader = await BuildChatHeaderAsync(channel, agent, request.ClientType, ct,
-            taskContext: request.TaskContext, externalUsername: request.ExternalUsername, externalDisplayName: request.ExternalDisplayName,
-            completionParameters: completionParams, providerKey: provider.ProviderKey);
-        if (chatHeader is not null)
-            history[^1] = new ChatCompletionMessage(ChatRoles.User, chatHeader + request.Message);
 
         using var httpClient = httpClientFactory.CreateClient();
 
@@ -808,25 +695,6 @@ public sealed class ChatService(
                 maxTokens, providerParams is not null,
                 completionParams is not null, totalTiming.ElapsedMilliseconds);
         }
-
-        // Persist user message immediately so it gets an accurate
-        // CreatedAt and survives crashes during LLM inference.
-        var senderUserId = jobService.GetSessionUserId();
-        var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
-            senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
-
-        var userMessage = chatMessages.CreateUserMessage(
-            channelId,
-            threadId,
-            request,
-            senderUserId,
-            senderUserSnapshot.Username,
-            senderUserSnapshot.RoleId,
-            senderUserSnapshot.RoleName);
-
-        db.ChatMessages.Add(userMessage);
-        await db.SaveChangesAsync(CancellationToken.None);
-        userMessagePersisted = true;
 
         ChatNativeToolStreamingLoopResult? streamingResult = null;
         await foreach (var loopEvent in chatNativeToolLoop.StreamAsync(
@@ -896,71 +764,47 @@ public sealed class ChatService(
             ? list
             : [.. streamingResult.JobResults];
 
-        // Persist assistant message after LLM completes
-
-        var assistantMessage = chatMessages.CreateAssistantMessage(
-            channelId,
-            threadId,
-            request,
-            agent,
-            assistantContent,
-            totalPromptTokens,
-            totalCompletionTokens,
-            finalProviderMetadataJson);
-
-        db.ChatMessages.Add(assistantMessage);
-        var assistantSaveTiming = Stopwatch.StartNew();
-        await db.SaveChangesAsync(CancellationToken.None);
+        var completionTiming = Stopwatch.StartNew();
+        var completion = await chatWorkflow.PersistCompletedExchangeAsync(
+            new ChatCompletedExchange(
+                channelId,
+                threadId,
+                request,
+                agent,
+                prepared.UserMessage,
+                assistantContent,
+                jobResults,
+                totalPromptTokens,
+                totalCompletionTokens,
+                finalProviderMetadataJson),
+            workflowHost,
+            ct);
         assistantMessagePersisted = true;
-        assistantSaveTiming.Stop();
-
-        await jobService.RecordTokensForCurrentExecutionAsync(
-            totalPromptTokens, totalCompletionTokens, ct);
-        chatCache.RecordAssistantTokens(
-            channelId,
-            threadId,
-            agent.Id,
-            agent.Name,
-            totalPromptTokens,
-            totalCompletionTokens);
+        completionTiming.Stop();
 
         if (logTiming)
         {
             logger.LogDebug(
-                "Streaming chat request {RequestId} saved assistant message in {AssistantSaveMs}ms. AssistantMessageId={AssistantMessageId} PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} AssistantContentChars={AssistantContentChars} JobResults={JobResultCount} ElapsedMs={ElapsedMs}",
-                timingRequestId, assistantSaveTiming.ElapsedMilliseconds,
-                assistantMessage.Id, totalPromptTokens, totalCompletionTokens,
+                "Streaming chat request {RequestId} persisted assistant exchange in {CompletionPersistMs}ms. AssistantMessageId={AssistantMessageId} PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} AssistantContentChars={AssistantContentChars} JobResults={JobResultCount} ElapsedMs={ElapsedMs}",
+                timingRequestId, completionTiming.ElapsedMilliseconds,
+                completion.AssistantMessage.Id, totalPromptTokens, totalCompletionTokens,
                 assistantContent.Length, jobResults.Count,
                 totalTiming.ElapsedMilliseconds);
         }
-
-        if (threadId is not null)
-            threadActivity.Publish(threadId.Value,
-                new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
-
-        var costTiming = Stopwatch.StartNew();
-        var (channelCost, threadCost, agentCost) =
-            await GetResponseCostsAsync(channelId, threadId, agent.Id, agent.Name, ct);
-        costTiming.Stop();
 
         streamCompleted = true;
         if (logTiming)
         {
             logger.LogDebug(
-                "Streaming chat request {RequestId} completed in {ElapsedMs}ms. ProviderRounds={ProviderRounds} CostLoadMs={CostLoadMs} ChannelTokens={ChannelTokens} ThreadTokens={ThreadTokens} AgentTokens={AgentTokens}",
+                "Streaming chat request {RequestId} completed in {ElapsedMs}ms. ProviderRounds={ProviderRounds} ChannelTokens={ChannelTokens} ThreadTokens={ThreadTokens} AgentTokens={AgentTokens}",
                 timingRequestId, totalTiming.ElapsedMilliseconds,
-                providerRound, costTiming.ElapsedMilliseconds,
-                channelCost.TotalTokens, threadCost?.TotalTokens,
-                agentCost?.TotalTokens);
+                providerRound,
+                completion.Costs.ChannelCost.TotalTokens,
+                completion.Costs.ThreadCost?.TotalTokens,
+                completion.Costs.AgentCost?.TotalTokens);
         }
 
-        yield return ChatStreamEvent.Complete(new ChatResponse(
-            chatMessages.ToResponse(userMessage),
-            chatMessages.ToResponse(assistantMessage),
-            jobResults.Count > 0 ? jobResults : null,
-            channelCost,
-            threadCost,
-            agentCost));
+        yield return ChatStreamEvent.Complete(completion.Response);
 
         } // try
         finally
@@ -975,106 +819,43 @@ public sealed class ChatService(
                     ct.IsCancellationRequested);
             }
 
-            if (!streamCompleted && userMessagePersisted && !assistantMessagePersisted && streamedContent.Length > 0)
+            if (!streamCompleted
+                && userMessagePersisted
+                && !assistantMessagePersisted
+                && streamedContent.Length > 0
+                && prepared is not null)
             {
-                await PersistPartialAssistantMessageAsync(
-                    channelId,
-                    threadId,
-                    request,
-                    agent,
-                    streamedContent.ToString(),
-                    totalPromptTokens: null,
-                    totalCompletionTokens: null,
-                    providerMetadataJson: null);
+                var partial = await chatWorkflow.TryPersistPartialAssistantMessageAsync(
+                    new ChatPartialAssistantPersistenceRequest(
+                        channelId,
+                        threadId,
+                        request,
+                        agent,
+                        streamedContent.ToString(),
+                        TotalPromptTokens: null,
+                        TotalCompletionTokens: null,
+                        ProviderMetadataJson: null),
+                    workflowHost,
+                    CancellationToken.None);
+
+                if (partial.Succeeded && logger.IsEnabled(LogLevel.Debug))
+                {
+                    logger.LogDebug(
+                        "Persisted partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId} AssistantMessageId={AssistantMessageId} ContentChars={ContentChars}",
+                        channelId, threadId, partial.Message!.Id,
+                        streamedContent.Length);
+                }
+                else if (!partial.Succeeded)
+                {
+                    logger.LogWarning(
+                        partial.Exception,
+                        "Failed to persist partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId}",
+                        channelId,
+                        threadId);
+                }
             }
 
-            threadLock?.Dispose();
-        }
-    }
-
-    /// <summary>
-    /// Persists the assistant text emitted before a stream was interrupted.
-    /// </summary>
-    private async Task PersistPartialAssistantMessageAsync(
-        Guid channelId,
-        Guid? threadId,
-        ChatRequest request,
-        AgentDB agent,
-        string content,
-        int? totalPromptTokens,
-        int? totalCompletionTokens,
-        string? providerMetadataJson)
-    {
-        try
-        {
-            var assistantMessage = chatMessages.CreateAssistantMessage(
-                channelId,
-                threadId,
-                request,
-                agent,
-                content,
-                totalPromptTokens,
-                totalCompletionTokens,
-                providerMetadataJson);
-
-            db.ChatMessages.Add(assistantMessage);
-            await db.SaveChangesAsync(CancellationToken.None);
-
-            if (threadId is not null)
-                threadActivity.Publish(threadId.Value,
-                    new ThreadActivityEvent(ThreadActivityEventType.NewMessages, request.ClientType));
-
-            if (logger.IsEnabled(LogLevel.Debug))
-            {
-                logger.LogDebug(
-                    "Persisted partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId} AssistantMessageId={AssistantMessageId} ContentChars={ContentChars}",
-                    channelId, threadId, assistantMessage.Id, content.Length);
-            }
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(
-                ex,
-                "Failed to persist partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId}",
-                channelId, threadId);
-        }
-    }
-
-    private async Task PersistStreamErrorAsync(
-        Guid channelId, Guid? threadId, ChatRequest request, Exception ex,
-        bool userMessageAlreadyPersisted, CancellationToken ct)
-    {
-        try
-        {
-            // If the user message was never saved (early validation failure),
-            // persist it now so the history shows what the user typed.
-            if (!userMessageAlreadyPersisted)
-            {
-                var senderUserId = jobService.GetSessionUserId();
-                var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
-                    senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
-
-                db.ChatMessages.Add(chatMessages.CreateUserMessage(
-                    channelId,
-                    threadId,
-                    request,
-                    senderUserId,
-                    senderUserSnapshot.Username,
-                    senderUserSnapshot.RoleId,
-                    senderUserSnapshot.RoleName));
-            }
-
-            db.ChatMessages.Add(chatMessages.CreateSystemErrorMessage(
-                channelId,
-                threadId,
-                request,
-                ex.Message));
-
-            await db.SaveChangesAsync(ct);
-        }
-        catch
-        {
-            // Best-effort â€” don't mask the original exception.
+            prepared?.Dispose();
         }
     }
 
@@ -1087,51 +868,14 @@ public sealed class ChatService(
     public async Task PersistChatErrorAsync(
         Guid channelId, Guid? threadId, ChatRequest request,
         string errorMessage, CancellationToken ct)
-    {
-        try
-        {
-            // Check whether a user message was already persisted for this
-            // request. The user message is the most recent user-role message
-            // matching the content + channel + thread.
-            // Internal dedup uses Origin where available; legacy rows
-            // (Origin == null) are matched on the provider Role string.
-            var userAlreadySaved = await db.ChatMessages.AnyAsync(
-                m => m.ChannelId == channelId
-                    && m.ThreadId == threadId
-                    && (m.Origin == MessageOrigin.User
-                        || (m.Origin == null && m.Role == ChatRoles.User))
-                    && m.Content == request.Message,
-                ct);
-
-            if (!userAlreadySaved)
-            {
-                var senderUserId = jobService.GetSessionUserId();
-                var senderUserSnapshot = await ResolveUserSenderSnapshotAsync(
-                    senderUserId, request.ExternalDisplayName, request.ExternalUsername, ct);
-
-                db.ChatMessages.Add(chatMessages.CreateUserMessage(
-                    channelId,
-                    threadId,
-                    request,
-                    senderUserId,
-                    senderUserSnapshot.Username,
-                    senderUserSnapshot.RoleId,
-                    senderUserSnapshot.RoleName));
-            }
-
-            db.ChatMessages.Add(chatMessages.CreateSystemErrorMessage(
+        => await chatWorkflow.TryPersistPublicErrorAsync(
+            new ChatPublicErrorPersistenceRequest(
                 channelId,
                 threadId,
                 request,
-                errorMessage));
-
-            await db.SaveChangesAsync(ct);
-        }
-        catch
-        {
-            // Best-effort â€” don't mask the original exception.
-        }
-    }
+                errorMessage),
+            new ChatServiceRequestWorkflowHost(this),
+            ct);
 
     /// <summary>
     /// Checks whether the current session user has sufficient authority
@@ -1142,11 +886,11 @@ public sealed class ChatService(
         Guid agentId, Guid? resourceId,
         CancellationToken ct, string? actionKey = null)
     {
-        var userId = jobService.GetSessionUserId();
+        var userId = _jobService.GetSessionUserId();
         if (userId is null) return false;
 
         var caller = new ActionCaller(UserId: userId);
-        var result = await jobService.CheckPermissionAsync(
+        var result = await _jobService.CheckPermissionAsync(
             agentId, resourceId, caller, ct, actionKey);
 
         return result.Verdict == ClearanceVerdict.Approved;
@@ -1169,7 +913,7 @@ public sealed class ChatService(
     {
         if (taskContext is null && agentId.HasValue)
         {
-            return await chatCache.GetOrCreateAsync(
+            return await _chatCache.GetOrCreateAsync(
                 ChatCache.KeyEffectiveTools(
                     agentId.Value,
                     chatToolSelection.BuildAwarenessFingerprint(toolAwareness)),
@@ -1300,7 +1044,7 @@ public sealed class ChatService(
     private Task<AgentActionResult> CheckInlineToolPermissionAsync(
         ChatInlineToolPermissionCheck check,
         CancellationToken ct) =>
-        jobService.CheckPermissionAsync(
+        _jobService.CheckPermissionAsync(
             check.AgentId,
             resourceId: null,
             new ActionCaller(AgentId: check.AgentId),
@@ -1315,7 +1059,7 @@ public sealed class ChatService(
         int promptTokens,
         int completionTokens,
         CancellationToken ct) =>
-        jobService.RecordTokensAsync(
+        _jobService.RecordTokensAsync(
             jobIds,
             promptTokens,
             completionTokens,
@@ -1441,16 +1185,16 @@ public sealed class ChatService(
                 supportsVision,
                 emitStreamEvents,
                 (targetChannelId, jobRequest, innerCt) =>
-                    jobService.SubmitAsync(targetChannelId, jobRequest, innerCt),
+                    _jobService.SubmitAsync(targetChannelId, jobRequest, innerCt),
                 (targetAgentId, resourceId, actionKey, innerCt) =>
                     CanSessionUserApproveAsync(
                         targetAgentId,
                         resourceId,
                         innerCt,
                         actionKey),
-                (jobId, innerCt) => jobService.CancelAsync(jobId, innerCt),
+                (jobId, innerCt) => _jobService.CancelAsync(jobId, innerCt),
                 approvalCallback,
-                (jobId, innerCt) => jobService.ApproveAsync(
+                (jobId, innerCt) => _jobService.ApproveAsync(
                     jobId,
                     new ApproveAgentJobRequest(),
                     innerCt)),
@@ -1472,6 +1216,137 @@ public sealed class ChatService(
                     innerCt);
             },
             message => Debug.WriteLine(message, "SharpClaw.CLI"));
+
+    private sealed class ChatServiceRequestWorkflowHost(
+        ChatService service) : IChatRequestWorkflowHost
+    {
+        public async Task<IDisposable?> BeginThreadProcessingAsync(
+            Guid threadId,
+            string clientType,
+            CancellationToken ct)
+        {
+            var threadLock = await service._threadActivity.AcquireThreadLockAsync(
+                threadId,
+                ct);
+            service._threadActivity.Publish(
+                threadId,
+                new ThreadActivityEvent(
+                    ThreadActivityEventType.Processing,
+                    clientType));
+            return threadLock;
+        }
+
+        public async Task<ChatProviderHistoryResult> LoadProviderThreadHistoryAsync(
+            Guid threadId,
+            CancellationToken ct) =>
+            await service._chatQueries.GetProviderThreadHistoryAsync(
+                threadId,
+                service._chatQueryHost,
+                ct);
+
+        public async Task<string?> BuildChatHeaderAsync(
+            ChannelDB channel,
+            AgentDB agent,
+            ChatRequest request,
+            ChatRequestPlan plan,
+            CancellationToken ct) =>
+            await service.BuildChatHeaderAsync(
+                channel,
+                agent,
+                request.ClientType,
+                ct,
+                taskContext: request.TaskContext,
+                externalUsername: request.ExternalUsername,
+                externalDisplayName: request.ExternalDisplayName,
+                completionParameters: plan.CompletionParameters,
+                providerKey: plan.ProviderKey);
+
+        public Guid? GetSessionUserId() =>
+            service._jobService.GetSessionUserId();
+
+        public async Task<ChatSenderSnapshot> LoadSenderSnapshotAsync(
+            Guid? senderUserId,
+            string? externalDisplayName,
+            string? externalUsername,
+            CancellationToken ct)
+        {
+            var snapshot = await service.ResolveUserSenderSnapshotAsync(
+                senderUserId,
+                externalDisplayName,
+                externalUsername,
+                ct);
+            return new ChatSenderSnapshot(
+                snapshot.Username,
+                snapshot.RoleId,
+                snapshot.RoleName);
+        }
+
+        public async Task PersistChatMessagesAsync(
+            IReadOnlyList<ChatMessageDB> messages,
+            CancellationToken ct)
+        {
+            service._db.ChatMessages.AddRange(messages);
+            await service._db.SaveChangesAsync(ct);
+        }
+
+        public async Task<bool> HasUserMessageAsync(
+            Guid channelId,
+            Guid? threadId,
+            string content,
+            CancellationToken ct) =>
+            await service._db.ChatMessages.AnyAsync(
+                m => m.ChannelId == channelId
+                    && m.ThreadId == threadId
+                    && (m.Origin == MessageOrigin.User
+                        || (m.Origin == null && m.Role == ChatRoles.User))
+                    && m.Content == content,
+                ct);
+
+        public Task RecordTokensForCurrentExecutionAsync(
+            int promptTokens,
+            int completionTokens,
+            CancellationToken ct) =>
+            service._jobService.RecordTokensForCurrentExecutionAsync(
+                promptTokens,
+                completionTokens,
+                ct);
+
+        public void RecordAssistantTokens(
+            Guid channelId,
+            Guid? threadId,
+            Guid agentId,
+            string agentName,
+            int promptTokens,
+            int completionTokens) =>
+            service._chatCache.RecordAssistantTokens(
+                channelId,
+                threadId,
+                agentId,
+                agentName,
+                promptTokens,
+                completionTokens);
+
+        public void PublishNewMessages(Guid threadId, string clientType) =>
+            service._threadActivity.Publish(
+                threadId,
+                new ThreadActivityEvent(
+                    ThreadActivityEventType.NewMessages,
+                    clientType));
+
+        public async Task<ChatResponseCostResult> GetResponseCostsAsync(
+            Guid channelId,
+            Guid? threadId,
+            Guid agentId,
+            string agentName,
+            CancellationToken ct) =>
+            await service._chatQueries.GetResponseCostsAsync(
+                channelId,
+                threadId,
+                agentId,
+                agentName,
+                service._chatQueryHost,
+                ct);
+    }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Internal types
