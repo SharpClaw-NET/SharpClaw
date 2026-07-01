@@ -1,13 +1,9 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Tools;
 using SharpClaw.Core.Tools;
-using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
 public sealed class ToolAwarenessSetService(
-    SharpClawDbContext db,
-    ToolAwarenessSetEngine toolAwareness,
     ToolAwarenessAdministrationEngine administration,
     EfToolAwarenessAdministrationHost administrationHost)
 {
@@ -25,18 +21,18 @@ public sealed class ToolAwarenessSetService(
         Guid id,
         CancellationToken ct = default)
     {
-        var entity = await db.ToolAwarenessSets.FindAsync([id], ct);
-        return entity is null ? null : toolAwareness.ToResponse(entity);
+        return await administration.GetByIdAsync(
+            id,
+            administrationHost,
+            ct);
     }
 
     public async Task<IReadOnlyList<ToolAwarenessSetResponse>> ListAsync(
         CancellationToken ct = default)
     {
-        var sets = await db.ToolAwarenessSets
-            .OrderBy(t => t.Name)
-            .ToListAsync(ct);
-
-        return sets.Select(toolAwareness.ToResponse).ToList();
+        return await administration.ListAsync(
+            administrationHost,
+            ct);
     }
 
     public async Task<ToolAwarenessSetResponse?> UpdateAsync(

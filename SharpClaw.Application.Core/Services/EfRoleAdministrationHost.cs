@@ -23,6 +23,14 @@ public sealed class EfRoleAdministrationHost(
         return await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct);
     }
 
+    public async Task<IReadOnlyList<RoleDB>> ListRolesAsync(
+        CancellationToken ct)
+    {
+        return await db.Roles
+            .OrderBy(role => role.Name)
+            .ToListAsync(ct);
+    }
+
     public async Task<RoleDB?> LoadRoleWithPermissionReferenceAsync(
         Guid roleId,
         CancellationToken ct)

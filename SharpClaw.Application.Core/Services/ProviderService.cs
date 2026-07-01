@@ -1,13 +1,10 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Models;
 using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Core.Providers;
-using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
 public sealed class ProviderService(
-    SharpClawDbContext db,
     ProviderModelAdministrationEngine administration,
     EfProviderModelAdministrationHost administrationHost)
 {
@@ -29,29 +26,19 @@ public sealed class ProviderService(
     public async Task<IReadOnlyList<ProviderResponse>> ListAsync(
         CancellationToken ct = default)
     {
-        return await db.Providers
-            .Select(provider => new ProviderResponse(
-                provider.Id,
-                provider.Name,
-                provider.ProviderKey,
-                provider.ApiEndpoint,
-                provider.EncryptedApiKey != null))
-            .ToListAsync(ct);
+        return await administration.ListProvidersAsync(
+            administrationHost,
+            ct);
     }
 
     public async Task<ProviderResponse?> GetByIdAsync(
         Guid id,
         CancellationToken ct = default)
     {
-        var provider = await db.Providers.FindAsync([id], ct);
-        return provider is null
-            ? null
-            : new ProviderResponse(
-                provider.Id,
-                provider.Name,
-                provider.ProviderKey,
-                provider.ApiEndpoint,
-                provider.EncryptedApiKey is not null);
+        return await administration.GetProviderAsync(
+            id,
+            administrationHost,
+            ct);
     }
 
     public async Task<ProviderResponse?> UpdateAsync(

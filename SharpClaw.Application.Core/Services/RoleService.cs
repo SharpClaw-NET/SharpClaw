@@ -1,7 +1,5 @@
-using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Roles;
 using SharpClaw.Core.Permissions;
-using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Services;
 
@@ -9,18 +7,15 @@ namespace SharpClaw.Application.Services;
 /// Manages roles and their permission sets.
 /// </summary>
 public sealed class RoleService(
-    SharpClawDbContext db,
-    RolePermissionAdministrationEngine rolePermissions,
     RoleAdministrationEngine administration,
     EfRoleAdministrationHost administrationHost)
 {
     public async Task<IReadOnlyList<RoleResponse>> ListAsync(
         CancellationToken ct = default)
     {
-        return await db.Roles
-            .OrderBy(r => r.Name)
-            .Select(rolePermissions.ToResponseProjection())
-            .ToListAsync(ct);
+        return await administration.ListAsync(
+            administrationHost,
+            ct);
     }
 
     public async Task<RoleResponse> CreateAsync(
@@ -37,10 +32,10 @@ public sealed class RoleService(
         Guid roleId,
         CancellationToken ct = default)
     {
-        return await db.Roles
-            .Where(r => r.Id == roleId)
-            .Select(rolePermissions.ToResponseProjection())
-            .FirstOrDefaultAsync(ct);
+        return await administration.GetAsync(
+            roleId,
+            administrationHost,
+            ct);
     }
 
     public async Task<RolePermissionsResponse?> GetPermissionsAsync(

@@ -1,3 +1,4 @@
+using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Tools;
@@ -14,6 +15,14 @@ public sealed class EfToolAwarenessAdministrationHost(
         CancellationToken ct)
     {
         return await db.ToolAwarenessSets.FindAsync([id], ct);
+    }
+
+    public async Task<IReadOnlyList<ToolAwarenessSetDB>> ListToolAwarenessSetsAsync(
+        CancellationToken ct)
+    {
+        return await db.ToolAwarenessSets
+            .OrderBy(set => set.Name)
+            .ToListAsync(ct);
     }
 
     public void TrackToolAwarenessSet(ToolAwarenessSetDB entity)

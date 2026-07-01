@@ -72,6 +72,31 @@ public sealed class EfProviderModelAdministrationHost(
             .FirstOrDefaultAsync(m => m.Id == modelId, ct);
     }
 
+    public async Task<IReadOnlyList<ProviderDB>> ListProvidersAsync(
+        CancellationToken ct)
+    {
+        return await db.Providers
+            .OrderBy(provider => provider.Name)
+            .ToListAsync(ct);
+    }
+
+    public async Task<IReadOnlyList<ModelDB>> ListModelsAsync(
+        Guid? providerId,
+        CancellationToken ct)
+    {
+        var query = db.Models
+            .Include(model => model.Provider)
+            .AsQueryable();
+
+        if (providerId is not null)
+            query = query.Where(model => model.ProviderId == providerId);
+
+        return await query
+            .OrderBy(model => model.Provider.Name)
+            .ThenBy(model => model.Name)
+            .ToListAsync(ct);
+    }
+
     public async Task<IReadOnlyList<ModelDB>> ListModelsForProviderAsync(
         Guid providerId,
         CancellationToken ct)
