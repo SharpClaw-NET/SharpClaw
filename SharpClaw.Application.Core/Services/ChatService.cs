@@ -35,7 +35,6 @@ namespace SharpClaw.Application.Services;
 public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
-    IPersistenceEntityResolver entities,
     IHttpClientFactory httpClientFactory,
     AgentJobService jobService,
     HeaderTagProcessor headerTagProcessor,
@@ -43,12 +42,12 @@ public sealed class ChatService(
     ModuleRegistry moduleRegistry,
     ModuleToolExecutionPlanner moduleExecutionPlanner,
     ChatCache chatCache,
-    ChatCostEngine chatCosts,
     ChatRequestPlanningEngine chatPlanner,
-    ChatHistoryEngine chatHistory,
     ChatDefaultHeaderEngine chatHeaders,
     ChatHeaderGrantFormatter headerGrantFormatter,
     ChatMessageEngine chatMessages,
+    ChatQueryWorkflowEngine chatQueries,
+    EfChatQueryHost chatQueryHost,
     ChatToolSelectionEngine chatToolSelection,
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
@@ -349,21 +348,12 @@ public sealed class ChatService(
 
     public async Task<IReadOnlyList<ChatMessageResponse>> GetHistoryAsync(
         Guid channelId, Guid? threadId = null, int limit = 50, CancellationToken ct = default)
-    {
-        var hint = threadId is not null
-            ? new PersistenceQueryHint("ThreadId", threadId.Value)
-            : new PersistenceQueryHint("ChannelId", channelId);
-
-        var hasThread = threadId is not null;
-        var messages = await entities.QueryAsync<ChatMessageDB>(
-            db,
-            m => hasThread ? m.ThreadId == threadId : m.ChannelId == channelId,
+        => await chatQueries.GetHistoryAsync(
+            channelId,
+            threadId,
             limit,
-            hint,
+            chatQueryHost,
             ct);
-
-        return chatMessages.ToOrderedHistoryResponses(messages);
-    }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Token cost aggregation
@@ -371,46 +361,15 @@ public sealed class ChatService(
 
     public async Task<ChannelCostResponse> GetChannelCostAsync(
         Guid channelId, CancellationToken ct = default)
-        => await chatCache.GetChannelCostAsync(
-            channelId,
-            innerCt => LoadChannelCostAsync(channelId, innerCt),
-            ct);
-
-    private async Task<ChannelCostResponse> LoadChannelCostAsync(
-        Guid channelId, CancellationToken ct)
-    {
-        var messages = await entities.QueryAsync<ChatMessageDB>(
-            db,
-            m => m.ChannelId == channelId && m.PromptTokens != null,
-            hint: new PersistenceQueryHint("ChannelId", channelId),
-            ct: ct);
-
-        return chatCosts.BuildChannelCost(channelId, messages);
-    }
+        => await chatQueries.GetChannelCostAsync(channelId, chatQueryHost, ct);
 
     public async Task<ThreadCostResponse?> GetThreadCostAsync(
         Guid channelId, Guid threadId, CancellationToken ct = default)
-        => await chatCache.GetThreadCostAsync(
+        => await chatQueries.GetThreadCostAsync(
             channelId,
             threadId,
-            innerCt => LoadThreadCostAsync(channelId, threadId, innerCt),
+            chatQueryHost,
             ct);
-
-    private async Task<ThreadCostResponse?> LoadThreadCostAsync(
-        Guid channelId, Guid threadId, CancellationToken ct)
-    {
-        var threadExists = await db.ChatThreads
-            .AnyAsync(t => t.Id == threadId && t.ChannelId == channelId, ct);
-        if (!threadExists) return null;
-
-        var rows = await entities.QueryAsync<ChatMessageDB>(
-            db,
-            m => m.ThreadId == threadId && m.PromptTokens != null,
-            hint: new PersistenceQueryHint("ThreadId", threadId),
-            ct: ct);
-
-        return chatCosts.BuildThreadCost(channelId, threadId, rows);
-    }
 
     /// <summary>
     /// Aggregated token usage for a single agent across all channels,
@@ -418,41 +377,28 @@ public sealed class ChatService(
     /// </summary>
     public async Task<AgentCostResponse?> GetAgentCostAsync(
         Guid agentId, CancellationToken ct = default)
-    {
-        var agent = await db.Agents.FindAsync([agentId], ct);
-        if (agent is null) return null;
-
-        return await GetAgentCostForKnownAgentAsync(agentId, agent.Name, ct);
-    }
+        => await chatQueries.GetAgentCostAsync(agentId, chatQueryHost, ct);
 
     private async Task<AgentCostResponse?> GetAgentCostForKnownAgentAsync(
         Guid agentId, string agentName, CancellationToken ct)
-        => await chatCache.GetAgentCostAsync(
+        => await chatQueries.GetKnownAgentCostAsync(
             agentId,
-            innerCt => LoadAgentCostAsync(agentId, agentName, innerCt),
+            agentName,
+            chatQueryHost,
             ct);
-
-    private async Task<AgentCostResponse?> LoadAgentCostAsync(
-        Guid agentId, string agentName, CancellationToken ct)
-    {
-        var messages = await entities.QueryAsync<ChatMessageDB>(
-            db,
-            m => m.SenderAgentId == agentId && m.PromptTokens != null,
-            hint: new PersistenceQueryHint("SenderAgentId", agentId),
-            ct: ct);
-
-        return chatCosts.BuildAgentCost(agentId, agentName, messages);
-    }
 
     private async Task<(ChannelCostResponse ChannelCost, ThreadCostResponse? ThreadCost, AgentCostResponse? AgentCost)> GetResponseCostsAsync(
         Guid channelId, Guid? threadId, Guid agentId, string agentName, CancellationToken ct)
     {
-        var channelCost = await GetChannelCostAsync(channelId, ct);
-        var threadCost = threadId is { } tid
-            ? await GetThreadCostAsync(channelId, tid, ct)
-            : null;
-        var agentCost = await GetAgentCostForKnownAgentAsync(agentId, agentName, ct);
-        return (channelCost, threadCost, agentCost);
+        var result = await chatQueries.GetResponseCostsAsync(
+            channelId,
+            threadId,
+            agentId,
+            agentName,
+            chatQueryHost,
+            ct);
+
+        return (result.ChannelCost, result.ThreadCost, result.AgentCost);
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -497,50 +443,11 @@ public sealed class ChatService(
     private async Task<(List<ChatCompletionMessage> Messages, int MaxMessages, int MaxCharacters)> LoadThreadHistoryAsync(
         Guid threadId, CancellationToken ct)
     {
-        var limits = await LoadThreadHistoryLimitsAsync(threadId, ct);
-        var cold = await entities.QueryAsync<ChatMessageDB>(
-            db,
-            m => m.ThreadId == threadId,
-            limit: limits.MaxMessages,
-            hint: new PersistenceQueryHint("ThreadId", threadId),
-            ct: ct);
-
-        var messages = chatHistory.BuildProviderHistory(
-                cold.Select(static m => new ChatHistoryMessage(
-                    m.CreatedAt,
-                    m.Role,
-                    m.Content,
-                    m.ProviderMetadataJson)),
-                limits)
-            .ToList();
-
-        return (messages, limits.MaxMessages, limits.MaxCharacters);
-    }
-
-    private async Task<ChatHistoryLimits> LoadThreadHistoryLimitsAsync(
-        Guid threadId, CancellationToken ct)
-    {
-        return await chatCache.GetOrCreateAsync(
-            ChatCache.KeyThreadHistoryLimits(threadId),
-            async innerCt =>
-            {
-                var limits = await db.ChatThreads
-                    .AsNoTracking()
-                    .Where(t => t.Id == threadId)
-                    .Select(t => new
-                    {
-                        t.MaxMessages,
-                        t.MaxCharacters
-                    })
-                    .FirstOrDefaultAsync(innerCt);
-
-                return chatHistory.ResolveLimits(
-                    limits?.MaxMessages,
-                    limits?.MaxCharacters);
-            },
-            static _ => 16,
-            ct)
-            ?? chatHistory.ResolveLimits(null, null);
+        var result = await chatQueries.GetProviderThreadHistoryAsync(
+            threadId,
+            chatQueryHost,
+            ct);
+        return ([.. result.Messages], result.MaxMessages, result.MaxCharacters);
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•

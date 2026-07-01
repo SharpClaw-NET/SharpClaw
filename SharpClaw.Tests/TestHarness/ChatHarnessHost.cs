@@ -138,6 +138,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatPromptEngine>();
         services.AddSingleton<ChatRequestPlanningEngine>();
         services.AddSingleton<ChatHistoryEngine>();
+        services.AddSingleton<ChatQueryWorkflowEngine>();
         services.AddSingleton<ChatDefaultHeaderEngine>();
         services.AddSingleton<ChatHeaderGrantFormatter>();
         services.AddSingleton<ChatHeaderTemplateEngine>();
@@ -176,6 +177,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             sp => sp.GetRequiredService<CountingPersistenceEntityResolver>());
         services.AddScoped<SessionService>();
         services.AddScoped<EfAgentActionHost>();
+        services.AddScoped<EfChatQueryHost>();
         services.AddScoped<AgentActionService>();
         services.AddScoped<EfAgentJobAdministrationHost>();
         services.AddScoped<AgentJobService>();

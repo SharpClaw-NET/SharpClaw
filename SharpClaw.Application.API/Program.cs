@@ -365,6 +365,7 @@ try
     builder.Services.AddSingleton<ChatPromptEngine>();
     builder.Services.AddSingleton<ChatRequestPlanningEngine>();
     builder.Services.AddSingleton<ChatHistoryEngine>();
+    builder.Services.AddSingleton<ChatQueryWorkflowEngine>();
     builder.Services.AddSingleton<ChatDefaultHeaderEngine>();
     builder.Services.AddSingleton<ChatHeaderGrantFormatter>();
     builder.Services.AddSingleton<ChatToolResultEngine>();
@@ -397,6 +398,7 @@ try
     builder.Services.AddScoped<ToolAwarenessSetService>();
     builder.Services.AddScoped<EfToolAwarenessAdministrationHost>();
     builder.Services.AddScoped<EfAgentActionHost>();
+    builder.Services.AddScoped<EfChatQueryHost>();
     builder.Services.AddScoped<AgentActionService>();
     builder.Services.AddScoped<EfAgentJobAdministrationHost>();
     builder.Services.AddScoped<AgentJobService>();
