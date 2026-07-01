@@ -364,6 +364,7 @@ try
     builder.Services.AddSingleton<ChatNativeToolCallParser>();
     builder.Services.AddSingleton<ChatNativeJobToolExecutor>();
     builder.Services.AddSingleton<ChatInlineToolExecutor>();
+    builder.Services.AddSingleton<ChatNativeToolLoopEngine>();
     builder.Services.AddSingleton<ModuleJobToolExecutor>();
     builder.Services.AddSingleton<TaskPreflightEngine>();
     builder.Services.AddSingleton<TaskTriggerBindingPlanner>();

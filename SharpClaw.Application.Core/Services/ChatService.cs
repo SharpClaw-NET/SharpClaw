@@ -1,4 +1,4 @@
-using System.Diagnostics;
+﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
 using System.Text.Json;
@@ -53,6 +53,7 @@ public sealed class ChatService(
     ChatToolSelectionEngine chatToolSelection,
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
+    ChatNativeToolLoopEngine chatNativeToolLoop,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -365,9 +366,9 @@ public sealed class ChatService(
         return chatMessages.ToOrderedHistoryResponses(messages);
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Token cost aggregation
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     public async Task<ChannelCostResponse> GetChannelCostAsync(
         Guid channelId, CancellationToken ct = default)
@@ -455,9 +456,9 @@ public sealed class ChatService(
         return (channelCost, threadCost, agentCost);
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Agent resolution
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Snapshot of the sender (user) at the moment a chat message is
@@ -482,9 +483,9 @@ public sealed class ChatService(
             : (snapshot.Username, snapshot.RoleId, snapshot.RoleName);
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Thread history loading
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Loads messages for a thread, respecting the thread's per-thread
@@ -543,9 +544,9 @@ public sealed class ChatService(
             ?? chatHistory.ResolveLimits(null, null);
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Chat header
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Builds a compact metadata header that is prepended to the user
@@ -578,7 +579,7 @@ public sealed class ChatService(
         if (!chatHeaders.ShouldBuildDefaultHeader(_disableDefaultChatHeaders))
             return null;
 
-        // ── Task-sourced message: lightweight header, no user lookup ──
+        // â”€â”€ Task-sourced message: lightweight header, no user lookup â”€â”€
         if (taskContext is not null)
         {
             var store = TaskSharedData.Get(taskContext.InstanceId);
@@ -605,7 +606,7 @@ public sealed class ChatService(
 
         var userId = jobService.GetSessionUserId();
 
-        // ── External user (bot-forwarded message): no DB session ─────
+        // â”€â”€ External user (bot-forwarded message): no DB session â”€â”€â”€â”€â”€
         if (userId is null && externalUsername is not null)
         {
             var suffix = await LoadAgentSuffixAsync(agent.Id, channel.Id, ct,
@@ -756,9 +757,9 @@ public sealed class ChatService(
             providerKey);
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Streaming chat
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Streams a chat response token-by-token, executing tool calls
@@ -1023,7 +1024,7 @@ public sealed class ChatService(
 
             foreach (var tc in roundResult.ToolCalls)
             {
-                // ── Task-specific tool interception ──────────────
+                // â”€â”€ Task-specific tool interception â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 var (handled, taskResult) = await TryHandleTaskToolAsync(
                     tc, request.TaskContext, ct);
                 if (handled)
@@ -1036,7 +1037,7 @@ public sealed class ChatService(
                     continue;
                 }
 
-                // ── Inline module tool interception ──────────────
+                // â”€â”€ Inline module tool interception â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
                 if (moduleRegistry.IsInlineTool(tc.Name))
                 {
                     var inlineResult = await HandleInlineModuleToolAsync(
@@ -1267,7 +1268,7 @@ public sealed class ChatService(
         }
         catch
         {
-            // Best-effort — don't mask the original exception.
+            // Best-effort â€” don't mask the original exception.
         }
     }
 
@@ -1322,13 +1323,13 @@ public sealed class ChatService(
         }
         catch
         {
-            // Best-effort — don't mask the original exception.
+            // Best-effort â€” don't mask the original exception.
         }
     }
 
     /// <summary>
     /// Checks whether the current session user has sufficient authority
-    /// to approve the given action — i.e. their own permission check
+    /// to approve the given action â€” i.e. their own permission check
     /// would return <see cref="ClearanceVerdict.Approved"/>.
     /// </summary>
     private async Task<bool> CanSessionUserApproveAsync(
@@ -1345,9 +1346,9 @@ public sealed class ChatService(
         return result.Verdict == ClearanceVerdict.Approved;
     }
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Task-specific tool handling
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Returns the effective tool list for a chat call.  When a task context is
@@ -1443,7 +1444,7 @@ public sealed class ChatService(
         Guid agentId,
         Guid channelId,
         Guid? threadId,
-        Dictionary<ChatInlineToolPermissionCacheKey, AgentActionResult> permissionCache,
+        IDictionary<ChatInlineToolPermissionCacheKey, AgentActionResult> permissionCache,
         CancellationToken ct)
     {
         var result = await chatInlineToolExecutor.ExecuteAsync(
@@ -1500,9 +1501,23 @@ public sealed class ChatService(
             ct,
             actionKey: check.ActionKey);
 
-    // ═══════════════════════════════════════════════════════════════
+    private bool IsInlineToolName(string toolName) =>
+        moduleRegistry.IsInlineTool(toolName);
+
+    private Task RecordRoundTokenUsageAsync(
+        IReadOnlyList<Guid> jobIds,
+        int promptTokens,
+        int completionTokens,
+        CancellationToken ct) =>
+        jobService.RecordTokensAsync(
+            jobIds,
+            promptTokens,
+            completionTokens,
+            ct);
+
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Tool-call loop implementations
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
     /// Uses native provider function calling. The provider returns structured
@@ -1530,249 +1545,46 @@ public sealed class ChatService(
         string? timingRequestId = null,
         Stopwatch? totalTiming = null)
     {
-        var messages = new List<ToolAwareMessage>(dbHistory.Count);
-        foreach (var msg in dbHistory)
-        {
-            messages.Add(new ToolAwareMessage
-            {
-                Role = msg.Role,
-                Content = msg.Content,
-                ProviderMetadataJson = msg.ProviderMetadataJson
-            });
-        }
+        var effectiveTools = await GetEffectiveToolsAsync(
+            taskContext,
+            toolAwareness,
+            agentId,
+            ct);
 
-        var supportsVision = modelCapabilityTags.Contains(WellKnownCapabilityKeys.Vision);
-        var jobResults = new List<AgentJobResponse>();
-        var toolNotation = new StringBuilder();
-        var rounds = 0;
-        var effectiveTools = await GetEffectiveToolsAsync(taskContext, toolAwareness, agentId, ct);
-        var totalPromptTokens = 0;
-        var totalCompletionTokens = 0;
-        var roundJobIds = new List<Guid>();
-        var logTiming = timingRequestId is not null && logger.IsEnabled(LogLevel.Debug);
-        var providerRound = 0;
-        var inlinePermissionCache = new Dictionary<ChatInlineToolPermissionCacheKey, AgentActionResult>();
+        var result = await chatNativeToolLoop.RunAsync(
+            new ChatNativeToolLoopRequest(
+                client,
+                httpClient,
+                apiKey,
+                modelName,
+                systemPrompt,
+                dbHistory,
+                agentId,
+                channelId,
+                modelCapabilityTags,
+                maxCompletionTokens,
+                providerParameters,
+                completionParameters,
+                effectiveTools,
+                new ChatServiceNativeToolLoopHost(this),
+                ct,
+                approvalCallback,
+                taskContext,
+                toolAwareness,
+                threadId,
+                timingRequestId,
+                () => totalTiming?.ElapsedMilliseconds,
+                MaxToolCallRounds));
 
-        if (logTiming)
-        {
-            logger.LogDebug(
-                "Chat request {RequestId} resolved native tools. AgentId={AgentId} ChannelId={ChannelId} ThreadId={ThreadId} EffectiveTools={EffectiveTools} HistoryMessages={HistoryMessages} SupportsVision={SupportsVision} ElapsedMs={ElapsedMs}",
-                timingRequestId, agentId, channelId, threadId,
-                effectiveTools.Count, dbHistory.Count, supportsVision,
-                totalTiming?.ElapsedMilliseconds);
-        }
-
-        while (true)
-        {
-            providerRound++;
-            var providerRoundTiming = Stopwatch.StartNew();
-            ChatCompletionResult result;
-            try
-            {
-                result = await client.ChatCompletionWithToolsAsync(
-                    httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
-            }
-            catch (LocalInferenceEnvelopeException ex)
-            {
-                providerRoundTiming.Stop();
-                logger.LogWarning(
-                    ex,
-                    "Local-inference tool loop aborted for chat request {RequestId} after {ProviderRoundMs}ms: malformed envelope from model. Preview={Preview}",
-                    timingRequestId, providerRoundTiming.ElapsedMilliseconds,
-                    ex.PayloadPreview);
-
-                return BuildEnvelopeFailureResult(
-                    toolNotation,
-                    jobResults,
-                    totalPromptTokens,
-                    totalCompletionTokens,
-                    ex);
-            }
-            providerRoundTiming.Stop();
-
-            if (result.Usage is { } usage)
-            {
-                totalPromptTokens += usage.PromptTokens;
-                totalCompletionTokens += usage.CompletionTokens;
-            }
-
-            if (logTiming)
-            {
-                logger.LogDebug(
-                    "Chat request {RequestId} native provider round {Round} completed in {ProviderRoundMs}ms. ToolCalls={ToolCalls} PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} ContentChars={ContentChars} ElapsedMs={ElapsedMs}",
-                    timingRequestId, providerRound,
-                    providerRoundTiming.ElapsedMilliseconds,
-                    result.ToolCalls.Count,
-                    result.Usage?.PromptTokens ?? 0,
-                    result.Usage?.CompletionTokens ?? 0,
-                    result.Content?.Length ?? 0,
-                    totalTiming?.ElapsedMilliseconds);
-            }
-
-            if (!result.HasToolCalls || ++rounds > MaxToolCallRounds)
-            {
-                var finalContent = chatToolResults.BuildFinalAssistantContent(
-                    toolNotation.ToString(),
-                    result.Content);
-                return new ToolLoopResult(
-                    finalContent,
-                    jobResults,
-                    totalPromptTokens,
-                    totalCompletionTokens,
-                    result.ProviderMetadataJson);
-            }
-
-            // Record assistant turn with tool calls
-            messages.Add(ToolAwareMessage.AssistantWithToolCalls(
-                result.ToolCalls,
-                result.Content,
-                result.ProviderMetadataJson));
-
-            var anyUnresolvableApproval = false;
-            roundJobIds.Clear();
-
-            foreach (var tc in result.ToolCalls)
-            {
-                // ── Task-specific tool interception ──────────────
-                var (handled, taskResult) = await TryHandleTaskToolAsync(
-                    tc, taskContext, ct);
-                if (handled)
-                {
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, taskResult ?? ""));
-                    toolNotation.Append(FormatTaskToolNotation(tc.Name));
-                    continue;
-                }
-
-                // ── Inline module tool interception ──────────────
-                if (moduleRegistry.IsInlineTool(tc.Name))
-                {
-                    var inlineResult = await HandleInlineModuleToolAsync(
-                        tc, agentId, channelId, threadId, inlinePermissionCache, ct);
-                    messages.Add(ToolAwareMessage.ToolResult(tc.Id, inlineResult));
-                    toolNotation.Append(FormatInlineToolNotation(tc.Name));
-                    continue;
-                }
-
-                var nativeTool = await ExecuteNativeJobToolAsync(
-                    tc,
-                    agentId,
-                    channelId,
-                    supportsVision,
-                    emitStreamEvents: false,
-                    approvalCallback,
-                    ct);
-
-                messages.Add(nativeTool.ToolResultMessage);
-                if (!nativeTool.Parsed)
-                    continue;
-
-                if (nativeTool.SubmittedJobId is { } submittedJobId)
-                    roundJobIds.Add(submittedJobId);
-
-                // Core owns native job approval and unresolved-approval detection.
-                if (nativeTool.JobResponse is not null)
-                    jobResults.Add(nativeTool.JobResponse);
-
-                toolNotation.Append(nativeTool.ToolNotation);
-
-                if (nativeTool.AwaitingUnresolvableApproval)
-                    anyUnresolvableApproval = true;
-            }
-
-            // Distribute this round's token usage across jobs submitted in the round
-            if (roundJobIds.Count > 0 && result.Usage is { } ru)
-            {
-                await jobService.RecordTokensAsync(roundJobIds, ru.PromptTokens, ru.CompletionTokens, ct);
-                chatToolResults.ApplyRoundTokenUsageToJobResponses(
-                    jobResults,
-                    roundJobIds,
-                    ru.PromptTokens,
-                    ru.CompletionTokens);
-            }
-
-            if (anyUnresolvableApproval)
-            {
-                ChatCompletionResult finalResult;
-                var finalApprovalTiming = Stopwatch.StartNew();
-                try
-                {
-                    finalResult = await client.ChatCompletionWithToolsAsync(
-                        httpClient, apiKey, modelName, systemPrompt, messages, effectiveTools, maxCompletionTokens, providerParameters, completionParameters, ct);
-                }
-                catch (LocalInferenceEnvelopeException ex)
-                {
-                    finalApprovalTiming.Stop();
-                    logger.LogWarning(
-                        ex,
-                        "Local-inference final approval round aborted for chat request {RequestId} after {ProviderRoundMs}ms: malformed envelope from model. Preview={Preview}",
-                        timingRequestId, finalApprovalTiming.ElapsedMilliseconds,
-                        ex.PayloadPreview);
-
-                    return BuildEnvelopeFailureResult(
-                        toolNotation,
-                        jobResults,
-                        totalPromptTokens,
-                        totalCompletionTokens,
-                        ex);
-                }
-                finalApprovalTiming.Stop();
-                if (finalResult.Usage is { } finalUsage)
-                {
-                    totalPromptTokens += finalUsage.PromptTokens;
-                    totalCompletionTokens += finalUsage.CompletionTokens;
-                }
-                if (logTiming)
-                {
-                    logger.LogDebug(
-                        "Chat request {RequestId} final approval provider round completed in {ProviderRoundMs}ms. PromptTokens={PromptTokens} CompletionTokens={CompletionTokens} ContentChars={ContentChars} ElapsedMs={ElapsedMs}",
-                        timingRequestId, finalApprovalTiming.ElapsedMilliseconds,
-                        finalResult.Usage?.PromptTokens ?? 0,
-                        finalResult.Usage?.CompletionTokens ?? 0,
-                        finalResult.Content?.Length ?? 0,
-                        totalTiming?.ElapsedMilliseconds);
-                }
-                var finalContent = chatToolResults.BuildFinalAssistantContent(
-                    toolNotation.ToString(),
-                    finalResult.Content);
-                return new ToolLoopResult(
-                    finalContent,
-                    jobResults,
-                    totalPromptTokens,
-                    totalCompletionTokens,
-                    finalResult.ProviderMetadataJson);
-            }
-        }
-    }
-
-    /// <summary>
-    /// Converts a malformed local-inference tool-loop envelope into a normal
-    /// assistant-visible error result instead of letting the exception bubble
-    /// out as a 500. The earlier tool results (and their authoritative
-    /// notation lines) are preserved so the user can still see what happened
-    /// before the local model lost the grammar and emitted invalid JSON.
-    /// <para>
-    /// This preserves the L-017 contract: the local-inference API client
-    /// still throws a typed exception on malformed envelopes, but the caller
-    /// turns it into a user-facing error response instead of a transport-level
-    /// failure.
-    /// </para>
-    /// </summary>
-    private ToolLoopResult BuildEnvelopeFailureResult(
-        StringBuilder toolNotation,
-        List<AgentJobResponse> jobResults,
-        int totalPromptTokens,
-        int totalCompletionTokens,
-        LocalInferenceEnvelopeException ex)
-    {
         return new ToolLoopResult(
-            chatToolResults.BuildMalformedEnvelopeAssistantContent(
-                toolNotation.ToString(),
-                ex.PayloadPreview),
-            jobResults,
-            totalPromptTokens,
-            totalCompletionTokens);
+            result.AssistantContent,
+            result.JobResults is List<AgentJobResponse> list
+                ? list
+                : [.. result.JobResults],
+            result.TotalPromptTokens,
+            result.TotalCompletionTokens,
+            result.ProviderMetadataJson);
     }
-
     /// <summary>
     /// Simple single-call completion for providers without native tool support
     /// or when tools are explicitly disabled.
@@ -1855,10 +1667,65 @@ public sealed class ChatService(
             },
             message => Debug.WriteLine(message, "SharpClaw.CLI"));
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Internal types
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
+    private sealed class ChatServiceNativeToolLoopHost(
+        ChatService service) : IChatNativeToolLoopHost
+    {
+        public bool IsInlineTool(string toolName) =>
+            service.IsInlineToolName(toolName);
+
+        public Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
+            ChatToolCall toolCall,
+            TaskChatContext? taskContext,
+            CancellationToken ct) =>
+            service.TryHandleTaskToolAsync(toolCall, taskContext, ct);
+
+        public Task<string> ExecuteInlineToolAsync(
+            ChatToolCall toolCall,
+            Guid agentId,
+            Guid channelId,
+            Guid? threadId,
+            IDictionary<ChatInlineToolPermissionCacheKey, AgentActionResult> permissionCache,
+            CancellationToken ct) =>
+            service.HandleInlineModuleToolAsync(
+                toolCall,
+                agentId,
+                channelId,
+                threadId,
+                permissionCache,
+                ct);
+
+        public Task<ChatNativeJobToolExecutionResult> ExecuteNativeJobToolAsync(
+            ChatToolCall toolCall,
+            Guid agentId,
+            Guid channelId,
+            bool supportsVision,
+            bool emitStreamEvents,
+            Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
+            CancellationToken ct) =>
+            service.ExecuteNativeJobToolAsync(
+                toolCall,
+                agentId,
+                channelId,
+                supportsVision,
+                emitStreamEvents,
+                approvalCallback,
+                ct);
+
+        public Task RecordRoundTokenUsageAsync(
+            IReadOnlyList<Guid> jobIds,
+            int promptTokens,
+            int completionTokens,
+            CancellationToken ct) =>
+            service.RecordRoundTokenUsageAsync(
+                jobIds,
+                promptTokens,
+                completionTokens,
+                ct);
+    }
     private readonly record struct ToolLoopResult(
         string AssistantContent,
         List<AgentJobResponse> JobResults,
@@ -1872,13 +1739,13 @@ public sealed class ChatService(
         IReadOnlyList<string> Grants,
         string? Bio);
 
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     // Tool call notation (persisted in assistant message content)
-    // ═══════════════════════════════════════════════════════════════
+    // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
     //
     // The actual format strings live on ToolNotationFormatter so that
     // tests, clients, and any non-Core call site share one source of
-    // truth for the persisted "⚙ [...] → ..." surface.  These thin
+    // truth for the persisted "âš™ [...] â†’ ..." surface.  These thin
     // wrappers exist only to keep the in-file call sites readable.
 
     private static string FormatInlineToolNotation(string toolName)

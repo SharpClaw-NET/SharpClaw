@@ -138,6 +138,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatNativeToolCallParser>();
         services.AddSingleton<ChatNativeJobToolExecutor>();
         services.AddSingleton<ChatInlineToolExecutor>();
+        services.AddSingleton<ChatNativeToolLoopEngine>();
         services.AddSingleton<TaskPreflightEngine>();
         services.AddSingleton<TaskTriggerBindingPlanner>();
         services.AddSingleton<ToolAwarenessSetEngine>();
