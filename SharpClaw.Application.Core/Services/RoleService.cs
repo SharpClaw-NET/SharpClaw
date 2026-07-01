@@ -18,6 +18,7 @@ public sealed class RoleService(
     SharpClawDbContext db,
     IConfiguration configuration,
     RolePermissionAdministrationEngine rolePermissions,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     // ═══════════════════════════════════════════════════════════════
@@ -245,9 +246,7 @@ public sealed class RoleService(
 
     private void InvalidatePermissionRuntimeState()
     {
-        chatCache.RemoveByPrefix(ChatCache.PrefixHeaderUser);
-        chatCache.RemoveByPrefix(ChatCache.PrefixHeaderAgentSuffix);
-        chatCache.RemoveByPrefix(ChatCache.PrefixDefaultResourceResolution);
+        invalidations.PermissionSetsChanged().ApplyTo(chatCache);
     }
 
     private async Task EnsureRoleNameUniqueAsync(string name, Guid? excludeId, CancellationToken ct)

@@ -20,6 +20,7 @@ public sealed class AgentService(
     ModuleRegistry moduleRegistry,
     IConfiguration configuration,
     ProviderApiClientFactory clientFactory,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache,
     AgentAdministrationEngine agentAdministration)
 {
@@ -297,7 +298,7 @@ public sealed class AgentService(
             moduleRegistry.GetAllRegisteredResourceTypes());
 
         await db.SaveChangesAsync(ct);
-        chatCache.Remove(ChatCache.KeyHeaderUser(userId));
+        invalidations.UserHeaderChanged(userId).ApplyTo(chatCache);
         return new MeResponse(
             user.Id,
             user.Username,
@@ -323,9 +324,7 @@ public sealed class AgentService(
 
     private void InvalidateAgentRuntimeState(Guid agentId)
     {
-        chatCache.RemoveHeaderAgentSuffixesForAgent(agentId);
-        chatCache.RemoveEffectiveToolsForAgent(agentId);
-        chatCache.RemoveDefaultResourceResolutionForAgent(agentId);
+        invalidations.AgentChanged(agentId).ApplyTo(chatCache);
     }
 
     private async Task EnsureAgentNameUniqueAsync(

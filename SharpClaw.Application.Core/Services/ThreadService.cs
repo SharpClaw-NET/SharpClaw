@@ -9,6 +9,7 @@ namespace SharpClaw.Application.Services;
 public sealed class ThreadService(
     SharpClawDbContext db,
     ConversationTopologyEngine conversation,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     public async Task<ThreadResponse> CreateAsync(
@@ -73,7 +74,7 @@ public sealed class ThreadService(
 
     private void InvalidateThreadRuntimeState(Guid threadId)
     {
-        chatCache.Remove(ChatCache.KeyThreadHistoryLimits(threadId));
+        invalidations.ThreadChanged(threadId).ApplyTo(chatCache);
     }
 
 }

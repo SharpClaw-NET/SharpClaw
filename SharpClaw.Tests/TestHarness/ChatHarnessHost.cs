@@ -110,6 +110,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ModuleJobToolExecutor>();
         services.AddSingleton<ThreadActivitySignal>();
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<ChatRuntimeInvalidationPlanner>();
         services.AddSingleton<ProviderApiClientFactory>();
         services.AddSingleton<AgentAdministrationEngine>();
         services.AddSingleton<PermissionEvaluationEngine>();
@@ -130,6 +131,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatDefaultHeaderEngine>();
         services.AddSingleton<ChatHeaderGrantFormatter>();
         services.AddSingleton<ChatHeaderTemplateEngine>();
+        services.AddSingleton<ChatHeaderExpansionPlanner>();
         services.AddSingleton<ChatToolResultEngine>();
         services.AddSingleton<ChatMessageEngine>();
         services.AddSingleton<ChatToolSelectionEngine>();

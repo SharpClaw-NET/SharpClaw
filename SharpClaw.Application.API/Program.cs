@@ -390,6 +390,7 @@ try
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
     builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
     builder.Services.AddSingleton<ChatCache>();
+    builder.Services.AddSingleton<ChatRuntimeInvalidationPlanner>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();
     builder.Services.AddScoped<IThreadResolver, HostThreadResolver>();
     builder.Services.AddScoped<IHostContextDataReader, HostContextDataReader>();
@@ -402,6 +403,7 @@ try
     builder.Services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
 
     builder.Services.AddScoped<ChatHeaderTemplateEngine>();
+    builder.Services.AddScoped<ChatHeaderExpansionPlanner>();
     builder.Services.AddScoped<HeaderTagProcessor>();
     builder.Services.AddScoped<ChatService>();
     builder.Services.AddSingleton<ThreadActivitySignal>();

@@ -85,6 +85,7 @@ public sealed class HeaderTagProcessorTests
         return new HeaderTagProcessor(
             db,
             engine,
+            new ChatHeaderExpansionPlanner(),
             services,
             configuration);
     }

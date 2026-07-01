@@ -12,6 +12,7 @@ public sealed class ContextService(
     SharpClawDbContext db,
     IConfiguration configuration,
     ConversationTopologyEngine conversation,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     public async Task<ContextResponse> CreateAsync(
@@ -214,11 +215,7 @@ public sealed class ContextService(
 
     private void InvalidateContextChannelRuntimeState(IEnumerable<Guid> channelIds)
     {
-        foreach (var channelId in channelIds)
-        {
-            chatCache.RemoveHeaderAgentSuffixesForChannel(channelId);
-            chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
-        }
+        invalidations.ContextChanged(channelIds).ApplyTo(chatCache);
     }
 
 }

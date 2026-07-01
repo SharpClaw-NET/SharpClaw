@@ -16,6 +16,7 @@ namespace SharpClaw.Application.Services;
 public sealed class DefaultResourceSetService(
     SharpClawDbContext db,
     ModuleRegistry moduleRegistry,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     // -- Reads ------------------------------------------------------
@@ -82,7 +83,8 @@ public sealed class DefaultResourceSetService(
             request,
             entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
-        chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
+        invalidations.DefaultResourcesForChannelChanged(channelId)
+            .ApplyTo(chatCache);
         return DefaultResourceEngine.ToResponse(
             DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
@@ -144,7 +146,8 @@ public sealed class DefaultResourceSetService(
             resourceId,
             entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
-        chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
+        invalidations.DefaultResourcesForChannelChanged(channelId)
+            .ApplyTo(chatCache);
         return DefaultResourceEngine.ToResponse(
             DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
@@ -168,7 +171,8 @@ public sealed class DefaultResourceSetService(
             null,
             entry => db.DefaultResourceEntries.Remove(entry));
         await db.SaveChangesAsync(ct);
-        chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
+        invalidations.DefaultResourcesForChannelChanged(channelId)
+            .ApplyTo(chatCache);
         return DefaultResourceEngine.ToResponse(
             DefaultResourceSetSnapshot.FromDefaultResourceSet(ch.DefaultResourceSet));
     }
@@ -243,8 +247,8 @@ public sealed class DefaultResourceSetService(
             .Select(c => c.Id)
             .ToListAsync(ct);
 
-        foreach (var channelId in channelIds)
-            chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
+        invalidations.DefaultResourcesForContextChanged(channelIds)
+            .ApplyTo(chatCache);
     }
 
     private static DefaultResourceSetSnapshot? Snapshot(DefaultResourceSetDB? drs) =>

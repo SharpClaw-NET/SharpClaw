@@ -8,6 +8,7 @@ namespace SharpClaw.Application.Services;
 public sealed class ToolAwarenessSetService(
     SharpClawDbContext db,
     ToolAwarenessSetEngine toolAwareness,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     public async Task<ToolAwarenessSetResponse> CreateAsync(
@@ -46,7 +47,7 @@ public sealed class ToolAwarenessSetService(
         toolAwareness.ApplyUpdate(entity, request);
 
         await db.SaveChangesAsync(ct);
-        chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
+        invalidations.ToolAwarenessSetsChanged().ApplyTo(chatCache);
         return toolAwareness.ToResponse(entity);
     }
 
@@ -57,7 +58,7 @@ public sealed class ToolAwarenessSetService(
 
         db.ToolAwarenessSets.Remove(entity);
         await db.SaveChangesAsync(ct);
-        chatCache.RemoveByPrefix(ChatCache.PrefixEffectiveTools);
+        invalidations.ToolAwarenessSetsChanged().ApplyTo(chatCache);
         return true;
     }
 

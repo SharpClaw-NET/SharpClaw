@@ -12,6 +12,7 @@ namespace SharpClaw.Application.Services;
 public sealed class HeaderTagProcessor(
     SharpClawDbContext db,
     ChatHeaderTemplateEngine headerTemplates,
+    ChatHeaderExpansionPlanner headerExpansionPlanner,
     IServiceProvider serviceProvider,
     IConfiguration configuration)
 {
@@ -41,8 +42,11 @@ public sealed class HeaderTagProcessor(
         if (options.DisableHeaderTagExpansion)
             return template;
 
-        var tagNames = ChatHeaderTemplateEngine.ExtractTagNames(template);
-        if (tagNames.Count == 0)
+        var plan = headerExpansionPlanner.BuildPlan(
+            template,
+            userId,
+            options);
+        if (!plan.ShouldExpand)
             return template;
 
         var context = await BuildContextAsync(
@@ -50,7 +54,7 @@ public sealed class HeaderTagProcessor(
             agent,
             clientType,
             userId,
-            tagNames,
+            plan,
             ct,
             completionParameters,
             providerKey);
@@ -69,34 +73,22 @@ public sealed class HeaderTagProcessor(
         AgentDB agent,
         string clientType,
         Guid? userId,
-        IReadOnlyCollection<string> tagNames,
+        ChatHeaderExpansionPlan plan,
         CancellationToken ct,
         CompletionParameters? completionParameters = null,
         string providerKey = "")
     {
-        var requiredTags = tagNames
-            .Select(static tag => tag.ToLowerInvariant())
-            .ToHashSet(StringComparer.Ordinal);
-        var needsUser = userId is not null
-            && (requiredTags.Contains("user")
-                || requiredTags.Contains("role")
-                || requiredTags.Contains("bio")
-                || requiredTags.Contains("grants"));
-        var needsUserPermissionSet = requiredTags.Contains("role")
-            || requiredTags.Contains("grants");
-        var needsAgentPermissionSet = requiredTags.Contains("agent-role")
-            || requiredTags.Contains("agent-grants");
-
         UserDB? user = null;
         PermissionSetDB? userPs = null;
-        if (needsUser)
+        if (plan.RequiresUser)
         {
             user = await db.Users
                 .AsNoTracking()
                 .Include(u => u.Role).ThenInclude(r => r!.PermissionSet)
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
-            if (needsUserPermissionSet && user?.Role?.PermissionSetId is { } psId)
+            if (plan.RequiresUserPermissionSet
+                && user?.Role?.PermissionSetId is { } psId)
             {
                 userPs = await db.PermissionSets
                     .AsNoTracking()
@@ -109,7 +101,7 @@ public sealed class HeaderTagProcessor(
 
         RoleDB? agentRole = null;
         PermissionSetDB? agentPs = null;
-        if (needsAgentPermissionSet)
+        if (plan.RequiresAgentPermissionSet)
         {
             var agentWithRole = await db.Agents
                 .AsNoTracking()

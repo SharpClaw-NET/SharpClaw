@@ -12,6 +12,7 @@ public sealed class ChannelService(
     SharpClawDbContext db,
     IConfiguration configuration,
     ConversationTopologyEngine conversation,
+    ChatRuntimeInvalidationPlanner invalidations,
     ChatCache chatCache)
 {
     /// <summary>
@@ -302,8 +303,7 @@ public sealed class ChannelService(
 
     private void InvalidateChannelRuntimeState(Guid channelId)
     {
-        chatCache.RemoveHeaderAgentSuffixesForChannel(channelId);
-        chatCache.RemoveDefaultResourceResolutionForChannel(channelId);
+        invalidations.ChannelChanged(channelId).ApplyTo(chatCache);
     }
 
     private bool IsUniqueChannelNamesEnforced()
