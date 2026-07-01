@@ -346,6 +346,7 @@ try
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobLifecycleEngine>();
+    builder.Services.AddSingleton<AgentJobRuntimeEngine>();
     builder.Services.AddSingleton<AgentJobDefaultResourceResolver>();
     builder.Services.AddSingleton<DefaultResourceEngine>();
     builder.Services.AddSingleton<ConversationTopologyEngine>();

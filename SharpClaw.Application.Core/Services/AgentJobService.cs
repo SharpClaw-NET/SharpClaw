@@ -43,10 +43,11 @@ public sealed class AgentJobService(
     IServiceScopeFactory serviceScopeFactory,
     IConfiguration configuration,
     ChatCache chatCache,
+    AgentJobRuntimeEngine jobRuntime,
     AgentJobLifecycleEngine lifecycle,
     AgentJobAdministrationEngine jobAdministration,
     AgentJobDefaultResourceResolver jobDefaultResources,
-    ILogger<AgentJobService> logger)
+    ILogger<AgentJobService> logger) : IAgentJobRuntimeHost
 {
     private readonly ModuleEventDispatcher _eventDispatcher = eventDispatcher;
     private readonly IConfiguration _configuration = configuration;
@@ -75,67 +76,7 @@ public sealed class AgentJobService(
         SubmitAgentJobRequest request,
         CancellationToken ct = default)
     {
-        var ch = await db.Channels
-            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
-            .Include(c => c.AllowedAgents)
-            .FirstOrDefaultAsync(c => c.Id == channelId, ct)
-            ?? throw new InvalidOperationException($"Channel {channelId} not found.");
-
-        var agentId = jobAdministration.ResolveSubmissionAgent(
-            ch,
-            channelId,
-            request.AgentId);
-
-        var effectiveResourceId = request.ResourceId;
-
-        // When no resource is specified for a per-resource action, resolve
-        // the default from: channel DefaultResourceSet → context DefaultResourceSet
-        // → channel/context/role PermissionSet defaults.
-        if (!effectiveResourceId.HasValue
-            && jobAdministration.IsPerResourceAction(moduleRegistry, request.ActionKey))
-        {
-            effectiveResourceId = await ResolveDefaultResourceIdAsync(
-                request.ActionKey, channelId, agentId, ct);
-        }
-
-        var job = jobAdministration.CreateSubmissionJob(
-            channelId,
-            agentId,
-            request,
-            session.UserId,
-            effectiveResourceId);
-
-        db.AgentJobs.Add(job);
-        ApplyLifecycleDecision(job, lifecycle.Queue(request.ActionKey));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        var caller = new ActionCaller(session.UserId, request.CallerAgentId);
-        var result = await DispatchPermissionCheckAsync(
-            agentId, job.ResourceId, caller, ct, job.ActionKey,
-            channelPsId: ch.PermissionSetId, contextPsId: ch.AgentContext?.PermissionSetId);
-
-        job.EffectiveClearance = result.EffectiveClearance;
-
-        var channelPreauthorized = result.Verdict == ClearanceVerdict.PendingApproval
-            && await HasChannelAuthorizationAsync(
-                channelId,
-                job.ResourceId,
-                result.EffectiveClearance,
-                session.UserId,
-                ct,
-                job.ActionKey);
-        var submissionDecision = lifecycle.ResolveSubmissionPermission(
-            result,
-            channelPreauthorized);
-        ApplyLifecycleDecision(job, submissionDecision);
-
-        if (submissionDecision.ShouldExecute)
-            await ExecuteJobAsync(job, ct);
-        else
-            await SaveChangesAndCacheLogsAsync(ct);
-
-        chatCache.SetJobLogs(job.Id, ToLogResponses(job.LogEntries));
-        return ToResponse(job);
+        return await jobRuntime.SubmitAsync(channelId, request, this, ct);
     }
 
     /// <summary>
@@ -149,42 +90,7 @@ public sealed class AgentJobService(
         var job = await LoadJobAsync(jobId, ct);
         if (job is null) return null;
 
-        if (job.Status != AgentJobStatus.AwaitingApproval)
-        {
-            ApplyLifecycleDecision(job, lifecycle.RejectApprovalForStatus(job.Status));
-            await SaveChangesAndCacheLogsAsync(ct);
-            return await ToResponseAsync(job, ct);
-        }
-
-        var approver = new ActionCaller(session.UserId, request.ApproverAgentId);
-
-        var approvalCh = await db.Channels
-            .Include(c => c.AgentContext)
-            .FirstOrDefaultAsync(c => c.Id == job.ChannelId, ct);
-
-        var result = await DispatchPermissionCheckAsync(
-            job.AgentId, job.ResourceId, approver, ct, job.ActionKey,
-            channelPsId: approvalCh?.PermissionSetId,
-            contextPsId: approvalCh?.AgentContext?.PermissionSetId);
-
-        var approvalDecision = lifecycle.ResolveApproval(
-            result,
-            approver,
-            DateTimeOffset.UtcNow);
-        if (approvalDecision.ShouldExecute)
-        {
-            job.ApprovedByUserId = session.UserId;
-            job.ApprovedByAgentId = request.ApproverAgentId;
-        }
-
-        ApplyLifecycleDecision(job, approvalDecision);
-
-        if (approvalDecision.ShouldExecute)
-            await ExecuteJobAsync(job, ct);
-        else
-            await SaveChangesAndCacheLogsAsync(ct);
-
-        return await ToResponseAsync(job, ct);
+        return await jobRuntime.ApproveAsync(job, request, this, ct);
     }
 
     /// <summary>Cancel a job that has not yet completed.</summary>
@@ -359,50 +265,133 @@ public sealed class AgentJobService(
         string? actionKey = null)
         => DispatchPermissionCheckAsync(agentId, resourceId, caller, ct, actionKey);
 
+    Guid? IAgentJobRuntimeHost.SessionUserId => session.UserId;
+
+    ModuleRegistry IAgentJobRuntimeHost.ModuleRegistry => moduleRegistry;
+
+    async Task<ChannelDB?> IAgentJobRuntimeHost.LoadSubmissionChannelAsync(
+        Guid channelId,
+        CancellationToken ct)
+    {
+        return await db.Channels
+            .Include(c => c.AgentContext).ThenInclude(ctx => ctx!.AllowedAgents)
+            .Include(c => c.AllowedAgents)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+    }
+
+    async Task<ChannelDB?> IAgentJobRuntimeHost.LoadApprovalChannelAsync(
+        Guid channelId,
+        CancellationToken ct)
+    {
+        return await db.Channels
+            .Include(c => c.AgentContext)
+            .FirstOrDefaultAsync(c => c.Id == channelId, ct);
+    }
+
+    Task<Guid?> IAgentJobRuntimeHost.ResolveDefaultResourceIdAsync(
+        string? actionKey,
+        Guid channelId,
+        Guid agentId,
+        CancellationToken ct)
+        => ResolveDefaultResourceIdAsync(actionKey, channelId, agentId, ct);
+
+    void IAgentJobRuntimeHost.TrackJob(AgentJobDB job)
+    {
+        db.AgentJobs.Add(job);
+    }
+
+    async Task IAgentJobRuntimeHost.SaveAsync(
+        IReadOnlyList<AgentJobLogEntryDB> logs,
+        CancellationToken ct)
+    {
+        _pendingCacheLogs.AddRange(logs);
+        await SaveChangesAndCacheLogsAsync(ct);
+    }
+
+    Task<AgentActionResult> IAgentJobRuntimeHost.DispatchPermissionCheckAsync(
+        Guid agentId,
+        Guid? resourceId,
+        ActionCaller caller,
+        string? actionKey,
+        Guid? channelPermissionSetId,
+        Guid? contextPermissionSetId,
+        CancellationToken ct)
+    {
+        return DispatchPermissionCheckAsync(
+            agentId,
+            resourceId,
+            caller,
+            ct,
+            actionKey,
+            channelPermissionSetId,
+            contextPermissionSetId);
+    }
+
+    Task<bool> IAgentJobRuntimeHost.HasChannelAuthorizationAsync(
+        Guid channelId,
+        Guid? resourceId,
+        PermissionClearance agentClearance,
+        Guid? callerUserId,
+        string? actionKey,
+        CancellationToken ct)
+    {
+        return HasChannelAuthorizationAsync(
+            channelId,
+            resourceId,
+            agentClearance,
+            callerUserId,
+            ct,
+            actionKey);
+    }
+
+    async Task<AgentJobExecutionDispatchResult> IAgentJobRuntimeHost.DispatchExecutionAsync(
+        AgentJobDB job,
+        Action<string, string> addLog,
+        CancellationToken ct)
+    {
+        using var executionScope = BeginExecutionScope(job.Id);
+        return await DispatchExecutionAsync(job, addLog, ct);
+    }
+
+    void IAgentJobRuntimeHost.LogLongRunningExecutionStarted(AgentJobDB job)
+    {
+        _logger.LogInformation(
+            "Long-running module job {JobId} for action {ActionKey} started and remains Executing.",
+            job.Id,
+            job.ActionKey);
+    }
+
+    void IAgentJobRuntimeHost.LogExecutionFailed(
+        AgentJobDB job,
+        Exception exception)
+    {
+        _logger.LogError(
+            exception,
+            "Agent job {JobId} for action {ActionKey} failed during execution.",
+            job.Id,
+            job.ActionKey);
+    }
+
+    void IAgentJobRuntimeHost.CacheJobLogs(
+        Guid jobId,
+        IReadOnlyList<AgentJobLogResponse> logs)
+    {
+        chatCache.SetJobLogs(jobId, logs);
+    }
+
+    Task<AgentJobResponse> IAgentJobRuntimeHost.BuildResponseAsync(
+        AgentJobDB job,
+        CancellationToken ct)
+        => ToResponseAsync(job, ct);
+
     // ═══════════════════════════════════════════════════════════════
     // Execution
     // ═══════════════════════════════════════════════════════════════
 
-    private async Task ExecuteJobAsync(AgentJobDB job, CancellationToken ct)
-    {
-        using var executionScope = BeginExecutionScope(job.Id);
-
-        ApplyLifecycleDecision(job, lifecycle.BeginExecution(DateTimeOffset.UtcNow));
-        await SaveChangesAndCacheLogsAsync(ct);
-
-        try
-        {
-            var execution = await DispatchExecutionAsync(job, ct);
-            var completionDecision = lifecycle.CompleteExecution(
-                execution.ResultData,
-                execution.CompletionBehavior,
-                DateTimeOffset.UtcNow);
-            ApplyLifecycleDecision(job, completionDecision);
-
-            if (execution.CompletionBehavior == ModuleJobCompletionBehavior.RemainExecuting)
-            {
-                _logger.LogInformation(
-                    "Long-running module job {JobId} for action {ActionKey} started and remains Executing.",
-                    job.Id, job.ActionKey);
-            }
-        }
-        catch (Exception ex)
-        {
-            ApplyLifecycleDecision(
-                job,
-                lifecycle.FailExecution(
-                    ex.Message,
-                    ex.ToString(),
-                    DateTimeOffset.UtcNow));
-            _logger.LogError(ex,
-                "Agent job {JobId} for action {ActionKey} failed during execution.",
-                job.Id, job.ActionKey);
-        }
-
-        await SaveChangesAndCacheLogsAsync(ct);
-    }
-
-    private async Task<AgentJobExecutionOutcome> DispatchExecutionAsync(AgentJobDB job, CancellationToken ct)
+    private async Task<AgentJobExecutionDispatchResult> DispatchExecutionAsync(
+        AgentJobDB job,
+        Action<string, string> addLog,
+        CancellationToken ct)
     {
         var maxEnvelopeSize = SecureJsonOptions.GetMaxEnvelopeSize(_configuration);
         var plan = moduleExecutionPlanner.BuildPlan(
@@ -411,7 +400,7 @@ public sealed class AgentJobService(
             maxEnvelopeSize,
             moduleRegistry);
 
-        return await DispatchModuleExecutionAsync(job, plan, ct);
+        return await DispatchModuleExecutionAsync(job, plan, addLog, ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -423,9 +412,10 @@ public sealed class AgentJobService(
     /// <see cref="ISharpClawCoreModule.ExecuteToolAsync"/> inside a restricted
     /// <see cref="ModuleServiceScope"/> with a per-manifest timeout.
     /// </summary>
-    private async Task<AgentJobExecutionOutcome> DispatchModuleExecutionAsync(
+    private async Task<AgentJobExecutionDispatchResult> DispatchModuleExecutionAsync(
         AgentJobDB job,
         ModuleToolExecutionPlan plan,
+        Action<string, string> addLog,
         CancellationToken ct)
     {
         var result = await moduleJobToolExecutor.ExecuteAsync(
@@ -435,11 +425,11 @@ public sealed class AgentJobService(
                 moduleRegistry,
                 serviceScopeFactory.CreateScope,
                 ModuleHostServiceAccess.BlockedServiceTypes,
-                message => AddLog(job, message),
+                message => addLog(message, JobLogLevels.Info),
                 IsStreamingNotSupportedException),
             ct);
 
-        return new AgentJobExecutionOutcome(
+        return new AgentJobExecutionDispatchResult(
             result.ResultData,
             result.CompletionBehavior);
     }
@@ -708,10 +698,6 @@ public sealed class AgentJobService(
         foreach (var log in pendingLogs)
             chatCache.AppendJobLogIfCached(log.AgentJobId, ToLogResponse(log));
     }
-
-    private sealed record AgentJobExecutionOutcome(
-        string? ResultData,
-        ModuleJobCompletionBehavior CompletionBehavior);
 
     private async Task<AgentJobResponse> ToResponseAsync(AgentJobDB job, CancellationToken ct)
         => ToResponse(job, await GetJobLogsAsync(job, ct));

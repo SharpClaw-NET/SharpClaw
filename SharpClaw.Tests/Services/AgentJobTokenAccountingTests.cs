@@ -131,6 +131,7 @@ public sealed class AgentJobTokenAccountingTests
             configuration,
             NullLogger<ModuleEventDispatcher>.Instance);
         var jobAdministration = new AgentJobAdministrationEngine();
+        var jobLifecycle = new AgentJobLifecycleEngine();
         var defaultResources = new DefaultResourceEngine();
         var permissionEvaluator = new PermissionEvaluationEngine();
 
@@ -154,7 +155,8 @@ public sealed class AgentJobTokenAccountingTests
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             configuration,
             new ChatCache(configuration),
-            new AgentJobLifecycleEngine(),
+            new AgentJobRuntimeEngine(jobLifecycle, jobAdministration),
+            jobLifecycle,
             jobAdministration,
             new AgentJobDefaultResourceResolver(
                 jobAdministration,
@@ -185,6 +187,7 @@ public sealed class AgentJobTokenAccountingTests
         services.AddSingleton<PermissionDelegateEvaluationEngine>();
         services.AddSingleton<AgentJobLifecycleEngine>();
         services.AddSingleton<AgentJobAdministrationEngine>();
+        services.AddSingleton<AgentJobRuntimeEngine>();
         services.AddSingleton<DefaultResourceEngine>();
         services.AddSingleton<AgentJobDefaultResourceResolver>();
         services.AddSingleton<ModuleEventDispatcher>(sp =>
