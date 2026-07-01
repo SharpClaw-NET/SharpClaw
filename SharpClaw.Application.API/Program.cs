@@ -383,6 +383,7 @@ try
     builder.Services.AddSingleton<ToolAwarenessAdministrationEngine>();
 
     builder.Services.AddScoped<EfProviderModelAdministrationHost>();
+    builder.Services.AddScoped<EfProviderCostHost>();
     builder.Services.AddScoped<ProviderService>();
     builder.Services.AddScoped<ProviderCostService>();
     builder.Services.AddScoped<ModelService>();

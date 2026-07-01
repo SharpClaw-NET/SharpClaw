@@ -192,6 +192,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<DefaultResourceSetService>();
         services.AddScoped<ProviderCostService>();
         services.AddScoped<EfProviderModelAdministrationHost>();
+        services.AddScoped<EfProviderCostHost>();
         services.AddScoped<ProviderService>();
         services.AddScoped<EfRoleAdministrationHost>();
         services.AddScoped<RoleService>();
