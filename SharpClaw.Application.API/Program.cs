@@ -378,6 +378,7 @@ try
     builder.Services.AddSingleton<ChatNativeJobToolExecutor>();
     builder.Services.AddSingleton<ChatInlineToolExecutor>();
     builder.Services.AddSingleton<ChatNativeToolLoopEngine>();
+    builder.Services.AddSingleton<ChatProviderExecutionWorkflowEngine>();
     builder.Services.AddSingleton<ModuleJobToolExecutor>();
     builder.Services.AddSingleton<TaskPreflightEngine>();
     builder.Services.AddSingleton<TaskAdministrationWorkflowEngine>();

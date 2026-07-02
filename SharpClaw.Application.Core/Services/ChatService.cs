@@ -1,7 +1,6 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
 using System.Text;
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -51,6 +50,7 @@ public sealed class ChatService(
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
     ChatNativeToolLoopEngine chatNativeToolLoop,
+    ChatProviderExecutionWorkflowEngine chatProviderExecution,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -73,6 +73,7 @@ public sealed class ChatService(
     private readonly HeaderTagProcessor _headerTagProcessor = headerTagProcessor;
     private readonly ChatHeaderWorkflowEngine _chatHeaderWorkflow = chatHeaderWorkflow;
     private readonly ChatToolWorkflowEngine _chatTools = chatTools;
+    private readonly ChatProviderExecutionWorkflowEngine _chatProviderExecution = chatProviderExecution;
     private readonly ChatHeaderGrantFormatter _headerGrantFormatter = headerGrantFormatter;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
@@ -196,15 +197,30 @@ public sealed class ChatService(
             }
 
             var providerTiming = Stopwatch.StartNew();
-            var loopResult = enableTools
-                ? await RunNativeToolLoopAsync(
-                    client, httpClient, apiKey, model.Name, systemPrompt,
-                    history, agent.Id, channelId, modelCapabilityTags, maxTokens, providerParams, completionParams, approvalCallback, ct,
-                    taskContext: request.TaskContext, toolAwareness: toolAwareness, threadId: threadId,
-                    timingRequestId: timingRequestId, totalTiming: totalTiming)
-                : await RunPlainCompletionAsync(
-                    client, httpClient, apiKey, model.Name, systemPrompt,
-                    history, maxTokens, providerParams, completionParams, ct);
+            var loopResult = await _chatProviderExecution.RunBufferedAsync(
+                new ChatBufferedProviderExecutionRequest(
+                    client,
+                    httpClient,
+                    apiKey,
+                    model.Name,
+                    systemPrompt,
+                    history,
+                    agent.Id,
+                    channelId,
+                    modelCapabilityTags,
+                    maxTokens,
+                    providerParams,
+                    completionParams,
+                    enableTools,
+                    new ChatServiceNativeToolLoopHost(this),
+                    ct,
+                    approvalCallback,
+                    request.TaskContext,
+                    toolAwareness,
+                    threadId,
+                    timingRequestId,
+                    () => totalTiming.ElapsedMilliseconds,
+                    MaxToolCallRounds));
             providerTiming.Stop();
 
             if (logTiming)
@@ -815,101 +831,6 @@ public sealed class ChatService(
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
-    /// Uses native provider function calling. The provider returns structured
-    /// tool calls that are dispatched through the job pipeline, with results
-    /// fed back as <c>tool</c>-role messages.
-    /// </summary>
-    private async Task<ToolLoopResult> RunNativeToolLoopAsync(
-        IProviderApiClient client,
-        HttpClient httpClient,
-        string apiKey,
-        string modelName,
-        string? systemPrompt,
-        IReadOnlyList<ChatCompletionMessage> dbHistory,
-        Guid agentId,
-        Guid channelId,
-        IReadOnlySet<string> modelCapabilityTags,
-        int? maxCompletionTokens,
-        Dictionary<string, JsonElement>? providerParameters,
-        CompletionParameters? completionParameters,
-        Func<AgentJobResponse, CancellationToken, Task<bool>>? approvalCallback,
-        CancellationToken ct,
-        TaskChatContext? taskContext = null,
-        Dictionary<string, bool>? toolAwareness = null,
-        Guid? threadId = null,
-        string? timingRequestId = null,
-        Stopwatch? totalTiming = null)
-    {
-        var effectiveTools = await _chatTools.GetEffectiveToolsAsync(
-            new ChatEffectiveToolRequest(
-                taskContext,
-                toolAwareness,
-                agentId),
-            ct);
-
-        var result = await chatNativeToolLoop.RunAsync(
-            new ChatNativeToolLoopRequest(
-                client,
-                httpClient,
-                apiKey,
-                modelName,
-                systemPrompt,
-                dbHistory,
-                agentId,
-                channelId,
-                modelCapabilityTags,
-                maxCompletionTokens,
-                providerParameters,
-                completionParameters,
-                effectiveTools,
-                new ChatServiceNativeToolLoopHost(this),
-                ct,
-                approvalCallback,
-                taskContext,
-                toolAwareness,
-                threadId,
-                timingRequestId,
-                () => totalTiming?.ElapsedMilliseconds,
-                MaxToolCallRounds));
-
-        return new ToolLoopResult(
-            result.AssistantContent,
-            result.JobResults is List<AgentJobResponse> list
-                ? list
-                : [.. result.JobResults],
-            result.TotalPromptTokens,
-            result.TotalCompletionTokens,
-            result.ProviderMetadataJson);
-    }
-    /// <summary>
-    /// Simple single-call completion for providers without native tool support
-    /// or when tools are explicitly disabled.
-    /// </summary>
-    private static async Task<ToolLoopResult> RunPlainCompletionAsync(
-        IProviderApiClient client,
-        HttpClient httpClient,
-        string apiKey,
-        string modelName,
-        string systemPrompt,
-        List<ChatCompletionMessage> history,
-        int? maxCompletionTokens,
-        Dictionary<string, JsonElement>? providerParameters,
-        CompletionParameters? completionParameters,
-        CancellationToken ct)
-    {
-        var result = await client.ChatCompletionAsync(
-            httpClient, apiKey, modelName, systemPrompt, history,
-            maxCompletionTokens, providerParameters, completionParameters, ct);
-
-        return new ToolLoopResult(
-            result.Content ?? "",
-            [],
-            result.Usage?.PromptTokens ?? 0,
-            result.Usage?.CompletionTokens ?? 0,
-            result.ProviderMetadataJson);
-    }
-
-    /// <summary>
     /// Parses a native <see cref="ChatToolCall"/> into the internal
     /// <see cref="ParsedChatToolCall"/> representation. Returns <see langword="null"/>
     /// if the tool name is unrecognized or the arguments are malformed.
@@ -1265,10 +1186,4 @@ public sealed class ChatService(
                 completionTokens,
                 ct);
     }
-    private readonly record struct ToolLoopResult(
-        string AssistantContent,
-        List<AgentJobResponse> JobResults,
-        int TotalPromptTokens = 0,
-        int TotalCompletionTokens = 0,
-        string? ProviderMetadataJson = null);
 }
