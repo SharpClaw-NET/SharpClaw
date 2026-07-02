@@ -449,6 +449,7 @@ try
     builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
     builder.Services.AddScoped<IGlobalFlagEvaluator, GlobalFlagEvaluator>();
     builder.Services.AddScoped<EnvFileService>();
+    builder.Services.AddScoped<TaskStartupPreparationEngine>();
     builder.Services.AddScoped<TaskPlanExecutionEngine>();
     builder.Services.AddScoped<TaskOrchestrator>();
     builder.Services.AddScoped<IHostAgentBridge, HostAgentBridge>();

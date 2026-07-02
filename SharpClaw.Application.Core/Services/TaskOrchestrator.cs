@@ -1,5 +1,4 @@
 using System.Diagnostics;
-using System.Text.Json;
 using System.Threading.Channels;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -24,6 +23,7 @@ namespace SharpClaw.Application.Services;
 public sealed class TaskOrchestrator(
     IServiceScopeFactory scopeFactory,
     TaskRuntimeHost runtimeHost,
+    TaskStartupPreparationEngine startupPreparation,
     ILogger<TaskOrchestrator> logger)
 {
     private readonly TaskAdministrationEngine _tasks = new();
@@ -57,36 +57,28 @@ public sealed class TaskOrchestrator(
                     $"Task definition {instance.TaskDefinitionId} for instance {instanceId} not found.");
         }
 
-        if (instance.Status != TaskInstanceStatus.Queued)
-            throw new InvalidOperationException(
-                $"Task instance {instanceId} is {instance.Status}, expected Queued.");
+        var startup = startupPreparation.Prepare(
+            instance,
+            instance.TaskDefinition);
 
-        Dictionary<string, object?>? parameterValues = null;
-        if (instance.ParameterValuesJson is not null)
+        if (startup.Kind == TaskStartupPreparationKind.CompilationFailed)
         {
-            parameterValues = JsonSerializer.Deserialize<Dictionary<string, object?>>(
-                instance.ParameterValuesJson);
-        }
-
-        var compilationResult = TaskScriptEngine.ProcessScript(
-            instance.TaskDefinition.SourceText,
-            parameterValues);
-
-        if (compilationResult.Plan is null)
-        {
-            var errors = string.Join(
-                "; ",
-                compilationResult.Diagnostics.Select(d => d.Message));
+            var errors = startup.CompilationErrors
+                ?? throw new InvalidOperationException(
+                    "Core task startup preparation returned compilation failure without diagnostics.");
             _tasks.ApplyCompilationFailure(instance, errors);
             await startupDb.SaveChangesAsync(ct);
             logger.LogDebug(
                 "Task instance {InstanceId} compilation failed after {ElapsedMs}ms with {DiagnosticCount} diagnostic(s).",
                 instanceId,
                 startupTiming.ElapsedMilliseconds,
-                compilationResult.Diagnostics.Count);
+                startup.DiagnosticCount);
             return;
         }
 
+        var plan = startup.Plan
+            ?? throw new InvalidOperationException(
+                "Core task startup preparation did not return a compiled plan.");
         var runtime = runtimeHost.Register(instanceId, ct);
 
         if (!await startupTaskService.TryMarkInstanceRunningAsync(instanceId, ct))
@@ -108,13 +100,13 @@ public sealed class TaskOrchestrator(
             "Task instance {InstanceId} compiled and entered Running in {ElapsedMs}ms. TaskName={TaskName} StepCount={StepCount}",
             instanceId,
             startupTiming.ElapsedMilliseconds,
-            PathGuard.SanitizeForLog(compilationResult.Plan.TaskName),
-            compilationResult.Plan.ExecutionSteps.Count);
+            PathGuard.SanitizeForLog(plan.TaskName),
+            plan.ExecutionSteps.Count);
 
         _ = Task.Run(
             () => ExecutePlanAsync(
                 instanceId,
-                compilationResult.Plan,
+                plan,
                 runtime),
             CancellationToken.None);
     }

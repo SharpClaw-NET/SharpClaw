@@ -81,6 +81,68 @@ public sealed class TaskExecutionLifecycleTests
     }
 
     [Test]
+    public async Task StartAsync_CompilationFailure_SavesFailureWithoutRegisteringRuntime()
+    {
+        await using var host = TaskLifecycleHost.Create();
+        var orchestrator = host.Services.GetRequiredService<TaskOrchestrator>();
+        var registry = host.Services.GetRequiredService<TaskRuntimeRegistry>();
+        var definition = new TaskDefinitionDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "compile-failure",
+            SourceText = InvalidSource("compile-failure")
+        };
+        var instance = new TaskInstanceDB
+        {
+            Id = Guid.NewGuid(),
+            TaskDefinitionId = definition.Id,
+            Status = TaskInstanceStatus.Queued
+        };
+        host.Db.TaskDefinitions.Add(definition);
+        host.Db.TaskInstances.Add(instance);
+        await host.Db.SaveChangesAsync();
+
+        await orchestrator.StartAsync(instance.Id);
+
+        var failed = await host.WaitForStatusAsync(
+            instance.Id,
+            TaskInstanceStatus.Failed);
+        failed.ErrorMessage.Should().StartWith("Compilation failed: ");
+        failed.Logs.Select(l => l.Message).Should().NotContain("Task started.");
+        registry.ActiveCount.Should().Be(0);
+        orchestrator.GetOutputReader(instance.Id).Should().BeNull();
+    }
+
+    [Test]
+    public async Task StartAsync_WaitingTask_EmitsStartedEventAfterRunningTransition()
+    {
+        await using var host = TaskLifecycleHost.Create();
+        var svc = host.Services.GetRequiredService<TaskService>();
+        var orchestrator = host.Services.GetRequiredService<TaskOrchestrator>();
+        var definition = await svc.CreateDefinitionAsync(
+            new CreateTaskDefinitionRequest(WaitSource("start-event-order")));
+        var created = await svc.CreateInstanceAsync(
+            new StartTaskInstanceRequest(
+                definition.Id,
+                ChannelId: Guid.NewGuid()));
+
+        await orchestrator.StartAsync(created.Id);
+
+        var running = await host.WaitForStatusAsync(
+            created.Id,
+            TaskInstanceStatus.Running);
+        var reader = orchestrator.GetOutputReader(created.Id);
+        reader.Should().NotBeNull();
+        reader!.TryRead(out var started).Should().BeTrue();
+        started.Type.Should().Be(TaskOutputEventType.StatusChange);
+        started.Data.Should().Be("Running");
+        running.Logs.Select(l => l.Message).Should().Contain("Task started.");
+
+        await orchestrator.StopAsync(created.Id);
+        await host.WaitForStatusAsync(created.Id, TaskInstanceStatus.Cancelled);
+    }
+
+    [Test]
     public async Task StartAsync_EmitTask_PersistsLatestSnapshotAndOutputHistory()
     {
         await using var host = TaskLifecycleHost.Create();
@@ -313,6 +375,16 @@ public class WaitTask
     }
 }
 """;
+
+    private static string InvalidSource(string name) => $$"""
+[Task("{{name}}")]
+public class InvalidTask
+{
+    public async Task NotTheEntryPoint(CancellationToken ct)
+    {
+    }
+}
+""";
 }
 
 internal sealed class TaskLifecycleHost : IAsyncDisposable
@@ -351,6 +423,7 @@ internal sealed class TaskLifecycleHost : IAsyncDisposable
         services.AddScoped<EfTaskAdministrationHost>();
         services.AddScoped<TaskService>();
         services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
+        services.AddScoped<TaskStartupPreparationEngine>();
         services.AddScoped<TaskPlanExecutionEngine>();
         services.AddScoped<TaskOrchestrator>();
         services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
