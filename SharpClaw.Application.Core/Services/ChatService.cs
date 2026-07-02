@@ -28,7 +28,6 @@ using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Tasks.Runtime;
 
 namespace SharpClaw.Application.Services;
 
@@ -48,7 +47,7 @@ public sealed class ChatService(
     ChatRequestWorkflowEngine chatWorkflow,
     ChatQueryWorkflowEngine chatQueries,
     EfChatQueryHost chatQueryHost,
-    ChatToolSelectionEngine chatToolSelection,
+    ChatToolWorkflowEngine chatTools,
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
     ChatNativeToolLoopEngine chatNativeToolLoop,
@@ -73,6 +72,7 @@ public sealed class ChatService(
     private readonly EfChatQueryHost _chatQueryHost = chatQueryHost;
     private readonly HeaderTagProcessor _headerTagProcessor = headerTagProcessor;
     private readonly ChatHeaderWorkflowEngine _chatHeaderWorkflow = chatHeaderWorkflow;
+    private readonly ChatToolWorkflowEngine _chatTools = chatTools;
     private readonly ChatHeaderGrantFormatter _headerGrantFormatter = headerGrantFormatter;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
@@ -503,7 +503,12 @@ public sealed class ChatService(
         var providerParams = plan.ProviderParameters;
         var toolAwareness = plan.ToolAwareness;
         var effectiveTools = plan.EnableTools
-            ? await GetEffectiveToolsAsync(request.TaskContext, toolAwareness, agent.Id, ct)
+            ? await _chatTools.GetEffectiveToolsAsync(
+                new ChatEffectiveToolRequest(
+                    request.TaskContext,
+                    toolAwareness,
+                    agent.Id),
+                ct)
             : [];
 
         if (logTiming)
@@ -724,89 +729,6 @@ public sealed class ChatService(
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
-    /// Returns the effective tool list for a chat call.  When a task context is
-    /// present, task-scoped tools (shared data, output, custom hooks) are appended.
-    /// The tool-awareness filter is applied last so it can suppress any tool by name.
-    /// </summary>
-    private async Task<IReadOnlyList<ChatToolDefinition>> GetEffectiveToolsAsync(
-        TaskChatContext? taskContext,
-        Dictionary<string, bool>? toolAwareness = null,
-        Guid? agentId = null,
-        CancellationToken ct = default)
-    {
-        if (taskContext is null && agentId.HasValue)
-        {
-            return await _chatCache.GetOrCreateAsync(
-                ChatCache.KeyEffectiveTools(
-                    agentId.Value,
-                    chatToolSelection.BuildAwarenessFingerprint(toolAwareness)),
-                async _ => (IReadOnlyList<ChatToolDefinition>?)
-                    await BuildEffectiveToolsAsync(null, toolAwareness),
-                chatToolSelection.EstimateToolDefinitions,
-                ct)
-                ?? [];
-        }
-
-        return await BuildEffectiveToolsAsync(taskContext, toolAwareness);
-    }
-
-    private Task<IReadOnlyList<ChatToolDefinition>> BuildEffectiveToolsAsync(
-        TaskChatContext? taskContext,
-        Dictionary<string, bool>? toolAwareness)
-    {
-        var baseTools = new List<ChatToolDefinition>(moduleRegistry.GetAllToolDefinitions());
-
-        // In-flight task-context tools (shared data, output, custom hooks)
-        if (taskContext is not null)
-        {
-            var store = TaskSharedData.Get(taskContext.InstanceId);
-            if (store is not null)
-                baseTools.AddRange(store.GetToolDefinitions());
-        }
-
-        return Task.FromResult(
-            chatToolSelection.ApplyAwareness(baseTools, toolAwareness));
-    }
-
-    /// <summary>
-    /// Try to handle a native tool call as a task-specific tool.
-    /// <para>
-    /// Handles in-flight task-context tools (shared data, output, custom hooks)
-    /// when <paramref name="taskContext"/> is present.
-    /// </para>
-    /// Returns <c>true</c> and sets <paramref name="result"/> if handled.
-    /// </summary>
-    private async Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
-        ChatToolCall toolCall,
-        TaskChatContext? taskContext,
-        CancellationToken ct)
-    {
-        if (taskContext is not null)
-        {
-            var store = TaskSharedData.Get(taskContext.InstanceId);
-            if (store is not null)
-            {
-                try
-                {
-                    JsonElement? args = null;
-                    if (!string.IsNullOrEmpty(toolCall.ArgumentsJson))
-                        args = JsonDocument.Parse(toolCall.ArgumentsJson).RootElement;
-
-                    var handled = await store.TryInvokeToolAsync(toolCall.Name, args, ct);
-                    if (handled.Handled)
-                        return handled;
-                }
-                catch (Exception ex)
-                {
-                    return (true, $"Error handling task tool '{toolCall.Name}': {ex.Message}");
-                }
-            }
-        }
-
-        return (false, null);
-    }
-
-    /// <summary>
     /// Dispatches an inline module tool call.  Resolves the owning module
     /// from <see cref="ModuleRegistry"/>, creates a restricted
     /// <see cref="ModuleServiceScope"/>, and calls
@@ -918,10 +840,11 @@ public sealed class ChatService(
         string? timingRequestId = null,
         Stopwatch? totalTiming = null)
     {
-        var effectiveTools = await GetEffectiveToolsAsync(
-            taskContext,
-            toolAwareness,
-            agentId,
+        var effectiveTools = await _chatTools.GetEffectiveToolsAsync(
+            new ChatEffectiveToolRequest(
+                taskContext,
+                toolAwareness,
+                agentId),
             ct);
 
         var result = await chatNativeToolLoop.RunAsync(
@@ -1294,7 +1217,10 @@ public sealed class ChatService(
             ChatToolCall toolCall,
             TaskChatContext? taskContext,
             CancellationToken ct) =>
-            service.TryHandleTaskToolAsync(toolCall, taskContext, ct);
+            service._chatTools.TryHandleTaskToolAsync(
+                toolCall,
+                taskContext,
+                ct);
 
         public Task<string> ExecuteInlineToolAsync(
             ChatToolCall toolCall,
