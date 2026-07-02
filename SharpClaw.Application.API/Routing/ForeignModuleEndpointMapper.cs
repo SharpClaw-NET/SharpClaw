@@ -9,6 +9,7 @@ using System.Net.WebSockets;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Modules.Foreign;
 
 namespace SharpClaw.Application.API.Routing;
 

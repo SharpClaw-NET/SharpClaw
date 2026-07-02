@@ -11,6 +11,7 @@ using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Core.Modules;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Utils.Security;
 using SharpClaw.Core.Modules.Foreign;
