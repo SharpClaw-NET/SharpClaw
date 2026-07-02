@@ -621,7 +621,7 @@ public sealed class HostModuleLifecycleManager(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var modules = scope.ServiceProvider.GetRequiredService<ModuleService>();
-        return ToContractResponse(await modules.LoadExternalAsync(moduleDir, hostServices, ct));
+        return await modules.LoadExternalAsync(moduleDir, hostServices, ct);
     }
 
     public async Task UnloadExternalAsync(string moduleId, CancellationToken ct = default)
@@ -636,18 +636,6 @@ public sealed class HostModuleLifecycleManager(
     {
         await using var scope = scopeFactory.CreateAsyncScope();
         var modules = scope.ServiceProvider.GetRequiredService<ModuleService>();
-        return ToContractResponse(await modules.ReloadExternalAsync(moduleId, hostServices, ct));
+        return await modules.ReloadExternalAsync(moduleId, hostServices, ct);
     }
-
-    private static Contracts.Modules.ModuleStateResponse ToContractResponse(
-        Application.Services.ModuleStateResponse response) => new(
-            response.ModuleId,
-            response.DisplayName,
-            response.ToolPrefix,
-            response.Enabled,
-            response.Version,
-            response.Registered,
-            response.IsExternal,
-            response.CreatedAt,
-            response.UpdatedAt);
 }

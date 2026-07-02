@@ -51,6 +51,8 @@ public sealed class ModuleService(
     IConfiguration? configuration = null,
     SharpClawInstancePaths? instancePaths = null)
 {
+    private static readonly ModuleLifecycleProjectionEngine ModuleProjection = new();
+
     // ═══════════════════════════════════════════════════════════════
     // Queries
     // ═══════════════════════════════════════════════════════════════
@@ -126,38 +128,10 @@ public sealed class ModuleService(
             isExternal = true;
         }
 
-        var enabled = isExternal || (state?.Enabled ?? false);
         var toolCount = module.GetToolDefinitions().Count;
         var inlineToolCount = module.GetInlineToolDefinitions().Count;
-        var protocolModule = module as IForeignModuleProtocolContractModule;
-        var exportedContracts = module.ExportedContracts
-            .Select(e => e.ContractName)
-            .Concat(protocolModule?.ExportedProtocolContracts.Select(e => e.ContractName)
-                ?? Enumerable.Empty<string>())
-            .ToArray();
-        var requiredContracts = module.RequiredContracts
-            .Select(r => r.ContractName)
-            .Concat(protocolModule?.RequiredProtocolContracts.Select(r => r.ContractName)
-                ?? Enumerable.Empty<string>())
-            .ToArray();
-
-        var allSatisfied = !module.RequiredContracts
-            .Where(r => !r.Optional)
-            .Any(r => registry.ResolveContract(r.ContractName) is null)
-            && !(protocolModule?.RequiredProtocolContracts
-                .Where(r => !r.Optional)
-                .Any(r => registry.ResolveProtocolContract(r.ContractName) is null) ?? false);
-
-        return new ModuleDetailResponse(
-            ModuleId: module.Id,
-            DisplayName: module.DisplayName,
-            ToolPrefix: module.ToolPrefix,
-            Enabled: enabled,
-            Version: manifest?.Version ?? state?.Version,
-            Registered: isExternal || state is not null,
-            IsExternal: isExternal,
-            CreatedAt: state?.CreatedAt,
-            UpdatedAt: state?.UpdatedAt,
+        return ModuleProjection.ProjectDetail(new ModuleLifecycleDetailFacts(
+            State: ToStateFacts(module, state, manifest, isExternal),
             Author: manifest?.Author,
             Description: manifest?.Description,
             License: manifest?.License,
@@ -165,9 +139,8 @@ public sealed class ModuleService(
             ExecutionTimeoutSeconds: manifest?.ExecutionTimeoutSeconds ?? 60,
             ToolCount: toolCount,
             InlineToolCount: inlineToolCount,
-            ExportedContracts: exportedContracts,
-            RequiredContracts: requiredContracts,
-            AllRequirementsSatisfied: allSatisfied);
+            ExportedContractNames: CollectExportedContractNames(module),
+            RequiredContracts: CollectRequiredContractFacts(module, registry)));
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1536,51 +1509,53 @@ public sealed class ModuleService(
 
     private static ModuleStateResponse ToResponse(
         ISharpClawCoreModule module, ModuleStateDB? state, ModuleManifest? manifest,
-        bool isExternal = false)
-    {
-        return new ModuleStateResponse(
-            ModuleId: module.Id,
-            DisplayName: module.DisplayName,
-            ToolPrefix: module.ToolPrefix,
-            Enabled: isExternal || (state?.Enabled ?? false),
-            Version: manifest?.Version ?? state?.Version,
-            Registered: isExternal || state is not null,
-            IsExternal: isExternal,
+        bool isExternal = false) =>
+        ModuleProjection.ProjectState(ToStateFacts(module, state, manifest, isExternal));
+
+    private static ModuleLifecycleStateFacts ToStateFacts(
+        ISharpClawCoreModule module,
+        ModuleStateDB? state,
+        ModuleManifest? manifest,
+        bool isExternal) =>
+        new(
+            module.Id,
+            module.DisplayName,
+            module.ToolPrefix,
+            isExternal,
+            HasPersistedState: state is not null,
+            StateEnabled: state?.Enabled,
+            StateVersion: state?.Version,
             CreatedAt: state?.CreatedAt,
-            UpdatedAt: state?.UpdatedAt);
+            UpdatedAt: state?.UpdatedAt,
+            ManifestVersion: manifest?.Version);
+
+    private static IReadOnlyList<string> CollectExportedContractNames(
+        ISharpClawCoreModule module)
+    {
+        var protocolModule = module as IForeignModuleProtocolContractModule;
+        return [.. module.ExportedContracts
+            .Select(e => e.ContractName)
+            .Concat(protocolModule?.ExportedProtocolContracts.Select(e => e.ContractName)
+                ?? Enumerable.Empty<string>())];
+    }
+
+    private static IReadOnlyList<ModuleLifecycleRequirementFacts> CollectRequiredContractFacts(
+        ISharpClawCoreModule module,
+        ModuleRegistry moduleRegistry)
+    {
+        var facts = module.RequiredContracts
+            .Select(requirement => new ModuleLifecycleRequirementFacts(
+                requirement.ContractName,
+                requirement.Optional,
+                moduleRegistry.ResolveContract(requirement.ContractName) is not null));
+
+        if (module is not IForeignModuleProtocolContractModule protocolModule)
+            return [.. facts];
+
+        return [.. facts.Concat(protocolModule.RequiredProtocolContracts
+            .Select(requirement => new ModuleLifecycleRequirementFacts(
+                requirement.ContractName,
+                requirement.Optional,
+                moduleRegistry.ResolveProtocolContract(requirement.ContractName) is not null)))];
     }
 }
-
-/// <summary>Module state as returned by the API.</summary>
-public sealed record ModuleStateResponse(
-    string ModuleId,
-    string DisplayName,
-    string ToolPrefix,
-    bool Enabled,
-    string? Version,
-    bool Registered,
-    bool IsExternal,
-    DateTimeOffset? CreatedAt,
-    DateTimeOffset? UpdatedAt);
-
-/// <summary>Extended module detail as returned by <c>GET /modules/{id}</c>.</summary>
-public sealed record ModuleDetailResponse(
-    string ModuleId,
-    string DisplayName,
-    string ToolPrefix,
-    bool Enabled,
-    string? Version,
-    bool Registered,
-    bool IsExternal,
-    DateTimeOffset? CreatedAt,
-    DateTimeOffset? UpdatedAt,
-    string? Author,
-    string? Description,
-    string? License,
-    string[]? Platforms,
-    int ExecutionTimeoutSeconds,
-    int ToolCount,
-    int InlineToolCount,
-    string[] ExportedContracts,
-    string[] RequiredContracts,
-    bool AllRequirementsSatisfied);
