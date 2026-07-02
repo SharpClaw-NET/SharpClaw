@@ -3,6 +3,7 @@ using System.Text.Json;
 using SharpClaw.Application.Core.Modules;
 using SharpClaw.Application.Core.Modules.Sidecar;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Tests.Modules;
 

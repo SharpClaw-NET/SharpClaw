@@ -1,4 +1,5 @@
 using System.Text.Json;
+using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Tests.Core;
 
@@ -138,5 +139,60 @@ public sealed class ModuleRuntimeProtocolCoreTests
         descriptor.StepKey.Should().Be("module.step");
         descriptor.Body.Should().ContainSingle()
             .Which.StepKey.Should().Be("module.child");
+    }
+
+    [Test]
+    public void SidecarReadinessEvaluator_ComeFromCoreAndEvaluatesPreCollectedFacts()
+    {
+        typeof(ModuleSidecarReadinessReport).Assembly.GetName().Name
+            .Should().Be("SharpClaw.Core");
+        typeof(SidecarReadinessEvaluator).Assembly.GetName().Name
+            .Should().Be("SharpClaw.Core");
+
+        var facts = new ModuleSidecarReadinessFacts(
+            "sample",
+            "Sample",
+            "sam",
+            "Sample.Module",
+            "Sample.Assembly",
+            new ModuleContributionInventory(
+                ToolCount: 1,
+                InlineToolCount: 0,
+                ResourceTypeDescriptorCount: 0,
+                GlobalFlagDescriptorCount: 0,
+                HeaderTagCount: 0,
+                UiContributionCount: 0,
+                FrontendContributionCount: 0,
+                CliCommandCount: 0,
+                ExportedClrContractCount: 0,
+                RequiredClrContractCount: 1,
+                RequiredNonOptionalClrContractCount: 1,
+                RequiredOptionalClrContractCount: 0,
+                ExportedProtocolContractCount: 0,
+                RequiredProtocolContractCount: 0,
+                MapsEndpoints: false,
+                OverridesInitialize: false,
+                OverridesShutdown: false,
+                OverridesSeedData: false,
+                OverridesHealthCheck: false,
+                OverridesStreamingTools: false,
+                OverridesJobCompletionBehavior: false,
+                IsTaskParserAware: false),
+            new ModuleServiceInventory(
+                Registrations: [],
+                ModuleStorageRegistrationTypes: [],
+                ProviderPluginRegistrations: [],
+                TaskRuntimeServiceRegistrations: [],
+                EventSinkRegistrations: [],
+                FactoryBackedServiceRegistrations: []));
+
+        var report = new SidecarReadinessEvaluator().Evaluate(facts);
+
+        report.Findings.Should()
+            .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
+                                && finding.Key == "tools.job")
+            .And
+            .Contain(finding => finding.Kind == SidecarReadinessFindingKind.RequiresClrContractBridge
+                                && finding.Key == "contracts.clr.requirements");
     }
 }

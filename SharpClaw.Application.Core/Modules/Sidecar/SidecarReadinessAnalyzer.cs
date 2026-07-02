@@ -1,10 +1,9 @@
 using Microsoft.Extensions.DependencyInjection;
-
-using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Application.Core.Modules.Sidecar;
 
@@ -26,13 +25,27 @@ public sealed class SidecarReadinessAnalyzer
         typeof(ISharpClawEventSink)
     ];
 
+    private readonly SidecarReadinessEvaluator _evaluator = new();
+
     public ModuleSidecarReadinessReport Analyze(ISharpClawCoreModule module)
     {
         ArgumentNullException.ThrowIfNull(module);
 
+        return _evaluator.Evaluate(CollectFacts(module));
+    }
+
+    public IReadOnlyList<ModuleSidecarReadinessReport> AnalyzeAll(IEnumerable<ISharpClawCoreModule> modules) =>
+        _evaluator.EvaluateAll(modules.Select(CollectFacts));
+
+    private static ModuleSidecarReadinessFacts CollectFacts(ISharpClawCoreModule module)
+    {
         var moduleType = module.GetType();
         var protocolModule = module as IForeignModuleProtocolContractModule;
         var runtimeModule = module as ISharpClawRuntimeModule;
+        var requiredClrContracts = module.RequiredContracts;
+        var requiredNonOptionalClrContracts = requiredClrContracts.Count(requirement => !requirement.Optional);
+        var requiredOptionalClrContracts = requiredClrContracts.Count - requiredNonOptionalClrContracts;
+
         var contributionInventory = new ModuleContributionInventory(
             ToolCount: module.GetToolDefinitions().Count,
             InlineToolCount: module.GetInlineToolDefinitions().Count,
@@ -44,6 +57,8 @@ public sealed class SidecarReadinessAnalyzer
             CliCommandCount: runtimeModule?.GetCliCommands()?.Count ?? 0,
             ExportedClrContractCount: module.ExportedContracts.Count,
             RequiredClrContractCount: module.RequiredContracts.Count,
+            RequiredNonOptionalClrContractCount: requiredNonOptionalClrContracts,
+            RequiredOptionalClrContractCount: requiredOptionalClrContracts,
             ExportedProtocolContractCount: protocolModule?.ExportedProtocolContracts.Count ?? 0,
             RequiredProtocolContractCount: protocolModule?.RequiredProtocolContracts.Count ?? 0,
             MapsEndpoints: runtimeModule is not null
@@ -56,22 +71,15 @@ public sealed class SidecarReadinessAnalyzer
             OverridesJobCompletionBehavior: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.GetJobCompletionBehavior)),
             IsTaskParserAware: module is ITaskParserAware);
 
-        var serviceInventory = InspectServices(module);
-        var findings = BuildFindings(contributionInventory, serviceInventory, module);
-
-        return new ModuleSidecarReadinessReport(
+        return new ModuleSidecarReadinessFacts(
             module.Id,
             module.DisplayName,
             module.ToolPrefix,
             moduleType.FullName ?? moduleType.Name,
             moduleType.Assembly.GetName().Name ?? "<unknown>",
             contributionInventory,
-            serviceInventory,
-            findings);
+            InspectServices(module));
     }
-
-    public IReadOnlyList<ModuleSidecarReadinessReport> AnalyzeAll(IEnumerable<ISharpClawCoreModule> modules) =>
-        [.. modules.Select(Analyze).OrderBy(report => report.ModuleId, StringComparer.Ordinal)];
 
     private static ModuleServiceInventory InspectServices(ISharpClawCoreModule module)
     {
@@ -84,7 +92,7 @@ public sealed class SidecarReadinessAnalyzer
         }
         catch (Exception ex)
         {
-            configureError = $"{ex.GetType().Name}: {ex.Message}";
+            configureError = $"{module.Id}: {ex.GetType().Name}: {ex.Message}";
         }
 
         var registrations = services
@@ -142,112 +150,6 @@ public sealed class SidecarReadinessAnalyzer
             eventSinks,
             factories,
             configureError);
-    }
-
-    private static IReadOnlyList<SidecarReadinessFinding> BuildFindings(
-        ModuleContributionInventory contributions,
-        ModuleServiceInventory services,
-        ISharpClawCoreModule module)
-    {
-        var findings = new List<SidecarReadinessFinding>();
-
-        AddCovered(findings, contributions.ToolCount, "tools.job", "Job-pipeline tools are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.InlineToolCount, "tools.inline", "Inline tools are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.MapsEndpoints ? 1 : 0, "endpoints.http", "HTTP endpoint proxying is covered by the current foreign protocol.");
-        AddCovered(findings, contributions.OverridesHealthCheck ? 1 : 0, "health", "Health checks are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.OverridesInitialize ? 1 : 0, "lifecycle.initialize", "Initialize is covered by the current foreign protocol.");
-        AddCovered(findings, contributions.OverridesShutdown ? 1 : 0, "lifecycle.shutdown", "Shutdown is covered by the current foreign protocol.");
-        AddCovered(findings, contributions.ExportedProtocolContractCount, "contracts.protocol.exports", "Protocol contract exports are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.RequiredProtocolContractCount, "contracts.protocol.requirements", "Protocol contract requirements are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.ResourceTypeDescriptorCount, "module.resource_descriptors", "Resource descriptors, id lookup, and lookup items are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.GlobalFlagDescriptorCount, "module.global_flags", "Global flag descriptors are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.HeaderTagCount, "module.header_tags", "Header tag discovery and invocation are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.UiContributionCount, "module.ui_contributions", "UI contribution descriptors are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.FrontendContributionCount, "module.frontend_contributions", "Frontend contribution descriptors are covered by the current foreign protocol.");
-        AddCovered(findings, contributions.CliCommandCount, "module.cli_commands", "CLI command discovery and invocation are covered by the current foreign protocol.");
-
-        if (contributions.ExportedClrContractCount > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresClrContractBridge,
-                "contracts.clr.exports",
-                $"{contributions.ExportedClrContractCount} CLR contract export(s) need protocol contract equivalents."));
-
-        var requiredClrContracts = module.RequiredContracts;
-        var requiredNonOptionalClrContracts = requiredClrContracts.Count(requirement => !requirement.Optional);
-        var requiredOptionalClrContracts = requiredClrContracts.Count - requiredNonOptionalClrContracts;
-
-        if (requiredNonOptionalClrContracts > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresClrContractBridge,
-                "contracts.clr.requirements",
-                $"{requiredNonOptionalClrContracts} non-optional CLR contract requirement(s) need protocol contract equivalents."));
-
-        AddCovered(
-            findings,
-            requiredOptionalClrContracts,
-            "contracts.clr.optional_requirements",
-            "Optional CLR contract requirements do not block sidecar loading.");
-
-        AddCovered(
-            findings,
-            contributions.IsTaskParserAware ? 1 : 0,
-            "tasks.parser_extension",
-            "Task parser extensions are covered by the current foreign protocol.");
-
-        AddCovered(
-            findings,
-            services.TaskRuntimeServiceRegistrations.Count,
-            "tasks.runtime_services",
-            "Task runtime services are covered by the current foreign protocol: "
-            + string.Join(", ", services.TaskRuntimeServiceRegistrations));
-
-        AddCovered(
-            findings,
-            services.EventSinkRegistrations.Count,
-            "events.sinks",
-            "Host event sinks are covered by the current foreign protocol: "
-            + string.Join(", ", services.EventSinkRegistrations));
-
-        AddCovered(
-            findings,
-            services.ProviderPluginRegistrations.Count,
-            "providers.plugins",
-            "Provider plugin discovery and invocation are covered by the current foreign protocol.");
-
-        if (services.ModuleDbContextTypes.Count > 0)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresStoragePlan,
-                "storage.module_dbcontexts",
-                "Module-owned EF contexts need a host-backed storage capability or explicit data migration: "
-                + string.Join(", ", services.ModuleDbContextTypes)));
-
-        AddCovered(findings, contributions.OverridesJobCompletionBehavior ? 1 : 0, "jobs.completion_behavior", "Dynamic job completion behavior is covered by the current foreign protocol.");
-
-        if (contributions.OverridesSeedData)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresManualReview,
-                "lifecycle.seed_data",
-                "SeedDataAsync needs a sidecar execution point with data-safety review."));
-
-        if (services.ConfigureServicesError is not null)
-            findings.Add(new(
-                SidecarReadinessFindingKind.RequiresManualReview,
-                "di.configure_services",
-                $"ConfigureServices inspection failed for module '{module.Id}': {services.ConfigureServicesError}"));
-
-        return [.. findings.OrderBy(finding => finding.Kind).ThenBy(finding => finding.Key, StringComparer.Ordinal)];
-    }
-
-    private static void AddCovered(
-        List<SidecarReadinessFinding> findings,
-        int count,
-        string key,
-        string detail)
-    {
-        if (count <= 0)
-            return;
-
-        findings.Add(new(SidecarReadinessFindingKind.CoveredByCurrentProtocol, key, detail));
     }
 
     private static bool DeclaresPublicInstanceMethod(Type type, string name) =>
