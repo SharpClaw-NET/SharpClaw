@@ -4,6 +4,7 @@ using SharpClaw.Application.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Jobs;
 using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.Core.Modules;
@@ -11,7 +12,9 @@ namespace SharpClaw.Application.Core.Modules;
 public sealed class HostAgentJobController(
     AgentJobService jobs,
     SharpClawDbContext db,
-    ChatCache chatCache) : IAgentJobController
+    ChatCache chatCache,
+    AgentJobAdministrationEngine jobAdministration,
+    AgentJobLifecycleEngine jobLifecycle) : IAgentJobController
 {
     public Task<AgentJobResponse> SubmitJobAsync(
         Guid channelId,
@@ -34,16 +37,12 @@ public sealed class HostAgentJobController(
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null) return;
 
-        var entry = new AgentJobLogEntryDB
-        {
-            AgentJobId = jobId,
-            Message = message,
-            Level = level,
-        };
-        job.LogEntries.Add(entry);
+        var entry = jobAdministration.AddLog(job, message, level);
 
         await db.SaveChangesAsync(ct);
-        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+        chatCache.AppendJobLogIfCached(
+            jobId,
+            jobAdministration.ToLogResponse(entry));
     }
 
     public async Task MarkJobFailedAsync(
@@ -53,21 +52,15 @@ public sealed class HostAgentJobController(
     {
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null) return;
-        if (job.Status.IsTerminal()) return;
 
-        job.Status = AgentJobStatus.Failed;
-        job.CompletedAt = DateTimeOffset.UtcNow;
-        job.ErrorLog = exception.ToString();
-        var entry = new AgentJobLogEntryDB
-        {
-            AgentJobId = jobId,
-            Message = $"Job failed: {exception.Message}",
-            Level = JobLogLevels.Error,
-        };
-        job.LogEntries.Add(entry);
-
-        await db.SaveChangesAsync(ct);
-        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+        await ApplyDecisionAsync(
+            job,
+            jobLifecycle.FailModuleCallback(
+                job.Status,
+                exception.Message,
+                exception.ToString(),
+                DateTimeOffset.UtcNow),
+            ct);
     }
 
     public async Task MarkJobCompletedAsync(
@@ -78,25 +71,15 @@ public sealed class HostAgentJobController(
     {
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null) return;
-        if (job.Status.IsTerminal()) return;
 
-        job.Status = AgentJobStatus.Completed;
-        job.CompletedAt = DateTimeOffset.UtcNow;
-        if (resultData is not null)
-            job.ResultData = resultData;
-
-        var entry = new AgentJobLogEntryDB
-        {
-            AgentJobId = jobId,
-            Message = string.IsNullOrWhiteSpace(message)
-                ? "Job completed by module."
-                : message,
-            Level = JobLogLevels.Info,
-        };
-        job.LogEntries.Add(entry);
-
-        await db.SaveChangesAsync(ct);
-        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+        await ApplyDecisionAsync(
+            job,
+            jobLifecycle.CompleteModuleCallback(
+                job.Status,
+                resultData,
+                message,
+                DateTimeOffset.UtcNow),
+            ct);
     }
 
     public async Task MarkJobCancelledAsync(
@@ -106,30 +89,21 @@ public sealed class HostAgentJobController(
     {
         var job = await db.AgentJobs.FirstOrDefaultAsync(j => j.Id == jobId, ct);
         if (job is null) return;
-        if (job.Status.IsTerminal()) return;
 
-        job.Status = AgentJobStatus.Cancelled;
-        job.CompletedAt = DateTimeOffset.UtcNow;
-        var entry = new AgentJobLogEntryDB
-        {
-            AgentJobId = jobId,
-            Message = string.IsNullOrWhiteSpace(message)
-                ? "Job cancelled by module."
-                : message,
-            Level = JobLogLevels.Warning,
-        };
-        job.LogEntries.Add(entry);
-
-        await db.SaveChangesAsync(ct);
-        chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+        await ApplyDecisionAsync(
+            job,
+            jobLifecycle.CancelModuleCallback(
+                job.Status,
+                message,
+                DateTimeOffset.UtcNow),
+            ct);
     }
 
     public async Task CancelStaleJobsByActionPrefixAsync(
         string actionKeyPrefix,
         CancellationToken ct = default)
     {
-        if (string.IsNullOrWhiteSpace(actionKeyPrefix))
-            throw new ArgumentException("Action key prefix is required.", nameof(actionKeyPrefix));
+        jobAdministration.EnsureModuleCallbackActionPrefix(actionKeyPrefix);
 
         var candidates = await db.AgentJobs
             .Where(j => (j.Status == AgentJobStatus.Executing || j.Status == AgentJobStatus.Queued)
@@ -137,32 +111,50 @@ public sealed class HostAgentJobController(
             .ToListAsync(ct);
 
         var stale = candidates
-            .Where(j => j.ActionKey!.StartsWith(actionKeyPrefix, StringComparison.OrdinalIgnoreCase))
+            .Where(j => jobAdministration.JobMatchesActionPrefix(j, actionKeyPrefix))
             .ToList();
 
         var cancelledLogs = new List<(Guid JobId, AgentJobLogEntryDB Entry)>(stale.Count);
         foreach (var job in stale)
         {
-            job.Status = AgentJobStatus.Cancelled;
-            job.CompletedAt = DateTimeOffset.UtcNow;
-            var entry = new AgentJobLogEntryDB
-            {
-                AgentJobId = job.Id,
-                Message = "Cancelled: stale from previous session.",
-                Level = JobLogLevels.Warning,
-            };
-            job.LogEntries.Add(entry);
-            cancelledLogs.Add((job.Id, entry));
+            var decision = jobLifecycle.CancelStaleFromPreviousSession(
+                job.Status,
+                DateTimeOffset.UtcNow);
+            if (!decision.HasChanges)
+                continue;
+
+            foreach (var entry in jobAdministration.ApplyLifecycleDecision(job, decision))
+                cancelledLogs.Add((job.Id, entry));
         }
 
-        if (stale.Count > 0)
+        if (cancelledLogs.Count > 0)
         {
             await db.SaveChangesAsync(ct);
             foreach (var (jobId, entry) in cancelledLogs)
-                chatCache.AppendJobLogIfCached(jobId, ToLogResponse(entry));
+            {
+                chatCache.AppendJobLogIfCached(
+                    jobId,
+                    jobAdministration.ToLogResponse(entry));
+            }
         }
     }
 
-    private static AgentJobLogResponse ToLogResponse(AgentJobLogEntryDB log)
-        => new(log.Message, log.Level, log.CreatedAt);
+    private async Task ApplyDecisionAsync(
+        AgentJobDB job,
+        AgentJobLifecycleDecision decision,
+        CancellationToken ct)
+    {
+        if (!decision.HasChanges)
+            return;
+
+        var logs = jobAdministration.ApplyLifecycleDecision(job, decision);
+        await db.SaveChangesAsync(ct);
+
+        foreach (var entry in logs)
+        {
+            chatCache.AppendJobLogIfCached(
+                job.Id,
+                jobAdministration.ToLogResponse(entry));
+        }
+    }
 }
