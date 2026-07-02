@@ -1,6 +1,5 @@
 ﻿using System.Diagnostics;
 using System.Runtime.CompilerServices;
-using System.Text;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
@@ -51,6 +50,7 @@ public sealed class ChatService(
     ChatInlineToolExecutor chatInlineToolExecutor,
     ChatNativeToolLoopEngine chatNativeToolLoop,
     ChatProviderExecutionWorkflowEngine chatProviderExecution,
+    ChatStreamingResponseEngine chatStreaming,
     ConversationTopologyEngine conversation,
     ILogger<ChatService> logger,
     IServiceScopeFactory serviceScopeFactory,
@@ -74,6 +74,7 @@ public sealed class ChatService(
     private readonly ChatHeaderWorkflowEngine _chatHeaderWorkflow = chatHeaderWorkflow;
     private readonly ChatToolWorkflowEngine _chatTools = chatTools;
     private readonly ChatProviderExecutionWorkflowEngine _chatProviderExecution = chatProviderExecution;
+    private readonly ChatStreamingResponseEngine _chatStreaming = chatStreaming;
     private readonly ChatHeaderGrantFormatter _headerGrantFormatter = headerGrantFormatter;
     private readonly IServiceProvider _serviceProvider = serviceProvider;
 
@@ -438,7 +439,7 @@ public sealed class ChatService(
         var streamCompleted = false;
         var userMessagePersisted = false;
         var assistantMessagePersisted = false;
-        var streamedContent = new StringBuilder();
+        var streamingState = new ChatStreamingResponseState();
 
         if (logTiming)
         {
@@ -532,7 +533,7 @@ public sealed class ChatService(
         }
 
         ChatNativeToolStreamingLoopResult? streamingResult = null;
-        await foreach (var loopEvent in _chatProviderExecution.StreamAsync(
+        var loopEvents = _chatProviderExecution.StreamAsync(
             new ChatStreamingProviderExecutionRequest(
                 client,
                 httpClient,
@@ -556,33 +557,27 @@ public sealed class ChatService(
                 timingRequestId,
                 () => totalTiming.ElapsedMilliseconds,
                 MaxToolCallRounds),
+            ct);
+
+        await foreach (var responseEvent in _chatStreaming.RunAsync(
+            loopEvents,
+            streamingState,
             ct))
         {
-            switch (loopEvent.Kind)
+            switch (responseEvent.Kind)
             {
-                case ChatNativeToolStreamingLoopEventKind.TextDelta:
-                    if (loopEvent.Text is { } textDelta)
-                    {
-                        streamedContent.Append(textDelta);
-                        yield return ChatStreamEvent.TextDelta(textDelta);
-                    }
+                case ChatStreamingResponseEventKind.StreamEvent:
+                    if (responseEvent.StreamEvent is not null)
+                        yield return responseEvent.StreamEvent;
                     break;
-                case ChatNativeToolStreamingLoopEventKind.BufferedText:
-                    if (loopEvent.Text is { } bufferedText)
-                        streamedContent.Append(bufferedText);
-                    break;
-                case ChatNativeToolStreamingLoopEventKind.StreamEvent:
-                    if (loopEvent.StreamEventValue is not null)
-                        yield return loopEvent.StreamEventValue;
-                    break;
-                case ChatNativeToolStreamingLoopEventKind.Completed:
-                    streamingResult = loopEvent.Result
+                case ChatStreamingResponseEventKind.Completed:
+                    streamingResult = responseEvent.Result
                         ?? throw new InvalidOperationException(
                             "Core streaming loop completed without a result.");
                     break;
                 default:
                     throw new InvalidOperationException(
-                        $"Unknown native chat streaming event kind '{loopEvent.Kind}'.");
+                        $"Unknown chat streaming response event kind '{responseEvent.Kind}'.");
             }
         }
 
@@ -644,20 +639,21 @@ public sealed class ChatService(
         } // try
         finally
         {
+            var partialContent = streamingState.PartialAssistantContent;
             if (!streamCompleted && logTiming)
             {
                 logger.LogDebug(
                     "Streaming chat request {RequestId} ended before completion after {ElapsedMs}ms. ChannelId={ChannelId} ThreadId={ThreadId} UserMessagePersisted={UserMessagePersisted} AssistantMessagePersisted={AssistantMessagePersisted} PartialChars={PartialChars} CancellationRequested={CancellationRequested}",
                     timingRequestId, totalTiming.ElapsedMilliseconds,
                     channelId, threadId, userMessagePersisted,
-                    assistantMessagePersisted, streamedContent.Length,
+                    assistantMessagePersisted, partialContent.Length,
                     ct.IsCancellationRequested);
             }
 
             if (!streamCompleted
                 && userMessagePersisted
                 && !assistantMessagePersisted
-                && streamedContent.Length > 0
+                && partialContent.Length > 0
                 && prepared is not null)
             {
                 var partial = await chatWorkflow.TryPersistPartialAssistantMessageAsync(
@@ -666,7 +662,7 @@ public sealed class ChatService(
                         threadId,
                         request,
                         agent,
-                        streamedContent.ToString(),
+                        partialContent,
                         TotalPromptTokens: null,
                         TotalCompletionTokens: null,
                         ProviderMetadataJson: null),
@@ -678,7 +674,7 @@ public sealed class ChatService(
                     logger.LogDebug(
                         "Persisted partial assistant message after interrupted stream. ChannelId={ChannelId} ThreadId={ThreadId} AssistantMessageId={AssistantMessageId} ContentChars={ContentChars}",
                         channelId, threadId, partial.Message!.Id,
-                        streamedContent.Length);
+                        partialContent.Length);
                 }
                 else if (!partial.Succeeded)
                 {

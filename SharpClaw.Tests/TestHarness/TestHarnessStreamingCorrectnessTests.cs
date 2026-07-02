@@ -223,6 +223,113 @@ public sealed class TestHarnessStreamingCorrectnessTests
         assistant.ProviderMetadataJson.Should().Be("""{"round":"final"}""");
     }
 
+    [Test]
+    public async Task ChatServiceStreamingPathInvokesProviderExecutionAndPersistsCompletedMessages()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.StreamingProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn
+                    {
+                        Content = null,
+                        StreamingChunks = ["completed ", "app ", "stream"],
+                        Usage = new TokenUsage(5, 6),
+                        ProviderMetadataJson = """{"stream":"completed"}"""
+                    }
+                ]
+            });
+
+        var events = await CollectStreamAsync(host, seeded.Channel.Id, "app stream");
+
+        var request = host.Harness.ProviderRequests.Single();
+        request.Surface.Should().Be("stream-tools");
+        request.Messages.Single(m => m.Role == "user").Content.Should().Be("app stream");
+        host.Harness.ProviderTimings.Single().Surface.Should().Be("stream-tools");
+
+        var done = events.Single(e => e.Type == ChatStreamEventType.Done);
+        done.FinalResponse!.AssistantMessage.Content.Should().Be("completed app stream");
+
+        var user = await host.Db.ChatMessages
+            .Where(m => m.Origin == MessageOrigin.User)
+            .SingleAsync();
+        var assistant = await host.Db.ChatMessages
+            .Where(m => m.Origin == MessageOrigin.Assistant)
+            .SingleAsync();
+        user.Content.Should().Be("app stream");
+        assistant.Content.Should().Be("completed app stream");
+        assistant.PromptTokens.Should().Be(5);
+        assistant.CompletionTokens.Should().Be(6);
+        assistant.ProviderMetadataJson.Should().Be("""{"stream":"completed"}""");
+    }
+
+    [Test]
+    public async Task ChatServiceStreamingPathPersistsPartialAssistantMessageAfterInterruption()
+    {
+        await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
+        {
+            ["Chat:DisableDefaultHeaders"] = "true"
+        });
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
+        host.Harness.ConfigureProvider(
+            TestHarnessConstants.StreamingProviderKey,
+            new TestHarnessProviderScenario
+            {
+                Turns =
+                [
+                    new TestHarnessProviderTurn
+                    {
+                        Content = null,
+                        StreamingChunks = ["partial", " ignored"],
+                        PerChunkDelayMs = 1000
+                    }
+                ]
+            });
+
+        using var cts = new CancellationTokenSource();
+        var received = new List<string?>();
+        var act = async () =>
+        {
+            await foreach (var evt in host.Chat.SendMessageStreamAsync(
+                seeded.Channel.Id,
+                new ChatRequest("interrupt stream"),
+                (_, _) => Task.FromResult(true),
+                ct: cts.Token))
+            {
+                if (evt.Type != ChatStreamEventType.TextDelta)
+                    continue;
+
+                received.Add(evt.Delta);
+                cts.Cancel();
+            }
+        };
+
+        await act.Should().ThrowAsync<OperationCanceledException>();
+
+        received.Should().Equal(["partial"]);
+        host.Harness.ProviderRequests.Single().Surface.Should().Be("stream-tools");
+        host.Harness.ProviderTimings.Single().Surface.Should().Be("stream-tools");
+
+        var user = await host.Db.ChatMessages
+            .Where(m => m.Origin == MessageOrigin.User)
+            .SingleAsync();
+        var assistant = await host.Db.ChatMessages
+            .Where(m => m.Origin == MessageOrigin.Assistant)
+            .SingleAsync();
+        user.Content.Should().Be("interrupt stream");
+        assistant.Content.Should().Be("partial");
+        assistant.PromptTokens.Should().BeNull();
+        assistant.CompletionTokens.Should().BeNull();
+        assistant.ProviderMetadataJson.Should().BeNull();
+    }
+
     [TestCaseSource(nameof(StreamPayloadCases))]
     public async Task TextPayloadsStreamWithoutCorruption(string name, IReadOnlyList<string> chunks)
     {
