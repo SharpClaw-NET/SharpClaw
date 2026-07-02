@@ -1,3 +1,4 @@
+using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -91,7 +92,121 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
         }
     }
 
+    [Test]
+    public async Task StreamAsync_WhenToolsAreEnabled_StreamsWithEffectiveTools()
+    {
+        var registry = CreateRegistry();
+        var client = new RecordingProviderClient
+        {
+            StreamingDeltas = ["stream ", "answer"],
+            StreamingResult = new ChatCompletionResult
+            {
+                Content = "stream answer",
+                Usage = new TokenUsage(13, 17),
+                ProviderMetadataJson = """{"id":"stream"}"""
+            }
+        };
+        var engine = CreateEngine(registry);
+        var host = new RecordingNativeToolLoopHost();
+        var instanceId = Guid.NewGuid();
+        var store = TaskSharedData.GetOrCreate(instanceId);
+        store.RegisterBuiltInTools();
+
+        try
+        {
+            var events = new List<ChatNativeToolStreamingLoopEvent>();
+            await foreach (var loopEvent in engine.StreamAsync(
+                CreateStreamingRequest(
+                    client,
+                    host,
+                    enableTools: true,
+                    taskContext: new TaskChatContext(instanceId, "Task"))))
+            {
+                events.Add(loopEvent);
+            }
+
+            events.Select(loopEvent => loopEvent.Kind).Should().Equal(
+                ChatNativeToolStreamingLoopEventKind.TextDelta,
+                ChatNativeToolStreamingLoopEventKind.TextDelta,
+                ChatNativeToolStreamingLoopEventKind.Completed);
+            events[0].Text.Should().Be("stream ");
+            events[1].Text.Should().Be("answer");
+            var result = events[^1].Result!;
+            result.AssistantContent.Should().Be("stream answer");
+            result.TotalPromptTokens.Should().Be(13);
+            result.TotalCompletionTokens.Should().Be(17);
+            result.ProviderMetadataJson.Should().Be("""{"id":"stream"}""");
+            result.ProviderRounds.Should().Be(1);
+            client.StreamingCalls.Should().Be(1);
+            client.LastStreamingToolNames.Should().Contain(["alpha", "beta", "task_read_light_data"]);
+            host.TaskToolCalls.Should().Be(0);
+            host.NativeJobToolCalls.Should().Be(0);
+        }
+        finally
+        {
+            TaskSharedData.Remove(instanceId);
+        }
+    }
+
+    [Test]
+    public async Task StreamAsync_WhenToolsAreDisabled_StreamsWithEmptyToolSet()
+    {
+        var client = new RecordingProviderClient
+        {
+            StreamingResult = new ChatCompletionResult
+            {
+                Content = "plain stream",
+                Usage = new TokenUsage(19, 23)
+            }
+        };
+        var engine = CreateEngine();
+        var host = new RecordingNativeToolLoopHost();
+
+        var events = new List<ChatNativeToolStreamingLoopEvent>();
+        await foreach (var loopEvent in engine.StreamAsync(
+            CreateStreamingRequest(
+                client,
+                host,
+                enableTools: false)))
+        {
+            events.Add(loopEvent);
+        }
+
+        var result = events.Single(loopEvent =>
+            loopEvent.Kind == ChatNativeToolStreamingLoopEventKind.Completed).Result!;
+        result.AssistantContent.Should().Be("plain stream");
+        result.TotalPromptTokens.Should().Be(19);
+        result.TotalCompletionTokens.Should().Be(23);
+        client.StreamingCalls.Should().Be(1);
+        client.LastStreamingToolNames.Should().BeEmpty();
+        host.TaskToolCalls.Should().Be(0);
+        host.NativeJobToolCalls.Should().Be(0);
+    }
+
     private static ChatBufferedProviderExecutionRequest CreateRequest(
+        RecordingProviderClient client,
+        RecordingNativeToolLoopHost host,
+        bool enableTools,
+        TaskChatContext? taskContext = null)
+        => new(
+            client,
+            new HttpClient(),
+            "api-key",
+            "model",
+            "system",
+            [new ChatCompletionMessage("user", "hello")],
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            new HashSet<string>(),
+            MaxCompletionTokens: 128,
+            ProviderParameters: null,
+            CompletionParameters: null,
+            enableTools,
+            host,
+            CancellationToken.None,
+            TaskContext: taskContext);
+
+    private static ChatStreamingProviderExecutionRequest CreateStreamingRequest(
         RecordingProviderClient client,
         RecordingNativeToolLoopHost host,
         bool enableTools,
@@ -162,9 +277,17 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
             Content = "native answer"
         };
 
+        public IReadOnlyList<string> StreamingDeltas { get; init; } = [];
+        public ChatCompletionResult StreamingResult { get; init; } = new()
+        {
+            Content = "stream answer"
+        };
+
         public int PlainCalls { get; private set; }
         public int NativeCalls { get; private set; }
+        public int StreamingCalls { get; private set; }
         public IReadOnlyList<string> LastNativeToolNames { get; private set; } = [];
+        public IReadOnlyList<string> LastStreamingToolNames { get; private set; } = [];
 
         public Task<IReadOnlyList<string>> ListModelIdsAsync(
             HttpClient httpClient,
@@ -202,6 +325,32 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
             NativeCalls++;
             LastNativeToolNames = [.. tools.Select(tool => tool.Name)];
             return Task.FromResult(NativeResult);
+        }
+
+        public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
+            HttpClient httpClient,
+            string apiKey,
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ToolAwareMessage> messages,
+            IReadOnlyList<ChatToolDefinition> tools,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            [EnumeratorCancellation] CancellationToken ct = default)
+        {
+            StreamingCalls++;
+            LastStreamingToolNames = [.. tools.Select(tool => tool.Name)];
+            await Task.CompletedTask;
+
+            foreach (var delta in StreamingDeltas)
+            {
+                ct.ThrowIfCancellationRequested();
+                yield return ChatStreamChunk.Text(delta);
+            }
+
+            ct.ThrowIfCancellationRequested();
+            yield return ChatStreamChunk.Final(StreamingResult);
         }
     }
 

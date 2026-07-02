@@ -514,35 +514,26 @@ public sealed class ChatService(
 
         using var httpClient = httpClientFactory.CreateClient();
 
-        var supportsVision = plan.SupportsVision;
         var maxTokens = plan.MaxCompletionTokens;
         var providerParams = plan.ProviderParameters;
         var toolAwareness = plan.ToolAwareness;
-        var effectiveTools = plan.EnableTools
-            ? await _chatTools.GetEffectiveToolsAsync(
-                new ChatEffectiveToolRequest(
-                    request.TaskContext,
-                    toolAwareness,
-                    agent.Id),
-                ct)
-            : [];
 
         if (logTiming)
         {
             logger.LogDebug(
-                "Streaming chat request {RequestId} prepared provider stream. AgentId={AgentId} AgentName={AgentName} ModelId={ModelId} ModelName={ModelName} ProviderKey={ProviderKey} ProviderName={ProviderName} SystemPromptChars={SystemPromptChars} SupportsVision={SupportsVision} EffectiveTools={EffectiveTools} MaxCompletionTokens={MaxCompletionTokens} ProviderParametersPresent={ProviderParametersPresent} CompletionParametersPresent={CompletionParametersPresent} ElapsedMs={ElapsedMs}",
+                "Streaming chat request {RequestId} prepared provider stream. AgentId={AgentId} AgentName={AgentName} ModelId={ModelId} ModelName={ModelName} ProviderKey={ProviderKey} ProviderName={ProviderName} SystemPromptChars={SystemPromptChars} SupportsVision={SupportsVision} ToolsEnabled={ToolsEnabled} MaxCompletionTokens={MaxCompletionTokens} ProviderParametersPresent={ProviderParametersPresent} CompletionParametersPresent={CompletionParametersPresent} ElapsedMs={ElapsedMs}",
                 timingRequestId, agent.Id, PathGuard.SanitizeForLog(agent.Name),
                 model.Id, PathGuard.SanitizeForLog(model.Name),
                 PathGuard.SanitizeForLog(provider.ProviderKey),
                 PathGuard.SanitizeForLog(provider.Name),
-                systemPrompt.Length, supportsVision, effectiveTools.Count,
+                systemPrompt.Length, plan.SupportsVision, plan.EnableTools,
                 maxTokens, providerParams is not null,
                 completionParams is not null, totalTiming.ElapsedMilliseconds);
         }
 
         ChatNativeToolStreamingLoopResult? streamingResult = null;
-        await foreach (var loopEvent in chatNativeToolLoop.StreamAsync(
-            new ChatNativeToolLoopRequest(
+        await foreach (var loopEvent in _chatProviderExecution.StreamAsync(
+            new ChatStreamingProviderExecutionRequest(
                 client,
                 httpClient,
                 apiKey,
@@ -555,7 +546,7 @@ public sealed class ChatService(
                 maxTokens,
                 providerParams,
                 completionParams,
-                effectiveTools,
+                plan.EnableTools,
                 new ChatServiceNativeToolLoopHost(this),
                 ct,
                 approvalCallback,
