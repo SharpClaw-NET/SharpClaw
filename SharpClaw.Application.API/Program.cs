@@ -346,6 +346,7 @@ try
     builder.Services.AddSingleton<PermissionEvaluationEngine>();
     builder.Services.AddSingleton<PermissionDelegateEvaluationEngine>();
     builder.Services.AddSingleton<AgentActionWorkflowEngine>();
+    builder.Services.AddSingleton<AdminPermissionSeedEngine>();
     builder.Services.AddSingleton<RolePermissionAdministrationEngine>();
     builder.Services.AddSingleton<RoleAdministrationEngine>();
     builder.Services.AddSingleton<AgentJobAdministrationEngine>();

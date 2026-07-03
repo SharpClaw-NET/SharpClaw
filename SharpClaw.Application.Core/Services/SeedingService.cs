@@ -4,16 +4,16 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Application.Core.Modules;
-using SharpClaw.Core.Clients;
+using SharpClaw.Contracts;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
-using SharpClaw.Contracts;
-using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Core.Clients;
+using SharpClaw.Core.Modules;
+using SharpClaw.Core.Permissions;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
-using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Application.Services;
 
@@ -25,7 +25,8 @@ public sealed class SeedingService(
     IServiceScopeFactory scopeFactory,
     IConfiguration configuration,
     ILogger<SeedingService> logger,
-    ModuleRegistry moduleRegistry) : IHostedLifecycleService
+    ModuleRegistry moduleRegistry,
+    AdminPermissionSeedEngine adminPermissions) : IHostedLifecycleService
 {
     private const string AdminRoleName = "Admin";
 
@@ -57,7 +58,7 @@ public sealed class SeedingService(
         {
             if (existing.PermissionSetId is null)
             {
-                // No permission set at all — create the full set.
+                // No permission set at all - create the full set.
                 var ps = CreateAdminPermissions();
                 db.PermissionSets.Add(ps);
                 await db.SaveChangesAsync(ct);
@@ -68,7 +69,7 @@ public sealed class SeedingService(
             {
                 // Reconcile: bring the existing permission set up to date
                 // in case new flags or grant types were added after initial seeding.
-                // Off by default — enable via Admin:ReconcilePermissions = true in .env.
+                // Off by default - enable via Admin:ReconcilePermissions = true in .env.
                 await ReconcileAdminPermissionsAsync(db, existing.PermissionSetId.Value, ct);
             }
             return existing;
@@ -87,35 +88,38 @@ public sealed class SeedingService(
         return role;
     }
 
-    private PermissionSetDB CreateAdminPermissions() => new()
+    private PermissionSetDB CreateAdminPermissions()
     {
-        // Global flags — all registered flag keys enabled for admin
-        // with explicit Independent clearance on each flag.
-        GlobalFlags = [.. moduleRegistry.GetAllRegisteredGlobalFlags()
-            .Select(fk => new GlobalFlagDB
+        var plan = adminPermissions.BuildCreatePlan(
+            moduleRegistry.GetAllRegisteredGlobalFlags(),
+            moduleRegistry.GetAllRegisteredResourceTypes());
+
+        return new PermissionSetDB
+        {
+            // Global flags - all registered flag keys enabled for admin
+            // with explicit Independent clearance on each flag.
+            GlobalFlags = [.. plan.GlobalFlags.Select(grant => new GlobalFlagDB
             {
-                FlagKey = fk,
-                Clearance = PermissionClearance.Independent,
+                FlagKey = grant.FlagKey,
+                Clearance = grant.Clearance,
             })],
 
-        // Wildcard grants — access to ALL resources of each type.
-        // WellKnownIds.AllResources is recognised as a universal match
-        // by AgentActionService and is immutable at runtime.
-        //
-        // IMPORTANT: Clearance MUST be set to Independent. ResourceAccessDB
-        // defaults Clearance to Unset, and EvaluateResourceAccessAsync treats
-        // Unset as "grant is inert, deny." Without this the Admin role has
-        // wildcard rows that look right in the DB but always deny at runtime.
-        // Previously shipped without this line, causing every agent tool call
-        // against a resource type to be denied despite the role's wildcard.
-        ResourceAccesses = [.. moduleRegistry.GetAllRegisteredResourceTypes()
-            .Select(rt => new ResourceAccessDB
-            {
-                ResourceType = rt,
-                ResourceId = WellKnownIds.AllResources,
-                Clearance = PermissionClearance.Independent,
-            })],
-    };
+            // Wildcard grants - access to ALL resources of each type.
+            // WellKnownIds.AllResources is recognised as a universal match
+            // by AgentActionService and is immutable at runtime.
+            //
+            // Clearance must be set to Independent. ResourceAccessDB defaults
+            // Clearance to Unset, and EvaluateResourceAccessAsync treats Unset
+            // as "grant is inert, deny."
+            ResourceAccesses = [.. plan.WildcardResources.Select(grant =>
+                new ResourceAccessDB
+                {
+                    ResourceType = grant.ResourceType,
+                    ResourceId = WellKnownIds.AllResources,
+                    Clearance = grant.Clearance,
+                })],
+        };
+    }
 
     /// <summary>
     /// Ensures an existing admin permission set has all current flags enabled
@@ -134,64 +138,58 @@ public sealed class SeedingService(
         if (ps is null)
             return;
 
-        var changed = false;
+        var plan = adminPermissions.BuildReconcilePlan(
+            moduleRegistry.GetAllRegisteredGlobalFlags(),
+            moduleRegistry.GetAllRegisteredResourceTypes(),
+            ps.GlobalFlags
+                .Select(flag => new AdminGlobalFlagGrantFact(
+                    flag.FlagKey,
+                    flag.Clearance))
+                .ToList(),
+            ps.ResourceAccesses
+                .Where(access => access.ResourceId == WellKnownIds.AllResources)
+                .Select(access => new AdminWildcardResourceGrantFact(
+                    access.ResourceType,
+                    access.Clearance))
+                .ToList());
 
-        // ── Global flag grants ─────────────────────────────────────
-        var allFlagKeys = moduleRegistry.GetAllRegisteredGlobalFlags();
-        foreach (var flagKey in allFlagKeys)
+        foreach (var grant in plan.MissingGlobalFlags)
         {
-            var existing = ps.GlobalFlags.FirstOrDefault(f => f.FlagKey == flagKey);
-            if (existing is null)
+            ps.GlobalFlags.Add(new GlobalFlagDB
             {
-                ps.GlobalFlags.Add(new GlobalFlagDB
-                {
-                    PermissionSetId = psId,
-                    FlagKey = flagKey,
-                    Clearance = PermissionClearance.Independent,
-                });
-                changed = true;
-            }
-            else if (existing.Clearance != PermissionClearance.Independent)
-            {
-                existing.Clearance = PermissionClearance.Independent;
-                changed = true;
-            }
+                PermissionSetId = psId,
+                FlagKey = grant.FlagKey,
+                Clearance = grant.Clearance,
+            });
         }
 
-        // ── Wildcard resource grants ──────────────────────────────
-        var allResourceTypes = moduleRegistry.GetAllRegisteredResourceTypes();
-
-        foreach (var rt in allResourceTypes)
+        foreach (var update in plan.GlobalFlagUpdates)
         {
-            // Two sub-tasks, matching the GlobalFlags loop above:
-            //   1. Add a wildcard row for any module-registered ResourceType
-            //      the admin PS doesn't have yet.
-            //   2. Upgrade any existing wildcard row whose Clearance is not
-            //      Independent (e.g. Unset, left over from the shipped-broken
-            //      seed that forgot to set Clearance on wildcard grants) so
-            //      the grant is actually effective rather than inert.
-            var existingAccess = ps.ResourceAccesses.FirstOrDefault(a =>
-                a.ResourceType == rt && a.ResourceId == WellKnownIds.AllResources);
-
-            if (existingAccess is null)
-            {
-                ps.ResourceAccesses.Add(new ResourceAccessDB
-                {
-                    PermissionSetId = psId,
-                    ResourceType = rt,
-                    ResourceId = WellKnownIds.AllResources,
-                    Clearance = PermissionClearance.Independent,
-                });
-                changed = true;
-            }
-            else if (existingAccess.Clearance != PermissionClearance.Independent)
-            {
-                existingAccess.Clearance = PermissionClearance.Independent;
-                changed = true;
-            }
+            var existing = ps.GlobalFlags.First(flag =>
+                flag.FlagKey == update.FlagKey);
+            existing.Clearance = update.Clearance;
         }
 
-        if (changed)
+        foreach (var grant in plan.MissingWildcardResources)
+        {
+            ps.ResourceAccesses.Add(new ResourceAccessDB
+            {
+                PermissionSetId = psId,
+                ResourceType = grant.ResourceType,
+                ResourceId = WellKnownIds.AllResources,
+                Clearance = grant.Clearance,
+            });
+        }
+
+        foreach (var update in plan.WildcardResourceUpdates)
+        {
+            var existing = ps.ResourceAccesses.First(access =>
+                access.ResourceType == update.ResourceType
+                && access.ResourceId == WellKnownIds.AllResources);
+            existing.Clearance = update.Clearance;
+        }
+
+        if (plan.HasChanges)
         {
             logger.LogInformation("Reconciled admin permissions — added missing grants.");
             await db.SaveChangesAsync(ct);
@@ -239,7 +237,7 @@ public sealed class SeedingService(
             .Select(p => p.ProviderKey)
             .ToHashSetAsync(ct);
 
-        // Plugins drive the seed list — disabling a provider module simply
+        // Plugins drive the seed list - disabling a provider module simply
         // means its IProviderPlugin is no longer registered, so it won't be
         // seeded. Plugins that opt out of seeding (e.g. Custom, which needs
         // an operator-supplied endpoint) set IsSeedable=false.
@@ -267,4 +265,3 @@ public sealed class SeedingService(
         await db.SaveChangesAsync(ct);
     }
 }
-
