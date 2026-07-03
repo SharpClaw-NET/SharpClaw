@@ -21,8 +21,8 @@ module, tool, model, and task operations through the runtime.
 
 This document describes the task system at a conceptual level: what task
 mechanics exist, how the pipeline fits together, and how modules contribute
-the step and trigger surface that scripts can use. It deliberately does **not**
-enumerate the specific step methods or trigger attributes available on your
+callable operations and triggers that scripts can use. It deliberately does
+**not** enumerate the specific module methods or trigger attributes available on your
 installation — that surface is contributed by modules and is documented in the
 corresponding module pages under [docs/modules/](modules/).
 
@@ -123,10 +123,10 @@ Inside `RunAsync` the parser allows a restricted whitelist of constructs:
 - `while (condition)`
 - `await expr;`
 - `return;` / `return expr;`
-- calls to step methods registered by a loaded module
+- calls to module methods registered by a loaded module
 
 General-purpose C# is not permitted. There is no reflection, no P/Invoke, no
-`System.IO`, and no arbitrary calls to outside types. The exact set of step
+`System.IO`, and no arbitrary calls to outside types. The exact set of module
 methods available to your scripts is controlled entirely by which modules are
 loaded — see [How modules contribute the task surface](#how-modules-contribute-the-task-surface).
 
@@ -203,10 +203,10 @@ requirement with severity, pass/fail, and a human-readable message. Preflight
 also runs automatically during instance creation; a blocking failure surfaces
 as `422 Unprocessable Entity` with the same structured payload.
 
-When a task uses a step or trigger whose owning module is not loaded, preflight
-will surface that as a recommendation finding. The exact list of step methods
-and trigger attributes available on your installation is documented per
-module.
+When a task uses a module method or trigger whose owning module is not loaded,
+preflight will surface that as a recommendation finding. The exact list of
+module methods and trigger attributes available on your installation is
+documented per module.
 
 ---
 
@@ -368,9 +368,9 @@ Modules contribute to the task surface through three extension points. Each of
 them is fully documented in [Module-Creation-Guide.md](guides/Module-Creation-Guide.md);
 this section is a high-level map of the contract surface.
 
-### Step methods (callable inside RunAsync)
+### Module methods (callable inside RunAsync)
 
-A module declares its step methods to the parser through
+A module declares its C#-style task methods to the parser through
 `ITaskParserModuleExtension`, and to the orchestrator through
 `ITaskStepExecutorExtension` (or by pre-registering descriptors with the
 shared `TaskStepRegistry`).
@@ -380,14 +380,14 @@ shared `TaskStepRegistry`).
   they map to, and which arguments are expressions versus literals. The parser
   resolves all registered extensions from DI at startup.
 - `ITaskStepExecutorExtension` is the orchestrator-side counterpart. The
-  orchestrator routes every step key to the first extension whose
+  orchestrator routes every runtime dispatch key to the first extension whose
   `CanExecute` returns true and invokes `ExecuteAsync` to perform the work.
-- `TaskStepRegistry` is the shared method-name <-> step-key index. The parser
-  uses it to translate script calls into step keys; tooling can use it for
+- `TaskStepRegistry` is the shared method-name <-> runtime-key index. The parser
+  uses it to translate script calls into runtime keys; tooling can use it for
   diagnostics. Modules normally populate it indirectly via their parser
   extension.
 
-Step keys should be namespaced per module — `{module_id}.{step_name}` — so
+Runtime keys should be namespaced per module — `{module_id}.{operation_name}` — so
 they do not collide across module authors.
 
 ### Trigger attributes (declared on the task class)
@@ -407,7 +407,7 @@ Trigger sources actually available on the running host are reported by
 
 ### Authoring summary
 
-When adding a new operation, define a stable, namespaced step key in your
+When adding a new operation, define a stable, namespaced runtime key in your
 module, add the method mapping to `ITaskParserModuleExtension`, and implement
 execution behind `ITaskStepExecutorExtension`. When adding a trigger, map the
 attribute or event-handler name to a trigger key and register an

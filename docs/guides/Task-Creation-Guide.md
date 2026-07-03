@@ -1,4 +1,4 @@
-# Creating a SharpClaw Task
+﻿# Creating a SharpClaw Task
 
 > **Reference:** [../Tasks-documentation.md](../Tasks-documentation.md)
 > **Skill version:** [Task-Creation-skill.md](Task-Creation-skill.md)
@@ -7,12 +7,12 @@
 This guide walks through writing, registering, running, and debugging
 SharpClaw tasks. It focuses on the parts of the task system that are
 universal: the script shape, parameters, requirements, preflight, the
-execution lifecycle, output, and how triggers and steps slot in.
+execution lifecycle, output, and how triggers and module operations slot in.
 
-The actual catalogue of step methods you can call inside `RunAsync`, and the
-catalogue of trigger attributes you can declare on the task class, are not
-fixed by the task host. Both surfaces are contributed by modules. To find
-out what is available on your installation, consult the module pages under
+Ordinary C# task syntax is fixed by the task host. The actual catalogue of
+module methods you can call inside `RunAsync`, and the catalogue of trigger
+attributes you can declare on the task class, are contributed by modules. To
+find out what is available on your installation, consult the module pages under
 [../modules/](../modules/) and the live endpoint
 `GET /tasks/trigger-sources`.
 
@@ -29,7 +29,7 @@ out what is available on your installation, consult the module pages under
 - [Concurrency policy](#concurrency-policy)
 - [Tool-call methods](#tool-call-methods)
 - [Agent tool exposure](#agent-tool-exposure)
-- [Discovering steps and triggers](#discovering-steps-and-triggers)
+- [Discovering module methods and triggers](#discovering-module-methods-and-triggers)
 - [Debugging and troubleshooting](#debugging-and-troubleshooting)
 
 ---
@@ -37,20 +37,19 @@ out what is available on your installation, consult the module pages under
 ## What a task is
 
 A task is a C# script registered in SharpClaw at runtime through the API or
-CLI. You don't change application code and you don't touch the solution — you
+CLI. You don't change application code and you don't touch the solution â€” you
 write a single class and post it. The task system parses it, validates it,
 and stores the definition. When you run it, the system compiles the
 definition with the supplied parameter values and hands the plan to the
 orchestrator.
 
 A task definition and a task instance are distinct. A definition is the
-stored script. An instance is one execution of it — with its own status,
+stored script. An instance is one execution of it â€” with its own status,
 logs, output, and lifecycle.
 
-Steps and triggers are not part of the task host itself; they are registered
-by modules at startup. So the precise calls available inside `RunAsync` and
-the precise attributes recognised on the class come from whichever modules
-are loaded.
+Module methods and triggers are registered by modules at startup. The precise
+calls available inside `RunAsync` and the precise attributes recognised on the
+class come from whichever modules are loaded.
 
 ---
 
@@ -101,7 +100,7 @@ The response gives you the task `id`. The definition is now stored.
 task run hello --param AgentName=Assistant
 ```
 
-Via API — create an instance, then start it:
+Via API â€” create an instance, then start it:
 
 ```http
 POST /tasks/{id}/instances
@@ -190,7 +189,7 @@ public class SummariseTask
 }
 ```
 
-Retrieve the final snapshot via `GET /tasks/{id}/instances/{iid}` —
+Retrieve the final snapshot via `GET /tasks/{id}/instances/{iid}` â€”
 `outputSnapshotJson` holds the last emitted value.
 
 Only one class per script may carry `[Output]`. Declaring more produces a
@@ -217,7 +216,7 @@ public class VisionCaptionTask
 }
 ```
 
-Run a preflight check before launching — it tells you exactly what is
+Run a preflight check before launching â€” it tells you exactly what is
 missing:
 
 ```
@@ -362,7 +361,7 @@ task activate {id}
 
 ---
 
-## Discovering steps and triggers
+## Discovering module methods and triggers
 
 Because the step and trigger surface is module-owned, the way to find out
 what your scripts can actually do is to look at the modules currently
@@ -375,25 +374,25 @@ task trigger-sources
 ```
 
 Then read the corresponding module page under [../modules/](../modules/) for
-the exact step methods and trigger attributes that module owns, plus any
+the exact module methods and trigger attributes that module owns, plus any
 permissions, resources, or configuration they require.
 
-If you are authoring a module yourself and want to add new steps or
+If you are authoring a module yourself and want to add new task-callable methods or
 triggers, see [Module-Creation-Guide.md](Module-Creation-Guide.md). The
 high-level extension points are:
 
-- `ITaskParserModuleExtension` — declare the method names and trigger
-  attributes your module recognises and the namespaced keys they map to.
-- `ITaskStepExecutorExtension` — implement step execution for your module
-  step keys.
-- `ITaskTriggerSource` (registered as `ITaskTriggerSourceProvider`) —
+- `ITaskParserModuleExtension` - declare the method names and trigger
+  attributes your module recognises and the namespaced runtime keys they map to.
+- `ITaskStepExecutorExtension` - implement execution for your module's
+  registered task-callable methods.
+- `ITaskTriggerSource` (registered as `ITaskTriggerSourceProvider`) â€”
   implement the runtime watcher behind your trigger attributes.
 
 ---
 
 ## Debugging and troubleshooting
 
-**Validation error on register — `TASK101` / `TASK102`**
+**Validation error on register â€” `TASK101` / `TASK102`**
 The script has a syntax or attribute error. The `diagnostics[]` array in
 the `POST /tasks` response lists the exact line and message.
 
@@ -403,10 +402,10 @@ The orchestrator queue may be busy, or the instance was created without
 `GET /tasks/{id}/instances/{iid}` for `errorMessage`.
 
 **Instance status is `Failed`**
-Check the instance `logs[]` array — step-level errors are logged there.
+Check the instance `logs[]` array â€” step-level errors are logged there.
 `errorMessage` on the instance carries the top-level failure reason.
 
-**Required parameter not found — `TASK201`**
+**Required parameter not found â€” `TASK201`**
 A required parameter was not supplied in `parameterValues`. Check the
 definition's `parameters[]` for required fields (`isRequired: true`).
 
@@ -418,7 +417,7 @@ definition's `parameters[]` for required fields (`isRequired: true`).
    `task schedule preview "<expr>" [--timezone <tz>]`.
 
 **Preflight blocks with a module finding**
-`[RecommendsModule]` is advisory — it will not block instance creation.
+`[RecommendsModule]` is advisory â€” it will not block instance creation.
 An `Error`-severity module finding means you used `[RequiresModule]` and
 the module is not loaded. Enable it with `module enable <id>`.
 

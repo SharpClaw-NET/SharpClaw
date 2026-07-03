@@ -4,11 +4,14 @@ Full human-readable reference: Tasks-documentation.md
 Module authoring reference:    guides/Module-Creation-Guide.md
 All bodies JSON. Enums as strings. Timestamps ISO 8601.
 
-Steps and triggers are NOT built into the task host. They are contributed by
-modules at startup. The exact set of step methods callable inside RunAsync,
-and the exact set of trigger attributes recognised on a task class, depend on
-which modules are loaded. For per-installation specifics, consult the module
-pages under docs/modules/ and the live endpoint GET /tasks/trigger-sources.
+Ordinary C# task syntax is built into the task host: declarations, assignment,
+control flow, return, logging, delay, structured response parsing, and
+cancellation waits are not module primitives. Modules contribute callable
+operations and trigger attributes at startup. The exact set of module methods
+callable inside RunAsync, and the exact set of trigger attributes recognised on
+a task class, depend on which modules are loaded. For per-installation
+specifics, consult the module pages under docs/modules/ and the live endpoint
+GET /tasks/trigger-sources.
 
 ----------------------------------------
 TASK DEFINITIONS
@@ -121,7 +124,7 @@ Allowed RunAsync constructs:
   while (cond) { }
   await expr;
   return;  |  return expr;
-  calls to step methods registered by a loaded module
+calls to module methods registered by a loaded module
 
 Allowed parameter / variable types:
   string, int, long, float, double, decimal, bool, Guid, DateTime, DateTimeOffset
@@ -130,29 +133,30 @@ Allowed parameter / variable types:
   inner classes declared in the same script
 
 ----------------------------------------
-STEP METHODS AND TRIGGER ATTRIBUTES
+MODULE METHODS AND TRIGGER ATTRIBUTES
 ----------------------------------------
-Steps and triggers are module-owned. The set of method names callable inside
-RunAsync, and the set of [On...] / [Schedule] / [Os...] / [OnTrigger] style
-attributes recognised on the class, comes from the module parser extensions
-that are loaded at startup. To discover what is available on the running host:
+Module methods and triggers are module-owned. The set of method names callable
+inside RunAsync, and the set of [On...] / [Schedule] / [Os...] / [OnTrigger]
+style attributes recognised on the class, comes from the module parser
+extensions that are loaded at startup. To discover what is available on the
+running host:
 
   GET /tasks/trigger-sources         (active trigger sources)
   task trigger-sources               (CLI equivalent)
   module list                        (loaded modules)
   module get <id>                    (per-module surface)
 
-For the authoritative list of step methods and trigger attributes for any
+For the authoritative list of module methods and trigger attributes for any
 specific module, consult its page under docs/modules/.
 
 ----------------------------------------
 MODULE EXTENSION POINTS (high level)
 ----------------------------------------
-Modules contribute the task surface through three interfaces. Full authoring
+Modules contribute the task operation and trigger surface through three interfaces. Full authoring
 walkthrough lives in guides/Module-Creation-Guide.md.
 
   ITaskParserModuleExtension
-    StepKeyMappings:           method name -> (step key, module id)
+    StepKeyMappings:           method name -> (runtime dispatch key, module id)
     EventTriggerMappings:      trigger attribute -> (trigger key, module id)
     SingleArgExpressionMethods: method names whose first arg is an expression
 
@@ -166,8 +170,8 @@ walkthrough lives in guides/Module-Creation-Guide.md.
     EnableTriggerAsync(definition, ct)
     DisableTriggerAsync(taskId, ct)
 
-TaskStepRegistry is the shared method-name <-> step-key index, populated from
-parser extensions at startup. Step keys should be namespaced
+TaskStepRegistry is the shared method-name <-> runtime-key index, populated
+from parser extensions at startup. Runtime keys should be namespaced
 {module_id}.{step_name} to avoid collisions.
 
 ----------------------------------------

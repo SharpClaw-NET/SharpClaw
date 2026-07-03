@@ -1,10 +1,10 @@
-# Creating a SharpClaw Module
+﻿# Creating a SharpClaw Module
 
 > **Enablement reference:** [modules/Module-Enablement-Guide.md](../modules/Module-Enablement-Guide.md)
 > **Agent skill:** [Module-Creation-skill.md](Module-Creation-skill.md)
 
 This guide walks through creating, testing, and shipping a SharpClaw module from
-scratch — from the minimal skeleton to registering tools, exporting contracts, owning
+scratch â€” from the minimal skeleton to registering tools, exporting contracts, owning
 task triggers, and troubleshooting at runtime.
 
 ---
@@ -24,8 +24,8 @@ task triggers, and troubleshooting at runtime.
 - [Exporting and consuming contracts](#exporting-and-consuming-contracts)
 - [Seed data](#seed-data)
 - [Contributing to the task pipeline](#contributing-to-the-task-pipeline)
-  - [Step methods (`ITaskStepDescriptorProvider`)](#step-methods-itaskstepdescriptorprovider)
-  - [Parser primitives and event handlers (`ITaskParserModuleExtension`)](#parser-primitives-and-event-handlers-itaskparsermoduleextension)
+  - [Module methods (`ITaskStepDescriptorProvider`)](#module-methods-itaskstepdescriptorprovider)
+  - [Parser mappings and event handlers (`ITaskParserModuleExtension`)](#parser-mappings-and-event-handlers-itaskparsermoduleextension)
   - [Trigger attributes (`ITaskTriggerAttributeHandler`)](#trigger-attributes-itasktriggerattributehandler)
   - [Trigger sources (`ITaskTriggerSource`)](#trigger-sources-itasktriggersource)
 - [Enabling your module](#enabling-your-module)
@@ -49,12 +49,12 @@ without giving the module direct access to the parent host container.
 
 Modules can contribute any combination of:
 
-- **Agent tools** — exposed to models via the job pipeline or the inline chat loop
-- **REST endpoints** — standard minimal-API routes, mounted at startup
-- **CLI commands** — additional verbs in the SharpClaw CLI
-- **Service contracts** — typed DI interfaces exported to other modules
-- **Task pipeline contributions** — step methods, parser primitives, trigger attributes, and runtime trigger sources
-- **Seed data** — one-time database rows or config inserted on first install
+- **Agent tools** â€” exposed to models via the job pipeline or the inline chat loop
+- **REST endpoints** â€” standard minimal-API routes, mounted at startup
+- **CLI commands** â€” additional verbs in the SharpClaw CLI
+- **Service contracts** â€” typed DI interfaces exported to other modules
+- **Task pipeline contributions** â€” module methods callable from C# task scripts, parser mappings, trigger attributes, and runtime trigger sources
+- **Seed data** â€” one-time database rows or config inserted on first install
 
 Modules can also own configuration under their own Core `.env` section. The
 env loader is generic: it reads the JSON-with-comments `.env` and `.dev.env`
@@ -89,7 +89,7 @@ Place the project under `DefaultModules/` by convention:
 DefaultModules/
   MyModule/
     MyModule.csproj
-    MyModule.cs          ← implements ISharpClawModule
+    MyModule.cs          â† implements ISharpClawModule
     Tools/
       MyToolHandler.cs
 ```
@@ -164,7 +164,7 @@ public async Task InitializeAsync(IServiceProvider services, CancellationToken c
 
 > **If this method throws, the module is disabled for the current session.** The
 > error is logged and the module's state is set to `enabled=false` to prevent boot
-> loops. This also poisons any contract your module exports — dependents will
+> loops. This also poisons any contract your module exports â€” dependents will
 > cascade-fail. Make sure initialization failures are specific and descriptive.
 
 ### `ShutdownAsync`
@@ -249,7 +249,7 @@ entry under `Modules`.
 
 ### Job-pipeline tools
 
-Job-pipeline tools go through the full `AgentJobService` lifecycle — they create a
+Job-pipeline tools go through the full `AgentJobService` lifecycle â€” they create a
 job record, support approval flows, and appear in job history. Use these for
 anything with side effects, latency, or that the user might want to audit.
 
@@ -388,7 +388,7 @@ public Task<ModuleInlineToolResult> ExecuteInlineToolAsync(
 
 `ModuleToolPermission` has two modes:
 
-**Custom check** — supply a `Func` that calls whatever service you need:
+**Custom check** â€” supply a `Func` that calls whatever service you need:
 
 ```csharp
 Permission: new ModuleToolPermission(
@@ -401,7 +401,7 @@ Permission: new ModuleToolPermission(
 )
 ```
 
-**Delegate to existing** — reuse a built-in permission category by name:
+**Delegate to existing** â€” reuse a built-in permission category by name:
 
 ```csharp
 Permission: new ModuleToolPermission(
@@ -419,7 +419,7 @@ startup.
 ## Adding REST endpoints
 
 Use `MapEndpoints(IEndpointRouteBuilder app)` with the standard minimal-API pattern.
-There is no required path prefix — use whatever makes sense, but `/modules/{id}/`
+There is no required path prefix â€” use whatever makes sense, but `/modules/{id}/`
 is the convention for module-scoped routes.
 
 ```csharp
@@ -569,17 +569,20 @@ interfaces in
 
 | Interface | What it contributes |
 |-----------|---------------------|
-| `ITaskStepDescriptorProvider` | Method-call step descriptors (e.g. `Chat(...)`, `HttpGet(...)`). |
+| `ITaskStepDescriptorProvider` | Registration records for module methods callable from task scripts, such as `Chat(...)` or `HttpGet(...)`. |
 | `ITaskParserModuleExtension` | Method mappings, event-handler names (`OnTimer`), and per-method parser hints. |
 | `ITaskTriggerAttributeHandler` | One trigger attribute (e.g. `[Schedule]`, `[OnWebhook]`). |
 | `ITaskTriggerSource` | Runtime watcher that fires bound trigger keys. |
 
 Most modules need only one or two of these. A pure tool module needs none.
 
-### Step methods (`ITaskStepDescriptorProvider`)
+### Module methods (`ITaskStepDescriptorProvider`)
 
 Use this when your module wants the parser to recognise a method call inside a
-task body and dispatch it through the central `TaskStepRegistry`.
+task body and dispatch it through the central `TaskStepRegistry`. The current
+contract calls the registration record a `TaskStepDescriptor`; that is runtime
+plumbing, not a separate programming model for task authors. Authors write a
+normal C#-style method call such as `DoThing(value)`.
 
 ```csharp
 public sealed class MyStepProvider : ITaskStepDescriptorProvider
@@ -606,13 +609,13 @@ services.AddSingleton<ITaskStepDescriptorProvider, MyStepProvider>();
 ```
 
 The `OwnerId` on every descriptor must match `ModuleId`. Method names and
-step keys are unique across all modules — duplicates fail at startup.
+runtime dispatch keys are unique across all modules; duplicates fail at startup.
 
 ### Parser mappings and event handlers (`ITaskParserModuleExtension`)
 
 Use this when your module wants to:
 
-Map a method name to a step key with extra parser hints, or map an
+Map a method name to a runtime dispatch key with extra parser hints, or map an
 event-handler name such as `OnTimer` or `OnMetricThreshold` to a module-owned
 trigger key. Do not contribute ordinary C# statement semantics here; Core owns
 those language constructs.
@@ -724,7 +727,7 @@ and `RemoveBindingsAsync` instead of relying on the default
 
 Users will see your module listed in `GET /tasks/trigger-sources` and
 `task trigger-sources`. Document the trigger keys you own in your module's own
-doc — when the module is disabled, tasks bound to those keys are flagged by
+doc â€” when the module is disabled, tasks bound to those keys are flagged by
 `task preflight`.
 
 ---
@@ -759,19 +762,19 @@ doc — when the module is disabled, tasks bound to those keys are flagged by
 
 ## Ideas for what to build
 
-- **Notification module** — watch for task completions or agent job failures and push
+- **Notification module** â€” watch for task completions or agent job failures and push
   a system notification, email, or webhook.
-- **File watcher module** — own an `OnFileChanged` trigger source; let tasks react to
+- **File watcher module** â€” own an `OnFileChanged` trigger source; let tasks react to
   file system events without polling.
-- **Hardware sensor module** — export an `ISensorReader` contract; other modules or
+- **Hardware sensor module** â€” export an `ISensorReader` contract; other modules or
   tasks can consume live temperature, battery, or GPU data.
-- **Calendar integration** — own an `OnCalendarEvent` trigger attribute and
+- **Calendar integration** â€” own an `OnCalendarEvent` trigger attribute and
   source; fire tasks at meeting start/end without a cron job.
-- **Data pipeline module** — expose a `transform_data` tool that agents can call to
+- **Data pipeline module** â€” expose a `transform_data` tool that agents can call to
   reshape JSON payloads between steps.
-- **Local LLM router** — export an `ILocalModelProvider` contract; point the model
+- **Local LLM router** â€” export an `ILocalModelProvider` contract; point the model
   service at a local Ollama or llama.cpp instance for offline capability.
-- **Browser automation** — use Playwright or Selenium under the hood; export
+- **Browser automation** â€” use Playwright or Selenium under the hood; export
   `browser_navigate` and `browser_extract` tools.
 
 ---
@@ -784,12 +787,12 @@ the solution. Check references and rebuild.
 
 **Module status is `failed` after enable**
 `InitializeAsync` threw. The full exception is in the application log under the
-`[Module:{id}]` category. Fix the error, then `module enable my_module` again — no
+`[Module:{id}]` category. Fix the error, then `module enable my_module` again â€” no
 restart needed.
 
 **Tool never reaches `ExecuteToolAsync`**
 The permission check is returning denied. Add a log line at the top of
-`ExecuteToolAsync` — if it never appears, the block is at the pipeline level, not
+`ExecuteToolAsync` â€” if it never appears, the block is at the pipeline level, not
 in your code. Check the `ModuleToolPermission` configuration for that tool.
 
 **Inline tool fires but produces no model output**
@@ -807,7 +810,7 @@ The `.seeded` marker already exists. Delete it from the module's data directory 
 restart to force a re-seed.
 
 **Trigger never fires**
-Confirm `StartAsync` was called on your `ITaskTriggerSource` — add a log line.
+Confirm `StartAsync` was called on your `ITaskTriggerSource` â€” add a log line.
 If it was called but events still don't fire, the OS-level hook (e.g. hotkey
 registration, process watcher) may have failed silently. Check platform
 prerequisites and permission levels. Confirm the binding row's `Kind` matches
