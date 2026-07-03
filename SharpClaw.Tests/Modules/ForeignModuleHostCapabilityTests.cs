@@ -605,7 +605,9 @@ public sealed class ForeignModuleHostCapabilityTests
         var info = providerInfoPayload.RootElement.GetProperty("info");
         info.GetProperty("modelName").GetString().Should().Be("capability-test-model");
         info.GetProperty("providerKey").GetString().Should().Be("groq");
-        info.GetProperty("decryptedApiKey").GetString().Should().Be("secret-key");
+        info.GetProperty("requiresApiKey").GetBoolean().Should().BeTrue();
+        info.GetProperty("hasApiKey").GetBoolean().Should().BeTrue();
+        info.TryGetProperty("decryptedApiKey", out _).Should().BeFalse();
 
         var localPathPayload = JsonDocument.Parse(await localPathResponse.Content.ReadAsStringAsync());
         localPathPayload.RootElement.GetProperty("path").GetString().Should().Be("E:/models/demo.gguf");
@@ -1169,7 +1171,7 @@ public sealed class ForeignModuleHostCapabilityTests
         {
             ProviderInfoModelId = modelId;
             return Task.FromResult<ModelProviderInfo?>(
-                new("capability-test-model", "groq", "secret-key"));
+                new("capability-test-model", "groq", RequiresApiKey: true, HasApiKey: true));
         }
 
         public Task<string?> GetLocalModelFilePathAsync(

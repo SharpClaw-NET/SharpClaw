@@ -18,6 +18,7 @@ using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Security;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Core.Clients;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
@@ -218,7 +219,7 @@ public sealed class HostAgentJobReader(AgentJobService jobs) : IAgentJobReader
 
 public sealed class HostModelInfoProvider(
     IServiceScopeFactory scopeFactory,
-    Contracts.Persistence.EncryptionOptions encryptionOptions) : IModelInfoProvider
+    ProviderApiClientFactory clientFactory) : IModelInfoProvider
 {
     public async Task<ModelProviderInfo?> GetModelProviderInfoAsync(Guid modelId, CancellationToken ct = default)
     {
@@ -232,11 +233,15 @@ public sealed class HostModelInfoProvider(
         if (model is null)
             return null;
 
-        var apiKey = string.IsNullOrEmpty(model.Provider.EncryptedApiKey)
-            ? string.Empty
-            : ApiKeyEncryptor.DecryptOrPassthrough(model.Provider.EncryptedApiKey, encryptionOptions.Key);
+        var plugin = clientFactory.GetPlugin(model.Provider.ProviderKey);
+        var requiresApiKey = plugin?.RequiresApiKey ?? true;
+        var hasApiKey = !string.IsNullOrEmpty(model.Provider.EncryptedApiKey);
 
-        return new ModelProviderInfo(model.Name, model.Provider.ProviderKey, apiKey);
+        return new ModelProviderInfo(
+            model.Name,
+            model.Provider.ProviderKey,
+            requiresApiKey,
+            hasApiKey);
     }
 }
 
