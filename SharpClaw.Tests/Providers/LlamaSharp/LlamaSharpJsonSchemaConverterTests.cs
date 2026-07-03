@@ -3,7 +3,7 @@ using System.Text.Json;
 using LLama.Sampling;
 using SharpClaw.Modules.Providers.LlamaSharp.Clients;
 using SharpClaw.Core.Clients;
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
+using LlamaSharp.ToolCallEnvelopes;
 using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;

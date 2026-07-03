@@ -9,11 +9,16 @@ using LLama.Common;
 using LLama.Native;
 using LLama.Sampling;
 using LLama.Transformers;
+using LlamaSharp.ToolCallEnvelopes;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
 using SharpClaw.Modules.Providers.LlamaSharp.Services;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
+using ContractToolAwareMessage = SharpClaw.Contracts.Providers.ToolAwareMessage;
+using ContractToolChoice = SharpClaw.Contracts.Providers.ToolChoice;
+using EnvelopeToolAwareMessage = LlamaSharp.ToolCallEnvelopes.ToolAwareMessage;
+using EnvelopeToolChoice = LlamaSharp.ToolCallEnvelopes.ToolChoice;
 
 namespace SharpClaw.Modules.Providers.LlamaSharp.Clients;
 
@@ -358,7 +363,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
         string model, string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
+        IReadOnlyList<ContractToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
         CompletionParameters? completionParameters = null,
@@ -381,7 +386,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         var strictTools = completionParameters?.StrictTools ?? true;
         var allowRefusal = ResolveAllowRefusal();
 
-        var history = LlamaSharpToolPromptBuilder.Build(
+        var history = BuildToolPromptHistory(
             systemPrompt, messages, tools,
             imageCount: 0, strictTools: strictTools, allowRefusal: allowRefusal);
         var prompt = ApplyTemplate(loaded.Weights, history);
@@ -444,7 +449,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
         string model, string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
+        IReadOnlyList<ContractToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
         CompletionParameters? completionParameters = null,
@@ -470,7 +475,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         var strictTools = completionParameters?.StrictTools ?? true;
         var allowRefusal = ResolveAllowRefusal();
 
-        var history = LlamaSharpToolPromptBuilder.Build(
+        var history = BuildToolPromptHistory(
             systemPrompt, messages, tools,
             imageCount: 0, strictTools: strictTools, allowRefusal: allowRefusal);
         var prompt = ApplyTemplate(loaded.Weights, history);
@@ -495,25 +500,8 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             loaded, completionParameters?.ThreadId, prompt, ct);
         var committed = false;
 
-        // Holdback buffer length
-        // prefix needed to detect "mode":"tool_calls" in the envelope.
-        // Once the mode field is confirmed we switch streaming phase.
-        const string ToolCallsModeToken = "\"tool_calls\"";
-        var maxApLen = 0;
-        foreach (var ap in antiPrompts)
-            if (ap.Length > maxApLen) maxApLen = ap.Length;
-        var retainLen = Math.Max(maxApLen, ToolCallsModeToken.Length);
-
-        // Phase detection: we read the mode field as tokens arrive.
-        // Null  = not yet determined.
-        // true  = "tool_calls" — buffer everything silently.
-        // false = "message"    — stream text value incrementally.
-        bool? isToolCallsMode = null;
-
-        var holdback = new StringBuilder();
         var fullBuffer = new StringBuilder(); // complete raw envelope
-        var textContent = new StringBuilder(); // streamed text (message mode)
-        var walker = new EnvelopeStreamWalker();
+        var streamParser = new LlamaSharpToolEnvelopeStreamParser();
 
         var completionTokens = 0;
         try
@@ -523,89 +511,12 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
             fullBuffer.Append(token);
             completionTokens++;
 
-            // Once mode is known and it's tool_calls, feed the walker
-            // so consumers receive incremental id/name/args deltas.
-            if (isToolCallsMode == true)
+            foreach (var chunk in streamParser.Feed(token))
             {
-                foreach (var d in walker.Feed(token))
-                    yield return ChatStreamChunk.ToolCall(d);
-                continue;
-            }
-
-            holdback.Append(token);
-            var text = holdback.ToString();
-
-            // Detect mode field as soon as enough tokens have arrived.
-            if (isToolCallsMode is null)
-            {
-                if (text.Contains("\"tool_calls\"", StringComparison.Ordinal))
-                {
-                    isToolCallsMode = true;
-                    holdback.Clear();
-                    // Replay everything buffered so far through the walker
-                    // so it can lock onto the "calls":[ opener that may
-                    // already be in-flight.
-                    foreach (var d in walker.Feed(fullBuffer.ToString()))
-                        yield return ChatStreamChunk.ToolCall(d);
-                    continue;
-                }
-
-                if (text.Contains("\"message\"", StringComparison.Ordinal))
-                {
-                    isToolCallsMode = false;
-                    // Fall through to normal text streaming below.
-                }
-                else
-                {
-                    // Mode not confirmed yet — hold back and wait.
-                    continue;
-                }
-            }
-
-            // isToolCallsMode == false: stream text content.
-            // Check for anti-prompts first.
-            bool hitStop = false;
-            foreach (var ap in antiPrompts)
-            {
-                var apIdx = text.IndexOf(ap, StringComparison.Ordinal);
-                if (apIdx >= 0)
-                {
-                    if (apIdx > 0)
-                    {
-                        var before = text[..apIdx];
-                        textContent.Append(before);
-                        yield return ChatStreamChunk.Text(before);
-                    }
-                    hitStop = true;
-                    holdback.Clear();
-                    break;
-                }
-            }
-
-            if (hitStop)
-                break;
-
-            // Flush characters that cannot be the start of an anti-prompt.
-            // In message mode the grammar only emits the text field value
-            // after the "text": key, so we can stream most of it directly.
-            var safeLen = text.Length - retainLen;
-            if (safeLen > 0)
-            {
-                var safe = text[..safeLen];
-                textContent.Append(safe);
-                yield return ChatStreamChunk.Text(safe);
-                holdback.Remove(0, safeLen);
-            }
-        }
-
-        // Flush remaining holdback in message mode.
-        if (isToolCallsMode == false && holdback.Length > 0)
-        {
-            var remaining = StripStopTokens(holdback.ToString(), antiPrompts);
-            if (remaining.Length > 0)
-            {
-                textContent.Append(remaining);
-                yield return ChatStreamChunk.Text(remaining);
+                if (chunk.TextDelta is { } textDelta)
+                    yield return ChatStreamChunk.Text(textDelta);
+                if (chunk.ToolCallDelta is { } toolCallDelta)
+                    yield return ChatStreamChunk.ToolCall(MapToolCallDelta(toolCallDelta));
             }
         }
 
@@ -651,7 +562,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
     private async Task<ChatCompletionResult> ChatCompletionWithToolsMultimodalAsync(
         LocalInferenceProcessManager.LoadedModel loaded,
         string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ContractToolAwareMessage> messages,
         IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens,
         CompletionParameters? completionParameters,
@@ -692,7 +603,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
                 var strictTools = completionParameters?.StrictTools ?? true;
                 var allowRefusal = ResolveAllowRefusal();
 
-                var history = LlamaSharpToolPromptBuilder.Build(
+                var history = BuildToolPromptHistory(
                     systemPrompt, messages, tools, imagesStaged,
                     strictTools: strictTools, allowRefusal: allowRefusal);
                 var prompt = ApplyTemplate(loaded.Weights, history);
@@ -833,6 +744,63 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         "assistant" => AuthorRole.Assistant,
         _ => AuthorRole.User,
     };
+
+    private static ChatHistory BuildToolPromptHistory(
+        string? systemPrompt,
+        IReadOnlyList<ContractToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int imageCount,
+        bool strictTools,
+        bool allowRefusal)
+    {
+        var packageHistory = LlamaSharpToolPromptBuilder.Build(
+            systemPrompt,
+            MapToolAwareMessages(messages),
+            MapToolDefinitions(tools),
+            imageCount,
+            strictTools,
+            allowRefusal);
+
+        var history = new ChatHistory();
+        foreach (var message in packageHistory.Messages)
+            history.AddMessage(MapPromptRole(message.Role), message.Content);
+        return history;
+    }
+
+    private static AuthorRole MapPromptRole(ToolPromptRole role) => role switch
+    {
+        ToolPromptRole.System => AuthorRole.System,
+        ToolPromptRole.Assistant => AuthorRole.Assistant,
+        _ => AuthorRole.User,
+    };
+
+    private static IReadOnlyList<ToolDefinition> MapToolDefinitions(
+        IReadOnlyList<ChatToolDefinition> tools) =>
+        tools.Select(tool => new ToolDefinition(
+            tool.Name,
+            tool.Description,
+            tool.ParametersSchema)).ToArray();
+
+    private static IReadOnlyList<EnvelopeToolAwareMessage> MapToolAwareMessages(
+        IReadOnlyList<ContractToolAwareMessage> messages) =>
+        messages.Select(message => new EnvelopeToolAwareMessage
+        {
+            Role = message.Role,
+            Content = message.Content,
+            ToolCalls = message.ToolCalls?.Select(MapToolCall).ToArray(),
+            ToolCallId = message.ToolCallId,
+            ImageBase64 = message.ImageBase64,
+            ImageMediaType = message.ImageMediaType,
+        }).ToArray();
+
+    private static ToolCall MapToolCall(ChatToolCall call) =>
+        new(call.Id, call.Name, call.ArgumentsJson);
+
+    private static ChatToolCall MapToolCall(ToolCall call) =>
+        new(call.Id, call.Name, call.ArgumentsJson);
+
+    private static ChatToolCallDelta MapToolCallDelta(ToolCallDelta delta) =>
+        new(delta.Index, delta.Id, delta.Name, delta.ArgumentsFragment);
 
     // ── Template application ──────────────────────────────────────
 
@@ -1071,12 +1039,22 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         CompletionParameters? p,
         IReadOnlyList<ChatToolDefinition> tools)
     {
-        var choice = p?.ToolChoice ?? ToolChoice.Auto;
+        var choice = MapToolChoice(p?.ToolChoice ?? ContractToolChoice.Auto);
         var parallel = p?.ParallelToolCalls ?? true;
         var strict = p?.StrictTools ?? true;
         var allowRefusal = ResolveAllowRefusal();
-        return LlamaSharpToolGrammar.Build(choice, parallel, tools, strict, allowRefusal);
+        return LlamaSharpToolGrammar.Build(choice, parallel, MapToolDefinitions(tools), strict, allowRefusal);
     }
+
+    private static EnvelopeToolChoice MapToolChoice(ContractToolChoice choice) =>
+        choice.Mode switch
+        {
+            SharpClaw.Contracts.Providers.ToolChoiceMode.None => EnvelopeToolChoice.None,
+            SharpClaw.Contracts.Providers.ToolChoiceMode.Required => EnvelopeToolChoice.Required,
+            SharpClaw.Contracts.Providers.ToolChoiceMode.Named => EnvelopeToolChoice.ForFunction(
+                choice.NamedFunction ?? string.Empty),
+            _ => EnvelopeToolChoice.Auto,
+        };
 
     /// <summary>
     /// Resolves whether the envelope grammar should include the third
@@ -1192,106 +1170,25 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
         return text;
     }
 
-    // ── Envelope parsing ──────────────────────────────────────────
+    // Envelope parsing
 
-    private static readonly JsonSerializerOptions JsonOpts = new()
-    {
-        PropertyNameCaseInsensitive = true,
-    };
-
-    /// <summary>
-    /// Names that local models emit to signal "I don't want to call a tool."
-    /// Treating these as real invocations would feed an error back to the model
-    /// and trigger an infinite tool-call loop.
-    /// </summary>
-    private static readonly HashSet<string> NoOpToolNames =
-        new(StringComparer.OrdinalIgnoreCase)
-        { "none", "null", "no_tool", "noop", "no-op", "n/a", "" };
-
-    /// <summary>
-    /// Parses the grammar-constrained envelope JSON produced by the model.
-    /// On parse failure — possible on heavily-quantised models that defeat the
-    /// grammar sampler — returns an empty <see cref="ChatCompletionResult"/> and
-    /// logs a warning.
-    /// </summary>
     internal static ChatCompletionResult ParseEnvelope(string json)
     {
-        if (string.IsNullOrWhiteSpace(json))
-            return new ChatCompletionResult { Content = string.Empty };
-
         try
         {
-            using var doc = JsonDocument.Parse(json);
-            var root = doc.RootElement;
-
-            // L-018 — be tolerant of casing and surrounding whitespace.
-            // The grammar emits canonical lowercase, but quantised models
-            // occasionally produce "Tool_Calls" or " tool_calls ". Trim
-            // and lower so the downstream comparison is robust without
-            // changing the grammar contract.
-            string mode = "message";
-            if (root.TryGetProperty("mode", out var modeEl) && modeEl.ValueKind == JsonValueKind.String)
+            var envelope = LlamaSharpToolEnvelopeParser.Parse(json);
+            return new ChatCompletionResult
             {
-                var raw = modeEl.GetString();
-                if (!string.IsNullOrWhiteSpace(raw))
-                    mode = raw.Trim().ToLowerInvariant();
-            }
-
-            var text = root.TryGetProperty("text", out var textEl) && textEl.ValueKind == JsonValueKind.String
-                ? textEl.GetString() ?? string.Empty
-                : string.Empty;
-
-            if (mode == "refusal")
-            {
-                // Refusal mode is semantically mutually exclusive with
-                // Content/ToolCalls — text carries the model-provided
-                // decline reason, which surfaces through Refusal so that
-                // ChatService can map finish_reason to ContentFilter.
-                return new ChatCompletionResult { Refusal = text };
-            }
-
-            if (mode != "tool_calls")
-                return new ChatCompletionResult { Content = text };
-
-            // tool_calls mode — parse the calls array.
-            if (!root.TryGetProperty("calls", out var callsEl)
-                || callsEl.ValueKind != JsonValueKind.Array)
-                return new ChatCompletionResult { Content = text };
-
-            var calls = new List<ChatToolCall>();
-            foreach (var callEl in callsEl.EnumerateArray())
-            {
-                var name = callEl.TryGetProperty("name", out var nameEl)
-                    ? nameEl.GetString() ?? string.Empty
-                    : string.Empty;
-
-                if (NoOpToolNames.Contains(name))
-                    continue;
-
-                var id = callEl.TryGetProperty("id", out var idEl)
-                    ? idEl.GetString()
-                    : null;
-                if (string.IsNullOrWhiteSpace(id))
-                    id = $"call_{Guid.NewGuid():N}";
-
-                var args = callEl.TryGetProperty("args", out var argsEl)
-                    ? argsEl.GetRawText()
-                    : "{}";
-
-                calls.Add(new ChatToolCall(id!, name, args));
-            }
-
-            return new ChatCompletionResult { Content = text, ToolCalls = calls };
+                Content = envelope.Content ?? string.Empty,
+                Refusal = envelope.Refusal,
+                ToolCalls = envelope.ToolCalls.Select(MapToolCall).ToArray(),
+            };
         }
-        catch (JsonException ex)
+        catch (LlamaSharpToolEnvelopeException ex)
         {
-            // L-017 — bubble the failure up as a typed exception so
-            // ChatService can map it to an error response rather than
-            // silently returning a fake apology that downstream tooling
-            // would treat as a successful completion.
             var preview = json[..Math.Min(json.Length, 200)];
             Debug.WriteLine(
-                $"[WARN] Envelope parse failed — grammar sampler may have been defeated. Input: {preview} — {ex.Message}",
+                $"[WARN] Envelope parse failed. Input: {preview} - {ex.Message}",
                 "SharpClaw.CLI");
             throw new LocalInferenceEnvelopeException(preview, ex);
         }

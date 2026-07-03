@@ -1,7 +1,5 @@
 using System.Text.RegularExpressions;
-using SharpClaw.Modules.Providers.LlamaSharp.Clients;
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
-using SharpClaw.Contracts.Providers;
+using LlamaSharp.ToolCallEnvelopes;
 using System.Text.Json;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
@@ -200,12 +198,9 @@ public class LlamaSharpToolGrammarShapeTests
             yield return (lines[i].TrimEnd('\r'), i + 1);
     }
 
-    private static ChatToolDefinition SimpleTool(string name, string parametersJson)
+    private static ToolDefinition SimpleTool(string name, string parametersJson)
     {
         using var doc = JsonDocument.Parse(parametersJson);
-        return new ChatToolDefinition(
-            Name: name,
-            Description: $"Test tool {name}",
-            ParametersSchema: doc.RootElement.Clone());
+        return new ToolDefinition(name, $"Test tool {name}", doc.RootElement.Clone());
     }
 }

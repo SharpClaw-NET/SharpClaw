@@ -1,7 +1,7 @@
 using System.Text.Json;
 using SharpClaw.Modules.Providers.LlamaSharp.Clients;
 using SharpClaw.Core.Clients;
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
+using LlamaSharp.ToolCallEnvelopes;
 using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;

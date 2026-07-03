@@ -1,8 +1,7 @@
 using SharpClaw.Modules.Providers.LlamaSharp.Clients;
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
-using SharpClaw.Contracts.Providers;
+using LlamaSharp.ToolCallEnvelopes;
 using SharpClaw.Providers.Common;
-using System.Text.Json;
+using EnvelopeToolAwareMessage = LlamaSharp.ToolCallEnvelopes.ToolAwareMessage;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 
@@ -162,7 +161,7 @@ public class LocalInferenceEnvelopeParserTests
     }
 
     [Test]
-    public void ParseEnvelope_CallWithNoId_GeneratesId()
+    public void ParseEnvelope_CallWithNoId_ThrowsEnvelopeException()
     {
         var json = """
             {
@@ -174,11 +173,10 @@ public class LocalInferenceEnvelopeParserTests
             }
             """;
 
-        var result = LocalInferenceApiClient.ParseEnvelope(json);
+        var act = () => LocalInferenceApiClient.ParseEnvelope(json);
 
-        result.ToolCalls.Should().HaveCount(1);
-        result.ToolCalls[0].Id.Should().NotBeNullOrWhiteSpace();
-        result.ToolCalls[0].Id.Should().StartWith("call_");
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     [Test]
@@ -208,46 +206,65 @@ public class LocalInferenceEnvelopeParserTests
     [TestCase("noop")]
     [TestCase("no-op")]
     [TestCase("n/a")]
-    [TestCase("")]
     [TestCase("NONE")]
     [TestCase("No_Tool")]
-    public void ParseEnvelope_NoOpToolName_ProducesZeroCalls(string noOpName)
+    public void ParseEnvelope_PseudoToolName_ReturnsCallAsData(string pseudoToolName)
     {
         var json = $$"""
             {
               "mode": "tool_calls",
               "text": "",
               "calls": [
-                { "id": "call_1", "name": "{{noOpName}}", "args": {} }
+                { "id": "call_1", "name": "{{pseudoToolName}}", "args": {} }
               ]
             }
             """;
 
         var result = LocalInferenceApiClient.ParseEnvelope(json);
 
-        result.ToolCalls.Should().BeEmpty();
+        result.ToolCalls.Should().ContainSingle();
+        result.ToolCalls[0].Name.Should().Be(pseudoToolName);
+    }
+
+    [Test]
+    public void ParseEnvelope_EmptyToolName_ThrowsEnvelopeException()
+    {
+        var json = """
+            {
+              "mode": "tool_calls",
+              "text": "",
+              "calls": [
+                { "id": "call_1", "name": "", "args": {} }
+              ]
+            }
+            """;
+
+        var act = () => LocalInferenceApiClient.ParseEnvelope(json);
+
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     // ── malformed input ───────────────────────────────────────────
 
     [Test]
-    public void ParseEnvelope_MissingMode_TreatsAsMessage()
+    public void ParseEnvelope_MissingMode_ThrowsEnvelopeException()
     {
         var json = """{"text":"fallback","calls":[]}""";
 
-        var result = LocalInferenceApiClient.ParseEnvelope(json);
+        var act = () => LocalInferenceApiClient.ParseEnvelope(json);
 
-        result.Content.Should().Be("fallback");
-        result.ToolCalls.Should().BeEmpty();
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     [Test]
-    public void ParseEnvelope_EmptyString_ReturnsEmptyResult()
+    public void ParseEnvelope_EmptyString_ThrowsEnvelopeException()
     {
-        var result = LocalInferenceApiClient.ParseEnvelope(string.Empty);
+        var act = () => LocalInferenceApiClient.ParseEnvelope(string.Empty);
 
-        result.Content.Should().BeEmpty();
-        result.ToolCalls.Should().BeEmpty();
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     [Test]
@@ -258,12 +275,12 @@ public class LocalInferenceEnvelopeParserTests
         // string that downstream code treats as a real assistant message.
         var act = () => LocalInferenceApiClient.ParseEnvelope("not json at all");
 
-        act.Should().Throw<LocalInferenceEnvelopeException>()
-           .WithInnerException<JsonException>();
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     [Test]
-    public void ParseEnvelope_ArgsAsEscapedString_StillReturnsCall()
+    public void ParseEnvelope_ArgsAsEscapedString_ThrowsEnvelopeException()
     {
         // Grammar prevents this but heavily-quantized models can defeat it.
         // The parser should survive gracefully — args will be the raw string token.
@@ -277,39 +294,45 @@ public class LocalInferenceEnvelopeParserTests
             }
             """;
 
-        var result = LocalInferenceApiClient.ParseEnvelope(json);
+        var act = () => LocalInferenceApiClient.ParseEnvelope(json);
 
-        // Call is parsed; args will be whatever the raw token text is.
-        result.ToolCalls.Should().HaveCount(1);
-        result.ToolCalls[0].Name.Should().Be("do_thing");
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 
     [Test]
-    public void ParseEnvelope_WrongTypeForText_ReturnsEmptyContent()
+    public void ParseEnvelope_WrongTypeForText_ThrowsEnvelopeException()
     {
         // text field is an integer instead of a string
         var json = """{"mode":"message","text":42,"calls":[]}""";
 
         // JsonElement.GetString() on a number returns null → falls back to empty
-        var result = LocalInferenceApiClient.ParseEnvelope(json);
+        var act = () => LocalInferenceApiClient.ParseEnvelope(json);
 
-        result.Content.Should().BeEmpty();
+        act.Should().Throw<SharpClaw.Contracts.Providers.LocalInferenceEnvelopeException>()
+           .WithInnerException<LlamaSharpToolEnvelopeException>();
     }
 }
 
 [TestFixture]
 public class EnvelopeStreamWalkerTests
 {
-    private static List<ChatToolCallDelta> FeedAll(string json)
+    private static List<ToolCallDelta> FeedAll(string json)
     {
-        var walker = new EnvelopeStreamWalker();
-        var deltas = new List<ChatToolCallDelta>();
+        var parser = new LlamaSharpToolEnvelopeStreamParser();
+        var deltas = new List<ToolCallDelta>();
         foreach (var ch in json)
-            deltas.AddRange(walker.Feed(ch.ToString()));
+        {
+            foreach (var chunk in parser.Feed(ch.ToString()))
+            {
+                if (chunk.ToolCallDelta is { } delta)
+                    deltas.Add(delta);
+            }
+        }
         return deltas;
     }
 
-    private static string ConcatArgs(IEnumerable<ChatToolCallDelta> deltas, int index) =>
+    private static string ConcatArgs(IEnumerable<ToolCallDelta> deltas, int index) =>
         string.Concat(deltas
             .Where(d => d.Index == index && d.ArgumentsFragment is not null)
             .Select(d => d.ArgumentsFragment));
@@ -409,8 +432,9 @@ public class EnvelopeStreamWalkerTests
 [TestFixture]
 public class LlamaSharpToolPromptBuilderImageTests
 {
-    private static readonly IReadOnlyList<ChatToolDefinition> NoTools = Array.Empty<ChatToolDefinition>();
-    private static readonly IReadOnlyList<ToolAwareMessage> NoMessages = Array.Empty<ToolAwareMessage>();
+    private static readonly IReadOnlyList<ToolDefinition> NoTools = Array.Empty<ToolDefinition>();
+    private static readonly IReadOnlyList<EnvelopeToolAwareMessage> NoMessages =
+        Array.Empty<EnvelopeToolAwareMessage>();
 
     [Test]
     public void Build_NoImages_OmitsVisualContextSection()
@@ -434,4 +458,3 @@ public class LlamaSharpToolPromptBuilderImageTests
         history.Messages[0].Content.Should().Contain("shown 3 images");
     }
 }
-

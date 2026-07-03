@@ -24,6 +24,7 @@
 
   <ItemGroup>
     <PackageReference Include="LLamaSharp" />
+    <PackageReference Include="LlamaSharp.ToolCallEnvelopes" />
     <PackageReference Include="LLamaSharp.Backend.Cpu" />
   </ItemGroup>
 

@@ -1,7 +1,5 @@
 using System.Text.Json;
-using SharpClaw.Modules.Providers.LlamaSharp.Clients;
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
-using SharpClaw.Contracts.Providers;
+using LlamaSharp.ToolCallEnvelopes;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 
@@ -15,7 +13,7 @@ public class LlamaSharpToolPromptBuilderTests
     {
         var history = LlamaSharpToolPromptBuilder.Build(null, [], []);
 
-        var systemMessage = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.System);
+        var systemMessage = history.Messages.First(m => m.Role == ToolPromptRole.System);
         systemMessage.Content.Should().Contain("mode");
         systemMessage.Content.Should().Contain("tool_calls");
         systemMessage.Content.Should().Contain("message");
@@ -26,7 +24,7 @@ public class LlamaSharpToolPromptBuilderTests
     {
         var history = LlamaSharpToolPromptBuilder.Build("Be concise.", [], []);
 
-        var systemMessage = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.System);
+        var systemMessage = history.Messages.First(m => m.Role == ToolPromptRole.System);
         systemMessage.Content.Should().StartWith("Be concise.");
         systemMessage.Content.Should().Contain("## Tool calling");
     }
@@ -36,14 +34,14 @@ public class LlamaSharpToolPromptBuilderTests
     {
         var history = LlamaSharpToolPromptBuilder.Build(null, [], []);
 
-        var systemMessage = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.System);
+        var systemMessage = history.Messages.First(m => m.Role == ToolPromptRole.System);
         systemMessage.Content.Should().NotStartWith("\n");
     }
 
     [Test]
     public void Build_WithTools_SystemPromptListsToolNames()
     {
-        var tools = new List<ChatToolDefinition>
+        var tools = new List<ToolDefinition>
         {
             MakeTool("get_weather", "Gets the current weather.", """{"properties":{"location":{"type":"string","description":"City name"}}}"""),
             MakeTool("search_web", "Searches the web.", """{"properties":{}}"""),
@@ -51,7 +49,7 @@ public class LlamaSharpToolPromptBuilderTests
 
         var history = LlamaSharpToolPromptBuilder.Build(null, [], tools);
 
-        var systemMessage = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.System);
+        var systemMessage = history.Messages.First(m => m.Role == ToolPromptRole.System);
         systemMessage.Content.Should().Contain("get_weather");
         systemMessage.Content.Should().Contain("Gets the current weather.");
         systemMessage.Content.Should().Contain("search_web");
@@ -65,7 +63,7 @@ public class LlamaSharpToolPromptBuilderTests
     {
         var history = LlamaSharpToolPromptBuilder.Build(null, [], []);
 
-        var systemMessage = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.System);
+        var systemMessage = history.Messages.First(m => m.Role == ToolPromptRole.System);
         systemMessage.Content.Should().NotContain("## Available tools");
     }
 
@@ -82,7 +80,7 @@ public class LlamaSharpToolPromptBuilderTests
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
         history.Messages.Should().Contain(m =>
-            m.AuthorRole == LLama.Common.AuthorRole.User && m.Content == "Hello");
+            m.Role == ToolPromptRole.User && m.Content == "Hello");
     }
 
     // ── Plain assistant messages ──────────────────────────────────
@@ -97,7 +95,7 @@ public class LlamaSharpToolPromptBuilderTests
 
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var assistantMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant);
+        var assistantMsg = history.Messages.First(m => m.Role == ToolPromptRole.Assistant);
         using var doc = JsonDocument.Parse(assistantMsg.Content);
         doc.RootElement.GetProperty("mode").GetString().Should().Be("message");
         doc.RootElement.GetProperty("text").GetString().Should().Be("Sure, I can help with that.");
@@ -114,7 +112,7 @@ public class LlamaSharpToolPromptBuilderTests
 
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var assistantMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant);
+        var assistantMsg = history.Messages.First(m => m.Role == ToolPromptRole.Assistant);
         using var doc = JsonDocument.Parse(assistantMsg.Content);
         doc.RootElement.GetProperty("text").GetString().Should().BeEmpty();
     }
@@ -132,14 +130,14 @@ public class LlamaSharpToolPromptBuilderTests
                 Content = "",
                 ToolCalls =
                 [
-                    new ChatToolCall("call_1", "get_weather", """{"location":"Paris"}"""),
+                    new ToolCall("call_1", "get_weather", """{"location":"Paris"}"""),
                 ],
             },
         };
 
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var assistantMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant);
+        var assistantMsg = history.Messages.First(m => m.Role == ToolPromptRole.Assistant);
         using var doc = JsonDocument.Parse(assistantMsg.Content);
         doc.RootElement.GetProperty("mode").GetString().Should().Be("tool_calls");
 
@@ -151,38 +149,31 @@ public class LlamaSharpToolPromptBuilderTests
     }
 
     [Test]
-    public void Build_AssistantWithToolCalls_InvalidArgsJson_UsesEmptyObject()
+    public void Build_AssistantWithToolCalls_InvalidArgsJson_Throws()
     {
         var messages = new List<ToolAwareMessage>
         {
             ToolAwareMessage.AssistantWithToolCalls(
-                [new ChatToolCall("call_2", "broken", "not-json")]),
+                [new ToolCall("call_2", "broken", "not-json")]),
         };
 
-        var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
+        var act = () => LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var assistantMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant);
-        using var doc = JsonDocument.Parse(assistantMsg.Content);
-        var args = doc.RootElement.GetProperty("calls")[0].GetProperty("args");
-        args.ValueKind.Should().Be(JsonValueKind.Object);
-        args.EnumerateObject().Should().BeEmpty();
+        act.Should().Throw<ArgumentException>();
     }
 
     [Test]
-    public void Build_AssistantWithToolCalls_NullArgs_UsesEmptyObject()
+    public void Build_AssistantWithToolCalls_EmptyArgs_Throws()
     {
         var messages = new List<ToolAwareMessage>
         {
             ToolAwareMessage.AssistantWithToolCalls(
-                [new ChatToolCall("call_3", "noop", "")]),
+                [new ToolCall("call_3", "noop", "")]),
         };
 
-        var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
+        var act = () => LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var assistantMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant);
-        using var doc = JsonDocument.Parse(assistantMsg.Content);
-        doc.RootElement.GetProperty("calls")[0].GetProperty("args").ValueKind
-            .Should().Be(JsonValueKind.Object);
+        act.Should().Throw<ArgumentException>();
     }
 
     // ── Tool result messages ──────────────────────────────────────
@@ -197,7 +188,7 @@ public class LlamaSharpToolPromptBuilderTests
 
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        var userMsg = history.Messages.First(m => m.AuthorRole == LLama.Common.AuthorRole.User);
+        var userMsg = history.Messages.First(m => m.Role == ToolPromptRole.User);
         using var doc = JsonDocument.Parse(userMsg.Content);
         var result = doc.RootElement.GetProperty("tool_result");
         result.GetProperty("id").GetString().Should().Be("call_1");
@@ -212,7 +203,7 @@ public class LlamaSharpToolPromptBuilderTests
         var messages = new List<ToolAwareMessage>
         {
             new() { Role = "user",      Content = "What is the weather in Tokyo?" },
-            new() { Role = "assistant", Content = "", ToolCalls = [new ChatToolCall("c1", "get_weather", """{"location":"Tokyo"}""")] },
+            new() { Role = "assistant", Content = "", ToolCalls = [new ToolCall("c1", "get_weather", """{"location":"Tokyo"}""")] },
             new() { Role = "tool",      ToolCallId = "c1", Content = "Rainy, 15°C" },
             new() { Role = "assistant", Content = "It is rainy in Tokyo at 15°C." },
         };
@@ -221,11 +212,11 @@ public class LlamaSharpToolPromptBuilderTests
 
         // system + 4 conversation turns
         history.Messages.Should().HaveCount(5);
-        history.Messages[0].AuthorRole.Should().Be(LLama.Common.AuthorRole.System);
-        history.Messages[1].AuthorRole.Should().Be(LLama.Common.AuthorRole.User);
-        history.Messages[2].AuthorRole.Should().Be(LLama.Common.AuthorRole.Assistant);
-        history.Messages[3].AuthorRole.Should().Be(LLama.Common.AuthorRole.User);   // tool result → user
-        history.Messages[4].AuthorRole.Should().Be(LLama.Common.AuthorRole.Assistant);
+        history.Messages[0].Role.Should().Be(ToolPromptRole.System);
+        history.Messages[1].Role.Should().Be(ToolPromptRole.User);
+        history.Messages[2].Role.Should().Be(ToolPromptRole.Assistant);
+        history.Messages[3].Role.Should().Be(ToolPromptRole.User);   // tool result → user
+        history.Messages[4].Role.Should().Be(ToolPromptRole.Assistant);
     }
 
     [Test]
@@ -234,12 +225,12 @@ public class LlamaSharpToolPromptBuilderTests
         var messages = new List<ToolAwareMessage>
         {
             ToolAwareMessage.Assistant("Thinking..."),
-            ToolAwareMessage.AssistantWithToolCalls([new ChatToolCall("c1", "lookup", "{}")]),
+            ToolAwareMessage.AssistantWithToolCalls([new ToolCall("c1", "lookup", "{}")]),
         };
 
         var history = LlamaSharpToolPromptBuilder.Build(null, messages, []);
 
-        foreach (var msg in history.Messages.Where(m => m.AuthorRole == LLama.Common.AuthorRole.Assistant))
+        foreach (var msg in history.Messages.Where(m => m.Role == ToolPromptRole.Assistant))
         {
             var act = () => JsonDocument.Parse(msg.Content);
             act.Should().NotThrow();
@@ -248,9 +239,9 @@ public class LlamaSharpToolPromptBuilderTests
 
     // ── Helpers ───────────────────────────────────────────────────
 
-    private static ChatToolDefinition MakeTool(string name, string description, string schemaJson)
+    private static ToolDefinition MakeTool(string name, string description, string schemaJson)
     {
         using var doc = JsonDocument.Parse(schemaJson);
-        return new ChatToolDefinition(name, description, doc.RootElement.Clone());
+        return new ToolDefinition(name, description, doc.RootElement.Clone());
     }
 }

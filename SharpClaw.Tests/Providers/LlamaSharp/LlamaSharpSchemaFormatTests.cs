@@ -1,4 +1,4 @@
-using SharpClaw.Modules.Providers.LlamaSharp.LocalInference;
+using LlamaSharp.ToolCallEnvelopes;
 
 namespace SharpClaw.Tests.Providers.LlamaSharp;
 
