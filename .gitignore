@@ -5,6 +5,7 @@
 # Internal specs & docs
 docs/internal
 docs/internal/
+sharpclaw-vs2026/docs/internal
 
 # Nested standalone repository
 SharpClaw.Core/
