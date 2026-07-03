@@ -22,6 +22,7 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Core.Permissions;
 // Infrastructure-facing: ModuleJsonPersistenceService coordinates module persistence
 // registration for JSON/InMemory mode.  This import does not introduce cold-entity
 // query coupling and is acceptable per the cold-storage-ef-query-integration-plan.
@@ -53,6 +54,7 @@ public sealed class ModuleService(
 {
     private static readonly ModuleLifecycleProjectionEngine ModuleProjection = new();
     private static readonly ModuleDisableDependencyEngine ModuleDisableDependencies = new();
+    private static readonly ModulePermissionReconciliationEngine ModulePermissionReconciliation = new();
 
     // ═══════════════════════════════════════════════════════════════
     // Queries
@@ -1430,52 +1432,55 @@ public sealed class ModuleService(
         if (permissionSets.Count == 0)
             return;
 
-        var changed = false;
+        var plan = ModulePermissionReconciliation.BuildPlan(
+            newFlagKeys,
+            newResourceTypes,
+            permissionSets
+                .Select(ps => new ModulePermissionSetReconciliationFact(
+                    ps.Id,
+                    ps.GlobalFlags
+                        .Select(flag => flag.FlagKey)
+                        .ToList(),
+                    ps.ResourceAccesses
+                        .Where(access => access.ResourceId == WellKnownIds.AllResources)
+                        .Select(access => access.ResourceType)
+                        .ToList()))
+                .ToList());
 
-        foreach (var ps in permissionSets)
+        if (!plan.HasChanges)
+            return;
+
+        foreach (var permissionSetPlan in plan.PermissionSets)
         {
-            foreach (var rt in newResourceTypes)
+            var ps = permissionSets.First(set =>
+                set.Id == permissionSetPlan.PermissionSetId);
+
+            foreach (var grant in permissionSetPlan.MissingWildcardResources)
             {
-                if (!ps.ResourceAccesses.Any(a =>
-                        a.ResourceType == rt && a.ResourceId == WellKnownIds.AllResources))
+                ps.ResourceAccesses.Add(new ResourceAccessDB
                 {
-                    // Clearance MUST be Independent — Unset (the DB default)
-                    // is treated as "grant is inert, deny" by
-                    // EvaluateResourceAccessAsync. See the matching guard in
-                    // SeedingService.CreateAdminPermissions.
-                    ps.ResourceAccesses.Add(new ResourceAccessDB
-                    {
-                        PermissionSetId = ps.Id,
-                        ResourceType = rt,
-                        ResourceId = WellKnownIds.AllResources,
-                        Clearance = PermissionClearance.Independent,
-                    });
-                    changed = true;
-                }
+                    PermissionSetId = ps.Id,
+                    ResourceType = grant.ResourceType,
+                    ResourceId = WellKnownIds.AllResources,
+                    Clearance = grant.Clearance,
+                });
             }
 
-            foreach (var flagKey in newFlagKeys)
+            foreach (var grant in permissionSetPlan.MissingGlobalFlags)
             {
-                if (!ps.GlobalFlags.Any(f => f.FlagKey == flagKey))
+                ps.GlobalFlags.Add(new GlobalFlagDB
                 {
-                    ps.GlobalFlags.Add(new GlobalFlagDB
-                    {
-                        PermissionSetId = ps.Id,
-                        FlagKey = flagKey,
-                        Clearance = PermissionClearance.Independent,
-                    });
-                    changed = true;
-                }
+                    PermissionSetId = ps.Id,
+                    FlagKey = grant.FlagKey,
+                    Clearance = grant.Clearance,
+                });
             }
         }
 
-        if (changed)
-        {
-            logger.LogInformation(
-                "Reconciled permissions for module '{ModuleId}' — backfilled grants into {Count} permission set(s).",
-                module.Id, permissionSets.Count);
-            await db.SaveChangesAsync(ct);
-        }
+        logger.LogInformation(
+            "Reconciled permissions for module '{ModuleId}' — backfilled grants into {Count} permission set(s).",
+            module.Id, permissionSets.Count);
+        await db.SaveChangesAsync(ct);
     }
 
     // ═══════════════════════════════════════════════════════════════
