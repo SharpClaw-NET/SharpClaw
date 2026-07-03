@@ -23,9 +23,9 @@ public sealed class AgentOrchestrationModule : ISharpClawRuntimeModule, ITaskPar
     public string ToolPrefix => "ao";
 
     /// <summary>
-    /// Parser extension contributed by the merged Task Scripting subsystem
-    /// (folded into Agent Orchestration). Registers the <c>OnTimer</c>
-    /// event-handler name and the scripting-language primitives.
+    /// Parser extension contributed by Agent Orchestration. Registers trigger
+    /// attributes and event-handler names; C# task-language statements are
+    /// Core-owned.
     /// </summary>
     public ITaskParserModuleExtension ParserExtension => TaskScriptingParserExtension.Instance;
 
@@ -47,12 +47,8 @@ public sealed class AgentOrchestrationModule : ISharpClawRuntimeModule, ITaskPar
         services.AddSingleton<ITaskTriggerSource>(sp => sp.GetRequiredService<EventBusTriggerSource>());
         services.AddSingleton<ISharpClawEventSink>(sp => sp.GetRequiredService<EventBusTriggerSource>());
 
-        // ── Merged from sharpclaw_task_scripting ───────────────────
-        // Task scripting primitives (declare/assign/conditional/loop/return/
-        // event_handler/evaluate) and runtime control (delay/wait_until_stopped/log).
-        services.AddScoped<ITaskStepExecutorExtension, TaskScriptingStepExecutor>();
-
-        // Lifecycle triggers (Startup / Shutdown).
+        // Lifecycle triggers (Startup / Shutdown). Intrinsic C# task-language
+        // statements are implemented by Core, not by this module.
         services.AddSingleton<ITaskTriggerSource, LifecycleTriggerSource>();
 
         // Task-chain triggers (TaskCompleted / TaskFailed). Same instance is

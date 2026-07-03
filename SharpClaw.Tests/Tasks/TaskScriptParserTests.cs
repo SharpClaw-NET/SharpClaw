@@ -146,7 +146,7 @@ public class LogTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
     }
 
     [Test]
@@ -168,7 +168,7 @@ public class EarlyExitTask
 
         result.Success.Should().BeTrue();
         result.Definition!.Steps.Should().HaveCount(2);
-        result.Definition.Steps.Last().StepKey.Should().Be(TaskScriptingStepKeys.Return);
+        result.Definition.Steps.Last().StepKey.Should().Be(TaskLanguageStepKeys.Return);
     }
 
     [Test]
@@ -191,7 +191,7 @@ public class BranchingTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Conditional);
+        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Conditional);
     }
 
     [Test]
@@ -218,9 +218,9 @@ public class IfElseTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Definition!.Steps.Single(s => s.StepKey == TaskScriptingStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        var conditional = result.Definition!.Steps.Single(s => s.StepKey == TaskLanguageStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
     }
 
     [Test]

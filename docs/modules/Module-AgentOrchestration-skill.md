@@ -80,13 +80,12 @@ ao_edit_channel_header (alias: edit_channel_header)
   Permission: per-resource (ChannelHeader)
 
 ────────────────────────────────────────
-TASK-SCRIPT STEPS
+TASK-SCRIPT OPERATIONS
 ────────────────────────────────────────
-Statement primitives (parser-emitted, owned by this module):
-  DeclareVariable, Assign, EventHandler, Conditional, Loop, Return,
-  Delay, Evaluate, Log, ParseResponse
-
-Step methods (registered with TaskStepRegistry):
+Core owns ordinary C# task-language statements: declaration, assignment,
+control flow, return, logging, delay, structured response parsing, and
+cancellation waits. This module contributes real host operations registered
+with TaskStepRegistry:
   Chat, ChatStream, ChatToThread        — agent chat
   Emit, ParseResponse                   — output / parsing
   FindModel, FindProvider, FindAgent    — entity lookup
@@ -96,8 +95,9 @@ Step methods (registered with TaskStepRegistry):
   CreateChannel, FindChannel,
     AddAllowedAgent                     — channels
 
-If this module is disabled, scripts using these methods or primitives
-are rejected by `task preflight`.
+If this module is disabled, scripts using these module operations or its
+triggers are rejected by `task preflight`. Pure C# control flow stays valid
+because it is Core-owned.
 
 ────────────────────────────────────────
 TRIGGERS

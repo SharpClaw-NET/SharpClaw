@@ -559,15 +559,18 @@ Guard with an existence check so re-seeding manually doesn't produce duplicates.
 
 ## Contributing to the task pipeline
 
-Tasks have no fixed step or trigger surface in core. Every step method, every
-statement primitive, every trigger attribute, and every runtime trigger source
-is contributed by a module. There are four small interfaces in
+Tasks have a fixed Core-owned C# language surface and a module-owned operation
+surface. Modules do not contribute parser-owned step tables for declarations,
+assignment, control flow, return, logging, delay, structured response parsing,
+or cancellation waits. They contribute real callable operations, event-handler
+names, trigger attributes, and runtime trigger sources. There are four small
+interfaces in
 `SharpClaw.Contracts.Tasks` that work together:
 
 | Interface | What it contributes |
 |-----------|---------------------|
 | `ITaskStepDescriptorProvider` | Method-call step descriptors (e.g. `Chat(...)`, `HttpGet(...)`). |
-| `ITaskParserModuleExtension` | Statement primitives, event-handler names (`OnTimer`), and per-method parser hints. |
+| `ITaskParserModuleExtension` | Method mappings, event-handler names (`OnTimer`), and per-method parser hints. |
 | `ITaskTriggerAttributeHandler` | One trigger attribute (e.g. `[Schedule]`, `[OnWebhook]`). |
 | `ITaskTriggerSource` | Runtime watcher that fires bound trigger keys. |
 
@@ -605,17 +608,14 @@ services.AddSingleton<ITaskStepDescriptorProvider, MyStepProvider>();
 The `OwnerId` on every descriptor must match `ModuleId`. Method names and
 step keys are unique across all modules — duplicates fail at startup.
 
-### Parser primitives and event handlers (`ITaskParserModuleExtension`)
+### Parser mappings and event handlers (`ITaskParserModuleExtension`)
 
 Use this when your module wants to:
 
-- Map a method name to a step key with extra parser hints.
-- Map an event-handler name (e.g. `OnTimer`, `OnMetricThreshold`) to a
-  module-owned trigger key.
-- Contribute the wire-format step keys for the parser's statement primitives
-  (variables, assignments, control flow, return, delay, evaluate, log,
-  parse-response). Exactly one loaded module supplies these via
-  `TaskParserPrimitives`.
+Map a method name to a step key with extra parser hints, or map an
+event-handler name such as `OnTimer` or `OnMetricThreshold` to a module-owned
+trigger key. Do not contribute ordinary C# statement semantics here; Core owns
+those language constructs.
 
 ```csharp
 public sealed class MyParserExtension : ITaskParserModuleExtension

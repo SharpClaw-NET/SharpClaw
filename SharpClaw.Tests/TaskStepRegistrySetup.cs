@@ -23,7 +23,6 @@ public sealed class TaskStepRegistrySetup
     {
         ITaskStepDescriptorProvider[] providers =
         [
-            new TaskScriptingStepDescriptorProvider(),
             new AgentOrchestrationStepDescriptorProvider(),
         ];
 

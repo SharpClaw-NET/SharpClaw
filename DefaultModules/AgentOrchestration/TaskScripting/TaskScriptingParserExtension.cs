@@ -3,10 +3,8 @@ using SharpClaw.Contracts.Tasks;
 namespace SharpClaw.Modules.AgentOrchestration;
 
 /// <summary>
-/// Registers the Task Scripting module's event-handler names with the parser.
-/// The lifecycle <c>OnTimer</c> handler is contributed here as a module-owned
-/// trigger; the parser stores the trigger key on
-/// <c>TaskStepDefinition.ModuleTriggerKey</c>.
+/// Registers Agent Orchestration event-handler names and trigger attributes
+/// with the task parser. C# task-language statements are Core-owned.
 /// </summary>
 public sealed class TaskScriptingParserExtension : ITaskParserModuleExtension
 {
@@ -31,12 +29,6 @@ public sealed class TaskScriptingParserExtension : ITaskParserModuleExtension
         new HashSet<string>(StringComparer.Ordinal);
 
     /// <summary>
-    /// Wire-format step-key strings for the statement-shaped scripting
-    /// primitives the parser emits directly. Sourced from
-    /// <see cref="TaskScriptingStepKeys"/> so the module is the single
-    /// source of truth; core defines no statement step-key constants.
-    /// </summary>
-    /// <summary>
     /// Trigger-attribute handlers owned by this module. Phase 2 of the
     /// trigger-attribute migration: <c>[Schedule]</c>, <c>[OnStartup]</c>,
     /// <c>[OnShutdown]</c>, <c>[OnTaskCompleted]</c>, <c>[OnTaskFailed]</c>,
@@ -47,17 +39,4 @@ public sealed class TaskScriptingParserExtension : ITaskParserModuleExtension
     public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers { get; } =
         AgentOrchestrationTriggerAttributeHandlers.All;
 
-    public TaskParserPrimitives? Primitives { get; } = new()
-    {
-        DeclareVariable = TaskScriptingStepKeys.DeclareVariable,
-        Assign          = TaskScriptingStepKeys.Assign,
-        EventHandler    = TaskScriptingStepKeys.EventHandler,
-        Conditional     = TaskScriptingStepKeys.Conditional,
-        Loop            = TaskScriptingStepKeys.Loop,
-        Return          = TaskScriptingStepKeys.Return,
-        Delay           = TaskScriptingStepKeys.Delay,
-        Evaluate        = TaskScriptingStepKeys.Evaluate,
-        Log             = TaskScriptingStepKeys.Log,
-        ParseResponse   = TaskScriptingStepKeys.ParseResponse,
-    };
 }

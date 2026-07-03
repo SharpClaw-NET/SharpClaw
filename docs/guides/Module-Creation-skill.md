@@ -104,14 +104,14 @@ ITaskStepDescriptorProvider
   Register: services.AddSingleton<ITaskStepDescriptorProvider, MyProvider>()
 
 ITaskParserModuleExtension
-  Parser hints, event-handler trigger keys, and statement primitives.
+  Parser hints, method mappings, and event-handler trigger keys.
   Members:
     StepKeyMappings: name → (StepKey, ModuleId) for context-API methods.
     EventTriggerMappings: name → (TriggerKey, ModuleId) for OnXxx handlers.
     SingleArgExpressionMethods: methods whose first arg is captured as Expression.
-    Primitives (TaskParserPrimitives?): wire-format step keys for statements
-      (declarations, assignments, control flow, return, delay, evaluate, log,
-      parse-response). Exactly one loaded module must supply this.
+    Core owns ordinary C# statement parsing. Do not add module primitive keys
+    for declarations, assignment, control flow, return, logging, delay,
+    structured response parsing, or cancellation waits.
     TriggerAttributeHandlers: name → ITaskTriggerAttributeHandler.
   Register: services.AddSingleton<ITaskParserModuleExtension, MyExtension>()
 

@@ -1,17 +1,17 @@
 using FluentAssertions;
 using NUnit.Framework;
 using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Tasks.Parsing;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
 /// <summary>
-/// Verifies that the parser sets the correct module-owned step key on every
+/// Verifies that the parser sets the correct step key on every
 /// parsed <see cref="TaskStepDefinition.StepKey"/> for representative step
-/// kinds. Step keys are owned by the TaskScripting and AgentOrchestration
-/// modules; the literal string values intentionally match the legacy
-/// <c>core.*</c> wire format for backward compatibility.
+/// kind. C# language statements are Core-owned; Agent Orchestration contributes
+/// only module/tool operation calls and trigger names.
 /// </summary>
 [TestFixture]
 public class TaskStepKeyAssignmentTests
@@ -37,7 +37,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var x = 1;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.DeclareVariable);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.DeclareVariable);
     }
 
     [Test]
@@ -46,7 +46,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("x = 1;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Assign);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Assign);
     }
 
     [Test]
@@ -55,7 +55,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("if (true) { Log(\"y\"); }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Conditional);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Conditional);
     }
 
     [Test]
@@ -64,7 +64,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("while (false) { }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Loop);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Loop);
     }
 
     [Test]
@@ -73,7 +73,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("foreach (var item in items) { Log(item); }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Loop);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Loop);
     }
 
     [Test]
@@ -82,7 +82,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("return;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Return);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Return);
     }
 
     // ── Context-API method calls ──────────────────────────────────────────────
@@ -93,7 +93,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("Log(\"hello\");"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Log);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
     }
 
     [Test]
@@ -129,7 +129,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var r = await ParseResponse<MyData>(reply);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.ParseResponse);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.ParseResponse);
     }
 
     [Test]
@@ -138,7 +138,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await Task.Delay(1000);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.Delay);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Delay);
     }
 
     [Test]
@@ -147,7 +147,47 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await WaitUntilStopped();"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskScriptingStepKeys.WaitUntilStopped);
+        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.WaitUntilStopped);
+    }
+
+    [Test]
+    [NonParallelizable]
+    public void Parse_CoreLanguageStatements_DoesNotRequireAgentOrchestrationParserExtension()
+    {
+        try
+        {
+            TaskScriptParser.UnregisterModule(TaskScriptingParserExtension.Instance);
+
+            var source = Wrap("""
+var value = "start";
+value = "done";
+if (value == "done")
+{
+    Log(value);
+}
+while (false)
+{
+    await Task.Delay(1);
+}
+await WaitUntilStopped();
+return;
+""");
+
+            var result = TaskScriptEngine.Parse(source);
+
+            result.Success.Should().BeTrue(string.Join(Environment.NewLine, result.Diagnostics.Select(d => d.Message)));
+            result.Definition!.Steps.Select(step => step.StepKey).Should().Equal(
+                TaskLanguageStepKeys.DeclareVariable,
+                TaskLanguageStepKeys.Assign,
+                TaskLanguageStepKeys.Conditional,
+                TaskLanguageStepKeys.Loop,
+                TaskLanguageStepKeys.WaitUntilStopped,
+                TaskLanguageStepKeys.Return);
+        }
+        finally
+        {
+            TaskScriptParser.RegisterModule(TaskScriptingParserExtension.Instance);
+        }
     }
 
     [Test]
@@ -231,9 +271,9 @@ else
 
         result.Success.Should().BeTrue();
         var cond = result.Definition!.Steps.Single();
-        cond.StepKey.Should().Be(TaskScriptingStepKeys.Conditional);
-        cond.Body!.Single().StepKey.Should().Be(TaskScriptingStepKeys.Log);
-        cond.ElseBody!.Single().StepKey.Should().Be(TaskScriptingStepKeys.Log);
+        cond.StepKey.Should().Be(TaskLanguageStepKeys.Conditional);
+        cond.Body!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
+        cond.ElseBody!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
     }
 
     [Test]
@@ -250,8 +290,8 @@ while (true)
 
         result.Success.Should().BeTrue();
         var loop = result.Definition!.Steps.Single();
-        loop.StepKey.Should().Be(TaskScriptingStepKeys.Loop);
-        loop.Body!.Single().StepKey.Should().Be(TaskScriptingStepKeys.Log);
+        loop.StepKey.Should().Be(TaskLanguageStepKeys.Loop);
+        loop.Body!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
     }
 }
 

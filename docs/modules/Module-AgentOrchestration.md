@@ -1,4 +1,4 @@
-# SharpClaw Module: Agent Orchestration
+﻿# SharpClaw Module: Agent Orchestration
 
 > **Module ID:** `sharpclaw_agent_orchestration`
 > **Display Name:** Agent Orchestration
@@ -15,7 +15,7 @@
 | Setting | Value |
 |---------|-------|
 | **.env key** | `Modules:sharpclaw_agent_orchestration` |
-| **Default** | ❌ Disabled |
+| **Default** | âŒ Disabled |
 | **Prerequisites** | None |
 | **Platform** | All |
 
@@ -47,7 +47,7 @@ pipeline.
 
 Tools are dispatched via the SharpClaw module system
 (`AgentActionType = ModuleAction`). Tool names are prefixed with `ao_`
-when sent to the model — for example, `manage_agent` becomes
+when sent to the model â€” for example, `manage_agent` becomes
 `ao_manage_agent`.
 
 ---
@@ -72,7 +72,7 @@ when sent to the model — for example, `manage_agent` becomes
 
 ### ao_create_sub_agent
 
-Create a sub-agent with permissions ≤ the creator's.
+Create a sub-agent with permissions â‰¤ the creator's.
 
 **Parameters:**
 
@@ -82,7 +82,7 @@ Create a sub-agent with permissions ≤ the creator's.
 | `modelId` | string (GUID) | yes | Model GUID |
 | `systemPrompt` | string | no | System prompt |
 
-**Permission:** Global — requires `canCreateSubAgents` flag.
+**Permission:** Global â€” requires `canCreateSubAgents` flag.
 
 ---
 
@@ -99,7 +99,7 @@ Update an agent's name, systemPrompt, or modelId.
 | `systemPrompt` | string | no | New system prompt |
 | `modelId` | string (GUID) | no | New model GUID |
 
-**Permission:** Per-resource — requires `agentAccesses` grant.
+**Permission:** Per-resource â€” requires `agentAccesses` grant.
 
 **Aliases:** `manage_agent`
 
@@ -120,7 +120,7 @@ scheduler's `task schedule` rows.
 | `repeatIntervalMinutes` | integer | no | Minutes between repeats (0 = remove) |
 | `maxRetries` | integer | no | Max retries |
 
-**Permission:** Per-resource — requires an `AoTask` resource grant.
+**Permission:** Per-resource â€” requires an `AoTask` resource grant.
 
 **Aliases:** `edit_task`
 
@@ -143,7 +143,7 @@ module-owned `AoSkill` resource.
 |-------|------|----------|-------------|
 | `resource_id` | string (GUID) | yes | Target skill GUID |
 
-**Permission:** Per-resource — requires an `AoSkill` resource grant.
+**Permission:** Per-resource â€” requires an `AoSkill` resource grant.
 
 **Aliases:** `access_skill`
 
@@ -166,7 +166,7 @@ Set or clear the custom chat header for an agent.
 | `resource_id` | string (GUID) | yes | Target agent GUID |
 | `header` | string | no | Template string (empty string to clear) |
 
-**Permission:** Per-resource — requires `agentHeaderAccesses` grant.
+**Permission:** Per-resource â€” requires `agentHeaderAccesses` grant.
 
 **Aliases:** `edit_agent_header`
 
@@ -183,38 +183,21 @@ Set or clear the custom chat header for a channel.
 | `resource_id` | string (GUID) | yes | Target channel GUID |
 | `header` | string | no | Template string (empty string to clear) |
 
-**Permission:** Per-resource — requires `channelHeaderAccesses` grant.
+**Permission:** Per-resource â€” requires `channelHeaderAccesses` grant.
 
 **Aliases:** `edit_channel_header`
 
 ---
 
-## Task-script Steps
+## Task-script Operations
 
-Agent Orchestration owns the **statement primitives** of the task script
-grammar plus the agent/entity step methods. None of these live in the core
-parser — they are contributed via `TaskScriptingParserExtension` and
-`AgentOrchestrationStepDescriptorProvider`.
-
-### Statement primitives
-
-The parser emits these directly from script syntax (variables, assignments,
-event handlers, control flow, etc.):
-
-| Primitive | Wire step key |
-|-----------|---------------|
-| `DeclareVariable` | `task_scripting.declare_variable` |
-| `Assign` | `task_scripting.assign` |
-| `EventHandler` | `task_scripting.event_handler` |
-| `Conditional` | `task_scripting.conditional` |
-| `Loop` | `task_scripting.loop` |
-| `Return` | `task_scripting.return` |
-| `Delay` | `task_scripting.delay` |
-| `Evaluate` | `task_scripting.evaluate` |
-| `Log` | `task_scripting.log` |
-| `ParseResponse` | `task_scripting.parse_response` |
-
-### Step methods
+Agent Orchestration no longer owns ordinary C# statement semantics. Core
+lowers declarations, assignment, control flow, return, logging, delay,
+structured response parsing, and cancellation waits into intrinsic task
+language steps. Agent Orchestration contributes the operations that actually
+need the module: chat and streaming calls, structured output, entity lookup and
+provisioning, role and permission updates, channel setup, event-handler names,
+and runtime trigger sources.
 
 Method calls in the task body are dispatched via the central
 `TaskStepRegistry`. Agent Orchestration registers the following method names:
@@ -239,15 +222,17 @@ Method calls in the task body are dispatched via the central
 | `FindChannel` | Resolve a channel by name / id. |
 | `AddAllowedAgent` | Add an allowed agent to a channel. |
 
-When this module is disabled, scripts that use these methods or the
-statement primitives will be rejected by `task preflight`.
+When this module is disabled, scripts that use these module operations or
+module-owned triggers will be rejected by `task preflight`. Scripts that use
+only ordinary C# control flow remain valid because that language surface is
+Core-owned.
 
 ---
 
 ## Triggers
 
-Agent Orchestration owns the lifecycle, scripting, event-bus, task-chain,
-and filesystem trigger attributes. Each is registered through
+Agent Orchestration owns lifecycle, event-bus, task-chain, and filesystem
+trigger attributes. Each is registered through
 `AgentOrchestrationTriggerAttributeHandlers` and surfaced as a runtime
 `ITaskTriggerSource`.
 

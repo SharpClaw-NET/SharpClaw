@@ -850,7 +850,6 @@ internal sealed class DotNetSidecarHost
                     mapping.Value.TriggerKey,
                     mapping.Value.ModuleId))],
             SingleArgExpressionMethods: [.. extension.SingleArgExpressionMethods],
-            Primitives: extension.Primitives,
             TriggerAttributeHandlers: [.. extension.TriggerAttributeHandlers.Keys.Select(name =>
                 new ForeignModuleTaskTriggerAttributeHandlerDescriptor(
                     name,

@@ -185,7 +185,7 @@ public class RequiredParamTask
         var result = TaskScriptEngine.ProcessScript(SimpleSource);
 
         result.Success.Should().BeTrue();
-        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(TaskScriptingStepKeys.Return);
+        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(TaskLanguageStepKeys.Return);
     }
 
     [Test]
@@ -212,9 +212,9 @@ public class ConditionalTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskLanguageStepKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
     }
 
     [Test]
@@ -242,7 +242,7 @@ public class LoopTask
         });
 
         result.Success.Should().BeTrue();
-        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Loop);
+        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskLanguageStepKeys.Loop);
         loop.VariableName.Should().NotBeNull();
     }
 

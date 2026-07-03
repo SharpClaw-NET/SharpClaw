@@ -146,8 +146,8 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
             ]
         };
 
@@ -175,7 +175,7 @@ public class BadParamTask
             ToolCallHooks = [],
             Steps =
             [
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
+                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
             ]
         };
 
@@ -205,7 +205,7 @@ public class BadParamTask
             [
                 new TaskStepDefinition
                 {
-                    StepKey  = TaskScriptingStepKeys.Loop,
+                    StepKey  = TaskLanguageStepKeys.Loop,
                     Line = 1, Column = 0,
                     VariableName = "item",
                     Expression = null,            // missing
@@ -266,14 +266,14 @@ public class ParseBadTask
             [
                 new TaskStepDefinition
                 {
-                    StepKey  = TaskScriptingStepKeys.Loop,
+                    StepKey  = TaskLanguageStepKeys.Loop,
                     Line = 1, Column = 0,
                     Expression = "true",
                     Body =
                     [
                         new TaskStepDefinition
                         {
-                            StepKey  = TaskScriptingStepKeys.DeclareVariable,
+                            StepKey  = TaskLanguageStepKeys.DeclareVariable,
                             Line = 2, Column = 4,
                             VariableName = "v",
                             TypeName = "UnknownNestedType"

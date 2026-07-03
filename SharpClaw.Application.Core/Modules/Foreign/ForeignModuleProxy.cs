@@ -391,8 +391,6 @@ internal sealed class ForeignModuleProxy(
             _singleArgExpressionMethods = descriptor?.SingleArgExpressionMethods?.ToHashSet(StringComparer.Ordinal)
                 ?? new HashSet<string>(StringComparer.Ordinal);
 
-            Primitives = descriptor?.Primitives;
-
             _triggerAttributeHandlers = descriptor?.TriggerAttributeHandlers?.ToDictionary(
                 handler => handler.Name,
                 handler => (ITaskTriggerAttributeHandler)new ForeignModuleTaskTriggerAttributeHandler(
@@ -410,8 +408,6 @@ internal sealed class ForeignModuleProxy(
             _eventTriggerMappings;
 
         public IReadOnlySet<string> SingleArgExpressionMethods => _singleArgExpressionMethods;
-
-        public TaskParserPrimitives? Primitives { get; }
 
         public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers =>
             _triggerAttributeHandlers;
