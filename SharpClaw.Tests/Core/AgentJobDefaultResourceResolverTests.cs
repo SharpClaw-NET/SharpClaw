@@ -27,48 +27,131 @@ public sealed class AgentJobDefaultResourceResolverTests
                 CreateRegistry(),
                 Set(("task", channelResource)),
                 Set(("task", contextResource)),
-                [
-                    PermissionSet(
-                        new ResourcePermissionGrant(
-                            "AoTask",
-                            permissionResource,
-                            PermissionClearance.Independent,
-                            IsDefault: true))
-                ]));
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        permissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                ContextPermissionSet: null,
+                AgentRolePermissionSet: null));
 
         resolved.Should().Be(channelResource);
     }
 
     [Test]
-    public void ResolveDefaultResource_WhenDefaultsMiss_UsesPermissionSetByMappedResourceType()
+    public void ResolveDefaultResource_WhenChannelDefaultMisses_UsesContextDefaultBeforePermissions()
     {
-        var firstPermissionResource = Guid.NewGuid();
-        var secondPermissionResource = Guid.NewGuid();
+        var contextResource = Guid.NewGuid();
+        var channelPermissionResource = Guid.NewGuid();
         var resolver = CreateResolver();
 
         var resolved = resolver.ResolveDefaultResource(
             new AgentJobDefaultResourceResolutionRequest(
                 "run",
                 CreateRegistry(),
-                ChannelDefaults: null,
-                ContextDefaults: Set(("other", Guid.NewGuid())),
-                OrderedPermissionSets:
-                [
-                    PermissionSet(
-                        new ResourcePermissionGrant(
-                            "AoTask",
-                            firstPermissionResource,
-                            PermissionClearance.Independent,
-                            IsDefault: true)),
-                    PermissionSet(
-                        new ResourcePermissionGrant(
-                            "AoTask",
-                            secondPermissionResource,
-                            PermissionClearance.Independent,
-                            IsDefault: true))
-                ]));
+                null,
+                Set(("task", contextResource)),
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        channelPermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                ContextPermissionSet: null,
+                AgentRolePermissionSet: null));
 
-        resolved.Should().Be(firstPermissionResource);
+        resolved.Should().Be(contextResource);
+    }
+
+    [Test]
+    public void ResolveDefaultResource_WhenDefaultsMiss_UsesChannelPermissionBeforeContextAndRole()
+    {
+        var channelPermissionResource = Guid.NewGuid();
+        var contextPermissionResource = Guid.NewGuid();
+        var rolePermissionResource = Guid.NewGuid();
+        var resolver = CreateResolver();
+
+        var resolved = resolver.ResolveDefaultResource(
+            new AgentJobDefaultResourceResolutionRequest(
+                "run",
+                CreateRegistry(),
+                null,
+                Set(("other", Guid.NewGuid())),
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        channelPermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        contextPermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        rolePermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true))));
+
+        resolved.Should().Be(channelPermissionResource);
+    }
+
+    [Test]
+    public void ResolveDefaultResource_WhenChannelPermissionMissing_UsesContextPermissionBeforeRole()
+    {
+        var contextPermissionResource = Guid.NewGuid();
+        var rolePermissionResource = Guid.NewGuid();
+        var resolver = CreateResolver();
+
+        var resolved = resolver.ResolveDefaultResource(
+            new AgentJobDefaultResourceResolutionRequest(
+                "run",
+                CreateRegistry(),
+                null,
+                null,
+                null,
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        contextPermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        rolePermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true))));
+
+        resolved.Should().Be(contextPermissionResource);
+    }
+
+    [Test]
+    public void ResolveDefaultResource_WhenOnlyRolePermissionExists_UsesRolePermission()
+    {
+        var rolePermissionResource = Guid.NewGuid();
+        var resolver = CreateResolver();
+
+        var resolved = resolver.ResolveDefaultResource(
+            new AgentJobDefaultResourceResolutionRequest(
+                "run",
+                CreateRegistry(),
+                null,
+                null,
+                null,
+                null,
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        rolePermissionResource,
+                        PermissionClearance.Independent,
+                        IsDefault: true))));
+
+        resolved.Should().Be(rolePermissionResource);
     }
 
     [Test]
@@ -81,16 +164,15 @@ public sealed class AgentJobDefaultResourceResolverTests
                 "plain",
                 CreateRegistry(),
                 Set(("task", Guid.NewGuid())),
-                ContextDefaults: null,
-                OrderedPermissionSets:
-                [
-                    PermissionSet(
-                        new ResourcePermissionGrant(
-                            "AoTask",
-                            Guid.NewGuid(),
-                            PermissionClearance.Independent,
-                            IsDefault: true))
-                ]));
+                null,
+                PermissionSet(
+                    new ResourcePermissionGrant(
+                        "AoTask",
+                        Guid.NewGuid(),
+                        PermissionClearance.Independent,
+                        IsDefault: true)),
+                ContextPermissionSet: null,
+                AgentRolePermissionSet: null));
 
         resolved.Should().BeNull();
     }

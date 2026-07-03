@@ -462,37 +462,44 @@ public sealed class AgentJobService(
             .Include(c => c.AgentContext!).ThenInclude(ctx => ctx.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .FirstOrDefaultAsync(c => c.Id == channelId, ct);
 
-        // Host loads permission snapshots in Core's fallback order.
-        var permissionSetIds = new List<Guid>(3);
-
-        if (ch?.PermissionSetId is { } chPsId)
-            permissionSetIds.Add(chPsId);
-
-        if (ch?.AgentContext?.PermissionSetId is { } ctxPsId)
-            permissionSetIds.Add(ctxPsId);
+        var channelPermissionSetId = ch?.PermissionSetId;
+        var contextPermissionSetId = ch?.AgentContext?.PermissionSetId;
 
         var agent = await db.Agents
             .Include(a => a.Role)
             .FirstOrDefaultAsync(a => a.Id == agentId, ct);
 
-        if (agent?.Role?.PermissionSetId is { } rolePsId)
-            permissionSetIds.Add(rolePsId);
+        var agentRolePermissionSetId = agent?.Role?.PermissionSetId;
 
-        var permissionSetSnapshots = new List<PermissionSetSnapshot>(permissionSetIds.Count);
-        if (permissionSetIds.Count > 0)
+        var permissionSetIdsToLoad = new HashSet<Guid>();
+        AddPermissionSetIdToLoad(channelPermissionSetId);
+        AddPermissionSetIdToLoad(contextPermissionSetId);
+        AddPermissionSetIdToLoad(agentRolePermissionSetId);
+
+        var permissionSetSnapshotsById = new Dictionary<Guid, PermissionSetSnapshot>();
+        if (permissionSetIdsToLoad.Count > 0)
         {
             var permissionSets = await db.PermissionSets
-                .Where(p => permissionSetIds.Contains(p.Id))
+                .Where(p => permissionSetIdsToLoad.Contains(p.Id))
                 .Include(p => p.ResourceAccesses)
                 .ToListAsync(ct);
 
-            foreach (var psId in permissionSetIds)
-            {
-                var ps = permissionSets.FirstOrDefault(p => p.Id == psId);
-                if (ps is not null)
-                    permissionSetSnapshots.Add(PermissionSetSnapshot.FromPermissionSet(ps));
-            }
+            permissionSetSnapshotsById = permissionSets.ToDictionary(
+                p => p.Id,
+                PermissionSetSnapshot.FromPermissionSet);
         }
+
+        void AddPermissionSetIdToLoad(Guid? permissionSetId)
+        {
+            if (permissionSetId is { } id)
+                permissionSetIdsToLoad.Add(id);
+        }
+
+        PermissionSetSnapshot? Snapshot(Guid? permissionSetId) =>
+            permissionSetId is { } id
+            && permissionSetSnapshotsById.TryGetValue(id, out var snapshot)
+                ? snapshot
+                : null;
 
         return jobDefaultResources.ResolveDefaultResource(
             new AgentJobDefaultResourceResolutionRequest(
@@ -504,7 +511,9 @@ public sealed class AgentJobService(
                 ch?.AgentContext?.DefaultResourceSet is { } contextDefaults
                     ? DefaultResourceSetSnapshot.FromDefaultResourceSet(contextDefaults)
                     : null,
-                permissionSetSnapshots));
+                Snapshot(channelPermissionSetId),
+                Snapshot(contextPermissionSetId),
+                Snapshot(agentRolePermissionSetId)));
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -9,6 +9,7 @@ using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Modules.TestHarness;
+using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
@@ -210,6 +211,68 @@ public sealed class TestHarnessDefaultsAndResourcesTests
     }
 
     [Test]
+    public async Task DefaultResourceAdapterMapsChannelPermissionSetToNamedSlot()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var channelPermissionSet = PermissionSet();
+        var contextPermissionSet = PermissionSet();
+        var channelResourceId = Guid.NewGuid();
+        var contextResourceId = Guid.NewGuid();
+        var roleResourceId = Guid.NewGuid();
+        var context = Context(seeded, contextPermissionSet);
+        seeded.Channel.PermissionSetId = channelPermissionSet.Id;
+        seeded.Channel.AgentContextId = context.Id;
+        seeded.Channel.AgentContext = context;
+        host.Db.PermissionSets.AddRange(channelPermissionSet, contextPermissionSet);
+        host.Db.AgentContexts.Add(context);
+        GrantHarnessResource(host, channelPermissionSet, channelResourceId, isDefault: true);
+        GrantHarnessResource(host, contextPermissionSet, contextResourceId, isDefault: true);
+        GrantHarnessResource(host, seeded.PermissionSet, roleResourceId, isDefault: true);
+        await host.Db.SaveChangesAsync();
+
+        var resolved = await ResolveDefaultResourceAsync(host, seeded);
+
+        resolved.Should().Be(channelResourceId);
+    }
+
+    [Test]
+    public async Task DefaultResourceAdapterMapsContextPermissionSetToNamedSlotWhenChannelSlotMissing()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var contextPermissionSet = PermissionSet();
+        var contextResourceId = Guid.NewGuid();
+        var roleResourceId = Guid.NewGuid();
+        var context = Context(seeded, contextPermissionSet);
+        seeded.Channel.AgentContextId = context.Id;
+        seeded.Channel.AgentContext = context;
+        host.Db.PermissionSets.Add(contextPermissionSet);
+        host.Db.AgentContexts.Add(context);
+        GrantHarnessResource(host, contextPermissionSet, contextResourceId, isDefault: true);
+        GrantHarnessResource(host, seeded.PermissionSet, roleResourceId, isDefault: true);
+        await host.Db.SaveChangesAsync();
+
+        var resolved = await ResolveDefaultResourceAsync(host, seeded);
+
+        resolved.Should().Be(contextResourceId);
+    }
+
+    [Test]
+    public async Task DefaultResourceAdapterMapsRolePermissionSetToNamedSlotWhenChannelAndContextSlotsMissing()
+    {
+        await using var host = ChatHarnessHost.Create();
+        var seeded = await host.SeedChatAsync(TestHarnessConstants.ToolProviderKey);
+        var roleResourceId = Guid.NewGuid();
+        GrantHarnessResource(host, seeded.PermissionSet, roleResourceId, isDefault: true);
+        await host.Db.SaveChangesAsync();
+
+        var resolved = await ResolveDefaultResourceAsync(host, seeded);
+
+        resolved.Should().Be(roleResourceId);
+    }
+
+    [Test]
     public async Task PerResourceJobWithoutDefaultStopsBeforeModuleInvocation()
     {
         await using var host = ChatHarnessHost.Create();
@@ -227,6 +290,39 @@ public sealed class TestHarnessDefaultsAndResourcesTests
         job.ResourceId.Should().BeNull();
         host.Harness.ToolCalls.Should().BeEmpty();
     }
+
+    private static async Task<Guid?> ResolveDefaultResourceAsync(
+        ChatHarnessHost host,
+        SeededChat seeded)
+    {
+        var runtimeHost = (IAgentJobRuntimeHost)host.Services
+            .GetRequiredService<AgentJobService>();
+        return await runtimeHost.ResolveDefaultResourceIdAsync(
+            TestHarnessConstants.JobResourceTool,
+            seeded.Channel.Id,
+            seeded.Agent.Id,
+            CancellationToken.None);
+    }
+
+    private static PermissionSetDB PermissionSet() => new()
+    {
+        Id = Guid.NewGuid(),
+        CreatedAt = DateTimeOffset.UtcNow,
+        UpdatedAt = DateTimeOffset.UtcNow
+    };
+
+    private static SharpClaw.Contracts.Entities.Core.Context.ChannelContextDB Context(
+        SeededChat seeded,
+        PermissionSetDB permissionSet) => new()
+        {
+            Id = Guid.NewGuid(),
+            Name = "Named Slot Context",
+            AgentId = seeded.Agent.Id,
+            Agent = seeded.Agent,
+            PermissionSetId = permissionSet.Id,
+            CreatedAt = DateTimeOffset.UtcNow,
+            UpdatedAt = DateTimeOffset.UtcNow
+        };
 
     private static void GrantHarnessResource(
         ChatHarnessHost host,
