@@ -87,10 +87,8 @@ public sealed class AuthService(
 
         await db.Users
             .Where(u => userIds.Contains(u.Id))
-            .ExecuteUpdateCompatAsync(
-                db,
+            .ExecuteUpdateAsync(
                 s => s.SetProperty(u => u.AccessTokensInvalidatedAt, now),
-                u => u.AccessTokensInvalidatedAt = now,
                 ct);
     }
 
@@ -102,10 +100,8 @@ public sealed class AuthService(
     {
         await db.RefreshTokens
             .Where(r => userIds.Contains(r.UserId) && !r.IsRevoked)
-            .ExecuteUpdateCompatAsync(
-                db,
+            .ExecuteUpdateAsync(
                 s => s.SetProperty(r => r.IsRevoked, true),
-                r => r.IsRevoked = true,
                 ct);
     }
 

@@ -23,10 +23,6 @@ using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
 using SharpClaw.Core.Permissions;
-// Infrastructure-facing: ModuleJsonPersistenceService coordinates module persistence
-// registration for JSON/InMemory mode.  This import does not introduce cold-entity
-// query coupling and is acceptable per the cold-storage-ef-query-integration-plan.
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Utils.Instances;
 using SharpClaw.Utils.Security;
@@ -44,8 +40,6 @@ public sealed class ModuleService(
     ModuleRegistry registry,
     RuntimeModuleDbContextRegistry moduleDbContextRegistry,
     ModulePersistenceRegistrationFactory modulePersistenceRegistrationFactory,
-    ModuleDbContextOptions moduleDbContextOptions,
-    ModuleJsonPersistenceService? moduleJsonPersistence,
     ModuleEventDispatcher eventDispatcher,
     ILogger<ModuleService> logger,
     ChatCache chatCache,
@@ -196,7 +190,6 @@ public sealed class ModuleService(
                 registry.Register(module, runtimeHost);
                 RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
                 RegisterModulePersistence(module);
-                await LoadModulePersistenceAsync(module, ct);
 
                 if (manifest is not null)
                     registry.CacheManifest(moduleId, manifest);
@@ -279,7 +272,6 @@ public sealed class ModuleService(
             RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
             if (manifest is not null)
                 registry.CacheManifest(moduleId, manifest);
-            await LoadModulePersistenceAsync(module, ct);
 
             return module;
         }
@@ -389,7 +381,6 @@ public sealed class ModuleService(
             RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
-            await LoadModulePersistenceAsync(host.Module, ct);
             await host.Module.InitializeAsync(host.Services, ct);
 
             // Reconcile: backfill wildcard grants for newly registered
@@ -543,7 +534,6 @@ public sealed class ModuleService(
             RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
-            await LoadModulePersistenceAsync(host.Module, ct);
             await host.Module.InitializeAsync(host.Services, ct);
 
             // Reconcile: backfill wildcard grants for newly registered
@@ -631,20 +621,6 @@ public sealed class ModuleService(
             TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
 
         TaskStepRegistry.Default.UnregisterOwner(module.Id);
-    }
-
-    public async Task LoadModulePersistenceAsync(ISharpClawCoreModule module, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(module);
-
-        if (moduleDbContextOptions.StorageMode != StorageMode.JsonFile || moduleJsonPersistence is null)
-            return;
-
-        foreach (var registration in moduleDbContextRegistry.GetAll()
-                     .Where(r => string.Equals(r.ModuleId, module.Id, StringComparison.Ordinal)))
-        {
-            await moduleJsonPersistence.LoadModuleAsync(registration, ct);
-        }
     }
 
     private async Task<(ISharpClawCoreModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(

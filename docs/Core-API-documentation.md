@@ -2768,10 +2768,11 @@ when it reaches that budget.
 Database configuration lives in the `Database` section. `Database:Provider`
 accepts `JsonFile`, `Postgres`, `SqlServer`, or `SQLite`, and relational
 providers read their matching `ConnectionStrings` entry. The same section
-also holds the JSON persistence durability options such as checksums, event
-log retention, snapshots, async flush, detailed errors, and sensitive-data
-logging. Migrations remain manual and are not generated or run by editing
-the env file.
+also holds JSONColdStore provider options such as checksums, event log
+retention, snapshots, detailed errors, and sensitive-data logging. SharpClaw
+does not run a local JSON persistence engine; JSON file storage behavior is
+owned by the JSONColdStore EF provider. Migrations remain manual and are not
+generated or run by editing the env file.
 
 `Admin` controls first-run admin seeding and permission reconciliation.
 `Local` controls LLamaSharp defaults such as GPU layers, context size,

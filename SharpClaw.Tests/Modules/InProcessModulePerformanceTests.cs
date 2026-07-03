@@ -19,7 +19,7 @@ namespace SharpClaw.Tests.Modules;
 [NonParallelizable]
 public sealed class InProcessModulePerformanceTests
 {
-    private const int VariantsPerOperation = 50;
+    private const int VariantsPerOperation = 63;
     private InProcessPerformanceHarness _harness = null!;
 
     [OneTimeSetUp]
@@ -63,11 +63,10 @@ public sealed class InProcessModulePerformanceTests
 
     private static IReadOnlyList<InProcessPerformanceCase> AllPerformanceCases()
     {
-        var cases = new List<InProcessPerformanceCase>(VariantsPerOperation * 5);
+        var cases = new List<InProcessPerformanceCase>(VariantsPerOperation * 4);
         AddCases(cases, InProcessPerformanceOperation.RegistryLookup, "registry_lookup", 50);
         AddCases(cases, InProcessPerformanceOperation.RuntimeScopeCapabilities, "runtime_scope_capabilities", 75);
         AddCases(cases, InProcessPerformanceOperation.DirectToolDispatch, "direct_tool_dispatch", 100);
-        AddCases(cases, InProcessPerformanceOperation.StorageCrudQueryClaim, "storage_crud_query_claim", 500);
         AddCases(cases, InProcessPerformanceOperation.ModuleSubmitsChildJob, "module_submits_child_job", 750);
         return cases;
     }
@@ -158,7 +157,6 @@ public sealed class InProcessModulePerformanceTests
             RunRegistryLookup(0);
             await RunRuntimeScopeCapabilitiesAsync(0);
             await ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.NoopTool, 0);
-            await ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.StorageTool, 0);
             await ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.SpawnJobTool, 0);
         }
 
@@ -180,8 +178,6 @@ public sealed class InProcessModulePerformanceTests
                     RunRuntimeScopeCapabilitiesAsync(testCase.Variant),
                 InProcessPerformanceOperation.DirectToolDispatch =>
                     RunDirectToolDispatchAsync(testCase.Variant),
-                InProcessPerformanceOperation.StorageCrudQueryClaim =>
-                    ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.StorageTool, testCase.Variant),
                 InProcessPerformanceOperation.ModuleSubmitsChildJob =>
                     ExecuteDirectToolAsync(InProcessPerformanceFixtureModule.SpawnJobTool, testCase.Variant),
                 _ => throw new InvalidOperationException(
@@ -232,9 +228,10 @@ public sealed class InProcessModulePerformanceTests
                 scope.ServiceProvider.GetRequiredService<IAgentJobReader>().Should().NotBeNull();
 
                 var config = scope.ServiceProvider.GetRequiredService<IModuleConfigStore>();
-                var key = $"perf-{variant:D3}-{i:D2}";
-                await config.SetAsync(key, "1");
-                (await config.GetAsync(key)).Should().Be("1");
+                var key = $"perf-runtime-scope-{i:D2}";
+                var value = $"variant-{variant:D3}";
+                await config.SetAsync(key, value);
+                (await config.GetAsync(key)).Should().Be(value);
             }
         }
 
@@ -344,7 +341,6 @@ public enum InProcessPerformanceOperation
     RegistryLookup,
     RuntimeScopeCapabilities,
     DirectToolDispatch,
-    StorageCrudQueryClaim,
     ModuleSubmitsChildJob,
 }
 

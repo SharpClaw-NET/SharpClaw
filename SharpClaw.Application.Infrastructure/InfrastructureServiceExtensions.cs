@@ -1,3 +1,4 @@
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -5,7 +6,6 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 
 namespace SharpClaw.Infrastructure;
@@ -19,7 +19,7 @@ public static class InfrastructureServiceExtensions
         this IServiceCollection services,
         StorageMode mode,
         string? connectionString = null,
-        Action<JsonFileOptions>? configureJsonFile = null)
+        Action<JsonColdStoreStorageOptions>? configureJsonColdStore = null)
     {
         services.AddSingleton(new ModuleDbContextOptions
         {
@@ -33,42 +33,29 @@ public static class InfrastructureServiceExtensions
         switch (mode)
         {
             case StorageMode.JsonFile:
-                var jsonOptions = new JsonFileOptions();
-                configureJsonFile?.Invoke(jsonOptions);
+                var jsonOptions = new JsonColdStoreStorageOptions();
+                configureJsonColdStore?.Invoke(jsonOptions);
                 services.AddSingleton(jsonOptions);
-                services.AddSingleton<IPersistenceFileSystem, PhysicalPersistenceFileSystem>();
-                services.AddSingleton<DirectoryLockManager>();
-                services.AddSingleton<TransactionQueue>();
-                services.AddScoped<JsonFilePersistenceService>();
-                services.AddSingleton<ColdEntityStore>();
-                services.AddSingleton<ColdIndexMaintenanceService>();
-                services.AddScoped<IPersistenceEntityResolver, JsonPersistenceEntityResolver>();
-
-                services.AddSingleton<FlushQueue>(sp => 
-                    new FlushQueue(sp.GetRequiredService<ILogger<FlushQueue>>(), capacity: 256));
-                services.AddSingleton<SnapshotService>(sp => 
-                    new SnapshotService(
-                        sp.GetRequiredService<IPersistenceFileSystem>(),
-                        sp.GetRequiredService<JsonFileOptions>(),
-                        sp.GetRequiredService<DirectoryLockManager>(),
-                        sp.GetRequiredService<ILogger<SnapshotService>>(),
-                        sp.GetRequiredService<FlushQueue>()));
-                services.AddSingleton<ISnapshotFallback>(sp => sp.GetRequiredService<SnapshotService>());
-                services.AddSingleton<FlushWorker>(sp =>
-                    new FlushWorker(
-                        sp.GetRequiredService<FlushQueue>(),
-                        sp,
-                        sp.GetRequiredService<ILogger<FlushWorker>>()));
-                services.AddSingleton<JsonPersistenceHealthCheck>();
-                services.AddSingleton<EntityMigrationRegistry>();
-                services.AddSingleton<ModuleJsonPersistenceService>();
-                services.AddSingleton<ModuleJsonSaveChangesInterceptor>();
+                if (jsonOptions.EncryptAtRest)
+                {
+                    services.AddSingleton(sp =>
+                        JsonColdStoreEncryptionKey.FromBytes(
+                            sp.GetRequiredService<EncryptionOptions>().Key));
+                }
 
                 services.AddDbContext<SharpClawDbContext>((sp, options) =>
                 {
                     ConfigureLogging(sp, options);
-                    options.UseInMemoryDatabase("SharpClaw");
+                    options.UseJsonColdStoreDatabase(
+                        jsonOptions.DataDirectory,
+                        store => JsonColdStoreRegistration.ConfigureStore(
+                            store,
+                            jsonOptions,
+                            jsonOptions.EncryptAtRest
+                                ? sp.GetRequiredService<JsonColdStoreEncryptionKey>()
+                                : null));
                 });
+                services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
                 break;
 
             case StorageMode.Postgres:
@@ -115,17 +102,9 @@ public static class InfrastructureServiceExtensions
                     "with EFC 10 compatibility. Not yet available.");
         }
 
-        // Register migration gate
-        // the /admin/db/* endpoints can always bind their DI parameters.
-        // In JsonFile mode the service is effectively a no-op (InMemory
-        // provider has no pending migrations), but it must still be
-        // resolvable — otherwise minimal-API parameter binding infers the
-        // type as [FromBody] and fails endpoint construction on GET routes.
         services.AddSingleton<MigrationGate>();
         services.AddSingleton<MigrationService>();
-
         services.AddScoped<ICoreEntityIdProvider, CoreEntityIdProvider>();
-
         services.AddScoped<ISharpClawDataContext>(
             sp => sp.GetRequiredService<SharpClawDbContext>());
 
@@ -148,7 +127,7 @@ public static class InfrastructureServiceExtensions
         if (loggerFactory is not null)
             options.UseLoggerFactory(loggerFactory);
 
-        var configuration = serviceProvider.GetService<Microsoft.Extensions.Configuration.IConfiguration>();
+        var configuration = serviceProvider.GetService<IConfiguration>();
 
         var enableDetailedErrors = configuration is null
             || !bool.TryParse(configuration["Database:EnableDetailedErrors"], out var detailedErrors)
@@ -166,140 +145,26 @@ public static class InfrastructureServiceExtensions
     }
 
     /// <summary>
-    /// Initializes the infrastructure layer
-    /// into the InMemory database). Call once after building the host.
-    /// On the first run after a navigation-stripping fix, a full re-flush
-    /// recompacts any bloated JSON files.
+    /// Initializes infrastructure services after the host is built.
     /// </summary>
     public static async Task InitializeInfrastructureAsync(this IServiceProvider services)
     {
-        // Phase C: Recover any incomplete two-phase commits before anything else.
-        var jsonOpts = services.GetService<JsonFileOptions>();
-        var fsys = services.GetService<IPersistenceFileSystem>();
-        if (jsonOpts is not null && fsys is not null)
-        {
-            await TwoPhaseCommit.RecoverAllAsync(fsys, jsonOpts.DataDirectory, CancellationToken.None);
-        }
-
-        // Phase A′: Replay any pending transaction manifests before loading.
-        var txQueue = services.GetService<TransactionQueue>();
-        if (txQueue is not null)
-        {
-            using var replayScope = services.CreateScope();
-            var replaySync = replayScope.ServiceProvider.GetService<JsonFilePersistenceService>();
-            if (replaySync is not null)
-            {
-                var replayed = await txQueue.ReplayPendingAsync(replaySync.ReplayManifestAsync);
-                if (replayed > 0)
-                {
-                    var logger = replayScope.ServiceProvider.GetService<ILogger<TransactionQueue>>();
-                    logger?.LogInformation("Replayed {Count} pending transaction(s) on startup", replayed);
-                }
-            }
-        }
+        var storage = services.GetRequiredService<ModuleDbContextOptions>();
+        if (storage.StorageMode != StorageMode.JsonFile)
+            return;
 
         using var scope = services.CreateScope();
-        var jsonSync = scope.ServiceProvider.GetService<JsonFilePersistenceService>();
-        if (jsonSync is not null)
-        {
-            await jsonSync.LoadAsync();
-
-            // Phase J: Startup full-scan checksum verification.
-            // Runs before index rebuild so corrupted files are quarantined
-            // before they can pollute the indexes.
-            if (jsonOpts!.EnableChecksums && fsys is not null)
-            {
-                var checksumLogger = scope.ServiceProvider.GetRequiredService<ILogger<ColdEntityStore>>();
-                var encOpts = scope.ServiceProvider.GetService<EncryptionOptions>();
-                var hmacKey = encOpts?.Key;
-                if (hmacKey is { Length: > 0 })
-                {
-                    var entityDirs = fsys.DirectoryExists(jsonOpts.DataDirectory)
-                        ? fsys.GetDirectories(jsonOpts.DataDirectory)
-                        : [];
-                    foreach (var entityDir in entityDirs)
-                    {
-                        var mismatched = await ChecksumManifest.VerifyAllAsync(
-                            fsys, entityDir, hmacKey, checksumLogger, CancellationToken.None, jsonOpts.FsyncOnWrite);
-                        foreach (var file in mismatched)
-                        {
-                            QuarantineService.MoveToQuarantine(fsys, file, entityDir, checksumLogger);
-                        }
-
-                        if (mismatched.Count > 0)
-                        {
-                            await ChecksumManifest.RebuildManifestAsync(
-                                fsys, entityDir, hmacKey, jsonOpts.FsyncOnWrite, checksumLogger, CancellationToken.None);
-                        }
-                    }
-                }
-            }
-
-            // Phase D: Parallel cold index rebuild + FK validation.
-            await jsonSync.RebuildColdIndexesAsync();
-            jsonSync.ValidateForeignKeys();
-
-            await jsonSync.RecompactIfNeededAsync();
-            await jsonSync.EncryptIfNeededAsync();
-
-            // Phase F: Purge expired quarantined files.
-            if (jsonOpts!.QuarantineMaxAgeDays > 0 && fsys is not null)
-            {
-                var purgeLogger = scope.ServiceProvider.GetRequiredService<ILogger<ColdEntityStore>>();
-                QuarantineService.PurgeExpiredQuarantineFiles(
-                    fsys, jsonOpts.DataDirectory, jsonOpts.QuarantineMaxAgeDays, purgeLogger, CancellationToken.None);
-            }
-
-            // Phase E: Start periodic cold index maintenance.
-            var maintenance = services.GetService<ColdIndexMaintenanceService>();
-            maintenance?.Start(jsonOpts!.IndexRescanIntervalMinutes);
-
-            // Phase M: Create unclean shutdown sentinel.
-            JsonPersistenceHealthCheck.CreateSentinel(fsys!, jsonOpts);
-        }
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        await db.Database.CanConnectAsync(CancellationToken.None);
     }
 
     /// <summary>
-    /// Gracefully shuts down the persistence layer by acquiring all directory
-    /// locks (draining in-flight I/O) and then disposing the lock manager.
-    /// Call from <c>IHostApplicationLifetime.ApplicationStopping</c> or equivalent.
+    /// Gracefully shuts down infrastructure services owned by SharpClaw.
     /// </summary>
     public static async Task ShutdownInfrastructureAsync(this IServiceProvider services)
     {
-        // Phase E: Stop periodic index maintenance first.
-        var maintenance = services.GetService<ColdIndexMaintenanceService>();
-        maintenance?.Dispose();
-
-        // Phase K: Signal the flush queue to complete, then drain remaining items.
-        var flushQueue = services.GetService<FlushQueue>();
-        var flushWorker = services.GetService<FlushWorker>();
-        if (flushQueue is not null)
-        {
-            flushQueue.Complete();
-            if (flushWorker is not null)
-            {
-                try { await flushWorker.StopAsync(); }
-                catch (OperationCanceledException) { }
-            }
-            flushQueue.Dispose();
-        }
-        flushWorker?.Dispose();
-
-        // Phase M: Remove unclean shutdown sentinel on clean shutdown.
-        var jsonOpts = services.GetService<JsonFileOptions>();
-        var fsys = services.GetService<IPersistenceFileSystem>();
-        if (jsonOpts is not null && fsys is not null)
-            JsonPersistenceHealthCheck.RemoveSentinel(fsys, jsonOpts);
-
-        // Dispose migration infrastructure.
         services.GetService<MigrationGate>()?.Dispose();
         (services.GetService<MigrationService>() as IDisposable)?.Dispose();
-
-        var lockManager = services.GetService<DirectoryLockManager>();
-        if (lockManager is not null)
-        {
-            await lockManager.AcquireAllAsync();
-            lockManager.Dispose();
-        }
+        await Task.CompletedTask;
     }
 }

@@ -203,11 +203,6 @@ public sealed class ModuleServiceDisableDependencyTests
             registry,
             new RuntimeModuleDbContextRegistry(),
             new ModulePersistenceRegistrationFactory(),
-            new ModuleDbContextOptions
-            {
-                StorageMode = StorageMode.SQLite
-            },
-            moduleJsonPersistence: null,
             new ModuleEventDispatcher(
                 rootServices,
                 configuration,

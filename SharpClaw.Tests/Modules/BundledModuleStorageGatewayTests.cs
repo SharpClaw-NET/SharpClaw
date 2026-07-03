@@ -1,5 +1,6 @@
 using System.Text.Json;
 using FluentAssertions;
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SharpClaw.Application.API;
@@ -213,86 +214,199 @@ public sealed class BundledModuleStorageGatewayTests
     [Test]
     public async Task Claim_PatchesMatchingRecordsAndReplacesClaimIndexes()
     {
-        await using var db = CreateDbContext();
-        var gateway = CreateGateway(db);
+        var dataDirectory = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "jsoncoldstore-module-claim-replace-" + Guid.NewGuid().ToString("N"));
 
-        await UpsertJobAsync(
-            gateway,
-            "due",
-            DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
-            status: "Pending");
-        await UpsertJobAsync(
-            gateway,
-            "future",
-            DateTimeOffset.Parse("2026-06-10T14:00:00Z"),
-            status: "Pending");
-
-        var result = await InvokeAsync(gateway, "claim", new
+        try
         {
-            filters = new object[]
-            {
-                new { indexName = "status", @operator = "equals", value = "Pending" },
-                new
-                {
-                    indexName = "nextRunAt",
-                    @operator = "lessThanOrEqual",
-                    value = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
-                },
-            },
-            orderBy = new { indexName = "nextRunAt", direction = "asc" },
-            limit = 10,
-            patch = new
-            {
-                status = "Running",
-                lastRunAt = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
-            },
-            indexes = new
-            {
-                status = "Running",
-            },
-        });
+            await using var db = CreateJsonColdStoreDbContext(dataDirectory);
+            await db.Database.EnsureDeletedAsync();
+            await db.Database.EnsureCreatedAsync();
+            var gateway = CreateGateway(db);
 
-        var record = result.GetProperty("records").EnumerateArray().Single();
-        record.GetProperty("key").GetString().Should().Be("due");
-        record.GetProperty("value").GetProperty("status").GetString().Should().Be("Running");
-        db.ModuleStorageIndexEntries.Single(index =>
-                index.RecordKey == "due" && index.IndexName == "status")
-            .StringValue
-            .Should()
-            .Be("Running");
+            await UpsertJobAsync(
+                gateway,
+                "due",
+                DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
+                status: "Pending");
+            await UpsertJobAsync(
+                gateway,
+                "future",
+                DateTimeOffset.Parse("2026-06-10T14:00:00Z"),
+                status: "Pending");
+
+            var result = await InvokeAsync(gateway, "claim", new
+            {
+                filters = new object[]
+                {
+                    new { indexName = "status", @operator = "equals", value = "Pending" },
+                    new
+                    {
+                        indexName = "nextRunAt",
+                        @operator = "lessThanOrEqual",
+                        value = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
+                    },
+                },
+                orderBy = new { indexName = "nextRunAt", direction = "asc" },
+                limit = 10,
+                patch = new
+                {
+                    status = "Running",
+                    lastRunAt = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
+                },
+                indexes = new
+                {
+                    status = "Running",
+                },
+            });
+
+            var record = result.GetProperty("records").EnumerateArray().Single();
+            record.GetProperty("key").GetString().Should().Be("due");
+            record.GetProperty("value").GetProperty("status").GetString().Should().Be("Running");
+
+            db.ChangeTracker.Clear();
+
+            var statusIndex = await db.ModuleStorageIndexEntries.SingleAsync(index =>
+                index.RecordKey == "due" && index.IndexName == "status");
+            statusIndex.StringValue.Should().Be("Running");
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+                Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Claim_PatchesMatchingRecordsWithJsonColdStoreTransaction()
+    {
+        var dataDirectory = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "jsoncoldstore-module-claim-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            await using var db = CreateJsonColdStoreDbContext(dataDirectory);
+            await db.Database.EnsureDeletedAsync();
+            await db.Database.EnsureCreatedAsync();
+            var gateway = CreateGateway(db);
+
+            await UpsertJobAsync(
+                gateway,
+                "due",
+                DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
+                status: "Pending");
+            await UpsertJobAsync(
+                gateway,
+                "future",
+                DateTimeOffset.Parse("2026-06-10T14:00:00Z"),
+                status: "Pending");
+
+            var result = await InvokeAsync(gateway, "claim", new
+            {
+                filters = new object[]
+                {
+                    new { indexName = "status", @operator = "equals", value = "Pending" },
+                    new
+                    {
+                        indexName = "nextRunAt",
+                        @operator = "lessThanOrEqual",
+                        value = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
+                    },
+                },
+                orderBy = new { indexName = "nextRunAt", direction = "asc" },
+                limit = 10,
+                patch = new
+                {
+                    status = "Running",
+                    lastRunAt = DateTimeOffset.Parse("2026-06-10T12:00:00Z"),
+                },
+                indexes = new
+                {
+                    status = "Running",
+                },
+            });
+
+            var record = result.GetProperty("records").EnumerateArray().Single();
+            record.GetProperty("key").GetString().Should().Be("due");
+            record.GetProperty("value").GetProperty("status").GetString().Should().Be("Running");
+
+            db.ChangeTracker.Clear();
+
+            var storedDue = await db.ModuleStorageRecords.SingleAsync(record =>
+                record.ModuleId == "test_module"
+                && record.StorageName == "records"
+                && record.RecordKey == "due");
+            storedDue.ValueJson.Should().Contain("\"Running\"");
+
+            var storedFuture = await db.ModuleStorageRecords.SingleAsync(record =>
+                record.ModuleId == "test_module"
+                && record.StorageName == "records"
+                && record.RecordKey == "future");
+            storedFuture.ValueJson.Should().Contain("\"Pending\"");
+
+            var dueStatus = await db.ModuleStorageIndexEntries.SingleAsync(index =>
+                index.ModuleId == "test_module"
+                && index.StorageName == "records"
+                && index.RecordKey == "due"
+                && index.IndexName == "status");
+            dueStatus.StringValue.Should().Be("Running");
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+                Directory.Delete(dataDirectory, recursive: true);
+        }
     }
 
     [Test]
     public async Task Claim_RejectsIndexedFieldPatchWithoutReplacementIndex()
     {
-        await using var db = CreateDbContext();
-        var gateway = CreateGateway(db);
-        await UpsertJobAsync(
-            gateway,
-            "due",
-            DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
-            status: "Pending");
+        var dataDirectory = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "jsoncoldstore-module-claim-reject-" + Guid.NewGuid().ToString("N"));
 
-        var act = async () => await InvokeAsync(gateway, "claim", new
+        try
         {
-            filters = new object[]
-            {
-                new { indexName = "status", @operator = "equals", value = "Pending" },
-            },
-            patch = new
-            {
-                status = "Running",
-            },
-        });
+            await using var db = CreateJsonColdStoreDbContext(dataDirectory);
+            await db.Database.EnsureDeletedAsync();
+            await db.Database.EnsureCreatedAsync();
+            var gateway = CreateGateway(db);
+            await UpsertJobAsync(
+                gateway,
+                "due",
+                DateTimeOffset.Parse("2026-06-10T10:00:00Z"),
+                status: "Pending");
 
-        await act.Should().ThrowAsync<ArgumentException>()
-            .WithMessage("*changes indexed field 'status' without replacing that index value*");
-        db.ModuleStorageRecords.Single().ValueJson.Should().Contain("\"Pending\"");
-        db.ModuleStorageIndexEntries.Single(index =>
-                index.RecordKey == "due" && index.IndexName == "status")
-            .StringValue
-            .Should()
-            .Be("Pending");
+            var act = async () => await InvokeAsync(gateway, "claim", new
+            {
+                filters = new object[]
+                {
+                    new { indexName = "status", @operator = "equals", value = "Pending" },
+                },
+                patch = new
+                {
+                    status = "Running",
+                },
+            });
+
+            await act.Should().ThrowAsync<ArgumentException>()
+                .WithMessage("*changes indexed field 'status' without replacing that index value*");
+
+            db.ChangeTracker.Clear();
+
+            var record = await db.ModuleStorageRecords.SingleAsync();
+            record.ValueJson.Should().Contain("\"Pending\"");
+            var statusIndex = await db.ModuleStorageIndexEntries.SingleAsync(index =>
+                index.RecordKey == "due" && index.IndexName == "status");
+            statusIndex.StringValue.Should().Be("Pending");
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+                Directory.Delete(dataDirectory, recursive: true);
+        }
     }
 
     [Test]
@@ -412,6 +526,23 @@ public sealed class BundledModuleStorageGatewayTests
         var options = new DbContextOptionsBuilder<SharpClawDbContext>()
             .UseInMemoryDatabase($"ModuleStorage_{Guid.NewGuid():N}", new InMemoryDatabaseRoot())
             .Options;
+        return new SharpClawDbContext(options);
+    }
+
+    private static SharpClawDbContext CreateJsonColdStoreDbContext(string dataDirectory)
+    {
+        var storageOptions = new JsonColdStoreStorageOptions
+        {
+            DataDirectory = dataDirectory,
+            EncryptAtRest = false,
+        };
+
+        var options = new DbContextOptionsBuilder<SharpClawDbContext>()
+            .UseJsonColdStoreDatabase(
+                storageOptions.DataDirectory,
+                store => JsonColdStoreRegistration.ConfigureStore(store, storageOptions, null))
+            .Options;
+
         return new SharpClawDbContext(options);
     }
 

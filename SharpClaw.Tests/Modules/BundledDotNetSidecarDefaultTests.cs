@@ -12,7 +12,6 @@ using SharpClaw.Application.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Tests.ExternalModule;
 using SharpClaw.Modules.TestHarness;
@@ -564,18 +563,12 @@ public sealed class BundledDotNetSidecarDefaultTests
                 StorageMode = StorageMode.SQLite,
                 ConnectionString = "Data Source=:memory:",
             });
-            services.AddSingleton(new JsonFileOptions
-            {
-                DataDirectory = Path.Combine(instanceRoot, "Data"),
-            });
             services.AddSingleton(new EncryptionOptions
             {
                 Key = new byte[32],
                 EncryptProviderKeys = false,
             });
-            services.AddSingleton<IPersistenceFileSystem, InMemoryPersistenceFileSystem>();
             services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
-            services.AddSingleton<ModuleJsonPersistenceService>();
             services.AddSingleton<ChatCache>();
             services.AddSingleton<ModuleEventDispatcher>(sp => new ModuleEventDispatcher(
                 sp,

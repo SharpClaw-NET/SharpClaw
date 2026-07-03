@@ -31,7 +31,7 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure;
 using SharpClaw.Infrastructure.Configuration;
-using SharpClaw.Infrastructure.Persistence.JSON;
+using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
 using Microsoft.EntityFrameworkCore;
@@ -77,7 +77,7 @@ using SharpClaw.Core.Tasks.Runtime;
 //    PHASE 4  Module log capture (ILoggerProvider feeding /modules/{id}/logs).
 //    PHASE 5  Encryption key resolution + validation
 //             (must run before infrastructure, which uses it for at-rest enc).
-//    PHASE 6  Infrastructure persistence (DbContext, JSON file store, etc.).
+//    PHASE 6  Infrastructure persistence (DbContext + configured EF provider).
 //    PHASE 7  Cross-cutting middleware-shaped services (CORS, auth/JWT).
 //    PHASE 8  Domain services (chat, agents, channels, threads, tasks,
 //             permissions, env editor, …) and host-side module bridges.
@@ -92,11 +92,11 @@ using SharpClaw.Core.Tasks.Runtime;
 //    PHASE 13 builder.Build() — container is now immutable.
 //    PHASE 14 Post-build infrastructure init + relational migration check.
 //    PHASE 15 Module enable-state sync from config + per-module persistence
-//             registration + bundled persistence load.
+//             registration.
 //    PHASE 16 Module initialisation in dependency order with cascade
 //             unregistration on failure.
 //    PHASE 17 External-module scan (filesystem + .env entries).
-//    PHASE 18 ApplicationStarted hook (FlushWorker start).
+//    PHASE 18 Reserved for provider lifecycle hooks.
 //    PHASE 19 CLI command dispatch — exits the process if a CLI verb matches.
 //    PHASE 20 HTTP pipeline (middleware order is load-bearing — see comments).
 //    PHASE 21 Endpoint mapping (handlers, modules, webhooks).
@@ -284,8 +284,6 @@ try
             .GetValue("Database:SnapshotIntervalHours", defaultValue: opts.SnapshotIntervalHours);
         opts.SnapshotRetentionCount = builder.Configuration
             .GetValue("Database:SnapshotRetentionCount", defaultValue: opts.SnapshotRetentionCount);
-        opts.AsyncFlush = builder.Configuration
-            .GetValue("Database:AsyncFlush", defaultValue: opts.AsyncFlush);
     });
 
     // CORS
@@ -621,16 +619,6 @@ try
             registeredModule.Id, registeredModule.DisplayName, runtimeLabel, version);
     }
 
-    if (storageMode == StorageMode.JsonFile)
-    {
-        using var moduleLoadScope = app.Services.CreateScope();
-        var moduleSvc = moduleLoadScope.ServiceProvider.GetRequiredService<ModuleService>();
-        foreach (var bundledModule in allBundled.Where(m =>
-                     enabledModuleIds.Contains(m.Id)
-                     && !moduleLoader.IsManifestOnlyBundledModule(m.Id)))
-            await moduleSvc.LoadModulePersistenceAsync(bundledModule);
-    }
-
     Log.Information("Bundled modules: {Registered} registered, {Disabled} disabled, {Total} discovered",
         registeredBundledCount, disabledBundledCount, allBundled.Count);
 
@@ -761,16 +749,7 @@ try
         totalLoaded, initializedCount, externalLoadedCount, envExternalLoadedCount,
         failedInitCount, disabledBundledCount, excludedModules.Count);
 
-    // ──────── PHASE 18 ─── ApplicationStarted hook ────────────────────────
-    // Start the JSON persistence FlushWorker only after the host signals
-    // ApplicationStarted, so transient startup writes go through the
-    // synchronous fallback rather than racing the worker's pump.
-    app.Lifetime.ApplicationStarted.Register(() =>
-    {
-        var flushWorker = app.Services.GetService<FlushWorker>();
-        flushWorker?.Start();
-    });
-
+    // PHASE 18 reserved for provider lifecycle hooks.
     // ──────── PHASE 19 ─── CLI command dispatch (one-shot) ────────────────
     // If the process was launched with a recognised CLI verb, handle it
     // and exit; we never enter API mode in this case.  Errors are written

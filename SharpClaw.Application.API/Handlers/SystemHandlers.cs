@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.API.Routing;
 using SharpClaw.Application.Services;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Utils.Instances;
 
 namespace SharpClaw.Application.API.Handlers;
@@ -17,7 +16,7 @@ public static class SystemHandlers
     /// </summary>
     [MapPost("/factory-reset")]
     public static async Task<IResult> FactoryReset(
-        JsonFileOptions jsonFileOptions,
+        JsonColdStoreStorageOptions jsonColdStoreOptions,
         SharpClawInstancePaths instancePaths,
         SessionService session,
         SharpClawDbContext db)
@@ -31,7 +30,7 @@ public static class SystemHandlers
                 statusCode: StatusCodes.Status403Forbidden);
         var errors = new List<string>();
 
-        DeleteDirectory(jsonFileOptions.DataDirectory, "Data", errors);
+        DeleteDirectory(jsonColdStoreOptions.DataDirectory, "Data", errors);
         DeleteDirectory(instancePaths.SecretsDirectory, "Secrets", errors);
         DeleteDirectory(instancePaths.RuntimeDirectory, "Runtime", errors);
         DeleteDirectory(instancePaths.LogsDirectory, "Logs", errors);

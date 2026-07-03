@@ -1,6 +1,7 @@
 using Microsoft.AspNetCore.Http;
+using Microsoft.EntityFrameworkCore;
 using SharpClaw.Application.API.Routing;
-using SharpClaw.Infrastructure.Persistence.JSON;
+using SharpClaw.Infrastructure.Persistence;
 
 namespace SharpClaw.Application.API.Handlers;
 
@@ -13,27 +14,30 @@ public static class HealthHandlers
     /// </summary>
     [MapGet("/health")]
     public static async Task<IResult> GetHealth(
-        JsonPersistenceHealthCheck healthCheck,
+        SharpClawDbContext db,
         CancellationToken ct)
     {
-        var result = await healthCheck.CheckAsync(ct);
+        var canConnect = await db.Database.CanConnectAsync(ct);
+        var status = canConnect ? "Healthy" : "Unhealthy";
 
         var body = new
         {
-            status = result.Status.ToString(),
-            checks = result.Entries.Select(e => new
+            status,
+            checks = new[]
             {
-                name = e.Name,
-                status = e.Status.ToString(),
-                description = e.Description
-            }).ToArray()
+                new
+                {
+                    name = "Database",
+                    status,
+                    description = canConnect
+                        ? "Configured EF provider is reachable."
+                        : "Configured EF provider is not reachable."
+                }
+            }
         };
 
-        return result.Status switch
-        {
-            HealthStatus.Healthy => Results.Ok(body),
-            HealthStatus.Degraded => Results.Json(body, statusCode: StatusCodes.Status207MultiStatus),
-            _ => Results.Json(body, statusCode: StatusCodes.Status503ServiceUnavailable)
-        };
+        return canConnect
+            ? Results.Ok(body)
+            : Results.Json(body, statusCode: StatusCodes.Status503ServiceUnavailable);
     }
 }

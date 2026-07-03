@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
-using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
@@ -14,13 +13,11 @@ using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 
 namespace SharpClaw.Infrastructure.Persistence;
 
 public class SharpClawDbContext(
-    DbContextOptions<SharpClawDbContext> options,
-    IServiceProvider? serviceProvider = null) : DbContext(options), ISharpClawDataContext
+    DbContextOptions<SharpClawDbContext> options) : DbContext(options), ISharpClawDataContext
 {
     IQueryable<AgentDB> ISharpClawDataContext.Agents => Agents;
     IQueryable<ChannelDB> ISharpClawDataContext.Channels => Channels;
@@ -30,13 +27,6 @@ public class SharpClawDbContext(
     IQueryable<PermissionSetDB> ISharpClawDataContext.PermissionSets => PermissionSets;
     IQueryable<GlobalFlagDB> ISharpClawDataContext.GlobalFlags => GlobalFlags;
     IQueryable<RoleDB> ISharpClawDataContext.Roles => Roles;
-
-    /// <summary>
-    /// When <c>true</c>, <see cref="SaveChangesAsync"/> skips the JSON
-    /// flush. Set by <see cref="JsonFilePersistenceService.LoadAsync"/>
-    /// to avoid re-serialising entities that are being hydrated.
-    /// </summary>
-    internal bool SuppressJsonFlush { get; set; }
 
     public DbSet<UserDB> Users => Set<UserDB>();
     public DbSet<RoleDB> Roles => Set<RoleDB>();
@@ -475,73 +465,7 @@ public class SharpClawDbContext(
             }
         }
 
-        // Capture pending changes BEFORE committing to the InMemory store.
-        // After base.SaveChangesAsync the change tracker resets states to
-        // Unchanged and we lose the information about what was modified.
-        var entityChanges = new List<(Type ClrType, Guid Id, EntityState State)>();
-        var joinTableChanges = new HashSet<string>();
-
-        foreach (var entry in ChangeTracker.Entries())
-        {
-            if (entry.Entity is BaseEntity be
-                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-            {
-                entityChanges.Add((be.GetType(), be.Id, entry.State));
-            }
-            else if (entry.Metadata.HasSharedClrType
-                && entry.State is EntityState.Added or EntityState.Modified or EntityState.Deleted)
-            {
-                joinTableChanges.Add(entry.Metadata.Name);
-            }
-        }
-
-        var result = await base.SaveChangesAsync(cancellationToken);
-
-        if (!SuppressJsonFlush)
-        {
-            if (entityChanges.Count > 0 || joinTableChanges.Count > 0)
-            {
-                var jsonOpts = serviceProvider?.GetService<JsonFileOptions>();
-                var flushQueue = serviceProvider?.GetService<FlushQueue>();
-
-                // Phase K: Async flush path — enqueue intent + overlay.
-                if (jsonOpts?.AsyncFlush == true && flushQueue is not null)
-                {
-                    var jsonSync = serviceProvider?.GetService<JsonFilePersistenceService>();
-                    var serialized = new Dictionary<(string TypeName, Guid Id), byte[]>();
-                    var serializedByClrType = new Dictionary<(Type ClrType, Guid Id), byte[]>();
-
-                    if (jsonSync is not null)
-                    {
-                        foreach (var (clrType, id, state) in entityChanges)
-                        {
-                            if (state == EntityState.Deleted)
-                                continue;
-
-                            var entity = Find(clrType, id);
-                            if (entity is not null)
-                            {
-                                var bytes = JsonSerializer.SerializeToUtf8Bytes(entity, clrType, ColdEntityStore.JsonOptions);
-                                serialized[(clrType.Name, id)] = bytes;
-                                serializedByClrType[(clrType, id)] = bytes;
-                            }
-                        }
-                    }
-
-                    var intent = new FlushQueue.FlushIntent(entityChanges, joinTableChanges, serialized, serializedByClrType);
-                    await flushQueue.EnqueueAsync(intent, cancellationToken);
-                }
-                else
-                {
-                    // Synchronous flush path (original behavior).
-                    var jsonSync = serviceProvider?.GetService<JsonFilePersistenceService>();
-                    if (jsonSync is not null)
-                        await jsonSync.FlushChangesAsync(entityChanges, joinTableChanges, cancellationToken);
-                }
-            }
-        }
-
-        return result;
+        return await base.SaveChangesAsync(cancellationToken);
     }
 
     /// <summary>

@@ -3681,21 +3681,16 @@ public static class CliDispatcher
 
     private static async Task<IResult> HandleHealthCommand(IServiceProvider sp)
     {
-        var healthCheck = sp.GetRequiredService<SharpClaw.Infrastructure.Persistence.JSON.JsonPersistenceHealthCheck>();
-        var result = await healthCheck.CheckAsync();
+        var db = sp.GetRequiredService<SharpClawDbContext>();
+        var canConnect = await db.Database.CanConnectAsync();
+        var status = canConnect ? "Healthy" : "Unhealthy";
 
-        Console.WriteLine($"Status: {result.Status}");
+        Console.WriteLine($"Status: {status}");
         Console.WriteLine();
-        foreach (var entry in result.Entries)
-        {
-            var icon = entry.Status switch
-            {
-                SharpClaw.Infrastructure.Persistence.JSON.HealthStatus.Healthy => "✓",
-                SharpClaw.Infrastructure.Persistence.JSON.HealthStatus.Degraded => "⚠",
-                _ => "✗"
-            };
-            Console.WriteLine($"  {icon} {entry.Name,-26} {entry.Description}");
-        }
+        Console.WriteLine(
+            canConnect
+                ? "  OK Database                   Configured EF provider is reachable."
+                : "  ERROR Database                Configured EF provider is not reachable.");
 
         return Results.Ok();
     }

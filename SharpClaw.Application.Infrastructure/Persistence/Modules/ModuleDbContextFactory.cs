@@ -2,6 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
+using JSONColdStore;
 
 using SharpClaw.Contracts.Persistence;
 
@@ -58,18 +59,20 @@ public sealed class ModuleDbContextFactory(
         if (enableSensitiveDataLogging)
             builder.EnableSensitiveDataLogging();
 
-        if (options.StorageMode == StorageMode.JsonFile)
-        {
-            var interceptor = serviceProvider?.GetService(typeof(ModuleJsonSaveChangesInterceptor)) as ModuleJsonSaveChangesInterceptor;
-            if (interceptor is not null)
-                builder.AddInterceptors(interceptor);
-        }
-
-        var databaseName = $"SharpClaw.Modules.{dbContextType.FullName}";
         switch (options.StorageMode)
         {
             case StorageMode.JsonFile:
-                builder.UseInMemoryDatabase(databaseName, options.InMemoryDatabaseRoot);
+                var jsonOptions = serviceProvider?.GetRequiredService<JsonColdStoreStorageOptions>()
+                    ?? throw new InvalidOperationException(
+                        "JSONColdStore options are not registered for module persistence.");
+                builder.UseJsonColdStoreDatabase(
+                    JsonColdStoreRegistration.GetModuleDirectory(jsonOptions, dbContextType),
+                    store => JsonColdStoreRegistration.ConfigureStore(
+                        store,
+                        jsonOptions,
+                        jsonOptions.EncryptAtRest
+                            ? serviceProvider.GetRequiredService<JsonColdStoreEncryptionKey>()
+                            : null));
                 break;
             case StorageMode.Postgres:
                 RequireConnectionString();

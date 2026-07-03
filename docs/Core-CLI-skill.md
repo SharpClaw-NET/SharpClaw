@@ -378,10 +378,8 @@ db migrate                             Drain requests, apply pending migrations.
 HEALTH
 ────────────────────────────────────────
 health
-  Runs JsonPersistenceHealthCheck. Prints each component status.
-  ✓ Healthy  ⚠ Degraded  ✗ Unhealthy
-  Checks: disk writable, pending transactions, quarantine count,
-          flush backlog, checksums, event log, snapshot age, sentinel.
+  Checks whether the configured EF database provider is reachable.
+  Prints Healthy when the provider can connect and Unhealthy otherwise.
 
 ────────────────────────────────────────
 MODULE-PROVIDED CLI COMMANDS

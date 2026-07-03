@@ -417,7 +417,7 @@ public sealed class BundledModuleStorageGateway(
 
     private async Task<IDbContextTransaction?> BeginClaimTransactionAsync(CancellationToken ct)
     {
-        if (db.Database.CurrentTransaction is not null || db.Database.IsInMemory())
+        if (db.Database.CurrentTransaction is not null)
             return null;
 
         return await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);

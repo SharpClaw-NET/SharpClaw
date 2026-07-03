@@ -1,3 +1,4 @@
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
@@ -518,11 +519,13 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
 {
     private readonly ServiceProvider _root;
     private readonly AsyncServiceScope _scope;
+    private readonly string _dataDirectory;
 
-    private ScheduledJobHost(ServiceProvider root, AsyncServiceScope scope)
+    private ScheduledJobHost(ServiceProvider root, AsyncServiceScope scope, string dataDirectory)
     {
         _root = root;
         _scope = scope;
+        _dataDirectory = dataDirectory;
     }
 
     public ScheduledJobStore Store => _scope.ServiceProvider.GetRequiredService<ScheduledJobStore>();
@@ -532,15 +535,24 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
     public static ScheduledJobHost Create(IReadOnlyDictionary<string, string?>? settings = null)
     {
         var services = new ServiceCollection();
-        var databaseRoot = new InMemoryDatabaseRoot();
-        var databaseName = "SharpClawScheduledJobs_" + Guid.NewGuid().ToString("N");
+        var dataDirectory = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "jsoncoldstore-scheduled-jobs-" + Guid.NewGuid().ToString("N"));
+        var storageOptions = new JsonColdStoreStorageOptions
+        {
+            DataDirectory = dataDirectory,
+            EncryptAtRest = false,
+        };
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
             .Build();
 
         services.AddSingleton<IConfiguration>(configuration);
         services.AddLogging();
-        services.AddDbContext<SharpClawDbContext>(options => options.UseInMemoryDatabase(databaseName, databaseRoot));
+        services.AddDbContext<SharpClawDbContext>(
+            options => options.UseJsonColdStoreDatabase(
+                storageOptions.DataDirectory,
+                store => JsonColdStoreRegistration.ConfigureStore(store, storageOptions, null)));
         services.AddSingleton<IModuleStorageContractProvider>(
             new StaticModuleStorageContractProvider(new AgentOrchestrationModule().GetStorageContracts()));
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
@@ -550,7 +562,14 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
         services.AddSingleton<ScheduledJobWorker>();
 
         var root = services.BuildServiceProvider();
-        return new ScheduledJobHost(root, root.CreateAsyncScope());
+        using (var initScope = root.CreateScope())
+        {
+            var db = initScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            db.Database.EnsureDeleted();
+            db.Database.EnsureCreated();
+        }
+
+        return new ScheduledJobHost(root, root.CreateAsyncScope(), dataDirectory);
     }
 
     public async Task<ScheduledJobDB> ReadScheduledJobAsync(string name)
@@ -563,6 +582,15 @@ internal sealed class ScheduledJobHost : IAsyncDisposable
     {
         await _scope.DisposeAsync();
         await _root.DisposeAsync();
+
+        try
+        {
+            if (Directory.Exists(_dataDirectory))
+                Directory.Delete(_dataDirectory, recursive: true);
+        }
+        catch
+        {
+        }
     }
 }
 

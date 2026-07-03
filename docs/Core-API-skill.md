@@ -475,7 +475,7 @@ Step 4 — Chat without a thread on the same channel is one-shot (no history).
 DATABASE ADMINISTRATION
 ────────────────────────────────────────
 Multi-provider EF Core support. Provider selected via Database:Provider in Core .env.
-Supported: JsonFile (default, InMemory+JSON), Postgres, SqlServer, SQLite.
+Supported: JsonFile (default, JSONColdStore EF provider), Postgres, SqlServer, SQLite.
 Stubbed (blocked on EFC 10 packages): MySql, Oracle.
 See docs/Database-Configuration.md for full setup.
 

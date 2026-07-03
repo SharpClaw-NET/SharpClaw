@@ -1,11 +1,11 @@
-# Database Configuration Guide
+﻿# Database Configuration Guide
 
 > **Applies to:** SharpClaw Core API and CLI
 >
-> **Default provider:** `JsonFile` (EF Core InMemory + JSON file persistence)
+> **Default provider:** `JsonFile` (EF Core through JSONColdStore)
 
 SharpClaw supports multiple EF Core database providers. The provider is
-selected via a single `.env` key — no code changes required.
+selected via a single `.env` key â€” no code changes required.
 
 ---
 
@@ -33,12 +33,12 @@ selected via a single `.env` key — no code changes required.
 
 | Provider | `Database:Provider` value | Connection string key | Status |
 |----------|--------------------------|----------------------|--------|
-| InMemory + JSON sync | `JsonFile` | *(none)* | ✅ Default |
-| PostgreSQL | `Postgres` | `ConnectionStrings:Postgres` | ✅ Supported |
-| SQL Server | `SqlServer` | `ConnectionStrings:SqlServer` | ✅ Supported |
-| SQLite | `SQLite` | `ConnectionStrings:SQLite` | ✅ Supported |
-| MySQL / MariaDB | `MySql` | `ConnectionStrings:MySql` | ⏳ Stub — blocked on Pomelo EFC 10 |
-| Oracle | `Oracle` | `ConnectionStrings:Oracle` | ⏳ Stub — blocked on Oracle EFC 10 |
+| JSONColdStore | `JsonFile` | *(none)* | Default |
+| PostgreSQL | `Postgres` | `ConnectionStrings:Postgres` | âœ… Supported |
+| SQL Server | `SqlServer` | `ConnectionStrings:SqlServer` | âœ… Supported |
+| SQLite | `SQLite` | `ConnectionStrings:SQLite` | âœ… Supported |
+| MySQL / MariaDB | `MySql` | `ConnectionStrings:MySql` | â³ Stub â€” blocked on Pomelo EFC 10 |
+| Oracle | `Oracle` | `ConnectionStrings:Oracle` | â³ Stub â€” blocked on Oracle EFC 10 |
 
 ---
 
@@ -94,9 +94,10 @@ Example:
 
 ### JsonFile (default)
 
-No connection string needed. Data is stored in EF Core InMemory with
-ACID-compliant JSON file persistence (see
-[ACID Compliance Plan](internal/acid-compliance-plan.md)).
+No connection string is needed. Data is stored through the external
+`JSONColdStore` EF Core provider, so SharpClaw code uses the same DbContext
+and LINQ flow as the relational providers. Legacy file-format handling, if
+needed, belongs in the provider package rather than in SharpClaw.
 
 ```jsonc
 {
@@ -174,7 +175,7 @@ EF Core 10 packages:
 ## Migrations
 
 Migrations are **never automatic**. SharpClaw starts and serves requests
-even when migrations are pending — it logs a warning at startup. You
+even when migrations are pending â€” it logs a warning at startup. You
 must explicitly trigger migrations when ready.
 
 ### Checking status
@@ -210,10 +211,10 @@ db migrate
 
 Both require admin privileges. The migration gate will:
 
-1. Close the gate — new requests are held.
+1. Close the gate â€” new requests are held.
 2. Drain all in-flight requests to completion.
 3. Apply all pending migrations.
-4. Reopen the gate — requests resume.
+4. Reopen the gate â€” requests resume.
 
 Returns `409 Conflict` if a migration is already in progress.
 
@@ -272,7 +273,7 @@ for key resolution and validation details.
 | Provider | Issue | Mitigation |
 |----------|-------|------------|
 | SQLite | No native `DateTimeOffset` support | Auto-applied `ValueConverter`: stored as Unix milliseconds |
-| MySQL/MariaDB | InnoDB 767-byte key length limit | Will limit indexed string columns to `MaxLength(255)` — deferred |
-| Oracle | 30-char identifier limit (pre-21c) | Will use short table names or require 21c+ — deferred |
-| InMemory | No relational features | Default behavior, no special handling |
+| MySQL/MariaDB | InnoDB 767-byte key length limit | Will limit indexed string columns to `MaxLength(255)` â€” deferred |
+| Oracle | 30-char identifier limit (pre-21c) | Will use short table names or require 21c+ â€” deferred |
+| JSONColdStore | Provider-backed JSON storage | SharpClaw uses provider configuration only; query and persistence behavior belongs in the provider |
 | Postgres / SQL Server | Full relational support | No special handling needed |

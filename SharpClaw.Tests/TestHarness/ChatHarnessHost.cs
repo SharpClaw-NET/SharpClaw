@@ -1,5 +1,6 @@
 using System.Linq.Expressions;
 using FluentAssertions;
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
@@ -32,7 +33,6 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.JSON;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Instances;
@@ -46,7 +46,10 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
     private readonly AsyncServiceScope _scope;
     private readonly string _instanceRoot;
 
-    private ChatHarnessHost(ServiceProvider root, AsyncServiceScope scope, string instanceRoot)
+    private ChatHarnessHost(
+        ServiceProvider root,
+        AsyncServiceScope scope,
+        string instanceRoot)
     {
         _root = root;
         _scope = scope;
@@ -66,7 +69,8 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
     public AsyncServiceScope CreateScope() => _root.CreateAsyncScope();
 
     public static ChatHarnessHost Create(
-        IReadOnlyDictionary<string, string?>? settings = null)
+        IReadOnlyDictionary<string, string?>? settings = null,
+        bool useJsonColdStoreDatabase = false)
     {
         var module = new TestHarnessModule();
         var configuration = new ConfigurationBuilder()
@@ -84,6 +88,11 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         var services = new ServiceCollection();
         var databaseRoot = new InMemoryDatabaseRoot();
         var databaseName = "SharpClawHarness_" + Guid.NewGuid().ToString("N");
+        var jsonColdStoreOptions = new JsonColdStoreStorageOptions
+        {
+            DataDirectory = Path.Combine(instanceRoot, "data", "jsoncoldstore"),
+            EncryptAtRest = false,
+        };
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(instancePaths);
         services.AddLogging();
@@ -97,10 +106,21 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         {
             Secret = Convert.ToBase64String(new byte[32])
         });
-        services.AddDbContext<SharpClawDbContext>(
-            options => options.UseInMemoryDatabase(
-                databaseName,
-                databaseRoot));
+        services.AddDbContext<SharpClawDbContext>(options =>
+        {
+            if (useJsonColdStoreDatabase)
+            {
+                options.UseJsonColdStoreDatabase(
+                    jsonColdStoreOptions.DataDirectory,
+                    store => JsonColdStoreRegistration.ConfigureStore(store, jsonColdStoreOptions, null));
+            }
+            else
+            {
+                options.UseInMemoryDatabase(
+                    databaseName,
+                    databaseRoot);
+            }
+        });
         services.AddSingleton(new ModuleLoader(module));
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ModuleToolExecutionPlanner>();
@@ -169,13 +189,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             StorageMode = StorageMode.SQLite,
             ConnectionString = "Data Source=:memory:",
         });
-        services.AddSingleton(new JsonFileOptions
-        {
-            DataDirectory = Path.Combine(instanceRoot, "Data"),
-        });
-        services.AddSingleton<IPersistenceFileSystem, InMemoryPersistenceFileSystem>();
         services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
-        services.AddSingleton<ModuleJsonPersistenceService>();
         services.AddSingleton<ForeignModuleTaskContextRegistry>();
         services.AddSingleton<CountingPersistenceEntityResolver>();
         services.AddScoped<TokenService>();
@@ -237,6 +251,13 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         module.ConfigureServices(services);
 
         var root = services.BuildServiceProvider();
+        if (useJsonColdStoreDatabase)
+        {
+            using var initScope = root.CreateScope();
+            var db = initScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            db.Database.EnsureCreated();
+        }
+
         var registry = root.GetRequiredService<ModuleRegistry>();
         registry.Register(module);
 

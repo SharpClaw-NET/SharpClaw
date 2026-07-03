@@ -15,19 +15,17 @@ public sealed record PersistenceQueryHint(string PropertyName, Guid Value);
 /// Provider-neutral abstraction for entity lookup and query that works for
 /// every configured storage provider.
 /// <para>
-/// In JSON/InMemory mode the implementation transparently falls back to
-/// cold storage when an entity is absent from the in-memory EF set.
-/// In relational provider mode the implementation delegates directly to EF.
-/// Core services should depend on this interface rather than
-/// <c>ColdEntityStore</c>.
+/// Implementations delegate through the configured EF provider. Core services
+/// use this interface when they need app-owned entity resolution without
+/// knowing which provider backs the DbContext.
 /// </para>
 /// </summary>
 public interface IPersistenceEntityResolver
 {
     /// <summary>
     /// Finds a single entity by primary key. Returns <c>null</c> when not found.
-    /// Cold entities from previous sessions are hydrated and attached to
-    /// <paramref name="db"/> when the JSON resolver is active.
+    /// Implementations may attach the returned entity to <paramref name="db"/>
+    /// when the configured provider requires it.
     /// </summary>
     Task<T?> FindAsync<T>(SharpClawDbContext db, Guid id, CancellationToken ct = default)
         where T : BaseEntity;
