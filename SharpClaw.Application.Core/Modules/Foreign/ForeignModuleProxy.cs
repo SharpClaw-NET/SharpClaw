@@ -685,31 +685,40 @@ internal sealed class ForeignModuleProxy(
                 ? new ForeignModuleDeviceCodeFlow(manifest, client, descriptor.ProviderKey)
                 : null;
 
-        public IProviderCostFeed? CostFeed =>
+        public bool SupportsCostFeed => descriptor.SupportsCostFeed;
+
+        public string CostFeedPermissionDeniedNote =>
+            descriptor.CostFeedPermissionDeniedNote
+            ?? IProviderPlugin.DefaultCostFeedPermissionDeniedNote;
+
+        public IProviderCostFeed? CreateCostFeed(ProviderClientOptions options) =>
             descriptor.SupportsCostFeed
                 ? new ForeignModuleProviderCostFeed(
                     manifest,
                     client,
                     descriptor.ProviderKey,
-                    descriptor.CostFeedPermissionDeniedNote)
+                    options.ApiKey)
                 : null;
 
-        public IProviderApiClient CreateClient(string? endpoint)
+        public IProviderApiClient CreateClient(ProviderClientOptions options)
         {
+            ArgumentNullException.ThrowIfNull(options);
+
             if (RequiresEndpoint
                 && !SupportsAutomaticEndpointDiscovery
-                && string.IsNullOrWhiteSpace(endpoint))
+                && string.IsNullOrWhiteSpace(options.Endpoint))
             {
                 throw new ArgumentException(
                     $"Provider '{ProviderKey}' requires a non-empty endpoint URL.",
-                    nameof(endpoint));
+                    nameof(options));
             }
 
             return new ForeignModuleProviderApiClient(
                 manifest,
                 client,
                 descriptor.ProviderKey,
-                endpoint,
+                options.Endpoint,
+                options.ApiKey,
                 descriptor.SupportsNativeToolCalling);
         }
 
@@ -730,15 +739,13 @@ internal sealed class ForeignModuleProxy(
         ForeignModuleProtocolClient client,
         string providerKey,
         string? endpoint,
+        string apiKey,
         bool supportsNativeToolCalling) : IProviderApiClient
     {
         public string ProviderKey => providerKey;
         public bool SupportsNativeToolCalling => supportsNativeToolCalling;
 
-        public Task<IReadOnlyList<string>> ListModelIdsAsync(
-            HttpClient httpClient,
-            string apiKey,
-            CancellationToken ct = default) =>
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             client.ListProviderModelIdsAsync(
                 manifest,
                 ProviderKey,
@@ -747,8 +754,6 @@ internal sealed class ForeignModuleProxy(
                 ct);
 
         public Task<ChatCompletionResult> ChatCompletionAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ChatCompletionMessage> messages,
@@ -770,8 +775,6 @@ internal sealed class ForeignModuleProxy(
                 ct);
 
         public Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ToolAwareMessage> messages,
@@ -795,8 +798,6 @@ internal sealed class ForeignModuleProxy(
                 ct);
 
         public IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ToolAwareMessage> messages,
@@ -838,11 +839,10 @@ internal sealed class ForeignModuleProxy(
         ForeignModuleProtocolClient client,
         string providerKey) : IDeviceCodeFlow
     {
-        public Task<DeviceCodeSession> StartAsync(HttpClient httpClient, CancellationToken ct = default) =>
+        public Task<DeviceCodeSession> StartAsync(CancellationToken ct = default) =>
             client.StartProviderDeviceCodeAsync(manifest, providerKey, ct);
 
         public Task<string?> PollAsync(
-            HttpClient httpClient,
             DeviceCodeSession session,
             CancellationToken ct = default) =>
             client.PollProviderDeviceCodeAsync(manifest, providerKey, session, ct);
@@ -852,17 +852,9 @@ internal sealed class ForeignModuleProxy(
         ModuleManifest manifest,
         ForeignModuleProtocolClient client,
         string providerKey,
-        string? permissionDeniedNote) : IProviderCostFeed
+        string apiKey) : IProviderCostFeed
     {
-        public string PermissionDeniedNote =>
-            permissionDeniedNote
-            ?? "Cost API is available for this provider but the current API key "
-            + "lacks the required permissions. Update the API key to one with "
-            + "billing/usage access to retrieve cost data.";
-
         public Task<ProviderCostResult?> GetCostsAsync(
-            HttpClient httpClient,
-            string apiKey,
             DateTimeOffset startTime,
             DateTimeOffset? endTime,
             CancellationToken ct = default) =>

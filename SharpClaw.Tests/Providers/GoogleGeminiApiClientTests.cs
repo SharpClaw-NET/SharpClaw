@@ -14,18 +14,16 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["response_mime_type"] = JsonSerializer.SerializeToElement("application/json")
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             providerParameters: providerParameters);
 
         using var doc = JsonDocument.Parse(handler.LastRequestBody!);
@@ -41,7 +39,7 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["generation_config"] = JsonSerializer.SerializeToElement(new
@@ -53,11 +51,9 @@ public sealed class GoogleGeminiApiClientTests
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             providerParameters: providerParameters,
             completionParameters: new CompletionParameters { Temperature = 0.4f });
 
@@ -79,18 +75,16 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["response_mime_type"] = JsonSerializer.SerializeToElement("application/json")
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             providerParameters: providerParameters,
             completionParameters: new CompletionParameters
             {
@@ -108,14 +102,12 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             completionParameters: new CompletionParameters
             {
                 PresencePenalty = 0.25f,
@@ -135,15 +127,13 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
 
         await client.ChatCompletionWithToolsAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ToolAwareMessage { Role = "user", Content = "Hello" }],
-            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            messages: [new ToolAwareMessage { Role = "user", Content = "Hello" }],
+            tools: [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
             completionParameters: new CompletionParameters
             {
                 ToolChoice = ToolChoice.ForFunction("lookup")
@@ -167,7 +157,7 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["safetySettings"] = JsonSerializer.SerializeToElement(new[]
@@ -181,11 +171,9 @@ public sealed class GoogleGeminiApiClientTests
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             providerParameters: providerParameters);
 
         using var doc = JsonDocument.Parse(handler.LastRequestBody!);
@@ -201,18 +189,16 @@ public sealed class GoogleGeminiApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleGeminiApiClient();
+        var client = new GoogleGeminiApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["generation_config"] = JsonSerializer.SerializeToElement("application/json")
         };
 
         var action = async () => await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "gemini-test",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")],
+            messages: [new ChatCompletionMessage("user", "Hello")],
             providerParameters: providerParameters);
 
         await action.Should().ThrowAsync<InvalidOperationException>()

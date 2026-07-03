@@ -118,10 +118,13 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
         public IReadOnlyList<ProviderCostSeed> CostSeeds { get; } = [new(ModelId, 0.01m, 0.02m)];
         public ICompletionParameterSpec ParameterSpec => ICompletionParameterSpec.Passthrough;
         public IDeviceCodeFlow? DeviceCodeFlow => null;
-        public IProviderCostFeed? CostFeed { get; } = new SyntheticExternalCostFeed();
+        public bool SupportsCostFeed => true;
 
-        public IProviderApiClient CreateClient(string? endpoint) =>
+        public IProviderApiClient CreateClient(ProviderClientOptions options) =>
             new SyntheticExternalProviderClient();
+
+        public IProviderCostFeed? CreateCostFeed(ProviderClientOptions options) =>
+            new SyntheticExternalCostFeed();
     }
 
     private sealed class SyntheticExternalCapabilities : IModelCapabilityResolver
@@ -132,8 +135,6 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
     private sealed class SyntheticExternalCostFeed : IProviderCostFeed
     {
         public Task<ProviderCostResult?> GetCostsAsync(
-            HttpClient httpClient,
-            string apiKey,
             DateTimeOffset startTime,
             DateTimeOffset? endTime,
             CancellationToken ct = default) =>
@@ -159,15 +160,10 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
     {
         public string ProviderKey => SyntheticExternalLifecycleModule.ProviderKey;
 
-        public Task<IReadOnlyList<string>> ListModelIdsAsync(
-            HttpClient httpClient,
-            string apiKey,
-            CancellationToken ct = default) =>
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>([ModelId]);
 
         public Task<ChatCompletionResult> ChatCompletionAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ChatCompletionMessage> messages,

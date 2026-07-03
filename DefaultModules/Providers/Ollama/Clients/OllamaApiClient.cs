@@ -12,7 +12,10 @@ namespace SharpClaw.Modules.Providers.Ollama.Clients;
 /// stored on the provider record. Overrides model listing to use
 /// Ollama's <c>GET /api/tags</c> endpoint.
 /// </summary>
-public sealed class OllamaApiClient(string? apiEndpoint = null) : OpenAiCompatibleApiClient
+public sealed class OllamaApiClient(
+    string? apiEndpoint = null,
+    string apiKey = "",
+    HttpClient? httpClient = null) : OpenAiCompatibleApiClient(apiKey, httpClient)
 {
     private const string DefaultEndpoint = "http://localhost:11434";
 
@@ -23,12 +26,9 @@ public sealed class OllamaApiClient(string? apiEndpoint = null) : OpenAiCompatib
 
     public override string ProviderKey => "ollama";
 
-    public override async Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient,
-        string apiKey,
-        CancellationToken ct = default)
+    public override async Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
-        var response = await httpClient.GetFromJsonAsync<OllamaTagsResponse>(
+        var response = await HttpClient.GetFromJsonAsync<OllamaTagsResponse>(
             $"{ApiEndpoint}/api/tags", ct);
 
         return response?.Models

@@ -187,12 +187,11 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
     /// </summary>
     public bool SupportsNativeToolCalling => true;
 
-    public Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<string>>([]);
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient, string apiKey, string model, string? systemPrompt,
+        string model, string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages, int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
         CompletionParameters? completionParameters = null,
@@ -358,7 +357,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient, string apiKey, string model, string? systemPrompt,
+        string model, string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,
@@ -444,7 +443,7 @@ public sealed class LocalInferenceApiClient : IProviderApiClient
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient, string apiKey, string model, string? systemPrompt,
+        string model, string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages, IReadOnlyList<ChatToolDefinition> tools,
         int? maxCompletionTokens = null,
         Dictionary<string, JsonElement>? providerParameters = null,

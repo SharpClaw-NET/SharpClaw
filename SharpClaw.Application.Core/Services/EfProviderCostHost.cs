@@ -11,8 +11,7 @@ namespace SharpClaw.Application.Services;
 public sealed class EfProviderCostHost(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
-    ProviderApiClientFactory clientFactory,
-    IHttpClientFactory httpClientFactory) : IProviderCostHost
+    ProviderApiClientFactory clientFactory) : IProviderCostHost
 {
     public async Task<ProviderCostProviderConfiguration?> LoadProviderAsync(
         Guid providerId,
@@ -24,6 +23,7 @@ public sealed class EfProviderCostHost(
                 provider.Id,
                 provider.Name,
                 provider.ProviderKey,
+                provider.ApiEndpoint,
                 provider.EncryptedApiKey))
             .FirstOrDefaultAsync(ct);
     }
@@ -46,6 +46,7 @@ public sealed class EfProviderCostHost(
                 provider.Id,
                 provider.Name,
                 provider.ProviderKey,
+                provider.ApiEndpoint,
                 provider.EncryptedApiKey))
             .ToListAsync(ct);
     }
@@ -63,16 +64,21 @@ public sealed class EfProviderCostHost(
     }
 
     public async Task<ProviderCostResult?> GetCostsAsync(
-        IProviderCostFeed costFeed,
-        string apiKey,
+        ProviderCostProviderConfiguration provider,
+        IProviderPlugin plugin,
         DateTimeOffset periodStart,
         DateTimeOffset periodEnd,
         CancellationToken ct)
     {
-        using var httpClient = httpClientFactory.CreateClient();
+        var apiKey = string.IsNullOrEmpty(provider.ProtectedApiKey)
+            ? string.Empty
+            : UnprotectProviderSecret(provider.ProtectedApiKey);
+        var costFeed = plugin.CreateCostFeed(
+            new ProviderClientOptions(provider.ApiEndpoint, apiKey));
+        if (costFeed is null)
+            return null;
+
         return await costFeed.GetCostsAsync(
-            httpClient,
-            apiKey,
             periodStart,
             periodEnd,
             ct);

@@ -287,7 +287,7 @@ public sealed class ProviderModelCatalogEngineTests
         bool RequiresApiKey,
         IDeviceCodeFlow? DeviceCodeFlow = null) : IProviderPlugin
     {
-        public IProviderApiClient CreateClient(string? endpoint) =>
+        public IProviderApiClient CreateClient(ProviderClientOptions options) =>
             throw new NotSupportedException();
 
         public IModelCapabilityResolver Capabilities { get; } = new Capabilities();
@@ -313,13 +313,10 @@ public sealed class ProviderModelCatalogEngineTests
 
     private sealed class DeviceCode : IDeviceCodeFlow
     {
-        public Task<DeviceCodeSession> StartAsync(
-            HttpClient httpClient,
-            CancellationToken ct = default) =>
+        public Task<DeviceCodeSession> StartAsync(CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<string?> PollAsync(
-            HttpClient httpClient,
             DeviceCodeSession session,
             CancellationToken ct = default) =>
             throw new NotSupportedException();
@@ -329,15 +326,10 @@ public sealed class ProviderModelCatalogEngineTests
     {
         public string ProviderKey => "unused";
 
-        public Task<IReadOnlyList<string>> ListModelIdsAsync(
-            HttpClient httpClient,
-            string apiKey,
-            CancellationToken ct = default) =>
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task<ChatCompletionResult> ChatCompletionAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ChatCompletionMessage> messages,

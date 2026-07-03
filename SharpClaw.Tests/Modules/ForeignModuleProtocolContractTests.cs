@@ -235,8 +235,8 @@ public sealed class ForeignModuleProtocolContractTests
         providerPlugin.ParameterSpec.ValidReasoningEffortValues.Should().Equal("none", "low", "medium");
         providerPlugin.ParameterSpec.SupportsStrictTools.Should().BeTrue();
         providerPlugin.DeviceCodeFlow.Should().NotBeNull();
-        providerPlugin.CostFeed.Should().NotBeNull();
-        providerPlugin.CostFeed!.PermissionDeniedNote.Should().Be("Sample foreign provider requires billing access.");
+        providerPlugin.SupportsCostFeed.Should().BeTrue();
+        providerPlugin.CostFeedPermissionDeniedNote.Should().Be("Sample foreign provider requires billing access.");
         providerPlugin.Capabilities.Resolve("sample-model")
             .Should()
             .BeEquivalentTo([WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Vision]);
@@ -255,18 +255,16 @@ public sealed class ForeignModuleProtocolContractTests
         registryProviderFactory.IsAvailable("sample-foreign-provider").Should().BeTrue();
         registryProviderFactory.GetPlugin("sample-foreign-provider")!.DisplayName.Should().Be("Sample Foreign Provider");
 
-        var providerClient = providerPlugin.CreateClient("http://127.0.0.1:9999");
+        var providerClient = providerPlugin.CreateClient(
+            new ProviderClientOptions("http://127.0.0.1:9999", "api-key"));
         providerClient.ProviderKey.Should().Be("sample-foreign-provider");
         providerClient.SupportsNativeToolCalling.Should().BeTrue();
 
-        using var httpClient = new HttpClient();
-        (await providerClient.ListModelIdsAsync(httpClient, "api-key", CancellationToken.None))
+        (await providerClient.ListModelIdsAsync(CancellationToken.None))
             .Should()
             .Equal("sample-model", "sample-vision-model");
 
         var chatResult = await providerClient.ChatCompletionAsync(
-            httpClient,
-            "api-key",
             "sample-model",
             "system",
             [new ChatCompletionMessage("user", "hello")],
@@ -278,8 +276,6 @@ public sealed class ForeignModuleProtocolContractTests
 
         using var toolSchema = JsonDocument.Parse("""{"type":"object","properties":{}}""");
         var toolResult = await providerClient.ChatCompletionWithToolsAsync(
-            httpClient,
-            "api-key",
             "sample-model",
             "system",
             [ToolAwareMessage.User("hello")],
@@ -294,8 +290,6 @@ public sealed class ForeignModuleProtocolContractTests
 
         var streamChunks = new List<ChatStreamChunk>();
         await foreach (var chunk in providerClient.StreamChatCompletionWithToolsAsync(
-                           httpClient,
-                           "api-key",
                            "sample-model",
                            "system",
                            [ToolAwareMessage.User("hello")],
@@ -310,15 +304,15 @@ public sealed class ForeignModuleProtocolContractTests
         streamChunks[1].ToolCallDelta!.ArgumentsFragment.Should().Be("""{"ok":""");
         streamChunks[^1].Finished!.ToolCalls.Should().ContainSingle(call => call.Name == "sample_tool");
 
-        var deviceSession = await providerPlugin.DeviceCodeFlow!.StartAsync(httpClient, CancellationToken.None);
+        var deviceSession = await providerPlugin.DeviceCodeFlow!.StartAsync(CancellationToken.None);
         deviceSession.UserCode.Should().Be("USER-CODE");
-        (await providerPlugin.DeviceCodeFlow.PollAsync(httpClient, deviceSession, CancellationToken.None))
+        (await providerPlugin.DeviceCodeFlow.PollAsync(deviceSession, CancellationToken.None))
             .Should()
             .Be("device-access-token");
 
-        var costs = await providerPlugin.CostFeed.GetCostsAsync(
-            httpClient,
-            "api-key",
+        var costFeed = providerPlugin.CreateCostFeed(new ProviderClientOptions(null, "api-key"));
+        costFeed.Should().NotBeNull();
+        var costs = await costFeed!.GetCostsAsync(
             DateTimeOffset.Parse("2026-05-01T00:00:00Z"),
             DateTimeOffset.Parse("2026-05-02T00:00:00Z"),
             CancellationToken.None);

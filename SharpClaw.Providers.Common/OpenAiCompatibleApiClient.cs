@@ -15,21 +15,33 @@ namespace SharpClaw.Providers.Common;
 /// </summary>
 public abstract class OpenAiCompatibleApiClient : IProviderApiClient
 {
+    private static readonly HttpClient SharedHttpClient = new();
+
+    private readonly HttpClient _httpClient;
+    private readonly string _apiKey;
+
+    protected OpenAiCompatibleApiClient(string apiKey = "", HttpClient? httpClient = null)
+    {
+        _apiKey = apiKey;
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
+
     protected abstract string ApiEndpoint { get; }
     public abstract string ProviderKey { get; }
     public virtual bool SupportsNativeToolCalling => true;
     protected virtual bool SupportsReasoningContentReplay => false;
+    protected HttpClient HttpClient => _httpClient;
+    protected string ApiKey => _apiKey;
 
-    public virtual async Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public virtual async Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
-        var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
+        var resolvedKey = await ResolveApiKeyAsync(HttpClient, ApiKey, ct);
 
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiEndpoint}/models");
         request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", resolvedKey);
         ConfigureRequest(request);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await HttpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<ModelsListResponse>(ct);
@@ -42,8 +54,6 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     }
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
@@ -57,7 +67,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         {
             ChatCompletionResult? final = null;
             await foreach (var chunk in StreamResponsesApiAsync(
-                httpClient, apiKey, model, systemPrompt,
+                model, systemPrompt,
                 messages.Select(m => new ToolAwareMessage
                 {
                     Role = m.Role,
@@ -72,7 +82,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             return final ?? throw new InvalidOperationException("No response content from provider.");
         }
 
-        var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
+        var resolvedKey = await ResolveApiKeyAsync(HttpClient, ApiKey, ct);
 
         var payloadMessages = new List<CompletionMessagePayload>();
 
@@ -111,7 +121,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             completionParameters,
             hasTools: false);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await HttpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<CompletionResponse>(ct);
@@ -133,8 +143,6 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     }
 
     public virtual async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -149,7 +157,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         {
             ChatCompletionResult? final = null;
             await foreach (var chunk in StreamResponsesApiAsync(
-                httpClient, apiKey, model, systemPrompt, messages, tools, maxCompletionTokens, providerParameters, completionParameters, ct))
+                model, systemPrompt, messages, tools, maxCompletionTokens, providerParameters, completionParameters, ct))
             {
                 if (chunk.IsFinished)
                     final = chunk.Finished;
@@ -157,7 +165,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             return final ?? throw new InvalidOperationException("No response from provider.");
         }
 
-        var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
+        var resolvedKey = await ResolveApiKeyAsync(HttpClient, ApiKey, ct);
 
         var payloadMessages = new List<object>();
 
@@ -203,7 +211,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             tools.Count > 0,
             OaiToolJsonOptions);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await HttpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var rawBody = await response.Content.ReadAsStringAsync(ct);
@@ -334,8 +342,6 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     }
 
     public virtual async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -349,14 +355,14 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         if (UseResponsesApi(model))
         {
             await foreach (var chunk in StreamResponsesApiAsync(
-                httpClient, apiKey, model, systemPrompt, messages, tools, maxCompletionTokens, providerParameters, completionParameters, ct))
+                model, systemPrompt, messages, tools, maxCompletionTokens, providerParameters, completionParameters, ct))
             {
                 yield return chunk;
             }
             yield break;
         }
 
-        var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
+        var resolvedKey = await ResolveApiKeyAsync(HttpClient, ApiKey, ct);
 
         var payloadMessages = new List<object>();
         if (systemPrompt is not null)
@@ -402,7 +408,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             tools.Count > 0,
             OaiToolJsonOptions);
 
-        using var response = await httpClient.SendAsync(
+        using var response = await HttpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
@@ -990,8 +996,6 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
     /// using the same contract as the Chat Completions streaming path.
     /// </summary>
     private async IAsyncEnumerable<ChatStreamChunk> StreamResponsesApiAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -1001,7 +1005,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
         CompletionParameters? completionParameters = null,
         [EnumeratorCancellation] CancellationToken ct = default)
     {
-        var resolvedKey = await ResolveApiKeyAsync(httpClient, apiKey, ct);
+        var resolvedKey = await ResolveApiKeyAsync(HttpClient, ApiKey, ct);
 
         // Build input array
         var input = new List<object>();
@@ -1103,7 +1107,7 @@ public abstract class OpenAiCompatibleApiClient : IProviderApiClient
             respTools.Count > 0,
             OaiToolJsonOptions);
 
-        using var response = await httpClient.SendAsync(
+        using var response = await HttpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 

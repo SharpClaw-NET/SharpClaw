@@ -25,14 +25,14 @@ public sealed class GoogleProvidersModule : ISharpClawCoreModule
 
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
             "google-vertex-ai", "Google Vertex AI", false,
-            endpoint => new GoogleVertexAIApiClient(endpoint), caps,
+            options => new GoogleVertexAIApiClient(options.Endpoint, options.ApiKey), caps,
             parameterSpec: ProviderParameterSpecs.GoogleVertexAI,
             supportsAutomaticEndpointDiscovery: true,
             ownerModuleId: "sharpclaw_providers_google"));
 
         services.AddSingleton<IProviderPlugin>(new SimpleProviderPlugin(
             "google-gemini", "Google Gemini", false,
-            _ => new GoogleGeminiApiClient(), caps,
+            options => new GoogleGeminiApiClient(options.ApiKey), caps,
             parameterSpec: ProviderParameterSpecs.GoogleGemini,
             ownerModuleId: "sharpclaw_providers_google"));
     }

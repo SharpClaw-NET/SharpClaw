@@ -19,6 +19,10 @@ namespace SharpClaw.Modules.Providers.Google.Clients;
 public sealed class GoogleGeminiApiClient : IProviderApiClient
 {
     private const string BaseUrl = "https://generativelanguage.googleapis.com/v1beta";
+    private static readonly HttpClient SharedHttpClient = new();
+
+    private readonly HttpClient _httpClient;
+    private readonly string _apiKey;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -29,14 +33,19 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
     public string ProviderKey => "google-gemini";
     public bool SupportsNativeToolCalling => true;
 
+    public GoogleGeminiApiClient(string apiKey = "", HttpClient? httpClient = null)
+    {
+        _apiKey = apiKey;
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
+
     // ── Model listing ─────────────────────────────────────────────
 
-    public async Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
         // GET /v1beta/models?key=...
-        using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/models?key={apiKey}");
-        var response = await httpClient.SendAsync(request, ct);
+        using var request = new HttpRequestMessage(HttpMethod.Get, $"{BaseUrl}/models?key={_apiKey}");
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<GeminiModelsListResponse>(JsonOptions, ct);
@@ -51,8 +60,6 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
     // ── Simple chat completion ────────────────────────────────────
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
@@ -72,7 +79,7 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
             .ToList();
 
         return await ChatCompletionWithToolsAsync(
-            httpClient, apiKey, model, systemPrompt,
+            model, systemPrompt,
             toolAwareMessages, [], maxCompletionTokens,
             providerParameters, completionParameters, ct);
     }
@@ -80,8 +87,6 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
     // ── Tool-aware chat completion ────────────────────────────────
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -96,10 +101,10 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"{BaseUrl}/models/{model}:generateContent");
-        request.Headers.Add("x-goog-api-key", apiKey);
+        request.Headers.Add("x-goog-api-key", _apiKey);
         request.Content = new StringContent(body.ToJsonString(JsonOptions), Encoding.UTF8, "application/json");
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<GeminiGenerateContentResponse>(JsonOptions, ct)
@@ -111,8 +116,6 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
     // ── Streaming ─────────────────────────────────────────────────
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -127,10 +130,10 @@ public sealed class GoogleGeminiApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             $"{BaseUrl}/models/{model}:streamGenerateContent?alt=sse");
-        request.Headers.Add("x-goog-api-key", apiKey);
+        request.Headers.Add("x-goog-api-key", _apiKey);
         request.Content = new StringContent(body.ToJsonString(JsonOptions), Encoding.UTF8, "application/json");
 
-        using var response = await httpClient.SendAsync(
+        using var response = await _httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 

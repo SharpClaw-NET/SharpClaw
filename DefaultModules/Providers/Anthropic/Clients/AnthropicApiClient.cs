@@ -11,6 +11,10 @@ public sealed class AnthropicApiClient : IProviderApiClient
 {
     private const string ApiEndpoint = "https://api.anthropic.com/v1";
     private const string ApiVersion = "2023-06-01";
+    private static readonly HttpClient SharedHttpClient = new();
+
+    private readonly HttpClient _httpClient;
+    private readonly string _apiKey;
 
     private static readonly JsonSerializerOptions WriteOptions = new()
     {
@@ -20,13 +24,18 @@ public sealed class AnthropicApiClient : IProviderApiClient
     public string ProviderKey => "anthropic";
     public bool SupportsNativeToolCalling => true;
 
-    public async Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public AnthropicApiClient(string apiKey = "", HttpClient? httpClient = null)
+    {
+        _apiKey = apiKey;
+        _httpClient = httpClient ?? SharedHttpClient;
+    }
+
+    public async Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Get, $"{ApiEndpoint}/models");
-        AddAuthHeaders(request, apiKey);
+        AddAuthHeaders(request, _apiKey);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<ModelsListResponse>(ct);
@@ -39,8 +48,6 @@ public sealed class AnthropicApiClient : IProviderApiClient
     }
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
@@ -64,10 +71,10 @@ public sealed class AnthropicApiClient : IProviderApiClient
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
-        AddAuthHeaders(request, apiKey);
+        AddAuthHeaders(request, _apiKey);
         request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<MessagesResponse>(ct);
@@ -155,8 +162,6 @@ public sealed class AnthropicApiClient : IProviderApiClient
     // ── Tool-aware completion ─────────────────────────────────────
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -185,10 +190,10 @@ public sealed class AnthropicApiClient : IProviderApiClient
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
-        AddAuthHeaders(request, apiKey);
+        AddAuthHeaders(request, _apiKey);
         request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<AntToolCompletionResponse>(ct);
@@ -430,8 +435,6 @@ public sealed class AnthropicApiClient : IProviderApiClient
     // ── Streaming ─────────────────────────────────────────────
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -461,10 +464,10 @@ public sealed class AnthropicApiClient : IProviderApiClient
         };
 
         using var request = new HttpRequestMessage(HttpMethod.Post, $"{ApiEndpoint}/messages");
-        AddAuthHeaders(request, apiKey);
+        AddAuthHeaders(request, _apiKey);
         request.Content = ProviderParameterMerger.Merge(payload, providerParameters, WriteOptions);
 
-        using var response = await httpClient.SendAsync(
+        using var response = await _httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 

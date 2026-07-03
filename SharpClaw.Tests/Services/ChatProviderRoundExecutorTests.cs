@@ -10,9 +10,8 @@ namespace SharpClaw.Tests.Services;
 public sealed class ChatProviderRoundExecutorTests
 {
     [Test]
-    public async Task CompleteAsync_ForwardsHttpClientApiKeyAndSemanticRequest()
+    public async Task CompleteAsync_ForwardsSemanticRequest()
     {
-        using var httpClient = new HttpClient();
         var client = new RecordingProviderClient
         {
             PlainResult = new ChatCompletionResult
@@ -21,10 +20,7 @@ public sealed class ChatProviderRoundExecutorTests
                 Usage = new TokenUsage(1, 2)
             }
         };
-        var executor = new ChatProviderRoundExecutor(
-            client,
-            httpClient,
-            "decrypted-key");
+        var executor = new ChatProviderRoundExecutor(client);
         var history = new[]
         {
             new ChatCompletionMessage("user", "hello")
@@ -41,8 +37,6 @@ public sealed class ChatProviderRoundExecutorTests
             CancellationToken.None);
 
         result.Content.Should().Be("plain");
-        client.LastHttpClient.Should().BeSameAs(httpClient);
-        client.LastApiKey.Should().Be("decrypted-key");
         client.LastModel.Should().Be("model");
         client.LastSystemPrompt.Should().Be("system");
         client.LastHistory.Should().BeSameAs(history);
@@ -52,7 +46,6 @@ public sealed class ChatProviderRoundExecutorTests
     [Test]
     public async Task CompleteWithToolsAsync_ForwardsToolRequest()
     {
-        using var httpClient = new HttpClient();
         var client = new RecordingProviderClient
         {
             ToolResult = new ChatCompletionResult
@@ -61,10 +54,7 @@ public sealed class ChatProviderRoundExecutorTests
                 Usage = new TokenUsage(3, 4)
             }
         };
-        var executor = new ChatProviderRoundExecutor(
-            client,
-            httpClient,
-            "tool-key");
+        var executor = new ChatProviderRoundExecutor(client);
         var messages = new[]
         {
             new ToolAwareMessage
@@ -93,8 +83,6 @@ public sealed class ChatProviderRoundExecutorTests
             CancellationToken.None);
 
         result.Content.Should().Be("tool");
-        client.LastHttpClient.Should().BeSameAs(httpClient);
-        client.LastApiKey.Should().Be("tool-key");
         client.LastToolMessages.Should().BeSameAs(messages);
         client.LastTools.Should().BeSameAs(tools);
         client.ToolCalls.Should().Be(1);
@@ -103,7 +91,6 @@ public sealed class ChatProviderRoundExecutorTests
     [Test]
     public async Task StreamWithToolsAsync_ForwardsStreamingToolRequest()
     {
-        using var httpClient = new HttpClient();
         var client = new RecordingProviderClient
         {
             StreamingDeltas = ["a", "b"],
@@ -113,10 +100,7 @@ public sealed class ChatProviderRoundExecutorTests
                 Usage = new TokenUsage(5, 6)
             }
         };
-        var executor = new ChatProviderRoundExecutor(
-            client,
-            httpClient,
-            "stream-key");
+        var executor = new ChatProviderRoundExecutor(client);
         var messages = Array.Empty<ToolAwareMessage>();
         var tools = Array.Empty<ChatToolDefinition>();
 
@@ -137,8 +121,6 @@ public sealed class ChatProviderRoundExecutorTests
 
         chunks.Select(chunk => chunk.Delta).Should().Equal("a", "b", null);
         chunks[^1].Finished?.Content.Should().Be("ab");
-        client.LastHttpClient.Should().BeSameAs(httpClient);
-        client.LastApiKey.Should().Be("stream-key");
         client.LastToolMessages.Should().BeSameAs(messages);
         client.LastTools.Should().BeSameAs(tools);
         client.StreamingCalls.Should().Be(1);
@@ -162,23 +144,16 @@ public sealed class ChatProviderRoundExecutorTests
         public int PlainCalls { get; private set; }
         public int ToolCalls { get; private set; }
         public int StreamingCalls { get; private set; }
-        public HttpClient? LastHttpClient { get; private set; }
-        public string? LastApiKey { get; private set; }
         public string? LastModel { get; private set; }
         public string? LastSystemPrompt { get; private set; }
         public IReadOnlyList<ChatCompletionMessage>? LastHistory { get; private set; }
         public IReadOnlyList<ToolAwareMessage>? LastToolMessages { get; private set; }
         public IReadOnlyList<ChatToolDefinition>? LastTools { get; private set; }
 
-        public Task<IReadOnlyList<string>> ListModelIdsAsync(
-            HttpClient httpClient,
-            string apiKey,
-            CancellationToken ct = default) =>
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<string>>([]);
 
         public Task<ChatCompletionResult> ChatCompletionAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ChatCompletionMessage> messages,
@@ -188,8 +163,6 @@ public sealed class ChatProviderRoundExecutorTests
             CancellationToken ct = default)
         {
             PlainCalls++;
-            LastHttpClient = httpClient;
-            LastApiKey = apiKey;
             LastModel = model;
             LastSystemPrompt = systemPrompt;
             LastHistory = messages;
@@ -197,8 +170,6 @@ public sealed class ChatProviderRoundExecutorTests
         }
 
         public Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ToolAwareMessage> messages,
@@ -209,8 +180,6 @@ public sealed class ChatProviderRoundExecutorTests
             CancellationToken ct = default)
         {
             ToolCalls++;
-            LastHttpClient = httpClient;
-            LastApiKey = apiKey;
             LastModel = model;
             LastSystemPrompt = systemPrompt;
             LastToolMessages = messages;
@@ -219,8 +188,6 @@ public sealed class ChatProviderRoundExecutorTests
         }
 
         public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-            HttpClient httpClient,
-            string apiKey,
             string model,
             string? systemPrompt,
             IReadOnlyList<ToolAwareMessage> messages,
@@ -231,8 +198,6 @@ public sealed class ChatProviderRoundExecutorTests
             [EnumeratorCancellation] CancellationToken ct = default)
         {
             StreamingCalls++;
-            LastHttpClient = httpClient;
-            LastApiKey = apiKey;
             LastModel = model;
             LastSystemPrompt = systemPrompt;
             LastToolMessages = messages;

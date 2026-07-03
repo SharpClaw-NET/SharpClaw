@@ -17,8 +17,11 @@ namespace SharpClaw.Modules.Providers.Google.Clients;
 public sealed class GoogleVertexAIApiClient : IProviderApiClient
 {
     private const string DefaultApiEndpoint = "https://aiplatform.googleapis.com/v1";
+    private static readonly HttpClient SharedHttpClient = new();
 
     private readonly string _apiEndpoint;
+    private readonly HttpClient _httpClient;
+    private readonly string _apiKey;
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -26,16 +29,20 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
     };
 
-    public GoogleVertexAIApiClient(string? apiEndpoint = null)
+    public GoogleVertexAIApiClient(
+        string? apiEndpoint = null,
+        string apiKey = "",
+        HttpClient? httpClient = null)
     {
         _apiEndpoint = NormalizeApiEndpoint(apiEndpoint);
+        _apiKey = apiKey;
+        _httpClient = httpClient ?? SharedHttpClient;
     }
 
     public string ProviderKey => "google-vertex-ai";
     public bool SupportsNativeToolCalling => true;
 
-    public async Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public async Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
         var projectLocationEndpoint = GetProjectLocationEndpoint()
             ?? throw new InvalidOperationException(
@@ -45,9 +52,9 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
         using var request = new HttpRequestMessage(
             HttpMethod.Get,
             $"{projectLocationEndpoint}/models");
-        AddAuthorization(request, apiKey);
+        AddAuthorization(request, _apiKey);
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var body = await response.Content.ReadFromJsonAsync<VertexModelsListResponse>(JsonOptions, ct);
@@ -60,8 +67,6 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
     }
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
@@ -81,14 +86,12 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
             .ToList();
 
         return await ChatCompletionWithToolsAsync(
-            httpClient, apiKey, model, systemPrompt,
+            model, systemPrompt,
             toolAwareMessages, [], maxCompletionTokens,
             providerParameters, completionParameters, ct);
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -103,10 +106,10 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             BuildGenerateContentUri(model, stream: false));
-        AddAuthorization(request, apiKey);
+        AddAuthorization(request, _apiKey);
         request.Content = new StringContent(body.ToJsonString(JsonOptions), Encoding.UTF8, "application/json");
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await _httpClient.SendAsync(request, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 
         var result = await response.Content.ReadFromJsonAsync<VertexGenerateContentResponse>(JsonOptions, ct)
@@ -116,8 +119,6 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -132,10 +133,10 @@ public sealed class GoogleVertexAIApiClient : IProviderApiClient
 
         using var request = new HttpRequestMessage(HttpMethod.Post,
             BuildGenerateContentUri(model, stream: true));
-        AddAuthorization(request, apiKey);
+        AddAuthorization(request, _apiKey);
         request.Content = new StringContent(body.ToJsonString(JsonOptions), Encoding.UTF8, "application/json");
 
-        using var response = await httpClient.SendAsync(
+        using var response = await _httpClient.SendAsync(
             request, HttpCompletionOption.ResponseHeadersRead, ct);
         await response.EnsureSuccessOrThrowAsync(ct);
 

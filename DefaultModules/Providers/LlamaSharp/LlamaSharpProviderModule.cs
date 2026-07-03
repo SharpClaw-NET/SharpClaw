@@ -92,7 +92,7 @@ public sealed class LlamaSharpProviderModule : ISharpClawRuntimeModule
                 _ => new LocalInferenceApiClient(pm, scopeFactory),
                 caps,
                 parameterSpec: ProviderParameterSpecs.LlamaSharp,
-                costFeed: LocalProviderCostFeed.Instance,
+                costFeedFactory: _ => LocalProviderCostFeed.Instance,
                 agentIdentifierSuffix: async (providerName, modelId, ct) =>
                 {
                     await using var scope = scopeFactory.CreateAsyncScope();

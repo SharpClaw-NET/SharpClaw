@@ -18,14 +18,12 @@ public sealed class DeepSeekApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
 
         var result = await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-flash",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Hello")]);
+            messages: [new ChatCompletionMessage("user", "Hello")]);
 
         result.Content.Should().Be("ok");
         handler.LastRequestUri?.ToString().Should().Be("https://api.deepseek.com/chat/completions");
@@ -40,18 +38,16 @@ public sealed class DeepSeekApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["thinking"] = JsonSerializer.SerializeToElement(new { type = "enabled" })
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Think this through")],
+            messages: [new ChatCompletionMessage("user", "Think this through")],
             providerParameters: providerParameters);
 
         using var doc = JsonDocument.Parse(handler.LastRequestBody!);
@@ -64,14 +60,12 @@ public sealed class DeepSeekApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Think this through")],
+            messages: [new ChatCompletionMessage("user", "Think this through")],
             completionParameters: new CompletionParameters { ReasoningEffort = "high" });
 
         using var doc = JsonDocument.Parse(handler.LastRequestBody!);
@@ -95,25 +89,22 @@ public sealed class DeepSeekApiClientTests
             }
             """);
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["thinking"] = JsonSerializer.SerializeToElement(new { type = "enabled" })
         };
 
         var first = await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ChatCompletionMessage("user", "Think this through")],
+            messages: [new ChatCompletionMessage("user", "Think this through")],
             providerParameters: providerParameters);
 
         var second = await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
+            messages:
             [
                 new ChatCompletionMessage("assistant", first.Content!)
                 {
@@ -139,19 +130,17 @@ public sealed class DeepSeekApiClientTests
     {
         using var handler = new CaptureHandler(ToolCallResponse, ReasonedCompletionResponse);
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["thinking"] = JsonSerializer.SerializeToElement(new { type = "enabled" })
         };
 
         var first = await client.ChatCompletionWithToolsAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ToolAwareMessage { Role = "user", Content = "Use a tool" }],
-            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            messages: [new ToolAwareMessage { Role = "user", Content = "Use a tool" }],
+            tools: [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
             providerParameters: providerParameters);
 
         first.HasToolCalls.Should().BeTrue();
@@ -160,10 +149,9 @@ public sealed class DeepSeekApiClientTests
         ExtractReasoningContent(first.ProviderMetadataJson).Should().Be("hidden tool reasoning");
 
         var final = await client.ChatCompletionWithToolsAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
+            messages:
             [
                 new ToolAwareMessage { Role = "user", Content = "Use a tool" },
                 ToolAwareMessage.AssistantWithToolCalls(
@@ -172,7 +160,7 @@ public sealed class DeepSeekApiClientTests
                     first.ProviderMetadataJson),
                 ToolAwareMessage.ToolResult(first.ToolCalls[0].Id, "lookup result")
             ],
-            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            tools: [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
             providerParameters: providerParameters);
 
         final.Content.Should().Be("ok");
@@ -192,15 +180,13 @@ public sealed class DeepSeekApiClientTests
     {
         using var handler = new CaptureHandler(ToolCallResponse);
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
 
         var result = await client.ChatCompletionWithToolsAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ToolAwareMessage { Role = "user", Content = "Use a tool" }],
-            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            messages: [new ToolAwareMessage { Role = "user", Content = "Use a tool" }],
+            tools: [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
             completionParameters: new CompletionParameters { ReasoningEffort = "high" });
 
         result.HasToolCalls.Should().BeTrue();
@@ -228,16 +214,14 @@ public sealed class DeepSeekApiClientTests
 
         using var handler = CaptureHandler.Stream(streamResponse);
         using var httpClient = new HttpClient(handler);
-        var client = new DeepSeekApiClient();
+        var client = new DeepSeekApiClient("test-key", httpClient);
 
         var chunks = new List<ChatStreamChunk>();
         await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-            httpClient,
-            "test-key",
             "deepseek-v4-pro",
             systemPrompt: null,
-            [new ToolAwareMessage { Role = "user", Content = "Think then answer" }],
-            [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
+            messages: [new ToolAwareMessage { Role = "user", Content = "Think then answer" }],
+            tools: [new ChatToolDefinition("lookup", "Lookup information", EmptyObjectSchema())],
             providerParameters: new Dictionary<string, JsonElement>
             {
                 ["thinking"] = JsonSerializer.SerializeToElement(new { type = "enabled" })
@@ -270,7 +254,8 @@ public sealed class DeepSeekApiClientTests
         plugin.DisplayName.Should().Be("DeepSeek");
         plugin.OwnerModuleId.Should().Be("sharpclaw_providers_openai_compat");
         plugin.ParameterSpec.Should().BeSameAs(ProviderParameterSpecs.DeepSeek);
-        plugin.CreateClient(null).Should().BeOfType<DeepSeekApiClient>();
+        plugin.CreateClient(new ProviderClientOptions(null, "test-key"))
+            .Should().BeOfType<DeepSeekApiClient>();
         plugin.Capabilities.Resolve("deepseek-v4-flash")
             .Should().BeEquivalentTo([WellKnownCapabilityKeys.Chat]);
     }

@@ -12,12 +12,13 @@ public sealed class SimpleProviderPlugin(
     string providerKey,
     string displayName,
     bool requiresEndpoint,
-    Func<string?, IProviderApiClient> clientFactory,
+    Func<ProviderClientOptions, IProviderApiClient> clientFactory,
     IModelCapabilityResolver capabilities,
     IReadOnlyList<ProviderCostSeed>? costSeeds = null,
     ICompletionParameterSpec? parameterSpec = null,
     IDeviceCodeFlow? deviceCodeFlow = null,
-    IProviderCostFeed? costFeed = null,
+    Func<ProviderClientOptions, IProviderCostFeed?>? costFeedFactory = null,
+    string? costFeedPermissionDeniedNote = null,
     Func<string, Guid, CancellationToken, Task<string>>? agentIdentifierSuffix = null,
     bool supportsAutomaticEndpointDiscovery = false,
     bool isSeedable = true,
@@ -35,20 +36,31 @@ public sealed class SimpleProviderPlugin(
     public IReadOnlyList<ProviderCostSeed> CostSeeds { get; } = costSeeds ?? [];
     public ICompletionParameterSpec ParameterSpec { get; } = parameterSpec ?? ICompletionParameterSpec.Passthrough;
     public IDeviceCodeFlow? DeviceCodeFlow { get; } = deviceCodeFlow;
-    public IProviderCostFeed? CostFeed { get; } = costFeed;
+    public bool SupportsCostFeed { get; } = costFeedFactory is not null;
+    public string CostFeedPermissionDeniedNote { get; } =
+        costFeedPermissionDeniedNote
+        ?? IProviderPlugin.DefaultCostFeedPermissionDeniedNote;
 
-    public IProviderApiClient CreateClient(string? endpoint)
+    public IProviderApiClient CreateClient(ProviderClientOptions options)
     {
+        ArgumentNullException.ThrowIfNull(options);
+
         if (RequiresEndpoint
             && !SupportsAutomaticEndpointDiscovery
-            && string.IsNullOrWhiteSpace(endpoint))
+            && string.IsNullOrWhiteSpace(options.Endpoint))
         {
             throw new ArgumentException(
                 $"Provider '{ProviderKey}' requires a non-empty endpoint URL.",
-                nameof(endpoint));
+                nameof(options));
         }
 
-        return clientFactory(endpoint);
+        return clientFactory(options);
+    }
+
+    public IProviderCostFeed? CreateCostFeed(ProviderClientOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+        return costFeedFactory?.Invoke(options);
     }
 
     public Task<string> GetAgentIdentifierSuffixAsync(

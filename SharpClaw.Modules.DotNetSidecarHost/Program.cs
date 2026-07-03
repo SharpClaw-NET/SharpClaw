@@ -342,12 +342,12 @@ internal sealed class DotNetSidecarHost
     {
         _app.MapPost(ForeignModuleProtocol.ProviderModelsListPath, async (
             ForeignModuleProviderModelListRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
-            var client = FindProvider(request.ProviderKey).CreateClient(request.Endpoint);
+            var client = FindProvider(request.ProviderKey).CreateClient(
+                new ProviderClientOptions(request.Endpoint, request.ApiKey));
             return Json(new ForeignModuleProviderModelListResponse(
-                await client.ListModelIdsAsync(httpClientFactory.CreateClient(), request.ApiKey, ct)));
+                await client.ListModelIdsAsync(ct)));
         });
 
         _app.MapPost(ForeignModuleProtocol.ProviderCapabilitiesResolvePath, (
@@ -357,14 +357,12 @@ internal sealed class DotNetSidecarHost
 
         _app.MapPost(ForeignModuleProtocol.ProviderChatCompletionPath, async (
             ForeignModuleProviderChatCompletionRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
-            var client = FindProvider(request.ProviderKey).CreateClient(request.Endpoint);
+            var client = FindProvider(request.ProviderKey).CreateClient(
+                new ProviderClientOptions(request.Endpoint, request.ApiKey));
             return Json(new ForeignModuleProviderChatCompletionResponse(
                 await client.ChatCompletionAsync(
-                    httpClientFactory.CreateClient(),
-                    request.ApiKey,
                     request.Model,
                     request.SystemPrompt,
                     request.Messages,
@@ -376,14 +374,12 @@ internal sealed class DotNetSidecarHost
 
         _app.MapPost(ForeignModuleProtocol.ProviderChatCompletionWithToolsPath, async (
             ForeignModuleProviderChatCompletionWithToolsRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
-            var client = FindProvider(request.ProviderKey).CreateClient(request.Endpoint);
+            var client = FindProvider(request.ProviderKey).CreateClient(
+                new ProviderClientOptions(request.Endpoint, request.ApiKey));
             return Json(new ForeignModuleProviderChatCompletionResponse(
                 await client.ChatCompletionWithToolsAsync(
-                    httpClientFactory.CreateClient(),
-                    request.ApiKey,
                     request.Model,
                     request.SystemPrompt,
                     request.Messages,
@@ -397,14 +393,12 @@ internal sealed class DotNetSidecarHost
         _app.MapPost(ForeignModuleProtocol.ProviderStreamChatCompletionWithToolsPath, async (
             HttpContext context,
             ForeignModuleProviderChatCompletionWithToolsRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
-            var client = FindProvider(request.ProviderKey).CreateClient(request.Endpoint);
+            var client = FindProvider(request.ProviderKey).CreateClient(
+                new ProviderClientOptions(request.Endpoint, request.ApiKey));
             context.Response.ContentType = "application/x-ndjson; charset=utf-8";
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                               httpClientFactory.CreateClient(),
-                               request.ApiKey,
                                request.Model,
                                request.SystemPrompt,
                                request.Messages,
@@ -420,37 +414,34 @@ internal sealed class DotNetSidecarHost
 
         _app.MapPost(ForeignModuleProtocol.ProviderDeviceCodeStartPath, async (
             ForeignModuleProviderDeviceCodeStartRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
             var flow = FindProvider(request.ProviderKey).DeviceCodeFlow
                 ?? throw new NotSupportedException($"Provider '{request.ProviderKey}' does not support device code.");
             return Json(new ForeignModuleProviderDeviceCodeStartResponse(
-                await flow.StartAsync(httpClientFactory.CreateClient(), ct)));
+                await flow.StartAsync(ct)));
         });
 
         _app.MapPost(ForeignModuleProtocol.ProviderDeviceCodePollPath, async (
             ForeignModuleProviderDeviceCodePollRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
             var flow = FindProvider(request.ProviderKey).DeviceCodeFlow
                 ?? throw new NotSupportedException($"Provider '{request.ProviderKey}' does not support device code.");
             return Json(new ForeignModuleProviderDeviceCodePollResponse(
-                await flow.PollAsync(httpClientFactory.CreateClient(), request.Session, ct)));
+                await flow.PollAsync(request.Session, ct)));
         });
 
         _app.MapPost(ForeignModuleProtocol.ProviderCostFeedPath, async (
             ForeignModuleProviderCostFeedRequest request,
-            IHttpClientFactory httpClientFactory,
             CancellationToken ct) =>
         {
-            var costFeed = FindProvider(request.ProviderKey).CostFeed
+            var plugin = FindProvider(request.ProviderKey);
+            var costFeed = plugin.CreateCostFeed(
+                new ProviderClientOptions(null, request.ApiKey))
                 ?? throw new NotSupportedException($"Provider '{request.ProviderKey}' does not support costs.");
             return Json(new ForeignModuleProviderCostFeedResponse(
                 await costFeed.GetCostsAsync(
-                    httpClientFactory.CreateClient(),
-                    request.ApiKey,
                     request.StartTime,
                     request.EndTime,
                     ct)));
@@ -898,7 +889,9 @@ internal sealed class DotNetSidecarHost
         var supportsNativeToolCalling = false;
         try
         {
-            supportsNativeToolCalling = plugin.CreateClient(endpoint: null).SupportsNativeToolCalling;
+            supportsNativeToolCalling = plugin
+                .CreateClient(ProviderClientOptions.Empty)
+                .SupportsNativeToolCalling;
         }
         catch when (plugin.RequiresEndpoint)
         {
@@ -916,7 +909,10 @@ internal sealed class DotNetSidecarHost
             plugin.CostSeeds,
             ForeignModuleCompletionParameterSpecDescriptor.From(plugin.ParameterSpec),
             SupportsDeviceCodeFlow: plugin.DeviceCodeFlow is not null,
-            SupportsCostFeed: plugin.CostFeed is not null);
+            SupportsCostFeed: plugin.SupportsCostFeed,
+            CostFeedPermissionDeniedNote: plugin.SupportsCostFeed
+                ? plugin.CostFeedPermissionDeniedNote
+                : null);
     }
 
     private static bool HasStreamingOverride(ISharpClawCoreModule module) =>

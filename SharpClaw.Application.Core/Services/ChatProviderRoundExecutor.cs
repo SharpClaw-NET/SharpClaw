@@ -4,16 +4,12 @@ using SharpClaw.Core.Chat;
 namespace SharpClaw.Application.Services;
 
 internal sealed class ChatProviderRoundExecutor(
-    IProviderApiClient client,
-    HttpClient httpClient,
-    string apiKey) : IChatProviderRoundExecutor
+    IProviderApiClient client) : IChatProviderRoundExecutor
 {
     public Task<ChatCompletionResult> CompleteAsync(
         ChatProviderCompletionRequest request,
         CancellationToken ct) =>
         client.ChatCompletionAsync(
-            httpClient,
-            apiKey,
             request.ModelName,
             request.SystemPrompt,
             request.History,
@@ -26,8 +22,6 @@ internal sealed class ChatProviderRoundExecutor(
         ChatProviderToolCompletionRequest request,
         CancellationToken ct) =>
         client.ChatCompletionWithToolsAsync(
-            httpClient,
-            apiKey,
             request.ModelName,
             request.SystemPrompt,
             request.Messages,
@@ -41,8 +35,6 @@ internal sealed class ChatProviderRoundExecutor(
         ChatProviderToolCompletionRequest request,
         CancellationToken ct) =>
         client.StreamChatCompletionWithToolsAsync(
-            httpClient,
-            apiKey,
             request.ModelName,
             request.SystemPrompt,
             request.Messages,

@@ -1206,11 +1206,11 @@ public sealed class TestHarnessPerformanceTierTests
     {
         await using var host = ChatHarnessHost.Create();
         var factory = host.Services.GetRequiredService<SharpClaw.Core.Clients.ProviderApiClientFactory>();
-        factory.GetClient(TestHarnessConstants.PlainProviderKey);
+        factory.GetClient(TestHarnessConstants.PlainProviderKey, ProviderClientOptions.Empty);
 
         var sw = Stopwatch.StartNew();
         for (var i = 0; i < 1_000; i++)
-            factory.GetClient(TestHarnessConstants.PlainProviderKey);
+            factory.GetClient(TestHarnessConstants.PlainProviderKey, ProviderClientOptions.Empty);
         sw.Stop();
         return sw.ElapsedMilliseconds;
     }

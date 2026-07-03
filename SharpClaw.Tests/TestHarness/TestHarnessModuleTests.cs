@@ -40,12 +40,12 @@ public sealed class TestHarnessModuleTests
     {
         await using var host = ChatHarnessHost.Create();
         var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
-        var client = factory.GetClient(TestHarnessConstants.PlainProviderKey);
+        var client = factory.GetClient(
+            TestHarnessConstants.PlainProviderKey,
+            new ProviderClientOptions(null, "sk-real-secret123456789"));
 
         using var providerParams = JsonDocument.Parse("""{"api_key":"sk-secret123456789","safe":"visible"}""");
         await client.ChatCompletionAsync(
-            new HttpClient(),
-            "sk-real-secret123456789",
             TestHarnessConstants.ModelId,
             "system token=secret-token-value",
             [new ChatCompletionMessage("user", "hello api_key=abc123 and sk-user-secret123456789")],
@@ -80,9 +80,10 @@ public sealed class TestHarnessModuleTests
         var plugin = host.Services.GetRequiredService<ProviderApiClientFactory>()
             .GetPlugin(TestHarnessConstants.CostProviderKey);
 
-        var result = await plugin!.CostFeed!.GetCostsAsync(
-            new HttpClient(),
-            "local",
+        plugin!.SupportsCostFeed.Should().BeTrue();
+        var costFeed = plugin.CreateCostFeed(new ProviderClientOptions(null, "local"));
+        costFeed.Should().NotBeNull();
+        var result = await costFeed!.GetCostsAsync(
             DateTimeOffset.UnixEpoch,
             DateTimeOffset.UnixEpoch.AddHours(1));
 
@@ -95,7 +96,9 @@ public sealed class TestHarnessModuleTests
     {
         await using var host = ChatHarnessHost.Create();
         var client = host.Services.GetRequiredService<ProviderApiClientFactory>()
-            .GetClient(TestHarnessConstants.PlainProviderKey);
+            .GetClient(
+                TestHarnessConstants.PlainProviderKey,
+                new ProviderClientOptions(null, "local"));
 
         for (var i = start; i < start + count; i++)
         {
@@ -114,8 +117,6 @@ public sealed class TestHarnessModuleTests
                 });
 
             var result = await client.ChatCompletionAsync(
-                new HttpClient(),
-                "local",
                 TestHarnessConstants.ModelId,
                 "system",
                 [new ChatCompletionMessage("user", $"message-{i:D4}")]);

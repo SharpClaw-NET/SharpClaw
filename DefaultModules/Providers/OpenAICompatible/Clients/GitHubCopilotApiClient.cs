@@ -7,7 +7,10 @@ using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Modules.Providers.OpenAICompatible.Clients;
 
-public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceCodeAuthClient
+public sealed class GitHubCopilotApiClient(
+    string apiKey = "",
+    HttpClient? httpClient = null)
+    : OpenAiCompatibleApiClient(apiKey, httpClient), IDeviceCodeAuthClient
 {
     private const string GitHubClientId = "Iv1.b507a08c87ecfe98";
     private const string DeviceCodeUrl = "https://github.com/login/device/code";
@@ -79,7 +82,7 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
             || name.StartsWith("codex");
     }
 
-    public async Task<DeviceCodeSession> StartDeviceCodeFlowAsync(HttpClient httpClient, CancellationToken ct = default)
+    public async Task<DeviceCodeSession> StartDeviceCodeFlowAsync(CancellationToken ct = default)
     {
         using var request = new HttpRequestMessage(HttpMethod.Post, DeviceCodeUrl)
         {
@@ -91,7 +94,7 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
         };
         request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-        var response = await httpClient.SendAsync(request, ct);
+        var response = await HttpClient.SendAsync(request, ct);
         response.EnsureSuccessStatusCode();
 
         var body = await response.Content.ReadFromJsonAsync<GitHubDeviceCodeResponse>(ct)
@@ -105,7 +108,7 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
             body.Interval);
     }
 
-    public async Task<string> PollForAccessTokenAsync(HttpClient httpClient, DeviceCodeSession session, CancellationToken ct = default)
+    public async Task<string> PollForAccessTokenAsync(DeviceCodeSession session, CancellationToken ct = default)
     {
         var deadline = DateTimeOffset.UtcNow.AddSeconds(session.ExpiresInSeconds);
 
@@ -125,7 +128,7 @@ public sealed class GitHubCopilotApiClient : OpenAiCompatibleApiClient, IDeviceC
             };
             request.Headers.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
 
-            var response = await httpClient.SendAsync(request, ct);
+            var response = await HttpClient.SendAsync(request, ct);
             var body = await response.Content.ReadFromJsonAsync<GitHubAccessTokenResponse>(ct);
 
             if (body?.AccessToken is not null)

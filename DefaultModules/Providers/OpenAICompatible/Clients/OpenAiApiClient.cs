@@ -5,7 +5,10 @@ using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Modules.Providers.OpenAICompatible.Clients;
 
-public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostFeed
+public sealed class OpenAiApiClient(
+    string apiKey = "",
+    HttpClient? httpClient = null)
+    : OpenAiCompatibleApiClient(apiKey, httpClient), IProviderCostFeed
 {
     protected override string ApiEndpoint => "https://api.openai.com/v1";
     public override string ProviderKey => "openai";
@@ -28,8 +31,6 @@ public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostFe
     /// key lacks admin permissions (HTTP 401/403).
     /// </summary>
     public async Task<ProviderCostResult?> GetCostsAsync(
-        HttpClient httpClient,
-        string apiKey,
         DateTimeOffset startTime,
         DateTimeOffset? endTime,
         CancellationToken ct = default)
@@ -50,12 +51,12 @@ public sealed class OpenAiApiClient : OpenAiCompatibleApiClient, IProviderCostFe
             var requestUrl = nextPage is not null ? $"{url}&page={nextPage}" : url;
 
             using var request = new HttpRequestMessage(HttpMethod.Get, requestUrl);
-            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", apiKey);
+            request.Headers.Authorization = new AuthenticationHeaderValue("Bearer", ApiKey);
 
             HttpResponseMessage response;
             try
             {
-                response = await httpClient.SendAsync(request, ct);
+                response = await HttpClient.SendAsync(request, ct);
             }
             catch
             {

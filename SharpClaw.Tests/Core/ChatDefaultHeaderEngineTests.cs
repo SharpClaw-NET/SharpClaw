@@ -138,7 +138,7 @@ public sealed class ChatDefaultHeaderEngineTests
     {
         public string DisplayName => ProviderKey;
         public bool RequiresEndpoint => false;
-        public IProviderApiClient CreateClient(string? endpoint) =>
+        public IProviderApiClient CreateClient(ProviderClientOptions options) =>
             throw new NotSupportedException();
         public IModelCapabilityResolver Capabilities { get; } = new Capabilities();
         public IReadOnlyList<ProviderCostSeed> CostSeeds => [];

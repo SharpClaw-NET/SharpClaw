@@ -12,11 +12,11 @@ public interface IDeviceCodeAuthClient
     /// Starts the device code flow and returns a session containing the user code
     /// and verification URI.
     /// </summary>
-    Task<DeviceCodeSession> StartDeviceCodeFlowAsync(HttpClient httpClient, CancellationToken ct = default);
+    Task<DeviceCodeSession> StartDeviceCodeFlowAsync(CancellationToken ct = default);
 
     /// <summary>
     /// Polls the authorization server until the user completes authentication.
     /// Returns the access token on success.
     /// </summary>
-    Task<string> PollForAccessTokenAsync(HttpClient httpClient, DeviceCodeSession session, CancellationToken ct = default);
+    Task<string> PollForAccessTokenAsync(DeviceCodeSession session, CancellationToken ct = default);
 }

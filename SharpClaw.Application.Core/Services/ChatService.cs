@@ -33,7 +33,6 @@ namespace SharpClaw.Application.Services;
 public sealed class ChatService(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
-    IHttpClientFactory httpClientFactory,
     ProviderApiClientFactory providerClientFactory,
     AgentJobService jobService,
     HeaderTagProcessor headerTagProcessor,
@@ -176,19 +175,13 @@ public sealed class ChatService(
             var apiKey = providerExecution!.RequiresApiKey
                 ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
                 : "local";
-            var client = providerExecution.Client
-                ?? throw new InvalidOperationException(
-                    "Provider client was not resolved for a valid chat request plan.");
+            var client = CreateProviderClient(providerExecution, provider, apiKey);
             var useNativeTools = plan.UseNativeTools;
             var enableTools = plan.EnableTools;
             var systemPrompt = plan.SystemPrompt;
             var completionParams = plan.CompletionParameters;
 
-            using var httpClient = httpClientFactory.CreateClient();
-            var providerRoundExecutor = new ChatProviderRoundExecutor(
-                client,
-                httpClient,
-                apiKey);
+            var providerRoundExecutor = new ChatProviderRoundExecutor(client);
 
             var modelCapabilityTags = plan.ModelCapabilityTags;
             var maxTokens = plan.MaxCompletionTokens;
@@ -522,17 +515,11 @@ public sealed class ChatService(
         var apiKey = providerExecution!.RequiresApiKey
             ? ApiKeyEncryptor.DecryptOrPassthrough(provider.EncryptedApiKey!, encryptionOptions.Key)
             : "local";
-        var client = providerExecution.Client
-            ?? throw new InvalidOperationException(
-                "Provider client was not resolved for a valid chat request plan.");
+        var client = CreateProviderClient(providerExecution, provider, apiKey);
         var systemPrompt = plan.SystemPrompt;
         var completionParams = plan.CompletionParameters;
 
-        using var httpClient = httpClientFactory.CreateClient();
-        var providerRoundExecutor = new ChatProviderRoundExecutor(
-            client,
-            httpClient,
-            apiKey);
+        var providerRoundExecutor = new ChatProviderRoundExecutor(client);
 
         var maxTokens = plan.MaxCompletionTokens;
         var providerParams = plan.ProviderParameters;
@@ -904,28 +891,46 @@ public sealed class ChatService(
         if (!providerAccessSatisfied)
         {
             return new ChatProviderExecutionSelection(
-                Client: null,
+                Plugin: null,
                 RequiresApiKey: requiresApiKey,
                 new ChatProviderPlanningFacts(
                     ProviderAccessSatisfied: false,
-                    SupportsNativeToolCalling: false,
-                    parameterSpec));
+                SupportsNativeToolCalling: false,
+                parameterSpec));
         }
 
-        var client = _providerClientFactory.GetClient(
-            provider.ProviderKey,
-            provider.ApiEndpoint);
+        if (plugin is null)
+            throw new ProviderUnavailableException(provider.ProviderKey);
+
+        var metadataClient = plugin.CreateClient(
+            new ProviderClientOptions(provider.ApiEndpoint, string.Empty));
+
         return new ChatProviderExecutionSelection(
-            client,
+            plugin,
             requiresApiKey,
             new ChatProviderPlanningFacts(
                 ProviderAccessSatisfied: true,
-                client.SupportsNativeToolCalling,
+                metadataClient.SupportsNativeToolCalling,
                 parameterSpec));
     }
 
+    private static IProviderApiClient CreateProviderClient(
+        ChatProviderExecutionSelection providerExecution,
+        ProviderDB provider,
+        string apiKey)
+    {
+        if (providerExecution.Plugin is null)
+        {
+            throw new InvalidOperationException(
+                "Provider plugin was not resolved for a valid chat request plan.");
+        }
+
+        return providerExecution.Plugin.CreateClient(
+            new ProviderClientOptions(provider.ApiEndpoint, apiKey));
+    }
+
     private sealed record ChatProviderExecutionSelection(
-        IProviderApiClient? Client,
+        IProviderPlugin? Plugin,
         bool RequiresApiKey,
         ChatProviderPlanningFacts PlanningFacts);
 

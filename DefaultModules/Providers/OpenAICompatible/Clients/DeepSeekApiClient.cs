@@ -7,7 +7,10 @@ namespace SharpClaw.Modules.Providers.OpenAICompatible.Clients;
 /// <summary>
 /// DeepSeek via its OpenAI-compatible Chat Completions API.
 /// </summary>
-public sealed class DeepSeekApiClient : OpenAiCompatibleApiClient
+public sealed class DeepSeekApiClient(
+    string apiKey = "",
+    HttpClient? httpClient = null)
+    : OpenAiCompatibleApiClient(apiKey, httpClient)
 {
     protected override string ApiEndpoint => "https://api.deepseek.com";
     public override string ProviderKey => "deepseek";

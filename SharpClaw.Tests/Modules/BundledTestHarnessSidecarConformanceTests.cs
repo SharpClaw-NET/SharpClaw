@@ -115,9 +115,9 @@ public sealed class BundledTestHarnessSidecarConformanceTests
 
         var providerPlugin = providers.Single(provider =>
             provider.ProviderKey == TestHarnessConstants.PlainProviderKey);
-        var providerResult = await providerPlugin.CreateClient(null).ChatCompletionAsync(
-            new HttpClient(),
-            apiKey: "local",
+        var providerResult = await providerPlugin
+            .CreateClient(new ProviderClientOptions(null, "local"))
+            .ChatCompletionAsync(
             model: TestHarnessConstants.ModelId,
             systemPrompt: "system",
             messages: [new ChatCompletionMessage("user", "hello")],
@@ -126,9 +126,10 @@ public sealed class BundledTestHarnessSidecarConformanceTests
 
         var costPlugin = providers.Single(provider =>
             provider.ProviderKey == TestHarnessConstants.CostProviderKey);
-        var cost = await costPlugin.CostFeed!.GetCostsAsync(
-            new HttpClient(),
-            apiKey: "local",
+        costPlugin.SupportsCostFeed.Should().BeTrue();
+        var costFeed = costPlugin.CreateCostFeed(new ProviderClientOptions(null, "local"));
+        costFeed.Should().NotBeNull();
+        var cost = await costFeed!.GetCostsAsync(
             startTime: DateTimeOffset.UnixEpoch,
             endTime: DateTimeOffset.UnixEpoch.AddDays(1));
         cost!.TotalAmount.Should().Be(0.25m);

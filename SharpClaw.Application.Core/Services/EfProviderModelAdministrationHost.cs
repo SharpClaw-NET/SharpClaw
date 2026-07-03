@@ -15,7 +15,6 @@ public sealed class EfProviderModelAdministrationHost(
     SharpClawDbContext db,
     EncryptionOptions encryptionOptions,
     ProviderApiClientFactory clientFactory,
-    IHttpClientFactory httpClientFactory,
     IConfiguration configuration) : IProviderModelAdministrationHost
 {
     public bool UniqueProviderNamesEnforced =>
@@ -128,20 +127,23 @@ public sealed class EfProviderModelAdministrationHost(
     }
 
     public async Task<IReadOnlyList<string>> ListProviderModelIdsAsync(
-        IProviderApiClient client,
-        string apiKey,
+        ProviderDB provider,
+        IProviderPlugin plugin,
         CancellationToken ct)
     {
-        using var httpClient = httpClientFactory.CreateClient();
-        return await client.ListModelIdsAsync(httpClient, apiKey, ct);
+        var apiKey = string.IsNullOrEmpty(provider.EncryptedApiKey)
+            ? string.Empty
+            : UnprotectProviderSecret(provider.EncryptedApiKey);
+        var client = plugin.CreateClient(
+            new ProviderClientOptions(provider.ApiEndpoint, apiKey));
+        return await client.ListModelIdsAsync(ct);
     }
 
     public async Task<DeviceCodeSession> StartDeviceCodeFlowAsync(
         IDeviceCodeFlow deviceCodeFlow,
         CancellationToken ct)
     {
-        using var httpClient = httpClientFactory.CreateClient();
-        return await deviceCodeFlow.StartAsync(httpClient, ct);
+        return await deviceCodeFlow.StartAsync(ct);
     }
 
     public async Task<string?> PollDeviceCodeFlowAsync(
@@ -149,8 +151,7 @@ public sealed class EfProviderModelAdministrationHost(
         DeviceCodeSession session,
         CancellationToken ct)
     {
-        using var httpClient = httpClientFactory.CreateClient();
-        return await deviceCodeFlow.PollAsync(httpClient, session, ct);
+        return await deviceCodeFlow.PollAsync(session, ct);
     }
 
     public void TrackProvider(ProviderDB provider)

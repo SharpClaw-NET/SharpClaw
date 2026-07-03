@@ -10,21 +10,19 @@ namespace SharpClaw.Modules.TestHarness;
 internal sealed class TestHarnessProviderClient(
     string providerKey,
     bool supportsNativeToolCalling,
-    TestHarnessState state) : IProviderApiClient
+    TestHarnessState state,
+    string apiKey) : IProviderApiClient
 {
     public string ProviderKey => providerKey;
     public bool SupportsNativeToolCalling => supportsNativeToolCalling;
 
-    public Task<IReadOnlyList<string>> ListModelIdsAsync(
-        HttpClient httpClient, string apiKey, CancellationToken ct = default)
+    public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default)
     {
         var scenario = state.GetScenario(providerKey);
         return Task.FromResult(scenario.ModelIds);
     }
 
     public async Task<ChatCompletionResult> ChatCompletionAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ChatCompletionMessage> messages,
@@ -49,8 +47,6 @@ internal sealed class TestHarnessProviderClient(
     }
 
     public async Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -76,8 +72,6 @@ internal sealed class TestHarnessProviderClient(
     }
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        HttpClient httpClient,
-        string apiKey,
         string model,
         string? systemPrompt,
         IReadOnlyList<ToolAwareMessage> messages,
@@ -253,20 +247,20 @@ internal sealed class TestHarnessProviderPlugin(
     ];
     public ICompletionParameterSpec ParameterSpec => ICompletionParameterSpec.Passthrough;
     public IDeviceCodeFlow? DeviceCodeFlow => null;
-    public IProviderCostFeed? CostFeed { get; } = new TestHarnessCostFeed(providerKey, state);
+    public bool SupportsCostFeed => true;
+    public string CostFeedPermissionDeniedNote =>
+        "The test harness cost reporter was configured to simulate a permission denial.";
 
-    public IProviderApiClient CreateClient(string? endpoint) =>
-        new TestHarnessProviderClient(providerKey, supportsNativeToolCalling, state);
+    public IProviderApiClient CreateClient(ProviderClientOptions options) =>
+        new TestHarnessProviderClient(providerKey, supportsNativeToolCalling, state, options.ApiKey);
+
+    public IProviderCostFeed? CreateCostFeed(ProviderClientOptions options) =>
+        new TestHarnessCostFeed(providerKey, state);
 }
 
 internal sealed class TestHarnessCostFeed(string providerKey, TestHarnessState state) : IProviderCostFeed
 {
-    public string PermissionDeniedNote =>
-        "The test harness cost reporter was configured to simulate a permission denial.";
-
     public async Task<ProviderCostResult?> GetCostsAsync(
-        HttpClient httpClient,
-        string apiKey,
         DateTimeOffset startTime,
         DateTimeOffset? endTime,
         CancellationToken ct = default)

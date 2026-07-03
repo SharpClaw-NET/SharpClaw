@@ -21,11 +21,9 @@ public sealed class EdenAIApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new EdenAIApiClient();
+        var client = new EdenAIApiClient("test-key", httpClient);
 
         var result = await client.ChatCompletionAsync(
-            httpClient,
-            "test-key",
             "openai/gpt-4o-mini",
             systemPrompt: null,
             [new ChatCompletionMessage("user", "Hello")],
@@ -64,9 +62,9 @@ public sealed class EdenAIApiClientTests
             }
             """);
         using var httpClient = new HttpClient(handler);
-        var client = new EdenAIApiClient();
+        var client = new EdenAIApiClient("test-key", httpClient);
 
-        var ids = await client.ListModelIdsAsync(httpClient, "test-key");
+        var ids = await client.ListModelIdsAsync();
 
         handler.LastRequestUri?.ToString()
             .Should().Be("https://api.edenai.run/v3/models");
@@ -88,7 +86,8 @@ public sealed class EdenAIApiClientTests
         plugin.DisplayName.Should().Be("Eden AI");
         plugin.OwnerModuleId.Should().Be("sharpclaw_providers_openai_compat");
         plugin.ParameterSpec.Should().BeSameAs(ProviderParameterSpecs.EdenAI);
-        plugin.CreateClient(null).Should().BeOfType<EdenAIApiClient>();
+        plugin.CreateClient(new ProviderClientOptions(null, "test-key"))
+            .Should().BeOfType<EdenAIApiClient>();
         plugin.Capabilities.Resolve("openai/gpt-4o-mini")
             .Should().BeEquivalentTo([WellKnownCapabilityKeys.Chat, WellKnownCapabilityKeys.Vision]);
         plugin.Capabilities.Resolve("@edenai")

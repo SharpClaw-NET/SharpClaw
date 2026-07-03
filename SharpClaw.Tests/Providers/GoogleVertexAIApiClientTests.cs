@@ -18,11 +18,11 @@ public sealed class GoogleVertexAIApiClientTests
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
         var client = new GoogleVertexAIApiClient(
-            "https://europe-west4-aiplatform.googleapis.com/v1/projects/test-project/locations/europe-west4");
+            "https://europe-west4-aiplatform.googleapis.com/v1/projects/test-project/locations/europe-west4",
+            "test-token",
+            httpClient);
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-token",
             "gemini-test",
             systemPrompt: null,
             [new ChatCompletionMessage("user", "Hello")],
@@ -51,11 +51,9 @@ public sealed class GoogleVertexAIApiClientTests
     {
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
-        var client = new GoogleVertexAIApiClient();
+        var client = new GoogleVertexAIApiClient(apiKey: "Bearer test-token", httpClient: httpClient);
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "Bearer test-token",
             "projects/test-project/locations/us-central1/publishers/google/models/gemini-test",
             systemPrompt: null,
             [new ChatCompletionMessage("user", "Hello")]);
@@ -72,7 +70,9 @@ public sealed class GoogleVertexAIApiClientTests
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
         var client = new GoogleVertexAIApiClient(
-            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1");
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1",
+            "test-token",
+            httpClient);
         var providerParameters = new Dictionary<string, JsonElement>
         {
             ["response_mime_type"] = JsonSerializer.SerializeToElement("application/json"),
@@ -98,8 +98,6 @@ public sealed class GoogleVertexAIApiClientTests
         };
 
         await client.ChatCompletionAsync(
-            httpClient,
-            "test-token",
             "gemini-test",
             systemPrompt: null,
             [new ChatCompletionMessage("user", "Hello")],
@@ -136,11 +134,11 @@ public sealed class GoogleVertexAIApiClientTests
         using var handler = new CaptureHandler();
         using var httpClient = new HttpClient(handler);
         var client = new GoogleVertexAIApiClient(
-            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1");
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1",
+            "test-token",
+            httpClient);
 
         await client.ChatCompletionWithToolsAsync(
-            httpClient,
-            "test-token",
             "gemini-test",
             systemPrompt: null,
             [new ToolAwareMessage { Role = "user", Content = "Hello" }],
@@ -170,9 +168,11 @@ public sealed class GoogleVertexAIApiClientTests
             """);
         using var httpClient = new HttpClient(handler);
         var client = new GoogleVertexAIApiClient(
-            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1");
+            "https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1",
+            "test-token",
+            httpClient);
 
-        var models = await client.ListModelIdsAsync(httpClient, "test-token");
+        var models = await client.ListModelIdsAsync();
 
         handler.LastRequestUri?.ToString()
             .Should().Be("https://us-central1-aiplatform.googleapis.com/v1/projects/test-project/locations/us-central1/models");
@@ -191,7 +191,9 @@ public sealed class GoogleVertexAIApiClientTests
 
         plugin.SupportsAutomaticEndpointDiscovery.Should().BeTrue();
         plugin.ParameterSpec.Should().BeSameAs(ProviderParameterSpecs.GoogleVertexAI);
-        plugin.CreateClient("https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1")
+        plugin.CreateClient(new ProviderClientOptions(
+                "https://us-central1-aiplatform.googleapis.com/v1/projects/p/locations/us-central1",
+                "test-token"))
             .Should().BeOfType<GoogleVertexAIApiClient>()
             .Which.SupportsNativeToolCalling.Should().BeTrue();
     }
