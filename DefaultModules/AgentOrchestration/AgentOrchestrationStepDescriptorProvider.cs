@@ -50,10 +50,11 @@ public sealed class AgentOrchestrationStepDescriptorProvider : ITaskStepDescript
             },
             new TaskStepDescriptor
             {
-                MethodName           = "ParseResponse",
-                StepKey              = AgentOrchestrationStepKeys.ParseResponse,
-                OwnerId              = owner,
-                CapturesGenericType  = true,
+                MethodName                  = "ParseResponse",
+                StepKey                     = AgentOrchestrationStepKeys.ParseResponse,
+                OwnerId                     = owner,
+                CapturesGenericType         = true,
+                RequiresDeclaredGenericType = true,
             },
 
             // ── Entity lookup / creation ────────────────────────────

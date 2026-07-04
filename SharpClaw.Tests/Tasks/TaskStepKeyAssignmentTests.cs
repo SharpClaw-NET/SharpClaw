@@ -129,7 +129,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var r = await ParseResponse<MyData>(reply);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.ParseResponse);
+        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.ParseResponse);
     }
 
     [Test]
@@ -251,6 +251,45 @@ return;
 
         result.Success.Should().BeTrue();
         result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.AssignRole);
+    }
+
+    [Test]
+    public void AgentOrchestrationOperationKeys_UseModuleNamespace()
+    {
+        var keys = new[]
+        {
+            AgentOrchestrationStepKeys.Chat,
+            AgentOrchestrationStepKeys.ChatStream,
+            AgentOrchestrationStepKeys.ChatToThread,
+            AgentOrchestrationStepKeys.Emit,
+            AgentOrchestrationStepKeys.ParseResponse,
+            AgentOrchestrationStepKeys.FindModel,
+            AgentOrchestrationStepKeys.FindProvider,
+            AgentOrchestrationStepKeys.FindAgent,
+            AgentOrchestrationStepKeys.CreateAgent,
+            AgentOrchestrationStepKeys.CreateThread,
+            AgentOrchestrationStepKeys.CreateRole,
+            AgentOrchestrationStepKeys.FindRole,
+            AgentOrchestrationStepKeys.SetRolePermissions,
+            AgentOrchestrationStepKeys.AssignRole,
+            AgentOrchestrationStepKeys.CreateChannel,
+            AgentOrchestrationStepKeys.FindChannel,
+            AgentOrchestrationStepKeys.AddAllowedAgent,
+        };
+
+        keys.Should().OnlyContain(key => key.StartsWith("sharpclaw_agent_orchestration.", StringComparison.Ordinal));
+        keys.Should().NotContain(key => key.StartsWith("core.", StringComparison.Ordinal));
+    }
+
+    [Test]
+    public void AgentOrchestrationExecutor_HandlesOnlyModuleOwnedOperationKeys()
+    {
+        var executor = new AgentOrchestrationTaskStepExecutor();
+
+        executor.CanExecute(AgentOrchestrationStepKeys.ParseResponse).Should().BeTrue();
+        executor.CanExecute(AgentOrchestrationStepKeys.Chat).Should().BeTrue();
+        executor.CanExecute("core.parse_response").Should().BeFalse();
+        executor.CanExecute("core.chat").Should().BeFalse();
     }
 
     [Test]
