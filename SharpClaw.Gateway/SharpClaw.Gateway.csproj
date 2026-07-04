@@ -16,8 +16,8 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Modules.Hosting" />
     <ProjectReference Include="..\SharpClaw.Gateway.Abstractions\SharpClaw.Gateway.Abstractions.csproj" />
-    <ProjectReference Include="..\SharpClaw.Modules.Hosting\SharpClaw.Modules.Hosting.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
   </ItemGroup>
 
