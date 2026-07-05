@@ -3,7 +3,6 @@ using NUnit.Framework;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -223,28 +222,6 @@ public class BadParamTask
     // ─────────────────────────────────────────────────────────────
     // TASK108 — ParseResponse with unknown type
     // ─────────────────────────────────────────────────────────────
-
-    [Test]
-    public void Validate_ParseResponseWithUnknownType_ProducesTASK108()
-    {
-        var source = """
-[Task("parse-bad")]
-public class ParseBadTask
-{
-    public async Task RunAsync(CancellationToken ct)
-    {
-        var result = ParseResponse<Nonexistent>("{}");
-        Log(result);
-    }
-}
-""";
-        var definition = ParseValid(source);
-
-        var result = TaskScriptEngine.Validate(definition);
-
-        result.IsValid.Should().BeFalse();
-        result.Diagnostics.Should().Contain(d => d.Code == "TASK108");
-    }
 
     // ─────────────────────────────────────────────────────────────
     // Nested validation

@@ -103,7 +103,7 @@ programming error.
 Id           = sharpclaw_metrics
 DisplayName  = Metrics
 ToolPrefix   = metric
-ParserExtension = MetricsParserExtension.Instance
+Task trigger parsing = package-owned MetricThreshold support
 Exported contracts = none
 Required contracts = none (consumes IHostQueueMetrics from the host)
 ```

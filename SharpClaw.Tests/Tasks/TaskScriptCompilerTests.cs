@@ -4,7 +4,6 @@ using NUnit.Framework;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 

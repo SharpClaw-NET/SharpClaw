@@ -20,6 +20,9 @@
     <PackageVersion Include="SharpClaw.Modules.EditorCommon" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.VS2026Editor" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.VSCodeEditor" Version="0.1.1-alpha" />
+    <PackageVersion Include="SharpClaw.Modules.AgentOrchestration" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Metrics" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="0.1.1-beta" />
     <PackageVersion Include="SharpClaw.Providers.Common" Version="0.1.3-beta" />
     <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="0.1.3-beta" />
     <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="0.1.3-beta" />

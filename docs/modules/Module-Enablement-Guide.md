@@ -2,10 +2,9 @@
 
 SharpClaw modules are runtime feature packages discovered by the Core API at
 startup. A module can add tools, REST endpoints, CLI commands, resource types,
-task triggers, provider implementations, or editor integrations. The current
-source tree ships the bundled modules under `DefaultModules`; external modules
-can be added separately through the `ExternalModules` section in the Core env
-file.
+task triggers, provider implementations, or editor integrations. The bundled
+modules are restored from NuGet package payloads; external modules can be added
+separately through the `ExternalModules` section in the Core env file.
 
 The Core env file is `SharpClaw.Runtime.INF/Environment/.env`.
 It uses JSON with comments and is read into `IConfiguration` during startup.
@@ -62,10 +61,12 @@ local work.
 
 ## Current Bundled Modules
 
-The current `DefaultModules` tree contains agent orchestration, editor common,
+The current bundled module set contains agent orchestration, editor common,
 metrics, module development, five provider modules, and two editor modules.
-Older module surfaces that are not present in this tree are not part of the
-bundled product unless an external module supplies them.
+Those modules are package-owned. SharpClaw keeps only the TestHarness module
+source in this repository for explicit test infrastructure. Older module
+surfaces that are not present in the package set are not part of the bundled
+product unless an external module supplies them.
 
 `sharpclaw_agent_orchestration` is the Agent Orchestration module. It owns
 agent lifecycle and orchestration tools such as sub-agent creation, agent

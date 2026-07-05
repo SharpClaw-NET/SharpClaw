@@ -179,11 +179,9 @@ public class BundledModuleOutputTests
     private static IReadOnlyList<BundledModuleExpectation> ReadBundledModuleExpectations()
     {
         var solutionRoot = ResolveSolutionRoot();
-        var defaultModulesDir = Path.Combine(solutionRoot, "DefaultModules");
         var testHarnessManifest = Path.Combine(solutionRoot, "SharpClaw.Modules.TestHarness", "module.json");
 
-        var sourceModules = Directory.EnumerateFiles(defaultModulesDir, "module.json", SearchOption.AllDirectories)
-            .Append(testHarnessManifest)
+        var sourceModules = new[] { testHarnessManifest }
             .Where(path => File.Exists(path) && !IsBuildOutputPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(ReadBundledModuleExpectation);
@@ -222,6 +220,18 @@ public class BundledModuleOutputTests
                 EntryAssemblyDirectory: "sharpclaw"),
             (
                 PackageId: "SharpClaw.Modules.VSCodeEditor",
+                ManifestPath: Path.Combine("sharpclaw", "module.json"),
+                EntryAssemblyDirectory: "sharpclaw"),
+            (
+                PackageId: "SharpClaw.Modules.AgentOrchestration",
+                ManifestPath: Path.Combine("sharpclaw", "module.json"),
+                EntryAssemblyDirectory: "sharpclaw"),
+            (
+                PackageId: "SharpClaw.Modules.Metrics",
+                ManifestPath: Path.Combine("sharpclaw", "module.json"),
+                EntryAssemblyDirectory: "sharpclaw"),
+            (
+                PackageId: "SharpClaw.Modules.ModuleDev",
                 ManifestPath: Path.Combine("sharpclaw", "module.json"),
                 EntryAssemblyDirectory: "sharpclaw"),
             ProviderPackage(

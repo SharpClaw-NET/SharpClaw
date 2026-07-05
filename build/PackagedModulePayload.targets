@@ -13,6 +13,12 @@
                           Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.Modules.*.dll"
                           Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_AgentOrchestration)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Metrics)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_ModuleDev)' != ''" />
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Anthropic.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_Anthropic)' != ''" />
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Google)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Google.dll"
@@ -35,6 +41,15 @@
       <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\*.dll"
                                     Exclude="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.*.dll"
                                     Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_AgentOrchestration)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_Metrics)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_ModuleDev)' != ''" />
 
       <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json"
                                Condition="Exists('$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json')">
@@ -47,6 +62,18 @@
       <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json"
                                Condition="Exists('$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json')">
         <ModuleId>sharpclaw_vscode_editor</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_agent_orchestration</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Metrics)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_metrics</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_module_dev</ModuleId>
       </_PackagedModuleManifest>
       <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_anthropic\module.json"
                                Condition="Exists('$(PkgSharpClaw_Modules_Providers_Anthropic)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_anthropic\module.json')">

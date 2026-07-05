@@ -83,11 +83,14 @@ If your module needs to write to the database, also reference
 `SharpClaw.Runtime.INF`. If it needs core services like agents or
 channels, reference `SharpClaw.Runtime.BLL`.
 
-Place the project under `DefaultModules/` by convention:
+Keep module source in its own repository or in an external module workspace.
+The SharpClaw repository keeps only the TestHarness module as test
+infrastructure; production modules are consumed from packages or loaded as
+external modules. A small module repository still uses a root project folder
+and a nearby manifest:
 
 ```
-DefaultModules/
-  MyModule/
+MyModule/
     MyModule.csproj
     MyModule.cs          â† implements ISharpClawModule
     Tools/

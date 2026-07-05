@@ -466,7 +466,7 @@ try
 
     // ──────── PHASE 12 ─── Misc post-module singletons ─────────────────────
     // (The scheduled-job loop has moved to
-    //  DefaultModules/AgentOrchestration/ScheduledJobWorker; it is started
+    //  the Agent Orchestration module's ScheduledJobWorker; it is started
     //  from that module's InitializeAsync, not here.)
     builder.Services.AddSingleton<DatabaseInitializationGate>();
 

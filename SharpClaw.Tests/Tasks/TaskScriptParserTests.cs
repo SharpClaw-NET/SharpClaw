@@ -3,7 +3,6 @@ using NUnit.Framework;
 using SharpClaw.Core.Tasks;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -221,26 +220,6 @@ public class IfElseTask
         var conditional = result.Definition!.Statements.Single(s => s.StatementKey == TaskLanguageStatementKeys.Conditional);
         conditional.Body.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
         conditional.ElseBody.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
-    }
-
-    [Test]
-    public void Parse_ChatCall_ProducesChatStep()
-    {
-        var source = """
-[Task("chat")]
-public class ChatTask
-{
-    public async Task RunAsync(CancellationToken ct)
-    {
-        var reply = await Chat(agentId, "Summarise this.");
-    }
-}
-""";
-
-        var result = TaskScriptEngine.Parse(source);
-
-        result.Success.Should().BeTrue();
-        result.Definition!.Statements.Should().ContainSingle(s => s.StatementKey == AgentOrchestrationOperationKeys.Chat);
     }
 
     // ─────────────────────────────────────────────────────────────

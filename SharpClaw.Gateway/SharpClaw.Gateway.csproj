@@ -22,6 +22,9 @@
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
@@ -32,17 +35,15 @@
   </ItemGroup>
 
   <!--
-    Copy bundled module DLLs into the gateway output so GatewayModuleLoader
+    Copy packaged module DLLs into the gateway output so GatewayModuleLoader
     can discover them at runtime. Unlike the API's variant, the gateway
-    target copies only the module's primary assembly (SharpClaw.Modules.*.dll);
+    target copies only each module's primary assembly (SharpClaw.Modules.*.dll);
     transitive dependencies stay with the API process.
   -->
   <Target Name="CopyBundledModules"
           AfterTargets="Build"
           DependsOnTargets="_ResolvePackagedModulePayloadFiles">
     <ItemGroup>
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_BundledModuleDll Include="@(_PackagedModuleDll)" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />

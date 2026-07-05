@@ -31,6 +31,9 @@
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" />
     <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" />
@@ -55,15 +58,6 @@
     normal copy-local mechanism.
   -->
   <ItemGroup>
-    <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
     <ProjectReference Include="..\SharpClaw.Modules.TestHarness\SharpClaw.Modules.TestHarness.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
@@ -75,26 +69,19 @@
     the API already references them directly - module bin copies may be stale and would overwrite
     the freshly built host DLLs.
 
-    Module DLLs:       SharpClaw.Modules.*.dll
-    Transitive deps:   *.dll that do NOT start with SharpClaw. (e.g. Cronos, NAudio)
+    Module DLLs:       SharpClaw.Modules.TestHarness.dll from the in-repo test module.
+    Transitive deps:   *.dll that do NOT start with SharpClaw.
     Packaged modules:  copied from each restored package's sharpclaw/ payload. SharpClaw.*
                        payload dependencies are excluded except the module entry DLLs, so package
                        payloads cannot overwrite freshly built host-owned SharpClaw assemblies.
 
-    SkipUnchangedFiles avoids unnecessary copies on incremental builds. Both top-level
-    (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module layouts are matched.
+    SkipUnchangedFiles avoids unnecessary copies on incremental builds.
   -->
   <Target Name="_ResolveBundledModuleOutputFiles"
           DependsOnTargets="_ResolvePackagedModulePayloadFiles">
     <ItemGroup>
       <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.TestHarness.dll" />
-      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
-                   Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
-      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
-                   Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_PackagedModulePayloadDll)" />

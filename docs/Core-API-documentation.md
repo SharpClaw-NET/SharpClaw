@@ -3294,13 +3294,14 @@ For tutorial-style module workflows, see
 
 ## Bundled modules
 
-The current `DefaultModules` tree ships agent orchestration, editor common,
+The current bundled module set is restored from NuGet package payloads rather
+than from SharpClaw-owned module source. Agent orchestration, editor common,
 metrics, module development, provider modules for Anthropic, Google,
 LlamaSharp, Ollama, and OpenAI-compatible APIs, plus the VS 2026 and VS Code
-editor integrations. Older docs for removed or externalized modules may remain
-in the repository as historical references, but they are not part of the
-current bundled module set unless a deployment supplies them as external
-modules.
+editor integrations are package-owned modules. Older docs for removed or
+externalized modules may remain in the repository as historical references, but
+they are not part of the current bundled module set unless a deployment
+supplies them as external modules.
 
 For the current enablement keys and base/development defaults, see the
 [Module Enablement Guide](modules/Module-Enablement-Guide.md). For task and

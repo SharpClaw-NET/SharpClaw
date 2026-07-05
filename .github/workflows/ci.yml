@@ -44,8 +44,6 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Services.HeaderTagProcessorTests'
           - domain: Core Chat Cache
             filter: 'FullyQualifiedName~SharpClaw.Tests.Services.ChatCacheTests'
-          - domain: Cross Thread History
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.CrossThreadHistoryTests'
           - domain: CLI Channel Commands
             filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.ChannelCliCommandTests'
           - domain: CLI REPL
