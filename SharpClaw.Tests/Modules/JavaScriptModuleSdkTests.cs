@@ -8,15 +8,7 @@ public sealed class JavaScriptModuleSdkTests
     [Test]
     public async Task JavaScriptSdk_ExposesCurrentForeignModuleProtocolShape()
     {
-        var sdkPath = Path.Combine(
-            FindRepoRoot(),
-            "sdk",
-            "javascript",
-            "sharpclaw-module-host",
-            "src",
-            "index.mjs");
-
-        var source = await File.ReadAllTextAsync(sdkPath);
+        var source = await File.ReadAllTextAsync(ModuleSdkSourcePaths.JavaScriptHostSourcePath);
 
         source.Should().Contain("X-SharpClaw-Control-Token");
         source.Should().Contain("SHARPCLAW_MODULE_DIR");

@@ -8,16 +8,7 @@ public sealed class PythonModuleSdkTests
     [Test]
     public async Task PythonSdk_ExposesCurrentForeignModuleProtocolShape()
     {
-        var sdkPath = Path.Combine(
-            FindRepoRoot(),
-            "sdk",
-            "python",
-            "sharpclaw-module-host",
-            "src",
-            "sharpclaw_module_host",
-            "host.py");
-
-        var source = await File.ReadAllTextAsync(sdkPath);
+        var source = await File.ReadAllTextAsync(ModuleSdkSourcePaths.PythonHostSourcePath);
 
         source.Should().Contain("X-SharpClaw-Control-Token");
         source.Should().Contain("SHARPCLAW_MODULE_DIR");
