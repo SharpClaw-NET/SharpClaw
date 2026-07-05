@@ -51,7 +51,7 @@
     <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />
     <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj" />
     <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj" />
-    <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj" />
+    <ProjectReference Include="..\SharpClaw.Modules.TestHarness\SharpClaw.Modules.TestHarness.csproj" />
     <ProjectReference Include="Fixtures\ExternalModule\SharpClaw.TestFixtures.ExternalModule.csproj" />
     <ProjectReference Include="Fixtures\ForeignSidecar\SharpClaw.TestFixtures.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>

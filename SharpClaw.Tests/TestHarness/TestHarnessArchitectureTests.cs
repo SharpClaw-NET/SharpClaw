@@ -243,7 +243,7 @@ public sealed class TestHarnessArchitectureTests
 
         var harnessReference = apiProject.Descendants("ProjectReference")
             .Single(e => (e.Attribute("Include")?.Value ?? "")
-                .Contains("DefaultModules\\TestHarness", StringComparison.OrdinalIgnoreCase));
+                .Contains("SharpClaw.Modules.TestHarness", StringComparison.OrdinalIgnoreCase));
 
         harnessReference.Element("ReferenceOutputAssembly")!.Value.Should().Be("false");
     }

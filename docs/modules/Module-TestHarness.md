@@ -1,10 +1,13 @@
 # Test Harness Module
 
-The Test Harness module is a bundled default module with the id
-`sharpclaw_test_harness`. It is not a production feature and it should not be
-enabled in production templates. The production environment template keeps it
-disabled, while the development template enables it so local and CI test runs
-can exercise SharpClaw without real provider API keys, network calls, or REPL
+The Test Harness module is a SharpClaw test-infrastructure module with the id
+`sharpclaw_test_harness`. It deliberately remains in the main SharpClaw
+repository as a top-level project so host, module, provider, gateway, and task
+tests can exercise one deterministic module without reaching into an external
+module repository. It is not a production feature and it should not be enabled
+in production templates. The production environment template keeps it disabled,
+while the development template enables it so local and CI test runs can
+exercise SharpClaw without real provider API keys, network calls, or REPL
 scripts.
 
 The module registers deterministic provider plugins under provider keys such

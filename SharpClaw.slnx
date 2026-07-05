@@ -26,7 +26,9 @@
     <Project Path="DefaultModules/AgentOrchestration/SharpClaw.Modules.AgentOrchestration.csproj" />
     <Project Path="DefaultModules/Metrics/SharpClaw.Modules.Metrics.csproj" />
     <Project Path="DefaultModules/ModuleDev/SharpClaw.Modules.ModuleDev.csproj" />
-    <Project Path="DefaultModules/TestHarness/SharpClaw.Modules.TestHarness.csproj" />
+  </Folder>
+  <Folder Name="/Tests/Infrastructure/">
+    <Project Path="SharpClaw.Modules.TestHarness/SharpClaw.Modules.TestHarness.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">
     <File Path="Directory.Build.props" />

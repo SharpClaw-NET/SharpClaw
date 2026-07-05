@@ -178,10 +178,13 @@ public class BundledModuleOutputTests
 
     private static IReadOnlyList<BundledModuleExpectation> ReadBundledModuleExpectations()
     {
-        var defaultModulesDir = Path.Combine(ResolveSolutionRoot(), "DefaultModules");
+        var solutionRoot = ResolveSolutionRoot();
+        var defaultModulesDir = Path.Combine(solutionRoot, "DefaultModules");
+        var testHarnessManifest = Path.Combine(solutionRoot, "SharpClaw.Modules.TestHarness", "module.json");
 
         var sourceModules = Directory.EnumerateFiles(defaultModulesDir, "module.json", SearchOption.AllDirectories)
-            .Where(path => !IsBuildOutputPath(path))
+            .Append(testHarnessManifest)
+            .Where(path => File.Exists(path) && !IsBuildOutputPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
             .Select(ReadBundledModuleExpectation);
         var packagedModules = ReadPackagedModuleExpectations();

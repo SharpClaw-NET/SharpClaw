@@ -64,7 +64,7 @@
     <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj">
+    <ProjectReference Include="..\SharpClaw.Modules.TestHarness\SharpClaw.Modules.TestHarness.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
   </ItemGroup>
@@ -90,10 +90,13 @@
       <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.TestHarness.dll" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
       <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_PackagedModulePayloadDll)" />
     </ItemGroup>
   </Target>
