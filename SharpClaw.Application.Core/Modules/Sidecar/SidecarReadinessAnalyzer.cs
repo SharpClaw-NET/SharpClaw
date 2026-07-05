@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Core.Modules.Sidecar;
 
 namespace SharpClaw.Application.Core.Modules.Sidecar;
@@ -11,8 +11,8 @@ public sealed class SidecarReadinessAnalyzer
 {
     private static readonly Type[] TaskRuntimeServiceTypes =
     [
-        typeof(ITaskStepExecutorExtension),
-        typeof(ITaskStepDescriptorProvider),
+        typeof(ITaskOperationExecutor),
+        typeof(ITaskOperationDescriptorProvider),
         typeof(ITaskTriggerSource),
         typeof(ITaskMetricProvider),
         typeof(ITaskTriggerAttributeHandler),

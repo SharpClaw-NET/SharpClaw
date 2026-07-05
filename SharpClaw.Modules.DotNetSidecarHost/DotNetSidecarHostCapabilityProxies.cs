@@ -10,6 +10,7 @@ using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 internal static class DotNetSidecarHostCapabilityProxies
 {

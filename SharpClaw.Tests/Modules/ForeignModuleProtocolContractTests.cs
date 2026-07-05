@@ -10,7 +10,7 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Providers.Common;
 
 namespace SharpClaw.Tests.Modules;
@@ -90,10 +90,10 @@ public sealed class ForeignModuleProtocolContractTests
 
         var parserAware = module.Should().BeAssignableTo<ITaskParserAware>().Which;
         var parserExtension = parserAware.ParserExtension;
-        parserExtension.StepKeyMappings["SampleTaskStep"].StepKey.Should().Be("sample.task.step");
-        parserExtension.StepKeyMappings["SampleTaskStep"].ModuleId.Should().Be("sample_node_module");
+        parserExtension.OperationKeyMappings["SampleTaskOperation"].OperationKey.Should().Be("sample.task.operation");
+        parserExtension.OperationKeyMappings["SampleTaskOperation"].ModuleId.Should().Be("sample_node_module");
         parserExtension.EventTriggerMappings["OnSample"].TriggerKey.Should().Be("sample.trigger");
-        parserExtension.SingleArgExpressionMethods.Should().Contain("SampleTaskStep");
+        parserExtension.SingleArgExpressionMethods.Should().Contain("SampleTaskOperation");
 
         var attributeContext = new TestTriggerAttributeContext(
             "SampleTrigger",
@@ -113,45 +113,45 @@ public sealed class ForeignModuleProtocolContractTests
         module.ConfigureServices(taskServices);
         using var taskProvider = taskServices.BuildServiceProvider();
 
-        var descriptorProvider = taskProvider.GetServices<ITaskStepDescriptorProvider>()
+        var descriptorProvider = taskProvider.GetServices<ITaskOperationDescriptorProvider>()
             .Should()
             .ContainSingle()
             .Subject;
         descriptorProvider.ModuleId.Should().Be("sample_node_module");
         descriptorProvider.Descriptors.Should().ContainSingle(descriptor =>
-            descriptor.StepKey == "sample.task.step"
+            descriptor.OperationKey == "sample.task.operation"
             && descriptor.OwnerId == "sample_node_module"
             && descriptor.FirstArgIsExpression);
 
-        var executor = taskProvider.GetServices<ITaskStepExecutorExtension>()
+        var executor = taskProvider.GetServices<ITaskOperationExecutor>()
             .Should()
             .ContainSingle()
             .Subject;
-        executor.CanExecute("sample.task.step").Should().BeTrue();
-        executor.Should().BeAssignableTo<ITaskStepInvocationExecutor>();
+        executor.CanExecute("sample.task.operation").Should().BeTrue();
+        executor.Should().BeAssignableTo<ITaskOperationInvocationExecutor>();
 
-        var executionContext = new TestTaskStepExecutionContext();
+        var executionContext = new TestTaskOperationExecutionContext();
         var shouldContinue = await executor.ExecuteAsync(
-            "sample.task.step",
+            "sample.task.operation",
             executionContext,
             ["alpha"],
             "expression",
-            "stepResult");
+            "operationResult");
         shouldContinue.Should().BeTrue();
-        executionContext.Variables["sidecarStep"].Should().Be("executed");
-        executionContext.Variables["stepResult"].Should().Be("step-result");
-        executionContext.Logs.Should().Contain("step log");
+        executionContext.Variables["sidecarOperation"].Should().Be("executed");
+        executionContext.Variables["operationResult"].Should().Be("operation-result");
+        executionContext.Logs.Should().Contain("operation log");
         executionContext.Outputs.Should().Contain("""{"sidecar":true}""");
 
-        var invocationResult = await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation("sample.task.step")
+        var invocationResult = await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation("sample.task.operation")
             {
                 ResultVariable = "invocationResult",
                 RawExpression = "expression",
                 Arguments = ["alpha"],
             },
             executionContext);
-        invocationResult.Should().Be(TaskStepResult.Continue);
+        invocationResult.Should().Be(TaskStatementResult.Continue);
         executionContext.Variables["sidecarInvocation"].Should().Be("executed");
         executionContext.Variables["invocationResult"].Should().Be("invocation-result");
 
@@ -448,7 +448,7 @@ public sealed class ForeignModuleProtocolContractTests
         finally { listener.Stop(); }
     }
 
-    private sealed class TestTaskStepExecutionContext : ITaskStepExecutionContext
+    private sealed class TestTaskOperationExecutionContext : ITaskOperationExecutionContext
     {
         private readonly List<ITaskEventHandler> _eventHandlers = [];
 
@@ -480,10 +480,10 @@ public sealed class ForeignModuleProtocolContractTests
 
         public void SetChannelId(Guid channelId) => ChannelId = channelId;
 
-        public Task<TaskStepResult> ExecuteStepsAsync(
-            IReadOnlyList<ITaskStepInvocation> steps,
+        public Task<TaskStatementResult> ExecuteStatementsAsync(
+            IReadOnlyList<ITaskStatementInvocation> steps,
             CancellationToken cancellationToken) =>
-            Task.FromResult(TaskStepResult.Continue);
+            Task.FromResult(TaskStatementResult.Continue);
 
         public bool EvaluateCondition(string? expression) =>
             bool.TryParse(expression, out var result) && result;
@@ -491,7 +491,7 @@ public sealed class ForeignModuleProtocolContractTests
         public void RegisterEventHandler(
             string moduleTriggerKey,
             string? parameterName,
-            IReadOnlyList<ITaskStepInvocation> body) =>
+            IReadOnlyList<ITaskStatementInvocation> body) =>
             _eventHandlers.Add(new TestTaskEventHandler(moduleTriggerKey, parameterName));
 
         public Task WaitIfPausedAsync() => Task.CompletedTask;
@@ -504,7 +504,7 @@ public sealed class ForeignModuleProtocolContractTests
         public Task ExecuteBodyAsync(CancellationToken ct) => Task.CompletedTask;
     }
 
-    private sealed record TestTaskStepInvocation(string StepKey) : ITaskStepInvocation
+    private sealed record TestTaskStatementInvocation(string StatementKey) : ITaskStatementInvocation
     {
         public string? VariableName { get; init; }
         public string? TypeName { get; init; }
@@ -513,8 +513,8 @@ public sealed class ForeignModuleProtocolContractTests
         public IReadOnlyList<string>? Arguments { get; init; }
         public string? ModuleTriggerKey { get; init; }
         public string? HandlerParameter { get; init; }
-        public IReadOnlyList<ITaskStepInvocation>? Body { get; init; }
-        public IReadOnlyList<ITaskStepInvocation>? ElseBody { get; init; }
+        public IReadOnlyList<ITaskStatementInvocation>? Body { get; init; }
+        public IReadOnlyList<ITaskStatementInvocation>? ElseBody { get; init; }
     }
 
     private sealed record TestTaskTriggerSourceContext(

@@ -7,7 +7,7 @@ using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
@@ -197,37 +197,37 @@ internal sealed class ForeignModuleProtocolClient
                 args),
             ct);
 
-    public Task<ForeignModuleTaskStepExecutionResponse> ExecuteTaskStepAsync(
+    public Task<ForeignModuleTaskOperationExecutionResponse> ExecuteTaskOperationAsync(
         ModuleManifest manifest,
-        string stepKey,
-        ForeignModuleTaskStepExecutionContextSnapshot context,
+        string operationKey,
+        ForeignModuleTaskOperationExecutionContextSnapshot context,
         IReadOnlyList<string>? arguments,
         string? expression,
         string? resultVariable,
         CancellationToken ct = default) =>
-        PostAsync<ForeignModuleTaskStepExecutionRequest, ForeignModuleTaskStepExecutionResponse>(
-            ForeignModuleProtocol.TaskStepExecutePath,
-            new ForeignModuleTaskStepExecutionRequest(
+        PostAsync<ForeignModuleTaskOperationExecutionRequest, ForeignModuleTaskOperationExecutionResponse>(
+            ForeignModuleProtocol.TaskOperationExecutePath,
+            new ForeignModuleTaskOperationExecutionRequest(
                 ForeignModuleProtocol.Version,
                 manifest.Id,
-                stepKey,
+                operationKey,
                 context,
                 arguments,
                 expression,
                 resultVariable),
             ct);
 
-    public Task<ForeignModuleTaskStepExecutionResponse> ExecuteTaskStepInvocationAsync(
+    public Task<ForeignModuleTaskOperationExecutionResponse> ExecuteTaskOperationInvocationAsync(
         ModuleManifest manifest,
-        ITaskStepInvocation step,
-        ForeignModuleTaskStepExecutionContextSnapshot context,
+        ITaskStatementInvocation statement,
+        ForeignModuleTaskOperationExecutionContextSnapshot context,
         CancellationToken ct = default) =>
-        PostAsync<ForeignModuleTaskStepInvocationRequest, ForeignModuleTaskStepExecutionResponse>(
-            ForeignModuleProtocol.TaskStepInvokePath,
-            new ForeignModuleTaskStepInvocationRequest(
+        PostAsync<ForeignModuleTaskOperationInvocationRequest, ForeignModuleTaskOperationExecutionResponse>(
+            ForeignModuleProtocol.TaskOperationInvokePath,
+            new ForeignModuleTaskOperationInvocationRequest(
                 ForeignModuleProtocol.Version,
                 manifest.Id,
-                ForeignModuleTaskStepInvocationDescriptor.From(step),
+                ForeignModuleTaskStatementInvocationDescriptor.From(statement),
                 context),
             ct);
 

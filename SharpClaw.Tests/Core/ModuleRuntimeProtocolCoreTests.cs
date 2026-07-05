@@ -119,26 +119,26 @@ public sealed class ModuleRuntimeProtocolCoreTests
             .Should().Be("SharpClaw.Core");
         typeof(ForeignModuleTaskLaunchRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
-        typeof(ForeignModuleTaskStepInvocationDescriptor).Assembly.GetName().Name
+        typeof(ForeignModuleTaskStatementInvocationDescriptor).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
-        typeof(ForeignModuleTaskStepExecutionResponse).Assembly.GetName().Name
+        typeof(ForeignModuleTaskOperationExecutionResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
         typeof(ForeignModuleInfoListResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Core");
         typeof(SharpClaw.Contracts.Modules.ModuleInfo).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
 
-        var descriptor = new ForeignModuleTaskStepInvocationDescriptor(
+        var descriptor = new ForeignModuleTaskStatementInvocationDescriptor(
             "module.step",
             Arguments: ["one"],
             Body:
             [
-                new ForeignModuleTaskStepInvocationDescriptor("module.child")
+                new ForeignModuleTaskStatementInvocationDescriptor("module.child")
             ]);
 
-        descriptor.StepKey.Should().Be("module.step");
+        descriptor.StatementKey.Should().Be("module.step");
         descriptor.Body.Should().ContainSingle()
-            .Which.StepKey.Should().Be("module.child");
+            .Which.StatementKey.Should().Be("module.child");
     }
 
     [Test]

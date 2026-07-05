@@ -11,12 +11,12 @@ public sealed class TaskScriptingParserExtension : ITaskParserModuleExtension
     public static readonly TaskScriptingParserExtension Instance = new();
 
     /// <summary>
-    /// Stable trigger key recorded on the parsed step's
+    /// Stable trigger key recorded on the parsed statement's
     /// <c>ModuleTriggerKey</c> for <c>OnTimer</c> handlers.
     /// </summary>
     public const string TimerTriggerKey = "sharpclaw.task_scripting.timer";
 
-    public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings { get; } =
+    public IReadOnlyDictionary<string, (string OperationKey, string ModuleId)> OperationKeyMappings { get; } =
         new Dictionary<string, (string, string)>(StringComparer.Ordinal);
 
     public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings { get; } =

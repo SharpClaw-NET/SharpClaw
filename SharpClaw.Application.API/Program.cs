@@ -42,6 +42,7 @@ using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Agents;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Permissions;

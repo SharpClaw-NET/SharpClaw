@@ -26,7 +26,7 @@ public sealed class DotNetSidecarFixtureModule : ISharpClawRuntimeModule, ITaskP
 
     public void ConfigureServices(IServiceCollection services)
     {
-        services.AddSingleton<ITaskStepExecutorExtension, DotNetSidecarFixtureTaskStepExecutor>();
+        services.AddSingleton<ITaskOperationExecutor, DotNetSidecarFixtureTaskOperationExecutor>();
         services.AddSingleton<ITaskTriggerSource, DotNetSidecarFixtureTriggerSource>();
         services.AddSingleton<ITaskTriggerBindingSideEffect, DotNetSidecarFixtureTriggerSideEffect>();
         services.AddSingleton<ITaskMetricProvider, DotNetSidecarFixtureMetricProvider>();
@@ -118,103 +118,103 @@ public sealed class DotNetSidecarFixtureModule : ISharpClawRuntimeModule, ITaskP
     }
 }
 
-public sealed class DotNetSidecarFixtureTaskStepDescriptorProvider : ITaskStepDescriptorProvider
+public sealed class DotNetSidecarFixtureTaskOperationDescriptorProvider : ITaskOperationDescriptorProvider
 {
-    public const string StepKey = "synthetic.dotnet.step";
+    public const string OperationKey = "synthetic.dotnet.operation";
     public const string ParentHandlerTriggerKey = "synthetic.dotnet.parent_handler";
     public const string RegisteredHandlerTriggerKey = "synthetic.dotnet.registered_handler";
     public string ModuleId => DotNetSidecarFixtureModule.ModuleId;
-    public IReadOnlyList<TaskStepDescriptor> Descriptors { get; } =
+    public IReadOnlyList<TaskOperationDescriptor> Descriptors { get; } =
     [
         new()
         {
-            MethodName = "DotNetSidecarStep",
-            StepKey = StepKey,
+            MethodName = "DotNetSidecarOperation",
+            OperationKey = OperationKey,
             OwnerId = DotNetSidecarFixtureModule.ModuleId,
             FirstArgIsExpression = true,
         },
     ];
 }
 
-internal sealed class DotNetSidecarFixtureTaskStepExecutor : ITaskStepInvocationExecutor
+internal sealed class DotNetSidecarFixtureTaskOperationExecutor : ITaskOperationInvocationExecutor
 {
     public string ModuleId => DotNetSidecarFixtureModule.ModuleId;
 
-    public bool CanExecute(string moduleStepKey) =>
+    public bool CanExecute(string operationKey) =>
         string.Equals(
-            moduleStepKey,
-            DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey,
+            operationKey,
+            DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey,
             StringComparison.Ordinal);
 
     public async Task<bool> ExecuteAsync(
-        string moduleStepKey,
-        ITaskStepExecutionContext context,
+        string operationKey,
+        ITaskOperationExecutionContext context,
         IReadOnlyList<string>? arguments,
         string? expression,
         string? resultVariable)
     {
-        context.Variables["dotnetSidecarStep"] = expression ?? arguments?.FirstOrDefault() ?? "executed";
+        context.Variables["dotnetSidecarOperation"] = expression ?? arguments?.FirstOrDefault() ?? "executed";
         if (resultVariable is not null)
-            context.Variables[resultVariable] = "dotnet-sidecar-step-result";
-        await context.AppendLogAsync("dotnet sidecar step log");
+            context.Variables[resultVariable] = "dotnet-sidecar-operation-result";
+        await context.AppendLogAsync("dotnet sidecar operation log");
         await context.WriteOutputAsync("""{"dotnetSidecar":true}""");
         return true;
     }
 
-    public async Task<TaskStepResult> ExecuteInvocationAsync(
-        ITaskStepInvocation step,
-        ITaskStepExecutionContext context)
+    public async Task<TaskStatementResult> ExecuteInvocationAsync(
+        ITaskStatementInvocation statement,
+        ITaskOperationExecutionContext context)
     {
-        if (string.Equals(step.RawExpression, "run-nested", StringComparison.Ordinal)
-            && step.Body is not null)
+        if (string.Equals(statement.RawExpression, "run-nested", StringComparison.Ordinal)
+            && statement.Body is not null)
         {
-            var nestedResult = await context.ExecuteStepsAsync(step.Body, context.CancellationToken);
+            var nestedResult = await context.ExecuteStatementsAsync(statement.Body, context.CancellationToken);
             context.Variables["dotnetSidecarNestedResult"] = nestedResult.ToString();
             return nestedResult;
         }
 
-        if (string.Equals(step.RawExpression, "bridge-find-model", StringComparison.Ordinal))
+        if (string.Equals(statement.RawExpression, "bridge-find-model", StringComparison.Ordinal))
         {
             var bridge = context.Services.GetRequiredService<IHostAgentBridge>();
             var modelId = await bridge.FindModelAsync("sidecar-model", context.CancellationToken);
             context.Variables["dotnetSidecarBridgeModelId"] = modelId?.ToString();
         }
 
-        if (string.Equals(step.RawExpression, "execute-parent-handler", StringComparison.Ordinal))
+        if (string.Equals(statement.RawExpression, "execute-parent-handler", StringComparison.Ordinal))
         {
             var handler = context.EventHandlers.First(candidate =>
                 string.Equals(
                     candidate.ModuleTriggerKey,
-                    DotNetSidecarFixtureTaskStepDescriptorProvider.ParentHandlerTriggerKey,
+                    DotNetSidecarFixtureTaskOperationDescriptorProvider.ParentHandlerTriggerKey,
                     StringComparison.Ordinal));
             await handler.ExecuteBodyAsync(context.CancellationToken);
             context.Variables["dotnetSidecarParentHandlerExecuted"] = "true";
         }
 
-        if (string.Equals(step.RawExpression, "register-handler", StringComparison.Ordinal)
-            && step.Body is not null)
+        if (string.Equals(statement.RawExpression, "register-handler", StringComparison.Ordinal)
+            && statement.Body is not null)
         {
             context.RegisterEventHandler(
-                DotNetSidecarFixtureTaskStepDescriptorProvider.RegisteredHandlerTriggerKey,
+                DotNetSidecarFixtureTaskOperationDescriptorProvider.RegisteredHandlerTriggerKey,
                 "evt",
-                step.Body);
+                statement.Body);
         }
 
-        context.Variables["dotnetSidecarInvocation"] = step.RawExpression ?? "invoked";
-        if (step.ResultVariable is not null)
-            context.Variables[step.ResultVariable] = "dotnet-sidecar-invocation-result";
+        context.Variables["dotnetSidecarInvocation"] = statement.RawExpression ?? "invoked";
+        if (statement.ResultVariable is not null)
+            context.Variables[statement.ResultVariable] = "dotnet-sidecar-invocation-result";
         await context.AppendLogAsync("dotnet sidecar invocation log");
-        return TaskStepResult.Continue;
+        return TaskStatementResult.Continue;
     }
 }
 
 internal sealed class DotNetSidecarFixtureParserExtension : ITaskParserModuleExtension
 {
-    public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings { get; } =
-        new Dictionary<string, (string StepKey, string ModuleId)>(StringComparer.Ordinal)
+    public IReadOnlyDictionary<string, (string OperationKey, string ModuleId)> OperationKeyMappings { get; } =
+        new Dictionary<string, (string OperationKey, string ModuleId)>(StringComparer.Ordinal)
         {
-            ["DotNetSidecarStep"] =
-                (DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey, DotNetSidecarFixtureModule.ModuleId),
+            ["DotNetSidecarOperation"] =
+                (DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey, DotNetSidecarFixtureModule.ModuleId),
         };
 
     public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings { get; } =
@@ -225,7 +225,7 @@ internal sealed class DotNetSidecarFixtureParserExtension : ITaskParserModuleExt
         };
 
     public IReadOnlySet<string> SingleArgExpressionMethods { get; } =
-        new HashSet<string>(StringComparer.Ordinal) { "DotNetSidecarStep" };
+        new HashSet<string>(StringComparer.Ordinal) { "DotNetSidecarOperation" };
 
     public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers { get; } =
         new Dictionary<string, ITaskTriggerAttributeHandler>(StringComparer.Ordinal)

@@ -112,9 +112,9 @@ public sealed class DotNetSidecarHostTests
         (await response.Content.ReadAsStringAsync()).Should().Be("dotnet sidecar pong");
 
         var parserAware = foreignHost.Module.Should().BeAssignableTo<ITaskParserAware>().Which;
-        parserAware.ParserExtension.StepKeyMappings["DotNetSidecarStep"].StepKey
+        parserAware.ParserExtension.OperationKeyMappings["DotNetSidecarOperation"].OperationKey
             .Should()
-            .Be(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey);
+            .Be(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey);
         parserAware.ParserExtension.EventTriggerMappings["OnDotNetSidecar"].TriggerKey
             .Should()
             .Be(DotNetSidecarFixtureTriggerSource.TriggerKeyValue);
@@ -134,57 +134,57 @@ public sealed class DotNetSidecarHostTests
         foreignHost.Module.ConfigureServices(taskServices);
         await using var taskProvider = taskServices.BuildServiceProvider();
 
-        var descriptorProvider = taskProvider.GetServices<ITaskStepDescriptorProvider>()
+        var descriptorProvider = taskProvider.GetServices<ITaskOperationDescriptorProvider>()
             .Should()
             .ContainSingle()
             .Subject;
         descriptorProvider.Descriptors.Should().ContainSingle(descriptor =>
-            descriptor.StepKey == DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey);
+            descriptor.OperationKey == DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey);
 
-        var executor = taskProvider.GetServices<ITaskStepExecutorExtension>()
+        var executor = taskProvider.GetServices<ITaskOperationExecutor>()
             .Should()
             .ContainSingle()
             .Subject;
-        var executionContext = new TestTaskStepExecutionContext(hostServices);
+        var executionContext = new TestTaskOperationExecutionContext(hostServices);
         (await executor.ExecuteAsync(
-            DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey,
+            DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey,
             executionContext,
             ["arg"],
             "expression",
-            "stepResult")).Should().BeTrue();
-        executionContext.Variables["dotnetSidecarStep"].Should().Be("expression");
-        executionContext.Variables["stepResult"].Should().Be("dotnet-sidecar-step-result");
-        executionContext.Logs.Should().Contain("dotnet sidecar step log");
+            "operationResult")).Should().BeTrue();
+        executionContext.Variables["dotnetSidecarOperation"].Should().Be("expression");
+        executionContext.Variables["operationResult"].Should().Be("dotnet-sidecar-operation-result");
+        executionContext.Logs.Should().Contain("dotnet sidecar operation log");
         executionContext.Outputs.Should().Contain("""{"dotnetSidecar":true}""");
 
-        var invocationResult = await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+        var invocationResult = await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey)
             {
                 RawExpression = "raw expression",
                 ResultVariable = "invocationResult",
             },
             executionContext);
-        invocationResult.Should().Be(TaskStepResult.Continue);
+        invocationResult.Should().Be(TaskStatementResult.Continue);
         executionContext.Variables["dotnetSidecarInvocation"].Should().Be("raw expression");
         executionContext.Variables["invocationResult"].Should().Be("dotnet-sidecar-invocation-result");
 
-        var nestedResult = await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+        var nestedResult = await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey)
             {
                 RawExpression = "run-nested",
                 Body =
                 [
-                    new TestTaskStepInvocation("synthetic.parent.nested"),
+                    new TestTaskStatementInvocation("synthetic.parent.nested"),
                 ],
             },
             executionContext);
-        nestedResult.Should().Be(TaskStepResult.Continue);
-        executionContext.NestedStepKeys.Should().ContainSingle().Which.Should().Be("synthetic.parent.nested");
+        nestedResult.Should().Be(TaskStatementResult.Continue);
+        executionContext.NestedStatementKeys.Should().ContainSingle().Which.Should().Be("synthetic.parent.nested");
         executionContext.Variables["dotnetSidecarNestedResult"].Should().Be("Continue");
         executionContext.Variables["parentNestedExecuted"].Should().Be("true");
 
-        await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+        await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey)
             {
                 RawExpression = "bridge-find-model",
             },
@@ -195,11 +195,11 @@ public sealed class DotNetSidecarHostTests
         hostAgentBridge.FindModelSearches.Should().ContainSingle().Which.Should().Be("sidecar-model");
 
         executionContext.EventHandlers.Add(new TestTaskEventHandler(
-            DotNetSidecarFixtureTaskStepDescriptorProvider.ParentHandlerTriggerKey,
+            DotNetSidecarFixtureTaskOperationDescriptorProvider.ParentHandlerTriggerKey,
             "evt",
             () => executionContext.Variables["parentHandlerExecuted"] = "true"));
-        await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+        await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey)
             {
                 RawExpression = "execute-parent-handler",
             },
@@ -207,21 +207,21 @@ public sealed class DotNetSidecarHostTests
         executionContext.Variables["dotnetSidecarParentHandlerExecuted"].Should().Be("true");
         executionContext.Variables["parentHandlerExecuted"].Should().Be("true");
 
-        await ((ITaskStepInvocationExecutor)executor).ExecuteInvocationAsync(
-            new TestTaskStepInvocation(DotNetSidecarFixtureTaskStepDescriptorProvider.StepKey)
+        await ((ITaskOperationInvocationExecutor)executor).ExecuteInvocationAsync(
+            new TestTaskStatementInvocation(DotNetSidecarFixtureTaskOperationDescriptorProvider.OperationKey)
             {
                 RawExpression = "register-handler",
                 Body =
                 [
-                    new TestTaskStepInvocation("synthetic.registered.body"),
+                    new TestTaskStatementInvocation("synthetic.registered.body"),
                 ],
             },
             executionContext);
         executionContext.RegisteredHandlers
             .Should()
             .ContainSingle(handler =>
-                handler.ModuleTriggerKey == DotNetSidecarFixtureTaskStepDescriptorProvider.RegisteredHandlerTriggerKey
-                && handler.Body.Single().StepKey == "synthetic.registered.body");
+                handler.ModuleTriggerKey == DotNetSidecarFixtureTaskOperationDescriptorProvider.RegisteredHandlerTriggerKey
+                && handler.Body.Single().StatementKey == "synthetic.registered.body");
 
         var triggerSource = taskProvider.GetServices<ITaskTriggerSource>()
             .Should()
@@ -428,7 +428,7 @@ public sealed class DotNetSidecarHostTests
                 new Dictionary<string, string>(_values, StringComparer.Ordinal));
     }
 
-    private sealed class TestTaskStepExecutionContext(IServiceProvider services) : ITaskStepExecutionContext
+    private sealed class TestTaskOperationExecutionContext(IServiceProvider services) : ITaskOperationExecutionContext
     {
         public Guid InstanceId { get; } = Guid.NewGuid();
         public Guid ChannelId { get; private set; } = Guid.NewGuid();
@@ -436,11 +436,11 @@ public sealed class DotNetSidecarHostTests
         public IServiceProvider Services { get; } = services;
         public IDictionary<string, object?> Variables { get; } = new Dictionary<string, object?>(StringComparer.Ordinal);
         public List<ITaskEventHandler> EventHandlers { get; } = [];
-        IReadOnlyList<ITaskEventHandler> ITaskStepExecutionContext.EventHandlers => EventHandlers;
+        IReadOnlyList<ITaskEventHandler> ITaskOperationExecutionContext.EventHandlers => EventHandlers;
         public List<string> Logs { get; } = [];
         public List<string?> Outputs { get; } = [];
-        public List<string> NestedStepKeys { get; } = [];
-        public List<(string ModuleTriggerKey, string? ParameterName, IReadOnlyList<ITaskStepInvocation> Body)> RegisteredHandlers { get; } = [];
+        public List<string> NestedStatementKeys { get; } = [];
+        public List<(string ModuleTriggerKey, string? ParameterName, IReadOnlyList<ITaskStatementInvocation> Body)> RegisteredHandlers { get; } = [];
 
         public string ResolveExpression(string expression) =>
             Variables.TryGetValue(expression, out var value)
@@ -461,13 +461,13 @@ public sealed class DotNetSidecarHostTests
 
         public void SetChannelId(Guid channelId) => ChannelId = channelId;
 
-        public Task<TaskStepResult> ExecuteStepsAsync(
-            IReadOnlyList<ITaskStepInvocation> steps,
+        public Task<TaskStatementResult> ExecuteStatementsAsync(
+            IReadOnlyList<ITaskStatementInvocation> steps,
             CancellationToken cancellationToken)
         {
-            NestedStepKeys.AddRange(steps.Select(step => step.StepKey));
+            NestedStatementKeys.AddRange(steps.Select(step => step.StatementKey));
             Variables["parentNestedExecuted"] = "true";
-            return Task.FromResult(TaskStepResult.Continue);
+            return Task.FromResult(TaskStatementResult.Continue);
         }
 
         public bool EvaluateCondition(string? expression) =>
@@ -476,7 +476,7 @@ public sealed class DotNetSidecarHostTests
         public void RegisterEventHandler(
             string moduleTriggerKey,
             string? parameterName,
-            IReadOnlyList<ITaskStepInvocation> body)
+            IReadOnlyList<ITaskStatementInvocation> body)
         {
             RegisteredHandlers.Add((moduleTriggerKey, parameterName, body));
         }
@@ -593,7 +593,7 @@ public sealed class DotNetSidecarHostTests
         }
     }
 
-    private sealed record TestTaskStepInvocation(string StepKey) : ITaskStepInvocation
+    private sealed record TestTaskStatementInvocation(string StatementKey) : ITaskStatementInvocation
     {
         public string? VariableName { get; init; }
         public string? TypeName { get; init; }
@@ -602,8 +602,8 @@ public sealed class DotNetSidecarHostTests
         public IReadOnlyList<string>? Arguments { get; init; }
         public string? ModuleTriggerKey { get; init; }
         public string? HandlerParameter { get; init; }
-        public IReadOnlyList<ITaskStepInvocation>? Body { get; init; }
-        public IReadOnlyList<ITaskStepInvocation>? ElseBody { get; init; }
+        public IReadOnlyList<ITaskStatementInvocation>? Body { get; init; }
+        public IReadOnlyList<ITaskStatementInvocation>? ElseBody { get; init; }
     }
 
     private sealed class TestTriggerAttributeContext : TaskTriggerAttributeContext

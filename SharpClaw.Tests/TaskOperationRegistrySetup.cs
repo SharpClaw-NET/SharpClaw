@@ -9,27 +9,27 @@ using SharpClaw.Modules.Metrics;
 namespace SharpClaw.Tests;
 
 /// <summary>
-/// Global one-time test setup that seeds <see cref="TaskStepRegistry.Default"/>
+/// Global one-time test setup that seeds <see cref="TaskOperationRegistry.Default"/>
 /// with the descriptor providers contributed by the default modules and
 /// registers the default-module parser extensions with
 /// <see cref="TaskScriptParser"/>. The production host performs both during
 /// startup; tests bypass the host entirely, so we replicate that here.
 /// </summary>
 [SetUpFixture]
-public sealed class TaskStepRegistrySetup
+public sealed class TaskOperationRegistrySetup
 {
     [OneTimeSetUp]
     public void SeedRegistry()
     {
-        ITaskStepDescriptorProvider[] providers =
+        ITaskOperationDescriptorProvider[] providers =
         [
-            new AgentOrchestrationStepDescriptorProvider(),
+            new AgentOrchestrationOperationDescriptorProvider(),
         ];
 
         foreach (var provider in providers)
         {
             foreach (var descriptor in provider.Descriptors)
-                TaskStepRegistry.Default.Register(descriptor);
+                TaskOperationRegistry.Default.Register(descriptor);
         }
 
         TaskScriptParser.RegisterModule(TaskScriptingParserExtension.Instance);

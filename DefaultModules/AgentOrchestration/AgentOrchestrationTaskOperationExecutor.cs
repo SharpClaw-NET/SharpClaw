@@ -5,47 +5,47 @@ using SharpClaw.Contracts.Tasks;
 namespace SharpClaw.Modules.AgentOrchestration;
 
 /// <summary>
-/// Module-side executor for chat / output / provisioning task steps owned by
+/// Module-side executor for chat / output / provisioning task operations owned by
 /// Agent Orchestration.  All real work is delegated to
 /// <see cref="IHostAgentBridge"/>, an application-host service
-/// resolved from the running task's <see cref="ITaskStepExecutionContext.Services"/>
+/// resolved from the running task's <see cref="ITaskOperationExecutionContext.Services"/>
 /// scope.  This keeps the module free of any direct dependency on Core / EF
-/// types while still owning the step semantics.
+/// types while still owning the operation semantics.
 /// </summary>
-public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtension
+public sealed class AgentOrchestrationTaskOperationExecutor : ITaskOperationExecutor
 {
     public string ModuleId => "sharpclaw_agent_orchestration";
 
-    public bool CanExecute(string moduleStepKey) => moduleStepKey switch
+    public bool CanExecute(string operationKey) => operationKey switch
     {
-        AgentOrchestrationStepKeys.Emit
-            or AgentOrchestrationStepKeys.Chat
-            or AgentOrchestrationStepKeys.ChatStream
-            or AgentOrchestrationStepKeys.ChatToThread
-            or AgentOrchestrationStepKeys.ParseResponse
-            or AgentOrchestrationStepKeys.FindModel
-            or AgentOrchestrationStepKeys.FindProvider
-            or AgentOrchestrationStepKeys.FindAgent
-            or AgentOrchestrationStepKeys.FindRole
-            or AgentOrchestrationStepKeys.FindChannel
-            or AgentOrchestrationStepKeys.CreateAgent
-            or AgentOrchestrationStepKeys.CreateThread
-            or AgentOrchestrationStepKeys.CreateRole
-            or AgentOrchestrationStepKeys.SetRolePermissions
-            or AgentOrchestrationStepKeys.AssignRole
-            or AgentOrchestrationStepKeys.CreateChannel
-            or AgentOrchestrationStepKeys.AddAllowedAgent => true,
+        AgentOrchestrationOperationKeys.Emit
+            or AgentOrchestrationOperationKeys.Chat
+            or AgentOrchestrationOperationKeys.ChatStream
+            or AgentOrchestrationOperationKeys.ChatToThread
+            or AgentOrchestrationOperationKeys.ParseResponse
+            or AgentOrchestrationOperationKeys.FindModel
+            or AgentOrchestrationOperationKeys.FindProvider
+            or AgentOrchestrationOperationKeys.FindAgent
+            or AgentOrchestrationOperationKeys.FindRole
+            or AgentOrchestrationOperationKeys.FindChannel
+            or AgentOrchestrationOperationKeys.CreateAgent
+            or AgentOrchestrationOperationKeys.CreateThread
+            or AgentOrchestrationOperationKeys.CreateRole
+            or AgentOrchestrationOperationKeys.SetRolePermissions
+            or AgentOrchestrationOperationKeys.AssignRole
+            or AgentOrchestrationOperationKeys.CreateChannel
+            or AgentOrchestrationOperationKeys.AddAllowedAgent => true,
         _ => false,
     };
 
     public async Task<bool> ExecuteAsync(
-        string moduleStepKey,
-        ITaskStepExecutionContext context,
+        string operationKey,
+        ITaskOperationExecutionContext context,
         IReadOnlyList<string>? arguments,
         string? expression,
         string? resultVariable)
     {
-        if (moduleStepKey == AgentOrchestrationStepKeys.Emit)
+        if (operationKey == AgentOrchestrationOperationKeys.Emit)
         {
             await context.WriteOutputAsync(expression);
             return true;
@@ -55,9 +55,9 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
         var ct = context.CancellationToken;
         var taskName = string.Empty;
 
-        switch (moduleStepKey)
+        switch (operationKey)
         {
-            case AgentOrchestrationStepKeys.Chat:
+            case AgentOrchestrationOperationKeys.Chat:
             {
                 var agentId = ParseGuidArg(arguments, 0);
                 var content = await bridge.ChatAsync(
@@ -66,7 +66,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = content;
                 break;
             }
-            case AgentOrchestrationStepKeys.ChatStream:
+            case AgentOrchestrationOperationKeys.ChatStream:
             {
                 var agentId = ParseGuidArg(arguments, 0);
                 var content = await bridge.ChatStreamAsync(
@@ -75,7 +75,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = content;
                 break;
             }
-            case AgentOrchestrationStepKeys.ChatToThread:
+            case AgentOrchestrationOperationKeys.ChatToThread:
             {
                 if (arguments is null || arguments.Count < 1 || !Guid.TryParse(arguments[0], out var threadId))
                     throw new InvalidOperationException(
@@ -87,7 +87,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = content;
                 break;
             }
-            case AgentOrchestrationStepKeys.ParseResponse:
+            case AgentOrchestrationOperationKeys.ParseResponse:
             {
                 var typeName = arguments is { Count: > 0 } ? arguments[0] : null;
                 var parsed = bridge.ParseStructuredResponse(
@@ -96,27 +96,27 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = parsed;
                 break;
             }
-            case AgentOrchestrationStepKeys.FindModel:
+            case AgentOrchestrationOperationKeys.FindModel:
                 StoreFindResult(resultVariable,
                     await bridge.FindModelAsync(expression ?? string.Empty, ct), context);
                 break;
-            case AgentOrchestrationStepKeys.FindProvider:
+            case AgentOrchestrationOperationKeys.FindProvider:
                 StoreFindResult(resultVariable,
                     await bridge.FindProviderAsync(expression ?? string.Empty, ct), context);
                 break;
-            case AgentOrchestrationStepKeys.FindAgent:
+            case AgentOrchestrationOperationKeys.FindAgent:
                 StoreFindResult(resultVariable,
                     await bridge.FindAgentAsync(expression ?? string.Empty, ct), context);
                 break;
-            case AgentOrchestrationStepKeys.FindRole:
+            case AgentOrchestrationOperationKeys.FindRole:
                 StoreFindResult(resultVariable,
                     await bridge.FindRoleAsync(expression ?? string.Empty, ct), context);
                 break;
-            case AgentOrchestrationStepKeys.FindChannel:
+            case AgentOrchestrationOperationKeys.FindChannel:
                 StoreFindResult(resultVariable,
                     await bridge.FindChannelAsync(expression ?? string.Empty, ct), context);
                 break;
-            case AgentOrchestrationStepKeys.CreateAgent:
+            case AgentOrchestrationOperationKeys.CreateAgent:
             {
                 var name = arguments is { Count: > 0 } ? arguments[0] : "Task Agent";
                 var modelId = ParseGuidArg(arguments, 1) ?? Guid.Empty;
@@ -128,7 +128,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = id.ToString();
                 break;
             }
-            case AgentOrchestrationStepKeys.CreateThread:
+            case AgentOrchestrationOperationKeys.CreateThread:
             {
                 var channelId = ParseGuidArg(arguments, 0);
                 var threadName = arguments is { Count: > 1 } ? arguments[1] : null;
@@ -137,7 +137,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = id.ToString();
                 break;
             }
-            case AgentOrchestrationStepKeys.CreateRole:
+            case AgentOrchestrationOperationKeys.CreateRole:
             {
                 var id = await bridge.CreateRoleAsync(expression ?? string.Empty, ct);
                 if (resultVariable is not null)
@@ -145,7 +145,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                 await context.AppendLogAsync($"CreateRole '{expression}' → {id}");
                 break;
             }
-            case AgentOrchestrationStepKeys.SetRolePermissions:
+            case AgentOrchestrationOperationKeys.SetRolePermissions:
             {
                 if (!Guid.TryParse(expression, out var roleId))
                     throw new InvalidOperationException($"SetRolePermissions: invalid role ID '{expression}'.");
@@ -154,7 +154,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                 await context.AppendLogAsync($"SetRolePermissions {roleId}");
                 break;
             }
-            case AgentOrchestrationStepKeys.AssignRole:
+            case AgentOrchestrationOperationKeys.AssignRole:
             {
                 if (!Guid.TryParse(expression, out var agentId))
                     throw new InvalidOperationException($"AssignRole: invalid agent ID '{expression}'.");
@@ -164,7 +164,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                 await context.AppendLogAsync($"AssignRole agent={agentId} role={roleId}");
                 break;
             }
-            case AgentOrchestrationStepKeys.CreateChannel:
+            case AgentOrchestrationOperationKeys.CreateChannel:
             {
                 var title = expression ?? string.Empty;
                 var agentId = ParseGuidArg(arguments, 1)
@@ -180,7 +180,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
                     context.Variables[resultVariable] = channelId.ToString();
                 break;
             }
-            case AgentOrchestrationStepKeys.AddAllowedAgent:
+            case AgentOrchestrationOperationKeys.AddAllowedAgent:
             {
                 if (!Guid.TryParse(expression, out var agentId))
                     throw new InvalidOperationException($"AddAllowedAgent: invalid agent ID '{expression}'.");
@@ -199,7 +199,7 @@ public sealed class AgentOrchestrationTaskStepExecutor : ITaskStepExecutorExtens
         return Guid.TryParse(args[index], out var g) ? g : null;
     }
 
-    private static void StoreFindResult(string? resultVariable, Guid? id, ITaskStepExecutionContext context)
+    private static void StoreFindResult(string? resultVariable, Guid? id, ITaskOperationExecutionContext context)
     {
         if (resultVariable is not null)
             context.Variables[resultVariable] = id?.ToString();

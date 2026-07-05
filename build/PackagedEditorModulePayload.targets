@@ -1,0 +1,42 @@
+<Project>
+  <Target Name="_ResolvePackagedEditorModulePayloadFiles">
+    <ItemGroup>
+      <_PackagedEditorModuleDll Remove="@(_PackagedEditorModuleDll)" />
+      <_PackagedEditorDependencyDll Remove="@(_PackagedEditorDependencyDll)" />
+      <_PackagedEditorPayloadDll Remove="@(_PackagedEditorPayloadDll)" />
+      <_PackagedEditorModuleManifest Remove="@(_PackagedEditorModuleManifest)" />
+
+      <_PackagedEditorModuleDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.Modules.*.dll"
+                                Condition="'$(PkgSharpClaw_Modules_EditorCommon)' != ''" />
+      <_PackagedEditorModuleDll Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\SharpClaw.Modules.*.dll"
+                                Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
+      <_PackagedEditorModuleDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.Modules.*.dll"
+                                Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+
+      <_PackagedEditorDependencyDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_EditorCommon)' != ''" />
+      <_PackagedEditorDependencyDll Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
+      <_PackagedEditorDependencyDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+
+      <_PackagedEditorModuleManifest Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json"
+                                     Condition="Exists('$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_editor_common</ModuleId>
+      </_PackagedEditorModuleManifest>
+      <_PackagedEditorModuleManifest Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\module.json"
+                                     Condition="Exists('$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_vs2026_editor</ModuleId>
+      </_PackagedEditorModuleManifest>
+      <_PackagedEditorModuleManifest Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json"
+                                     Condition="Exists('$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_vscode_editor</ModuleId>
+      </_PackagedEditorModuleManifest>
+
+      <_PackagedEditorPayloadDll Include="@(_PackagedEditorModuleDll);@(_PackagedEditorDependencyDll)" />
+    </ItemGroup>
+  </Target>
+</Project>

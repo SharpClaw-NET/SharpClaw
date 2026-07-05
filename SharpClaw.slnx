@@ -27,7 +27,6 @@
   <Folder Name="/Solution Items/" />
   <Folder Name="/DefaultModules/">
     <Project Path="DefaultModules/AgentOrchestration/SharpClaw.Modules.AgentOrchestration.csproj" />
-    <Project Path="DefaultModules/EditorCommon/SharpClaw.Modules.EditorCommon.csproj" />
     <Project Path="DefaultModules/Metrics/SharpClaw.Modules.Metrics.csproj" />
     <Project Path="DefaultModules/ModuleDev/SharpClaw.Modules.ModuleDev.csproj" />
     <Project Path="DefaultModules/Providers/Anthropic/SharpClaw.Modules.Providers.Anthropic.csproj" />
@@ -36,8 +35,6 @@
     <Project Path="DefaultModules/Providers/Ollama/SharpClaw.Modules.Providers.Ollama.csproj" />
     <Project Path="DefaultModules/Providers/OpenAICompatible/SharpClaw.Modules.Providers.OpenAICompatible.csproj" />
     <Project Path="DefaultModules/TestHarness/SharpClaw.Modules.TestHarness.csproj" />
-    <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
-    <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">
     <File Path="Directory.Build.props" />

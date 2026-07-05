@@ -21,7 +21,7 @@ using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Utils.Security;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 namespace SharpClaw.Application.Core.Modules;
 
@@ -210,7 +210,7 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         ForwardHostSingleton<IConfiguration>(hostServices, services);
 
         module.ConfigureServices(services);
-        RegisterTaskStepDescriptorProviders(services, moduleAssembly);
+        RegisterTaskOperationDescriptorProviders(services, moduleAssembly);
         RegisterHostCapabilities(services, module.Id, hostServices);
 
         return services.BuildServiceProvider();
@@ -304,17 +304,17 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         services.RemoveAll<ISharpClawEventSinkRegistry>();
     }
 
-    private static void RegisterTaskStepDescriptorProviders(
+    private static void RegisterTaskOperationDescriptorProviders(
         IServiceCollection services,
         Assembly assembly)
     {
         foreach (var providerType in assembly.GetTypes()
                      .Where(type => !type.IsAbstract
                                     && !type.IsInterface
-                                    && typeof(ITaskStepDescriptorProvider).IsAssignableFrom(type)
+                                    && typeof(ITaskOperationDescriptorProvider).IsAssignableFrom(type)
                                     && type.GetConstructor(Type.EmptyTypes) is not null))
         {
-            services.AddSingleton(typeof(ITaskStepDescriptorProvider), providerType);
+            services.AddSingleton(typeof(ITaskOperationDescriptorProvider), providerType);
         }
     }
 

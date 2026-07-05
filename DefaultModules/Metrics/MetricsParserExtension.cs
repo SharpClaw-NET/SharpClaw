@@ -7,7 +7,7 @@ public sealed class MetricsParserExtension : ITaskParserModuleExtension
 {
     public static readonly MetricsParserExtension Instance = new();
 
-    public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings { get; } =
+    public IReadOnlyDictionary<string, (string OperationKey, string ModuleId)> OperationKeyMappings { get; } =
         new Dictionary<string, (string, string)>(StringComparer.Ordinal);
 
     public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings { get; } =

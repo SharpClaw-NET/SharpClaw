@@ -35,9 +35,9 @@ public class LoopTask
 
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
-        result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].StepKey.Should().Be(TaskLanguageStepKeys.Loop);
-        result.Plan.ExecutionSteps[0].VariableName.Should().Be("item");
+        result.Plan!.ExecutionStatements.Should().ContainSingle();
+        result.Plan.ExecutionStatements[0].StatementKey.Should().Be(TaskLanguageStatementKeys.Loop);
+        result.Plan.ExecutionStatements[0].VariableName.Should().Be("item");
         result.Plan.ParameterValues["Items"].Should().BeAssignableTo<List<object?>>();
     }
 
@@ -62,8 +62,8 @@ public class WhileTask
 
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
-        result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].VariableName.Should().BeNull();
+        result.Plan!.ExecutionStatements.Should().ContainSingle();
+        result.Plan.ExecutionStatements[0].VariableName.Should().BeNull();
     }
 
     [Test]

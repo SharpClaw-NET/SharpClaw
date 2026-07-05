@@ -101,7 +101,7 @@ public sealed class TaskOrchestrator(
             instanceId,
             startupTiming.ElapsedMilliseconds,
             PathGuard.SanitizeForLog(plan.TaskName),
-            plan.ExecutionSteps.Count);
+            plan.ExecutionStatements.Count);
 
         _ = Task.Run(
             () => ExecutePlanAsync(

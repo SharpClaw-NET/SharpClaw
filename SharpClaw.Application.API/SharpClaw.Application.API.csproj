@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\build\PackagedEditorModulePayload.targets" />
+
   <PropertyGroup>
     <OutputType>Exe</OutputType>
     <TargetFramework>net10.0</TargetFramework>
@@ -26,6 +28,9 @@
   <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <ProjectReference Include="..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
@@ -59,9 +64,6 @@
     <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\EditorCommon\SharpClaw.Modules.EditorCommon.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
     <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
@@ -86,12 +88,6 @@
     <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj">
       <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
     </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\VS2026Editor\SharpClaw.Modules.VS2026Editor.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
-    <ProjectReference Include="..\DefaultModules\VSCodeEditor\SharpClaw.Modules.VSCodeEditor.csproj">
-      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
-    </ProjectReference>
   </ItemGroup>
 
   <!--
@@ -102,11 +98,15 @@
 
     Module DLLs:       SharpClaw.Modules.*.dll
     Transitive deps:   *.dll that do NOT start with SharpClaw. (e.g. Cronos, NAudio)
+    Packaged modules:  copied from each restored package's sharpclaw/ payload. SharpClaw.*
+                       payload dependencies are excluded except the module entry DLLs, so package
+                       payloads cannot overwrite freshly built host-owned SharpClaw assemblies.
 
     SkipUnchangedFiles avoids unnecessary copies on incremental builds. Both top-level
     (DefaultModules\Foo\) and nested (DefaultModules\Providers\Foo\) module layouts are matched.
   -->
-  <Target Name="_ResolveBundledModuleOutputFiles">
+  <Target Name="_ResolveBundledModuleOutputFiles"
+          DependsOnTargets="_ResolvePackagedEditorModulePayloadFiles">
     <ItemGroup>
       <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
@@ -119,7 +119,7 @@
       <_DotNetSidecarHostFile Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost"
                               Condition="Exists('$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost')" />
       <_DotNetSidecarHostFile Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.DotNetSidecarHost\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.DotNetSidecarHost.*" />
-      <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_DotNetSidecarHostFile)" />
+      <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_DotNetSidecarHostFile);@(_PackagedEditorPayloadDll)" />
     </ItemGroup>
   </Target>
 
@@ -127,12 +127,20 @@
           AfterTargets="Build"
           DependsOnTargets="_ResolveBundledModuleOutputFiles">
     <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedEditorModuleManifest)"
+          DestinationFiles="@(_PackagedEditorModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedEditorModuleManifest)' != ''" />
   </Target>
 
   <Target Name="CopyBundledModulesToPublish"
           AfterTargets="Publish"
           DependsOnTargets="_ResolveBundledModuleOutputFiles">
     <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedEditorModuleManifest)"
+          DestinationFiles="@(_PackagedEditorModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedEditorModuleManifest)' != ''" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">

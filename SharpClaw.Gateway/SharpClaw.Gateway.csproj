@@ -17,6 +17,9 @@
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
     <PackageReference Include="SharpClaw.Modules.Hosting" />
+    <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <ProjectReference Include="..\SharpClaw.Gateway.Abstractions\SharpClaw.Gateway.Abstractions.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
   </ItemGroup>
@@ -31,6 +34,12 @@
     <ItemGroup>
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
       <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\DefaultModules\*\*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.*.dll" />
+      <_BundledModuleDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.Modules.*.dll"
+                         Condition="'$(PkgSharpClaw_Modules_EditorCommon)' != ''" />
+      <_BundledModuleDll Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\SharpClaw.Modules.*.dll"
+                         Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
+      <_BundledModuleDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.Modules.*.dll"
+                         Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
   </Target>

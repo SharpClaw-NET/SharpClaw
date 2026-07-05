@@ -4,7 +4,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// Stable task-operation keys owned by the Agent Orchestration module for
 /// chat/output and entity lookup/provisioning operations.
 /// </summary>
-public static class AgentOrchestrationStepKeys
+public static class AgentOrchestrationOperationKeys
 {
     private const string Prefix = "sharpclaw_agent_orchestration.";
 

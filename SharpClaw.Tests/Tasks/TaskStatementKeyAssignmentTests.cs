@@ -9,12 +9,12 @@ namespace SharpClaw.Tests.Tasks;
 
 /// <summary>
 /// Verifies that the parser sets the correct step key on every
-/// parsed <see cref="TaskStepDefinition.StepKey"/> for representative step
+/// parsed <see cref="TaskStatementDefinition.StatementKey"/> for representative step
 /// kind. C# language statements are Core-owned; Agent Orchestration contributes
 /// only module/tool operation calls and trigger names.
 /// </summary>
 [TestFixture]
-public class TaskStepKeyAssignmentTests
+public class TaskStatementKeyAssignmentTests
 {
     // ── Helpers ──────────────────────────────────────────────────────────────
 
@@ -37,7 +37,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var x = 1;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.DeclareVariable);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.DeclareVariable);
     }
 
     [Test]
@@ -46,7 +46,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("x = 1;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Assign);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Assign);
     }
 
     [Test]
@@ -55,7 +55,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("if (true) { Log(\"y\"); }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Conditional);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Conditional);
     }
 
     [Test]
@@ -64,7 +64,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("while (false) { }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Loop);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Loop);
     }
 
     [Test]
@@ -73,7 +73,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("foreach (var item in items) { Log(item); }"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Loop);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Loop);
     }
 
     [Test]
@@ -82,7 +82,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("return;"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Return);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Return);
     }
 
     // ── Context-API method calls ──────────────────────────────────────────────
@@ -93,7 +93,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("Log(\"hello\");"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Log);
     }
 
     [Test]
@@ -102,7 +102,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var r = await Chat(agentId, \"hello\");"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.Chat);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.Chat);
     }
 
     [Test]
@@ -111,7 +111,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await ChatStream(agentId, \"msg\");"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.ChatStream);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.ChatStream);
     }
 
     [Test]
@@ -120,7 +120,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await Emit(result);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.Emit);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.Emit);
     }
 
     [Test]
@@ -129,7 +129,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("var r = await ParseResponse<MyData>(reply);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.ParseResponse);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.ParseResponse);
     }
 
     [Test]
@@ -138,7 +138,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await Task.Delay(1000);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.Delay);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Delay);
     }
 
     [Test]
@@ -147,7 +147,7 @@ public class TestTask
         var result = TaskScriptEngine.Parse(Wrap("await WaitUntilStopped();"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(TaskLanguageStepKeys.WaitUntilStopped);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.WaitUntilStopped);
     }
 
     [Test]
@@ -176,13 +176,13 @@ return;
             var result = TaskScriptEngine.Parse(source);
 
             result.Success.Should().BeTrue(string.Join(Environment.NewLine, result.Diagnostics.Select(d => d.Message)));
-            result.Definition!.Steps.Select(step => step.StepKey).Should().Equal(
-                TaskLanguageStepKeys.DeclareVariable,
-                TaskLanguageStepKeys.Assign,
-                TaskLanguageStepKeys.Conditional,
-                TaskLanguageStepKeys.Loop,
-                TaskLanguageStepKeys.WaitUntilStopped,
-                TaskLanguageStepKeys.Return);
+            result.Definition!.Statements.Select(step => step.StatementKey).Should().Equal(
+                TaskLanguageStatementKeys.DeclareVariable,
+                TaskLanguageStatementKeys.Assign,
+                TaskLanguageStatementKeys.Conditional,
+                TaskLanguageStatementKeys.Loop,
+                TaskLanguageStatementKeys.WaitUntilStopped,
+                TaskLanguageStatementKeys.Return);
         }
         finally
         {
@@ -196,7 +196,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var m = await FindModel(modelId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.FindModel);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.FindModel);
     }
 
     [Test]
@@ -205,7 +205,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var a = await FindAgent(agentId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.FindAgent);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.FindAgent);
     }
 
     [Test]
@@ -214,7 +214,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var a = await CreateAgent(\"name\", modelId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.CreateAgent);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.CreateAgent);
     }
 
     [Test]
@@ -223,7 +223,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var c = await CreateChannel(\"title\", agentId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.CreateChannel);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.CreateChannel);
     }
 
     [Test]
@@ -232,7 +232,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var c = await FindChannel(channelId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.FindChannel);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.FindChannel);
     }
 
     [Test]
@@ -241,7 +241,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("var r = await CreateRole(\"admin\");"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.CreateRole);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.CreateRole);
     }
 
     [Test]
@@ -250,7 +250,7 @@ return;
         var result = TaskScriptEngine.Parse(Wrap("await AssignRole(agentId, roleId);"));
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Single().StepKey.Should().Be(AgentOrchestrationStepKeys.AssignRole);
+        result.Definition!.Statements.Single().StatementKey.Should().Be(AgentOrchestrationOperationKeys.AssignRole);
     }
 
     [Test]
@@ -258,23 +258,23 @@ return;
     {
         var keys = new[]
         {
-            AgentOrchestrationStepKeys.Chat,
-            AgentOrchestrationStepKeys.ChatStream,
-            AgentOrchestrationStepKeys.ChatToThread,
-            AgentOrchestrationStepKeys.Emit,
-            AgentOrchestrationStepKeys.ParseResponse,
-            AgentOrchestrationStepKeys.FindModel,
-            AgentOrchestrationStepKeys.FindProvider,
-            AgentOrchestrationStepKeys.FindAgent,
-            AgentOrchestrationStepKeys.CreateAgent,
-            AgentOrchestrationStepKeys.CreateThread,
-            AgentOrchestrationStepKeys.CreateRole,
-            AgentOrchestrationStepKeys.FindRole,
-            AgentOrchestrationStepKeys.SetRolePermissions,
-            AgentOrchestrationStepKeys.AssignRole,
-            AgentOrchestrationStepKeys.CreateChannel,
-            AgentOrchestrationStepKeys.FindChannel,
-            AgentOrchestrationStepKeys.AddAllowedAgent,
+            AgentOrchestrationOperationKeys.Chat,
+            AgentOrchestrationOperationKeys.ChatStream,
+            AgentOrchestrationOperationKeys.ChatToThread,
+            AgentOrchestrationOperationKeys.Emit,
+            AgentOrchestrationOperationKeys.ParseResponse,
+            AgentOrchestrationOperationKeys.FindModel,
+            AgentOrchestrationOperationKeys.FindProvider,
+            AgentOrchestrationOperationKeys.FindAgent,
+            AgentOrchestrationOperationKeys.CreateAgent,
+            AgentOrchestrationOperationKeys.CreateThread,
+            AgentOrchestrationOperationKeys.CreateRole,
+            AgentOrchestrationOperationKeys.FindRole,
+            AgentOrchestrationOperationKeys.SetRolePermissions,
+            AgentOrchestrationOperationKeys.AssignRole,
+            AgentOrchestrationOperationKeys.CreateChannel,
+            AgentOrchestrationOperationKeys.FindChannel,
+            AgentOrchestrationOperationKeys.AddAllowedAgent,
         };
 
         keys.Should().OnlyContain(key => key.StartsWith("sharpclaw_agent_orchestration.", StringComparison.Ordinal));
@@ -284,10 +284,10 @@ return;
     [Test]
     public void AgentOrchestrationExecutor_HandlesOnlyModuleOwnedOperationKeys()
     {
-        var executor = new AgentOrchestrationTaskStepExecutor();
+        var executor = new AgentOrchestrationTaskOperationExecutor();
 
-        executor.CanExecute(AgentOrchestrationStepKeys.ParseResponse).Should().BeTrue();
-        executor.CanExecute(AgentOrchestrationStepKeys.Chat).Should().BeTrue();
+        executor.CanExecute(AgentOrchestrationOperationKeys.ParseResponse).Should().BeTrue();
+        executor.CanExecute(AgentOrchestrationOperationKeys.Chat).Should().BeTrue();
         executor.CanExecute("core.parse_response").Should().BeFalse();
         executor.CanExecute("core.chat").Should().BeFalse();
     }
@@ -309,10 +309,10 @@ else
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var cond = result.Definition!.Steps.Single();
-        cond.StepKey.Should().Be(TaskLanguageStepKeys.Conditional);
-        cond.Body!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
-        cond.ElseBody!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
+        var cond = result.Definition!.Statements.Single();
+        cond.StatementKey.Should().Be(TaskLanguageStatementKeys.Conditional);
+        cond.Body!.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Log);
+        cond.ElseBody!.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Log);
     }
 
     [Test]
@@ -328,9 +328,9 @@ while (true)
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var loop = result.Definition!.Steps.Single();
-        loop.StepKey.Should().Be(TaskLanguageStepKeys.Loop);
-        loop.Body!.Single().StepKey.Should().Be(TaskLanguageStepKeys.Log);
+        var loop = result.Definition!.Statements.Single();
+        loop.StatementKey.Should().Be(TaskLanguageStatementKeys.Loop);
+        loop.Body!.Single().StatementKey.Should().Be(TaskLanguageStatementKeys.Log);
     }
 }
 

@@ -13,7 +13,7 @@ using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
@@ -243,10 +243,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await DeleteTaskAsync(services, Deserialize<ForeignModuleTaskIdRequest>(request), ct),
             ForeignModuleHostCapabilityProtocol.TaskLaunchPath =>
                 await LaunchTaskAsync(services, Deserialize<ForeignModuleTaskLaunchRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskContextExecuteStepsPath =>
-                await ExecuteTaskContextStepsAsync(
+            ForeignModuleHostCapabilityProtocol.TaskContextExecuteStatementsPath =>
+                await ExecuteTaskContextStatementsAsync(
                     services,
-                    Deserialize<ForeignModuleTaskContextExecuteStepsRequest>(request),
+                    Deserialize<ForeignModuleTaskContextExecuteStatementsRequest>(request),
                     ct),
             ForeignModuleHostCapabilityProtocol.TaskContextExecuteEventHandlerPath =>
                 await ExecuteTaskContextEventHandlerAsync(
@@ -658,15 +658,15 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         return new ForeignModuleTaskLaunchResponse(instanceId);
     }
 
-    private static async Task<ForeignModuleTaskContextExecutionResponse> ExecuteTaskContextStepsAsync(
+    private static async Task<ForeignModuleTaskContextExecutionResponse> ExecuteTaskContextStatementsAsync(
         IServiceProvider services,
-        ForeignModuleTaskContextExecuteStepsRequest request,
+        ForeignModuleTaskContextExecuteStatementsRequest request,
         CancellationToken ct)
     {
         var context = ResolveTaskContext(services, request.ContextId);
         ApplyTaskContextSnapshot(context, request.ChannelId, request.Variables);
-        var result = await context.ExecuteStepsAsync(
-            [.. request.Steps.Select(ForeignModuleProxy.ToTaskStepDefinition)],
+        var result = await context.ExecuteStatementsAsync(
+            [.. request.Statements.Select(ForeignModuleProxy.ToTaskStatementDefinition)],
             ct);
         return CreateTaskContextResponse(result, context);
     }
@@ -685,10 +685,10 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
 
         ApplyTaskContextSnapshot(context, request.ChannelId, request.Variables);
         await handler.ExecuteBodyAsync(ct);
-        return CreateTaskContextResponse(TaskStepResult.Continue, context);
+        return CreateTaskContextResponse(TaskStatementResult.Continue, context);
     }
 
-    private static ITaskStepExecutionContext ResolveTaskContext(
+    private static ITaskOperationExecutionContext ResolveTaskContext(
         IServiceProvider services,
         string contextId)
     {
@@ -702,7 +702,7 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     }
 
     private static void ApplyTaskContextSnapshot(
-        ITaskStepExecutionContext context,
+        ITaskOperationExecutionContext context,
         Guid? channelId,
         IReadOnlyDictionary<string, JsonElement>? variables)
     {
@@ -717,8 +717,8 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     }
 
     private static ForeignModuleTaskContextExecutionResponse CreateTaskContextResponse(
-        TaskStepResult result,
-        ITaskStepExecutionContext context) =>
+        TaskStatementResult result,
+        ITaskOperationExecutionContext context) =>
         new(
             result,
             context.ChannelId,

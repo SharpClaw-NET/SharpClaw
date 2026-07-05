@@ -317,12 +317,12 @@ async Task HandleAsync(TcpClient client)
                     },
                     taskParser = new
                     {
-                        stepKeyMappings = new[]
+                        operationKeyMappings = new[]
                         {
                             new
                             {
-                                methodName = "SampleTaskStep",
-                                stepKey = "sample.task.step",
+                                methodName = "SampleTaskOperation",
+                                statementKey = "sample.task.operation",
                                 moduleId,
                             },
                         },
@@ -335,7 +335,7 @@ async Task HandleAsync(TcpClient client)
                                 moduleId,
                             },
                         },
-                        singleArgExpressionMethods = new[] { "SampleTaskStep" },
+                        singleArgExpressionMethods = new[] { "SampleTaskOperation" },
                         triggerAttributeHandlers = new[]
                         {
                             new
@@ -345,22 +345,22 @@ async Task HandleAsync(TcpClient client)
                             },
                         },
                     },
-                    taskStepDescriptors = new[]
+                    taskOperationDescriptors = new[]
                     {
                         new
                         {
-                            methodName = "SampleTaskStep",
-                            stepKey = "sample.task.step",
+                            methodName = "SampleTaskOperation",
+                            operationKey = "sample.task.operation",
                             ownerId = moduleId,
                             firstArgIsExpression = true,
                         },
                     },
-                    taskStepExecutors = new[]
+                    taskOperationExecutors = new[]
                     {
                         new
                         {
                             moduleId,
-                            stepKeys = new[] { "sample.task.step" },
+                            operationKeys = new[] { "sample.task.operation" },
                             supportsInvocation = true,
                         },
                     },
@@ -549,22 +549,22 @@ async Task HandleAsync(TcpClient client)
                 });
                 break;
 
-            case "/.sharpclaw/tasks/steps/execute":
+            case "/.sharpclaw/tasks/operations/execute":
                 await WriteJsonAsync(stream, new
                 {
                     result = "Continue",
                     @continue = true,
                     variableUpdates = new Dictionary<string, object?>
                     {
-                        ["sidecarStep"] = "executed",
+                        ["sidecarOperation"] = "executed",
                     },
-                    resultVariableValue = "step-result",
-                    logs = new[] { "step log" },
+                    resultVariableValue = "operation-result",
+                    logs = new[] { "operation log" },
                     outputJson = """{"sidecar":true}""",
                 });
                 break;
 
-            case "/.sharpclaw/tasks/steps/invoke":
+            case "/.sharpclaw/tasks/operations/invoke":
                 await WriteJsonAsync(stream, new
                 {
                     result = "Continue",

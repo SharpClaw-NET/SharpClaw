@@ -38,7 +38,7 @@ public sealed class AgentOrchestrationModule : ISharpClawRuntimeModule, ITaskPar
         services.AddScoped<ScheduledJobStore>();
         services.AddScoped<SkillStore>();
         services.TryAddScoped<AgentOrchestrationService>();
-        services.AddScoped<ITaskStepExecutorExtension, AgentOrchestrationTaskStepExecutor>();
+        services.AddScoped<ITaskOperationExecutor, AgentOrchestrationTaskOperationExecutor>();
 
         // Event-bus triggers (Event / TaskCompleted / TaskFailed) — moved here
         // from core by the trigger-extraction plan. The same instance is

@@ -5,22 +5,22 @@ namespace SharpClaw.Application.Core.Modules.Foreign;
 
 public sealed class ForeignModuleTaskContextRegistry
 {
-    private readonly ConcurrentDictionary<string, ITaskStepExecutionContext> _contexts = new(StringComparer.Ordinal);
+    private readonly ConcurrentDictionary<string, ITaskOperationExecutionContext> _contexts = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, RegisteredEventHandler> _eventHandlers = new(StringComparer.Ordinal);
 
-    internal ForeignModuleTaskContextRegistration Register(ITaskStepExecutionContext context)
+    internal ForeignModuleTaskContextRegistration Register(ITaskOperationExecutionContext context)
     {
         var contextId = Guid.NewGuid().ToString("N");
         _contexts[contextId] = context;
         return new ForeignModuleTaskContextRegistration(this, contextId);
     }
 
-    internal bool TryGetContext(string contextId, out ITaskStepExecutionContext context) =>
+    internal bool TryGetContext(string contextId, out ITaskOperationExecutionContext context) =>
         _contexts.TryGetValue(contextId, out context!);
 
     internal bool TryGetEventHandler(
         string handlerId,
-        out ITaskStepExecutionContext context,
+        out ITaskOperationExecutionContext context,
         out ITaskEventHandler handler)
     {
         if (_eventHandlers.TryGetValue(handlerId, out var registered)

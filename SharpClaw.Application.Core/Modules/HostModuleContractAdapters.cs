@@ -21,7 +21,7 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Clients;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 namespace SharpClaw.Application.Core.Modules;
 

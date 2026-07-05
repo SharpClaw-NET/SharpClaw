@@ -7,7 +7,7 @@ using SharpClaw.Contracts.DTOs.Providers;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 namespace SharpClaw.Application.Core.Modules.Foreign;
 
@@ -35,8 +35,8 @@ internal sealed class ForeignModuleProxy(
     private IReadOnlyList<ModuleStorageContractDescriptor> _storageContracts = [];
     private IReadOnlyList<ForeignModuleCliCommandDescriptor> _cliCommands = [];
     private ForeignModuleTaskParserDescriptor? _taskParser;
-    private IReadOnlyList<TaskStepDescriptor> _taskStepDescriptors = [];
-    private IReadOnlyList<ForeignModuleTaskStepExecutorDescriptor> _taskStepExecutors = [];
+    private IReadOnlyList<TaskOperationDescriptor> _taskOperationDescriptors = [];
+    private IReadOnlyList<ForeignModuleTaskOperationExecutorDescriptor> _taskOperationExecutors = [];
     private IReadOnlyList<ForeignModuleTaskTriggerSourceDescriptor> _taskTriggerSources = [];
     private IReadOnlyList<ForeignModuleTaskTriggerBindingSideEffectDescriptor> _taskTriggerBindingSideEffects = [];
     private IReadOnlyList<ForeignModuleTaskMetricProviderDescriptor> _taskMetricProviders = [];
@@ -50,18 +50,18 @@ internal sealed class ForeignModuleProxy(
 
     public void ConfigureServices(IServiceCollection services)
     {
-        if (_taskStepDescriptors.Count > 0)
+        if (_taskOperationDescriptors.Count > 0)
         {
-            services.AddSingleton<ITaskStepDescriptorProvider>(
-                new ForeignModuleTaskStepDescriptorProvider(manifest.Id, _taskStepDescriptors));
+            services.AddSingleton<ITaskOperationDescriptorProvider>(
+                new ForeignModuleTaskOperationDescriptorProvider(manifest.Id, _taskOperationDescriptors));
         }
 
-        foreach (var executor in _taskStepExecutors)
+        foreach (var executor in _taskOperationExecutors)
         {
-            services.AddSingleton<ITaskStepExecutorExtension>(
+            services.AddSingleton<ITaskOperationExecutor>(
                 executor.SupportsInvocation
-                    ? new ForeignModuleTaskStepInvocationExecutor(manifest, client, executor)
-                    : new ForeignModuleTaskStepExecutor(manifest, client, executor));
+                    ? new ForeignModuleTaskOperationInvocationExecutor(manifest, client, executor)
+                    : new ForeignModuleTaskOperationExecutor(manifest, client, executor));
         }
 
         foreach (var source in _taskTriggerSources)
@@ -125,7 +125,7 @@ internal sealed class ForeignModuleProxy(
     public IReadOnlyList<ForeignModuleProtocolContractRequirement> RequiredProtocolContracts =>
         [.. _requiredProtocolContracts.Select(contract => contract.ToProtocolContractRequirement())];
 
-    internal IReadOnlyList<TaskStepDescriptor> TaskStepDescriptors => _taskStepDescriptors;
+    internal IReadOnlyList<TaskOperationDescriptor> TaskOperationDescriptors => _taskOperationDescriptors;
 
     public ITaskParserModuleExtension ParserExtension =>
         _parserExtension ??= new ForeignModuleTaskParserExtension(manifest, client, _taskParser);
@@ -144,8 +144,8 @@ internal sealed class ForeignModuleProxy(
         _storageContracts = discovery.StorageContracts ?? [];
         _cliCommands = discovery.CliCommands ?? [];
         _taskParser = discovery.TaskParser;
-        _taskStepDescriptors = discovery.TaskStepDescriptors ?? [];
-        _taskStepExecutors = discovery.TaskStepExecutors ?? [];
+        _taskOperationDescriptors = discovery.TaskOperationDescriptors ?? [];
+        _taskOperationExecutors = discovery.TaskOperationExecutors ?? [];
         _taskTriggerSources = discovery.TaskTriggerSources ?? [];
         _taskTriggerBindingSideEffects = discovery.TaskTriggerBindingSideEffects ?? [];
         _taskMetricProviders = discovery.TaskMetricProviders ?? [];
@@ -250,11 +250,11 @@ internal sealed class ForeignModuleProxy(
     }
 
     private static ForeignModuleTaskContextRegistry.ForeignModuleTaskContextRegistration? CreateTaskContextRegistration(
-        ITaskStepExecutionContext context) =>
+        ITaskOperationExecutionContext context) =>
         context.Services.GetService<ForeignModuleTaskContextRegistry>()?.Register(context);
 
-    private static ForeignModuleTaskStepExecutionContextSnapshot SnapshotContext(
-        ITaskStepExecutionContext context,
+    private static ForeignModuleTaskOperationExecutionContextSnapshot SnapshotContext(
+        ITaskOperationExecutionContext context,
         ForeignModuleTaskContextRegistry.ForeignModuleTaskContextRegistration? registration) =>
         new(
             context.InstanceId,
@@ -293,9 +293,9 @@ internal sealed class ForeignModuleProxy(
         }
     }
 
-    private static async Task ApplyTaskStepResponseAsync(
-        ForeignModuleTaskStepExecutionResponse response,
-        ITaskStepExecutionContext context,
+    private static async Task ApplyTaskOperationResponseAsync(
+        ForeignModuleTaskOperationExecutionResponse response,
+        ITaskOperationExecutionContext context,
         string? resultVariable)
     {
         if (response.ChannelId is { } channelId)
@@ -329,16 +329,16 @@ internal sealed class ForeignModuleProxy(
                 context.RegisterEventHandler(
                     handler.ModuleTriggerKey,
                     handler.ParameterName,
-                    [.. handler.Body.Select(ToTaskStepDefinition)]);
+                    [.. handler.Body.Select(ToTaskStatementDefinition)]);
             }
         }
     }
 
-    internal static TaskStepDefinition ToTaskStepDefinition(
-        ForeignModuleTaskStepInvocationDescriptor descriptor) =>
+    internal static TaskStatementDefinition ToTaskStatementDefinition(
+        ForeignModuleTaskStatementInvocationDescriptor descriptor) =>
         new()
         {
-            StepKey = descriptor.StepKey,
+            StatementKey = descriptor.StatementKey,
             Line = 0,
             Column = 0,
             VariableName = descriptor.VariableName,
@@ -348,8 +348,8 @@ internal sealed class ForeignModuleProxy(
             Arguments = descriptor.Arguments,
             ModuleTriggerKey = descriptor.ModuleTriggerKey,
             HandlerParameter = descriptor.HandlerParameter,
-            Body = descriptor.Body is null ? null : [.. descriptor.Body.Select(ToTaskStepDefinition)],
-            ElseBody = descriptor.ElseBody is null ? null : [.. descriptor.ElseBody.Select(ToTaskStepDefinition)],
+            Body = descriptor.Body is null ? null : [.. descriptor.Body.Select(ToTaskStatementDefinition)],
+            ElseBody = descriptor.ElseBody is null ? null : [.. descriptor.ElseBody.Select(ToTaskStatementDefinition)],
         };
 
     private static object? ConvertJsonValue(JsonElement value) =>
@@ -366,7 +366,7 @@ internal sealed class ForeignModuleProxy(
 
     private sealed class ForeignModuleTaskParserExtension : ITaskParserModuleExtension
     {
-        private readonly IReadOnlyDictionary<string, (string StepKey, string ModuleId)> _stepKeyMappings;
+        private readonly IReadOnlyDictionary<string, (string OperationKey, string ModuleId)> _operationKeyMappings;
         private readonly IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> _eventTriggerMappings;
         private readonly IReadOnlySet<string> _singleArgExpressionMethods;
         private readonly IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> _triggerAttributeHandlers;
@@ -376,11 +376,11 @@ internal sealed class ForeignModuleProxy(
             ForeignModuleProtocolClient client,
             ForeignModuleTaskParserDescriptor? descriptor)
         {
-            _stepKeyMappings = descriptor?.StepKeyMappings?.ToDictionary(
+            _operationKeyMappings = descriptor?.OperationKeyMappings?.ToDictionary(
                 mapping => mapping.MethodName,
-                mapping => (mapping.StepKey, mapping.ModuleId),
+                mapping => (mapping.StatementKey, mapping.ModuleId),
                 StringComparer.Ordinal)
-                ?? new Dictionary<string, (string StepKey, string ModuleId)>(StringComparer.Ordinal);
+                ?? new Dictionary<string, (string OperationKey, string ModuleId)>(StringComparer.Ordinal);
 
             _eventTriggerMappings = descriptor?.EventTriggerMappings?.ToDictionary(
                 mapping => mapping.MethodName,
@@ -401,8 +401,8 @@ internal sealed class ForeignModuleProxy(
                 ?? new Dictionary<string, ITaskTriggerAttributeHandler>(StringComparer.Ordinal);
         }
 
-        public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings =>
-            _stepKeyMappings;
+        public IReadOnlyDictionary<string, (string OperationKey, string ModuleId)> OperationKeyMappings =>
+            _operationKeyMappings;
 
         public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings =>
             _eventTriggerMappings;
@@ -472,68 +472,68 @@ internal sealed class ForeignModuleProxy(
                     ?? new Dictionary<string, double?>(StringComparer.Ordinal));
     }
 
-    private sealed class ForeignModuleTaskStepDescriptorProvider(
+    private sealed class ForeignModuleTaskOperationDescriptorProvider(
         string moduleId,
-        IReadOnlyList<TaskStepDescriptor> descriptors) : ITaskStepDescriptorProvider
+        IReadOnlyList<TaskOperationDescriptor> descriptors) : ITaskOperationDescriptorProvider
     {
         public string ModuleId => moduleId;
-        public IReadOnlyList<TaskStepDescriptor> Descriptors => descriptors;
+        public IReadOnlyList<TaskOperationDescriptor> Descriptors => descriptors;
     }
 
-    private class ForeignModuleTaskStepExecutor(
+    private class ForeignModuleTaskOperationExecutor(
         ModuleManifest manifest,
         ForeignModuleProtocolClient client,
-        ForeignModuleTaskStepExecutorDescriptor descriptor) : ITaskStepExecutorExtension
+        ForeignModuleTaskOperationExecutorDescriptor descriptor) : ITaskOperationExecutor
     {
-        private readonly HashSet<string> _stepKeys = new(descriptor.StepKeys, StringComparer.Ordinal);
+        private readonly HashSet<string> _operationKeys = new(descriptor.OperationKeys, StringComparer.Ordinal);
 
         protected ModuleManifest Manifest { get; } = manifest;
         protected ForeignModuleProtocolClient Client { get; } = client;
 
         public string ModuleId => descriptor.ModuleId;
 
-        public bool CanExecute(string moduleStepKey) => _stepKeys.Contains(moduleStepKey);
+        public bool CanExecute(string operationKey) => _operationKeys.Contains(operationKey);
 
         public async Task<bool> ExecuteAsync(
-            string moduleStepKey,
-            ITaskStepExecutionContext context,
+            string operationKey,
+            ITaskOperationExecutionContext context,
             IReadOnlyList<string>? arguments,
             string? expression,
             string? resultVariable)
         {
             using var registration = CreateTaskContextRegistration(context);
-            var response = await Client.ExecuteTaskStepAsync(
+            var response = await Client.ExecuteTaskOperationAsync(
                 Manifest,
-                moduleStepKey,
+                operationKey,
                 SnapshotContext(context, registration),
                 arguments,
                 expression,
                 resultVariable,
                 context.CancellationToken);
 
-            await ApplyTaskStepResponseAsync(response, context, resultVariable);
-            return response.Continue ?? response.Result == TaskStepResult.Continue;
+            await ApplyTaskOperationResponseAsync(response, context, resultVariable);
+            return response.Continue ?? response.Result == TaskStatementResult.Continue;
         }
     }
 
-    private sealed class ForeignModuleTaskStepInvocationExecutor(
+    private sealed class ForeignModuleTaskOperationInvocationExecutor(
         ModuleManifest manifest,
         ForeignModuleProtocolClient client,
-        ForeignModuleTaskStepExecutorDescriptor descriptor)
-        : ForeignModuleTaskStepExecutor(manifest, client, descriptor), ITaskStepInvocationExecutor
+        ForeignModuleTaskOperationExecutorDescriptor descriptor)
+        : ForeignModuleTaskOperationExecutor(manifest, client, descriptor), ITaskOperationInvocationExecutor
     {
-        public async Task<TaskStepResult> ExecuteInvocationAsync(
-            ITaskStepInvocation step,
-            ITaskStepExecutionContext context)
+        public async Task<TaskStatementResult> ExecuteInvocationAsync(
+            ITaskStatementInvocation step,
+            ITaskOperationExecutionContext context)
         {
             using var registration = CreateTaskContextRegistration(context);
-            var response = await Client.ExecuteTaskStepInvocationAsync(
+            var response = await Client.ExecuteTaskOperationInvocationAsync(
                 Manifest,
                 step,
                 SnapshotContext(context, registration),
                 context.CancellationToken);
 
-            await ApplyTaskStepResponseAsync(response, context, step.ResultVariable);
+            await ApplyTaskOperationResponseAsync(response, context, step.ResultVariable);
             return response.Result;
         }
     }

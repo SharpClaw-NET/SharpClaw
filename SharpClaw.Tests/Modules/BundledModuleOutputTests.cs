@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
+using System.Xml.Linq;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -161,11 +162,80 @@ public class BundledModuleOutputTests
     {
         var defaultModulesDir = Path.Combine(ResolveSolutionRoot(), "DefaultModules");
 
-        return Directory.EnumerateFiles(defaultModulesDir, "module.json", SearchOption.AllDirectories)
+        var sourceModules = Directory.EnumerateFiles(defaultModulesDir, "module.json", SearchOption.AllDirectories)
             .Where(path => !IsBuildOutputPath(path))
             .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(ReadBundledModuleExpectation)
+            .Select(ReadBundledModuleExpectation);
+        var packagedEditorModules = ReadPackagedEditorModuleExpectations();
+
+        return sourceModules
+            .Concat(packagedEditorModules)
+            .OrderBy(module => module.Id, StringComparer.Ordinal)
             .ToArray();
+    }
+
+    [Test]
+    public void PackagedEditorModulePayloadsArePresentInNuGetCache()
+    {
+        foreach (var module in ReadPackagedEditorModuleExpectations())
+        {
+            File.Exists(module.ManifestPath).Should().BeTrue(
+                $"packaged editor module '{module.Id}' must expose sharpclaw/module.json");
+            File.Exists(Path.Combine(Path.GetDirectoryName(module.ManifestPath)!, module.EntryAssembly))
+                .Should()
+                .BeTrue($"packaged editor module '{module.Id}' must expose its entry assembly beside module.json");
+        }
+    }
+
+    private static IReadOnlyList<BundledModuleExpectation> ReadPackagedEditorModuleExpectations()
+    {
+        var packageIds = new[]
+        {
+            "SharpClaw.Modules.EditorCommon",
+            "SharpClaw.Modules.VS2026Editor",
+            "SharpClaw.Modules.VSCodeEditor",
+        };
+
+        return packageIds
+            .Select(packageId => ReadBundledModuleExpectation(
+                Path.Combine(
+                    ResolveNuGetPackageRoot(packageId),
+                    "sharpclaw",
+                    "module.json")))
+            .ToArray();
+    }
+
+    private static string ResolveNuGetPackageRoot(string packageId)
+    {
+        var version = ResolveCentralPackageVersion(packageId);
+        var packagesRoot = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+        if (string.IsNullOrWhiteSpace(packagesRoot))
+        {
+            packagesRoot = Path.Combine(
+                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
+                ".nuget",
+                "packages");
+        }
+
+        return Path.Combine(packagesRoot, packageId.ToLowerInvariant(), version.ToLowerInvariant());
+    }
+
+    private static string ResolveCentralPackageVersion(string packageId)
+    {
+        var propsPath = Path.Combine(ResolveSolutionRoot(), "Directory.Packages.props");
+        var document = XDocument.Load(propsPath);
+        var version = document
+            .Descendants("PackageVersion")
+            .Where(element => string.Equals(
+                (string?)element.Attribute("Include"),
+                packageId,
+                StringComparison.Ordinal))
+            .Select(element => (string?)element.Attribute("Version"))
+            .SingleOrDefault();
+
+        version.Should().NotBeNullOrWhiteSpace(
+            $"{propsPath} must centrally pin {packageId}");
+        return version!;
     }
 
     private static BundledModuleExpectation ReadBundledModuleExpectation(string manifestPath)

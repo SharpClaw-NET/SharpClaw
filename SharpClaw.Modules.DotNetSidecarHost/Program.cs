@@ -12,10 +12,11 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Modules;
+using SharpClaw.Core.Modules.Foreign;
 using SharpClaw.Modules.Hosting;
 using SharpClaw.Providers.Common;
 using SharpClaw.Utils.Security;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 
 var process = await DotNetSidecarHost.CreateAsync(args);
 await process.RunAsync();
@@ -112,7 +113,7 @@ internal sealed class DotNetSidecarHost
         builder.Services.TryAddSingleton<ICliIdResolver, SidecarCliIdResolver>();
         DotNetSidecarHostCapabilityProxies.Register(builder.Services);
         module.ConfigureServices(builder.Services);
-        RegisterTaskStepDescriptorProviders(builder.Services, module.GetType().Assembly);
+        RegisterTaskOperationDescriptorProviders(builder.Services, module.GetType().Assembly);
 
         var app = builder.Build();
         app.UseWebSockets();
@@ -472,18 +473,18 @@ internal sealed class DotNetSidecarHost
 
     private void MapTaskRuntimeEndpoints()
     {
-        _app.MapPost(ForeignModuleProtocol.TaskStepExecutePath, async (
-            ForeignModuleTaskStepExecutionRequest request,
+        _app.MapPost(ForeignModuleProtocol.TaskOperationExecutePath, async (
+            ForeignModuleTaskOperationExecutionRequest request,
             CancellationToken ct) =>
         {
             using var scope = _app.Services.CreateScope();
-            var executor = ResolveTaskStepExecutor(scope.ServiceProvider, request.StepKey);
-            var context = new DotNetSidecarTaskStepExecutionContext(
+            var executor = ResolveTaskOperationExecutor(scope.ServiceProvider, request.OperationKey);
+            var context = new DotNetSidecarTaskOperationExecutionContext(
                 scope.ServiceProvider,
                 request.Context,
                 ct);
             var shouldContinue = await executor.ExecuteAsync(
-                request.StepKey,
+                request.OperationKey,
                 context,
                 request.Arguments,
                 request.Expression,
@@ -491,26 +492,26 @@ internal sealed class DotNetSidecarHost
             return Json(context.ToResponse(shouldContinue));
         });
 
-        _app.MapPost(ForeignModuleProtocol.TaskStepInvokePath, async (
-            ForeignModuleTaskStepInvocationRequest request,
+        _app.MapPost(ForeignModuleProtocol.TaskOperationInvokePath, async (
+            ForeignModuleTaskOperationInvocationRequest request,
             CancellationToken ct) =>
         {
             using var scope = _app.Services.CreateScope();
-            var executor = ResolveTaskStepExecutor(scope.ServiceProvider, request.Step.StepKey);
-            if (executor is not ITaskStepInvocationExecutor invocationExecutor)
+            var executor = ResolveTaskOperationExecutor(scope.ServiceProvider, request.Statement.StatementKey);
+            if (executor is not ITaskOperationInvocationExecutor invocationExecutor)
             {
                 throw new NotSupportedException(
-                    $"Task step '{request.Step.StepKey}' does not support invocation execution.");
+                    $"Task operation '{request.Statement.StatementKey}' does not support invocation execution.");
             }
 
-            var context = new DotNetSidecarTaskStepExecutionContext(
+            var context = new DotNetSidecarTaskOperationExecutionContext(
                 scope.ServiceProvider,
                 request.Context,
                 ct);
             var result = await invocationExecutor.ExecuteInvocationAsync(
-                new DotNetSidecarTaskStepInvocation(request.Step),
+                new DotNetSidecarTaskStatementInvocation(request.Statement),
                 context);
-            return Json(context.ToResponse(result, request.Step.ResultVariable));
+            return Json(context.ToResponse(result, request.Statement.ResultVariable));
         });
 
         _app.MapPost(ForeignModuleProtocol.TaskTriggerAttributeHandlePath, (
@@ -657,12 +658,12 @@ internal sealed class DotNetSidecarHost
         var runtimeModule = _module as ISharpClawRuntimeModule;
         using var scope = _app.Services.CreateScope();
         var services = scope.ServiceProvider;
-        var taskStepDescriptors = services.GetServices<ITaskStepDescriptorProvider>()
+        var taskOperationDescriptors = services.GetServices<ITaskOperationDescriptorProvider>()
             .SelectMany(provider => provider.Descriptors)
             .ToArray();
-        var taskStepExecutors = services.GetServices<ITaskStepExecutorExtension>()
-            .Select(executor => ToTaskStepExecutorDescriptor(executor, taskStepDescriptors))
-            .Where(descriptor => descriptor.StepKeys.Count > 0)
+        var taskOperationExecutors = services.GetServices<ITaskOperationExecutor>()
+            .Select(executor => ToTaskOperationExecutorDescriptor(executor, taskOperationDescriptors))
+            .Where(descriptor => descriptor.OperationKeys.Count > 0)
             .ToArray();
         return new ForeignModuleDiscoveryResponse(
             Endpoints: DiscoverMappedEndpoints(),
@@ -690,8 +691,8 @@ internal sealed class DotNetSidecarHost
                 command.Description,
                 command.UsageLines))],
             TaskParser: ToTaskParserDescriptor(_module as ITaskParserAware),
-            TaskStepDescriptors: taskStepDescriptors,
-            TaskStepExecutors: taskStepExecutors,
+            TaskOperationDescriptors: taskOperationDescriptors,
+            TaskOperationExecutors: taskOperationExecutors,
             TaskTriggerSources: [.. services.GetServices<ITaskTriggerSource>()
                 .Select(source => new ForeignModuleTaskTriggerSourceDescriptor(
                     source.TriggerKeys,
@@ -839,10 +840,10 @@ internal sealed class DotNetSidecarHost
 
         var extension = parserAware.ParserExtension;
         return new ForeignModuleTaskParserDescriptor(
-            StepKeyMappings: [.. extension.StepKeyMappings.Select(mapping =>
-                new ForeignModuleTaskParserStepMapping(
+            OperationKeyMappings: [.. extension.OperationKeyMappings.Select(mapping =>
+                new ForeignModuleTaskParserOperationMapping(
                     mapping.Key,
-                    mapping.Value.StepKey,
+                    mapping.Value.OperationKey,
                     mapping.Value.ModuleId))],
             EventTriggerMappings: [.. extension.EventTriggerMappings.Select(mapping =>
                 new ForeignModuleTaskParserEventMapping(
@@ -875,17 +876,17 @@ internal sealed class DotNetSidecarHost
                     ]))]);
     }
 
-    private static ForeignModuleTaskStepExecutorDescriptor ToTaskStepExecutorDescriptor(
-        ITaskStepExecutorExtension executor,
-        IReadOnlyList<TaskStepDescriptor> descriptors) =>
+    private static ForeignModuleTaskOperationExecutorDescriptor ToTaskOperationExecutorDescriptor(
+        ITaskOperationExecutor executor,
+        IReadOnlyList<TaskOperationDescriptor> descriptors) =>
         new(
             executor.ModuleId,
             [.. descriptors
                 .Where(descriptor => string.Equals(descriptor.OwnerId, executor.ModuleId, StringComparison.Ordinal)
-                                     && executor.CanExecute(descriptor.StepKey))
-                .Select(descriptor => descriptor.StepKey)
+                                     && executor.CanExecute(descriptor.OperationKey))
+                .Select(descriptor => descriptor.OperationKey)
                 .Distinct(StringComparer.Ordinal)],
-            SupportsInvocation: executor is ITaskStepInvocationExecutor);
+            SupportsInvocation: executor is ITaskOperationInvocationExecutor);
 
     private static ForeignModuleHeaderTagDescriptor ToHeaderTagDescriptor(ModuleHeaderTag tag) =>
         new(tag.Name, SupportsContext: tag.ResolveWithContext is not null);
@@ -935,19 +936,19 @@ internal sealed class DotNetSidecarHost
             .Any(method => method.Name == nameof(ISharpClawCoreModule.ExecuteToolStreamingAsync));
 
     private static bool HasTaskRuntimeContributions(IServiceProvider services) =>
-        services.GetServices<ITaskStepDescriptorProvider>().Any()
-        || services.GetServices<ITaskStepExecutorExtension>().Any()
+        services.GetServices<ITaskOperationDescriptorProvider>().Any()
+        || services.GetServices<ITaskOperationExecutor>().Any()
         || services.GetServices<ITaskTriggerSource>().Any()
         || services.GetServices<ITaskTriggerBindingSideEffect>().Any()
         || services.GetServices<ITaskMetricProvider>().Any()
         || services.GetServices<ISharpClawEventSink>().Any();
 
-    private static ITaskStepExecutorExtension ResolveTaskStepExecutor(
+    private static ITaskOperationExecutor ResolveTaskOperationExecutor(
         IServiceProvider services,
-        string stepKey) =>
-        services.GetServices<ITaskStepExecutorExtension>()
-            .FirstOrDefault(executor => executor.CanExecute(stepKey))
-        ?? throw new NotSupportedException($"Task step '{stepKey}' was not found.");
+        string operationKey) =>
+        services.GetServices<ITaskOperationExecutor>()
+            .FirstOrDefault(executor => executor.CanExecute(operationKey))
+        ?? throw new NotSupportedException($"Task operation '{operationKey}' was not found.");
 
     private static ITaskTriggerSource ResolveTaskTriggerSource(
         IServiceProvider services,
@@ -968,16 +969,16 @@ internal sealed class DotNetSidecarHost
                 StringComparison.Ordinal))
         ?? throw new NotSupportedException($"Task trigger binding side effect '{triggerKey}' was not found.");
 
-    private static void RegisterTaskStepDescriptorProviders(IServiceCollection services, Assembly assembly)
+    private static void RegisterTaskOperationDescriptorProviders(IServiceCollection services, Assembly assembly)
     {
         var providerTypes = assembly.GetTypes()
             .Where(type => !type.IsAbstract
                            && !type.IsInterface
-                           && typeof(ITaskStepDescriptorProvider).IsAssignableFrom(type)
+                           && typeof(ITaskOperationDescriptorProvider).IsAssignableFrom(type)
                            && type.GetConstructor(Type.EmptyTypes) is not null);
 
         foreach (var providerType in providerTypes)
-            services.AddSingleton(typeof(ITaskStepDescriptorProvider), providerType);
+            services.AddSingleton(typeof(ITaskOperationDescriptorProvider), providerType);
     }
 
     private static bool HasCompletionBehaviorOverride(ISharpClawCoreModule module) =>
@@ -1072,18 +1073,18 @@ internal sealed class DotNetSidecarHost
 
     private sealed record ConsoleCaptureResult(bool Success, string? Stdout, string? Stderr);
 
-    private sealed class DotNetSidecarTaskStepExecutionContext : ITaskStepExecutionContext
+    private sealed class DotNetSidecarTaskOperationExecutionContext : ITaskOperationExecutionContext
     {
-        private readonly ForeignModuleTaskStepExecutionContextSnapshot _snapshot;
+        private readonly ForeignModuleTaskOperationExecutionContextSnapshot _snapshot;
         private readonly Guid _initialChannelId;
         private readonly List<string> _logs = [];
         private readonly List<string?> _outputs = [];
         private readonly List<ForeignModuleTaskRegisteredEventHandlerDescriptor> _registeredEventHandlers = [];
         private readonly List<ITaskEventHandler> _eventHandlers = [];
 
-        public DotNetSidecarTaskStepExecutionContext(
+        public DotNetSidecarTaskOperationExecutionContext(
             IServiceProvider services,
-            ForeignModuleTaskStepExecutionContextSnapshot snapshot,
+            ForeignModuleTaskOperationExecutionContextSnapshot snapshot,
             CancellationToken cancellationToken)
         {
             _snapshot = snapshot;
@@ -1137,8 +1138,8 @@ internal sealed class DotNetSidecarHost
 
         public void SetChannelId(Guid channelId) => ChannelId = channelId;
 
-        public async Task<TaskStepResult> ExecuteStepsAsync(
-            IReadOnlyList<ITaskStepInvocation> steps,
+        public async Task<TaskStatementResult> ExecuteStatementsAsync(
+            IReadOnlyList<ITaskStatementInvocation> steps,
             CancellationToken cancellationToken)
         {
             if (string.IsNullOrWhiteSpace(_snapshot.ContextCallbackId))
@@ -1147,15 +1148,15 @@ internal sealed class DotNetSidecarHost
             var client = Services.GetService<DotNetSidecarHostCapabilityClient>()
                 ?? throw new NotSupportedException("Nested task step execution requires host capability access.");
             var response = await client.PostAsync<
-                ForeignModuleTaskContextExecuteStepsRequest,
+                ForeignModuleTaskContextExecuteStatementsRequest,
                 ForeignModuleTaskContextExecutionResponse>(
-                ForeignModuleHostCapabilityProtocol.TaskContextExecuteStepsPath,
-                new ForeignModuleTaskContextExecuteStepsRequest
+                ForeignModuleHostCapabilityProtocol.TaskContextExecuteStatementsPath,
+                new ForeignModuleTaskContextExecuteStatementsRequest
                 {
                     ContextId = _snapshot.ContextCallbackId,
                     ChannelId = ChannelId,
                     Variables = SnapshotVariables(),
-                    Steps = [.. steps.Select(ForeignModuleTaskStepInvocationDescriptor.From)],
+                    Statements = [.. steps.Select(ForeignModuleTaskStatementInvocationDescriptor.From)],
                 },
                 cancellationToken);
             ApplyHostContextResponse(response);
@@ -1174,10 +1175,10 @@ internal sealed class DotNetSidecarHost
         public void RegisterEventHandler(
             string moduleTriggerKey,
             string? parameterName,
-            IReadOnlyList<ITaskStepInvocation> body)
+            IReadOnlyList<ITaskStatementInvocation> body)
         {
             var descriptorBody = body
-                .Select(ForeignModuleTaskStepInvocationDescriptor.From)
+                .Select(ForeignModuleTaskStatementInvocationDescriptor.From)
                 .ToArray();
             _registeredEventHandlers.Add(new ForeignModuleTaskRegisteredEventHandlerDescriptor(
                 moduleTriggerKey,
@@ -1192,21 +1193,21 @@ internal sealed class DotNetSidecarHost
 
         public Task WaitIfPausedAsync() => Task.CompletedTask;
 
-        public ForeignModuleTaskStepExecutionResponse ToResponse(
+        public ForeignModuleTaskOperationExecutionResponse ToResponse(
             bool shouldContinue,
             string? resultVariable = null) =>
             ToResponse(
-                shouldContinue ? TaskStepResult.Continue : TaskStepResult.Return,
+                shouldContinue ? TaskStatementResult.Continue : TaskStatementResult.Return,
                 shouldContinue,
                 resultVariable);
 
-        public ForeignModuleTaskStepExecutionResponse ToResponse(
-            TaskStepResult result,
+        public ForeignModuleTaskOperationExecutionResponse ToResponse(
+            TaskStatementResult result,
             string? resultVariable = null) =>
             ToResponse(result, null, resultVariable);
 
-        private ForeignModuleTaskStepExecutionResponse ToResponse(
-            TaskStepResult result,
+        private ForeignModuleTaskOperationExecutionResponse ToResponse(
+            TaskStatementResult result,
             bool? shouldContinue,
             string? resultVariable)
         {
@@ -1219,7 +1220,7 @@ internal sealed class DotNetSidecarHost
                 ? value
                 : null;
 
-            return new ForeignModuleTaskStepExecutionResponse(
+            return new ForeignModuleTaskOperationExecutionResponse(
                 result,
                 shouldContinue,
                 variableUpdates,
@@ -1307,17 +1308,17 @@ internal sealed class DotNetSidecarHost
     private sealed record DotNetSidecarLocalTaskEventHandler(
         string? ModuleTriggerKey,
         string? ParameterName,
-        DotNetSidecarTaskStepExecutionContext Context,
-        IReadOnlyList<ITaskStepInvocation> Body) : ITaskEventHandler
+        DotNetSidecarTaskOperationExecutionContext Context,
+        IReadOnlyList<ITaskStatementInvocation> Body) : ITaskEventHandler
     {
         public async Task ExecuteBodyAsync(CancellationToken ct) =>
-            _ = await Context.ExecuteStepsAsync(Body, ct);
+            _ = await Context.ExecuteStatementsAsync(Body, ct);
     }
 
-    private sealed class DotNetSidecarTaskStepInvocation(
-        ForeignModuleTaskStepInvocationDescriptor descriptor) : ITaskStepInvocation
+    private sealed class DotNetSidecarTaskStatementInvocation(
+        ForeignModuleTaskStatementInvocationDescriptor descriptor) : ITaskStatementInvocation
     {
-        public string StepKey => descriptor.StepKey;
+        public string StatementKey => descriptor.StatementKey;
         public string? VariableName => descriptor.VariableName;
         public string? TypeName => descriptor.TypeName;
         public string? ResultVariable => descriptor.ResultVariable;
@@ -1325,10 +1326,10 @@ internal sealed class DotNetSidecarHost
         public IReadOnlyList<string>? Arguments => descriptor.Arguments;
         public string? ModuleTriggerKey => descriptor.ModuleTriggerKey;
         public string? HandlerParameter => descriptor.HandlerParameter;
-        public IReadOnlyList<ITaskStepInvocation>? Body =>
-            descriptor.Body is null ? null : [.. descriptor.Body.Select(step => new DotNetSidecarTaskStepInvocation(step))];
-        public IReadOnlyList<ITaskStepInvocation>? ElseBody =>
-            descriptor.ElseBody is null ? null : [.. descriptor.ElseBody.Select(step => new DotNetSidecarTaskStepInvocation(step))];
+        public IReadOnlyList<ITaskStatementInvocation>? Body =>
+            descriptor.Body is null ? null : [.. descriptor.Body.Select(step => new DotNetSidecarTaskStatementInvocation(step))];
+        public IReadOnlyList<ITaskStatementInvocation>? ElseBody =>
+            descriptor.ElseBody is null ? null : [.. descriptor.ElseBody.Select(step => new DotNetSidecarTaskStatementInvocation(step))];
     }
 
     private sealed class DotNetSidecarTaskTriggerSourceContext(

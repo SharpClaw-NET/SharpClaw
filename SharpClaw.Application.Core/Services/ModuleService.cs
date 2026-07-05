@@ -21,7 +21,7 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Modules.Foreign;
+using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Infrastructure.Persistence.Modules;
 using SharpClaw.Utils.Instances;
@@ -598,16 +598,16 @@ public sealed class ModuleService(
     {
         if (module is ForeignModuleProxy foreignModule && moduleServices is null)
         {
-            foreach (var descriptor in foreignModule.TaskStepDescriptors)
-                TaskStepRegistry.Default.Register(descriptor);
+            foreach (var descriptor in foreignModule.TaskOperationDescriptors)
+                TaskOperationRegistry.Default.Register(descriptor);
         }
 
         if (moduleServices is not null)
         {
-            foreach (var provider in moduleServices.GetServices<ITaskStepDescriptorProvider>())
+            foreach (var provider in moduleServices.GetServices<ITaskOperationDescriptorProvider>())
             {
                 foreach (var descriptor in provider.Descriptors)
-                    TaskStepRegistry.Default.Register(descriptor);
+                    TaskOperationRegistry.Default.Register(descriptor);
             }
         }
 
@@ -620,7 +620,7 @@ public sealed class ModuleService(
         if (module is ITaskParserAware parserAware)
             TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
 
-        TaskStepRegistry.Default.UnregisterOwner(module.Id);
+        TaskOperationRegistry.Default.UnregisterOwner(module.Id);
     }
 
     private async Task<(ISharpClawCoreModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(

@@ -113,7 +113,7 @@ public class BadParamTask
             ClassName = "MultiOutputTask",
             EntryPointMethod = "RunAsync",
             Parameters = [],
-            Steps = [],
+            Statements = [],
             ToolCallHooks = [],
             DataTypes =
             [
@@ -144,10 +144,10 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
-                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
             ]
         };
 
@@ -173,9 +173,9 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition { StepKey = TaskLanguageStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
             ]
         };
 
@@ -201,11 +201,11 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition
+                new TaskStatementDefinition
                 {
-                    StepKey  = TaskLanguageStepKeys.Loop,
+                    StatementKey  = TaskLanguageStatementKeys.Loop,
                     Line = 1, Column = 0,
                     VariableName = "item",
                     Expression = null,            // missing
@@ -262,18 +262,18 @@ public class ParseBadTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition
+                new TaskStatementDefinition
                 {
-                    StepKey  = TaskLanguageStepKeys.Loop,
+                    StatementKey  = TaskLanguageStatementKeys.Loop,
                     Line = 1, Column = 0,
                     Expression = "true",
                     Body =
                     [
-                        new TaskStepDefinition
+                        new TaskStatementDefinition
                         {
-                            StepKey  = TaskLanguageStepKeys.DeclareVariable,
+                            StatementKey  = TaskLanguageStatementKeys.DeclareVariable,
                             Line = 2, Column = 4,
                             VariableName = "v",
                             TypeName = "UnknownNestedType"

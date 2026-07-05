@@ -146,7 +146,7 @@ public class LogTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
+        result.Definition!.Statements.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
     }
 
     [Test]
@@ -167,8 +167,8 @@ public class EarlyExitTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().HaveCount(2);
-        result.Definition.Steps.Last().StepKey.Should().Be(TaskLanguageStepKeys.Return);
+        result.Definition!.Statements.Should().HaveCount(2);
+        result.Definition.Statements.Last().StatementKey.Should().Be(TaskLanguageStatementKeys.Return);
     }
 
     [Test]
@@ -191,7 +191,7 @@ public class BranchingTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Conditional);
+        result.Definition!.Statements.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Conditional);
     }
 
     [Test]
@@ -218,9 +218,9 @@ public class IfElseTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Definition!.Steps.Single(s => s.StepKey == TaskLanguageStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskLanguageStepKeys.Log);
+        var conditional = result.Definition!.Statements.Single(s => s.StatementKey == TaskLanguageStatementKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
     }
 
     [Test]
@@ -240,7 +240,7 @@ public class ChatTask
         var result = TaskScriptEngine.Parse(source);
 
         result.Success.Should().BeTrue();
-        result.Definition!.Steps.Should().ContainSingle(s => s.StepKey == AgentOrchestrationStepKeys.Chat);
+        result.Definition!.Statements.Should().ContainSingle(s => s.StatementKey == AgentOrchestrationOperationKeys.Chat);
     }
 
     // ─────────────────────────────────────────────────────────────
