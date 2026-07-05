@@ -3,6 +3,7 @@
     <ItemGroup>
       <_PackagedModuleDll Remove="@(_PackagedModuleDll)" />
       <_PackagedModuleDependencyDll Remove="@(_PackagedModuleDependencyDll)" />
+      <_PackagedSidecarHostFile Remove="@(_PackagedSidecarHostFile)" />
       <_PackagedModulePayloadDll Remove="@(_PackagedModulePayloadDll)" />
       <_PackagedModuleManifest Remove="@(_PackagedModuleManifest)" />
 
@@ -22,6 +23,8 @@
                           Condition="'$(PkgSharpClaw_Modules_Providers_Ollama)' != ''" />
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.OpenAICompatible.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_OpenAICompatible)' != ''" />
+      <_PackagedSidecarHostFile Include="$(PkgSharpClaw_ModuleHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.ModuleHost.OutOfProcess*"
+                                Condition="'$(PkgSharpClaw_ModuleHost_OutOfProcess)' != ''" />
 
       <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\*.dll"
                                     Exclude="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.*.dll"
@@ -66,7 +69,7 @@
         <ModuleId>sharpclaw_providers_openai_compat</ModuleId>
       </_PackagedModuleManifest>
 
-      <_PackagedModulePayloadDll Include="@(_PackagedModuleDll);@(_PackagedModuleDependencyDll)" />
+      <_PackagedModulePayloadDll Include="@(_PackagedModuleDll);@(_PackagedModuleDependencyDll);@(_PackagedSidecarHostFile)" />
     </ItemGroup>
   </Target>
 </Project>

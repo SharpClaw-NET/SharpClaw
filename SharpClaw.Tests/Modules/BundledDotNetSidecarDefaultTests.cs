@@ -529,7 +529,7 @@ public sealed class BundledDotNetSidecarDefaultTests
 
             var configurationValues = new Dictionary<string, string?>
             {
-                ["Modules:DotNetSidecarHostPath"] = ResolveDotNetSidecarHostPath(),
+                ["Modules:OutOfProcessModuleHostPath"] = ResolveOutOfProcessModuleHostPath(),
             };
             if (configurationOverrides is not null)
             {
@@ -628,20 +628,14 @@ public sealed class BundledDotNetSidecarDefaultTests
             .AddInMemoryCollection(values)
             .Build();
 
-    private static string ResolveDotNetSidecarHostPath()
+    private static string ResolveOutOfProcessModuleHostPath()
     {
-        var root = ResolveRepoRoot();
-        var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
         var hostPath = Path.Combine(
-            root,
-            "SharpClaw.Modules.DotNetSidecarHost",
-            "bin",
-            configuration,
-            "net10.0",
-            "SharpClaw.Modules.DotNetSidecarHost.dll");
+            TestContext.CurrentContext.TestDirectory,
+            "SharpClaw.ModuleHost.OutOfProcess.dll");
 
         File.Exists(hostPath).Should().BeTrue(
-            $"shared .NET sidecar host must be built before tests run: '{hostPath}'");
+            $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");
         return hostPath;
     }
 

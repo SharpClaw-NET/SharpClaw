@@ -97,6 +97,20 @@ public class BundledModuleOutputTests
     }
 
     [Test]
+    public void OutOfProcessModuleHostPackagePayloadIsPresentInNuGetCache()
+    {
+        var packageRoot = ResolveNuGetPackageRoot("SharpClaw.ModuleHost.OutOfProcess");
+        var toolsDir = Path.Combine(packageRoot, "tools", "net10.0", "any");
+
+        File.Exists(Path.Combine(toolsDir, "SharpClaw.ModuleHost.OutOfProcess.dll"))
+            .Should().BeTrue("the sidecar host package must expose the executable host DLL");
+        File.Exists(Path.Combine(toolsDir, "SharpClaw.ModuleHost.OutOfProcess.deps.json"))
+            .Should().BeTrue("the sidecar host package must expose the executable deps file");
+        File.Exists(Path.Combine(toolsDir, "SharpClaw.ModuleHost.OutOfProcess.runtimeconfig.json"))
+            .Should().BeTrue("the sidecar host package must expose the executable runtimeconfig");
+    }
+
+    [Test]
     public async Task PublishedApiOutputContainsBundledSidecarPayload()
     {
         var publishDir = Path.Combine(
@@ -124,11 +138,11 @@ public class BundledModuleOutputTests
         Directory.Exists(outputDir).Should().BeTrue(
             $"output directory should exist at '{outputDir}'");
 
-        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.dll"))
+        File.Exists(Path.Combine(outputDir, "SharpClaw.ModuleHost.OutOfProcess.dll"))
             .Should().BeTrue("the shared .NET sidecar host DLL must be present");
-        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.deps.json"))
+        File.Exists(Path.Combine(outputDir, "SharpClaw.ModuleHost.OutOfProcess.deps.json"))
             .Should().BeTrue("the shared .NET sidecar host deps file must be present");
-        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.DotNetSidecarHost.runtimeconfig.json"))
+        File.Exists(Path.Combine(outputDir, "SharpClaw.ModuleHost.OutOfProcess.runtimeconfig.json"))
             .Should().BeTrue("the shared .NET sidecar host runtimeconfig must be present");
 
         foreach (var module in ReadBundledModuleExpectations())

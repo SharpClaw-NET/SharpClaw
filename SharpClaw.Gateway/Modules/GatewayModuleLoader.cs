@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Gateway.Abstractions;
-using SharpClaw.Modules.Hosting;
+using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Gateway.Modules;

@@ -24,6 +24,7 @@
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" />
     <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" />
     <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" />
@@ -46,7 +47,6 @@
     <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj" />
     <ProjectReference Include="..\SharpClaw.Tests.ExternalModule\SharpClaw.Tests.ExternalModule.csproj" />
     <ProjectReference Include="..\SharpClaw.Tests.ForeignSidecar\SharpClaw.Tests.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\SharpClaw.Modules.DotNetSidecarHost\SharpClaw.Modules.DotNetSidecarHost.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
 
   <Target Name="CopyPackagedModulesToTestOutput"

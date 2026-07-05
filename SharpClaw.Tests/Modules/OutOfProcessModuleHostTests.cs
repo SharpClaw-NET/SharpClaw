@@ -12,7 +12,7 @@ using SharpClaw.Tests.ExternalModule;
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
-public sealed class DotNetSidecarHostTests
+public sealed class OutOfProcessModuleHostTests
 {
     [Test]
     public void ModuleManifestRuntimeInfoReadsDotNetSidecarPackageMetadata()
@@ -50,7 +50,7 @@ public sealed class DotNetSidecarHostTests
     }
 
     [Test]
-    public async Task DotNetSidecarHostAdaptsSharpClawModuleToForeignProtocol()
+    public async Task OutOfProcessModuleHostAdaptsSharpClawModuleToForeignProtocol()
     {
         using var workspace = TestWorkspace.Create();
         CopyFixtureModulePayload(workspace.ModuleDir);
@@ -275,7 +275,7 @@ public sealed class DotNetSidecarHostTests
         TestWorkspace workspace,
         IServiceProvider hostServices)
     {
-        var hostPath = ResolveDotNetSidecarHostPath();
+        var hostPath = ResolveOutOfProcessModuleHostPath();
         return new ForeignModuleHostLaunchOptions
         {
             ExecutablePath = "dotnet",
@@ -358,20 +358,14 @@ public sealed class DotNetSidecarHostTests
         writer.Write(text);
     }
 
-    private static string ResolveDotNetSidecarHostPath()
+    private static string ResolveOutOfProcessModuleHostPath()
     {
-        var root = ResolveRepoRoot();
-        var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
         var hostPath = Path.Combine(
-            root,
-            "SharpClaw.Modules.DotNetSidecarHost",
-            "bin",
-            configuration,
-            "net10.0",
-            "SharpClaw.Modules.DotNetSidecarHost.dll");
+            TestContext.CurrentContext.TestDirectory,
+            "SharpClaw.ModuleHost.OutOfProcess.dll");
 
         File.Exists(hostPath).Should().BeTrue(
-            $"shared .NET sidecar host must be built before tests run: '{hostPath}'");
+            $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");
         return hostPath;
     }
 

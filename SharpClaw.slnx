@@ -19,7 +19,6 @@
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
   <Folder Name="/Shared/">
-    <Project Path="SharpClaw.Modules.DotNetSidecarHost/SharpClaw.Modules.DotNetSidecarHost.csproj" />
     <Project Path="SharpClaw.Utils/SharpClaw.Utils.csproj" />
   </Folder>
   <Folder Name="/Solution Items/" />

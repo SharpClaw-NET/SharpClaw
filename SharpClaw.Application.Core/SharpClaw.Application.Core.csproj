@@ -8,7 +8,7 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
-    <InternalsVisibleTo Include="SharpClaw.Modules.DotNetSidecarHost" />
+    <InternalsVisibleTo Include="SharpClaw.ModuleHost.OutOfProcess" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,7 +21,7 @@
   <ItemGroup>
     <PackageReference Include="SharpClaw.Core" />
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.Modules.Hosting" />
+    <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
   </ItemGroup>

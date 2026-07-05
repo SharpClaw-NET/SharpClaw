@@ -5,7 +5,6 @@
 # Internal specs & docs
 docs/internal
 docs/internal/
-sharpclaw-vs2026/docs/internal
 
 # Nested standalone repository
 SharpClaw.Core/
@@ -27,11 +26,6 @@ signing/
 
 # Visual Studio Code detritus
 .vscode/
-
-# VS Extension build outputs
-sharpclaw-vs2026/bin/
-sharpclaw-vs2026/obj/
-sharpclaw-vs2026/*.vsix
 
 # ASP.NET Core development server files
 *.db        # SQLite or EF Core local DBs 

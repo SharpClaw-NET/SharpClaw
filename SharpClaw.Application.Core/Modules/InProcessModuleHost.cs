@@ -18,7 +18,7 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Infrastructure.Persistence.Modules;
-using SharpClaw.Modules.Hosting;
+using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Utils.Security;
 using SharpClaw.Core.Modules;
 using SharpClaw.Contracts.Modules.Foreign;

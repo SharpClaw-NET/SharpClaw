@@ -18,7 +18,7 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.Modules.Hosting" />
+    <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />

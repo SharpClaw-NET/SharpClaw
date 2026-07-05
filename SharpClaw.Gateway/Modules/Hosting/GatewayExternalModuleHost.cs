@@ -6,7 +6,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Security;
-using SharpClaw.Modules.Hosting;
+using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;

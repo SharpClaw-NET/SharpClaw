@@ -3,7 +3,7 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Abstractions;
 using SharpClaw.Gateway.Modules.Routing;
-using SharpClaw.Modules.Hosting;
+using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Utils.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;

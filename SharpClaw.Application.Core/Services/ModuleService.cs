@@ -968,7 +968,7 @@ public sealed class ModuleService(
     private (string ExecutablePath, IReadOnlyList<string> Arguments, string WorkingDirectory)
         ResolveDotNetSidecarLaunchCommand()
     {
-        var configuredPath = configuration?["Modules:DotNetSidecarHostPath"];
+        var configuredPath = configuration?["Modules:OutOfProcessModuleHostPath"];
         if (!string.IsNullOrWhiteSpace(configuredPath))
         {
             var fullPath = Path.GetFullPath(configuredPath);
@@ -986,10 +986,10 @@ public sealed class ModuleService(
         }
 
         var baseDir = ResolveApplicationBaseDirectory();
-        var hostPath = Path.Combine(baseDir, "SharpClaw.Modules.DotNetSidecarHost.dll");
+        var hostPath = Path.Combine(baseDir, "SharpClaw.ModuleHost.OutOfProcess.dll");
         var appHostName = OperatingSystem.IsWindows()
-            ? "SharpClaw.Modules.DotNetSidecarHost.exe"
-            : "SharpClaw.Modules.DotNetSidecarHost";
+            ? "SharpClaw.ModuleHost.OutOfProcess.exe"
+            : "SharpClaw.ModuleHost.OutOfProcess";
         var appHostPath = Path.Combine(baseDir, appHostName);
 
         if (File.Exists(appHostPath))
