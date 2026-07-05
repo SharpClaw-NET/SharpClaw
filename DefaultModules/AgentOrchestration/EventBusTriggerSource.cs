@@ -13,7 +13,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// Implements <see cref="ISharpClawEventSink"/> so the host dispatcher
 /// delivers events directly to it.
 /// <para>
-/// Moved out of <c>SharpClaw.Application.Core</c> by the trigger-extraction
+/// Moved out of <c>SharpClaw.Runtime.BLL</c> by the trigger-extraction
 /// plan; behavior is preserved verbatim.
 /// </para>
 /// </summary>

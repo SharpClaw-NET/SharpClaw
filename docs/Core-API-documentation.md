@@ -1,4 +1,4 @@
-﻿# SharpClaw Core API Reference
+# SharpClaw Core API Reference
 
 > **Base URL:** `http://127.0.0.1:48923`
 >
@@ -2674,9 +2674,9 @@ bytes) after Base64 decoding. Got N bytes.` Both errors advise removing
 ## Env file management
 
 SharpClaw uses JSON-with-comments environment files that are loaded into
-`IConfiguration`. Core reads `SharpClaw.Application.Infrastructure/Environment/.env`
+`IConfiguration`. Core reads `SharpClaw.Runtime.INF/Environment/.env`
 and, in development, `.dev.env`. The Uno interface reads
-`SharpClaw.Uno/Environment/.env` and `.dev.env` directly from the client
+`SharpClaw.Client.Uno/Environment/.env` and `.dev.env` directly from the client
 process. The public gateway reads `SharpClaw.Gateway/Environment/.env`
 and `.dev.env` through `GatewayEnvironment.AddGatewayEnvironment()`.
 
@@ -2751,7 +2751,7 @@ Overwrite the Core `.env` file with new content.
 
 ### Core `.env` keys
 
-The Core template is `SharpClaw.Application.Infrastructure/Environment/.env.template`.
+The Core template is `SharpClaw.Runtime.INF/Environment/.env.template`.
 It includes the `Encryption` section for the at-rest encryption key and
 encryption toggles, the `Jwt` section for token signing, issuer, audience,
 and lifetimes, and the `Auth` section for local-only bypass switches.
@@ -2787,7 +2787,7 @@ module enablement.
 
 ### Interface `.env` keys
 
-The Interface template is `SharpClaw.Uno/Environment/.env.template`.
+The Interface template is `SharpClaw.Client.Uno/Environment/.env.template`.
 `Api:Url` selects the Core API URL and is also passed to a bundled backend
 as `ASPNETCORE_URLS` when the client launches one. `Backend:Enabled`
 controls bundled backend launch. `Gateway:Enabled` is false in the

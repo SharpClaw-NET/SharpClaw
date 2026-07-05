@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Chat;
 

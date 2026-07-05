@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Design;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Migrations.SQLite;
 

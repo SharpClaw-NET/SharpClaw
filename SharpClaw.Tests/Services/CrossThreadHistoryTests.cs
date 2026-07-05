@@ -10,7 +10,7 @@ using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Services;

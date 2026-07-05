@@ -1,7 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.DefaultResources;
 using SharpClaw.Contracts.Entities.Core.Access;

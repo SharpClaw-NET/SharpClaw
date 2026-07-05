@@ -60,7 +60,7 @@ function Register-Service {
 
 Assert-Elevated
 
-$apiExe = Join-Path $InstallDir "api\SharpClaw.Application.API.exe"
+$apiExe = Join-Path $InstallDir "api\SharpClaw.Runtime.Host.exe"
 if (-not (Test-Path $apiExe)) {
     Write-Error "API executable not found at $apiExe"
     exit 1

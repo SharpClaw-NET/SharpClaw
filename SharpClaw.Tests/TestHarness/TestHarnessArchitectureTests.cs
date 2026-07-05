@@ -2,7 +2,7 @@ using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Core.Modules;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Core.Modules;
@@ -121,12 +121,12 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var prod = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Application.Infrastructure",
+            "SharpClaw.Runtime.INF",
             "Environment",
             ".env.template"));
         var dev = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Application.Infrastructure",
+            "SharpClaw.Runtime.INF",
             "Environment",
             ".dev.env.template"));
 
@@ -152,7 +152,7 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var searchedRoots = new[]
         {
-            Path.Combine(root, "SharpClaw.Application.Core"),
+            Path.Combine(root, "SharpClaw.Runtime.BLL"),
             Path.Combine(root, "SharpClaw.Tests")
         };
         var banned = new[]
@@ -186,11 +186,11 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var projectRelativePaths = new[]
         {
-            "SharpClaw.Application.API/SharpClaw.Application.API.csproj",
-            "SharpClaw.Application.Core/SharpClaw.Application.Core.csproj",
-            "SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj",
+            "SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj",
+            "SharpClaw.Runtime.BLL/SharpClaw.Runtime.BLL.csproj",
+            "SharpClaw.Runtime.INF/SharpClaw.Runtime.INF.csproj",
             "SharpClaw.Gateway/SharpClaw.Gateway.csproj",
-            "SharpClaw.Uno/SharpClaw.Uno.csproj"
+            "SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj"
         };
 
         foreach (var relativePath in projectRelativePaths)
@@ -224,8 +224,8 @@ public sealed class TestHarnessArchitectureTests
 
         var appCoreProject = XDocument.Load(Path.Combine(
             root,
-            "SharpClaw.Application.Core",
-            "SharpClaw.Application.Core.csproj"));
+            "SharpClaw.Runtime.BLL",
+            "SharpClaw.Runtime.BLL.csproj"));
         appCoreProject.Descendants("PackageReference")
             .Select(e => e.Attribute("Include")?.Value)
             .Should()
@@ -238,8 +238,8 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var apiProject = XDocument.Load(Path.Combine(
             root,
-            "SharpClaw.Application.API",
-            "SharpClaw.Application.API.csproj"));
+            "SharpClaw.Runtime.Host",
+            "SharpClaw.Runtime.Host.csproj"));
 
         var harnessReference = apiProject.Descendants("ProjectReference")
             .Single(e => (e.Attribute("Include")?.Value ?? "")

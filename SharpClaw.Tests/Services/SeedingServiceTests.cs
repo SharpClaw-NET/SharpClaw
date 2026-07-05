@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
@@ -14,7 +14,7 @@ using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Clients;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Permissions;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Services;
 

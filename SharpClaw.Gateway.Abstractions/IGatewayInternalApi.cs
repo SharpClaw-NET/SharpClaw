@@ -2,7 +2,7 @@ namespace SharpClaw.Gateway.Abstractions;
 
 /// <summary>
 /// Read-only forwarder a module can inject to perform <c>GET</c> requests
-/// against the internal SharpClaw Application API. The implementation
+/// against the internal SharpClaw Runtime Host. The implementation
 /// attaches the <c>X-Api-Key</c> header, the gateway service token, and
 /// forwards the caller's <c>Authorization</c> header unchanged. Mutations
 /// must go through <see cref="IGatewayDispatcher"/> instead so they can be

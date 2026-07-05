@@ -1,7 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Core.Modules;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Modules;
 using SharpClaw.Modules.TestHarness;

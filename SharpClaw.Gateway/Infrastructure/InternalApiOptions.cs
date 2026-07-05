@@ -1,7 +1,7 @@
 namespace SharpClaw.Gateway.Infrastructure;
 
 /// <summary>
-/// Configuration for connecting to the internal SharpClaw Application API.
+/// Configuration for connecting to the internal SharpClaw Runtime Host.
 /// </summary>
 public sealed class InternalApiOptions
 {

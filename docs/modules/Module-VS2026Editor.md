@@ -106,7 +106,7 @@ Status is shown in the VS status bar.
 
 Default connection: `ws://localhost:5163/api/editor/bridge`
 
-To change the port, update `SharpClaw.Application.API` listen URL in:
+To change the port, update `SharpClaw.Runtime.Host` listen URL in:
 `Infrastructure/Environment/.env`
 
 ```jsonc

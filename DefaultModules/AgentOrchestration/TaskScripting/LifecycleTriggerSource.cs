@@ -11,7 +11,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// callback (<see cref="TaskScriptingTriggerKeys.Shutdown"/>) via
 /// <see cref="IHostApplicationLifetime"/>.
 /// <para>
-/// Moved out of <c>SharpClaw.Application.Core</c> by the trigger-extraction
+/// Moved out of <c>SharpClaw.Runtime.BLL</c> by the trigger-extraction
 /// plan; behavior is preserved verbatim.
 /// </para>
 /// </summary>

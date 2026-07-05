@@ -8,9 +8,9 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.API.Routing;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Runtime.Host.Routing;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Modules;
 

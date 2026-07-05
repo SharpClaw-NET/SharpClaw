@@ -2,7 +2,7 @@ namespace SharpClaw.Gateway.Abstractions;
 
 /// <summary>
 /// Mutation forwarder a module injects to perform <c>POST</c>/<c>PUT</c>/<c>DELETE</c>
-/// requests against the internal SharpClaw Application API. The implementation
+/// requests against the internal SharpClaw Runtime Host. The implementation
 /// routes mutations through the gateway's request queue when enabled so that
 /// sequential processing, circuit breaking, and queue metrics apply uniformly
 /// to module-contributed endpoints.

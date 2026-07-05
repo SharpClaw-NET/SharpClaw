@@ -1,4 +1,4 @@
-﻿# Database Configuration Guide
+# Database Configuration Guide
 
 > **Applies to:** SharpClaw Core API and CLI
 >
@@ -296,7 +296,7 @@ To add a new migration (example for PostgreSQL):
 ```bash
 dotnet ef migrations add MyMigrationName \
   --project SharpClaw.Migrations.Postgres \
-  --startup-project SharpClaw.Application.API
+  --startup-project SharpClaw.Runtime.Host
 ```
 
 Each assembly contains a `IDesignTimeDbContextFactory<SharpClawDbContext>`

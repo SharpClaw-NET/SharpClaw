@@ -42,10 +42,10 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Application.API\SharpClaw.Application.API.csproj" />
-    <ProjectReference Include="..\SharpClaw.Uno\SharpClaw.Uno.csproj" />
-    <ProjectReference Include="..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
-    <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime.Host\SharpClaw.Runtime.Host.csproj" />
+    <ProjectReference Include="..\SharpClaw.Client.Uno\SharpClaw.Client.Uno.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime.BLL\SharpClaw.Runtime.BLL.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime.INF\SharpClaw.Runtime.INF.csproj" />
     <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
     <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
     <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />

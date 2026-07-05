@@ -1,7 +1,7 @@
 using System.Reflection;
 using System.Text.Json;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Modules.Sidecar;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Sidecar;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Modules.Sidecar;
 
@@ -193,7 +193,7 @@ public sealed class SidecarReadinessInventoryTests
         var config = new DirectoryInfo(testBinDir).Parent!.Name;
         var tfm = new DirectoryInfo(testBinDir).Name;
 
-        return Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+        return Path.Combine(solutionRoot, "SharpClaw.Runtime.Host", "bin", config, tfm);
     }
 
     private static IReadOnlyList<(ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo)>

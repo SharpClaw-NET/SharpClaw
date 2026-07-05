@@ -5,9 +5,9 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.Modules;
+using SharpClaw.Runtime.INF;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Runtime.INF.Persistence.Modules;
 
 namespace SharpClaw.Tests.Persistence;
 

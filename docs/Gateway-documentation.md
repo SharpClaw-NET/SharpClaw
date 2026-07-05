@@ -1,9 +1,9 @@
-﻿# SharpClaw Gateway API Reference
+# SharpClaw Gateway API Reference
 
 > **Default URL:** `https://your-domain.example.com` (user-configured)
 >
 > **Authentication:** The gateway forwards all requests to the internal
-> SharpClaw Application API. The caller authenticates using the same
+> SharpClaw Runtime Host. The caller authenticates using the same
 > JWT-based auth flow — `POST /api/auth/login` returns a token that
 > must be sent as a `Bearer` header (or however the internal API
 > expects it). The gateway itself attaches the internal `X-Api-Key`
@@ -18,7 +18,7 @@ strings. Timestamps are ISO 8601 (`DateTimeOffset`).
 
 The **SharpClaw Gateway** (`SharpClaw.Gateway`) is a standalone
 ASP.NET Core reverse proxy that sits between public clients and the
-internal SharpClaw Application API. The internal API stays bound to a
+internal SharpClaw Runtime Host. The internal API stays bound to a
 local or private address and protects itself with a per-instance runtime
 API key. The gateway resolves that key from explicit configuration, an
 auth file path, or selected-backend discovery metadata, then attaches it
@@ -62,7 +62,7 @@ and [Endpoint toggles](#endpoint-toggles). It then documents
 ## Architecture
 
 ```
-  Public Client ──► SharpClaw Gateway ──► Internal Application API
+  Public Client ──► SharpClaw Gateway ──► Internal Runtime Host
                    (public-facing)        (localhost:48923)
 ```
 

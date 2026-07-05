@@ -3,9 +3,9 @@ using FluentAssertions;
 using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
-using SharpClaw.Application.API;
+using SharpClaw.Runtime.Host;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Modules;
 

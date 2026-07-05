@@ -1,5 +1,5 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core;

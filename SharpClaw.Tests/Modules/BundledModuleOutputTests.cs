@@ -8,7 +8,7 @@ namespace SharpClaw.Tests.Modules;
 /// <summary>
 /// Verifies that bundled module payloads are present in API build and publish output.
 /// This test will fail if the CopyBundledModules MSBuild target in
-/// SharpClaw.Application.API.csproj is broken or a module project is removed.
+/// SharpClaw.Runtime.Host.csproj is broken or a module project is removed.
 /// </summary>
 [TestFixture]
 public class BundledModuleOutputTests
@@ -173,7 +173,7 @@ public class BundledModuleOutputTests
         var config = ResolveConfiguration();
         var tfm = new DirectoryInfo(testBinDir).Name;
 
-        return Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+        return Path.Combine(solutionRoot, "SharpClaw.Runtime.Host", "bin", config, tfm);
     }
 
     private static IReadOnlyList<BundledModuleExpectation> ReadBundledModuleExpectations()
@@ -351,8 +351,8 @@ public class BundledModuleOutputTests
     {
         var apiProject = Path.Combine(
             ResolveSolutionRoot(),
-            "SharpClaw.Application.API",
-            "SharpClaw.Application.API.csproj");
+            "SharpClaw.Runtime.Host",
+            "SharpClaw.Runtime.Host.csproj");
 
         var startInfo = new ProcessStartInfo("dotnet")
         {

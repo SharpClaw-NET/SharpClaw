@@ -2,14 +2,14 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Diagnostics;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Jobs;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Modules;
 

@@ -165,8 +165,8 @@ if (-not $MsixVersion) {
 # ===================================================================
 
 $repoRoot       = $PSScriptRoot
-$unoProject     = Join-Path (Join-Path $repoRoot "SharpClaw.Uno") "SharpClaw.Uno.csproj"
-$apiProject     = Join-Path (Join-Path $repoRoot "SharpClaw.Application.API") "SharpClaw.Application.API.csproj"
+$unoProject     = Join-Path (Join-Path $repoRoot "SharpClaw.Client.Uno") "SharpClaw.Client.Uno.csproj"
+$apiProject     = Join-Path (Join-Path $repoRoot "SharpClaw.Runtime.Host") "SharpClaw.Runtime.Host.csproj"
 $gatewayProject = Join-Path (Join-Path $repoRoot "SharpClaw.Gateway") "SharpClaw.Gateway.csproj"
 $signingDir     = Join-Path $repoRoot "signing"
 
@@ -299,8 +299,8 @@ function Publish-Uno {
     param([string]$TargetRid)
 
     $label    = "Uno/$TargetRid"
-    $stageDir = Join-Path $OutputDir "SharpClaw-Uno-$TargetRid"
-    $zipPath  = Join-Path $OutputDir "SharpClaw-Uno-$TargetRid.zip"
+    $stageDir = Join-Path $OutputDir "SharpClaw-Client-Uno-$TargetRid"
+    $zipPath  = Join-Path $OutputDir "SharpClaw-Client-Uno-$TargetRid.zip"
 
     Write-Host ""
     Write-Host "-- Uno: $TargetRid ----------------------------------" -ForegroundColor Green
@@ -328,7 +328,7 @@ function Publish-Uno {
     }
 
     # Verify backend
-    $backendExe = Join-Path (Join-Path $stageDir "backend") (Get-ExeName "SharpClaw.Application.API" $TargetRid)
+    $backendExe = Join-Path (Join-Path $stageDir "backend") (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     if (-not (Test-Path $backendExe)) {
         Write-Host "  [X] Backend not found at $backendExe" -ForegroundColor Red
         Add-Result "Uno" $TargetRid $false
@@ -476,7 +476,7 @@ function Publish-MSIX {
 
     $assetsDir = Join-Path $stageDir "Assets"
     if (-not (Test-Path $assetsDir)) { New-Item $assetsDir -ItemType Directory -Force | Out-Null }
-    $iconSrc = Join-Path (Join-Path (Join-Path $repoRoot "SharpClaw.Uno") "Environment") "icon.png"
+    $iconSrc = Join-Path (Join-Path (Join-Path $repoRoot "SharpClaw.Client.Uno") "Environment") "icon.png"
     if (Test-Path $iconSrc) { Copy-Item $iconSrc (Join-Path $assetsDir "icon.png") -Force }
 
     $manifest = @(
@@ -510,7 +510,7 @@ function Publish-MSIX {
         ''
         '  <Applications>'
         '    <Application Id="SharpClaw"'
-        '      Executable="SharpClaw.Uno.exe"'
+        '      Executable="SharpClaw.Client.Uno.exe"'
         '      EntryPoint="Windows.FullTrustApplication">'
         '      <uap:VisualElements'
         '        DisplayName="SharpClaw"'
@@ -637,7 +637,7 @@ function Publish-Server {
     }
 
     # Verify
-    $apiExe = Join-Path $apiDir (Get-ExeName "SharpClaw.Application.API" $TargetRid)
+    $apiExe = Join-Path $apiDir (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     $gwExe  = Join-Path $gatewayDir (Get-ExeName "SharpClaw.Gateway" $TargetRid)
 
     if (-not (Test-Path $apiExe)) {
@@ -706,7 +706,7 @@ function Publish-Core {
     }
 
     # Verify
-    $apiExe = Join-Path $apiDir (Get-ExeName "SharpClaw.Application.API" $TargetRid)
+    $apiExe = Join-Path $apiDir (Get-ExeName "SharpClaw.Runtime.Host" $TargetRid)
     if (-not (Test-Path $apiExe)) {
         Write-Host "  [X] API executable not found at $apiExe" -ForegroundColor Red
         Add-Result "Core" $TargetRid $false
@@ -861,7 +861,7 @@ function Package-Snap {
     if ($Profile -eq "desktop") {
         New-Item (Join-Path $workDir "snap\gui") -ItemType Directory | Out-Null
         Copy-Item (Join-Path $repoRoot "packaging\snap\gui\sharpclaw.desktop") (Join-Path $workDir "snap\gui\sharpclaw.desktop") -Force
-        Copy-Item (Join-Path $repoRoot "SharpClaw.Uno\Environment\icon.png")   (Join-Path $workDir "snap\gui\icon.png")          -Force
+        Copy-Item (Join-Path $repoRoot "SharpClaw.Client.Uno\Environment\icon.png")   (Join-Path $workDir "snap\gui\icon.png")          -Force
     }
 
     Push-Location $workDir
@@ -909,7 +909,7 @@ function Package-Flatpak {
 
     Copy-Item (Join-Path $repoRoot "packaging\flatpak\com.mkn8rn.SharpClaw.yml")     (Join-Path $workDir "com.mkn8rn.SharpClaw.yml")     -Force
     Copy-Item (Join-Path $repoRoot "packaging\flatpak\com.mkn8rn.SharpClaw.desktop") (Join-Path $workDir "com.mkn8rn.SharpClaw.desktop") -Force
-    Copy-Item (Join-Path $repoRoot "SharpClaw.Uno\Environment\icon.png")             (Join-Path $workDir "icon.png")                     -Force
+    Copy-Item (Join-Path $repoRoot "SharpClaw.Client.Uno\Environment\icon.png")             (Join-Path $workDir "icon.png")                     -Force
 
     $buildDir = Join-Path $workDir "build"
     $repoDir  = Join-Path $workDir "repo"
@@ -1294,7 +1294,7 @@ if ($failedItems.Count -gt 0) {
 
 Write-Host ""
 Write-Host "Output directory: $OutputDir" -ForegroundColor DarkGray
-Write-Host "Gateway is opt-in: enable it from the .env editor (Application Interface)." -ForegroundColor DarkGray
+Write-Host "Gateway is opt-in: enable it from the .env editor (Client Interface)." -ForegroundColor DarkGray
 Write-Host ""
 
 if ($failedItems.Count -gt 0) { exit 1 }

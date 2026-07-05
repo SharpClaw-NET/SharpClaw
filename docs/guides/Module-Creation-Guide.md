@@ -1,4 +1,4 @@
-﻿# Creating a SharpClaw Module
+# Creating a SharpClaw Module
 
 > **Enablement reference:** [modules/Module-Enablement-Guide.md](../modules/Module-Enablement-Guide.md)
 > **Agent skill:** [Module-Creation-skill.md](Module-Creation-skill.md)
@@ -80,8 +80,8 @@ you have access to `ISharpClawModule` and all the supporting types.
 ```
 
 If your module needs to write to the database, also reference
-`SharpClaw.Application.Infrastructure`. If it needs core services like agents or
-channels, reference `SharpClaw.Application.Core`.
+`SharpClaw.Runtime.INF`. If it needs core services like agents or
+channels, reference `SharpClaw.Runtime.BLL`.
 
 Place the project under `DefaultModules/` by convention:
 
@@ -204,7 +204,7 @@ name that belongs to the module, document the keys, and read them from DI in the
 service that uses them.
 
 For example, a module with id `my_module` can ask users to add this section next
-to the existing top-level sections in `SharpClaw.Application.Infrastructure`
+to the existing top-level sections in `SharpClaw.Runtime.INF`
 `/Environment/.env`:
 
 ```jsonc

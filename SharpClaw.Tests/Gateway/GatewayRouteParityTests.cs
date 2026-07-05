@@ -4,14 +4,14 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using NUnit.Framework;
-using SharpClaw.Application.API.Routing;
+using SharpClaw.Runtime.Host.Routing;
 using SharpClaw.Gateway.Abstractions;
 
 namespace SharpClaw.Tests.Gateway;
 
 /// <summary>
 /// Tier-4 route-parity guardrail. Reflects over the core
-/// <c>SharpClaw.Application.API</c> handlers (decorated with
+/// <c>SharpClaw.Runtime.Host</c> handlers (decorated with
 /// <see cref="RouteGroupAttribute"/>) and the <c>SharpClaw.Gateway</c>
 /// MVC controllers, then asserts that every public core route is either
 /// projected through a classic gateway controller, projected through a

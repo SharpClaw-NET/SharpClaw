@@ -2,10 +2,10 @@ using FluentAssertions;
 using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Services;
-using SharpClaw.Application.Services.Auth;
+using SharpClaw.Runtime.BLL.Services;
+using SharpClaw.Runtime.BLL.Services.Auth;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Services;
 

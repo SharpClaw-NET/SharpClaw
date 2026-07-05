@@ -7,7 +7,7 @@ source tree ships the bundled modules under `DefaultModules`; external modules
 can be added separately through the `ExternalModules` section in the Core env
 file.
 
-The Core env file is `SharpClaw.Application.Infrastructure/Environment/.env`.
+The Core env file is `SharpClaw.Runtime.INF/Environment/.env`.
 It uses JSON with comments and is read into `IConfiguration` during startup.
 In development mode, `.dev.env` is loaded after `.env`, so the development file
 can turn on modules without changing the base template. A module is enabled

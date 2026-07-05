@@ -6,7 +6,7 @@ format, supported parameters, ranges, and provider-specific behaviour —
 see the dedicated provider docs linked below.
 
 The canonical source of truth in code is
-[`CompletionParameterSpec.cs`](../SharpClaw.Application.Core/Clients/CompletionParameterSpec.cs).
+[`CompletionParameterSpec.cs`](../SharpClaw.Runtime.BLL/Clients/CompletionParameterSpec.cs).
 
 > ⚠️ **Completeness disclaimer:** Provider API surfaces are large and
 > change frequently. The typed completion parameter support documented

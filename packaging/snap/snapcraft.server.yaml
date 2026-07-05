@@ -16,7 +16,7 @@ confinement: strict
 
 apps:
   api:
-    command: api/SharpClaw.Application.API
+    command: api/SharpClaw.Runtime.Host
     daemon: simple
     install-mode: disable
     plugs:

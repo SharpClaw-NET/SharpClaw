@@ -57,7 +57,7 @@ internal sealed class SharpClawSdkReferenceService
                 tools, contracts, resources, flags, header tags, endpoints, and
                 CLI commands. Keep module code behind SharpClaw.Contracts and
                 SharpClaw.Utils references. Do not reference
-                SharpClaw.Application.Core, SharpClaw.Application.Infrastructure,
+                SharpClaw.Runtime.BLL, SharpClaw.Runtime.INF,
                 or a host DbContext from a module. Host-owned features such as
                 task authoring, lifecycle, module storage, and conversation
                 steering are injected as Contracts interfaces.

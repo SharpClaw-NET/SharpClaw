@@ -222,7 +222,7 @@ builder.Services.AddOpenApi(options =>
     {
         doc.Info.Title = "SharpClaw Gateway";
         doc.Info.Version = "v1";
-        doc.Info.Description = "Public REST gateway for the SharpClaw Application API.";
+        doc.Info.Description = "Public REST gateway for the SharpClaw Runtime Host.";
         return Task.CompletedTask;
     });
 });

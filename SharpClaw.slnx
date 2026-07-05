@@ -1,8 +1,8 @@
 <Solution>
   <Folder Name="/Application/">
-    <Project Path="SharpClaw.Application.API/SharpClaw.Application.API.csproj" />
-    <Project Path="SharpClaw.Application.Core/SharpClaw.Application.Core.csproj" />
-    <Project Path="SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj" />
+    <Project Path="SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj" />
+    <Project Path="SharpClaw.Runtime.BLL/SharpClaw.Runtime.BLL.csproj" />
+    <Project Path="SharpClaw.Runtime.INF/SharpClaw.Runtime.INF.csproj" />
   </Folder>
   <Folder Name="/Migrations/">
     <Project Path="SharpClaw.Migrations.Postgres/SharpClaw.Migrations.Postgres.csproj" />
@@ -10,7 +10,7 @@
     <Project Path="SharpClaw.Migrations.SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
   </Folder>
   <Folder Name="/NativeClient/">
-    <Project Path="SharpClaw.Uno/SharpClaw.Uno.csproj">
+    <Project Path="SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj">
       <Deploy />
     </Project>
   </Folder>

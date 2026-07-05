@@ -1,4 +1,4 @@
-﻿SharpClaw Core API — Agent Skill Reference
+SharpClaw Core API — Agent Skill Reference
 
 Base: http://127.0.0.1:48923
 Auth: X-Api-Key header for the current runtime instance, plus Bearer JWT on
@@ -510,8 +510,8 @@ ENV FILE MANAGEMENT
 ────────────────────────────────────────
 Three .env files use JSON-with-comments and load into IConfiguration. The
 Core env file is server-side and lives under
-SharpClaw.Application.Infrastructure/Environment. The Interface env file
-lives under SharpClaw.Uno/Environment and controls client process startup and
+SharpClaw.Runtime.INF/Environment. The Interface env file
+lives under SharpClaw.Client.Uno/Environment and controls client process startup and
 URLs. The Gateway env file lives under SharpClaw.Gateway/Environment and
 controls public proxy routing, internal API auth, and queue behavior.
 

@@ -11,7 +11,7 @@ namespace SharpClaw.Modules.AgentOrchestration;
 /// (<see cref="TaskScriptingTriggerKeys.TaskFailed"/>). Receives host events
 /// through <see cref="ISharpClawEventSink"/>.
 /// <para>
-/// Moved out of <c>SharpClaw.Application.Core</c> by the trigger-extraction
+/// Moved out of <c>SharpClaw.Runtime.BLL</c> by the trigger-extraction
 /// plan; behavior is preserved verbatim.
 /// </para>
 /// </summary>

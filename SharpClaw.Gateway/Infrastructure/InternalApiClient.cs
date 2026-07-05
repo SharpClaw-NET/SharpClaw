@@ -12,7 +12,7 @@ namespace SharpClaw.Gateway.Infrastructure;
 
 /// <summary>
 /// Typed <see cref="HttpClient"/> wrapper that forwards requests to the
-/// internal SharpClaw Application API, automatically attaching the
+/// internal SharpClaw Runtime Host, automatically attaching the
 /// <c>X-Api-Key</c> header and forwarding the caller's JWT when present.
 /// </summary>
 public sealed class InternalApiClient(

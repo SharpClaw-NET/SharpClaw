@@ -6,8 +6,8 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
@@ -18,8 +18,8 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Infrastructure.Persistence.Modules;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Runtime.INF.Persistence.Modules;
 
 namespace SharpClaw.Tests.Modules;
 

@@ -15,7 +15,7 @@ public class ModuleDependencyGuardrailTests
     [Test]
     public void Api_assembly_must_not_reference_module_assemblies()
     {
-        var apiAssembly = typeof(SharpClaw.Application.API.DatabaseInitializationGate).Assembly;
+        var apiAssembly = typeof(SharpClaw.Runtime.Host.DatabaseInitializationGate).Assembly;
 
         var moduleReferences = apiAssembly.GetReferencedAssemblies()
             .Select(a => a.Name)
@@ -29,7 +29,7 @@ public class ModuleDependencyGuardrailTests
     [Test]
     public void Api_project_module_references_must_not_output_compiler_references()
     {
-        var apiProjectPath = FindFileFromTestAssembly("SharpClaw.Application.API", "SharpClaw.Application.API.csproj");
+        var apiProjectPath = FindFileFromTestAssembly("SharpClaw.Runtime.Host", "SharpClaw.Runtime.Host.csproj");
         var project = XDocument.Load(apiProjectPath);
 
         var moduleReferences = project.Descendants("ProjectReference")

@@ -126,10 +126,10 @@ meeting preparation, and status reporting.
 
 | Component | Role |
 | --- | --- |
-| `SharpClaw.Application.Core` | Agents, chat, jobs, permissions, tasks, modules, providers, costs, and logs. |
-| `SharpClaw.Application.API` | HTTP surface over Core for headless and integrated deployments. |
+| `SharpClaw.Runtime.BLL` | Agents, chat, jobs, permissions, tasks, modules, providers, costs, and logs. |
+| `SharpClaw.Runtime.Host` | HTTP surface over Core for headless and integrated deployments. |
 | `SharpClaw.Gateway` | Optional public proxy with endpoint toggles, queueing, rate limiting, and module-contributed routes. |
-| `SharpClaw.Uno` | Modular desktop frontend that can host module-provided UI hooks and manage local processes. |
+| `SharpClaw.Client.Uno` | Modular desktop frontend that can host module-provided UI hooks and manage local processes. |
 | `DefaultModules` | Bundled providers, editor bridges, agent orchestration, metrics, and module development tools. |
 
 The currently bundled modules are intentionally focused: Anthropic, Google,
@@ -161,8 +161,8 @@ Developers who want to run from source can still build and start the Core API
 directly:
 
 ```bash
-dotnet build SharpClaw.Application.API/SharpClaw.Application.API.csproj
-dotnet run --project SharpClaw.Application.API/SharpClaw.Application.API.csproj
+dotnet build SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj
+dotnet run --project SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj
 ```
 
 Then launch the Uno client separately, create the first admin account, add a

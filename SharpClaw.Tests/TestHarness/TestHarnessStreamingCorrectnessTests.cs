@@ -2,7 +2,7 @@ using System.Diagnostics;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.API.Handlers;
+using SharpClaw.Runtime.Host.Handlers;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Enums;

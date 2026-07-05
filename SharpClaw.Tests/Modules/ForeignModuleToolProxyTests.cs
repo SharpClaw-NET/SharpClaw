@@ -1,8 +1,8 @@
 using System.Net;
 using System.Net.Sockets;
 using System.Text.Json;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Modules;
 

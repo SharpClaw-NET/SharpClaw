@@ -1,5 +1,5 @@
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Tasks.Runtime;
 
