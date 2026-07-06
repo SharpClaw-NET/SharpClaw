@@ -35,7 +35,7 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;

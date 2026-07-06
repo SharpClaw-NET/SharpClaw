@@ -1,6 +1,6 @@
 using FluentAssertions;
 using SharpClaw.Services;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.Frontend;
 

@@ -1,7 +1,7 @@
 using SharpClaw.Configuration;
 using SharpClaw.Services;
 using SharpClaw.Client.Uno;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 using Serilog;
 using Serilog.Events;
 using Microsoft.Extensions.Configuration;

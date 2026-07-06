@@ -23,7 +23,7 @@ public sealed class BundledTestHarnessSidecarConformanceTests
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
         runtimeInfo.IsSidecarHostMode.Should().BeTrue();
-        runtimeInfo.ModuleType.Should().Be("SharpClaw.Modules.TestHarness.TestHarnessOutOfProcessModule");
+        runtimeInfo.ModuleType.Should().Be("SharpClaw.DefaultModules.TestHarness.TestHarnessOutOfProcessModule");
 
         await using var foreignHost = await ForeignModuleHost.StartAsync(
             manifest,
@@ -156,7 +156,7 @@ public sealed class BundledTestHarnessSidecarConformanceTests
     private static void CopyTestHarnessPayload(string moduleDir)
     {
         var sourceDir = TestContext.CurrentContext.TestDirectory;
-        foreach (var file in Directory.GetFiles(sourceDir, "SharpClaw.Modules.TestHarness.OutOfProcess.*"))
+        foreach (var file in Directory.GetFiles(sourceDir, "SharpClaw.DefaultModules.TestHarness.OutOfProcess.*"))
         {
             if (file.EndsWith(".dll", StringComparison.OrdinalIgnoreCase)
                 || file.EndsWith(".deps.json", StringComparison.OrdinalIgnoreCase)
@@ -167,7 +167,7 @@ public sealed class BundledTestHarnessSidecarConformanceTests
         }
 
         File.Copy(
-            Path.Combine(ResolveRepoRoot(), "SharpClaw.Modules.TestHarness.OutOfProcess", "module.json"),
+            Path.Combine(ResolveRepoRoot(), "SharpClaw.DefaultModules.TestHarness.OutOfProcess", "module.json"),
             Path.Combine(moduleDir, "module.json"),
             overwrite: true);
     }

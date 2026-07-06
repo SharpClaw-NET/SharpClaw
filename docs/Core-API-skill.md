@@ -510,7 +510,7 @@ ENV FILE MANAGEMENT
 ────────────────────────────────────────
 Three .env files use JSON-with-comments and load into IConfiguration. The
 Core env file is server-side and lives under
-SharpClaw.Runtime.INF/Environment. The Interface env file
+SharpClaw.Runtime/INF/Environment. The Interface env file
 lives under SharpClaw.Client.Uno/Environment and controls client process startup and
 URLs. The Gateway env file lives under SharpClaw.Gateway/Environment and
 controls public proxy routing, internal API auth, and queue behavior.

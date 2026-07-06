@@ -173,7 +173,7 @@ public class BundledModuleOutputTests
         var config = ResolveConfiguration();
         var tfm = new DirectoryInfo(testBinDir).Name;
 
-        return Path.Combine(solutionRoot, "SharpClaw.Runtime.Host", "bin", config, tfm);
+        return Path.Combine(solutionRoot, "SharpClaw.Runtime", "Host", "bin", config, tfm);
     }
 
     private static IReadOnlyList<BundledModuleExpectation> ReadBundledModuleExpectations()
@@ -181,7 +181,7 @@ public class BundledModuleOutputTests
         var solutionRoot = ResolveSolutionRoot();
         var testHarnessManifests = new[]
         {
-            Path.Combine(solutionRoot, "SharpClaw.Modules.TestHarness.OutOfProcess", "module.json"),
+            Path.Combine(solutionRoot, "SharpClaw.DefaultModules", "TestHarness.OutOfProcess", "module.json"),
         };
 
         var sourceModules = testHarnessManifests
@@ -218,12 +218,13 @@ public class BundledModuleOutputTests
         var tfm = new DirectoryInfo(testBinDir).Name;
         var outputDir = Path.Combine(
             solutionRoot,
-            "SharpClaw.Modules.TestHarness.InProcess",
+            "SharpClaw.DefaultModules",
+            "TestHarness.InProcess",
             "bin",
             config,
             tfm);
 
-        File.Exists(Path.Combine(outputDir, "SharpClaw.Modules.TestHarness.InProcess.dll"))
+        File.Exists(Path.Combine(outputDir, "SharpClaw.DefaultModules.TestHarness.InProcess.dll"))
             .Should()
             .BeTrue("the in-process harness module project must build its own payload assembly");
         File.Exists(Path.Combine(outputDir, "modules", "sharpclaw_test_harness_in_process", "module.json"))
@@ -389,7 +390,8 @@ public class BundledModuleOutputTests
     {
         var apiProject = Path.Combine(
             ResolveSolutionRoot(),
-            "SharpClaw.Runtime.Host",
+            "SharpClaw.Runtime",
+            "Host",
             "SharpClaw.Runtime.Host.csproj");
 
         var startInfo = new ProcessStartInfo("dotnet")

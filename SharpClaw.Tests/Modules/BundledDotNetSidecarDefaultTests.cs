@@ -15,7 +15,7 @@ using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.TestFixtures.ExternalModule;
 using SharpClaw.Tests.TestHarness;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;

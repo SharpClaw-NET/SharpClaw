@@ -138,7 +138,7 @@ SharpClaw uses two `.env` files (JSON-with-comments format):
 
 ### Core .env (API-side)
 
-**Location:** `SharpClaw.Runtime.INF/Environment/.env`
+**Location:** `SharpClaw.Runtime/INF/Environment/.env`
 
 **Managed via:** Settings → >env button → **Runtime Host** tab
 

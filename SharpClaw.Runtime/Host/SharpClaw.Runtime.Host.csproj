@@ -1,0 +1,130 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <Import Project="..\..\build\PackagedModulePayload.targets" />
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <FrameworkReference Include="Microsoft.AspNetCore.App" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.EntityFrameworkCore.Design">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp.Workspaces">
+      <PrivateAssets>all</PrivateAssets>
+    </PackageReference>
+    <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="System.Security.Cryptography.Xml" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\BLL\SharpClaw.Runtime.BLL.csproj" />
+    <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Ollama" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.OpenAICompatible" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Providers.Common" />
+    <PackageReference Include="SharpClaw.Providers.LocalCommon" />
+    <ProjectReference Include="..\INF\SharpClaw.Runtime.INF.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Migrations\Postgres\SharpClaw.Migrations.Postgres.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Migrations\SqlServer\SharpClaw.Migrations.SqlServer.csproj" />
+    <ProjectReference Include="..\..\SharpClaw.Migrations\SQLite\SharpClaw.Migrations.SQLite.csproj" />
+  </ItemGroup>
+
+  <!--
+    Bundled modules: ReferenceOutputAssembly=false keeps them off the compiler reference list so the
+    Runtime cannot take accidental compile-time dependencies. Private is left at its default (true) so
+    that Visual Studio includes these projects in the pre-launch build graph - without it VS skips
+    rebuilding modules on Start/Start Without Debugging. The CopyBundledModules target below handles
+    copying the DLLs to the output folder, because ReferenceOutputAssembly=false also suppresses the
+    normal copy-local mechanism.
+  -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" Condition="'$(Configuration)' == 'Debug'">
+      <ReferenceOutputAssembly>false</ReferenceOutputAssembly>
+    </ProjectReference>
+  </ItemGroup>
+
+  <!--
+    Copy module assemblies and their transitive dependencies from each module's output folder.
+    Host assemblies (SharpClaw.Contracts, SharpClaw.Shared, etc.) are deliberately excluded because
+    Runtime already references them directly - module bin copies may be stale and would overwrite
+    the freshly built host DLLs.
+
+    Module DLLs:       SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll from the in-repo test module.
+    Transitive deps:   *.dll that do NOT start with SharpClaw.
+    Packaged modules:  copied from each restored package's sharpclaw/ payload. SharpClaw.*
+                       payload dependencies are excluded except the module entry DLLs, so package
+                       payloads cannot overwrite freshly built host-owned SharpClaw assemblies.
+
+    SkipUnchangedFiles avoids unnecessary copies on incremental builds.
+  -->
+  <Target Name="_ResolveBundledModuleOutputFiles"
+          DependsOnTargets="_ResolvePackagedModulePayloadFiles">
+    <ItemGroup>
+      <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug'" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll"
+                   Condition="'$(Configuration)' == 'Debug'" />
+      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json" Condition="'$(Configuration)' == 'Debug'">
+        <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
+      </_BundledModuleManifest>
+      <_BundledModuleOutputFile Include="@(_BundledModuleDll);@(_NonHostDll);@(_BundledHostDll);@(_PackagedModulePayloadDll)" />
+    </ItemGroup>
+  </Target>
+
+  <Target Name="CopyBundledModules"
+          AfterTargets="Build"
+          DependsOnTargets="_ResolveBundledModuleOutputFiles">
+    <RemoveDir Directories="$(OutputPath)modules\sharpclaw_test_harness;$(OutputPath)modules\sharpclaw_test_harness_in_process" />
+    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
+          DestinationFiles="@(_PackagedModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedModuleManifest);@(_BundledModuleManifest)' != ''" />
+  </Target>
+
+  <Target Name="CopyBundledModulesToPublish"
+          AfterTargets="Publish"
+          DependsOnTargets="_ResolveBundledModuleOutputFiles">
+    <RemoveDir Directories="$(PublishDir)modules\sharpclaw_test_harness;$(PublishDir)modules\sharpclaw_test_harness_in_process" />
+    <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
+          DestinationFiles="@(_PackagedModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedModuleManifest);@(_BundledModuleManifest)' != ''" />
+  </Target>
+
+  <Target Name="CleanBundledModules" AfterTargets="Clean">
+    <ItemGroup>
+      <_CopiedBundledModuleDll Include="$(OutputPath)SharpClaw.Modules.*.dll;$(OutputPath)SharpClaw.DefaultModules.*.dll" />
+      <_CopiedBundledHostDll Include="$(OutputPath)SharpClaw.Providers.Common.dll" />
+      <_CopiedOutOfProcessModuleHostFile Include="$(OutputPath)SharpClaw.ModuleHost.OutOfProcess.*" />
+      <_CopiedBundledModuleManifest Include="$(OutputPath)modules\**\*" />
+    </ItemGroup>
+    <Delete Files="@(_CopiedBundledModuleDll)" Condition="'@(_CopiedBundledModuleDll)' != ''" />
+    <Delete Files="@(_CopiedBundledHostDll)" Condition="'@(_CopiedBundledHostDll)' != ''" />
+    <Delete Files="@(_CopiedOutOfProcessModuleHostFile)" Condition="'@(_CopiedOutOfProcessModuleHostFile)' != ''" />
+    <Delete Files="@(_CopiedBundledModuleManifest)" Condition="'@(_CopiedBundledModuleManifest)' != ''" />
+  </Target>
+
+</Project>

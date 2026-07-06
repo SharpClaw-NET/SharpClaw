@@ -4,8 +4,8 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Infrastructure;
-using SharpClaw.Utils.Instances;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Instances;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.Gateway;
 

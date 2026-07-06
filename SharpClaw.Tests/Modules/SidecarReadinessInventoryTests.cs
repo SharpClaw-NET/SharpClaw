@@ -21,7 +21,7 @@ public sealed class SidecarReadinessInventoryTests
         "SharpClaw.Modules.Providers.LlamaSharp.dll",
         "SharpClaw.Modules.Providers.Ollama.dll",
         "SharpClaw.Modules.Providers.OpenAICompatible.dll",
-        "SharpClaw.Modules.TestHarness.OutOfProcess.dll",
+        "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll",
         "SharpClaw.Modules.VS2026Editor.dll",
         "SharpClaw.Modules.VSCodeEditor.dll",
     ];

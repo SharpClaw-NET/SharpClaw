@@ -7,7 +7,7 @@ using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Modules.Hosting;
 using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Security;
-using SharpClaw.Utils.Security;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules;
 

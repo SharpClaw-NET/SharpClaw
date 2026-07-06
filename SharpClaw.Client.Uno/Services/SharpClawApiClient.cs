@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Services;
 

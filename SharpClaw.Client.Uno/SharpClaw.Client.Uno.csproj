@@ -55,7 +55,7 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
-    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
 
   <!--
@@ -97,12 +97,12 @@
     <UnoIconForegroundFile>DISABLED</UnoIconForegroundFile>
   </PropertyGroup>
 
-  <Target Name="PublishWithBackend" BeforeTargets="Publish" Condition="'$(BundleBackend)' == 'true' AND Exists('..\SharpClaw.Runtime.Host\SharpClaw.Runtime.Host.csproj')">
+  <Target Name="PublishWithBackend" BeforeTargets="Publish" Condition="'$(BundleBackend)' == 'true' AND Exists('..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj')">
     <PropertyGroup>
       <_BackendSelfContained Condition="'$(SelfContained)' == 'true'">--self-contained -r $(RuntimeIdentifier) -p:PublishReadyToRun=true -p:PublishTrimmed=false</_BackendSelfContained>
       <_BackendSelfContained Condition="'$(SelfContained)' != 'true'">--no-self-contained</_BackendSelfContained>
     </PropertyGroup>
-    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Runtime.Host\SharpClaw.Runtime.Host.csproj&quot; -c $(Configuration) $(_BackendSelfContained) -o &quot;$(PublishDir)backend&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
+    <Exec Command="dotnet publish &quot;$(MSBuildThisFileDirectory)..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj&quot; -c $(Configuration) $(_BackendSelfContained) -o &quot;$(PublishDir)backend&quot;" ConsoleToMsBuild="true" StandardOutputImportance="low" />
   </Target>
 
   <!--

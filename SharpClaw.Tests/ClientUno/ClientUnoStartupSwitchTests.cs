@@ -3,7 +3,7 @@ using FluentAssertions;
 using NUnit.Framework;
 using SharpClaw.Presentation;
 using SharpClaw.Services;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.ClientUno;
 

@@ -45,14 +45,14 @@
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Runtime.Host\SharpClaw.Runtime.Host.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj" />
     <ProjectReference Include="..\SharpClaw.Client.Uno\SharpClaw.Client.Uno.csproj" />
-    <ProjectReference Include="..\SharpClaw.Runtime.BLL\SharpClaw.Runtime.BLL.csproj" />
-    <ProjectReference Include="..\SharpClaw.Runtime.INF\SharpClaw.Runtime.INF.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime\BLL\SharpClaw.Runtime.BLL.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime\INF\SharpClaw.Runtime.INF.csproj" />
     <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
-    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
-    <ProjectReference Include="..\SharpClaw.Modules.TestHarness.OutOfProcess\SharpClaw.Modules.TestHarness.OutOfProcess.csproj" ReferenceOutputAssembly="false" />
-    <ProjectReference Include="..\SharpClaw.Modules.TestHarness.InProcess\SharpClaw.Modules.TestHarness.InProcess.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
+    <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.InProcess\SharpClaw.DefaultModules.TestHarness.InProcess.csproj" ReferenceOutputAssembly="false" />
     <ProjectReference Include="Fixtures\ExternalModule\SharpClaw.TestFixtures.ExternalModule.csproj" />
     <ProjectReference Include="Fixtures\ForeignSidecar\SharpClaw.TestFixtures.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
   </ItemGroup>
@@ -61,16 +61,16 @@
           AfterTargets="Build"
           DependsOnTargets="_ResolvePackagedModulePayloadFiles">
     <ItemGroup>
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.TestHarness.*.dll" />
-      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.*\bin\$(Configuration)\$(TargetFramework)\*.dll"
-                   Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
-      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.OutOfProcess\module.json">
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.*.dll" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json">
         <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
       </_BundledModuleManifest>
-      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.Modules.TestHarness.InProcess.dll" />
-      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
-                                Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
-      <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.Modules.TestHarness.InProcess\module.json" />
+      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.InProcess.dll" />
+      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                                Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\module.json" />
     </ItemGroup>
     <RemoveDir Directories="$(OutDir)modules\sharpclaw_test_harness;$(OutDir)modules\sharpclaw_test_harness_in_process" />
     <Copy SourceFiles="@(_BundledModuleDll);@(_NonHostDll)"

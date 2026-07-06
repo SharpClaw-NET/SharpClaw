@@ -47,7 +47,7 @@
                    FontSize="11"
                    Foreground="#CCCC66"
                    TextWrapping="Wrap"
-                   Text="Default admin credentials: username admin, password 123456 unless otherwise configured in SharpClaw.Runtime.Host/Environment/.env. You are encouraged to change them after finishing first-time setup." />
+                   Text="Default admin credentials: username admin, password 123456 unless otherwise configured in SharpClaw.Runtime/INF/Environment/.env. You are encouraged to change them after finishing first-time setup." />
       </Border>
 
       <!-- Saved accounts (populated in code-behind) -->

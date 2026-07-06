@@ -1,13 +1,13 @@
 <Solution>
-  <Folder Name="/Application/">
-    <Project Path="SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj" />
-    <Project Path="SharpClaw.Runtime.BLL/SharpClaw.Runtime.BLL.csproj" />
-    <Project Path="SharpClaw.Runtime.INF/SharpClaw.Runtime.INF.csproj" />
+  <Folder Name="/Runtime/">
+    <Project Path="SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj" />
+    <Project Path="SharpClaw.Runtime/BLL/SharpClaw.Runtime.BLL.csproj" />
+    <Project Path="SharpClaw.Runtime/INF/SharpClaw.Runtime.INF.csproj" />
   </Folder>
   <Folder Name="/Migrations/">
-    <Project Path="SharpClaw.Migrations.Postgres/SharpClaw.Migrations.Postgres.csproj" />
-    <Project Path="SharpClaw.Migrations.SQLite/SharpClaw.Migrations.SQLite.csproj" />
-    <Project Path="SharpClaw.Migrations.SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
+    <Project Path="SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj" />
+    <Project Path="SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj" />
+    <Project Path="SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
   </Folder>
   <Folder Name="/NativeClient/">
     <Project Path="SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj">
@@ -18,12 +18,12 @@
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
   <Folder Name="/Shared/">
-    <Project Path="SharpClaw.Utils/SharpClaw.Utils.csproj" />
+    <Project Path="SharpClaw.Shared/SharpClaw.Shared.csproj" />
   </Folder>
   <Folder Name="/Solution Items/" />
   <Folder Name="/Tests/Infrastructure/">
-    <Project Path="SharpClaw.Modules.TestHarness.InProcess/SharpClaw.Modules.TestHarness.InProcess.csproj" />
-    <Project Path="SharpClaw.Modules.TestHarness.OutOfProcess/SharpClaw.Modules.TestHarness.OutOfProcess.csproj" />
+    <Project Path="SharpClaw.DefaultModules/TestHarness.InProcess/SharpClaw.DefaultModules.TestHarness.InProcess.csproj" />
+    <Project Path="SharpClaw.DefaultModules/TestHarness.OutOfProcess/SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">
     <File Path="Directory.Build.props" />

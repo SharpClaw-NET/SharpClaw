@@ -2674,7 +2674,7 @@ bytes) after Base64 decoding. Got N bytes.` Both errors advise removing
 ## Env file management
 
 SharpClaw uses JSON-with-comments environment files that are loaded into
-`IConfiguration`. Core reads `SharpClaw.Runtime.INF/Environment/.env`
+`IConfiguration`. Core reads `SharpClaw.Runtime/INF/Environment/.env`
 and, in development, `.dev.env`. The Uno interface reads
 `SharpClaw.Client.Uno/Environment/.env` and `.dev.env` directly from the client
 process. The public gateway reads `SharpClaw.Gateway/Environment/.env`
@@ -2751,7 +2751,7 @@ Overwrite the Core `.env` file with new content.
 
 ### Core `.env` keys
 
-The Core template is `SharpClaw.Runtime.INF/Environment/.env.template`.
+The Core template is `SharpClaw.Runtime/INF/Environment/.env.template`.
 It includes the `Encryption` section for the at-rest encryption key and
 encryption toggles, the `Jwt` section for token signing, issuer, audience,
 and lifetimes, and the `Auth` section for local-only bypass switches.

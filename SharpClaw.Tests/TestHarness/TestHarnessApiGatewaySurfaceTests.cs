@@ -21,7 +21,7 @@ using SharpClaw.Contracts.Providers;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Tests.TestHarness;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.TestHarness;
 

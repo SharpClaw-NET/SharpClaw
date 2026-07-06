@@ -1,7 +1,7 @@
 using System.Diagnostics;
 using System.Net;
 using System.Net.NetworkInformation;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Services;
 

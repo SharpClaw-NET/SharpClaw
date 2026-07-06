@@ -5,8 +5,8 @@ parameter system. For full details on any individual provider — wire
 format, supported parameters, ranges, and provider-specific behaviour —
 see the dedicated provider docs linked below.
 
-The canonical source of truth in code is
-[`CompletionParameterSpec.cs`](../SharpClaw.Runtime.BLL/Clients/CompletionParameterSpec.cs).
+The canonical source of truth in code lives with the owning provider
+modules and the Runtime provider parameter validation surface.
 
 > ⚠️ **Completeness disclaimer:** Provider API surfaces are large and
 > change frequently. The typed completion parameter support documented

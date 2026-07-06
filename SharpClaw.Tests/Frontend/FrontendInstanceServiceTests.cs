@@ -1,7 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
 using SharpClaw.Services;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Frontend;
 

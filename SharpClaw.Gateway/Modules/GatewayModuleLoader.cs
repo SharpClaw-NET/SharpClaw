@@ -3,7 +3,7 @@ using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.ModuleHost.InProcess;
-using SharpClaw.Utils.Security;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules;
 

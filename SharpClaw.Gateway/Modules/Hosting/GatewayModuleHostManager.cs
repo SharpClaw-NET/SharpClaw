@@ -4,7 +4,7 @@ using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.ModuleHost.InProcess;
-using SharpClaw.Utils.Security;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;
 

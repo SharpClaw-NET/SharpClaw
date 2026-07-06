@@ -33,7 +33,7 @@ public class ApiHostStartupTests
     private static string ResolveApiExecutable()
     {
         // Test assembly lives at: …/SharpClaw.Tests/bin/<config>/net10.0/
-        // API output lives at:    …/SharpClaw.Runtime.Host/bin/<config>/net10.0/
+        // API output lives at:    .../SharpClaw.Runtime/Host/bin/<config>/net10.0/
         var testBinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
         var solutionRoot = Path.GetFullPath(Path.Combine(testBinDir, "..", "..", "..", ".."));
         var config = new DirectoryInfo(testBinDir).Parent!.Name;

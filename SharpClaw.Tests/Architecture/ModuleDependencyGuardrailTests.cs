@@ -14,11 +14,13 @@ namespace SharpClaw.Tests.Architecture;
 [TestFixture]
 public class ModuleDependencyGuardrailTests
 {
-    private static readonly string[] ProjectDirectories =
+    public sealed record ProjectLocation(string Directory, string ProjectFile);
+
+    private static readonly ProjectLocation[] ProjectLocations =
     [
-        "SharpClaw.Runtime.Host",
-        "SharpClaw.Gateway",
-        "SharpClaw.Tests",
+        new("SharpClaw.Runtime/Host", "SharpClaw.Runtime.Host.csproj"),
+        new("SharpClaw.Gateway", "SharpClaw.Gateway.csproj"),
+        new("SharpClaw.Tests", "SharpClaw.Tests.csproj"),
     ];
 
     [Test]
@@ -45,7 +47,7 @@ public class ModuleDependencyGuardrailTests
     [Test]
     public void Runtime_host_project_must_not_reference_extracted_module_source_projects()
     {
-        var apiProjectPath = FindFileFromTestAssembly("SharpClaw.Runtime.Host", "SharpClaw.Runtime.Host.csproj");
+        var apiProjectPath = FindFileFromTestAssembly("SharpClaw.Runtime/Host", "SharpClaw.Runtime.Host.csproj");
         var project = XDocument.Load(apiProjectPath);
 
         var extractedModuleProjectNames = new[]
@@ -68,7 +70,7 @@ public class ModuleDependencyGuardrailTests
 
         var testHarnessReferences = project.Descendants("ProjectReference")
             .Where(reference => (((string?)reference.Attribute("Include")) ?? "")
-                .Contains("SharpClaw.Modules.TestHarness", StringComparison.OrdinalIgnoreCase))
+                .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         testHarnessReferences.Should().NotBeEmpty(
@@ -81,10 +83,10 @@ public class ModuleDependencyGuardrailTests
         }
     }
 
-    [TestCaseSource(nameof(ProjectDirectories))]
-    public void Module_payload_package_references_must_be_path_only(string projectDirectory)
+    [TestCaseSource(nameof(ProjectLocations))]
+    public void Module_payload_package_references_must_be_path_only(ProjectLocation projectLocation)
     {
-        var projectPath = FindFileFromTestAssembly(projectDirectory, $"{projectDirectory}.csproj");
+        var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var packageReferences = GetModulePayloadPackageIds(project)
             .Select(id => new
@@ -115,14 +117,14 @@ public class ModuleDependencyGuardrailTests
         }
     }
 
-    [TestCaseSource(nameof(ProjectDirectories))]
-    public void In_repo_test_harness_project_references_must_be_payload_only(string projectDirectory)
+    [TestCaseSource(nameof(ProjectLocations))]
+    public void In_repo_test_harness_project_references_must_be_payload_only(ProjectLocation projectLocation)
     {
-        var projectPath = FindFileFromTestAssembly(projectDirectory, $"{projectDirectory}.csproj");
+        var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var testHarnessReferences = project.Descendants("ProjectReference")
             .Where(reference => (((string?)reference.Attribute("Include")) ?? "")
-                .Contains("SharpClaw.Modules.TestHarness", StringComparison.OrdinalIgnoreCase))
+                .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase))
             .ToList();
 
         foreach (var reference in testHarnessReferences)
@@ -137,10 +139,10 @@ public class ModuleDependencyGuardrailTests
         }
     }
 
-    [TestCaseSource(nameof(ProjectDirectories))]
-    public void Module_payload_packages_must_not_contribute_compile_assets(string projectDirectory)
+    [TestCaseSource(nameof(ProjectLocations))]
+    public void Module_payload_packages_must_not_contribute_compile_assets(ProjectLocation projectLocation)
     {
-        var projectPath = FindFileFromTestAssembly(projectDirectory, $"{projectDirectory}.csproj");
+        var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var packageIds = GetModulePayloadPackageIds(project).ToList();
         var assetsPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
@@ -168,10 +170,10 @@ public class ModuleDependencyGuardrailTests
         }
     }
 
-    [TestCaseSource(nameof(ProjectDirectories))]
-    public void Module_facing_package_graph_must_not_depend_on_sharpclaw_core(string projectDirectory)
+    [TestCaseSource(nameof(ProjectLocations))]
+    public void Module_facing_package_graph_must_not_depend_on_sharpclaw_core(ProjectLocation projectLocation)
     {
-        var projectPath = FindFileFromTestAssembly(projectDirectory, $"{projectDirectory}.csproj");
+        var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var packageIds = GetModuleFacingPackageIds(project).ToList();
         var assetsPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
@@ -205,7 +207,7 @@ public class ModuleDependencyGuardrailTests
         var moduleProjectPaths = solution.Descendants("Project")
             .Select(project => (string?)project.Attribute("Path"))
             .Where(path => path is not null
-                && path.Contains("SharpClaw.Modules.", StringComparison.OrdinalIgnoreCase))
+                && path.Contains("SharpClaw.DefaultModules", StringComparison.OrdinalIgnoreCase))
             .Select(path => Path.Combine(solutionRoot, path!))
             .ToList();
 

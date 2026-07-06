@@ -1,5 +1,5 @@
 using FluentAssertions;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 using System.Text.Json;
 
 namespace SharpClaw.Tests.Persistence;

@@ -286,17 +286,17 @@ Returns `409 Conflict` if a migration is already in progress.
 Each relational provider has a dedicated migration assembly:
 
 ```
-SharpClaw.Migrations.Postgres/
-SharpClaw.Migrations.SqlServer/
-SharpClaw.Migrations.SQLite/
+SharpClaw.Migrations/Postgres/
+SharpClaw.Migrations/SqlServer/
+SharpClaw.Migrations/SQLite/
 ```
 
 To add a new migration (example for PostgreSQL):
 
 ```bash
 dotnet ef migrations add MyMigrationName \
-  --project SharpClaw.Migrations.Postgres \
-  --startup-project SharpClaw.Runtime.Host
+  --project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj \
+  --startup-project SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj
 ```
 
 Each assembly contains a `IDesignTimeDbContextFactory<SharpClawDbContext>`

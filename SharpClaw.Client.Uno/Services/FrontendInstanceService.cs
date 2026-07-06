@@ -1,7 +1,7 @@
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using SharpClaw.Configuration;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Services;
 

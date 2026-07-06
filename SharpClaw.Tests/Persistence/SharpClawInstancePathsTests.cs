@@ -1,7 +1,7 @@
 using System.Text.Json;
 using FluentAssertions;
-using SharpClaw.Utils.Instances;
-using SharpClaw.Utils.Security;
+using SharpClaw.Shared.Instances;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Tests.Persistence;
 

@@ -31,7 +31,7 @@
     <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Ollama" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.OpenAICompatible" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
+    <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
 
   <!--

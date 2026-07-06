@@ -1,0 +1,17 @@
+{
+  "id": "sharpclaw_test_harness_out_of_process",
+  "displayName": "Test Harness Out Of Process",
+  "version": "0.1.0-beta",
+  "toolPrefix": "th",
+  "runtime": "dotnet",
+  "hostMode": "sidecar",
+  "entryAssembly": "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll",
+  "moduleType": "SharpClaw.DefaultModules.TestHarness.TestHarnessOutOfProcessModule",
+  "minHostVersion": "0.1.0-beta",
+  "author": "mkn8rn",
+  "description": "Deterministic spoof providers, tools, header tags, cost reporters, and latency/failure controls for SharpClaw out-of-process module tests.",
+  "license": "AGPL-3.0",
+  "platforms": [ "windows", "linux", "macos" ],
+  "exports": [],
+  "requires": []
+}

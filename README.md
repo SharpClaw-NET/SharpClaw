@@ -131,7 +131,7 @@ meeting preparation, and status reporting.
 | `SharpClaw.Gateway` | Optional public proxy with endpoint toggles, queueing, rate limiting, and module-contributed routes. |
 | `SharpClaw.Client.Uno` | Modular desktop frontend that can host module-provided UI hooks and manage local processes. |
 | Packaged modules | Providers, editor bridges, agent orchestration, metrics, and module development tools restored from NuGet package payloads. |
-| `SharpClaw.Modules.TestHarness.OutOfProcess` and `SharpClaw.Modules.TestHarness.InProcess` | The only in-repo module sources, kept deliberately as test infrastructure for the two module host modes. |
+| `SharpClaw.DefaultModules.TestHarness.OutOfProcess` and `SharpClaw.DefaultModules.TestHarness.InProcess` | The only in-repo module sources, kept deliberately as test infrastructure for the two module host modes. |
 
 The currently bundled modules are intentionally focused: Anthropic, Google,
 LlamaSharp, Ollama, OpenAI-compatible providers, Visual Studio 2026, VS Code,
@@ -150,20 +150,20 @@ that matches how you want to run SharpClaw.
 
 | Release family | Includes | Best fit |
 | --- | --- | --- |
-| Core | Core API only. | You already have a reverse proxy, service wrapper, or container host and only need the internal API. |
-| Server | Core API and Gateway. | You want a headless deployment that can expose public routes, webhooks, bots, or module-contributed gateway endpoints. |
-| Uno | Uno desktop client, Core API, and Gateway. | You want the local app experience with the bundled backend and optional gateway managed from the UI. |
+| Runtime | Runtime.Host only. | You already have a reverse proxy, service wrapper, or container host and only need the internal runtime API. |
+| Server | Gateway and Runtime.Host. | You want a headless deployment that can expose public routes, webhooks, bots, or module-contributed gateway endpoints. |
+| Application | Client.Uno, Gateway, and Runtime.Host. | You want the local app experience with the bundled runtime and optional gateway managed from the UI. |
 
 Each family is published for supported Windows, Linux, and macOS runtime
 identifiers such as `win-x64`, `linux-x64`, `linux-arm64`, `osx-x64`, and
 `osx-arm64` when the platform supports that shape.
 
-Developers who want to run from source can still build and start the Core API
+Developers who want to run from source can still build and start Runtime.Host
 directly:
 
 ```bash
-dotnet build SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj
-dotnet run --project SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj
+dotnet build SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj
+dotnet run --project SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj
 ```
 
 Then launch the Uno client separately, create the first admin account, add a

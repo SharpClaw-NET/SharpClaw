@@ -114,12 +114,14 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var prod = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Runtime.INF",
+            "SharpClaw.Runtime",
+            "INF",
             "Environment",
             ".env.template"));
         var dev = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Runtime.INF",
+            "SharpClaw.Runtime",
+            "INF",
             "Environment",
             ".dev.env.template"));
 
@@ -147,7 +149,7 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var searchedRoots = new[]
         {
-            Path.Combine(root, "SharpClaw.Runtime.BLL"),
+            Path.Combine(root, "SharpClaw.Runtime", "BLL"),
             Path.Combine(root, "SharpClaw.Tests")
         };
         var banned = new[]
@@ -181,9 +183,9 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var projectRelativePaths = new[]
         {
-            "SharpClaw.Runtime.Host/SharpClaw.Runtime.Host.csproj",
-            "SharpClaw.Runtime.BLL/SharpClaw.Runtime.BLL.csproj",
-            "SharpClaw.Runtime.INF/SharpClaw.Runtime.INF.csproj",
+            "SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj",
+            "SharpClaw.Runtime/BLL/SharpClaw.Runtime.BLL.csproj",
+            "SharpClaw.Runtime/INF/SharpClaw.Runtime.INF.csproj",
             "SharpClaw.Gateway/SharpClaw.Gateway.csproj",
             "SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj"
         };
@@ -219,7 +221,8 @@ public sealed class TestHarnessArchitectureTests
 
         var appCoreProject = XDocument.Load(Path.Combine(
             root,
-            "SharpClaw.Runtime.BLL",
+            "SharpClaw.Runtime",
+            "BLL",
             "SharpClaw.Runtime.BLL.csproj"));
         appCoreProject.Descendants("PackageReference")
             .Select(e => e.Attribute("Include")?.Value)
@@ -233,14 +236,29 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var apiProject = XDocument.Load(Path.Combine(
             root,
-            "SharpClaw.Runtime.Host",
+            "SharpClaw.Runtime",
+            "Host",
             "SharpClaw.Runtime.Host.csproj"));
 
         var harnessReference = apiProject.Descendants("ProjectReference")
             .Single(e => (e.Attribute("Include")?.Value ?? "")
-                .Contains("SharpClaw.Modules.TestHarness", StringComparison.OrdinalIgnoreCase));
+                .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase));
 
         harnessReference.Element("ReferenceOutputAssembly")!.Value.Should().Be("false");
+        harnessReference.Attribute("Condition")!.Value.Should().Contain(
+            "$(Configuration)' == 'Debug",
+            "the in-repo TestHarness module is developer-build-only and must not be bundled by Release deployments");
+
+        var harnessCopyItems = apiProject
+            .Descendants()
+            .Where(e => ((string?)e.Attribute("Include") ?? "")
+                .Contains("SharpClaw.DefaultModules\\TestHarness.OutOfProcess", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        harnessCopyItems.Should().NotBeEmpty();
+        harnessCopyItems.Should().OnlyContain(
+            e => ((string?)e.Attribute("Condition") ?? "").Contains("$(Configuration)' == 'Debug", StringComparison.Ordinal),
+            "every Runtime.Host TestHarness copy item must be gated to developer builds");
     }
 
     [Test]

@@ -5,8 +5,8 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Contracts;
-using SharpClaw.Utils.Logging;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Logging;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
