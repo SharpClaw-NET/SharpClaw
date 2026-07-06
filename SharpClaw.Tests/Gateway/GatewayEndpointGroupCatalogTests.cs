@@ -1,7 +1,7 @@
 using FluentAssertions;
 using Microsoft.Extensions.Options;
 using NUnit.Framework;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Modules;
 
 namespace SharpClaw.Tests.Gateway;

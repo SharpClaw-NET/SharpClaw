@@ -1,4 +1,4 @@
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;

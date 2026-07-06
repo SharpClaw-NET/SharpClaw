@@ -16,6 +16,7 @@
     <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.4" />
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageVersion Include="SharpClaw.Contracts" Version="0.3.16" />
+    <PackageVersion Include="SharpClaw.Gateway.Contracts" Version="0.1.0" />
     <PackageVersion Include="SharpClaw.Core" Version="[0.1.108-alpha]" />
     <PackageVersion Include="SharpClaw.Modules.EditorCommon" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.VS2026Editor" Version="0.1.1-alpha" />

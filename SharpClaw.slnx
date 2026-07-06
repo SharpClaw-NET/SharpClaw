@@ -15,7 +15,6 @@
     </Project>
   </Folder>
   <Folder Name="/Gateway/">
-    <Project Path="SharpClaw.Gateway.Abstractions/SharpClaw.Gateway.Abstractions.csproj" />
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
   <Folder Name="/Shared/">

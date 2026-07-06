@@ -5,7 +5,7 @@ using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Routing;
 using NUnit.Framework;
 using SharpClaw.Runtime.Host.Routing;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 
 namespace SharpClaw.Tests.Gateway;
 

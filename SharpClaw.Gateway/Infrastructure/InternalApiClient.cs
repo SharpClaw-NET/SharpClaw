@@ -4,7 +4,7 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Utils.Logging;
 using SharpClaw.Utils.Instances;
 

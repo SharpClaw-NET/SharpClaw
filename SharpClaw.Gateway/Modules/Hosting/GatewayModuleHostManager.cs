@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Utils.Security;

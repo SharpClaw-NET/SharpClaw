@@ -1,6 +1,6 @@
 using System.Collections.Concurrent;
 using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 
 namespace SharpClaw.Gateway.Modules;
 

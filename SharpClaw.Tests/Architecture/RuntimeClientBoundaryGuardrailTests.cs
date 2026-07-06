@@ -71,7 +71,7 @@ public sealed class RuntimeClientBoundaryGuardrailTests
                 name is not null &&
                 (name.StartsWith("SharpClaw.Runtime.", StringComparison.Ordinal) ||
                  string.Equals(name, "SharpClaw.Gateway", StringComparison.Ordinal) ||
-                 string.Equals(name, "SharpClaw.Gateway.Abstractions", StringComparison.Ordinal)))
+                 string.Equals(name, "SharpClaw.Gateway.Contracts", StringComparison.Ordinal)))
             .ToList();
 
         offenders.Should().BeEmpty(
