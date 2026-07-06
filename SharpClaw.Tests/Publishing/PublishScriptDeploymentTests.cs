@@ -45,6 +45,19 @@ public sealed class PublishScriptDeploymentTests
         runtime.Should().NotContain("$clientProject");
     }
 
+    [Test]
+    public void PublishScriptResolvesRepositoryRootFromScriptsDirectory()
+    {
+        var script = ReadPublishScript();
+
+        script.Should().Contain(
+            "$repoRoot = Split-Path -Parent $PSScriptRoot",
+            "the publish script lives under scripts/ and must still resolve project paths from the repository root");
+        script.Should().Contain(
+            "[string]$OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) \"publish\")",
+            "default publish output should remain at the repository publish/ directory");
+    }
+
     [TestCase("Uno")]
     [TestCase("Core")]
     [TestCase("MSIX")]
@@ -69,12 +82,12 @@ public sealed class PublishScriptDeploymentTests
             pattern,
             RegexOptions.Singleline | RegexOptions.Multiline | RegexOptions.CultureInvariant);
 
-        match.Success.Should().BeTrue($"publish.ps1 must define {functionName}");
+        match.Success.Should().BeTrue($"scripts/publish.ps1 must define {functionName}");
         return match.Value;
     }
 
     private static string ReadPublishScript()
-        => File.ReadAllText(Path.Combine(FindSolutionRoot(), "publish.ps1"));
+        => File.ReadAllText(Path.Combine(FindSolutionRoot(), "scripts", "publish.ps1"));
 
     private static string FindSolutionRoot()
     {

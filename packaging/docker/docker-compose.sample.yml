@@ -1,6 +1,6 @@
 # Sample docker-compose for SharpClaw Server deployment.
 # Usage:
-#   .\publish.ps1 -Include Server -ServerRid linux-x64 -Package Container
+#   .\scripts\publish.ps1 -Include Server -ServerRid linux-x64 -Package Container
 #   docker compose -f docker-compose.sample.yml up -d
 #
 # Both images are produced by `dotnet publish /t:PublishContainer`. Tag the

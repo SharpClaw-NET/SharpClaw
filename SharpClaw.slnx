@@ -88,15 +88,16 @@
     <File Path=".gitignore" />
   </Folder>
   <Folder Name="/Solution Items/Notices/">
-    <File Path="CONTRIBUTING.md" />
+    <File Path=".github/CONTRIBUTING.md" />
     <File Path="LICENSE.md" />
-    <File Path="README.md" />
-    <File Path="SECURITY.md" />
+    <File Path=".github/README.md" />
+    <File Path=".github/SECURITY.md" />
+    <File Path="docs/legal/DISCLAIMER.md" />
   </Folder>
   <Folder Name="/Solution Items/Scripts/">
     <File Path="publish-msix.ps1" />
     <File Path="publish-release.ps1" />
-    <File Path="publish.ps1" />
+    <File Path="scripts/publish.ps1" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="SharpClaw.Tests/SharpClaw.Tests.csproj">

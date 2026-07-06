@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Registers the staged API and Gateway executables produced by
-    `publish.ps1 -Include Server` (or -Include Core) as Windows Services
+    `scripts\publish.ps1 -Include Server` (or -Include Runtime) as Windows Services
     using sc.exe. Run from an elevated PowerShell prompt.
 
 .PARAMETER InstallDir

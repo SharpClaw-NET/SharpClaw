@@ -1,13 +1,13 @@
 # SharpClaw
 
 > **Alpha.** Single developer, early stage, lots of untested surface area.
-> [Read the full disclaimer.](DISCLAIMER.md)
+> [Read the full disclaimer.](../docs/legal/DISCLAIMER.md)
 
 > **Developer notice.** The developer of SharpClaw has been hired to work on
 > an undisclosed commercial enterprise tool inspired by this project. Future
 > development on SharpClaw will be limited by time and contractual constraints,
 > but **the project is not abandoned**. SharpClaw remains open-source under
-> [AGPL-3.0](LICENSE.md), and that will not change regardless of what happens
+> [AGPL-3.0](../LICENSE.md), and that will not change regardless of what happens
 > with the commercial version.
 
 SharpClaw is a local AI agent runtime for building agents that can use real
@@ -183,7 +183,7 @@ and local AppData log files are covered in [Logging](docs/Logging.md).
 ## License
 
 SharpClaw is licensed under the
-[GNU Affero General Public License v3.0](LICENSE.md). Some bundled modules,
+[GNU Affero General Public License v3.0](../LICENSE.md). Some bundled modules,
 generated assets, documentation examples, or third-party components may carry
 their own license notices; check the files and package metadata in the part of
 the project you are using. Report security issues through

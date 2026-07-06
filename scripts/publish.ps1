@@ -28,9 +28,9 @@
     linux, osx, and all.
 
 .EXAMPLE
-    .\publish.ps1 -Include Application -Rid win
-    .\publish.ps1 -Include Server -ServerRid linux
-    .\publish.ps1 -Include Runtime -RuntimeRid win -SkipZip
+    .\scripts\publish.ps1 -Include Application -Rid win
+    .\scripts\publish.ps1 -Include Server -ServerRid linux
+    .\scripts\publish.ps1 -Include Runtime -RuntimeRid win -SkipZip
 #>
 param(
     [string]$Include = "All",
@@ -39,7 +39,7 @@ param(
     [string]$ServerRid = "all",
     [string]$RuntimeRid = "all",
     [string]$Configuration = "Release",
-    [string]$OutputDir = (Join-Path $PSScriptRoot "publish"),
+    [string]$OutputDir = (Join-Path (Split-Path -Parent $PSScriptRoot) "publish"),
     [switch]$SkipZip,
     [switch]$Parallel
 )
@@ -47,7 +47,7 @@ param(
 $ErrorActionPreference = "Stop"
 Set-StrictMode -Version Latest
 
-$repoRoot = $PSScriptRoot
+$repoRoot = Split-Path -Parent $PSScriptRoot
 $clientProject = Join-Path (Join-Path $repoRoot "SharpClaw.Client.Uno") "SharpClaw.Client.Uno.csproj"
 $runtimeProject = Join-Path (Join-Path (Join-Path $repoRoot "SharpClaw.Runtime") "Host") "SharpClaw.Runtime.Host.csproj"
 $gatewayProject = Join-Path (Join-Path $repoRoot "SharpClaw.Gateway") "SharpClaw.Gateway.csproj"
