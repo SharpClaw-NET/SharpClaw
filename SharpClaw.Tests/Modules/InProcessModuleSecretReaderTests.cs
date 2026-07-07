@@ -118,6 +118,47 @@ public sealed class InProcessModuleSecretReaderTests
     }
 
     [Test]
+    public async Task InProcessModuleScope_CanResolveModelRegistrar()
+    {
+        using var services = CreateServices(out _);
+        var moduleDir = CreateInProcessFixtureDirectory();
+        var assemblyPath = typeof(InProcessPerformanceFixtureModule).Assembly.Location;
+        var manifest = new ModuleManifest(
+            InProcessPerformanceFixtureModule.ModuleId,
+            "Synthetic In-Process Performance",
+            "1.0.0",
+            InProcessPerformanceFixtureModule.ToolPrefixValue,
+            Path.GetFileName(assemblyPath),
+            "0.0.0");
+        var runtimeInfo = new ModuleManifestRuntimeInfo(
+            "dotnet",
+            Path.GetFileName(assemblyPath),
+            typeof(InProcessPerformanceFixtureModule).FullName,
+            "in-process");
+
+        await using var host = InProcessModuleHost.Load(
+            moduleDir,
+            moduleDir,
+            manifest,
+            runtimeInfo,
+            services);
+        using var scope = host.CreateScope();
+
+        var registrar = scope.ServiceProvider.GetRequiredService<IModelRegistrar>();
+        var providerId = await registrar.EnsureProviderAsync(
+            "module-owned-provider",
+            "Module Owned Provider");
+
+        await using var dbScope = services.CreateAsyncScope();
+        var db = dbScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var provider = await db.Providers.SingleAsync(provider =>
+            provider.Id == providerId
+            && provider.ProviderKey == "module-owned-provider");
+
+        provider.Name.Should().Be("Module Owned Provider");
+    }
+
+    [Test]
     public void ModelInfoProviderContract_RemainsNonSecret()
     {
         var disallowedProperties = typeof(ModelProviderInfo)
@@ -179,6 +220,7 @@ public sealed class InProcessModuleSecretReaderTests
         services.AddDbContext<SharpClawDbContext>(options =>
             options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<IInProcessModuleSecretReader, HostInProcessModuleSecretReader>();
+        services.AddScoped<IModelRegistrar, HostModelRegistrar>();
 
         return services.BuildServiceProvider();
     }
