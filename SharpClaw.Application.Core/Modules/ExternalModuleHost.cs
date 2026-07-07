@@ -114,6 +114,7 @@ public sealed class ExternalModuleHost : IModuleRuntimeHost
             services.AddScoped(_ => new HostScopeBridge(hostScopeFactory));
             ForwardHostScoped<IAgentJobController>(services);
             ForwardHostScoped<IAgentJobReader>(services);
+            ForwardHostScoped<IModelRegistrar>(services);
         }
 
         module.ConfigureServices(services);

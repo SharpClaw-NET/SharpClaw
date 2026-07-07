@@ -111,6 +111,40 @@ public sealed class InProcessModuleSecretReaderTests
     }
 
     [Test]
+    public async Task InProcessModuleScope_CanResolveModelRegistrar()
+    {
+        await using var services = CreateServices(out _);
+        var moduleDir = Path.GetDirectoryName(typeof(TestHarnessModule).Assembly.Location)!;
+        var manifest = new ModuleManifest(
+            TestHarnessConstants.ModuleId,
+            "Test Harness",
+            "1.0.0",
+            TestHarnessConstants.ToolPrefix,
+            Path.GetFileName(typeof(TestHarnessModule).Assembly.Location),
+            "0.0.0");
+
+        await using var host = ExternalModuleHost.Load(
+            moduleDir,
+            manifest,
+            services,
+            services.GetRequiredService<ILoggerFactory>());
+        using var scope = host.CreateScope();
+
+        var registrar = scope.ServiceProvider.GetRequiredService<IModelRegistrar>();
+        var providerId = await registrar.EnsureProviderAsync(
+            "module-owned-provider",
+            "Module Owned Provider");
+
+        await using var dbScope = services.CreateAsyncScope();
+        var db = dbScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var provider = await db.Providers.SingleAsync(provider =>
+            provider.Id == providerId
+            && provider.ProviderKey == "module-owned-provider");
+
+        provider.Name.Should().Be("Module Owned Provider");
+    }
+
+    [Test]
     public void ModelInfoProviderContract_RemainsNonSecret()
     {
         var infoProperties = typeof(ModelProviderInfo)
@@ -243,6 +277,7 @@ public sealed class InProcessModuleSecretReaderTests
         services.AddDbContext<SharpClawDbContext>(options =>
             options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<IInProcessModuleSecretReader, HostInProcessModuleSecretReader>();
+        services.AddScoped<IModelRegistrar, HostModelRegistrar>();
 
         return services.BuildServiceProvider();
     }
