@@ -9,6 +9,29 @@ internal static class ProviderClientCompatibilityExtensions
 {
     private static readonly ConditionalWeakTable<object, Dictionary<string, MethodInfo>> MethodCache = new();
 
+    public static Task<IReadOnlyList<string>> ListModelIdsForModelSyncAsync(
+        this IProviderApiClient client,
+        HttpClient httpClient,
+        string apiKey,
+        CancellationToken ct = default)
+    {
+        var legacyMethod = FindLegacyMethod(
+            client,
+            nameof(IProviderApiClient.ListModelIdsAsync),
+            [
+                typeof(HttpClient),
+                typeof(string),
+                typeof(CancellationToken),
+            ]);
+
+        return legacyMethod is null
+            ? client.ListModelIdsAsync(ct)
+            : InvokeLegacyAsync<Task<IReadOnlyList<string>>>(
+                client,
+                legacyMethod,
+                [httpClient, apiKey, ct]);
+    }
+
     public static Task<IReadOnlyList<string>> ListModelIdsAsync(
         this IProviderApiClient client,
         HttpClient httpClient,
@@ -166,21 +189,41 @@ internal static class ProviderClientCompatibilityExtensions
         Type[] parameterTypes,
         object?[] arguments)
     {
+        var method = FindLegacyMethod(target, methodName, parameterTypes)
+            ?? throw new NotSupportedException(
+                $"Provider implementation '{target.GetType().FullName}' does not expose legacy host-bound method '{methodName}'.");
+
+        return InvokeLegacyAsync<T>(target, method, arguments);
+    }
+
+    private static T InvokeLegacyAsync<T>(
+        object target,
+        MethodInfo method,
+        object?[] arguments)
+    {
+        return (T)method.Invoke(target, arguments)!;
+    }
+
+    private static MethodInfo? FindLegacyMethod(
+        object target,
+        string methodName,
+        Type[] parameterTypes)
+    {
         var key = methodName + "(" + string.Join(",", parameterTypes.Select(type => type.FullName)) + ")";
         var methods = MethodCache.GetOrCreateValue(target);
-        if (!methods.TryGetValue(key, out var method))
-        {
-            method = target.GetType().GetMethod(
-                methodName,
-                BindingFlags.Instance | BindingFlags.Public,
-                binder: null,
-                types: parameterTypes,
-                modifiers: null)
-                ?? throw new NotSupportedException(
-                    $"Provider implementation '{target.GetType().FullName}' does not expose legacy host-bound method '{methodName}'.");
-            methods[key] = method;
-        }
+        if (methods.TryGetValue(key, out var method))
+            return method;
 
-        return (T)method.Invoke(target, arguments)!;
+        method = target.GetType().GetMethod(
+            methodName,
+            BindingFlags.Instance | BindingFlags.Public,
+            binder: null,
+            types: parameterTypes,
+            modifiers: null);
+
+        if (method is not null)
+            methods[key] = method;
+
+        return method;
     }
 }

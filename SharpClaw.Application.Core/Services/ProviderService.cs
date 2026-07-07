@@ -245,7 +245,7 @@ public sealed class ProviderService(
         var client = plugin.CreateClient(new ProviderClientOptions(provider.ApiEndpoint));
 
         using var httpClient = httpClientFactory.CreateClient();
-        var modelIds = await client.ListModelIdsAsync(httpClient, apiKey, ct);
+        var modelIds = await client.ListModelIdsForModelSyncAsync(httpClient, apiKey, ct);
 
         var existingNames = provider.Models.Select(m => m.Name).ToHashSet();
         var newModels = modelIds
