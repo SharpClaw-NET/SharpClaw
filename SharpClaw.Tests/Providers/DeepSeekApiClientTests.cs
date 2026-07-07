@@ -270,7 +270,7 @@ public sealed class DeepSeekApiClientTests
         plugin.DisplayName.Should().Be("DeepSeek");
         plugin.OwnerModuleId.Should().Be("sharpclaw_providers_openai_compat");
         plugin.ParameterSpec.Should().BeSameAs(ProviderParameterSpecs.DeepSeek);
-        plugin.CreateClient(null).Should().BeOfType<DeepSeekApiClient>();
+        plugin.CreateClient((string?)null).Should().BeOfType<DeepSeekApiClient>();
         plugin.Capabilities.Resolve("deepseek-v4-flash")
             .Should().BeEquivalentTo([WellKnownCapabilityKeys.Chat]);
     }

@@ -100,7 +100,11 @@ public sealed class HostModelInfoProvider(
         if (model is null)
             return null;
 
-        return new ModelProviderInfo(model.Name, model.Provider.ProviderKey);
+        return new ModelProviderInfo(
+            model.Name,
+            model.Provider.ProviderKey,
+            RequiresApiKey: true,
+            HasApiKey: !string.IsNullOrEmpty(model.Provider.EncryptedApiKey));
     }
 }
 

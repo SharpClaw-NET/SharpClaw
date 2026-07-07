@@ -63,6 +63,14 @@ public interface IProviderPlugin
     /// clients return a cached singleton; endpoint-bound providers
     /// construct a new client per call.
     /// </summary>
+    IProviderApiClient CreateClient(ProviderClientOptions options) =>
+        CreateClient(options.Endpoint);
+
+    /// <summary>
+    /// Returns the API client for this provider.
+    /// clients return a cached singleton; endpoint-bound providers
+    /// construct a new client per call.
+    /// </summary>
     IProviderApiClient CreateClient(string? endpoint);
 
     /// <summary>Resolves model capability flags for this provider's models.</summary>
@@ -90,6 +98,25 @@ public interface IProviderPlugin
     /// providers that do not expose a billing/usage API.
     /// </summary>
     IProviderCostFeed? CostFeed => null;
+
+    /// <summary>
+    /// Indicates whether this provider can expose a live-cost reporting
+    /// surface.
+    /// </summary>
+    bool SupportsCostFeed => CostFeed is not null;
+
+    /// <summary>
+    /// Human-readable explanation surfaced when a supported cost feed
+    /// cannot be read with the configured key.
+    /// </summary>
+    string CostFeedPermissionDeniedNote =>
+        CostFeed?.PermissionDeniedNote
+        ?? "Cost API is available for this provider but the current API key lacks the required permissions.";
+
+    /// <summary>
+    /// Creates the provider's optional live-cost reporting surface.
+    /// </summary>
+    IProviderCostFeed? CreateCostFeed(ProviderClientOptions options) => CostFeed;
 
     /// <summary>
     /// Computes the provider-shape suffix used when synthesising the

@@ -31,10 +31,14 @@ public interface IModelInfoProvider
 }
 
 /// <summary>
-/// Resolved model + provider information required for inference.
+/// Resolved model and provider metadata.
 /// </summary>
 /// <param name="ModelName">The model name / identifier string to pass to the API.</param>
 /// <param name="ProviderKey">The provider key that owns the model.</param>
+/// <param name="RequiresApiKey">Whether the registered provider plugin requires an API key.</param>
+/// <param name="HasApiKey">Whether the host has a protected API key configured for the provider.</param>
 public sealed record ModelProviderInfo(
     string ModelName,
-    string ProviderKey);
+    string ProviderKey,
+    bool RequiresApiKey,
+    bool HasApiKey);

@@ -14,7 +14,27 @@ public interface IProviderApiClient
     bool SupportsNativeToolCalling => false;
 
     Task<IReadOnlyList<string>> ListModelIdsAsync(
+        CancellationToken ct = default)
+    {
+        throw new NotSupportedException(
+            $"Provider '{ProviderKey}' does not expose host-bound model listing.");
+    }
+
+    Task<IReadOnlyList<string>> ListModelIdsAsync(
         HttpClient httpClient, string apiKey, CancellationToken ct = default);
+
+    Task<ChatCompletionResult> ChatCompletionAsync(
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ChatCompletionMessage> messages,
+        int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
+        CancellationToken ct = default)
+    {
+        throw new NotSupportedException(
+            $"Provider '{ProviderKey}' does not expose host-bound chat completion.");
+    }
 
     Task<ChatCompletionResult> ChatCompletionAsync(
         HttpClient httpClient,
@@ -26,6 +46,24 @@ public interface IProviderApiClient
         Dictionary<string, JsonElement>? providerParameters = null,
         CompletionParameters? completionParameters = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Sends a chat completion request with native tool definitions and
+    /// returns a structured result that distinguishes text from tool calls.
+    /// </summary>
+    Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
+        CancellationToken ct = default)
+    {
+        throw new NotSupportedException(
+            $"Provider '{ProviderKey}' does not support native tool calling.");
+    }
 
     /// <summary>
     /// Sends a chat completion request with native tool definitions and
@@ -45,6 +83,27 @@ public interface IProviderApiClient
     {
         throw new NotSupportedException(
             $"Provider '{ProviderKey}' does not support native tool calling.");
+    }
+
+    /// <summary>
+    /// Streams a chat completion with native tool definitions, yielding
+    /// text deltas as they arrive. When the model finishes, yields a
+    /// final <see cref="ChatCompletionResult"/> containing any tool calls.
+    /// <para>Providers that do not support streaming should override to
+    /// fall back to <see cref="ChatCompletionWithToolsAsync"/>.</para>
+    /// </summary>
+    IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
+        string model,
+        string? systemPrompt,
+        IReadOnlyList<ToolAwareMessage> messages,
+        IReadOnlyList<ChatToolDefinition> tools,
+        int? maxCompletionTokens = null,
+        Dictionary<string, JsonElement>? providerParameters = null,
+        CompletionParameters? completionParameters = null,
+        CancellationToken ct = default)
+    {
+        throw new NotSupportedException(
+            $"Provider '{ProviderKey}' does not support streaming.");
     }
 
     /// <summary>

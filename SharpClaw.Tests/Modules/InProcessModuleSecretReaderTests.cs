@@ -8,6 +8,7 @@ using SharpClaw.Application.Core.Modules.Foreign;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Infrastructure.Persistence;
 using SharpClaw.Modules.TestHarness;
 using SharpClaw.Utils.Security;
@@ -117,13 +118,67 @@ public sealed class InProcessModuleSecretReaderTests
             .Select(property => property.Name)
             .ToArray();
 
-        infoProperties.Should().BeEquivalentTo("ModelName", "ProviderKey");
+        infoProperties.Should().BeEquivalentTo(
+            "ModelName",
+            "ProviderKey",
+            "RequiresApiKey",
+            "HasApiKey");
+        infoProperties.Should().NotContain(property =>
+            property.Contains("Secret", StringComparison.OrdinalIgnoreCase)
+            || property.Contains("Decrypted", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(property, "ApiKey", StringComparison.OrdinalIgnoreCase));
         typeof(IModelInfoProvider)
             .GetMethods()
             .Select(method => method.Name)
             .Should()
             .NotContain(name => name.Contains("Secret", StringComparison.OrdinalIgnoreCase)
                 || name.Contains("ApiKey", StringComparison.OrdinalIgnoreCase));
+    }
+
+    [Test]
+    public void EmbeddedContracts_ExposePublishedProviderCompatibilityMembers()
+    {
+        var providerClientOptionsConstructors = typeof(ProviderClientOptions)
+            .GetConstructors()
+            .Where(constructor =>
+            {
+                var parameters = constructor.GetParameters();
+                return parameters.Length == 1
+                    && parameters[0].ParameterType == typeof(string);
+            })
+            .ToArray();
+
+        providerClientOptionsConstructors
+            .Should()
+            .ContainSingle();
+
+        typeof(IProviderPlugin)
+            .GetMethod(nameof(IProviderPlugin.CreateClient), [typeof(ProviderClientOptions)])
+            .Should()
+            .NotBeNull();
+        typeof(IProviderPlugin)
+            .GetMethod(nameof(IProviderPlugin.CreateCostFeed), [typeof(ProviderClientOptions)])
+            .Should()
+            .NotBeNull();
+        typeof(IProviderPlugin).GetProperty(nameof(IProviderPlugin.SupportsCostFeed)).Should().NotBeNull();
+        typeof(IProviderPlugin).GetProperty(nameof(IProviderPlugin.CostFeedPermissionDeniedNote)).Should().NotBeNull();
+
+        typeof(IProviderApiClient)
+            .GetMethod(nameof(IProviderApiClient.ListModelIdsAsync), [typeof(CancellationToken)])
+            .Should()
+            .NotBeNull();
+        var stringFirstChatCompletionMethods = typeof(IProviderApiClient)
+            .GetMethods()
+            .Where(method =>
+            {
+                var parameters = method.GetParameters();
+                return method.Name == nameof(IProviderApiClient.ChatCompletionAsync)
+                    && parameters.Length > 0
+                    && parameters[0].ParameterType == typeof(string);
+            })
+            .ToArray();
+
+        stringFirstChatCompletionMethods.Should().NotBeEmpty();
     }
 
     [Test]
