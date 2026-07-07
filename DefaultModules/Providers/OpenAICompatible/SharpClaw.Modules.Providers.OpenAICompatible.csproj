@@ -8,7 +8,7 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <PackageReference Include="SharpClaw.Contracts" />
+    <ProjectReference Include="..\..\..\SharpClaw.Contracts\SharpClaw.Contracts.csproj" />
     <ProjectReference Include="..\..\..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
   </ItemGroup>
 

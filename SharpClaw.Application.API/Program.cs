@@ -346,6 +346,7 @@ try
     builder.Services.AddScoped<IAgentJobReader, HostAgentJobReader>();
     builder.Services.AddSingleton<IAgentJobCostTracker, HostAgentJobCostTracker>();
     builder.Services.AddSingleton<IModelInfoProvider, HostModelInfoProvider>();
+    builder.Services.AddSingleton<IInProcessModuleSecretReader, HostInProcessModuleSecretReader>();
     builder.Services.AddScoped<IModelRegistrar, HostModelRegistrar>();
     builder.Services.AddSingleton<ChatCache>();
     builder.Services.AddScoped<IContainerProvisioner, HostContainerProvisioner>();

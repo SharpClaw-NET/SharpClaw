@@ -100,6 +100,7 @@ public sealed class ExternalModuleHost : IModuleRuntimeHost
         // model registry, and module-owned EF persistence.
         ForwardSingleton<IModuleDbContextFactory>(hostServices, services);
         ForwardSingleton<IModelInfoProvider>(hostServices, services);
+        ForwardSingleton<IInProcessModuleSecretReader>(hostServices, services);
         ForwardSingleton<IAgentJobCostTracker>(hostServices, services);
         ForwardSingleton<EncryptionOptions>(hostServices, services);
         ForwardSingleton<ICliIdResolver>(hostServices, services);
