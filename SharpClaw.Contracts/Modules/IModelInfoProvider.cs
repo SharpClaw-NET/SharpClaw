@@ -4,7 +4,7 @@ namespace SharpClaw.Contracts.Modules;
 /// Provides read-only model and provider information needed to start
 /// module-owned inference jobs.
 /// Implemented host-side; injected into modules that must resolve a
-/// model's API key and provider key without touching Core directly.
+/// model and provider metadata without touching Core directly.
 /// </summary>
 public interface IModelInfoProvider
 {
@@ -35,8 +35,6 @@ public interface IModelInfoProvider
 /// </summary>
 /// <param name="ModelName">The model name / identifier string to pass to the API.</param>
 /// <param name="ProviderKey">The provider key that owns the model.</param>
-/// <param name="DecryptedApiKey">Decrypted API key, or empty for local models.</param>
 public sealed record ModelProviderInfo(
     string ModelName,
-    string ProviderKey,
-    string DecryptedApiKey);
+    string ProviderKey);

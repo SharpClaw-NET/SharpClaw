@@ -86,8 +86,7 @@ public sealed class HostAgentJobReader(AgentJobService jobs) : IAgentJobReader
 }
 
 public sealed class HostModelInfoProvider(
-    IServiceScopeFactory scopeFactory,
-    Contracts.Persistence.EncryptionOptions encryptionOptions) : IModelInfoProvider
+    IServiceScopeFactory scopeFactory) : IModelInfoProvider
 {
     public async Task<ModelProviderInfo?> GetModelProviderInfoAsync(Guid modelId, CancellationToken ct = default)
     {
@@ -101,12 +100,51 @@ public sealed class HostModelInfoProvider(
         if (model is null)
             return null;
 
-        var apiKey = string.IsNullOrEmpty(model.Provider.EncryptedApiKey)
-            ? string.Empty
-            : ApiKeyEncryptor.DecryptOrPassthrough(model.Provider.EncryptedApiKey, encryptionOptions.Key);
-
-        return new ModelProviderInfo(model.Name, model.Provider.ProviderKey, apiKey);
+        return new ModelProviderInfo(model.Name, model.Provider.ProviderKey);
     }
+}
+
+public sealed class HostInProcessModuleSecretReader(
+    IServiceScopeFactory scopeFactory,
+    Contracts.Persistence.EncryptionOptions encryptionOptions) : IInProcessModuleSecretReader
+{
+    public async Task<string?> GetProviderApiKeyAsync(
+        string providerKey, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(providerKey))
+            throw new ArgumentException("Provider key must not be blank.", nameof(providerKey));
+
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+
+        var encryptedApiKey = await db.Providers
+            .Where(provider => provider.ProviderKey == providerKey)
+            .Select(provider => provider.EncryptedApiKey)
+            .FirstOrDefaultAsync(ct);
+
+        return DecryptOrNull(encryptedApiKey);
+    }
+
+    public async Task<string?> GetModelProviderApiKeyAsync(
+        Guid modelId, CancellationToken ct = default)
+    {
+        await using var scope = scopeFactory.CreateAsyncScope();
+        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+
+        var encryptedApiKey = await db.Models
+            .Where(model => model.Id == modelId)
+            .Select(model => model.Provider.EncryptedApiKey)
+            .FirstOrDefaultAsync(ct);
+
+        return DecryptOrNull(encryptedApiKey);
+    }
+
+    private string? DecryptOrNull(string? encryptedApiKey) =>
+        string.IsNullOrEmpty(encryptedApiKey)
+            ? null
+            : ApiKeyEncryptor.DecryptOrPassthrough(
+                encryptedApiKey,
+                encryptionOptions.Key);
 }
 
 /// <summary>
