@@ -278,7 +278,10 @@ internal sealed class TestHarnessProviderPlugin(
     ];
     public ICompletionParameterSpec ParameterSpec => ICompletionParameterSpec.Passthrough;
     public IDeviceCodeFlow? DeviceCodeFlow => null;
-    public IProviderCostFeed? CostFeed { get; } = new TestHarnessCostFeed(providerKey, state);
+    private IProviderCostFeed CostFeed { get; } = new TestHarnessCostFeed(providerKey, state);
+    public bool SupportsCostFeed => true;
+    public string CostFeedPermissionDeniedNote => CostFeed.PermissionDeniedNote;
+    public IProviderCostFeed? CreateCostFeed(ProviderClientOptions options) => CostFeed;
 
     public IProviderApiClient CreateClient(ProviderClientOptions options) =>
         new TestHarnessProviderClient(providerKey, supportsNativeToolCalling, state);
