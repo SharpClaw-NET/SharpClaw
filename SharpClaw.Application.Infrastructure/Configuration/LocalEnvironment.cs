@@ -1,5 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Utils.Instances;
 using SharpClaw.Utils.Security;
@@ -7,96 +8,91 @@ using SharpClaw.Utils.Security;
 namespace SharpClaw.Infrastructure.Configuration;
 
 /// <summary>
-/// Loads environment configuration from an instance-scoped active file created
-/// from the assembly-local Environment/.env template. Startup may encrypt the
-/// active file after loading it, but it never mutates the published template.
+/// Loads environment configuration from the assembly-local active
+/// <c>Environment/.env</c> file created from the portable plaintext
+/// <c>Environment/.env.template</c>. Startup may encrypt the active file after
+/// loading it, but it never mutates the template.
 /// </summary>
 public static class LocalEnvironment
 {
-    private const string DefaultEnvContent =
-        """
-        {
-          // SharpClaw Environment Configuration
-          // Values here are loaded for all environments.
-
-          "Jwt": {
-            "Issuer": "SharpClaw",
-            "Audience": "SharpClaw",
-            "AccessTokenLifetime": "00:30:00",
-            "RefreshTokenLifetime": "30.00:00:00"
-          },
-
-          "Auth": {
-            "DisableApiKeyCheck": "false",
-            "DisableAccessTokenCheck": "false"
-          },
-
-          "Admin": {
-            "Username": "admin",
-            "Password": "123456",
-            "ReconcilePermissions": "true"
-          },
-
-          "EnvEditor": { "AllowNonAdmin": "false" }
-        }
-        """;
-
     public static IConfigurationBuilder AddLocalEnvironment(
         this IConfigurationBuilder builder,
         bool isDevelopment = false,
         SharpClawInstancePaths? instancePaths = null)
     {
-        var templateDir = Path.Combine(
+        var envDir = Path.Combine(
             Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
             "Environment");
-        var activeConfigDir = ResolveActiveConfigDirectory(instancePaths);
 
         return builder.AddLocalEnvironmentFrom(
-            templateDir,
-            activeConfigDir,
+            envDir,
             isDevelopment,
             instancePaths);
     }
 
     internal static IConfigurationBuilder AddLocalEnvironmentFrom(
         this IConfigurationBuilder builder,
-        string templateDir,
-        string activeConfigDir,
+        string envDir,
         bool isDevelopment,
         SharpClawInstancePaths? instancePaths = null)
     {
-        EnsureEnvironmentTemplate(templateDir, ".env", createDefaultWhenMissing: true);
-        EnsureActiveEnvironmentFile(templateDir, activeConfigDir, ".env");
-        AddEnvFile(builder, templateDir, activeConfigDir, ".env", instancePaths);
+        instancePaths ??= TryResolveBackendInstancePathsFromEnvironment();
 
-        if (isDevelopment && File.Exists(Path.Combine(templateDir, ".dev.env")))
+        EnsureEnvironmentTemplate(envDir, ".env.template");
+        EnsureActiveEnvironmentFile(envDir, ".env", ".env.template");
+        AddEnvFile(
+            builder,
+            envDir: envDir,
+            fileName: ".env",
+            templateFileName: ".env.template",
+            instancePaths: instancePaths);
+
+        if (isDevelopment)
         {
-            EnsureEnvironmentTemplate(templateDir, ".dev.env", createDefaultWhenMissing: false);
-            EnsureActiveEnvironmentFile(templateDir, activeConfigDir, ".dev.env");
-            AddEnvFile(builder, templateDir, activeConfigDir, ".dev.env", instancePaths);
+            EnsureEnvironmentTemplate(envDir, ".dev.env.template");
+            EnsureActiveEnvironmentFile(envDir, ".dev.env", ".dev.env.template");
+            AddEnvFile(
+                builder,
+                envDir: envDir,
+                fileName: ".dev.env",
+                templateFileName: ".dev.env.template",
+                instancePaths: instancePaths);
         }
 
         return builder;
     }
 
     public static string ResolveActiveEnvFilePath(SharpClawInstancePaths? instancePaths = null) =>
-        Path.Combine(ResolveActiveConfigDirectory(instancePaths), ".env");
+        Path.Combine(
+            Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
+            "Environment",
+            ".env");
 
     private static void AddEnvFile(
         IConfigurationBuilder builder,
-        string templateDir,
-        string activeConfigDir,
+        string envDir,
         string fileName,
+        string templateFileName,
         SharpClawInstancePaths? instancePaths)
     {
-        var activePath = Path.Combine(activeConfigDir, fileName);
+        var activePath = Path.Combine(envDir, fileName);
         if (!File.Exists(activePath))
             return;
 
         if (!EncryptedEnvFile.IsEncryptedOnDisk(activePath))
         {
-            AddPlaintextEnvFile(builder, activePath, instancePaths);
-            return;
+            try
+            {
+                AddPlaintextEnvFile(builder, activePath, instancePaths);
+                return;
+            }
+            catch (Exception ex) when (IsUnreadableActiveFile(ex))
+            {
+                QuarantineUnreadableActiveFile(activePath);
+                CopyTemplateToActive(envDir, fileName, templateFileName);
+                AddPlaintextEnvFile(builder, activePath, instancePaths);
+                return;
+            }
         }
 
         var key = EncryptionKeyResolver.ResolveKey(instancePaths);
@@ -106,10 +102,10 @@ public static class LocalEnvironment
                 .GetAwaiter().GetResult();
             AddJson(builder, json);
         }
-        catch (Exception ex) when (IsUnreadableEncryptedFile(ex))
+        catch (Exception ex) when (IsUnreadableActiveFile(ex))
         {
             QuarantineUnreadableActiveFile(activePath);
-            CopyTemplateToActive(templateDir, activeConfigDir, fileName);
+            CopyTemplateToActive(envDir, fileName, templateFileName);
             AddPlaintextEnvFile(builder, activePath, instancePaths);
         }
     }
@@ -132,14 +128,22 @@ public static class LocalEnvironment
 
     private static void AddJson(IConfigurationBuilder builder, string json)
     {
+        var options = new JsonDocumentOptions
+        {
+            CommentHandling = JsonCommentHandling.Skip,
+            AllowTrailingCommas = true
+        };
+        using (JsonDocument.Parse(json, options))
+        {
+        }
+
         var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         builder.AddJsonStream(stream);
     }
 
     private static void EnsureEnvironmentTemplate(
         string templateDir,
-        string fileName,
-        bool createDefaultWhenMissing)
+        string fileName)
     {
         var templatePath = Path.Combine(templateDir, fileName);
         if (File.Exists(templatePath) && new FileInfo(templatePath).Length > 0)
@@ -153,40 +157,33 @@ public static class LocalEnvironment
             return;
         }
 
-        if (!createDefaultWhenMissing)
-            return;
-
-        try
-        {
-            Directory.CreateDirectory(templateDir);
-            File.WriteAllText(templatePath, DefaultEnvContent);
-        }
-        catch
-        {
-            // Best-effort: read-only deployments can still rely on existing templates.
-        }
+        throw new InvalidOperationException(
+            $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
     }
 
     private static void EnsureActiveEnvironmentFile(
-        string templateDir,
-        string activeConfigDir,
-        string fileName)
+        string envDir,
+        string activeFileName,
+        string templateFileName)
     {
-        var activePath = Path.Combine(activeConfigDir, fileName);
+        var activePath = Path.Combine(envDir, activeFileName);
         if (File.Exists(activePath) && new FileInfo(activePath).Length > 0)
             return;
 
-        CopyTemplateToActive(templateDir, activeConfigDir, fileName);
+        CopyTemplateToActive(envDir, activeFileName, templateFileName);
     }
 
     private static void CopyTemplateToActive(
-        string templateDir,
-        string activeConfigDir,
-        string fileName)
+        string envDir,
+        string activeFileName,
+        string templateFileName)
     {
-        var templatePath = Path.Combine(templateDir, fileName);
+        var templatePath = Path.Combine(envDir, templateFileName);
         if (!File.Exists(templatePath) || new FileInfo(templatePath).Length == 0)
-            return;
+        {
+            throw new InvalidOperationException(
+                $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
+        }
 
         if (EncryptedEnvFile.IsEncryptedOnDisk(templatePath))
         {
@@ -194,8 +191,8 @@ public static class LocalEnvironment
                 $"Environment template '{templatePath}' is encrypted. Published templates must be plaintext and portable.");
         }
 
-        Directory.CreateDirectory(activeConfigDir);
-        File.Copy(templatePath, Path.Combine(activeConfigDir, fileName), overwrite: true);
+        Directory.CreateDirectory(envDir);
+        File.Copy(templatePath, Path.Combine(envDir, activeFileName), overwrite: true);
     }
 
     private static void QuarantineUnreadableActiveFile(string activePath)
@@ -204,19 +201,13 @@ public static class LocalEnvironment
         File.Move(activePath, quarantinePath, overwrite: true);
     }
 
-    private static bool IsUnreadableEncryptedFile(Exception ex) =>
+    private static bool IsUnreadableActiveFile(Exception ex) =>
         ex is CryptographicException
+        || ex is JsonException
+        || ex is InvalidDataException
+        || ex is FormatException
         || ex is ArgumentException
-        || ex.InnerException is not null && IsUnreadableEncryptedFile(ex.InnerException);
-
-    private static string ResolveActiveConfigDirectory(SharpClawInstancePaths? instancePaths)
-    {
-        instancePaths ??= TryResolveBackendInstancePathsFromEnvironment();
-        return instancePaths?.ConfigDirectory
-            ?? Path.Combine(
-                Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
-                "config");
-    }
+        || ex.InnerException is not null && IsUnreadableActiveFile(ex.InnerException);
 
     private static SharpClawInstancePaths? TryResolveBackendInstancePathsFromEnvironment()
     {
