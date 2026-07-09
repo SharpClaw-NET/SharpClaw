@@ -108,6 +108,57 @@ public sealed class JwtSessionMiddlewareTests
     }
 
     [Test]
+    public async Task InvokeAsync_WhenAccessTokenCheckDisabledAndAnonymousUsernameConfigured_UsesAnonymousUser()
+    {
+        var instanceRoot = CreateTempDirectory();
+        var adminId = Guid.NewGuid();
+        var anonymousId = Guid.NewGuid();
+
+        try
+        {
+            await using var provider = CreateProvider(
+                instanceRoot,
+                new Dictionary<string, string?>
+                {
+                    ["Auth:AnonymousUsername"] = "anonymous"
+                });
+            await SeedUserAsync(provider, adminId, "admin", isAdmin: true);
+            await SeedUserAsync(provider, anonymousId, "anonymous", isAdmin: false);
+
+            await using var scope = provider.CreateAsyncScope();
+            var calledNext = false;
+            var middleware = new JwtSessionMiddleware(
+                context =>
+                {
+                    var session = context.RequestServices.GetRequiredService<SessionService>();
+
+                    session.UserId.Should().Be(anonymousId);
+                    session.UserId.Should().NotBe(adminId);
+                    calledNext = true;
+                    context.Response.StatusCode = StatusCodes.Status204NoContent;
+                    return Task.CompletedTask;
+                },
+                provider.GetRequiredService<IConfiguration>(),
+                provider.GetRequiredService<ApiKeyProvider>());
+
+            var context = new DefaultHttpContext
+            {
+                RequestServices = scope.ServiceProvider
+            };
+            context.Request.Path = "/auth/me";
+
+            await middleware.InvokeAsync(context);
+
+            calledNext.Should().BeTrue();
+            context.Response.StatusCode.Should().Be(StatusCodes.Status204NoContent);
+        }
+        finally
+        {
+            DeleteDirectoryIfExists(instanceRoot);
+        }
+    }
+
+    [Test]
     public async Task InvokeAsync_WhenAccessTokenCheckDisabledAndNoLocalAdminExists_ReturnsResourceUnavailable()
     {
         var instanceRoot = CreateTempDirectory();
@@ -147,16 +198,26 @@ public sealed class JwtSessionMiddlewareTests
         }
     }
 
-    private static ServiceProvider CreateProvider(string instanceRoot)
+    private static ServiceProvider CreateProvider(
+        string instanceRoot,
+        IReadOnlyDictionary<string, string?>? configurationOverrides = null)
     {
         var databaseName = $"JwtSessionMiddlewareTests-{Guid.NewGuid():N}";
+        var configurationValues = new Dictionary<string, string?>
+        {
+            ["Auth:DisableAccessTokenCheck"] = "true",
+            ["Admin:Username"] = "admin",
+            ["ChatCache:MaxMegabytes"] = "0"
+        };
+
+        if (configurationOverrides is not null)
+        {
+            foreach (var pair in configurationOverrides)
+                configurationValues[pair.Key] = pair.Value;
+        }
+
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
-                ["Auth:DisableAccessTokenCheck"] = "true",
-                ["Admin:Username"] = "admin",
-                ["ChatCache:MaxMegabytes"] = "0"
-            })
+            .AddInMemoryCollection(configurationValues)
             .Build();
 
         var services = new ServiceCollection();

@@ -145,6 +145,20 @@ public sealed class AuthService(
 
     public async Task<Guid?> ResolveDisabledAuthSessionUserIdAsync(CancellationToken ct = default)
     {
+        var anonymousUsername = configuration["Auth:AnonymousUsername"];
+        if (anonymousUsername is not null)
+        {
+            if (string.IsNullOrWhiteSpace(anonymousUsername))
+                throw new InvalidOperationException("Auth:AnonymousUsername is configured but empty.");
+
+            return await db.Users
+                .Where(u => u.Username == anonymousUsername)
+                .Select(u => (Guid?)u.Id)
+                .FirstOrDefaultAsync(ct)
+                ?? throw new InvalidOperationException(
+                    $"Auth:AnonymousUsername is set to '{anonymousUsername}', but no matching user exists.");
+        }
+
         var configuredUsername = configuration["Admin:Username"];
 
         if (!string.IsNullOrWhiteSpace(configuredUsername))

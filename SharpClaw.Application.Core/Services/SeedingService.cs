@@ -44,6 +44,7 @@ public sealed class SeedingService(
 
         var adminRole = await SeedAdminRoleAsync(db, ct);
         await SeedAdminUserAsync(db, adminRole, ct);
+        await ValidateAnonymousUserAsync(db, ct);
         await SeedWellKnownProvidersAsync(db, clientFactory, ct);
     }
 
@@ -229,6 +230,23 @@ public sealed class SeedingService(
 
         db.Users.Add(user);
         await db.SaveChangesAsync(ct);
+    }
+
+    private async Task ValidateAnonymousUserAsync(SharpClawDbContext db, CancellationToken ct)
+    {
+        var anonymousUsername = configuration["Auth:AnonymousUsername"];
+        if (anonymousUsername is null)
+            return;
+
+        if (string.IsNullOrWhiteSpace(anonymousUsername))
+            throw new InvalidOperationException("Auth:AnonymousUsername is configured but empty.");
+
+        var exists = await db.Users.AnyAsync(u => u.Username == anonymousUsername, ct);
+        if (!exists)
+        {
+            throw new InvalidOperationException(
+                $"Auth:AnonymousUsername is set to '{anonymousUsername}', but no matching user exists.");
+        }
     }
 
     private async Task SeedWellKnownProvidersAsync(
