@@ -1194,13 +1194,15 @@ public sealed class ChatService(
             var roundDeltaContent = new StringBuilder();
 
             await foreach (var chunk in client.StreamChatCompletionWithToolsAsync(
-                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct))
+                httpClient, apiKey, model.Name, systemPrompt, messages, effectiveTools, maxTokens, providerParams, completionParams, ct)
+                .WithCancellation(ct))
             {
                 if (chunk.Delta is not null)
                 {
                     roundDeltaContent.Append(chunk.Delta);
                     streamedContent.Append(chunk.Delta);
                     yield return ChatStreamEvent.TextDelta(chunk.Delta);
+                    ct.ThrowIfCancellationRequested();
                 }
 
                 if (chunk.IsFinished)
