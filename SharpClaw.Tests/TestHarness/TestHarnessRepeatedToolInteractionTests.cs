@@ -397,7 +397,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedNoOpToolCalls_NoGlobalSerialization()
+    public async Task PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedToolCalls_NoGlobalSerialization()
     {
         var chats = new List<IsolatedHundredToolChat>();
         try
@@ -546,7 +546,11 @@ public sealed class TestHarnessRepeatedToolInteractionTests
     private static async Task<IsolatedHundredToolChat> CreateIsolatedHundredToolChatAsync(bool grantPermission)
     {
         var host = CreateHotPathHost();
-        host.Harness.ConfigurePermissionedInlineTool(new TestHarnessToolBehavior { Result = "" });
+        host.Harness.ConfigurePermissionedInlineTool(new TestHarnessToolBehavior
+        {
+            Result = "",
+            LatencyMs = 25
+        });
         try
         {
             var seeded = await host.SeedChatAsync(
