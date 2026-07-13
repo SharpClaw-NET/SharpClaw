@@ -133,7 +133,11 @@ internal sealed record CapturedProviderTiming(
     string Surface,
     int ConfiguredDelayMs,
     long ElapsedMs,
-    bool Failed);
+    bool Failed)
+{
+    public long StartedAtTimestamp { get; init; }
+    public long CompletedAtTimestamp { get; init; }
+}
 
 internal sealed record CapturedToolCall(
     int Sequence,

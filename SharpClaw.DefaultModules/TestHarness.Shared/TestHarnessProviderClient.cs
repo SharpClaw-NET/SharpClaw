@@ -96,6 +96,7 @@ internal sealed class TestHarnessProviderClient(
 
         var scenario = state.GetScenario(providerKey);
         var (_, turn, failBeforeSuccess) = state.NextTurn(providerKey);
+        var startedAt = Stopwatch.GetTimestamp();
         var sw = Stopwatch.StartNew();
         var failed = false;
         try
@@ -144,13 +145,18 @@ internal sealed class TestHarnessProviderClient(
         finally
         {
             sw.Stop();
+            var completedAt = Stopwatch.GetTimestamp();
             state.RecordProviderTiming(new CapturedProviderTiming(
                 sequence,
                 providerKey,
                 "stream-tools",
                 turn.ConfiguredDelayMs,
                 sw.ElapsedMilliseconds,
-                failed));
+                failed)
+            {
+                StartedAtTimestamp = startedAt,
+                CompletedAtTimestamp = completedAt
+            });
         }
     }
 
@@ -161,6 +167,7 @@ internal sealed class TestHarnessProviderClient(
     {
         var scenario = state.GetScenario(providerKey);
         var (_, turn, failBeforeSuccess) = state.NextTurn(providerKey);
+        var startedAt = Stopwatch.GetTimestamp();
         var sw = Stopwatch.StartNew();
         var failed = false;
         try
@@ -186,13 +193,18 @@ internal sealed class TestHarnessProviderClient(
         finally
         {
             sw.Stop();
+            var completedAt = Stopwatch.GetTimestamp();
             state.RecordProviderTiming(new CapturedProviderTiming(
                 sequence,
                 providerKey,
                 surface,
                 turn.FirstTokenDelayMs + turn.CompletionDelayMs,
                 sw.ElapsedMilliseconds,
-                failed));
+                failed)
+            {
+                StartedAtTimestamp = startedAt,
+                CompletedAtTimestamp = completedAt
+            });
         }
     }
 

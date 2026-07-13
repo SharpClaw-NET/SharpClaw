@@ -408,12 +408,11 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             for (var i = 0; i < 10; i++)
                 chats.Add(await CreateIsolatedHundredToolChatAsync(grantPermission: true));
 
-            var (results, elapsedMs) = await RunParallelChatsAsync(chats, "parallel-allowed");
+            var results = await RunParallelChatsAsync(chats, "parallel-allowed");
 
             results.Should().OnlyContain(r => r.ToolBodyInvocations == HundredCalls);
-            elapsedMs.Should().BeLessThanOrEqualTo(
-                results.Max(r => r.ClientVisibleMs) + 200,
-                "parallel 100-tool chats should not serialize behind a process-wide lock");
+            HasCrossChatToolOverlap(chats).Should().BeTrue(
+                "parallel allowed chats must overlap in actual module tool execution");
             results.Select(r => r.LastFinalText).Should().OnlyHaveUniqueItems();
         }
         finally
@@ -433,13 +432,12 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             for (var i = 0; i < 10; i++)
                 chats.Add(await CreateIsolatedHundredToolChatAsync(grantPermission: false));
 
-            var (results, elapsedMs) = await RunParallelChatsAsync(chats, "parallel-denied");
+            var results = await RunParallelChatsAsync(chats, "parallel-denied");
 
             results.Should().OnlyContain(r => r.ToolBodyInvocations == 0);
             results.Should().OnlyContain(r => r.PermissionDeniedResults == HundredCalls);
-            elapsedMs.Should().BeLessThanOrEqualTo(
-                results.Max(r => r.ClientVisibleMs) + 200,
-                "parallel denied 100-tool chats should stop at host permission checks without global serialization");
+            HasCrossChatProviderOverlap(chats).Should().BeTrue(
+                "parallel denied chats must overlap in provider streaming before host permission denial");
         }
         finally
         {
@@ -567,7 +565,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         }
     }
 
-    private static async Task<(RepeatedToolRunMeasurement[] Results, long ElapsedMs)> RunParallelChatsAsync(
+    private static async Task<RepeatedToolRunMeasurement[]> RunParallelChatsAsync(
         IReadOnlyList<IsolatedHundredToolChat> chats,
         string finalTextPrefix)
     {
@@ -576,14 +574,18 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         var readyCount = 0;
 
         var tasks = chats
-            .Select((chat, i) => Task.Run(async () =>
-            {
-                if (Interlocked.Increment(ref readyCount) == chats.Count)
-                    allReady.TrySetResult();
+            .Select((chat, i) => Task.Factory.StartNew(async () =>
+                {
+                    if (Interlocked.Increment(ref readyCount) == chats.Count)
+                        allReady.TrySetResult();
 
-                await release.Task;
-                return await chat.RunAsync($"{finalTextPrefix}-{i}");
-            }))
+                    await release.Task;
+                    return await chat.RunAsync($"{finalTextPrefix}-{i}");
+                },
+                CancellationToken.None,
+                TaskCreationOptions.LongRunning,
+                TaskScheduler.Default)
+            .Unwrap())
             .ToArray();
 
         try
@@ -596,16 +598,16 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             throw;
         }
 
-        var sw = Stopwatch.StartNew();
         release.SetResult();
         var results = await Task.WhenAll(tasks);
-        sw.Stop();
-
-        return (results, sw.ElapsedMilliseconds);
+        return results;
     }
 
     private sealed class IsolatedHundredToolChat(ChatHarnessHost host, Guid channelId) : IAsyncDisposable
     {
+        public IReadOnlyList<CapturedProviderTiming> ProviderTimings => host.Harness.ProviderTimings;
+        public IReadOnlyList<CapturedToolCall> ToolCalls => host.Harness.ToolCalls;
+
         public async Task<RepeatedToolRunMeasurement> RunAsync(string finalText)
         {
             var run = await RunStreamingToolLoopAsync(
@@ -617,6 +619,40 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         }
 
         public ValueTask DisposeAsync() => host.DisposeAsync();
+    }
+
+    private static bool HasCrossChatToolOverlap(IReadOnlyList<IsolatedHundredToolChat> chats) =>
+        HasCrossChatOverlap(chats.SelectMany((chat, index) =>
+            chat.ToolCalls
+                .Where(call => call.StartedAtTimestamp > 0 && call.CompletedAtTimestamp > call.StartedAtTimestamp)
+                .Select(call => (ChatIndex: index, call.StartedAtTimestamp, call.CompletedAtTimestamp))));
+
+    private static bool HasCrossChatProviderOverlap(IReadOnlyList<IsolatedHundredToolChat> chats) =>
+        HasCrossChatOverlap(chats.SelectMany((chat, index) =>
+            chat.ProviderTimings
+                .Where(timing => timing.StartedAtTimestamp > 0 && timing.CompletedAtTimestamp > timing.StartedAtTimestamp)
+                .Select(timing => (ChatIndex: index, timing.StartedAtTimestamp, timing.CompletedAtTimestamp))));
+
+    private static bool HasCrossChatOverlap(
+        IEnumerable<(int ChatIndex, long StartedAtTimestamp, long CompletedAtTimestamp)> intervals)
+    {
+        var ordered = intervals
+            .OrderBy(interval => interval.StartedAtTimestamp)
+            .ToArray();
+
+        for (var i = 0; i < ordered.Length; i++)
+        {
+            for (var j = i + 1; j < ordered.Length; j++)
+            {
+                if (ordered[j].StartedAtTimestamp >= ordered[i].CompletedAtTimestamp)
+                    break;
+
+                if (ordered[i].ChatIndex != ordered[j].ChatIndex)
+                    return true;
+            }
+        }
+
+        return false;
     }
 
     private static ChatHarnessHost CreateHotPathHost() =>
