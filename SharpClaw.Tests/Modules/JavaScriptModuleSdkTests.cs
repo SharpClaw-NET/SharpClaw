@@ -8,15 +8,7 @@ public sealed class JavaScriptModuleSdkTests
     [Test]
     public async Task JavaScriptSdk_ExposesCurrentForeignModuleProtocolShape()
     {
-        var sdkPath = Path.Combine(
-            FindRepoRoot(),
-            "sdk",
-            "javascript",
-            "sharpclaw-module-host",
-            "src",
-            "index.mjs");
-
-        var source = await File.ReadAllTextAsync(sdkPath);
+        var source = await File.ReadAllTextAsync(ModuleSdkSourcePaths.JavaScriptHostSourcePath);
 
         source.Should().Contain("X-SharpClaw-Control-Token");
         source.Should().Contain("SHARPCLAW_MODULE_DIR");
@@ -39,56 +31,21 @@ public sealed class JavaScriptModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/conversation/steer");
+        source.Should().Contain("/.sharpclaw/host/conversation/steering/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("createHostCapabilitiesClient");
+        source.Should().Contain("createDocumentStore");
+        source.Should().Contain("addConversationSteering");
+        source.Should().Contain("listConversationSteering");
         source.Should().Contain("inlineTools");
         source.Should().Contain("protocolContracts");
+        source.Should().Contain("storageContracts");
+        source.Should().Contain("invokeStorage");
+        source.Should().Contain("batchUpsert");
+        source.Should().Contain("lessThanOrEqual");
         source.Should().Contain("supportsStreaming");
     }
 
-    [Test]
-    public async Task NodeTemplates_DeclareModuleHostDependencyAndEntrypoint()
-    {
-        var repoRoot = FindRepoRoot();
-        var packageTemplate = await File.ReadAllTextAsync(Path.Combine(
-            repoRoot,
-            "DefaultModules",
-            "ModuleDev",
-            "Templates",
-            "NodePackage.json.template"));
-        var manifestTemplate = await File.ReadAllTextAsync(Path.Combine(
-            repoRoot,
-            "DefaultModules",
-            "ModuleDev",
-            "Templates",
-            "NodeManifest.json.template"));
-
-        packageTemplate.Should().Contain("\"@sharpclaw/module-host\": \"0.1.0-beta\"");
-        manifestTemplate.Should().Contain("\"runtime\": \"node\"");
-        manifestTemplate.Should().Contain("\"entrypoint\": \"module.mjs\"");
-    }
-
-    private static string FindRepoRoot()
-    {
-        foreach (var startingPoint in new[]
-                 {
-                     TestContext.CurrentContext.TestDirectory,
-                     AppContext.BaseDirectory,
-                     Directory.GetCurrentDirectory()
-                 })
-        {
-            var current = startingPoint;
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                if (File.Exists(Path.Combine(current, "Directory.Build.props"))
-                    && Directory.Exists(Path.Combine(current, "SharpClaw.Tests")))
-                {
-                    return current;
-                }
-
-                current = Directory.GetParent(current)?.FullName;
-            }
-        }
-
-        throw new DirectoryNotFoundException("Could not locate SharpClaw repository root.");
-    }
 }

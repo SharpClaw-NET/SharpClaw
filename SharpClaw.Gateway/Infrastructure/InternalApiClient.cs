@@ -4,15 +4,15 @@ using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Abstractions;
-using SharpClaw.Utils.Logging;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Gateway.Contracts;
+using SharpClaw.Shared.Logging;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
 /// <summary>
 /// Typed <see cref="HttpClient"/> wrapper that forwards requests to the
-/// internal SharpClaw Application API, automatically attaching the
+/// internal SharpClaw Runtime Host, automatically attaching the
 /// <c>X-Api-Key</c> header and forwarding the caller's JWT when present.
 /// </summary>
 public sealed class InternalApiClient(

@@ -28,10 +28,10 @@ modules:
     build-commands:
       - mkdir -p /app/opt/sharpclaw
       - cp -r publish/* /app/opt/sharpclaw/
-      - chmod +x /app/opt/sharpclaw/SharpClaw.Uno
-      - chmod +x /app/opt/sharpclaw/backend/SharpClaw.Application.API
+      - chmod +x /app/opt/sharpclaw/SharpClaw.Client.Uno
+      - chmod +x /app/opt/sharpclaw/backend/SharpClaw.Runtime.Host
       - test -f /app/opt/sharpclaw/gateway/SharpClaw.Gateway && chmod +x /app/opt/sharpclaw/gateway/SharpClaw.Gateway || true
-      - ln -sf /app/opt/sharpclaw/SharpClaw.Uno /app/bin/sharpclaw
+      - ln -sf /app/opt/sharpclaw/SharpClaw.Client.Uno /app/bin/sharpclaw
       - install -Dm644 com.mkn8rn.SharpClaw.desktop /app/share/applications/com.mkn8rn.SharpClaw.desktop
       - install -Dm644 com.mkn8rn.SharpClaw.metainfo.xml /app/share/metainfo/com.mkn8rn.SharpClaw.metainfo.xml
       - install -Dm644 icon.png /app/share/icons/hicolor/256x256/apps/com.mkn8rn.SharpClaw.png

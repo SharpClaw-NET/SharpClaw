@@ -1,21 +1,20 @@
-using System.Reflection;
 using System.IO.Compression;
 using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Services.Triggers;
-using SharpClaw.Application.Services;
+using SharpClaw.Core.Clients;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
+using SharpClaw.Runtime.BLL.Services.Triggers;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Tests.ExternalModule;
+using SharpClaw.TestFixtures.ExternalModule;
 using SharpClaw.Tests.TestHarness;
-using ModuleManifestRuntimeInfo = SharpClaw.Application.Core.Modules.ModuleManifestRuntimeInfo;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -32,7 +31,7 @@ public sealed class SyntheticExternalModuleLifecycleTests
               "displayName": "Synthetic External Lifecycle",
               "version": "1.0.0",
               "toolPrefix": "sel",
-              "entryAssembly": "SharpClaw.Tests.ExternalModule.dll",
+              "entryAssembly": "SharpClaw.TestFixtures.ExternalModule.dll",
               "minHostVersion": "0.0.0"
             }
             """;
@@ -41,43 +40,35 @@ public sealed class SyntheticExternalModuleLifecycleTests
             SecureJsonOptions.Manifest)!;
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
-        manifest.EntryAssembly.Should().Be("SharpClaw.Tests.ExternalModule.dll");
+        manifest.EntryAssembly.Should().Be("SharpClaw.TestFixtures.ExternalModule.dll");
         runtimeInfo.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
         runtimeInfo.IsDotNet.Should().BeTrue();
     }
 
     [Test]
-    public async Task ExternalModuleHostRejectsUnsupportedForeignRuntimeClearly()
+    public void ModuleManifestRuntimeInfoAcceptsLegacyTypeProperty()
     {
-        await using var host = ChatHarnessHost.Create();
-        var moduleDir = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "foreign-runtime-modules",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
-        var manifest = new ModuleManifest(
-            "synthetic_node_module",
-            "Synthetic Node Module",
-            "1.0.0",
-            "snm",
-            "server.js",
-            "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.Node, "server.js");
+        const string json =
+            """
+            {
+              "id": "synthetic_external_lifecycle",
+              "displayName": "Synthetic External Lifecycle",
+              "version": "1.0.0",
+              "toolPrefix": "sel",
+              "entryAssembly": "SharpClaw.TestFixtures.ExternalModule.dll",
+              "type": "SharpClaw.TestFixtures.ExternalModule.SyntheticExternalLifecycleModule",
+              "minHostVersion": "0.0.0"
+            }
+            """;
 
-        var act = () => ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            runtimeInfo,
-            host.Services,
-            host.Services.GetRequiredService<ILoggerFactory>());
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
-        act.Should()
-            .Throw<NotSupportedException>()
-            .WithMessage("*runtime 'node'*only supports 'dotnet'*not implemented yet*");
+        runtimeInfo.ModuleType.Should()
+            .Be("SharpClaw.TestFixtures.ExternalModule.SyntheticExternalLifecycleModule");
     }
 
     [Test]
-    public async Task NuGetPackageWithForeignRuntimeFailsWithUnsupportedRuntime()
+    public async Task NuGetPackageWithForeignRuntimeMaterializesScriptEntrypoint()
     {
         var packageSource = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
@@ -93,52 +84,85 @@ public sealed class SyntheticExternalModuleLifecycleTests
         const string version = "1.0.0";
         CreateForeignRuntimeModulePackage(packageSource, packageId, version);
 
-        var act = async () => await NuGetModulePackageResolver.ResolveAsync(
+        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
             new NuGetModulePackageReference(packageId, version, packageSource),
             packageCache);
 
-        await act.Should()
-            .ThrowAsync<NotSupportedException>()
-            .WithMessage("*runtime 'python'*only supports 'dotnet'*not implemented yet*");
+        File.Exists(Path.Combine(moduleDir, "module.json")).Should().BeTrue();
+        File.Exists(Path.Combine(moduleDir, "module.py")).Should().BeTrue();
+    }
+
+    [TestCase(ModuleManifestRuntimeInfo.Node, "module.mjs")]
+    [TestCase(ModuleManifestRuntimeInfo.Python, "module.py")]
+    public async Task ExternalScriptRuntimeModuleLoadsThroughSidecarModuleService(
+        string runtime,
+        string entrypoint)
+    {
+        await using var host = CreateSidecarHarness(new Dictionary<string, string?>
+        {
+            ["Modules:NodeExecutablePath"] = ResolveForeignSidecarExecutablePath(),
+            ["Modules:PythonExecutablePath"] = ResolveForeignSidecarExecutablePath(),
+        });
+        var registry = host.Services.GetRequiredService<ModuleRegistry>();
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
+        var moduleDir = CreateScriptExternalModuleDirectory(runtime, entrypoint);
+        var moduleId = $"synthetic_{runtime}_module";
+
+        try
+        {
+            var response = await moduleService.LoadExternalFromAbsolutePathAsync(
+                moduleDir,
+                host.RootServices,
+                CancellationToken.None,
+                persistDisabledEnvEntry: false);
+
+            response.ModuleId.Should().Be(moduleId);
+            response.ToolPrefix.Should().Be("snm");
+            registry.IsExternal(moduleId).Should().BeTrue();
+            registry.GetModule(moduleId).Should().NotBeNull();
+            registry.GetRuntimeHost(moduleId)
+                .Should()
+                .BeAssignableTo<IForeignModuleRuntimeHost>();
+            registry.GetModule(moduleId)!.GetStorageContracts()
+                .Should()
+                .Contain(contract => contract.StorageName == "sample_records");
+        }
+        finally
+        {
+            if (registry.GetModule(moduleId) is not null)
+                await moduleService.UnloadExternalAsync(moduleId);
+        }
     }
 
     [Test]
-    public async Task NuGetPackageModuleMaterializesAndLoadsThroughExternalModuleHost()
+    public async Task NuGetPackageModuleMaterializesAndLoadsThroughSidecarModuleService()
     {
-        await using var host = ChatHarnessHost.Create();
+        await using var host = CreateSidecarHarness();
         var packageSource = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "nuget-module-source",
             Guid.NewGuid().ToString("N"));
-        var packageCache = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "nuget-module-cache",
-            Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(packageSource);
 
-        const string packageId = "SharpClaw.Tests.ExternalModule.Package";
+        const string packageId = "SharpClaw.TestFixtures.ExternalModule.Package";
         const string version = "1.0.0";
         CreateSyntheticExternalModulePackage(packageSource, packageId, version);
         var registry = host.Services.GetRequiredService<ModuleRegistry>();
-        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
-            new NuGetModulePackageReference(packageId, version, packageSource),
-            packageCache);
-        var manifest = JsonSerializer.Deserialize<ModuleManifest>(
-            await File.ReadAllTextAsync(Path.Combine(moduleDir, "module.json")),
-            SecureJsonOptions.Manifest)!;
-        var moduleHost = ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            host.Services,
-            host.Services.GetRequiredService<ILoggerFactory>());
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
 
         try
         {
-            registry.Register(moduleHost.Module, moduleHost);
-            await moduleHost.Module.InitializeAsync(moduleHost.Services, CancellationToken.None);
+            var response = await moduleService.LoadExternalPackageAsync(
+                new NuGetModulePackageReference(packageId, version, packageSource),
+                host.RootServices,
+                CancellationToken.None);
 
+            response.ModuleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
             registry.GetModule(SyntheticExternalLifecycleModule.ModuleId).Should().NotBeNull();
+            registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+                .Should()
+                .BeAssignableTo<IForeignModuleRuntimeHost>();
             registry.TryResolve(SyntheticExternalLifecycleModule.JobTool, out var moduleId, out var toolName)
                 .Should().BeTrue();
             moduleId.Should().Be(SyntheticExternalLifecycleModule.ModuleId);
@@ -147,32 +171,32 @@ public sealed class SyntheticExternalModuleLifecycleTests
         finally
         {
             if (registry.GetModule(SyntheticExternalLifecycleModule.ModuleId) is not null)
-            {
-                await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-                await moduleHost.Module.ShutdownAsync();
-                registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-            }
-
-            await moduleHost.DisposeAsync();
+                await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
         }
     }
 
     [Test]
     public async Task ExternalModuleUnloadRemovesModuleOwnedSurfacesAndKeepsCoreState()
     {
-        await using var host = ChatHarnessHost.Create();
+        await using var host = CreateSidecarHarness();
         var registry = host.Services.GetRequiredService<ModuleRegistry>();
         var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
         var triggerRegistry = new TaskTriggerSourceRegistry([], moduleRegistry: registry);
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
 
-        var moduleHost = LoadSyntheticExternalModule(host.Services);
-        registry.Register(moduleHost.Module, moduleHost);
-        await moduleHost.Module.InitializeAsync(moduleHost.Services, CancellationToken.None);
+        var moduleDir = CreateSyntheticExternalModuleDirectory();
+        await moduleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            host.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
 
         try
         {
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeTrue();
-            registry.GetExternalHost(SyntheticExternalLifecycleModule.ModuleId).Should().BeSameAs(moduleHost);
+            registry.GetRuntimeHost(SyntheticExternalLifecycleModule.ModuleId)
+                .Should()
+                .BeAssignableTo<IForeignModuleRuntimeHost>();
             registry.GetHeaderTag(SyntheticExternalLifecycleModule.HeaderTag).Should().NotBeNull();
             registry.IsInlineTool(SyntheticExternalLifecycleModule.InlineTool).Should().BeTrue();
             registry.TryResolve(SyntheticExternalLifecycleModule.JobTool, out var moduleId, out var toolName)
@@ -185,7 +209,8 @@ public sealed class SyntheticExternalModuleLifecycleTests
             factory.IsAvailable(SyntheticExternalLifecycleModule.ProviderKey).Should().BeTrue();
             var providerPlugin = factory.GetPlugin(SyntheticExternalLifecycleModule.ProviderKey);
             providerPlugin.Should().NotBeNull();
-            providerPlugin!.CreateCostFeed(new ProviderClientOptions(null)).Should().NotBeNull();
+            providerPlugin!.SupportsCostFeed.Should().BeTrue();
+        providerPlugin.CreateCostFeed(new ProviderClientOptions(null)).Should().NotBeNull();
             triggerRegistry.ResolveByKey(SyntheticExternalLifecycleModule.TriggerKey).Should().NotBeNull();
 
             var seeded = await host.SeedChatAsync(
@@ -215,10 +240,7 @@ public sealed class SyntheticExternalModuleLifecycleTests
                     endDate: DateTimeOffset.UnixEpoch.AddDays(1));
             costs!.TotalCost.Should().Be(3.21m);
 
-            await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-            await moduleHost.Module.ShutdownAsync();
-            registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-            await moduleHost.DisposeAsync();
+            await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
 
             registry.GetModule(SyntheticExternalLifecycleModule.ModuleId).Should().BeNull();
             registry.IsExternal(SyntheticExternalLifecycleModule.ModuleId).Should().BeFalse();
@@ -242,16 +264,11 @@ public sealed class SyntheticExternalModuleLifecycleTests
         finally
         {
             if (registry.GetModule(SyntheticExternalLifecycleModule.ModuleId) is not null)
-            {
-                await moduleHost.DrainAsync(TimeSpan.FromSeconds(1));
-                await moduleHost.Module.ShutdownAsync();
-                registry.Unregister(SyntheticExternalLifecycleModule.ModuleId);
-                await moduleHost.DisposeAsync();
-            }
+                await moduleService.UnloadExternalAsync(SyntheticExternalLifecycleModule.ModuleId);
         }
     }
 
-    private static ExternalModuleHost LoadSyntheticExternalModule(IServiceProvider hostServices)
+    private static string CreateSyntheticExternalModuleDirectory()
     {
         var assemblyPath = typeof(SyntheticExternalLifecycleModule).Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
@@ -267,22 +284,42 @@ public sealed class SyntheticExternalModuleLifecycleTests
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
             File.Copy(file, Path.Combine(moduleDir, Path.GetFileName(file)), overwrite: true);
 
-        var manifest = new ModuleManifest(
-            SyntheticExternalLifecycleModule.ModuleId,
-            "Synthetic External Lifecycle",
-            "1.0.0",
-            SyntheticExternalLifecycleModule.ToolPrefixValue,
-            Path.GetFileName(assemblyPath),
-            "0.0.0");
         File.WriteAllText(
             Path.Combine(moduleDir, "module.json"),
-            JsonSerializer.Serialize(manifest));
+            SyntheticExternalManifestJson("1.0.0", Path.GetFileName(assemblyPath)));
 
-        return ExternalModuleHost.Load(
-            moduleDir,
-            manifest,
-            hostServices,
-            hostServices.GetRequiredService<ILoggerFactory>());
+        return moduleDir;
+    }
+
+    private static string CreateScriptExternalModuleDirectory(string runtime, string entrypoint)
+    {
+        var moduleId = $"synthetic_{runtime}_module";
+        var moduleDir = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "external-script-modules",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(moduleDir);
+        File.WriteAllText(
+            Path.Combine(moduleDir, entrypoint),
+            runtime == ModuleManifestRuntimeInfo.Python
+                ? "# launched by configured test sidecar executable"
+                : "// launched by configured test sidecar executable");
+        File.WriteAllText(
+            Path.Combine(moduleDir, "module.json"),
+            $$"""
+            {
+              "id": "{{moduleId}}",
+              "displayName": "Synthetic {{runtime}} Module",
+              "version": "1.0.0",
+              "toolPrefix": "snm",
+              "runtime": "{{runtime}}",
+              "entryAssembly": "",
+              "entrypoint": "{{entrypoint}}",
+              "minHostVersion": "0.0.0"
+            }
+            """);
+
+        return moduleDir;
     }
 
     private static void CreateSyntheticExternalModulePackage(
@@ -293,16 +330,12 @@ public sealed class SyntheticExternalModuleLifecycleTests
         var assemblyPath = typeof(SyntheticExternalLifecycleModule).Assembly.Location;
         var sourceDir = Path.GetDirectoryName(assemblyPath)!;
         var packagePath = Path.Combine(packageSource, $"{packageId}.{version}.nupkg");
-        var manifest = new ModuleManifest(
-            SyntheticExternalLifecycleModule.ModuleId,
-            "Synthetic External Lifecycle",
-            version,
-            SyntheticExternalLifecycleModule.ToolPrefixValue,
-            Path.GetFileName(assemblyPath),
-            "0.0.0");
 
         using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
-        WriteTextEntry(archive, "module.json", JsonSerializer.Serialize(manifest));
+        WriteTextEntry(
+            archive,
+            "module.json",
+            SyntheticExternalManifestJson(version, Path.GetFileName(assemblyPath)));
         WriteTextEntry(
             archive,
             $"{packageId}.nuspec",
@@ -343,10 +376,14 @@ public sealed class SyntheticExternalModuleLifecycleTests
               "version": "1.0.0",
               "toolPrefix": "spm",
               "runtime": "python",
-              "entrypoint": "synthetic_module.main:app",
+              "entrypoint": "module.py",
               "minHostVersion": "0.0.0"
             }
             """);
+        WriteTextEntry(
+            archive,
+            "sharpclaw/module.py",
+            "from sharpclaw_module_host import create_sharpclaw_host\n");
         WriteTextEntry(
             archive,
             $"{packageId}.nuspec",
@@ -368,5 +405,84 @@ public sealed class SyntheticExternalModuleLifecycleTests
         var entry = archive.CreateEntry(entryName);
         using var writer = new StreamWriter(entry.Open());
         writer.Write(text);
+    }
+
+    private static ChatHarnessHost CreateSidecarHarness(
+        IReadOnlyDictionary<string, string?>? additionalConfiguration = null)
+    {
+        var configuration = new Dictionary<string, string?>
+        {
+            ["Modules:OutOfProcessModuleHostPath"] = ResolveOutOfProcessModuleHostPath(),
+        };
+
+        if (additionalConfiguration is not null)
+        {
+            foreach (var pair in additionalConfiguration)
+                configuration[pair.Key] = pair.Value;
+        }
+
+        return ChatHarnessHost.Create(configuration);
+    }
+
+    private static string SyntheticExternalManifestJson(string version, string entryAssembly) =>
+        $$"""
+        {
+          "id": "{{SyntheticExternalLifecycleModule.ModuleId}}",
+          "displayName": "Synthetic External Lifecycle",
+          "version": "{{version}}",
+          "toolPrefix": "{{SyntheticExternalLifecycleModule.ToolPrefixValue}}",
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "{{entryAssembly}}",
+          "moduleType": "{{typeof(SyntheticExternalLifecycleModule).FullName}}",
+          "minHostVersion": "0.0.0"
+        }
+        """;
+
+    private static string ResolveOutOfProcessModuleHostPath()
+    {
+        var hostPath = Path.Combine(
+            TestContext.CurrentContext.TestDirectory,
+            "SharpClaw.ModuleHost.OutOfProcess.dll");
+
+        File.Exists(hostPath).Should().BeTrue(
+            $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");
+        return hostPath;
+    }
+
+    private static string ResolveForeignSidecarExecutablePath()
+    {
+        var root = ResolveRepoRoot();
+        var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
+        var appHostName = OperatingSystem.IsWindows()
+            ? "SharpClaw.TestFixtures.ForeignSidecar.exe"
+            : "SharpClaw.TestFixtures.ForeignSidecar";
+        var helperPath = Path.Combine(
+            root,
+            "SharpClaw.Tests",
+            "Fixtures",
+            "ForeignSidecar",
+            "bin",
+            configuration,
+            "net10.0",
+            appHostName);
+
+        File.Exists(helperPath).Should().BeTrue(
+            $"foreign sidecar apphost must be built before script lifecycle tests run: '{helperPath}'");
+        return helperPath;
+    }
+
+    private static string ResolveRepoRoot()
+    {
+        var current = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
+        while (current is not null)
+        {
+            if (File.Exists(Path.Combine(current.FullName, "Directory.Packages.props")))
+                return current.FullName;
+
+            current = current.Parent;
+        }
+
+        throw new DirectoryNotFoundException("Could not locate SharpClaw repository root.");
     }
 }

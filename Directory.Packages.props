@@ -16,6 +16,24 @@
     <PackageVersion Include="GitHubActionsTestLogger" Version="3.0.4" />
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageVersion Include="SharpClaw.Contracts" Version="0.3.17" />
+    <PackageVersion Include="SharpClaw.Gateway.Contracts" Version="0.1.0" />
+    <PackageVersion Include="SharpClaw.Core" Version="[0.1.108-alpha]" />
+    <PackageVersion Include="SharpClaw.Modules.EditorCommon" Version="0.1.1-alpha" />
+    <PackageVersion Include="SharpClaw.Modules.VS2026Editor" Version="0.1.1-alpha" />
+    <PackageVersion Include="SharpClaw.Modules.VSCodeEditor" Version="0.1.1-alpha" />
+    <PackageVersion Include="SharpClaw.Modules.AgentOrchestration" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Metrics" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Providers.Common" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Google" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.LlamaSharp" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Ollama" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.OpenAICompatible" Version="0.1.4-beta" />
+    <PackageVersion Include="SharpClaw.ModuleHost.InProcess" Version="0.1.0-alpha" />
+    <PackageVersion Include="SharpClaw.ModuleHost.OutOfProcess" Version="0.1.1-alpha" />
+    <PackageVersion Include="JSONColdStore" Version="0.1.0-alpha.8" />
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.7" />
     <PackageVersion Include="Uno.UITest.Helpers" Version="1.1.0-dev.92" />
     <PackageVersion Include="Xamarin.UITest" Version="4.4.2" />
@@ -23,7 +41,7 @@
     <PackageVersion Include="Swashbuckle.AspNetCore.SwaggerUI" Version="10.1.7" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore" Version="10.0.8" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.InMemory" Version="10.0.6" />
-    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.5" />
+    <PackageVersion Include="Microsoft.EntityFrameworkCore.Relational" Version="10.0.8" />
     <PackageVersion Include="Npgsql.EntityFrameworkCore.PostgreSQL" Version="10.0.1" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.SqlServer" Version="10.0.5" />
     <PackageVersion Include="Microsoft.EntityFrameworkCore.Sqlite" Version="10.0.5" />
@@ -39,6 +57,7 @@
     <PackageVersion Include="Serilog.AspNetCore" Version="10.0.0" />
     <PackageVersion Include="NAudio" Version="2.3.0" />
     <PackageVersion Include="LLamaSharp" Version="0.27.0" />
+    <PackageVersion Include="LlamaSharp.ToolCallEnvelopes" Version="0.1.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cpu" Version="0.27.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12.Windows" Version="0.27.0" />
     <PackageVersion Include="LLamaSharp.Backend.Cuda12.Linux" Version="0.27.0" />

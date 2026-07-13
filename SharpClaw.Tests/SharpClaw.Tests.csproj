@@ -1,5 +1,7 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
+  <Import Project="..\build\PackagedModulePayload.targets" />
+
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
     <IsPackable>false</IsPackable>
@@ -8,34 +10,88 @@
 
   <ItemGroup>
     <PackageReference Include="FluentAssertions" />
+    <PackageReference Include="LlamaSharp.ToolCallEnvelopes" />
+    <PackageReference Include="Microsoft.EntityFrameworkCore.InMemory" />
     <PackageReference Include="Microsoft.NET.Test.Sdk" />
+    <PackageReference Include="Newtonsoft.Json" />
     <PackageReference Include="NUnit" />
     <PackageReference Include="NUnit3TestAdapter" />
+    <PackageReference Include="Uno.UITest.Helpers" />
+    <PackageReference Include="Xamarin.UITest" />
     <PackageReference Include="coverlet.collector" />
     <PackageReference Include="GitHubActionsTestLogger">
       <PrivateAssets>all</PrivateAssets>
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="System.Security.Cryptography.Xml" />
+    <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.Ollama" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Providers.OpenAICompatible" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Providers.Common" />
+    <PackageReference Include="SharpClaw.Providers.LocalCommon" />
   </ItemGroup>
 
   <ItemGroup>
-    <ProjectReference Include="..\SharpClaw.Application.API\SharpClaw.Application.API.csproj" />
-    <ProjectReference Include="..\SharpClaw.Uno\SharpClaw.Uno.csproj" />
-    <ProjectReference Include="..\SharpClaw.Application.Core\SharpClaw.Application.Core.csproj" />
-    <ProjectReference Include="..\SharpClaw.Application.Infrastructure\SharpClaw.Application.Infrastructure.csproj" />
-    <ProjectReference Include="..\SharpClaw.Application.Infrastructure.Tasks\SharpClaw.Application.Infrastructure.Tasks.csproj" />
-    <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
-    <ProjectReference Include="..\SharpClaw.Utils\SharpClaw.Utils.csproj" />
-    <ProjectReference Include="..\SharpClaw.Providers.Common\SharpClaw.Providers.Common.csproj" />
-    <ProjectReference Include="..\DefaultModules\Providers\Google\SharpClaw.Modules.Providers.Google.csproj" />
-    <ProjectReference Include="..\DefaultModules\Providers\OpenAICompatible\SharpClaw.Modules.Providers.OpenAICompatible.csproj" />
-    <ProjectReference Include="..\DefaultModules\Providers\LlamaSharp\SharpClaw.Modules.Providers.LlamaSharp.csproj" />
-    <ProjectReference Include="..\DefaultModules\AgentOrchestration\SharpClaw.Modules.AgentOrchestration.csproj" />
-    <ProjectReference Include="..\DefaultModules\ModuleDev\SharpClaw.Modules.ModuleDev.csproj" />
-    <ProjectReference Include="..\DefaultModules\Metrics\SharpClaw.Modules.Metrics.csproj" />
-    <ProjectReference Include="..\DefaultModules\TestHarness\SharpClaw.Modules.TestHarness.csproj" />
-    <ProjectReference Include="..\SharpClaw.Tests.ExternalModule\SharpClaw.Tests.ExternalModule.csproj" />
-    <ProjectReference Include="..\SharpClaw.Tests.ForeignSidecar\SharpClaw.Tests.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
+    <Compile Remove="Fixtures\**\*.cs" />
   </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj" />
+    <ProjectReference Include="..\SharpClaw.Client.Uno\SharpClaw.Client.Uno.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime\BLL\SharpClaw.Runtime.BLL.csproj" />
+    <ProjectReference Include="..\SharpClaw.Runtime\INF\SharpClaw.Runtime.INF.csproj" />
+    <ProjectReference Include="..\SharpClaw.Gateway\SharpClaw.Gateway.csproj" />
+    <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
+    <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="..\SharpClaw.DefaultModules\TestHarness.InProcess\SharpClaw.DefaultModules.TestHarness.InProcess.csproj" ReferenceOutputAssembly="false" />
+    <ProjectReference Include="Fixtures\ExternalModule\SharpClaw.TestFixtures.ExternalModule.csproj" />
+    <ProjectReference Include="Fixtures\ForeignSidecar\SharpClaw.TestFixtures.ForeignSidecar.csproj" ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <Target Name="CopyPackagedModulesToTestOutput"
+          AfterTargets="Build"
+          DependsOnTargets="_ResolvePackagedModulePayloadFiles">
+    <ItemGroup>
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.*.dll" />
+      <_NonHostDll Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                   Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.*\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json">
+        <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
+      </_BundledModuleManifest>
+      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.InProcess.dll" />
+      <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
+                                Exclude="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll" />
+      <_InProcessHarnessManifest Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\module.json" />
+    </ItemGroup>
+    <RemoveDir Directories="$(OutDir)modules\sharpclaw_test_harness;$(OutDir)modules\sharpclaw_test_harness_in_process" />
+    <Copy SourceFiles="@(_BundledModuleDll);@(_NonHostDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_BundledModuleDll);@(_NonHostDll)' != ''" />
+    <Copy SourceFiles="@(_InProcessHarnessPayload)"
+          DestinationFolder="$(OutDir)test-modules\sharpclaw_test_harness_in_process"
+          SkipUnchangedFiles="true"
+          Condition="'@(_InProcessHarnessPayload)' != ''" />
+    <Copy SourceFiles="@(_InProcessHarnessManifest)"
+          DestinationFiles="$(OutDir)test-modules\sharpclaw_test_harness_in_process\module.json"
+          SkipUnchangedFiles="true"
+          Condition="'@(_InProcessHarnessManifest)' != ''" />
+    <Copy SourceFiles="@(_PackagedModulePayloadDll)"
+          DestinationFolder="$(OutDir)"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedModulePayloadDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
+          DestinationFiles="@(_PackagedModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedModuleManifest);@(_BundledModuleManifest)' != ''" />
+  </Target>
 </Project>

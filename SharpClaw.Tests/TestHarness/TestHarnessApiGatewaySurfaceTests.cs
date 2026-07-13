@@ -11,8 +11,8 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using SharpClaw.Application.API.Handlers;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.Host.Handlers;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core.Clearance;
@@ -20,8 +20,8 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
-using SharpClaw.Modules.TestHarness;
-using SharpClaw.Utils.Logging;
+using SharpClaw.Tests.TestHarness;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.TestHarness;
 

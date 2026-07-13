@@ -5,12 +5,16 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Core.Jobs;
+using SharpClaw.Core.Modules;
+using SharpClaw.Core.Permissions;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Tests.Services;
 
@@ -122,22 +126,45 @@ public sealed class AgentJobTokenAccountingTests
         var registry = new ModuleRegistry();
         var configuration = new ConfigurationBuilder().Build();
         var serviceProvider = new ServiceCollection().BuildServiceProvider();
-        var eventDispatcher = new ModuleEventDispatcher(
-            serviceProvider,
-            configuration,
-            NullLogger<ModuleEventDispatcher>.Instance);
+        var jobAdministration = new AgentJobAdministrationEngine();
+        var jobLifecycle = new AgentJobLifecycleEngine();
+        var defaultResources = new DefaultResourceEngine();
+        var permissionEvaluator = new PermissionEvaluationEngine();
+        var actionHost = new EfAgentActionHost(db);
+        var chatCache = new ChatCache(configuration);
 
         return new AgentJobService(
             db,
-            new EfPersistenceEntityResolver(),
-            new AgentActionService(db, registry),
+            new AgentActionService(
+                registry,
+                new AgentActionWorkflowEngine(
+                    permissionEvaluator,
+                    new PermissionDelegateEvaluationEngine(
+                        permissionEvaluator)),
+                actionHost),
             new SessionService(),
             registry,
-            new ModuleMetricsCollector(),
-            eventDispatcher,
+            new ModuleToolExecutionPlanner(),
+            new ModuleToolPermissionExecutor(new ModuleToolPermissionPlanner()),
+            new ModuleJobToolExecutor(
+                new ModuleMetricsCollector(),
+                NullLogger<ModuleJobToolExecutor>.Instance),
             serviceProvider.GetRequiredService<IServiceScopeFactory>(),
             configuration,
-            new ChatCache(configuration),
+            chatCache,
+            new AgentJobRuntimeEngine(jobLifecycle, jobAdministration),
+            new AgentJobAdministrationWorkflowEngine(
+                jobAdministration,
+                jobLifecycle),
+            new EfAgentJobAdministrationHost(
+                db,
+                new EfPersistenceEntityResolver(),
+                chatCache,
+                jobAdministration),
+            jobAdministration,
+            new AgentJobDefaultResourceResolver(
+                jobAdministration,
+                defaultResources),
             NullLogger<AgentJobService>.Instance);
     }
 
@@ -154,8 +181,21 @@ public sealed class AgentJobTokenAccountingTests
             options => options.UseInMemoryDatabase(databaseName, root));
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
         services.AddSingleton<ModuleRegistry>();
+        services.AddSingleton<ModuleToolExecutionPlanner>();
+        services.AddSingleton<ModuleToolPermissionPlanner>();
+        services.AddSingleton<ModuleToolPermissionExecutor>();
         services.AddSingleton<ModuleMetricsCollector>();
+        services.AddSingleton<ModuleJobToolExecutor>();
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<PermissionEvaluationEngine>();
+        services.AddSingleton<PermissionDelegateEvaluationEngine>();
+        services.AddSingleton<AgentActionWorkflowEngine>();
+        services.AddSingleton<AgentJobLifecycleEngine>();
+        services.AddSingleton<AgentJobAdministrationEngine>();
+        services.AddSingleton<AgentJobAdministrationWorkflowEngine>();
+        services.AddSingleton<AgentJobRuntimeEngine>();
+        services.AddSingleton<DefaultResourceEngine>();
+        services.AddSingleton<AgentJobDefaultResourceResolver>();
         services.AddSingleton<ModuleEventDispatcher>(sp =>
             new ModuleEventDispatcher(
                 sp,
@@ -163,6 +203,8 @@ public sealed class AgentJobTokenAccountingTests
                 NullLogger<ModuleEventDispatcher>.Instance));
         services.AddScoped<AgentActionService>();
         services.AddScoped<SessionService>();
+        services.AddScoped<EfAgentJobAdministrationHost>();
+        services.AddScoped<EfAgentActionHost>();
         services.AddScoped<AgentJobService>();
         services.AddSingleton<IAgentJobCostTracker, HostAgentJobCostTracker>();
 

@@ -7,7 +7,7 @@ Wants=network-online.target
 [Service]
 Type=simple
 WorkingDirectory=/usr/lib/sharpclaw/api
-ExecStart=/usr/lib/sharpclaw/api/SharpClaw.Application.API
+ExecStart=/usr/lib/sharpclaw/api/SharpClaw.Runtime.Host
 Restart=on-failure
 RestartSec=5
 User=sharpclaw

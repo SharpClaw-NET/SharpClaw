@@ -1,44 +1,29 @@
 <Solution>
-  <Folder Name="/Application/">
-    <Project Path="SharpClaw.Application.API/SharpClaw.Application.API.csproj" />
-    <Project Path="SharpClaw.Application.Core/SharpClaw.Application.Core.csproj" />
-    <Project Path="SharpClaw.Application.Infrastructure.Tasks/SharpClaw.Application.Infrastructure.Tasks.csproj" Id="23769044-e624-4ad4-a4ba-66de30a6eb15" />
-    <Project Path="SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj" />
+  <Folder Name="/Runtime/">
+    <Project Path="SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj" />
+    <Project Path="SharpClaw.Runtime/BLL/SharpClaw.Runtime.BLL.csproj" />
+    <Project Path="SharpClaw.Runtime/INF/SharpClaw.Runtime.INF.csproj" />
   </Folder>
   <Folder Name="/Migrations/">
-    <Project Path="SharpClaw.Migrations.Postgres/SharpClaw.Migrations.Postgres.csproj" />
-    <Project Path="SharpClaw.Migrations.SQLite/SharpClaw.Migrations.SQLite.csproj" />
-    <Project Path="SharpClaw.Migrations.SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
+    <Project Path="SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj" />
+    <Project Path="SharpClaw.Migrations/SQLite/SharpClaw.Migrations.SQLite.csproj" />
+    <Project Path="SharpClaw.Migrations/SqlServer/SharpClaw.Migrations.SqlServer.csproj" />
   </Folder>
   <Folder Name="/NativeClient/">
-    <Project Path="SharpClaw.Uno/SharpClaw.Uno.csproj">
+    <Project Path="SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj">
       <Deploy />
     </Project>
   </Folder>
   <Folder Name="/Gateway/">
-    <Project Path="SharpClaw.Gateway.Abstractions/SharpClaw.Gateway.Abstractions.csproj" />
     <Project Path="SharpClaw.Gateway/SharpClaw.Gateway.csproj" />
   </Folder>
   <Folder Name="/Shared/">
-    <Project Path="SharpClaw.Modules.Hosting/SharpClaw.Modules.Hosting.csproj" />
-    <Project Path="SharpClaw.Providers.Common/SharpClaw.Providers.Common.csproj" />
-    <Project Path="SharpClaw.Providers.LocalCommon/SharpClaw.Providers.LocalCommon.csproj" />
-    <Project Path="SharpClaw.Utils/SharpClaw.Utils.csproj" />
+    <Project Path="SharpClaw.Shared/SharpClaw.Shared.csproj" />
   </Folder>
   <Folder Name="/Solution Items/" />
-  <Folder Name="/DefaultModules/">
-    <Project Path="DefaultModules/AgentOrchestration/SharpClaw.Modules.AgentOrchestration.csproj" />
-    <Project Path="DefaultModules/EditorCommon/SharpClaw.Modules.EditorCommon.csproj" />
-    <Project Path="DefaultModules/Metrics/SharpClaw.Modules.Metrics.csproj" />
-    <Project Path="DefaultModules/ModuleDev/SharpClaw.Modules.ModuleDev.csproj" />
-    <Project Path="DefaultModules/Providers/Anthropic/SharpClaw.Modules.Providers.Anthropic.csproj" />
-    <Project Path="DefaultModules/Providers/Google/SharpClaw.Modules.Providers.Google.csproj" />
-    <Project Path="DefaultModules/Providers/LlamaSharp/SharpClaw.Modules.Providers.LlamaSharp.csproj" />
-    <Project Path="DefaultModules/Providers/Ollama/SharpClaw.Modules.Providers.Ollama.csproj" />
-    <Project Path="DefaultModules/Providers/OpenAICompatible/SharpClaw.Modules.Providers.OpenAICompatible.csproj" />
-    <Project Path="DefaultModules/TestHarness/SharpClaw.Modules.TestHarness.csproj" />
-    <Project Path="DefaultModules/VS2026Editor/SharpClaw.Modules.VS2026Editor.csproj" />
-    <Project Path="DefaultModules/VSCodeEditor/SharpClaw.Modules.VSCodeEditor.csproj" />
+  <Folder Name="/Tests/Infrastructure/">
+    <Project Path="SharpClaw.DefaultModules/TestHarness.InProcess/SharpClaw.DefaultModules.TestHarness.InProcess.csproj" />
+    <Project Path="SharpClaw.DefaultModules/TestHarness.OutOfProcess/SharpClaw.DefaultModules.TestHarness.OutOfProcess.csproj" />
   </Folder>
   <Folder Name="/Solution Items/Build/">
     <File Path="Directory.Build.props" />
@@ -103,21 +88,19 @@
     <File Path=".gitignore" />
   </Folder>
   <Folder Name="/Solution Items/Notices/">
-    <File Path="CONTRIBUTING.md" />
+    <File Path=".github/CONTRIBUTING.md" />
     <File Path="LICENSE.md" />
-    <File Path="README.md" />
-    <File Path="SECURITY.md" />
+    <File Path=".github/README.md" />
+    <File Path=".github/SECURITY.md" />
+    <File Path="docs/legal/DISCLAIMER.md" />
   </Folder>
   <Folder Name="/Solution Items/Scripts/">
     <File Path="publish-msix.ps1" />
     <File Path="publish-release.ps1" />
-    <File Path="publish.ps1" />
+    <File Path="scripts/publish.ps1" />
   </Folder>
   <Folder Name="/Tests/">
     <Project Path="SharpClaw.Tests/SharpClaw.Tests.csproj">
-      <Deploy />
-    </Project>
-    <Project Path="SharpClaw.UITests/SharpClaw.UITests.csproj">
       <Deploy />
     </Project>
   </Folder>

@@ -1,12 +1,12 @@
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
 
 namespace SharpClaw.Tests.TestHarness;
 

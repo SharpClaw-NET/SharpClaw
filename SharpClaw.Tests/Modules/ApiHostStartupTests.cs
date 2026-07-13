@@ -7,7 +7,7 @@ using System.Text;
 namespace SharpClaw.Tests.Modules;
 
 /// <summary>
-/// End-to-end startup smoke test: spawns the real <c>SharpClaw.Application.API</c>
+/// End-to-end startup smoke test: spawns the real <c>SharpClaw.Runtime.Host</c>
 /// executable in headless mode and waits for it to reach the "API listening on"
 /// log line, which is emitted from <c>Program.cs</c> PHASE 23 immediately after
 /// <c>app.StartAsync()</c> returns successfully — i.e. the login prompt would
@@ -15,7 +15,7 @@ namespace SharpClaw.Tests.Modules;
 /// <para>
 /// This complements <see cref="BundledModuleOutputTests"/>: that one only
 /// confirms module DLLs are present on disk and contain an
-/// <c>ISharpClawModule</c> implementation, but it cannot detect runtime
+/// <c>ISharpClawCoreModule</c> implementation, but it cannot detect runtime
 /// startup regressions such as duplicate trigger-attribute ownership in
 /// <c>TaskScriptParser.RegisterModule</c>, parser-extension primitives
 /// collisions, missing infrastructure dependencies, or any other crash that
@@ -33,23 +33,23 @@ public class ApiHostStartupTests
     private static string ResolveApiExecutable()
     {
         // Test assembly lives at: …/SharpClaw.Tests/bin/<config>/net10.0/
-        // API output lives at:    …/SharpClaw.Application.API/bin/<config>/net10.0/
+        // API output lives at:    .../SharpClaw.Runtime/Host/bin/<config>/net10.0/
         var testBinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
         var solutionRoot = Path.GetFullPath(Path.Combine(testBinDir, "..", "..", "..", ".."));
         var config = new DirectoryInfo(testBinDir).Parent!.Name;
         var tfm = new DirectoryInfo(testBinDir).Name;
 
-        var apiOutputDir = Path.Combine(solutionRoot, "SharpClaw.Application.API", "bin", config, tfm);
+        var apiOutputDir = Path.Combine(solutionRoot, "SharpClaw.Runtime.Host", "bin", config, tfm);
 
         // Prefer the platform-native launcher; fall back to `dotnet exec` on the dll.
         var exeName = OperatingSystem.IsWindows()
-            ? "SharpClaw.Application.API.exe"
-            : "SharpClaw.Application.API";
+            ? "SharpClaw.Runtime.Host.exe"
+            : "SharpClaw.Runtime.Host";
         var exePath = Path.Combine(apiOutputDir, exeName);
         if (File.Exists(exePath))
             return exePath;
 
-        var dllPath = Path.Combine(apiOutputDir, "SharpClaw.Application.API.dll");
+        var dllPath = Path.Combine(apiOutputDir, "SharpClaw.Runtime.Host.dll");
         return File.Exists(dllPath) ? dllPath : exePath;
     }
 

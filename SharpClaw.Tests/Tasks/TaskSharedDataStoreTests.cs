@@ -1,5 +1,5 @@
 using System.Text.Json;
-using SharpClaw.Application.Services;
+using SharpClaw.Core.Tasks.Runtime;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -55,7 +55,7 @@ public class TaskSharedDataStoreTests
     public async Task TryInvokeToolAsync_CustomToolHook_UsesRegisteredDescriptor()
     {
         var store = new TaskSharedDataStore();
-        var hook = new SharpClaw.Application.Infrastructure.Tasks.Models.TaskToolCallHook
+        var hook = new SharpClaw.Core.Tasks.Models.TaskToolCallHook
         {
             Name = "custom_echo",
             Description = "Echo value",

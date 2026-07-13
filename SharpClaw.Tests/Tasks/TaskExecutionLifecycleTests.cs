@@ -1,21 +1,24 @@
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.Host;
+using SharpClaw.Core.Clients;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Modules.AgentOrchestration;
-using SharpClaw.Modules.AgentOrchestration.Models;
-using SharpClaw.Modules.AgentOrchestration.ScheduledJobs;
-using SharpClaw.Modules.AgentOrchestration.Services;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Core.Modules;
+using SharpClaw.Core.Tasks.Administration;
+using SharpClaw.Core.Tasks.Preflight;
+using SharpClaw.Core.Tasks.Runtime;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -75,22 +78,65 @@ public sealed class TaskExecutionLifecycleTests
     }
 
     [Test]
-    public async Task StartAsync_EmitTask_PersistsLatestSnapshotAndOutputHistory()
+    public async Task StartAsync_CompilationFailure_SavesFailureWithoutRegisteringRuntime()
+    {
+        await using var host = TaskLifecycleHost.Create();
+        var orchestrator = host.Services.GetRequiredService<TaskOrchestrator>();
+        var registry = host.Services.GetRequiredService<TaskRuntimeRegistry>();
+        var definition = new TaskDefinitionDB
+        {
+            Id = Guid.NewGuid(),
+            Name = "compile-failure",
+            SourceText = InvalidSource("compile-failure")
+        };
+        var instance = new TaskInstanceDB
+        {
+            Id = Guid.NewGuid(),
+            TaskDefinitionId = definition.Id,
+            Status = TaskInstanceStatus.Queued
+        };
+        host.Db.TaskDefinitions.Add(definition);
+        host.Db.TaskInstances.Add(instance);
+        await host.Db.SaveChangesAsync();
+
+        await orchestrator.StartAsync(instance.Id);
+
+        var failed = await host.WaitForStatusAsync(
+            instance.Id,
+            TaskInstanceStatus.Failed);
+        failed.ErrorMessage.Should().StartWith("Compilation failed: ");
+        failed.Logs.Select(l => l.Message).Should().NotContain("Task started.");
+        registry.ActiveCount.Should().Be(0);
+        orchestrator.GetOutputReader(instance.Id).Should().BeNull();
+    }
+
+    [Test]
+    public async Task StartAsync_WaitingTask_EmitsStartedEventAfterRunningTransition()
     {
         await using var host = TaskLifecycleHost.Create();
         var svc = host.Services.GetRequiredService<TaskService>();
         var orchestrator = host.Services.GetRequiredService<TaskOrchestrator>();
-        var definition = await svc.CreateDefinitionAsync(new CreateTaskDefinitionRequest(EmitSource("emit-history")));
-        var created = await svc.CreateInstanceAsync(new StartTaskInstanceRequest(definition.Id, ChannelId: Guid.NewGuid()));
+        var definition = await svc.CreateDefinitionAsync(
+            new CreateTaskDefinitionRequest(WaitSource("start-event-order")));
+        var created = await svc.CreateInstanceAsync(
+            new StartTaskInstanceRequest(
+                definition.Id,
+                ChannelId: Guid.NewGuid()));
 
         await orchestrator.StartAsync(created.Id);
-        var completed = await host.WaitForStatusAsync(created.Id, TaskInstanceStatus.Completed);
-        var outputs = await host.ReadOutputsAsync(created.Id);
 
-        completed.OutputSnapshotJson.Should().Be("task-output");
-        outputs.Should().ContainSingle();
-        outputs.Single().Data.Should().Be("task-output");
-        outputs.Single().Sequence.Should().Be(2);
+        var running = await host.WaitForStatusAsync(
+            created.Id,
+            TaskInstanceStatus.Running);
+        var reader = orchestrator.GetOutputReader(created.Id);
+        reader.Should().NotBeNull();
+        reader!.TryRead(out var started).Should().BeTrue();
+        started.Type.Should().Be(TaskOutputEventType.StatusChange);
+        started.Data.Should().Be("Running");
+        running.Logs.Select(l => l.Message).Should().Contain("Task started.");
+
+        await orchestrator.StopAsync(created.Id);
+        await host.WaitForStatusAsync(created.Id, TaskInstanceStatus.Cancelled);
     }
 
     [Test]
@@ -176,105 +222,6 @@ public sealed class TaskExecutionLifecycleTests
         recovered.Should().OnlyContain(i => i.ErrorMessage!.Contains("Manual restart required."));
     }
 
-    [Test]
-    public async Task ScheduledJobWorker_ProcessDueJobs_LaunchesBoundTaskWithParameters()
-    {
-        await using var host = ScheduledJobHost.Create();
-        var taskDefinitionId = Guid.NewGuid();
-        var callerAgentId = Guid.NewGuid();
-        var due = DateTimeOffset.UtcNow.AddSeconds(-1);
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
-        {
-            Id = Guid.NewGuid(),
-            Name = "due-job",
-            TaskDefinitionId = taskDefinitionId,
-            CallerAgentId = callerAgentId,
-            ParameterValuesJson = """{"Topic":"scheduled"}""",
-            NextRunAt = due,
-            RepeatInterval = TimeSpan.FromMinutes(5)
-        });
-        await host.Db.SaveChangesAsync();
-
-        await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
-
-        host.Launcher.Launches.Should().ContainSingle();
-        var launch = host.Launcher.Launches.Single();
-        launch.TaskDefinitionId.Should().Be(taskDefinitionId);
-        launch.CallerAgentId.Should().Be(callerAgentId);
-        launch.ParameterValues.Should().ContainKey("Topic").WhoseValue.Should().Be("scheduled");
-        launch.ChannelId.Should().BeNull();
-        launch.ContextId.Should().BeNull();
-
-        var updated = await host.ReadScheduledJobAsync("due-job");
-        updated.Status.Should().Be(ScheduledTaskStatus.Pending);
-        updated.RetryCount.Should().Be(0);
-        updated.LastError.Should().BeNull();
-        updated.LastRunAt.Should().NotBeNull();
-        updated.NextRunAt.Should().BeAfter(due);
-    }
-
-    [Test]
-    public async Task ScheduledJobWorker_SkipMissedFire_DoesNotLaunchTask()
-    {
-        await using var host = ScheduledJobHost.Create(
-            new Dictionary<string, string?>
-            {
-                ["Scheduler:MissedFireThresholdMinutes"] = "1"
-            });
-        var missedAt = DateTimeOffset.UtcNow.AddMinutes(-10);
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
-        {
-            Id = Guid.NewGuid(),
-            Name = "missed-job",
-            TaskDefinitionId = Guid.NewGuid(),
-            NextRunAt = missedAt,
-            RepeatInterval = TimeSpan.FromMinutes(5),
-            MissedFirePolicy = MissedFirePolicy.Skip
-        });
-        await host.Db.SaveChangesAsync();
-
-        await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
-
-        host.Launcher.Launches.Should().BeEmpty();
-        var updated = await host.ReadScheduledJobAsync("missed-job");
-        updated.Status.Should().Be(ScheduledTaskStatus.Pending);
-        updated.LastRunAt.Should().BeNull();
-        updated.NextRunAt.Should().BeAfter(missedAt);
-    }
-
-    [Test]
-    public async Task ScheduledJobWorker_FailedLaunch_RequeuesUntilMaxRetriesThenFails()
-    {
-        await using var host = ScheduledJobHost.Create();
-        host.Launcher.ThrowOnLaunch = true;
-        var jobId = Guid.NewGuid();
-        host.Db.ScheduledJobs.Add(new ScheduledJobDB
-        {
-            Id = jobId,
-            Name = "retry-job",
-            TaskDefinitionId = Guid.NewGuid(),
-            NextRunAt = DateTimeOffset.UtcNow.AddSeconds(-1),
-            MaxRetries = 2
-        });
-        await host.Db.SaveChangesAsync();
-
-        await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
-        var firstAttempt = await host.ReadScheduledJobAsync("retry-job");
-        firstAttempt.Status.Should().Be(ScheduledTaskStatus.Pending);
-        firstAttempt.RetryCount.Should().Be(1);
-        firstAttempt.LastError.Should().Contain("forced launch failure");
-
-        var trackedRetry = await host.Db.ScheduledJobs.SingleAsync(j => j.Id == jobId);
-        trackedRetry.NextRunAt = DateTimeOffset.UtcNow.AddSeconds(-1);
-        await host.Db.SaveChangesAsync();
-        await host.Worker.ProcessDueJobsAsync(CancellationToken.None);
-
-        var secondAttempt = await host.ReadScheduledJobAsync("retry-job");
-        secondAttempt.Status.Should().Be(ScheduledTaskStatus.Failed);
-        secondAttempt.RetryCount.Should().Be(2);
-        host.Launcher.Launches.Should().HaveCount(2);
-    }
-
     private static string LogOnlySource(string name) => $$"""
 [Task("{{name}}")]
 public class LogOnlyTask
@@ -288,17 +235,6 @@ public class LogOnlyTask
 }
 """;
 
-    private static string EmitSource(string name) => $$"""
-[Task("{{name}}")]
-public class EmitTask
-{
-    public async Task RunAsync(CancellationToken ct)
-    {
-        await Emit("task-output");
-    }
-}
-""";
-
     private static string WaitSource(string name) => $$"""
 [Task("{{name}}")]
 public class WaitTask
@@ -307,6 +243,16 @@ public class WaitTask
     {
         Log("before-wait");
         await WaitUntilStopped();
+    }
+}
+""";
+
+    private static string InvalidSource(string name) => $$"""
+[Task("{{name}}")]
+public class InvalidTask
+{
+    public async Task NotTheEntryPoint(CancellationToken ct)
+    {
     }
 }
 """;
@@ -340,13 +286,19 @@ internal sealed class TaskLifecycleHost : IAsyncDisposable
         services.AddDbContext<SharpClawDbContext>(options => options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<ModuleRegistry>();
         services.AddSingleton<ProviderApiClientFactory>();
+        services.AddSingleton<TaskPreflightEngine>();
+        services.AddSingleton<TaskAdministrationWorkflowEngine>();
         services.AddScoped<IPersistenceEntityResolver, EfPersistenceEntityResolver>();
+        services.AddScoped<EfTaskPreflightHost>();
         services.AddScoped<TaskPreflightChecker>();
+        services.AddScoped<EfTaskAdministrationHost>();
         services.AddScoped<TaskService>();
+        services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
+        services.AddScoped<TaskStartupPreparationEngine>();
+        services.AddScoped<TaskPlanExecutionEngine>();
         services.AddScoped<TaskOrchestrator>();
         services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
-        services.AddScoped<ITaskOperationExecutor, TaskScriptingStepExecutor>();
-        services.AddScoped<ITaskOperationExecutor, AgentOrchestrationTaskStepExecutor>();
+        services.AddSingleton<TaskRuntimeRegistry>();
         services.AddSingleton<TaskRuntimeHost>();
 
         var root = services.BuildServiceProvider();
@@ -430,89 +382,3 @@ internal sealed class TaskLifecycleHost : IAsyncDisposable
         await _root.DisposeAsync();
     }
 }
-
-internal sealed class ScheduledJobHost : IAsyncDisposable
-{
-    private readonly ServiceProvider _root;
-    private readonly AsyncServiceScope _scope;
-
-    private ScheduledJobHost(ServiceProvider root, AsyncServiceScope scope)
-    {
-        _root = root;
-        _scope = scope;
-    }
-
-    public AgentOrchestrationDbContext Db => _scope.ServiceProvider.GetRequiredService<AgentOrchestrationDbContext>();
-    public ScheduledJobWorker Worker => _root.GetRequiredService<ScheduledJobWorker>();
-    public RecordingTaskInstanceLauncher Launcher => _root.GetRequiredService<RecordingTaskInstanceLauncher>();
-
-    public static ScheduledJobHost Create(IReadOnlyDictionary<string, string?>? settings = null)
-    {
-        var services = new ServiceCollection();
-        var databaseName = "SharpClawScheduledJobs_" + Guid.NewGuid().ToString("N");
-        var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
-            .Build();
-
-        services.AddSingleton<IConfiguration>(configuration);
-        services.AddLogging();
-        services.AddDbContext<AgentOrchestrationDbContext>(options => options.UseInMemoryDatabase(databaseName));
-        services.AddSingleton<RecordingTaskInstanceLauncher>();
-        services.AddSingleton<ITaskInstanceLauncher>(sp => sp.GetRequiredService<RecordingTaskInstanceLauncher>());
-        services.AddSingleton<ScheduledJobWorker>();
-
-        var root = services.BuildServiceProvider();
-        return new ScheduledJobHost(root, root.CreateAsyncScope());
-    }
-
-    public async Task<ScheduledJobDB> ReadScheduledJobAsync(string name)
-    {
-        await using var scope = _root.CreateAsyncScope();
-        return await scope.ServiceProvider
-            .GetRequiredService<AgentOrchestrationDbContext>()
-            .ScheduledJobs
-            .SingleAsync(j => j.Name == name);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await _scope.DisposeAsync();
-        await _root.DisposeAsync();
-    }
-}
-
-internal sealed class RecordingTaskInstanceLauncher : ITaskInstanceLauncher
-{
-    public List<RecordedLaunch> Launches { get; } = [];
-    public bool ThrowOnLaunch { get; set; }
-
-    public Task<Guid> LaunchAsync(
-        Guid taskDefinitionId,
-        IReadOnlyDictionary<string, string>? parameterValues,
-        Guid? callerAgentId,
-        Guid? channelId,
-        Guid? contextId,
-        CancellationToken ct)
-    {
-        Launches.Add(new RecordedLaunch(
-            taskDefinitionId,
-            parameterValues is null
-                ? new Dictionary<string, string>()
-                : new Dictionary<string, string>(parameterValues, StringComparer.Ordinal),
-            callerAgentId,
-            channelId,
-            contextId));
-
-        if (ThrowOnLaunch)
-            throw new InvalidOperationException("forced launch failure");
-
-        return Task.FromResult(Guid.NewGuid());
-    }
-}
-
-internal sealed record RecordedLaunch(
-    Guid TaskDefinitionId,
-    IReadOnlyDictionary<string, string> ParameterValues,
-    Guid? CallerAgentId,
-    Guid? ChannelId,
-    Guid? ContextId);

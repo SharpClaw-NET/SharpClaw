@@ -1,6 +1,6 @@
 using FluentAssertions;
-using SharpClaw.Application.API.Api;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Runtime.Host.Api;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Api;
 

@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
 
 namespace SharpClaw.Tests.TestHarness;
 

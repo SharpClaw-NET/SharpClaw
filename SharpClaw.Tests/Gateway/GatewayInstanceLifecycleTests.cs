@@ -1,5 +1,5 @@
 using FluentAssertions;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Gateway;
 

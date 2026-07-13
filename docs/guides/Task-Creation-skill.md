@@ -4,11 +4,14 @@ Full guide:                guides/Task-Creation-Guide.md
 Root task reference:       Tasks-documentation.md
 Module authoring guide:    guides/Module-Creation-Guide.md
 
-Steps and triggers are NOT built into the task host. They are contributed by
-modules at startup. The exact set of step methods callable inside RunAsync,
-and the exact set of trigger attributes recognised on a task class, depend on
-which modules are loaded. For per-installation specifics, consult the module
-pages under docs/modules/ and the live endpoint GET /tasks/trigger-sources.
+Ordinary C# task syntax is built into the task host: declarations, assignment,
+control flow, return, logging, delay, structured response parsing, and
+cancellation waits are not module-defined syntax. Modules contribute callable
+operations and trigger attributes at startup. The exact set of module methods
+callable inside RunAsync, and the exact set of trigger attributes recognised on
+a task class, depend on which modules are loaded. For per-installation
+specifics, consult the module pages under docs/modules/ and the live endpoint
+GET /tasks/trigger-sources.
 
 ----------------------------------------
 WHAT A TASK SCRIPT IS
@@ -86,13 +89,13 @@ foreach (var item in collection) { }
 while (cond) { }
 await expr;
 return;  |  return expr;
-calls to step methods registered by a loaded module
+calls to module methods registered by a loaded module
 
 General-purpose C# (reflection, P/Invoke, System.IO, arbitrary type calls)
 is NOT permitted.
 
 ----------------------------------------
-STEP METHODS AND TRIGGER ATTRIBUTES
+MODULE METHODS AND TRIGGER ATTRIBUTES
 ----------------------------------------
 The set of method names callable inside RunAsync, and the set of trigger
 attributes recognised on the class, comes from the module parser extensions
@@ -103,10 +106,10 @@ loaded at startup. Discover what is available on the running host:
   module list                        (loaded modules)
   module get <id>                    (per-module surface)
 
-For the authoritative list of step methods and trigger attributes for a
+For the authoritative list of module methods and trigger attributes for a
 specific module, consult its page under docs/modules/.
 
-If your task uses a step or trigger contributed by a module, prefer
+If your task uses a module method or trigger contributed by a module, prefer
 [RequiresModule("module-id")] so preflight tells the operator exactly which
 module to enable.
 

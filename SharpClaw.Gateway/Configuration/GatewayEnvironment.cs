@@ -1,18 +1,90 @@
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Utils.Security;
+using Microsoft.Extensions.FileProviders;
+using Microsoft.Extensions.FileProviders.Physical;
 
 namespace SharpClaw.Gateway.Configuration;
 
 /// <summary>
-/// Loads gateway configuration from assembly-local active environment files.
-/// Active files live beside their portable plaintext templates in
-/// <c>Environment</c>: <c>.env</c> falls back to <c>.env.template</c>, and
-/// development <c>.dev.env</c> falls back to <c>.dev.env.template</c>.
+/// Loads gateway environment configuration from <c>Environment/.env</c>
+/// (always) and <c>Environment/.dev.env</c> (development only) relative
+/// to the assembly location. Creates a default <c>.env</c> if one does
+/// not exist.
 /// </summary>
 public static class GatewayEnvironment
 {
+    private const string DefaultEnvContent =
+        """
+        {
+          // SharpClaw Gateway Environment Configuration
+          // Values here are loaded for all environments.
+
+          "InternalApi": {
+            "BaseUrl": "http://127.0.0.1:48923",
+            "TimeoutSeconds": "300",
+            "ApiKey": "",
+            "ApiKeyFilePath": "",
+            "GatewayToken": "",
+            "GatewayTokenFilePath": ""
+          },
+
+          "Logging": {
+            "Serilog": {
+              "Enabled": "true",
+              "ConsoleEnabled": "true",
+              "FileEnabled": "true",
+              "RequestLoggingEnabled": "true",
+              "MinimumLevel": "Information",
+              "MicrosoftMinimumLevel": "Warning",
+              "AspNetCoreMinimumLevel": "Warning",
+              "EntityFrameworkCoreMinimumLevel": "Warning",
+              "UnoMinimumLevel": "Warning"
+            }
+          },
+
+          "Gateway": {
+            "RequestQueue": {
+              "Enabled": "true",
+              "MaxConcurrency": "1",
+              "TimeoutSeconds": "30",
+              "MaxRetries": "2",
+              "RetryDelayMs": "500",
+              "MaxQueueSize": "500"
+            },
+
+            "Endpoints": {
+              "Enabled": "true",
+              "Auth": "false",
+              "Agents": "false",
+              "Channels": "false",
+              "ChannelContexts": "false",
+              "Chat": "false",
+              "ChatStream": "false",
+              "Threads": "false",
+              "ThreadChat": "false",
+              "ThreadWatch": "false",
+              "Jobs": "false",
+              "Models": "false",
+              "LocalModels": "false",
+              "Providers": "false",
+              "Roles": "false",
+              "Users": "false",
+              "Cost": "false",
+              "Tasks": "false",
+              "TaskStreaming": "false",
+              "ToolAwarenessSets": "false",
+              "Resources": "false"
+            },
+
+            "Modules": {
+              "Modules": {},
+              "Groups": {},
+              "HotReloadEnabled": "false",
+              "DrainTimeoutSeconds": "30"
+            }
+          }
+        }
+        """;
+
     public static IConfigurationBuilder AddGatewayEnvironment(
         this IConfigurationBuilder builder, bool isDevelopment = false)
     {
@@ -20,167 +92,38 @@ public static class GatewayEnvironment
             Path.GetDirectoryName(typeof(GatewayEnvironment).Assembly.Location)!,
             "Environment");
 
-        return builder.AddGatewayEnvironmentFrom(envDir, isDevelopment);
-    }
+        EnsureEnvironmentFile(envDir);
 
-    internal static IConfigurationBuilder AddGatewayEnvironmentFrom(
-        this IConfigurationBuilder builder,
-        string envDir,
-        bool isDevelopment)
-    {
-        EnsureEnvironmentTemplate(envDir, ".env.template");
-        EnsureActiveEnvironmentFile(envDir, ".env", ".env.template");
-        AddEnvFile(
-            builder,
-            envDir: envDir,
-            activeFileName: ".env",
-            templateFileName: ".env.template");
+        if (!Directory.Exists(envDir))
+            return builder;
+
+        // PhysicalFileProvider defaults to ExclusionFilters.Sensitive which
+        // excludes dot-prefixed files (.env, .dev.env). Use None so the
+        // configuration system can see them.
+        var fileProvider = new PhysicalFileProvider(envDir, ExclusionFilters.None);
+
+        builder.AddJsonFile(fileProvider, ".env", optional: true, reloadOnChange: false);
 
         if (isDevelopment)
-        {
-            EnsureEnvironmentTemplate(envDir, ".dev.env.template");
-            EnsureActiveEnvironmentFile(envDir, ".dev.env", ".dev.env.template");
-            AddEnvFile(
-                builder,
-                envDir: envDir,
-                activeFileName: ".dev.env",
-                templateFileName: ".dev.env.template");
-        }
+            builder.AddJsonFile(fileProvider, ".dev.env", optional: true, reloadOnChange: false);
 
         return builder;
     }
 
-    private static void AddEnvFile(
-        IConfigurationBuilder builder,
-        string envDir,
-        string activeFileName,
-        string templateFileName)
+    private static void EnsureEnvironmentFile(string envDir)
     {
-        var activePath = Path.Combine(envDir, activeFileName);
-        if (!File.Exists(activePath))
+        var envFile = Path.Combine(envDir, ".env");
+        if (File.Exists(envFile) && new FileInfo(envFile).Length > 0)
             return;
-
-        if (EncryptedEnvFile.IsEncryptedOnDisk(activePath))
-        {
-            var key = EncryptionKeyResolver.ResolveKey();
-            try
-            {
-                var json = EncryptedEnvFile.ReadAsync(activePath, key, CancellationToken.None)
-                    .GetAwaiter().GetResult();
-                AddJson(builder, json);
-                return;
-            }
-            catch (Exception ex) when (IsUnreadableActiveFile(ex))
-            {
-                QuarantineUnreadableActiveFile(activePath);
-                CopyTemplateToActive(envDir, activeFileName, templateFileName);
-                AddPlaintextEnvFile(builder, activePath);
-                return;
-            }
-        }
 
         try
         {
-            AddPlaintextEnvFile(builder, activePath);
+            Directory.CreateDirectory(envDir);
+            File.WriteAllText(envFile, DefaultEnvContent);
         }
-        catch (Exception ex) when (IsUnreadableActiveFile(ex))
+        catch
         {
-            QuarantineUnreadableActiveFile(activePath);
-            CopyTemplateToActive(envDir, activeFileName, templateFileName);
-            AddPlaintextEnvFile(builder, activePath);
-        }
-    }
-
-    private static void AddPlaintextEnvFile(IConfigurationBuilder builder, string activePath)
-    {
-        var json = File.ReadAllText(activePath);
-        AddJson(builder, json);
-
-        var key = EncryptionKeyResolver.ResolveKey();
-        if (key is not null)
-        {
-            EncryptedEnvFile.WriteAsync(activePath, json, key, encrypt: true, CancellationToken.None)
-                .GetAwaiter().GetResult();
+            // Best-effort; read-only or restricted file system.
         }
     }
-
-    private static void AddJson(IConfigurationBuilder builder, string json)
-    {
-        var options = new JsonDocumentOptions
-        {
-            CommentHandling = JsonCommentHandling.Skip,
-            AllowTrailingCommas = true
-        };
-        using (JsonDocument.Parse(json, options))
-        {
-        }
-
-        builder.AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json)));
-    }
-
-    private static void EnsureEnvironmentTemplate(string envDir, string templateFileName)
-    {
-        var templatePath = Path.Combine(envDir, templateFileName);
-        if (File.Exists(templatePath) && new FileInfo(templatePath).Length > 0)
-        {
-            if (EncryptedEnvFile.IsEncryptedOnDisk(templatePath))
-            {
-                throw new InvalidOperationException(
-                    $"Environment template '{templatePath}' is encrypted. Published templates must be plaintext and portable.");
-            }
-
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
-    }
-
-    private static void EnsureActiveEnvironmentFile(
-        string envDir,
-        string activeFileName,
-        string templateFileName)
-    {
-        var activePath = Path.Combine(envDir, activeFileName);
-        if (File.Exists(activePath) && new FileInfo(activePath).Length > 0)
-            return;
-
-        CopyTemplateToActive(envDir, activeFileName, templateFileName);
-    }
-
-    private static void CopyTemplateToActive(
-        string envDir,
-        string activeFileName,
-        string templateFileName)
-    {
-        var templatePath = Path.Combine(envDir, templateFileName);
-        if (!File.Exists(templatePath) || new FileInfo(templatePath).Length == 0)
-        {
-            throw new InvalidOperationException(
-                $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
-        }
-
-        if (EncryptedEnvFile.IsEncryptedOnDisk(templatePath))
-        {
-            throw new InvalidOperationException(
-                $"Environment template '{templatePath}' is encrypted. Published templates must be plaintext and portable.");
-        }
-
-        Directory.CreateDirectory(envDir);
-        File.Copy(templatePath, Path.Combine(envDir, activeFileName), overwrite: true);
-    }
-
-    private static void QuarantineUnreadableActiveFile(string activePath)
-    {
-        var quarantinePath = activePath + $".unreadable-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
-        File.Move(activePath, quarantinePath, overwrite: true);
-    }
-
-    private static bool IsUnreadableActiveFile(Exception ex) =>
-        ex is JsonException
-        || ex is System.Security.Cryptography.CryptographicException
-        || ex is InvalidDataException
-        || ex is FormatException
-        || ex is ArgumentException
-        || ex.InnerException is not null && IsUnreadableActiveFile(ex.InnerException);
 }

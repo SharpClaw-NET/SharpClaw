@@ -46,10 +46,10 @@ The Metrics module owns the `MetricThreshold` task trigger and the
 built-in `ITaskMetricProvider` implementations. It has **no
 LLM-callable tools** — it contributes purely to the task pipeline.
 
-The module's parser extension (`MetricsParserExtension`) makes the
-metric primitives visible to the task script grammar so tasks can be
-authored against thresholds without referencing arbitrary numeric
-literals.
+The module contributes the `MetricThreshold` trigger and the metric-provider
+runtime surface that trigger uses. Task authors declare the trigger with normal
+C# task attributes; the module does not add grammar constructs or teach the
+task language new control-flow syntax.
 
 The built-in providers consume `IHostQueueMetrics` (forwarded from the
 host) so the module stays free of any direct database dependency.
@@ -103,7 +103,7 @@ programming error.
 Id           = sharpclaw_metrics
 DisplayName  = Metrics
 ToolPrefix   = metric
-ParserExtension = MetricsParserExtension.Instance
+Task trigger parsing = package-owned MetricThreshold support
 Exported contracts = none
 Required contracts = none (consumes IHostQueueMetrics from the host)
 ```

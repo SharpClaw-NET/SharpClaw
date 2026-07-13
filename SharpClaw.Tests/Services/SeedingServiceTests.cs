@@ -1,13 +1,20 @@
+using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Logging;
-using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
-using SharpClaw.Contracts.Entities.Core;
+using Microsoft.Extensions.Logging.Abstractions;
+using SharpClaw.Runtime.BLL.Services;
+using SharpClaw.Contracts;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Core.Clients;
+using SharpClaw.Core.Modules;
+using SharpClaw.Core.Permissions;
+using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Services;
 
@@ -15,103 +22,123 @@ namespace SharpClaw.Tests.Services;
 public sealed class SeedingServiceTests
 {
     [Test]
-    public async Task StartingAsync_WhenAnonymousUsernameIsMissing_FailsStartup()
+    public async Task StartingAsync_WhenReconcileEnabled_AppliesCorePermissionPlanToEfRows()
     {
-        await using var provider = CreateProvider(new Dictionary<string, string?>
-        {
-            ["Auth:AnonymousUsername"] = "missing-user"
-        });
-        var service = provider.GetRequiredService<SeedingService>();
-
-        var act = async () => await service.StartingAsync(CancellationToken.None);
-
-        await act.Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Auth:AnonymousUsername*missing-user*no matching user exists*");
-    }
-
-    [Test]
-    public async Task StartingAsync_WhenAnonymousUsernameIsEmpty_FailsStartup()
-    {
-        await using var provider = CreateProvider(new Dictionary<string, string?>
-        {
-            ["Auth:AnonymousUsername"] = ""
-        });
-        var service = provider.GetRequiredService<SeedingService>();
-
-        var act = async () => await service.StartingAsync(CancellationToken.None);
-
-        await act.Should()
-            .ThrowAsync<InvalidOperationException>()
-            .WithMessage("*Auth:AnonymousUsername*empty*");
-    }
-
-    [Test]
-    public async Task StartingAsync_WhenAnonymousUsernameExists_StartsSuccessfully()
-    {
-        await using var provider = CreateProvider(new Dictionary<string, string?>
-        {
-            ["Auth:AnonymousUsername"] = "anonymous"
-        });
-        await SeedUserAsync(provider, "anonymous", isAdmin: false);
-        var service = provider.GetRequiredService<SeedingService>();
-
-        await service.StartingAsync(CancellationToken.None);
-
-        await using var scope = provider.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-
-        (await db.Users.AnyAsync(u => u.Username == "anonymous")).Should().BeTrue();
-        (await db.Users.AnyAsync(u => u.Username == "admin" && u.IsUserAdmin)).Should().BeTrue();
-    }
-
-    private static ServiceProvider CreateProvider(IReadOnlyDictionary<string, string?> configurationOverrides)
-    {
-        var databaseName = $"SeedingServiceTests-{Guid.NewGuid():N}";
-        var configurationValues = new Dictionary<string, string?>
-        {
-            ["Admin:Username"] = "admin",
-            ["Admin:Password"] = "123456",
-            ["Admin:ReconcilePermissions"] = "true"
-        };
-
-        foreach (var pair in configurationOverrides)
-            configurationValues[pair.Key] = pair.Value;
-
+        var registry = new ModuleRegistry();
+        registry.Register(new SeedPermissionModule());
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(configurationValues)
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Admin:ReconcilePermissions"] = "true"
+            })
             .Build();
+        var databaseName = Guid.NewGuid().ToString("N");
+        var databaseRoot = new InMemoryDatabaseRoot();
+        var services = new ServiceCollection()
+            .AddSingleton<IConfiguration>(configuration)
+            .AddSingleton(registry)
+            .AddSingleton(new ProviderApiClientFactory([], registry))
+            .AddDbContext<SharpClawDbContext>(options =>
+                options.UseInMemoryDatabase(databaseName, databaseRoot));
 
-        var services = new ServiceCollection();
-        services.AddSingleton<IConfiguration>(configuration);
-        services.AddLogging();
-        services.AddSingleton<ModuleRegistry>();
-        services.AddSingleton(sp => new ProviderApiClientFactory(
-            Array.Empty<IProviderPlugin>(),
-            sp.GetRequiredService<ModuleRegistry>()));
-        services.AddDbContext<SharpClawDbContext>(options =>
-            options.UseInMemoryDatabase(databaseName));
-        services.AddSingleton<SeedingService>();
+        await using var provider = services.BuildServiceProvider();
+        Guid permissionSetId;
+        var specificResourceId = Guid.NewGuid();
+        using (var scope = provider.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            var permissionSet = new PermissionSetDB();
+            permissionSet.GlobalFlags.Add(new GlobalFlagDB
+            {
+                FlagKey = "CanSeedModule",
+                Clearance = PermissionClearance.Unset
+            });
+            permissionSet.ResourceAccesses.Add(new ResourceAccessDB
+            {
+                ResourceType = "seed_resource",
+                ResourceId = specificResourceId,
+                Clearance = PermissionClearance.Restricted
+            });
+            db.PermissionSets.Add(permissionSet);
+            await db.SaveChangesAsync();
+            permissionSetId = permissionSet.Id;
+            db.Roles.Add(new RoleDB
+            {
+                Name = "Admin",
+                PermissionSetId = permissionSetId
+            });
+            await db.SaveChangesAsync();
+        }
 
-        return services.BuildServiceProvider(validateScopes: true);
+        var seeding = new SeedingService(
+            provider.GetRequiredService<IServiceScopeFactory>(),
+            configuration,
+            NullLogger<SeedingService>.Instance,
+            registry,
+            new AdminPermissionSeedEngine());
+
+        await seeding.StartingAsync(CancellationToken.None);
+
+        using var verifyScope = provider.CreateScope();
+        var verifyDb = verifyScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        var saved = await verifyDb.PermissionSets
+            .Include(set => set.GlobalFlags)
+            .Include(set => set.ResourceAccesses)
+            .SingleAsync(set => set.Id == permissionSetId);
+
+        saved.GlobalFlags.Single(flag => flag.FlagKey == "CanSeedModule")
+            .Clearance.Should().Be(PermissionClearance.Independent);
+        saved.GlobalFlags.Single(flag => flag.FlagKey == "CanSeedExtra")
+            .Clearance.Should().Be(PermissionClearance.Independent);
+        saved.ResourceAccesses.Single(access =>
+            access.ResourceType == "seed_resource"
+            && access.ResourceId == WellKnownIds.AllResources)
+            .Clearance.Should().Be(PermissionClearance.Independent);
+        saved.ResourceAccesses.Single(access =>
+            access.ResourceType == "seed_resource"
+            && access.ResourceId == specificResourceId)
+            .Clearance.Should().Be(PermissionClearance.Restricted);
+        (await verifyDb.Users.CountAsync()).Should().Be(0);
+        (await verifyDb.Providers.CountAsync()).Should().Be(0);
     }
 
-    private static async Task SeedUserAsync(
-        ServiceProvider provider,
-        string username,
-        bool isAdmin)
+    private sealed class SeedPermissionModule : ISharpClawCoreModule
     {
-        await using var scope = provider.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+        public string Id => "seed_permissions";
+        public string DisplayName => "Seed Permissions";
+        public string ToolPrefix => "seedperm";
+        public void ConfigureServices(IServiceCollection services) { }
+        public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
 
-        db.Users.Add(new UserDB
-        {
-            Username = username,
-            PasswordHash = [1],
-            PasswordSalt = [2],
-            IsUserAdmin = isAdmin
-        });
+        public IReadOnlyList<ModuleGlobalFlagDescriptor> GetGlobalFlagDescriptors() =>
+        [
+            new(
+                "CanSeedModule",
+                "Seed Module",
+                "Seed module permissions.",
+                "SeedModuleAsync"),
+            new(
+                "CanSeedExtra",
+                "Seed Extra",
+                "Seed extra permissions.",
+                "SeedExtraAsync")
+        ];
 
-        await db.SaveChangesAsync();
+        public IReadOnlyList<ModuleResourceTypeDescriptor> GetResourceTypeDescriptors() =>
+        [
+            new(
+                "seed_resource",
+                "Seed Resource",
+                "UseSeedResourceAsync",
+                (_, _) => Task.FromResult(new List<Guid>()))
+        ];
+
+        public Task<string> ExecuteToolAsync(
+            string toolName,
+            JsonElement parameters,
+            AgentJobContext job,
+            IServiceProvider scopedServices,
+            CancellationToken ct) =>
+            Task.FromResult("");
     }
 }

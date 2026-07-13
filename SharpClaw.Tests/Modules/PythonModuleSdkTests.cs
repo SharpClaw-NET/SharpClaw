@@ -8,16 +8,7 @@ public sealed class PythonModuleSdkTests
     [Test]
     public async Task PythonSdk_ExposesCurrentForeignModuleProtocolShape()
     {
-        var sdkPath = Path.Combine(
-            FindRepoRoot(),
-            "sdk",
-            "python",
-            "sharpclaw-module-host",
-            "src",
-            "sharpclaw_module_host",
-            "host.py");
-
-        var source = await File.ReadAllTextAsync(sdkPath);
+        var source = await File.ReadAllTextAsync(ModuleSdkSourcePaths.PythonHostSourcePath);
 
         source.Should().Contain("X-SharpClaw-Control-Token");
         source.Should().Contain("SHARPCLAW_MODULE_DIR");
@@ -40,57 +31,23 @@ public sealed class PythonModuleSdkTests
         source.Should().Contain("/.sharpclaw/host/config/get");
         source.Should().Contain("/.sharpclaw/host/job/log");
         source.Should().Contain("/.sharpclaw/host/contracts/invoke");
+        source.Should().Contain("/.sharpclaw/host/conversation/steer");
+        source.Should().Contain("/.sharpclaw/host/conversation/steering/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/list");
+        source.Should().Contain("/.sharpclaw/host/modules/storage/invoke");
         source.Should().Contain("HostCapabilitiesClient");
+        source.Should().Contain("ModuleDocumentStore");
+        source.Should().Contain("create_document_store");
+        source.Should().Contain("add_conversation_steering");
+        source.Should().Contain("list_conversation_steering");
         source.Should().Contain("InlineToolExecutionContext");
         source.Should().Contain("ProtocolContractContext");
+        source.Should().Contain("storageContracts");
+        source.Should().Contain("invoke_storage");
+        source.Should().Contain("batchUpsert");
+        source.Should().Contain("lessThanOrEqual");
         source.Should().Contain("supportsStreaming");
         source.Should().Contain("asgi_app");
     }
 
-    [Test]
-    public async Task PythonTemplates_DeclareRuntimeAndEntrypoint()
-    {
-        var repoRoot = FindRepoRoot();
-        var projectTemplate = await File.ReadAllTextAsync(Path.Combine(
-            repoRoot,
-            "DefaultModules",
-            "ModuleDev",
-            "Templates",
-            "PythonPyproject.toml.template"));
-        var manifestTemplate = await File.ReadAllTextAsync(Path.Combine(
-            repoRoot,
-            "DefaultModules",
-            "ModuleDev",
-            "Templates",
-            "PythonManifest.json.template"));
-
-        projectTemplate.Should().Contain("sharpclaw-module-host==0.1.0b0");
-        manifestTemplate.Should().Contain("\"runtime\": \"python\"");
-        manifestTemplate.Should().Contain("\"entrypoint\": \"module.py\"");
-    }
-
-    private static string FindRepoRoot()
-    {
-        foreach (var startingPoint in new[]
-                 {
-                     TestContext.CurrentContext.TestDirectory,
-                     AppContext.BaseDirectory,
-                     Directory.GetCurrentDirectory()
-                 })
-        {
-            var current = startingPoint;
-            while (!string.IsNullOrWhiteSpace(current))
-            {
-                if (File.Exists(Path.Combine(current, "Directory.Build.props"))
-                    && Directory.Exists(Path.Combine(current, "SharpClaw.Tests")))
-                {
-                    return current;
-                }
-
-                current = Directory.GetParent(current)?.FullName;
-            }
-        }
-
-        throw new DirectoryNotFoundException("Could not locate SharpClaw repository root.");
-    }
 }

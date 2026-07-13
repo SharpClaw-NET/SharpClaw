@@ -4,9 +4,9 @@
 |---|---|
 | **`ProviderKey`** | `llamasharp` |
 | **Client class** | `LocalInferenceApiClient` (dedicated) |
-| **Endpoint** | In-process (no HTTP) |
+| **Endpoint** | Local provider inside the LlamaSharp module sidecar |
 | **Auth** | None |
-| **Protocol** | LLamaSharp in-process inference (llama.cpp) |
+| **Protocol** | LLamaSharp llama.cpp inference inside the provider sidecar |
 | **Tool calling** | ✅ GBNF grammar-constrained |
 | **API docs** | https://scisharp.github.io/LLamaSharp/ |
 
@@ -127,7 +127,8 @@ optional.
 
 ## Notes
 
-- Inference runs in-process — `providerParameters` does not apply.
+- Inference runs inside the LlamaSharp module sidecar rather than the Core API
+  process, so `providerParameters` does not apply.
 - The native backend (CUDA / Vulkan / CPU) is chosen at startup and is
   sticky once any LLama API is touched. A startup log line records the
   selection.

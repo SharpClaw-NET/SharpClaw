@@ -2,9 +2,10 @@ using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Application.Core.Modules;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -19,7 +20,6 @@ public sealed class TestHarnessArchitectureTests
         "Clients Finish Reasons",
         "Core Header Tags",
         "Core Chat Cache",
-        "Cross Thread History",
         "CLI Channel Commands",
         "CLI REPL",
         "Gateway Abstraction Boundaries",
@@ -37,18 +37,12 @@ public sealed class TestHarnessArchitectureTests
         "Frontend Instances",
         "Frontend Gateway Process",
         "Frontend Uno Client State",
-        "Persistence Files",
-        "Persistence Cold Store",
-        "Persistence Integrity",
-        "Persistence Transactions",
+        "Persistence Provider Configuration",
+        "JSONColdStore Provider Paths",
         "Persistence Instances",
         "Providers Capabilities",
-        "Providers Hosted OpenAI Compatible",
-        "Providers Google",
         "LlamaSharp Schema Conversion",
-        "LlamaSharp Parameter Validation",
         "LlamaSharp Tool Calling",
-        "LlamaSharp Local Inference",
         "Tasks Scripts Compiler Parser",
         "Tasks Scripts Semantics Validator",
         "Tasks Step Keys",
@@ -85,6 +79,7 @@ public sealed class TestHarnessArchitectureTests
         "Module Bundled Outputs",
         "Module External Lifecycle",
         "Module Foreign Runtime",
+        "Module Sidecar Parity",
         "Module Harness Integration",
         "Module Harness Cost And Matrix",
         "Module Contracts Architecture",
@@ -119,17 +114,21 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var prod = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Application.Infrastructure",
+            "SharpClaw.Runtime",
+            "INF",
             "Environment",
             ".env.template"));
         var dev = LoadTemplate(Path.Combine(
             root,
-            "SharpClaw.Application.Infrastructure",
+            "SharpClaw.Runtime",
+            "INF",
             "Environment",
             ".dev.env.template"));
 
-        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.ModuleId, prod).Should().BeFalse();
-        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.ModuleId, dev).Should().BeTrue();
+        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.OutOfProcessModuleId, prod).Should().BeFalse();
+        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.InProcessModuleId, prod).Should().BeFalse();
+        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.OutOfProcessModuleId, dev).Should().BeTrue();
+        ModuleLoader.IsEnabledInConfig(TestHarnessConstants.InProcessModuleId, dev).Should().BeFalse();
     }
 
     [Test]
@@ -150,7 +149,7 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var searchedRoots = new[]
         {
-            Path.Combine(root, "SharpClaw.Application.Core"),
+            Path.Combine(root, "SharpClaw.Runtime", "BLL"),
             Path.Combine(root, "SharpClaw.Tests")
         };
         var banned = new[]
@@ -179,30 +178,56 @@ public sealed class TestHarnessArchitectureTests
     }
 
     [Test]
-    public void HostProjectsConsumeContractsAsPackageReferences()
+    public void HostProjectsUsePackagedCoreContractsWorkflow()
     {
         var root = FindSolutionRoot();
         var projectRelativePaths = new[]
         {
-            "SharpClaw.Application.API/SharpClaw.Application.API.csproj",
-            "SharpClaw.Application.Core/SharpClaw.Application.Core.csproj",
-            "SharpClaw.Application.Infrastructure/SharpClaw.Application.Infrastructure.csproj",
+            "SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj",
+            "SharpClaw.Runtime/BLL/SharpClaw.Runtime.BLL.csproj",
+            "SharpClaw.Runtime/INF/SharpClaw.Runtime.INF.csproj",
             "SharpClaw.Gateway/SharpClaw.Gateway.csproj",
-            "SharpClaw.Uno/SharpClaw.Uno.csproj"
+            "SharpClaw.Client.Uno/SharpClaw.Client.Uno.csproj"
         };
 
         foreach (var relativePath in projectRelativePaths)
         {
             var project = XDocument.Load(Path.Combine(root, relativePath));
-            project.Descendants("ProjectReference")
+            var contractProjectReferences = project.Descendants("ProjectReference")
                 .Select(e => e.Attribute("Include")?.Value ?? "")
-                .Should()
-                .NotContain(path => path.Contains("SharpClaw.Contracts", StringComparison.OrdinalIgnoreCase));
-            project.Descendants("PackageReference")
+                .Where(path => path.Contains("SharpClaw.Contracts", StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            var contractPackageReferences = project.Descendants("PackageReference")
                 .Select(e => e.Attribute("Include")?.Value)
+                .Where(package => string.Equals(package, "SharpClaw.Contracts", StringComparison.Ordinal))
+                .ToList();
+
+            contractProjectReferences
                 .Should()
-                .Contain("SharpClaw.Contracts");
+                .BeEmpty("contracts are now consumed only through the published SharpClaw.Contracts package");
+            contractPackageReferences
+                .Should()
+                .ContainSingle();
+
+            project.Descendants("PackageReference")
+                .Single(e => string.Equals(
+                    e.Attribute("Include")?.Value,
+                    "SharpClaw.Contracts",
+                    StringComparison.Ordinal))
+                .Attribute("Condition")?.Value
+                .Should()
+                .BeNull("there is no local contracts-project escape hatch anymore");
         }
+
+        var appCoreProject = XDocument.Load(Path.Combine(
+            root,
+            "SharpClaw.Runtime",
+            "BLL",
+            "SharpClaw.Runtime.BLL.csproj"));
+        appCoreProject.Descendants("PackageReference")
+            .Select(e => e.Attribute("Include")?.Value)
+            .Should()
+            .Contain("SharpClaw.Core");
     }
 
     [Test]
@@ -211,14 +236,29 @@ public sealed class TestHarnessArchitectureTests
         var root = FindSolutionRoot();
         var apiProject = XDocument.Load(Path.Combine(
             root,
-            "SharpClaw.Application.API",
-            "SharpClaw.Application.API.csproj"));
+            "SharpClaw.Runtime",
+            "Host",
+            "SharpClaw.Runtime.Host.csproj"));
 
         var harnessReference = apiProject.Descendants("ProjectReference")
             .Single(e => (e.Attribute("Include")?.Value ?? "")
-                .Contains("DefaultModules\\TestHarness", StringComparison.OrdinalIgnoreCase));
+                .Contains("SharpClaw.DefaultModules.TestHarness", StringComparison.OrdinalIgnoreCase));
 
         harnessReference.Element("ReferenceOutputAssembly")!.Value.Should().Be("false");
+        harnessReference.Attribute("Condition")!.Value.Should().Contain(
+            "$(Configuration)' == 'Debug",
+            "the in-repo TestHarness module is developer-build-only and must not be bundled by Release deployments");
+
+        var harnessCopyItems = apiProject
+            .Descendants()
+            .Where(e => ((string?)e.Attribute("Include") ?? "")
+                .Contains("SharpClaw.DefaultModules\\TestHarness.OutOfProcess", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+
+        harnessCopyItems.Should().NotBeEmpty();
+        harnessCopyItems.Should().OnlyContain(
+            e => ((string?)e.Attribute("Condition") ?? "").Contains("$(Configuration)' == 'Debug", StringComparison.Ordinal),
+            "every Runtime.Host TestHarness copy item must be gated to developer builds");
     }
 
     [Test]
@@ -238,13 +278,13 @@ public sealed class TestHarnessArchitectureTests
         correctnessDomains.Should().Equal(ExpectedCorrectnessDomains);
         performanceDomains.Should().Equal(ExpectedPerformanceDomains);
 
-        correctnessDomains.Count.Should().BeGreaterThan(70);
+        correctnessDomains.Count.Should().BeGreaterThan(65);
         performanceDomains.Count.Should().BeGreaterThan(15);
 
         workflow.Should().Contain("FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath");
         workflow.Should().Contain("FullyQualifiedName~ApiJob");
         workflow.Should().Contain("FullyQualifiedName~EffectiveToolDefinitionsStayWarmUntilAgentToolSettingsChange");
-        workflow.Should().Contain("FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LocalInference");
+        workflow.Should().Contain("FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests");
         workflow.Should().Contain("FullyQualifiedName~PerformanceGate_ColdChatAfterCacheClear");
         workflow.Should().Contain("--filter \"TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})\"");
         workflow.Should().Contain("--filter \"TestCategory=PerformanceGate&(${{ matrix.filter }})\"");
@@ -348,7 +388,7 @@ public sealed class TestHarnessArchitectureTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
         var expectedChecks = ExtractRequiredCheckContextsFromWorkflow(workflow);
 
-        expectedChecks.Count.Should().BeGreaterThan(90);
+        expectedChecks.Count.Should().BeGreaterThan(85);
         requiredChecks.Should().Equal(expectedChecks);
     }
 
@@ -377,11 +417,14 @@ public sealed class TestHarnessArchitectureTests
         new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
-                [$"Modules:{TestHarnessConstants.ModuleId}"] = ReadModuleFlag(path)
+                [$"Modules:{TestHarnessConstants.OutOfProcessModuleId}"] =
+                    ReadModuleFlag(path, TestHarnessConstants.OutOfProcessModuleId),
+                [$"Modules:{TestHarnessConstants.InProcessModuleId}"] =
+                    ReadModuleFlag(path, TestHarnessConstants.InProcessModuleId)
             })
             .Build();
 
-    private static string ReadModuleFlag(string path)
+    private static string ReadModuleFlag(string path, string moduleId)
     {
         using var doc = JsonDocument.Parse(
             File.ReadAllText(path),
@@ -393,7 +436,7 @@ public sealed class TestHarnessArchitectureTests
 
         return doc.RootElement
             .GetProperty("Modules")
-            .GetProperty(TestHarnessConstants.ModuleId)
+            .GetProperty(moduleId)
             .GetString() ?? "false";
     }
 

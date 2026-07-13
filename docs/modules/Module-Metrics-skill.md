@@ -36,7 +36,7 @@ Task-pipeline-only module. No LLM-callable tools.
 Owns:
   - MetricThreshold task trigger (MetricTriggerSource).
   - Built-in ITaskMetricProvider implementations.
-  - MetricsParserExtension for the task script grammar.
+  - Package-owned MetricThreshold task trigger parsing.
 
 Built-in providers consume IHostQueueMetrics from the host, so the
 module has no direct database dependency.

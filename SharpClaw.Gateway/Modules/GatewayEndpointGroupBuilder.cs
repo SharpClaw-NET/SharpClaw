@@ -1,6 +1,6 @@
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Routing;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 
 namespace SharpClaw.Gateway.Modules;
 

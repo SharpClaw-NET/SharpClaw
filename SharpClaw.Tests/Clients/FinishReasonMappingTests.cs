@@ -1,4 +1,4 @@
-using SharpClaw.Application.Core.Clients;
+using SharpClaw.Core.Clients;
 using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Tests.Clients;

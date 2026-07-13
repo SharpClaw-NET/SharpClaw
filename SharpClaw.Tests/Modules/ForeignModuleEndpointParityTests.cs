@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Net.WebSockets;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
@@ -7,11 +8,11 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.API.Routing;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Runtime.Host.Routing;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
-using ModuleManifestRuntimeInfo = SharpClaw.Application.Core.Modules.ModuleManifestRuntimeInfo;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -47,6 +48,20 @@ public sealed class ForeignModuleEndpointParityTests
         {
             await using var host = await StartSurfaceAsync(runtime);
             observed[runtime] = await ReadAssetSurfaceAsync(host.Api.BaseAddress);
+        }
+
+        observed[RuntimeKind.Node].Should().Be(observed[RuntimeKind.CSharp]);
+        observed[RuntimeKind.Python].Should().Be(observed[RuntimeKind.CSharp]);
+    }
+
+    [Test]
+    public async Task WebSocketRoutesMatchAcrossCSharpNodeAndPythonModules()
+    {
+        var observed = new Dictionary<RuntimeKind, string>();
+        foreach (var runtime in RuntimeKinds)
+        {
+            await using var host = await StartSurfaceAsync(runtime);
+            observed[runtime] = await ReadWebSocketSurfaceAsync(host.Api.BaseAddress);
         }
 
         observed[RuntimeKind.Node].Should().Be(observed[RuntimeKind.CSharp]);
@@ -127,6 +142,37 @@ public sealed class ForeignModuleEndpointParityTests
             streamResponse.Content.Headers.ContentType?.MediaType ?? "");
     }
 
+    private static async Task<string> ReadWebSocketSurfaceAsync(Uri baseAddress)
+    {
+        using var socket = new ClientWebSocket();
+        await socket.ConnectAsync(ToWebSocketUri(baseAddress, "/modules/sample/ws"), CancellationToken.None);
+
+        var payload = Encoding.UTF8.GetBytes("hello");
+        await socket.SendAsync(
+            payload,
+            WebSocketMessageType.Text,
+            endOfMessage: true,
+            CancellationToken.None);
+
+        var buffer = new byte[1024];
+        var result = await socket.ReceiveAsync(buffer, CancellationToken.None);
+        var text = Encoding.UTF8.GetString(buffer, 0, result.Count);
+
+        await socket.CloseAsync(
+            WebSocketCloseStatus.NormalClosure,
+            "done",
+            CancellationToken.None);
+
+        result.MessageType.Should().Be(WebSocketMessageType.Text);
+        return text;
+    }
+
+    private static Uri ToWebSocketUri(Uri baseAddress, string path) =>
+        new UriBuilder(new Uri(baseAddress, path))
+        {
+            Scheme = baseAddress.Scheme == Uri.UriSchemeHttps ? "wss" : "ws",
+        }.Uri;
+
     private static async Task<JsonElement> ReadJsonAsync(HttpResponseMessage response)
     {
         var body = await response.Content.ReadAsStringAsync();
@@ -139,7 +185,7 @@ public sealed class ForeignModuleEndpointParityTests
         var registry = new ModuleRegistry();
         TestWorkspace? workspace = null;
         IAsyncDisposable? runtimeHost = null;
-        ISharpClawModule module;
+        ISharpClawRuntimeModule module;
 
         if (runtime == RuntimeKind.CSharp)
         {
@@ -154,7 +200,7 @@ public sealed class ForeignModuleEndpointParityTests
                 RuntimeInfo(runtime),
                 CreateLaunchOptions(workspace, runtime));
             runtimeHost = foreignHost;
-            module = foreignHost.Module;
+            module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeModule>().Subject;
             registry.Register(module, foreignHost);
         }
 
@@ -170,7 +216,8 @@ public sealed class ForeignModuleEndpointParityTests
         builder.WebHost.UseUrls(baseAddress.ToString());
         builder.Services.AddSingleton(registry);
         var app = builder.Build();
-        foreach (var module in registry.GetAllModules())
+        app.UseWebSockets();
+        foreach (var module in registry.GetAllModules().OfType<ISharpClawRuntimeModule>())
             module.MapEndpoints(app);
         app.MapForeignModuleEndpoints(registry);
         await app.StartAsync();
@@ -224,11 +271,13 @@ public sealed class ForeignModuleEndpointParityTests
         var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
         var helperPath = Path.Combine(
             root,
-            "SharpClaw.Tests.ForeignSidecar",
+            "SharpClaw.Tests",
+            "Fixtures",
+            "ForeignSidecar",
             "bin",
             configuration,
             "net10.0",
-            "SharpClaw.Tests.ForeignSidecar.dll");
+            "SharpClaw.TestFixtures.ForeignSidecar.dll");
 
         File.Exists(helperPath).Should().BeTrue(
             $"foreign sidecar helper must be built before tests run: '{helperPath}'");
@@ -292,13 +341,13 @@ public sealed class ForeignModuleEndpointParityTests
 
     private sealed class ParitySurfaceHost(
         ModuleRegistry registry,
-        ISharpClawModule module,
+        ISharpClawRuntimeModule module,
         TestApiHost api,
         IAsyncDisposable? runtimeHost,
         TestWorkspace? workspace) : IAsyncDisposable
     {
         public ModuleRegistry Registry => registry;
-        public ISharpClawModule Module => module;
+        public ISharpClawRuntimeModule Module => module;
         public TestApiHost Api => api;
 
         public async ValueTask DisposeAsync()
@@ -345,7 +394,7 @@ public sealed class ForeignModuleEndpointParityTests
         }
     }
 
-    private sealed class NativeParityModule : ISharpClawModule
+    private sealed class NativeParityModule : ISharpClawRuntimeModule
     {
         public string Id => "sample_csharp_module";
         public string DisplayName => "Sample C# Module";
@@ -420,6 +469,46 @@ public sealed class ForeignModuleEndpointParityTests
                 await context.Response.WriteAsync(
                     "{\"delta\":\"first:\"}\n{\"delta\":\"second\"}\n{\"isFinal\":true}\n",
                     context.RequestAborted);
+            });
+
+            endpoints.MapGet("/modules/sample/ws", async context =>
+            {
+                if (!await EnsureAvailableAsync(context))
+                    return;
+
+                if (!context.WebSockets.IsWebSocketRequest)
+                {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    await context.Response.WriteAsync("WebSocket connections only.", context.RequestAborted);
+                    return;
+                }
+
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                var buffer = new byte[1024];
+                var result = await socket.ReceiveAsync(buffer, context.RequestAborted);
+                if (result.MessageType == WebSocketMessageType.Close)
+                    return;
+
+                var text = Encoding.UTF8.GetString(buffer, 0, result.Count);
+                var response = Encoding.UTF8.GetBytes("sidecar:" + text);
+                await socket.SendAsync(
+                    response,
+                    WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    context.RequestAborted);
+
+                while (socket.State == WebSocketState.Open)
+                {
+                    result = await socket.ReceiveAsync(buffer, context.RequestAborted);
+                    if (result.MessageType != WebSocketMessageType.Close)
+                        continue;
+
+                    await socket.CloseOutputAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "closing",
+                        CancellationToken.None);
+                    break;
+                }
             });
         }
 

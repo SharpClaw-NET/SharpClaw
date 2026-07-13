@@ -1,6 +1,6 @@
 using System.Net;
 using System.Text.Json;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 
 namespace SharpClaw.Gateway.Infrastructure;
 

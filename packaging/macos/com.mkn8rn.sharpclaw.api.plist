@@ -6,7 +6,7 @@
     <string>com.mkn8rn.sharpclaw.api</string>
     <key>ProgramArguments</key>
     <array>
-        <string>/usr/local/sharpclaw/api/SharpClaw.Application.API</string>
+        <string>/usr/local/sharpclaw/api/SharpClaw.Runtime.Host</string>
     </array>
     <key>WorkingDirectory</key>
     <string>/usr/local/sharpclaw/api</string>

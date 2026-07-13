@@ -1,13 +1,12 @@
 using FluentAssertions;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.API.Cli;
+using SharpClaw.Runtime.Host.Cli;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Tests.TestHarness;
 
 namespace SharpClaw.Tests.Cli;

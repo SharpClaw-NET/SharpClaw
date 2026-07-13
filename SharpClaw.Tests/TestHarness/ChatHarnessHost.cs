@@ -1,23 +1,42 @@
 using System.Linq.Expressions;
+using System.Text.Json;
 using FluentAssertions;
+using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
-using SharpClaw.Application.Services.Auth;
+using SharpClaw.Runtime.Host;
+using SharpClaw.Core.Clients;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
+using SharpClaw.Runtime.BLL.Services;
+using SharpClaw.Runtime.BLL.Services.Auth;
+using SharpClaw.Core.Agents;
+using SharpClaw.Core.Chat;
+using SharpClaw.Core.Conversation;
+using SharpClaw.Core.Jobs;
+using SharpClaw.Core.Permissions;
+using SharpClaw.Core.Providers;
+using SharpClaw.Core.Resources;
+using SharpClaw.Core.Tasks.Administration;
+using SharpClaw.Core.Tasks.Preflight;
+using SharpClaw.Core.Tasks.Triggers;
+using SharpClaw.Core.Tools;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Contracts.Tasks;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Runtime.INF.Persistence.Modules;
+using SharpClaw.Shared.Instances;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -25,18 +44,25 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 {
     private readonly ServiceProvider _root;
     private readonly AsyncServiceScope _scope;
+    private readonly string _instanceRoot;
 
-    private ChatHarnessHost(ServiceProvider root, AsyncServiceScope scope)
+    private ChatHarnessHost(
+        ServiceProvider root,
+        AsyncServiceScope scope,
+        string instanceRoot)
     {
         _root = root;
         _scope = scope;
+        _instanceRoot = instanceRoot;
+        Harness = new TestHarnessControl(this);
     }
 
+    public IServiceProvider RootServices => _root;
     public IServiceProvider Services => _scope.ServiceProvider;
     public SharpClawDbContext Db => Services.GetRequiredService<SharpClawDbContext>();
     public ChatService Chat => Services.GetRequiredService<ChatService>();
-    public TestHarnessState Harness => _root.GetRequiredService<TestHarnessState>();
-    public TestHarnessModule Module => (TestHarnessModule)Services
+    public TestHarnessControl Harness { get; }
+    public ISharpClawCoreModule Module => Services
         .GetRequiredService<ModuleRegistry>()
         .GetModule(TestHarnessConstants.ModuleId)!;
     public CountingPersistenceEntityResolver PersistenceCounter =>
@@ -44,17 +70,33 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
     public AsyncServiceScope CreateScope() => _root.CreateAsyncScope();
 
     public static ChatHarnessHost Create(
-        IReadOnlyDictionary<string, string?>? settings = null)
+        IReadOnlyDictionary<string, string?>? settings = null,
+        bool useJsonColdStoreDatabase = false)
     {
-        var module = new TestHarnessModule();
+        var mergedSettings = new Dictionary<string, string?>(settings ?? new Dictionary<string, string?>());
+        mergedSettings[$"Modules:{TestHarnessConstants.ModuleId}"] = "true";
         var configuration = new ConfigurationBuilder()
-            .AddInMemoryCollection(settings ?? new Dictionary<string, string?>())
+            .AddInMemoryCollection(mergedSettings)
             .Build();
+        var instanceRoot = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "chat-harness",
+            Guid.NewGuid().ToString("N"));
+        var instancePaths = new SharpClawInstancePaths(
+            SharpClawInstanceKind.Backend,
+            explicitInstanceRoot: instanceRoot);
+        instancePaths.EnsureDirectories();
 
         var services = new ServiceCollection();
         var databaseRoot = new InMemoryDatabaseRoot();
         var databaseName = "SharpClawHarness_" + Guid.NewGuid().ToString("N");
+        var jsonColdStoreOptions = new JsonColdStoreStorageOptions
+        {
+            DataDirectory = Path.Combine(instanceRoot, "data", "jsoncoldstore"),
+            EncryptAtRest = false,
+        };
         services.AddSingleton<IConfiguration>(configuration);
+        services.AddSingleton(instancePaths);
         services.AddLogging();
         services.AddHttpClient();
         services.AddSingleton(new EncryptionOptions
@@ -66,48 +108,186 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         {
             Secret = Convert.ToBase64String(new byte[32])
         });
-        services.AddDbContext<SharpClawDbContext>(
-            options => options.UseInMemoryDatabase(
-                databaseName,
-                databaseRoot));
+        services.AddDbContext<SharpClawDbContext>(options =>
+        {
+            if (useJsonColdStoreDatabase)
+            {
+                options.UseJsonColdStoreDatabase(
+                    jsonColdStoreOptions.DataDirectory,
+                    store => JsonColdStoreRegistration.ConfigureStore(store, jsonColdStoreOptions, null));
+            }
+            else
+            {
+                options.UseInMemoryDatabase(
+                    databaseName,
+                    databaseRoot);
+            }
+        });
+        services.AddSingleton(ModuleLoader.DiscoverBundled(configuration));
         services.AddSingleton<ModuleRegistry>();
+        services.AddSingleton<ModuleToolExecutionPlanner>();
+        services.AddSingleton<ModuleToolPermissionPlanner>();
+        services.AddSingleton<ModuleToolPermissionExecutor>();
+        services.AddSingleton<IModuleStorageContractProvider>(
+            sp => sp.GetRequiredService<ModuleRegistry>());
         services.AddSingleton<ModuleMetricsCollector>();
+        services.AddSingleton<ModuleJobToolExecutor>();
         services.AddSingleton<ThreadActivitySignal>();
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<ChatRuntimeInvalidationPlanner>();
         services.AddSingleton<ProviderApiClientFactory>();
+        services.AddSingleton<AgentAdministrationEngine>();
+        services.AddSingleton<AgentRuntimeAdministrationEngine>();
+        services.AddSingleton<PermissionEvaluationEngine>();
+        services.AddSingleton<PermissionDelegateEvaluationEngine>();
+        services.AddSingleton<AgentActionWorkflowEngine>();
+        services.AddSingleton<AdminPermissionSeedEngine>();
+        services.AddSingleton<RolePermissionAdministrationEngine>();
+        services.AddSingleton<RoleAdministrationEngine>();
+        services.AddSingleton<AgentJobAdministrationEngine>();
+        services.AddSingleton<AgentJobAdministrationWorkflowEngine>();
+        services.AddSingleton<AgentJobLifecycleEngine>();
+        services.AddSingleton<AgentJobRuntimeEngine>();
+        services.AddSingleton<AgentJobDefaultResourceResolver>();
+        services.AddSingleton<DefaultResourceEngine>();
+        services.AddSingleton<DefaultResourceAdministrationEngine>();
+        services.AddSingleton<ConversationTopologyEngine>();
+        services.AddSingleton<ConversationAdministrationEngine>();
+        services.AddSingleton<ConversationSteeringEngine>();
+        services.AddSingleton<ProviderCatalogEngine>();
+        services.AddSingleton<ProviderModelAdministrationEngine>();
+        services.AddSingleton<ProviderCostEngine>();
+        services.AddSingleton<ModelCatalogEngine>();
+        services.AddSingleton<ChatCostEngine>();
+        services.AddSingleton<ChatPromptEngine>();
+        services.AddSingleton<ChatRequestPlanningEngine>();
+        services.AddSingleton<ChatHistoryEngine>();
+        services.AddSingleton<ChatQueryWorkflowEngine>();
+        services.AddSingleton<ChatDefaultHeaderEngine>();
+        services.AddSingleton<ChatHeaderWorkflowEngine>();
+        services.AddSingleton<ChatHeaderGrantFormatter>();
+        services.AddSingleton<ChatHeaderTemplateEngine>();
+        services.AddSingleton<ChatHeaderExpansionPlanner>();
+        services.AddSingleton<ChatToolResultEngine>();
+        services.AddSingleton<ChatMessageEngine>();
+        services.AddSingleton<ChatRequestWorkflowEngine>();
+        services.AddSingleton<ChatToolSelectionEngine>();
+        services.AddSingleton<ChatToolWorkflowEngine>();
+        services.AddSingleton<ChatNativeToolCallParser>();
+        services.AddSingleton<ChatNativeJobToolExecutor>();
+        services.AddSingleton<ChatInlineToolExecutor>();
+        services.AddSingleton<ChatNativeToolLoopEngine>();
+        services.AddSingleton<ChatProviderExecutionWorkflowEngine>();
+        services.AddSingleton<ChatStreamingResponseEngine>();
+        services.AddSingleton<TaskPreflightEngine>();
+        services.AddSingleton<TaskAdministrationWorkflowEngine>();
+        services.AddSingleton<TaskTriggerBindingPlanner>();
+        services.AddSingleton<ToolAwarenessSetEngine>();
+        services.AddSingleton<ToolAwarenessAdministrationEngine>();
+        services.AddSingleton<RuntimeModuleDbContextRegistry>();
+        services.AddSingleton<ModulePersistenceRegistrationFactory>();
+        services.AddSingleton(new ModuleDbContextOptions
+        {
+            StorageMode = StorageMode.SQLite,
+            ConnectionString = "Data Source=:memory:",
+        });
+        services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
+        services.AddSingleton<ForeignModuleTaskContextRegistry>();
         services.AddSingleton<CountingPersistenceEntityResolver>();
         services.AddScoped<TokenService>();
         services.AddScoped<AuthService>();
         services.AddScoped<IPersistenceEntityResolver>(
             sp => sp.GetRequiredService<CountingPersistenceEntityResolver>());
         services.AddScoped<SessionService>();
+        services.AddScoped<EfAgentActionHost>();
+        services.AddScoped<EfChatQueryHost>();
         services.AddScoped<AgentActionService>();
+        services.AddScoped<EfAgentJobAdministrationHost>();
         services.AddScoped<AgentJobService>();
+        services.AddScoped<IAgentJobController, HostAgentJobController>();
+        services.AddScoped<IAgentJobReader, HostAgentJobReader>();
+        services.AddScoped<EfAgentAdministrationHost>();
         services.AddScoped<AgentService>();
+        services.AddScoped<EfConversationAdministrationHost>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();
+        services.AddScoped<EfDefaultResourceAdministrationHost>();
         services.AddScoped<DefaultResourceSetService>();
         services.AddScoped<ProviderCostService>();
+        services.AddScoped<EfProviderModelAdministrationHost>();
+        services.AddScoped<EfProviderCostHost>();
         services.AddScoped<ProviderService>();
+        services.AddScoped<EfRoleAdministrationHost>();
         services.AddScoped<RoleService>();
+        services.AddScoped<EfToolAwarenessAdministrationHost>();
+        services.AddScoped<ToolAwarenessSetService>();
+        services.AddScoped<EfTaskPreflightHost>();
+        services.AddScoped<TaskPreflightChecker>();
+        services.AddScoped<TaskTriggerRegistrar>();
+        services.AddScoped<EfTaskAdministrationHost>();
+        services.AddScoped<TaskService>();
+        services.AddScoped<ITaskAuthoring>(sp =>
+            sp.GetRequiredService<TaskService>());
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();
+        services.AddScoped<IConversationSteering, HostConversationSteering>();
+        services.AddScoped<ModuleService>();
         services.AddScoped<ModuleExecutionContext>();
+        services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+        services.AddScoped<IModuleConfigStore>(sp =>
+        {
+            var context = sp.GetRequiredService<ModuleExecutionContext>();
+            var db = sp.GetRequiredService<SharpClawDbContext>();
+            return new ModuleConfigStore(db, context.ModuleId ?? "");
+        });
         services.AddScoped<ISharpClawDataContext>(
             sp => sp.GetRequiredService<SharpClawDbContext>());
         services.AddSingleton<ModuleEventDispatcher>(sp => new ModuleEventDispatcher(
             sp,
             sp.GetRequiredService<IConfiguration>(),
             NullLogger<ModuleEventDispatcher>.Instance));
-
-        module.ConfigureServices(services);
+        services.AddSingleton<ISharpClawEventSinkRegistry>(
+            sp => sp.GetRequiredService<ModuleEventDispatcher>());
 
         var root = services.BuildServiceProvider();
-        var registry = root.GetRequiredService<ModuleRegistry>();
-        registry.Register(module);
+        root.GetRequiredService<ModuleLoader>().SetRootServices(root);
+        if (useJsonColdStoreDatabase)
+        {
+            using var initScope = root.CreateScope();
+            var db = initScope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+            db.Database.EnsureCreated();
+        }
 
-        return new ChatHarnessHost(root, root.CreateAsyncScope());
+        using (var enableScope = root.CreateScope())
+        {
+            enableScope.ServiceProvider
+                .GetRequiredService<ModuleService>()
+                .EnableAsync(TestHarnessConstants.ModuleId, root, CancellationToken.None)
+                .GetAwaiter()
+                .GetResult();
+        }
+
+        return new ChatHarnessHost(root, root.CreateAsyncScope(), instanceRoot);
+    }
+
+    public string ExecuteHarnessInlineTool(string toolName, object payload)
+    {
+        var json = JsonSerializer.Serialize(payload, new JsonSerializerOptions(JsonSerializerDefaults.Web));
+        using var document = JsonDocument.Parse(json);
+        var moduleServices = Services
+            .GetRequiredService<ModuleRegistry>()
+            .GetRuntimeHost(TestHarnessConstants.ModuleId)
+            ?.Services
+            ?? Services;
+        return Module.ExecuteInlineToolAsync(
+                toolName,
+                document.RootElement,
+                new InlineToolContext(Guid.NewGuid(), Guid.NewGuid(), null, "test-harness-control"),
+                moduleServices,
+                CancellationToken.None)
+            .GetAwaiter()
+            .GetResult();
     }
 
     public async Task<SeededChat> SeedChatAsync(
@@ -223,8 +403,39 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 
     public async ValueTask DisposeAsync()
     {
+        var registry = _root.GetRequiredService<ModuleRegistry>();
+        var loader = _root.GetRequiredService<ModuleLoader>();
+        var moduleService = _scope.ServiceProvider.GetRequiredService<ModuleService>();
+        var runtimeBackedModuleIds = registry.GetAllModules()
+            .Select(module => module.Id)
+            .Where(moduleId => registry.GetRuntimeHost(moduleId) is not null)
+            .ToArray();
+
+        foreach (var moduleId in runtimeBackedModuleIds)
+        {
+            if (registry.GetModule(moduleId) is null)
+                continue;
+
+            if (registry.IsExternal(moduleId))
+                await moduleService.UnloadExternalAsync(moduleId, CancellationToken.None);
+            else if (loader.IsDefaultModule(moduleId))
+                await moduleService.DisableAsync(moduleId, CancellationToken.None);
+        }
+
+        foreach (var runtimeHost in registry.GetRuntimeHosts())
+            await runtimeHost.DisposeAsync();
+
         await _scope.DisposeAsync();
         await _root.DisposeAsync();
+
+        try
+        {
+            if (Directory.Exists(_instanceRoot))
+                Directory.Delete(_instanceRoot, recursive: true);
+        }
+        catch
+        {
+        }
     }
 }
 

@@ -4,10 +4,10 @@ using Microsoft.AspNetCore.Hosting.Server;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Security;
-using SharpClaw.Modules.Hosting;
-using SharpClaw.Utils.Security;
+using SharpClaw.ModuleHost.InProcess;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;
 

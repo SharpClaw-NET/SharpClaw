@@ -1,11 +1,17 @@
-# Test Harness Module
+# Test Harness Modules
 
-The Test Harness module is a bundled default module with the id
-`sharpclaw_test_harness`. It is not a production feature and it should not be
-enabled in production templates. The production environment template keeps it
-disabled, while the development template enables it so local and CI test runs
-can exercise SharpClaw without real provider API keys, network calls, or REPL
-scripts.
+The Test Harness modules are SharpClaw test-infrastructure modules with the ids
+`sharpclaw_test_harness_out_of_process` and
+`sharpclaw_test_harness_in_process`. They deliberately remain in the main
+SharpClaw repository as top-level fixture projects so host, module, provider,
+gateway, and task tests can exercise deterministic modules without reaching
+into an external module repository. They are not production features and should
+not be enabled in production templates. The production environment template
+keeps both disabled. The development template enables the out-of-process
+harness so local and CI test runs can exercise SharpClaw without real provider
+API keys, network calls, or REPL scripts; the in-process harness stays disabled
+unless a focused test or developer run explicitly opts into in-process .NET
+module hosting.
 
 The module registers deterministic provider plugins under provider keys such
 as `sharpclaw-test`, `sharpclaw-test-stream`, `sharpclaw-test-tools`, and
@@ -15,17 +21,20 @@ normal chat request through `ChatService`. SharpClaw still resolves the model,
 builds headers, chooses the provider, validates completion parameters, sends
 tool definitions, records token usage, and stores messages exactly as it would
 for a real provider. The only difference is that the provider response comes
-from an in-memory scenario configured through `TestHarnessState`.
+from an in-memory scenario configured through the harness module's control
+tool. Tests should call that control tool through the normal module runtime
+surface, not by compiling against the harness implementation classes.
 
-To add a new provider case, configure `TestHarnessState` before the chat call.
-For example, a test can set the `sharpclaw-test-tools` scenario to return a
-first turn with a `ChatToolCall` for `test_harness_inline_permissioned`, then a
-second turn with final assistant text. That tests the complete native tool loop:
-SharpClaw sends tool schemas to the provider, receives the tool call, evaluates
-the module permission descriptor, executes or denies the tool through the host
-pipeline, sends a tool-result message back to the provider, and persists the
-final assistant response. Because the scenario is a list of turns, multi-round
-tool conversations stay deterministic and readable.
+To add a new provider case, configure the harness through
+`test_harness_control` before the chat call. For example, a test can set the
+`sharpclaw-test-tools` scenario to return a first turn with a `ChatToolCall`
+for `test_harness_inline_permissioned`, then a second turn with final assistant
+text. That tests the complete native tool loop: SharpClaw sends tool schemas
+to the provider, receives the tool call, evaluates the module permission
+descriptor, executes or denies the tool through the host pipeline, sends a
+tool-result message back to the provider, and persists the final assistant
+response. Because the scenario is a list of turns, multi-round tool
+conversations stay deterministic and readable.
 
 Streaming tests use the same shape. A turn can specify streaming chunks, a
 first-token delay, a per-chunk delay, and a completion delay. If the turn is

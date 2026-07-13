@@ -80,13 +80,12 @@ ao_edit_channel_header (alias: edit_channel_header)
   Permission: per-resource (ChannelHeader)
 
 ────────────────────────────────────────
-TASK-SCRIPT STEPS
+TASK-SCRIPT OPERATIONS
 ────────────────────────────────────────
-Statement primitives (parser-emitted, owned by this module):
-  DeclareVariable, Assign, EventHandler, Conditional, Loop, Return,
-  Delay, Evaluate, Log, ParseResponse
-
-Step methods (registered with TaskStepRegistry):
+Core owns ordinary C# task-language statements: declaration, assignment,
+control flow, return, logging, delay, structured response parsing, and
+cancellation waits. This module contributes real host operations registered
+with TaskStepRegistry:
   Chat, ChatStream, ChatToThread        — agent chat
   Emit, ParseResponse                   — output / parsing
   FindModel, FindProvider, FindAgent    — entity lookup
@@ -96,8 +95,9 @@ Step methods (registered with TaskStepRegistry):
   CreateChannel, FindChannel,
     AddAllowedAgent                     — channels
 
-If this module is disabled, scripts using these methods or primitives
-are rejected by `task preflight`.
+If this module is disabled, scripts using these module operations or its
+triggers are rejected by `task preflight`. Pure C# control flow stays valid
+because it is Core-owned.
 
 ────────────────────────────────────────
 TRIGGERS
@@ -119,8 +119,9 @@ and removed from `task trigger-sources`.
 ────────────────────────────────────────
 MODULE-OWNED CLI RESOURCES
 ────────────────────────────────────────
-AoTask resources live in AgentOrchestrationDbContext.ScheduledJobs. They are
-created and managed by this module, separately from Core task schedule rows.
+AoTask resources live in the Agent Orchestration module's persistent
+scheduled-job store. The store is owned by the module and follows it into the
+sidecar process, separately from Core task schedule rows.
 
   resource aotask add <name> [--next-run <timestamp>] [--repeat-minutes <n>] [--max-retries <n>]
   resource aotask get <id>
@@ -130,7 +131,9 @@ created and managed by this module, separately from Core task schedule rows.
 
 Alias: resource aot ...
 
-AoSkill resources live in AgentOrchestrationDbContext.Skills.
+AoSkill resources live in the Agent Orchestration module's persistent skill
+store. The skill text is still retrieved through the module-owned
+access_skill tool, but it no longer depends on an in-process EF context.
 
   resource aoskill add <name> --text <skillText> [--description <description>]
   resource aoskill get <id>

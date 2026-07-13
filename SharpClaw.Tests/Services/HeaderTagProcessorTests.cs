@@ -1,13 +1,14 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Core.Clients;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Core.Clients;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Services;
 
@@ -79,11 +80,13 @@ public sealed class HeaderTagProcessorTests
             Array.Empty<IProviderPlugin>(),
             registry);
 
+        var engine = new ChatHeaderTemplateEngine(registry, clientFactory);
+
         return new HeaderTagProcessor(
             db,
-            registry,
+            engine,
+            new ChatHeaderExpansionPlanner(),
             services,
-            clientFactory,
             configuration);
     }
 }

@@ -1,10 +1,10 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Modules.Routing;
-using SharpClaw.Modules.Hosting;
-using SharpClaw.Utils.Security;
+using SharpClaw.ModuleHost.InProcess;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;
 

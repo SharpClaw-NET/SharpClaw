@@ -1,9 +1,8 @@
 using FluentAssertions;
 using NUnit.Framework;
-using SharpClaw.Application.Infrastructure.Tasks;
-using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -113,7 +112,7 @@ public class BadParamTask
             ClassName = "MultiOutputTask",
             EntryPointMethod = "RunAsync",
             Parameters = [],
-            Steps = [],
+            Statements = [],
             ToolCallHooks = [],
             DataTypes =
             [
@@ -144,10 +143,10 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "x", TypeName = "string" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 2, Column = 0, VariableName = "x", TypeName = "string" },
             ]
         };
 
@@ -173,9 +172,9 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition { StepKey = TaskScriptingStepKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
+                new TaskStatementDefinition { StatementKey = TaskLanguageStatementKeys.DeclareVariable, Line = 1, Column = 0, VariableName = "obj", TypeName = "WeirdType" },
             ]
         };
 
@@ -201,11 +200,11 @@ public class BadParamTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition
+                new TaskStatementDefinition
                 {
-                    StepKey  = TaskScriptingStepKeys.Loop,
+                    StatementKey  = TaskLanguageStatementKeys.Loop,
                     Line = 1, Column = 0,
                     VariableName = "item",
                     Expression = null,            // missing
@@ -224,28 +223,6 @@ public class BadParamTask
     // TASK108 — ParseResponse with unknown type
     // ─────────────────────────────────────────────────────────────
 
-    [Test]
-    public void Validate_ParseResponseWithUnknownType_ProducesTASK108()
-    {
-        var source = """
-[Task("parse-bad")]
-public class ParseBadTask
-{
-    public async Task RunAsync(CancellationToken ct)
-    {
-        var result = ParseResponse<Nonexistent>("{}");
-        Log(result);
-    }
-}
-""";
-        var definition = ParseValid(source);
-
-        var result = TaskScriptEngine.Validate(definition);
-
-        result.IsValid.Should().BeFalse();
-        result.Diagnostics.Should().Contain(d => d.Code == "TASK108");
-    }
-
     // ─────────────────────────────────────────────────────────────
     // Nested validation
     // ─────────────────────────────────────────────────────────────
@@ -262,18 +239,18 @@ public class ParseBadTask
             Parameters = [],
             DataTypes = [],
             ToolCallHooks = [],
-            Steps =
+            Statements =
             [
-                new TaskStepDefinition
+                new TaskStatementDefinition
                 {
-                    StepKey  = TaskScriptingStepKeys.Loop,
+                    StatementKey  = TaskLanguageStatementKeys.Loop,
                     Line = 1, Column = 0,
                     Expression = "true",
                     Body =
                     [
-                        new TaskStepDefinition
+                        new TaskStatementDefinition
                         {
-                            StepKey  = TaskScriptingStepKeys.DeclareVariable,
+                            StatementKey  = TaskLanguageStatementKeys.DeclareVariable,
                             Line = 2, Column = 4,
                             VariableName = "v",
                             TypeName = "UnknownNestedType"

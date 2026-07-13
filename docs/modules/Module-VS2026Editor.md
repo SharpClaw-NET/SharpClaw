@@ -79,7 +79,8 @@ Extension to be installed in Visual Studio 2026. See [Extension Setup](#extensio
 
 1. **Download VSIX Package**:
    - From GitHub releases: https://github.com/mkn8rn/SharpClaw/releases
-   - Or build from source (see [Development Guide](../../sharpclaw-vs2026/DEVELOPMENT.md))
+   - Or build from the SharpClaw editor integrations repository:
+     https://github.com/mkn8rn/SharpClaw.EditorIntegrations
 
 2. **Install Extension**:
    ```powershell
@@ -105,7 +106,7 @@ Status is shown in the VS status bar.
 
 Default connection: `ws://localhost:5163/api/editor/bridge`
 
-To change the port, update `SharpClaw.Application.API` listen URL in:
+To change the port, update `SharpClaw.Runtime.Host` listen URL in:
 `Infrastructure/Environment/.env`
 
 ```jsonc
@@ -116,17 +117,11 @@ To change the port, update `SharpClaw.Application.API` listen URL in:
 
 ### Building Extension from Source
 
-The extension is **excluded from regular solution builds**. To build:
-
-```powershell
-# Build VSIX package
-dotnet build sharpclaw-vs2026/SharpClaw.VS2026Extension.csproj -c Release /p:PublishVSExtension=true
-
-# Or use publish script
-sharpclaw-vs2026\.vsextension\publish.ps1
-```
-
-See [Development Guide](../../sharpclaw-vs2026/DEVELOPMENT.md) for full details.
+The extension is owned by the SharpClaw editor integrations repository and is
+excluded from regular SharpClaw solution builds. To build it from source, clone
+or open https://github.com/mkn8rn/SharpClaw.EditorIntegrations and use that
+repository's VS 2026 extension build instructions. The SharpClaw application
+repository no longer contains or builds the extension source.
 
 ---
 

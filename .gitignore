@@ -3,7 +3,11 @@
 ## My additions will be here at the top:
 
 # Internal specs & docs
+docs/internal
 docs/internal/
+
+# Nested standalone repository
+SharpClaw.Core/
 
 # Copilot
 .github/upgrades
@@ -22,11 +26,6 @@ signing/
 
 # Visual Studio Code detritus
 .vscode/
-
-# VS Extension build outputs
-sharpclaw-vs2026/bin/
-sharpclaw-vs2026/obj/
-sharpclaw-vs2026/*.vsix
 
 # ASP.NET Core development server files
 *.db        # SQLite or EF Core local DBs 

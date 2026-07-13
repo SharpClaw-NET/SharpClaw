@@ -5,7 +5,7 @@ using NUnit.Framework;
 namespace SharpClaw.Tests.Architecture;
 
 /// <summary>
-/// Guardrail test that prevents <c>SharpClaw.Application.Core</c> from
+/// Guardrail test that prevents <c>SharpClaw.Runtime.BLL</c> from
 /// re-acquiring a project reference to either provider shared library.
 /// The pipeline must remain agnostic to whether a model is local or
 /// remote and to any provider-specific protocol shape; everything that
@@ -24,7 +24,7 @@ public class CoreDependencyGuardrailTests
     [Test]
     public void Core_assembly_must_not_reference_provider_shared_libraries()
     {
-        var coreAssembly = typeof(SharpClaw.Application.Services.AgentService).Assembly;
+        var coreAssembly = typeof(SharpClaw.Runtime.BLL.Services.AgentService).Assembly;
 
         var referenced = coreAssembly.GetReferencedAssemblies()
             .Select(a => a.Name)
@@ -33,7 +33,7 @@ public class CoreDependencyGuardrailTests
         foreach (var forbidden in ForbiddenAssemblies)
         {
             referenced.Should().NotContain(forbidden,
-                because: $"SharpClaw.Application.Core must not reference '{forbidden}'. "
+                because: $"SharpClaw.Runtime.BLL must not reference '{forbidden}'. "
                        + "Provider-shape concerns belong on IProviderPlugin in "
                        + "SharpClaw.Contracts.Providers, not in pipeline code.");
         }
@@ -45,13 +45,13 @@ public class CoreDependencyGuardrailTests
         var root = FindSolutionRoot();
         var pipelineFiles = new[]
         {
-            Path.Combine(root, "SharpClaw.Application.Core", "Services", "AgentJobService.cs"),
-            Path.Combine(root, "SharpClaw.Application.Core", "Modules", "HostAgentJobController.cs"),
-            Path.Combine(root, "SharpClaw.Application.API", "Handlers", "AgentJobHandlers.cs"),
+            Path.Combine(root, "SharpClaw.Runtime.BLL", "Services", "AgentJobService.cs"),
+            Path.Combine(root, "SharpClaw.Runtime.BLL", "Modules", "HostAgentJobController.cs"),
+            Path.Combine(root, "SharpClaw.Runtime.Host", "Handlers", "AgentJobHandlers.cs"),
         };
         var forbiddenTerms = new[]
         {
-            "SharpClaw.Infrastructure.Persistence.JSON",
+            "SharpClaw.Runtime.INF.Persistence.JSON",
             "ColdEntityIndex",
             "ColdEntityStore",
             "_index_AgentJobId",

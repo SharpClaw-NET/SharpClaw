@@ -1,9 +1,0 @@
-## Visual Studio Extension
-bin/
-obj/
-vsct/
-*.vsix
-*.user
-*.suo
-*.cache
-.vs/

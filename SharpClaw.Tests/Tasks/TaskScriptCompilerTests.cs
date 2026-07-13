@@ -1,10 +1,9 @@
 using System.Text.Json;
 using FluentAssertions;
 using NUnit.Framework;
-using SharpClaw.Application.Infrastructure.Tasks;
-using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -185,7 +184,7 @@ public class RequiredParamTask
         var result = TaskScriptEngine.ProcessScript(SimpleSource);
 
         result.Success.Should().BeTrue();
-        result.Plan!.ExecutionSteps.Last().StepKey.Should().Be(TaskScriptingStepKeys.Return);
+        result.Plan!.ExecutionStatements.Last().StatementKey.Should().Be(TaskLanguageStatementKeys.Return);
     }
 
     [Test]
@@ -212,9 +211,9 @@ public class ConditionalTask
         var result = TaskScriptEngine.ProcessScript(source);
 
         result.Success.Should().BeTrue();
-        var conditional = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Conditional);
-        conditional.Body.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
-        conditional.ElseBody.Should().ContainSingle(s => s.StepKey == TaskScriptingStepKeys.Log);
+        var conditional = result.Plan!.ExecutionStatements.Single(s => s.StatementKey == TaskLanguageStatementKeys.Conditional);
+        conditional.Body.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
+        conditional.ElseBody.Should().ContainSingle(s => s.StatementKey == TaskLanguageStatementKeys.Log);
     }
 
     [Test]
@@ -242,7 +241,7 @@ public class LoopTask
         });
 
         result.Success.Should().BeTrue();
-        var loop = result.Plan!.ExecutionSteps.Single(s => s.StepKey == TaskScriptingStepKeys.Loop);
+        var loop = result.Plan!.ExecutionStatements.Single(s => s.StatementKey == TaskLanguageStatementKeys.Loop);
         loop.VariableName.Should().NotBeNull();
     }
 

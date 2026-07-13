@@ -5,15 +5,16 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.API.Handlers;
-using SharpClaw.Application.Core.Modules;
+using SharpClaw.Runtime.Host.Handlers;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -178,7 +179,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         await host.Db.SaveChangesAsync();
 
         host.Harness.Reset();
-        host.Module.ResetDiagnostics();
+        host.Harness.ResetDiagnostics();
         await RunStreamingToolLoopAsync(
             host,
             seeded.Channel.Id,
@@ -188,7 +189,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
         host.Harness.ToolCalls.Should().BeEmpty();
         ToolResultMessages(host).Count(m => m.Content?.Contains("permission denied", StringComparison.OrdinalIgnoreCase) == true)
             .Should().Be(50);
-        host.Module.PermissionDescriptorBuilds.Should().Be(0);
+        host.Harness.PermissionDescriptorBuilds.Should().Be(0);
     }
 
     [Test]
@@ -247,8 +248,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             seeded.Channel.Id,
             BuildToolCalls(1, LifecycleInlineToolModule.ToolName),
             "enabled");
-        host.Harness.ToolCalls.Should().ContainSingle()
-            .Which.ToolName.Should().Be(LifecycleInlineToolModule.ToolName);
+        ToolResultMessages(host).Single().Content.Should().Be("lifecycle-ok");
 
         registry.Unregister(LifecycleInlineToolModule.ModuleId);
         host.Harness.Reset();
@@ -267,8 +267,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             seeded.Channel.Id,
             BuildToolCalls(1, LifecycleInlineToolModule.ToolName),
             "reenabled");
-        host.Harness.ToolCalls.Should().ContainSingle()
-            .Which.ToolName.Should().Be(LifecycleInlineToolModule.ToolName);
+        ToolResultMessages(host).Single().Content.Should().Be("lifecycle-ok");
     }
 
     [Test]
@@ -513,7 +512,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             "warm");
 
         host.Harness.Reset();
-        host.Module.ResetDiagnostics();
+        host.Harness.ResetDiagnostics();
         host.Harness.ConfigurePermissionedInlineTool(new TestHarnessToolBehavior { Result = "" });
         var run = await RunStreamingToolLoopAsync(
             host,
@@ -539,7 +538,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             "warm-denied");
 
         host.Harness.Reset();
-        host.Module.ResetDiagnostics();
+        host.Harness.ResetDiagnostics();
         var run = await RunStreamingToolLoopAsync(
             host,
             seeded.Channel.Id,
@@ -707,7 +706,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             toolCalls.Count == 0 ? 0 : overheadMs / (double)Math.Max(1, toolCalls.Count),
             toolCalls.Count,
             resultMessages.Count(m => m.Content?.Contains("permission denied", StringComparison.OrdinalIgnoreCase) == true),
-            host.Module.PermissionDescriptorBuilds,
+            host.Harness.PermissionDescriptorBuilds,
             interCallStats,
             run.Done.FinalResponse!.AssistantMessage.Content);
     }
@@ -793,7 +792,7 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             $"descriptorBuilds={DescriptorBuilds}, max={InterCallStats.Max}, p95={InterCallStats.P95}, p99={InterCallStats.P99}";
     }
 
-    private sealed class LifecycleInlineToolModule : ISharpClawModule
+    private sealed class LifecycleInlineToolModule : ISharpClawCoreModule
     {
         public const string ModuleId = "sharpclaw_lifecycle_test";
         public const string ToolName = "lifecycle_permissioned";
@@ -828,24 +827,6 @@ public sealed class TestHarnessRepeatedToolInteractionTests
             CancellationToken ct)
         {
             await Task.Yield();
-            var state = scopedServices.GetRequiredService<TestHarnessState>();
-            var startedAt = Stopwatch.GetTimestamp();
-            var completedAt = Stopwatch.GetTimestamp();
-            state.RecordToolCall(new CapturedToolCall(
-                state.NextSequence(),
-                "lifecycle-inline",
-                toolName,
-                parameters.GetRawText(),
-                context.AgentId,
-                context.ChannelId,
-                context.ThreadId,
-                null,
-                0,
-                Failed: false)
-            {
-                StartedAtTimestamp = startedAt,
-                CompletedAtTimestamp = completedAt
-            });
             return "lifecycle-ok";
         }
 

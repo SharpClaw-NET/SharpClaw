@@ -5,11 +5,11 @@ using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.API.Routing;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Core.Modules.Foreign;
+using SharpClaw.Runtime.Host.Routing;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Modules;
-using ModuleManifestRuntimeInfo = SharpClaw.Application.Core.Modules.ModuleManifestRuntimeInfo;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -147,11 +147,13 @@ public sealed class ForeignModuleEndpointProxyTests
         var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
         var helperPath = Path.Combine(
             root,
-            "SharpClaw.Tests.ForeignSidecar",
+            "SharpClaw.Tests",
+            "Fixtures",
+            "ForeignSidecar",
             "bin",
             configuration,
             "net10.0",
-            "SharpClaw.Tests.ForeignSidecar.dll");
+            "SharpClaw.TestFixtures.ForeignSidecar.dll");
 
         File.Exists(helperPath).Should().BeTrue(
             $"foreign sidecar helper must be built before tests run: '{helperPath}'");

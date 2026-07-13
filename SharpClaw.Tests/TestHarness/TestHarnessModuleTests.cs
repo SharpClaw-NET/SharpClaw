@@ -1,8 +1,10 @@
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Core.Clients;
+using SharpClaw.Contracts.DTOs.Chat;
+using SharpClaw.Core.Clients;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -21,7 +23,7 @@ public sealed class TestHarnessModuleTests
         factory.IsAvailable(TestHarnessConstants.CostProviderKey).Should().BeTrue();
         factory.IsAvailable(TestHarnessConstants.EdenStyleProviderKey).Should().BeTrue();
 
-        var registry = host.Services.GetRequiredService<SharpClaw.Application.Core.Modules.ModuleRegistry>();
+        var registry = host.Services.GetRequiredService<ModuleRegistry>();
         registry.GetHeaderTag(TestHarnessConstants.HeaderTagName).Should().NotBeNull();
         registry.IsInlineTool(TestHarnessConstants.InlinePermissionedTool).Should().BeTrue();
         registry.IsInlineTool(TestHarnessConstants.InlinePermissionedToolAlias).Should().BeTrue();
@@ -38,24 +40,23 @@ public sealed class TestHarnessModuleTests
     public async Task ProviderCaptureRedactsSecretsButKeepsAssertablePromptShape()
     {
         await using var host = ChatHarnessHost.Create();
-        var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
-        var client = factory.GetClient(TestHarnessConstants.PlainProviderKey);
-
+        var seeded = await host.SeedChatAsync(
+            TestHarnessConstants.PlainProviderKey,
+            agentSystemPrompt: "system token=secret-token-value");
+        seeded.Provider.EncryptedApiKey = "sk-real-secret123456789";
         using var providerParams = JsonDocument.Parse("""{"api_key":"sk-secret123456789","safe":"visible"}""");
-        await client.ChatCompletionAsync(
-            new HttpClient(),
-            "sk-real-secret123456789",
-            TestHarnessConstants.ModelId,
-            "system token=secret-token-value",
-            [new ChatCompletionMessage("user", "hello api_key=abc123 and sk-user-secret123456789")],
-            providerParameters: new Dictionary<string, JsonElement>
-            {
-                ["api_key"] = providerParams.RootElement.GetProperty("api_key").Clone(),
-                ["safe"] = providerParams.RootElement.GetProperty("safe").Clone()
-            });
+        seeded.Agent.ProviderParameters = new Dictionary<string, JsonElement>
+        {
+            ["api_key"] = providerParams.RootElement.GetProperty("api_key").Clone(),
+            ["safe"] = providerParams.RootElement.GetProperty("safe").Clone()
+        };
+        await host.Db.SaveChangesAsync();
+
+        await host.Chat.SendMessageAsync(
+            seeded.Channel.Id,
+            new ChatRequest("hello api_key=abc123 and sk-user-secret123456789"));
 
         var request = host.Harness.ProviderRequests.Single();
-        request.ApiKeyWasProvided.Should().BeTrue();
         request.ApiKeyFingerprint.Should().NotBe("sk-real-secret123456789");
         request.SystemPrompt.Should().Contain("[redacted]");
         request.Messages.Single().Content.Should().Contain("[redacted]");
@@ -79,9 +80,10 @@ public sealed class TestHarnessModuleTests
         var plugin = host.Services.GetRequiredService<ProviderApiClientFactory>()
             .GetPlugin(TestHarnessConstants.CostProviderKey);
 
-        var result = await plugin!.CreateCostFeed(new ProviderClientOptions(null))!.GetCostsAsync(
-            new HttpClient(),
-            "local",
+        plugin!.SupportsCostFeed.Should().BeTrue();
+        var costFeed = plugin.CreateCostFeed(new ProviderClientOptions(null));
+        costFeed.Should().NotBeNull();
+        var result = await costFeed!.GetCostsAsync(
             DateTimeOffset.UnixEpoch,
             DateTimeOffset.UnixEpoch.AddHours(1));
 
@@ -94,7 +96,9 @@ public sealed class TestHarnessModuleTests
     {
         await using var host = ChatHarnessHost.Create();
         var client = host.Services.GetRequiredService<ProviderApiClientFactory>()
-            .GetClient(TestHarnessConstants.PlainProviderKey);
+            .GetClient(
+                TestHarnessConstants.PlainProviderKey,
+                new ProviderClientOptions(null));
 
         for (var i = start; i < start + count; i++)
         {
@@ -113,8 +117,6 @@ public sealed class TestHarnessModuleTests
                 });
 
             var result = await client.ChatCompletionAsync(
-                new HttpClient(),
-                "local",
                 TestHarnessConstants.ModelId,
                 "system",
                 [new ChatCompletionMessage("user", $"message-{i:D4}")]);

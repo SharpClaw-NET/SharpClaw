@@ -8,13 +8,21 @@ Tasks are user-defined automation scripts that run as managed background
 processes inside SharpClaw. A task is a small C# class registered through the
 API or CLI at runtime — there is no application code change, no rebuild, and
 no restart. The task host parses the script, validates it, stores it as a
-definition, and later compiles and runs instances of it on demand or in
-response to triggers.
+reusable definition, and later compiles and runs instances of it on demand or
+in response to triggers.
+
+The intended authoring model is deliberately close to ordinary C# scripting.
+Use `if`, `while`, `foreach`, `for`, `try/catch`, explicit retry loops,
+ordinary local variables, and direct method calls. A task should feel like a
+durable SharpClaw-aware version of a REPL or shell automation snippet: cheap
+enough to throw away when the job is done, but saved, parameterized,
+preflighted, cancellable, logged, streamable, and able to call SharpClaw
+module, tool, model, and task operations through the runtime.
 
 This document describes the task system at a conceptual level: what task
 mechanics exist, how the pipeline fits together, and how modules contribute
-the step and trigger surface that scripts can use. It deliberately does **not**
-enumerate the specific step methods or trigger attributes available on your
+callable operations and triggers that scripts can use. It deliberately does
+**not** enumerate the specific module methods or trigger attributes available on your
 installation — that surface is contributed by modules and is documented in the
 corresponding module pages under [docs/modules/](modules/).
 
@@ -48,7 +56,7 @@ corresponding module pages under [docs/modules/](modules/).
 | **Task orchestrator** | Server component that walks the compiled execution plan step by step, managing pause/resume gates and the output channel. |
 | **Task runtime host** | Per-instance singleton that owns the CancellationToken, pause gates, and the SSE output channel for one running instance. |
 | **Compiled plan** | Artifact produced by the compiler from a validated definition plus resolved parameter values. Passed directly to the orchestrator on instance start. |
-| **Step** | One callable operation usable inside a task body. Steps are not built into the core task host — they are registered by modules. |
+| **Step** | One executable operation in a compiled plan. Ordinary C# language statements are lowered by Core; module/tool/model calls are contributed by modules. |
 | **Trigger** | A declaration that causes the task host to launch instances automatically in response to an external condition. Triggers are also module-owned. |
 
 ---
@@ -64,10 +72,14 @@ Parsing and validation happen when the definition is registered or updated.
 Compilation runs when an instance starts because parameter values are supplied
 at launch time.
 
-The parser is module-aware: it recognises step methods and trigger attributes
-that modules register at startup. A script that calls a step or declares a
-trigger whose owning module is not loaded will still parse, but preflight will
-flag the missing module before an instance is created.
+The parser owns ordinary C# task-language syntax directly. Variable
+declarations, assignment, conditionals, loops, return, `Log`, `Task.Delay`,
+`WaitUntilStopped`, and structured response parsing are not module-defined
+syntax. Modules extend the surface by registering callable
+operations such as `Chat`, `Emit`, `CreateAgent`, or domain-specific tools, and
+by registering trigger attributes. A script that calls a module operation or
+declares a trigger whose owning module is not loaded will still parse, but
+preflight will flag the missing module before an instance is created.
 
 ---
 
@@ -111,10 +123,10 @@ Inside `RunAsync` the parser allows a restricted whitelist of constructs:
 - `while (condition)`
 - `await expr;`
 - `return;` / `return expr;`
-- calls to step methods registered by a loaded module
+- calls to module methods registered by a loaded module
 
 General-purpose C# is not permitted. There is no reflection, no P/Invoke, no
-`System.IO`, and no arbitrary calls to outside types. The exact set of step
+`System.IO`, and no arbitrary calls to outside types. The exact set of module
 methods available to your scripts is controlled entirely by which modules are
 loaded — see [How modules contribute the task surface](#how-modules-contribute-the-task-surface).
 
@@ -191,10 +203,10 @@ requirement with severity, pass/fail, and a human-readable message. Preflight
 also runs automatically during instance creation; a blocking failure surfaces
 as `422 Unprocessable Entity` with the same structured payload.
 
-When a task uses a step or trigger whose owning module is not loaded, preflight
-will surface that as a recommendation finding. The exact list of step methods
-and trigger attributes available on your installation is documented per
-module.
+When a task uses a module method or trigger whose owning module is not loaded,
+preflight will surface that as a recommendation finding. The exact list of
+module methods and trigger attributes available on your installation is
+documented per module.
 
 ---
 
@@ -340,36 +352,42 @@ on the current channel and started automatically.
 
 ## How modules contribute the task surface
 
-The task host does not ship a fixed set of step methods or trigger attributes.
-Both surfaces are registered by modules at startup. From a script-author point
-of view this means: which step methods are callable inside `RunAsync`, and
-which trigger attributes are recognised on the class, depend entirely on which
-modules are loaded.
+The task host ships the language shape. Modules do not teach the parser what
+`if`, `while`, `foreach`, `return`, assignment, logging, delay, or cancellation
+waits mean. They teach SharpClaw which host operations are callable inside
+`RunAsync` and which trigger attributes can launch a saved definition.
+
+From a script-author point of view this means that ordinary control flow is
+always available, while calls such as `Chat(...)`, `Emit(...)`,
+`CreateChannel(...)`, or a module-specific operation depend on the loaded
+module set. A validation or preflight failure for a module operation should be
+read the same way as a missing command in a shell script: the script syntax is
+valid, but the runtime command surface is not present.
 
 Modules contribute to the task surface through three extension points. Each of
 them is fully documented in [Module-Creation-Guide.md](guides/Module-Creation-Guide.md);
 this section is a high-level map of the contract surface.
 
-### Step methods (callable inside RunAsync)
+### Module methods (callable inside RunAsync)
 
-A module declares its step methods to the parser through
+A module declares its C#-style task methods to the parser through
 `ITaskParserModuleExtension`, and to the orchestrator through
 `ITaskStepExecutorExtension` (or by pre-registering descriptors with the
 shared `TaskStepRegistry`).
 
-- `ITaskParserModuleExtension` tells the parser the method names your module
-  recognises, the namespaced step keys they map to, and which arguments are
-  expressions versus literals. The parser resolves all registered extensions
-  from DI at startup.
+- `ITaskParserModuleExtension` tells the parser the method names or event
+  handler names your module recognises, the namespaced step or trigger keys
+  they map to, and which arguments are expressions versus literals. The parser
+  resolves all registered extensions from DI at startup.
 - `ITaskStepExecutorExtension` is the orchestrator-side counterpart. The
-  orchestrator routes every step key to the first extension whose
+  orchestrator routes every runtime dispatch key to the first extension whose
   `CanExecute` returns true and invokes `ExecuteAsync` to perform the work.
-- `TaskStepRegistry` is the shared method-name <-> step-key index. The parser
-  uses it to translate script calls into step keys; tooling can use it for
+- `TaskStepRegistry` is the shared method-name <-> runtime-key index. The parser
+  uses it to translate script calls into runtime keys; tooling can use it for
   diagnostics. Modules normally populate it indirectly via their parser
   extension.
 
-Step keys should be namespaced per module — `{module_id}.{step_name}` — so
+Runtime keys should be namespaced per module — `{module_id}.{operation_name}` — so
 they do not collide across module authors.
 
 ### Trigger attributes (declared on the task class)
@@ -387,25 +405,17 @@ those attributes by implementing `ITaskTriggerSource` (registered as
 Trigger sources actually available on the running host are reported by
 `GET /tasks/trigger-sources` and `task trigger-sources`.
 
-### Statement primitives
-
-Even the basic task-script statements (variable declarations, assignment, the
-event-handler shape, conditionals, loops, return, plus generic `Log` and
-`Delay` calls) are contributed by a module parser extension. There is no core
-step set; everything in a task body comes from a registered extension.
-
 ### Authoring summary
 
-When adding a new step or trigger to a module:
-
-1. Define a stable, namespaced step or trigger key as a constant in your
-   module.
-2. Add the method or attribute mapping to your `ITaskParserModuleExtension`.
-3. For steps, implement execution behind an `ITaskStepExecutorExtension`.
-4. For triggers, register an `ITaskTriggerSource` to enable and watch
-   bindings.
-5. Document the new step or trigger in your module page under
-   [docs/modules/](modules/).
+When adding a new operation, define a stable, namespaced runtime key in your
+module, add the method mapping to `ITaskParserModuleExtension`, and implement
+execution behind `ITaskStepExecutorExtension`. When adding a trigger, map the
+attribute or event-handler name to a trigger key and register an
+`ITaskTriggerSource` that can enable and watch those bindings. In both cases,
+document the operation or trigger in the module page under
+[docs/modules/](modules/). Do not model ordinary C# language constructs as
+module operations; write the task with normal C# control flow and reserve
+module steps for real SharpClaw capabilities.
 
 The full authoring walkthrough — interfaces, registration, lifecycle, and
 testing — lives in [Module-Creation-Guide.md](guides/Module-Creation-Guide.md).

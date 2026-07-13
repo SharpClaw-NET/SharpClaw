@@ -8,9 +8,9 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using SharpClaw.Application.API.Handlers;
-using SharpClaw.Application.Core.Modules;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.Host.Handlers;
+using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.Entities.Core;
@@ -22,9 +22,9 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Infrastructure.Persistence;
-using SharpClaw.Modules.AgentOrchestration;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Tests.TestHarness;
+using SharpClaw.Core.Modules;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -47,7 +47,6 @@ public sealed class TestHarnessPerformanceTierTests
     private static readonly ConcurrentDictionary<string, Lazy<Task<SurfaceLatencyMeasurement>>> LatencyMeasurements = new();
     private static readonly ConcurrentDictionary<string, Lazy<Task<StreamingSurfaceSetMeasurement>>> SurfaceSetMeasurements = new();
     private static readonly ConcurrentDictionary<string, Lazy<Task<ToolRoundTripMeasurement>>> ToolMeasurements = new();
-    private static readonly ConcurrentDictionary<string, Lazy<Task<AccessibleThreadsLoadMeasurement>>> AccessibleMeasurements = new();
 
     [TestCaseSource(nameof(StreamingAllSurfaceTiers))]
     [Category(HarnessTestCategories.PerformanceDiagnostic)]
@@ -226,39 +225,6 @@ public sealed class TestHarnessPerformanceTierTests
             completion.ProviderConfiguredMs,
             50,
             "completion latency");
-    }
-
-    [TestCase(10)]
-    [TestCase(25)]
-    [TestCase(50)]
-    [TestCase(100)]
-    [Category(HarnessTestCategories.PerformanceDiagnostic)]
-    public async Task AccessibleThreads_List_0Threads_TieredAbsolute(int maxMs)
-    {
-        HarnessDiagnostics.RequireEnabled();
-        var measured = await CachedAsync("accessible-0", MeasureAccessibleThreadsZeroAsync);
-        measured.Should().BeLessThanOrEqualTo(maxMs);
-    }
-
-    [Test]
-    [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_AccessibleThreads_List_0Threads_Under10ms()
-    {
-        var measured = await CachedAsync("accessible-0", MeasureAccessibleThreadsZeroAsync);
-        measured.Should().BeLessThanOrEqualTo(10);
-    }
-
-    [Test]
-    [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_AccessibleThreads_List_1000Threads_ColdAndRepeatUnder500ms()
-    {
-        var measured = await CachedAccessibleThreadsAsync(
-            "accessible-1000",
-            () => MeasureAccessibleThreadsLoadAsync(1000));
-
-        measured.ResultCount.Should().Be(1000);
-        measured.ColdMs.Should().BeLessThanOrEqualTo(500, measured.Describe());
-        measured.RepeatMs.Should().BeLessThanOrEqualTo(500, measured.Describe());
     }
 
     [TestCase(5)]
@@ -652,11 +618,6 @@ public sealed class TestHarnessPerformanceTierTests
         Func<Task<ToolRoundTripMeasurement>> factory) =>
         ToolMeasurements.GetOrAdd(key, _ => new Lazy<Task<ToolRoundTripMeasurement>>(factory)).Value;
 
-    private static Task<AccessibleThreadsLoadMeasurement> CachedAccessibleThreadsAsync(
-        string key,
-        Func<Task<AccessibleThreadsLoadMeasurement>> factory) =>
-        AccessibleMeasurements.GetOrAdd(key, _ => new Lazy<Task<AccessibleThreadsLoadMeasurement>>(factory)).Value;
-
     private static async Task<long> MeasureSequentialWarmCacheChatAsync(
         ChatHarnessHost host,
         Guid channelId,
@@ -978,65 +939,6 @@ public sealed class TestHarnessPerformanceTierTests
             providerMs);
     }
 
-    private static async Task<long> MeasureAccessibleThreadsZeroAsync()
-    {
-        await using var fixture = AccessibleThreadsFixture.Create();
-        var (agentId, channelId) = await fixture.SeedZeroThreadScenarioAsync();
-        using var doc = JsonDocument.Parse("{}");
-        await fixture.Module.ExecuteInlineToolAsync(
-            "list_accessible_threads",
-            doc.RootElement,
-            new InlineToolContext(agentId, channelId, null, "warm"),
-            fixture.Services,
-            default);
-
-        var sw = Stopwatch.StartNew();
-        await fixture.Module.ExecuteInlineToolAsync(
-            "list_accessible_threads",
-            doc.RootElement,
-            new InlineToolContext(agentId, channelId, null, "measure"),
-            fixture.Services,
-            default);
-        sw.Stop();
-        return sw.ElapsedMilliseconds;
-    }
-
-    private static async Task<AccessibleThreadsLoadMeasurement> MeasureAccessibleThreadsLoadAsync(int threadCount)
-    {
-        await using var fixture = AccessibleThreadsFixture.Create();
-        var (agentId, channelId) = await fixture.SeedThreadScenarioAsync(threadCount);
-        using var doc = JsonDocument.Parse("{}");
-
-        var coldSw = Stopwatch.StartNew();
-        var cold = await fixture.Module.ExecuteInlineToolAsync(
-            "list_accessible_threads",
-            doc.RootElement,
-            new InlineToolContext(agentId, channelId, null, "cold"),
-            fixture.Services,
-            default);
-        coldSw.Stop();
-
-        var repeatSw = Stopwatch.StartNew();
-        var repeat = await fixture.Module.ExecuteInlineToolAsync(
-            "list_accessible_threads",
-            doc.RootElement,
-            new InlineToolContext(agentId, channelId, null, "repeat"),
-            fixture.Services,
-            default);
-        repeatSw.Stop();
-
-        using var parsed = JsonDocument.Parse(repeat);
-        var resultCount = parsed.RootElement.GetArrayLength();
-        resultCount.Should().Be(threadCount);
-        cold.Should().Contain("Thread 0000");
-
-        return new AccessibleThreadsLoadMeasurement(
-            threadCount,
-            resultCount,
-            coldSw.ElapsedMilliseconds,
-            repeatSw.ElapsedMilliseconds);
-    }
-
     private static async Task<long> MeasureInlinePermissionCheckAsync()
     {
         await using var host = ChatHarnessHost.Create();
@@ -1204,12 +1106,12 @@ public sealed class TestHarnessPerformanceTierTests
     private static async Task<long> MeasureProviderResolutionAsync()
     {
         await using var host = ChatHarnessHost.Create();
-        var factory = host.Services.GetRequiredService<SharpClaw.Application.Core.Clients.ProviderApiClientFactory>();
-        factory.GetClient(TestHarnessConstants.PlainProviderKey);
+        var factory = host.Services.GetRequiredService<SharpClaw.Core.Clients.ProviderApiClientFactory>();
+        factory.GetClient(TestHarnessConstants.PlainProviderKey, ProviderClientOptions.Empty);
 
         var sw = Stopwatch.StartNew();
         for (var i = 0; i < 1_000; i++)
-            factory.GetClient(TestHarnessConstants.PlainProviderKey);
+            factory.GetClient(TestHarnessConstants.PlainProviderKey, ProviderClientOptions.Empty);
         sw.Stop();
         return sw.ElapsedMilliseconds;
     }
@@ -1502,16 +1404,6 @@ public sealed class TestHarnessPerformanceTierTests
 
 internal sealed record ToolRoundTripMeasurement(long ClientVisibleMs, long ProviderActualMs);
 
-internal sealed record AccessibleThreadsLoadMeasurement(
-    int ExpectedCount,
-    int ResultCount,
-    long ColdMs,
-    long RepeatMs)
-{
-    public string Describe() =>
-        $"expectedCount={ExpectedCount}, resultCount={ResultCount}, coldMs={ColdMs}, repeatMs={RepeatMs}";
-}
-
 internal sealed record HotPathSampleMeasurement(string Name, IReadOnlyList<double> SamplesMs)
 {
     public double AverageMs => SamplesMs.Average();
@@ -1597,121 +1489,4 @@ internal sealed record StreamingSurfaceSetMeasurement(
 
     public string Describe() =>
         $"{ApiStream.Describe()}; {Sse.Describe()}; {Gateway.Describe()}; slowestSurface={SlowestSurface}";
-}
-
-file sealed class AccessibleThreadsFixture : IAsyncDisposable
-{
-    private readonly ServiceProvider _provider;
-    private readonly AsyncServiceScope _scope;
-
-    private AccessibleThreadsFixture(ServiceProvider provider, AsyncServiceScope scope, AgentOrchestrationModule module)
-    {
-        _provider = provider;
-        _scope = scope;
-        Module = module;
-    }
-
-    public IServiceProvider Services => _scope.ServiceProvider;
-    public SharpClawDbContext Db => Services.GetRequiredService<SharpClawDbContext>();
-    public AgentOrchestrationModule Module { get; }
-
-    public static AccessibleThreadsFixture Create()
-    {
-        var module = new AgentOrchestrationModule();
-        var services = new ServiceCollection();
-        services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
-        services.AddDbContext<SharpClawDbContext>(
-            options => options.UseInMemoryDatabase(Guid.NewGuid().ToString("N")));
-        services.AddScoped<ISharpClawDataContext>(
-            sp => sp.GetRequiredService<SharpClawDbContext>());
-        services.AddSingleton<ModuleRegistry>();
-        module.ConfigureServices(services);
-
-        var provider = services.BuildServiceProvider();
-        provider.GetRequiredService<ModuleRegistry>().Register(module);
-        return new AccessibleThreadsFixture(provider, provider.CreateAsyncScope(), module);
-    }
-
-    public Task<(Guid AgentId, Guid ChannelId)> SeedZeroThreadScenarioAsync() =>
-        SeedThreadScenarioAsync(0);
-
-    public async Task<(Guid AgentId, Guid ChannelId)> SeedThreadScenarioAsync(int threadCount)
-    {
-        var now = DateTimeOffset.UtcNow;
-        var permissionSet = new PermissionSetDB
-        {
-            Id = Guid.NewGuid(),
-            CreatedAt = now,
-            UpdatedAt = now,
-            GlobalFlags =
-            [
-                new GlobalFlagDB
-                {
-                    Id = Guid.NewGuid(),
-                    FlagKey = ContextToolsPermissionKeys.CanReadCrossThreadHistory,
-                    Clearance = PermissionClearance.Independent,
-                    CreatedAt = now,
-                    UpdatedAt = now
-                }
-            ]
-        };
-        var role = new RoleDB
-        {
-            Id = Guid.NewGuid(),
-            Name = "Accessible Threads Role",
-            PermissionSetId = permissionSet.Id,
-            PermissionSet = permissionSet,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var agent = new AgentDB
-        {
-            Id = Guid.NewGuid(),
-            Name = "Accessible Threads Agent",
-            RoleId = role.Id,
-            Role = role,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var current = new ChannelDB
-        {
-            Id = Guid.NewGuid(),
-            Title = "Current",
-            AgentId = agent.Id,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-        var source = new ChannelDB
-        {
-            Id = Guid.NewGuid(),
-            Title = "Source",
-            AgentId = agent.Id,
-            CreatedAt = now,
-            UpdatedAt = now
-        };
-
-        Db.PermissionSets.Add(permissionSet);
-        Db.Roles.Add(role);
-        Db.Agents.Add(agent);
-        Db.Channels.AddRange(current, source);
-        for (var i = 0; i < threadCount; i++)
-        {
-            Db.ChatThreads.Add(new ChatThreadDB
-            {
-                Id = Guid.NewGuid(),
-                ChannelId = source.Id,
-                Name = $"Thread {i:D4}",
-                CreatedAt = now.AddMilliseconds(i),
-                UpdatedAt = now.AddMilliseconds(i)
-            });
-        }
-        await Db.SaveChangesAsync();
-        return (agent.Id, current.Id);
-    }
-
-    public async ValueTask DisposeAsync()
-    {
-        await _scope.DisposeAsync();
-        await _provider.DisposeAsync();
-    }
 }

@@ -1,0 +1,102 @@
+<Project>
+  <Target Name="_ResolvePackagedModulePayloadFiles">
+    <ItemGroup>
+      <_PackagedModuleDll Remove="@(_PackagedModuleDll)" />
+      <_PackagedModuleDependencyDll Remove="@(_PackagedModuleDependencyDll)" />
+      <_PackagedSidecarHostFile Remove="@(_PackagedSidecarHostFile)" />
+      <_PackagedModulePayloadDll Remove="@(_PackagedModulePayloadDll)" />
+      <_PackagedModuleManifest Remove="@(_PackagedModuleManifest)" />
+
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_EditorCommon)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_AgentOrchestration)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Metrics)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\SharpClaw.Modules.*.dll"
+                          Condition="'$(PkgSharpClaw_Modules_ModuleDev)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Anthropic.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Providers_Anthropic)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Google)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Google.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Providers_Google)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_LlamaSharp)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.LlamaSharp.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Providers_LlamaSharp)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Ollama)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Ollama.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Providers_Ollama)' != ''" />
+      <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.OpenAICompatible.dll"
+                          Condition="'$(PkgSharpClaw_Modules_Providers_OpenAICompatible)' != ''" />
+      <_PackagedSidecarHostFile Include="$(PkgSharpClaw_ModuleHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.ModuleHost.OutOfProcess*"
+                                Condition="'$(PkgSharpClaw_ModuleHost_OutOfProcess)' != ''" />
+
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_EditorCommon)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_VS2026Editor)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_VSCodeEditor)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_AgentOrchestration)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_Metrics)' != ''" />
+      <_PackagedModuleDependencyDll Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\*.dll"
+                                    Exclude="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\SharpClaw.*.dll"
+                                    Condition="'$(PkgSharpClaw_Modules_ModuleDev)' != ''" />
+
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_EditorCommon)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_editor_common</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_VS2026Editor)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_vs2026_editor</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_VSCodeEditor)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_vscode_editor</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_AgentOrchestration)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_agent_orchestration</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Metrics)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Metrics)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_metrics</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_ModuleDev)\sharpclaw\module.json')">
+        <ModuleId>sharpclaw_module_dev</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_anthropic\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Providers_Anthropic)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_anthropic\module.json')">
+        <ModuleId>sharpclaw_providers_anthropic</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_Google)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_google\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Providers_Google)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_google\module.json')">
+        <ModuleId>sharpclaw_providers_google</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_LlamaSharp)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_llamasharp\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Providers_LlamaSharp)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_llamasharp\module.json')">
+        <ModuleId>sharpclaw_providers_llamasharp</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_Ollama)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_ollama\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Providers_Ollama)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_ollama\module.json')">
+        <ModuleId>sharpclaw_providers_ollama</ModuleId>
+      </_PackagedModuleManifest>
+      <_PackagedModuleManifest Include="$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_openai_compat\module.json"
+                               Condition="Exists('$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\contentFiles\any\$(TargetFramework)\modules\sharpclaw_providers_openai_compat\module.json')">
+        <ModuleId>sharpclaw_providers_openai_compat</ModuleId>
+      </_PackagedModuleManifest>
+
+      <_PackagedModulePayloadDll Include="@(_PackagedModuleDll);@(_PackagedModuleDependencyDll);@(_PackagedSidecarHostFile)" />
+    </ItemGroup>
+  </Target>
+</Project>

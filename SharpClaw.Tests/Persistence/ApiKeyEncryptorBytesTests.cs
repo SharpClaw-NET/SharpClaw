@@ -1,6 +1,6 @@
 using System.Security.Cryptography;
 using System.Text;
-using SharpClaw.Utils.Security;
+using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Tests.Persistence;
 

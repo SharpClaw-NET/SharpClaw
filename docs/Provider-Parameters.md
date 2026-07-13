@@ -5,8 +5,8 @@ parameter system. For full details on any individual provider — wire
 format, supported parameters, ranges, and provider-specific behaviour —
 see the dedicated provider docs linked below.
 
-The canonical source of truth in code is
-[`CompletionParameterSpec.cs`](../SharpClaw.Application.Core/Clients/CompletionParameterSpec.cs).
+The canonical source of truth in code lives with the owning provider
+modules and the Runtime provider parameter validation surface.
 
 > ⚠️ **Completeness disclaimer:** Provider API surfaces are large and
 > change frequently. The typed completion parameter support documented
@@ -72,7 +72,7 @@ format examples, and provider-specific notes:
 | Mistral | `mistral` | OpenAI-compatible | [providers/Mistral.md](providers/Mistral.md) |
 | GitHub Copilot | `github-copilot` | OpenAI-compatible | [providers/GitHub-Copilot.md](providers/GitHub-Copilot.md) |
 | Custom | `custom` | OpenAI-compatible (user endpoint) | [providers/Custom.md](providers/Custom.md) |
-| LlamaSharp | `llamasharp` | In-process (GBNF grammar-constrained) | [providers/LlamaSharp.md](providers/LlamaSharp.md) |
+| LlamaSharp | `llamasharp` | Sidecar-local GBNF grammar-constrained | [providers/LlamaSharp.md](providers/LlamaSharp.md) |
 | Minimax | `minimax` | OpenAI-compatible | [providers/Minimax.md](providers/Minimax.md) |
 | Google Gemini (OpenAI) | `google-gemini-openai` | OpenAI-compatible | [providers/Google-Gemini-OpenAI.md](providers/Google-Gemini-OpenAI.md) |
 | Google Vertex AI (OpenAI) | `google-vertex-ai-openai` | OpenAI-compatible | [providers/Google-Vertex-AI-OpenAI.md](providers/Google-Vertex-AI-OpenAI.md) |

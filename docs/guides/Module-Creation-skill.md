@@ -5,10 +5,12 @@ Full human-readable guide: guides/Module-Creation-Guide.md
 ────────────────────────────────────────
 WHAT A MODULE IS
 ────────────────────────────────────────
-A C# class implementing ISharpClawModule compiled into the solution.
-Discovered automatically by ModuleLoader at startup.
+A manifest-backed module running in a sidecar process.
+C# modules still implement ISharpClawModule, but the parent host discovers
+module.json and talks to the module through the sidecar protocol.
 Enabled/disabled by the Modules section in Infrastructure/Environment/.env.
-Can be toggled at runtime with no restart: module enable/disable <id>
+Can be toggled at runtime without restarting the Core API process:
+module enable/disable <id>
 
 ────────────────────────────────────────
 REQUIRED INTERFACE MEMBERS
@@ -95,21 +97,21 @@ Tasks have no fixed step or trigger surface in core. Modules contribute via
 four interfaces in SharpClaw.Contracts.Tasks:
 
 ITaskStepDescriptorProvider
-  Method-call step descriptors registered with TaskStepRegistry.
+  Registration records for module methods callable from C# task scripts.
   Members: ModuleId, Descriptors (IReadOnlyList<TaskStepDescriptor>)
   Each descriptor's OwnerId must equal ModuleId.
-  Method names and step keys are unique across all modules.
+  Method names and runtime dispatch keys are unique across all modules.
   Register: services.AddSingleton<ITaskStepDescriptorProvider, MyProvider>()
 
 ITaskParserModuleExtension
-  Parser hints, event-handler trigger keys, and statement primitives.
+  Parser hints, method mappings, and event-handler trigger keys.
   Members:
-    StepKeyMappings: name → (StepKey, ModuleId) for context-API methods.
+    StepKeyMappings: name -> (runtime dispatch key, ModuleId) for context-API methods.
     EventTriggerMappings: name → (TriggerKey, ModuleId) for OnXxx handlers.
     SingleArgExpressionMethods: methods whose first arg is captured as Expression.
-    Primitives (TaskParserPrimitives?): wire-format step keys for statements
-      (declarations, assignments, control flow, return, delay, evaluate, log,
-      parse-response). Exactly one loaded module must supply this.
+    Core owns ordinary C# statement parsing. Do not add module language keys
+    for declarations, assignment, control flow, return, logging, delay,
+    structured response parsing, or cancellation waits.
     TriggerAttributeHandlers: name → ITaskTriggerAttributeHandler.
   Register: services.AddSingleton<ITaskParserModuleExtension, MyExtension>()
 

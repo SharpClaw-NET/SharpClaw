@@ -1,11 +1,11 @@
-using SharpClaw.Gateway.Abstractions;
+using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Gateway.Modules;
 using SharpClaw.Gateway.Security;
-using SharpClaw.Utils.Logging;
-using SharpClaw.Utils.Instances;
+using SharpClaw.Shared.Logging;
+using SharpClaw.Shared.Instances;
 using Serilog;
 using Serilog.Events;
 using SharpClaw.Gateway.Modules.Routing;
@@ -222,7 +222,7 @@ builder.Services.AddOpenApi(options =>
     {
         doc.Info.Title = "SharpClaw Gateway";
         doc.Info.Version = "v1";
-        doc.Info.Description = "Public REST gateway for the SharpClaw Application API.";
+        doc.Info.Description = "Public REST gateway for the SharpClaw Runtime Host.";
         return Task.CompletedTask;
     });
 });

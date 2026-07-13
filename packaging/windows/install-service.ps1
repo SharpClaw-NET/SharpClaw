@@ -4,7 +4,7 @@
 
 .DESCRIPTION
     Registers the staged API and Gateway executables produced by
-    `publish.ps1 -Include Server` (or -Include Core) as Windows Services
+    `scripts\publish.ps1 -Include Server` (or -Include Runtime) as Windows Services
     using sc.exe. Run from an elevated PowerShell prompt.
 
 .PARAMETER InstallDir
@@ -60,7 +60,7 @@ function Register-Service {
 
 Assert-Elevated
 
-$apiExe = Join-Path $InstallDir "api\SharpClaw.Application.API.exe"
+$apiExe = Join-Path $InstallDir "api\SharpClaw.Runtime.Host.exe"
 if (-not (Test-Path $apiExe)) {
     Write-Error "API executable not found at $apiExe"
     exit 1

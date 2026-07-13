@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Agents;
 using SharpClaw.Contracts.DTOs.Channels;
@@ -11,7 +11,7 @@ using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Modules.TestHarness;
+using SharpClaw.Tests.TestHarness;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -172,9 +172,9 @@ public sealed class TestHarnessCacheBehaviorTests
         var toolsKey = ChatCache.KeyEffectiveTools(seeded.Agent.Id, "all");
         cache.TryGet<object>(toolsKey, out _).Should().BeTrue();
 
-        host.Module.ResetDiagnostics();
+        host.Harness.ResetDiagnostics();
         await host.Chat.SendMessageAsync(seeded.Channel.Id, new ChatRequest("still warm"));
-        host.Module.PermissionDescriptorBuilds.Should().Be(0);
+        host.Harness.PermissionDescriptorBuilds.Should().Be(0);
         cache.TryGet<object>(toolsKey, out _).Should().BeTrue();
 
         await host.Services.GetRequiredService<AgentService>().UpdateAsync(

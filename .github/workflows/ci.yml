@@ -44,8 +44,6 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Services.HeaderTagProcessorTests'
           - domain: Core Chat Cache
             filter: 'FullyQualifiedName~SharpClaw.Tests.Services.ChatCacheTests'
-          - domain: Cross Thread History
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.CrossThreadHistoryTests'
           - domain: CLI Channel Commands
             filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.ChannelCliCommandTests'
           - domain: CLI REPL
@@ -80,30 +78,18 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.GatewayProcessManagerTests'
           - domain: Frontend Uno Client State
             filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.UnoClientStateTests'
-          - domain: Persistence Files
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.AtomicFileWriterTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DirectoryLockManagerTests|FullyQualifiedName~SharpClaw.Tests.Persistence.JsonFileEncryptionTests|FullyQualifiedName~SharpClaw.Tests.Persistence.JsonFilePersistenceServiceTests'
-          - domain: Persistence Cold Store
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ColdEntityIndexTests|FullyQualifiedName~SharpClaw.Tests.Persistence.ColdEntityStoreTests|FullyQualifiedName~SharpClaw.Tests.Persistence.ColdIndexMaintenanceServiceTests|FullyQualifiedName~SharpClaw.Tests.Persistence.PersistenceEntityResolverTests'
-          - domain: Persistence Integrity
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ChecksumManifestTests|FullyQualifiedName~SharpClaw.Tests.Persistence.EntityMigrationRegistryTests|FullyQualifiedName~SharpClaw.Tests.Persistence.JsonPersistenceHealthCheckTests|FullyQualifiedName~SharpClaw.Tests.Persistence.JsonSchemaVersionTests|FullyQualifiedName~SharpClaw.Tests.Persistence.QuarantineServiceTests'
-          - domain: Persistence Transactions
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.EventLogTests|FullyQualifiedName~SharpClaw.Tests.Persistence.FlushQueueTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SnapshotServiceTests|FullyQualifiedName~SharpClaw.Tests.Persistence.TransactionQueueTests|FullyQualifiedName~SharpClaw.Tests.Persistence.TwoPhaseCommitTests'
+          - domain: Persistence Provider Configuration
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
+          - domain: JSONColdStore Provider Paths
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.AuthServiceJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleStorageGatewayTests|FullyQualifiedName~SharpClaw.Tests.Modules.InProcessModuleJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskExecutionLifecycleTests.ScheduledJobWorker'
           - domain: Persistence Instances
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ModuleJsonPersistenceServiceTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
           - domain: Providers Capabilities
             filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests'
-          - domain: Providers Hosted OpenAI Compatible
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.DeepSeekApiClientTests|FullyQualifiedName~SharpClaw.Tests.Providers.EdenAIApiClientTests'
-          - domain: Providers Google
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.GoogleGeminiApiClientTests|FullyQualifiedName~SharpClaw.Tests.Providers.GoogleVertexAIApiClientTests'
           - domain: LlamaSharp Schema Conversion
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.GgufHeaderReaderTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpJsonSchemaConverterTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpRegexToGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpStringFormatGrammarsTests'
-          - domain: LlamaSharp Parameter Validation
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpValidator|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.ChatHeaderNoticesTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpRegexToGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpStringFormatGrammarsTests'
           - domain: LlamaSharp Tool Calling
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarShapeTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderImageTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.EnvelopeStreamWalkerTests'
-          - domain: LlamaSharp Local Inference
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LocalInference'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarShapeTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests'
           - domain: Tasks Scripts Compiler Parser
             filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptCompilerTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptParserTests'
           - domain: Tasks Scripts Semantics Validator
@@ -176,6 +162,8 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.SyntheticExternalModuleLifecycleTests'
           - domain: Module Foreign Runtime
             filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ForeignModule|FullyQualifiedName~SharpClaw.Tests.Modules.JavaScriptModuleSdkTests|FullyQualifiedName~SharpClaw.Tests.Modules.PythonModuleSdkTests'
+          - domain: Module Sidecar Parity
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledDotNetSidecarDefaultTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledTestHarnessSidecarConformanceTests|FullyQualifiedName~SharpClaw.Tests.Modules.OutOfProcessModuleHostTests|FullyQualifiedName~SharpClaw.Tests.Modules.SidecarReadinessInventoryTests'
           - domain: Module Harness Integration
             filter: 'FullyQualifiedName~ModuleRegistersDynamicProvidersToolsHeaderTagsAndCostFeed|FullyQualifiedName~ProviderCaptureRedactsSecretsButKeepsAssertablePromptShape'
           - domain: Module Harness Cost And Matrix

@@ -66,9 +66,8 @@ Standard OpenAI Chat Completions format. `reasoningEffort` is sent as
 ## `generation_config` unwrapping
 
 If you pass a `generation_config` wrapper in `providerParameters`, its
-inner keys are automatically promoted to the top level. This is handled
-by
-[`GoogleParameterTranslator`](../../SharpClaw.Application.Core/Clients/GoogleParameterTranslator.cs).
+inner keys are automatically promoted to the top level by the Google
+provider module package.
 
 ```json
 // You send:

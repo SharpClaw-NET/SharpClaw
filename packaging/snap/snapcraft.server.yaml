@@ -1,5 +1,5 @@
 # Snapcraft manifest for SharpClaw Server (headless)
-# Used by publish.ps1 -Package Snap when staging Server/Core builds.
+# Used by scripts/publish.ps1 when staging Server or Runtime builds.
 # __VERSION__ is replaced at build time.
 
 name: sharpclaw-server
@@ -16,7 +16,7 @@ confinement: strict
 
 apps:
   api:
-    command: api/SharpClaw.Application.API
+    command: api/SharpClaw.Runtime.Host
     daemon: simple
     install-mode: disable
     plugs:

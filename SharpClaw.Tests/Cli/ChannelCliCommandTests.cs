@@ -3,15 +3,18 @@ using Microsoft.EntityFrameworkCore.Storage;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using System.Text.Json;
-using SharpClaw.Application.API.Cli;
-using SharpClaw.Application.Core.Modules;
+using SharpClaw.Runtime.Host.Cli;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Application.Services;
+using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
-using SharpClaw.Infrastructure.Persistence;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Core.Conversation;
+using SharpClaw.Core.Modules;
+using SharpClaw.Core.Resources;
 
 namespace SharpClaw.Tests.Cli;
 
@@ -257,7 +260,13 @@ public sealed class ChannelCliCommandTests
             options.UseInMemoryDatabase(databaseName, databaseRoot));
         services.AddSingleton<IConfiguration>(new ConfigurationBuilder().Build());
         services.AddSingleton<ChatCache>();
+        services.AddSingleton<ConversationTopologyEngine>();
+        services.AddSingleton<ChatRuntimeInvalidationPlanner>();
+        services.AddSingleton<ConversationAdministrationEngine>();
+        services.AddSingleton<DefaultResourceAdministrationEngine>();
         services.AddScoped<SessionService>();
+        services.AddScoped<EfConversationAdministrationHost>();
+        services.AddScoped<EfDefaultResourceAdministrationHost>();
         services.AddScoped<ChannelService>();
         services.AddScoped<ContextService>();
         services.AddScoped<DefaultResourceSetService>();
@@ -357,7 +366,7 @@ public sealed class ChannelCliCommandTests
         return (channel.Id, agent.Id, context.Id, toolSet.Id);
     }
 
-    private sealed class TestDefaultResourceModule : ISharpClawModule, ISharpClawCoreModule
+    private sealed class TestDefaultResourceModule : ISharpClawCoreModule
     {
         public string Id => "test_default_resources";
 

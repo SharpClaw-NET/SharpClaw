@@ -874,8 +874,8 @@ applied automatically — you must trigger this explicitly.
 ```
 health
 ```
-Runs the JSON persistence health check and prints the status of all
-monitored components:
+Checks whether the configured EF provider is reachable and prints the
+database health response:
 
 | Icon | Status |
 |---|---|
@@ -883,9 +883,10 @@ monitored components:
 | ⚠ | Degraded |
 | ✗ | Unhealthy |
 
-Checks include: disk writability, pending transactions, quarantine count,
-flush backlog, checksums, event log integrity, snapshot age, and unclean
-shutdown sentinel.
+For `JsonFile`, this reaches the external JSONColdStore EF provider through
+the same DbContext path used by the application. SharpClaw no longer owns a
+local JSON flush queue, transaction journal, sentinel, or snapshot health
+engine.
 
 ---
 

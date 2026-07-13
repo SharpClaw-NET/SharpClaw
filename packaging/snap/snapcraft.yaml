@@ -21,7 +21,7 @@ confinement: strict
 
 apps:
   sharpclaw:
-    command: SharpClaw.Uno
+    command: SharpClaw.Client.Uno
     extensions: [gnome]
     desktop: snap/gui/sharpclaw.desktop
     plugs:

@@ -1,8 +1,7 @@
 using System.Text.Json;
-using SharpClaw.Application.Infrastructure.Tasks;
-using SharpClaw.Application.Infrastructure.Tasks.Models;
+using SharpClaw.Core.Tasks;
+using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Contracts.Tasks;
-using SharpClaw.Modules.AgentOrchestration;
 
 namespace SharpClaw.Tests.Tasks;
 
@@ -35,9 +34,9 @@ public class LoopTask
 
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
-        result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].StepKey.Should().Be(TaskScriptingStepKeys.Loop);
-        result.Plan.ExecutionSteps[0].VariableName.Should().Be("item");
+        result.Plan!.ExecutionStatements.Should().ContainSingle();
+        result.Plan.ExecutionStatements[0].StatementKey.Should().Be(TaskLanguageStatementKeys.Loop);
+        result.Plan.ExecutionStatements[0].VariableName.Should().Be("item");
         result.Plan.ParameterValues["Items"].Should().BeAssignableTo<List<object?>>();
     }
 
@@ -62,33 +61,8 @@ public class WhileTask
 
         result.Success.Should().BeTrue();
         result.Plan.Should().NotBeNull();
-        result.Plan!.ExecutionSteps.Should().ContainSingle();
-        result.Plan.ExecutionSteps[0].VariableName.Should().BeNull();
-    }
-
-    [Test]
-    public void Validate_ParseResponseWithUnknownType_ReturnsDiagnostic()
-    {
-        var source = """
-[Task("ParseTask")]
-public class ParseTask
-{
-    public async Task RunAsync(CancellationToken ct)
-    {
-        var parsed = ParseResponse<MissingType>("{}");
-        Log(parsed);
-    }
-}
-""";
-
-        var parseResult = TaskScriptEngine.Parse(source);
-        parseResult.Success.Should().BeTrue();
-        parseResult.Definition.Should().NotBeNull();
-
-        var validation = TaskScriptEngine.Validate(parseResult.Definition!);
-
-        validation.IsValid.Should().BeFalse();
-        validation.Diagnostics.Should().Contain(d => d.Code == "TASK108");
+        result.Plan!.ExecutionStatements.Should().ContainSingle();
+        result.Plan.ExecutionStatements[0].VariableName.Should().BeNull();
     }
 
     [Test]

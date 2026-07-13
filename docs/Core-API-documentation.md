@@ -1,4 +1,4 @@
-﻿# SharpClaw Core API Reference
+# SharpClaw Core API Reference
 
 > **Base URL:** `http://127.0.0.1:48923`
 >
@@ -2241,7 +2241,7 @@ Same fields as the request, plus an `id` field for the
 
 ## Local models
 
-In-process local model management for LLamaSharp. Endpoints live under
+LlamaSharp sidecar local model management. Endpoints live under
 `/models/local`.
 
 ### POST /models/local/download
@@ -2674,9 +2674,9 @@ bytes) after Base64 decoding. Got N bytes.` Both errors advise removing
 ## Env file management
 
 SharpClaw uses JSON-with-comments environment files that are loaded into
-`IConfiguration`. Core reads `SharpClaw.Application.Infrastructure/Environment/.env`
+`IConfiguration`. Core reads `SharpClaw.Runtime/INF/Environment/.env`
 and, in development, `.dev.env`. The Uno interface reads
-`SharpClaw.Uno/Environment/.env` and `.dev.env` directly from the client
+`SharpClaw.Client.Uno/Environment/.env` and `.dev.env` directly from the client
 process. The public gateway reads `SharpClaw.Gateway/Environment/.env`
 and `.dev.env` through `GatewayEnvironment.AddGatewayEnvironment()`.
 
@@ -2751,7 +2751,7 @@ Overwrite the Core `.env` file with new content.
 
 ### Core `.env` keys
 
-The Core template is `SharpClaw.Application.Infrastructure/Environment/.env.template`.
+The Core template is `SharpClaw.Runtime/INF/Environment/.env.template`.
 It includes the `Encryption` section for the at-rest encryption key and
 encryption toggles, the `Jwt` section for token signing, issuer, audience,
 and lifetimes, and the `Auth` section for local-only bypass switches.
@@ -2768,10 +2768,13 @@ when it reaches that budget.
 Database configuration lives in the `Database` section. `Database:Provider`
 accepts `JsonFile`, `Postgres`, `SqlServer`, or `SQLite`, and relational
 providers read their matching `ConnectionStrings` entry. The same section
-also holds the JSON persistence durability options such as checksums, event
-log retention, snapshots, async flush, detailed errors, and sensitive-data
-logging. Migrations remain manual and are not generated or run by editing
-the env file.
+also holds JSONColdStore provider options such as checksums, event log
+retention, snapshots, compression, startup mode, full-scan policy, detailed
+errors, and sensitive-data logging. Relational providers expose command
+timeout settings, and PostgreSQL plus SQL Server expose provider-level retry
+settings. SharpClaw does not run a local JSON persistence engine; JSON file
+storage behavior is owned by the JSONColdStore EF provider. Migrations remain
+manual and are not generated or run by editing the env file.
 
 `Admin` controls first-run admin seeding and permission reconciliation.
 `Local` controls LLamaSharp defaults such as GPU layers, context size,
@@ -2784,7 +2787,7 @@ module enablement.
 
 ### Interface `.env` keys
 
-The Interface template is `SharpClaw.Uno/Environment/.env.template`.
+The Interface template is `SharpClaw.Client.Uno/Environment/.env.template`.
 `Api:Url` selects the Core API URL and is also passed to a bundled backend
 as `ASPNETCORE_URLS` when the client launches one. `Backend:Enabled`
 controls bundled backend launch. `Gateway:Enabled` is false in the
@@ -3291,13 +3294,14 @@ For tutorial-style module workflows, see
 
 ## Bundled modules
 
-The current `DefaultModules` tree ships agent orchestration, editor common,
+The current bundled module set is restored from NuGet package payloads rather
+than from SharpClaw-owned module source. Agent orchestration, editor common,
 metrics, module development, provider modules for Anthropic, Google,
 LlamaSharp, Ollama, and OpenAI-compatible APIs, plus the VS 2026 and VS Code
-editor integrations. Older docs for removed or externalized modules may remain
-in the repository as historical references, but they are not part of the
-current bundled module set unless a deployment supplies them as external
-modules.
+editor integrations are package-owned modules. Older docs for removed or
+externalized modules may remain in the repository as historical references, but
+they are not part of the current bundled module set unless a deployment
+supplies them as external modules.
 
 For the current enablement keys and base/development defaults, see the
 [Module Enablement Guide](modules/Module-Enablement-Guide.md). For task and
