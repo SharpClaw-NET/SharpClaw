@@ -45,9 +45,9 @@ public class CoreDependencyGuardrailTests
         var root = FindSolutionRoot();
         var pipelineFiles = new[]
         {
-            Path.Combine(root, "SharpClaw.Runtime.BLL", "Services", "AgentJobService.cs"),
-            Path.Combine(root, "SharpClaw.Runtime.BLL", "Modules", "HostAgentJobController.cs"),
-            Path.Combine(root, "SharpClaw.Runtime.Host", "Handlers", "AgentJobHandlers.cs"),
+            Path.Combine(root, "SharpClaw.Runtime", "BLL", "Services", "AgentJobService.cs"),
+            Path.Combine(root, "SharpClaw.Runtime", "BLL", "Modules", "HostAgentJobController.cs"),
+            Path.Combine(root, "SharpClaw.Runtime", "Host", "Handlers", "AgentJobHandlers.cs"),
         };
         var forbiddenTerms = new[]
         {
