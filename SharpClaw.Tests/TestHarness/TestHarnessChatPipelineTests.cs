@@ -260,6 +260,17 @@ public sealed class TestHarnessChatPipelineTests
     public async Task StreamingChatAndSseForwardingMeetHardProviderPlusOverheadBudget()
     {
         await using var host = ChatHarnessHost.Create();
+
+        // Warm the first streaming pipeline before measuring its steady-state budget.
+        var warmup = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
+        await foreach (var _ in host.Chat.SendMessageStreamAsync(
+            warmup.Channel.Id,
+            new ChatRequest("stream warmup"),
+            (_, _) => Task.FromResult(true)))
+        {
+        }
+
+        host.Harness.Reset();
         var seeded = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
         host.Harness.ConfigureProvider(
             TestHarnessConstants.StreamingProviderKey,
@@ -290,7 +301,24 @@ public sealed class TestHarnessChatPipelineTests
         sw.Stop();
 
         events.Should().Contain(e => e.Type == ChatStreamEventType.Done);
+        var streamTiming = host.Harness.ProviderTimings.Single();
+        streamTiming.ConfiguredDelayMs.Should().Be(120);
+        streamTiming.ElapsedMs.Should().BeGreaterThanOrEqualTo(120);
         HarnessBudget.AssertWithin(sw.ElapsedMilliseconds, 120, 500, "streaming chat");
+
+        host.Harness.Reset();
+
+        // Warm the HTTP/SSE forwarding path independently from the measured request.
+        warmup = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
+        var warmupContext = new DefaultHttpContext();
+        await using var warmupBody = new MemoryStream();
+        warmupContext.Response.Body = warmupBody;
+        await ChatStreamHandlers.StreamChat(
+            warmupContext,
+            warmup.Channel.Id,
+            new ChatRequest("SSE warmup"),
+            host.Chat,
+            NullLoggerFactory.Instance);
 
         host.Harness.Reset();
         seeded = await host.SeedChatAsync(TestHarnessConstants.StreamingProviderKey);
@@ -324,6 +352,9 @@ public sealed class TestHarnessChatPipelineTests
             NullLoggerFactory.Instance);
         sw.Stop();
 
+        var sseTiming = host.Harness.ProviderTimings.Single();
+        sseTiming.ConfiguredDelayMs.Should().Be(120);
+        sseTiming.ElapsedMs.Should().BeGreaterThanOrEqualTo(120);
         HarnessBudget.AssertWithin(sw.ElapsedMilliseconds, 120, 500, "SSE forwarding");
         body.Position = 0;
         var sse = await new StreamReader(body).ReadToEndAsync();
