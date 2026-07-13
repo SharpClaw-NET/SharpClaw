@@ -164,6 +164,16 @@ public class BundledModuleOutputTests
             outputManifest.HostMode.Should().Be(module.HostMode);
             outputManifest.EntryAssembly.Should().Be(module.EntryAssembly);
         }
+
+        if (!IsDeveloperConfiguration())
+        {
+            File.Exists(Path.Combine(outputDir, "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll"))
+                .Should()
+                .BeFalse("the out-of-process TestHarness payload is developer-build only");
+            File.Exists(Path.Combine(outputDir, "modules", "sharpclaw_test_harness_out_of_process", "module.json"))
+                .Should()
+                .BeFalse("the out-of-process TestHarness manifest is developer-build only");
+        }
     }
 
     private static string ResolveApiOutputDirectory()
@@ -184,10 +194,12 @@ public class BundledModuleOutputTests
             Path.Combine(solutionRoot, "SharpClaw.DefaultModules", "TestHarness.OutOfProcess", "module.json"),
         };
 
-        var sourceModules = testHarnessManifests
-            .Where(path => File.Exists(path) && !IsBuildOutputPath(path))
-            .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
-            .Select(ReadBundledModuleExpectation);
+        var sourceModules = IsDeveloperConfiguration()
+            ? testHarnessManifests
+                .Where(path => File.Exists(path) && !IsBuildOutputPath(path))
+                .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                .Select(ReadBundledModuleExpectation)
+            : Enumerable.Empty<BundledModuleExpectation>();
         var packagedModules = ReadPackagedModuleExpectations();
 
         return sourceModules
@@ -406,6 +418,7 @@ public class BundledModuleOutputTests
         startInfo.ArgumentList.Add("-c");
         startInfo.ArgumentList.Add(ResolveConfiguration());
         startInfo.ArgumentList.Add("--no-build");
+        startInfo.ArgumentList.Add("--no-restore");
         startInfo.ArgumentList.Add("-o");
         startInfo.ArgumentList.Add(publishDir);
 
@@ -440,6 +453,9 @@ public class BundledModuleOutputTests
 
     private static string ResolveConfiguration()
         => new DirectoryInfo(ResolveTestOutputDirectory()).Parent!.Name;
+
+    private static bool IsDeveloperConfiguration() =>
+        string.Equals(ResolveConfiguration(), "Debug", StringComparison.OrdinalIgnoreCase);
 
     private static string ResolveSolutionRoot()
     {
