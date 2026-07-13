@@ -566,13 +566,16 @@ public sealed class ChatService(
         await foreach (var responseEvent in _chatStreaming.RunAsync(
             loopEvents,
             streamingState,
-            ct))
+            ct).WithCancellation(ct))
         {
             switch (responseEvent.Kind)
             {
                 case ChatStreamingResponseEventKind.StreamEvent:
                     if (responseEvent.StreamEvent is not null)
+                    {
                         yield return responseEvent.StreamEvent;
+                        ct.ThrowIfCancellationRequested();
+                    }
                     break;
                 case ChatStreamingResponseEventKind.Completed:
                     streamingResult = responseEvent.Result
