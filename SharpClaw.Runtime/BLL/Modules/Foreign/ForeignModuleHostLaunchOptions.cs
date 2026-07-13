@@ -2,7 +2,7 @@ namespace SharpClaw.Runtime.BLL.Modules.Foreign;
 
 internal sealed record class ForeignModuleHostLaunchOptions
 {
-    public static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(30);
+    public static readonly TimeSpan DefaultStartupTimeout = TimeSpan.FromSeconds(90);
     public static readonly TimeSpan DefaultShutdownTimeout = TimeSpan.FromSeconds(5);
 
     public required string ExecutablePath { get; init; }
