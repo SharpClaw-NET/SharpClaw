@@ -1401,7 +1401,6 @@ public sealed class ModuleService(
         var permissionSets = await db.PermissionSets
             .Include(p => p.ResourceAccesses)
             .Include(p => p.GlobalFlags)
-            .AsSplitQuery()
             .Where(p => p.ResourceAccesses.Any(a => a.ResourceId == WellKnownIds.AllResources))
             .ToListAsync(ct);
 
