@@ -237,7 +237,7 @@ jobs:
           - domain: Tools Provider Stream Serial
             filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_100AllowedNoOpToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_100DeniedToolCalls'
           - domain: Tools Provider Stream Parallel
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedNoOpToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls'
+            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls'
           - domain: Accessible Threads
             filter: 'FullyQualifiedName~PerformanceGate_AccessibleThreads'
           - domain: Prompt Assembly
