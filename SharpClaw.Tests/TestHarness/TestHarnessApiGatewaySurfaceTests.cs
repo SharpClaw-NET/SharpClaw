@@ -123,7 +123,7 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         var sse = await new StreamReader(body).ReadToEndAsync();
         sse.Should().Contain("event: Error");
         sse.Should().Contain("\"type\":\"Error\"");
-        sse.Should().Contain("test harness configured mid-stream failure");
+        sse.Should().Contain("ResponseEnded");
     }
 
     [Test]
