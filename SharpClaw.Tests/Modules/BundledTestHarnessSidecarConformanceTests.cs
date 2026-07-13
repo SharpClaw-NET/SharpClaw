@@ -167,7 +167,11 @@ public sealed class BundledTestHarnessSidecarConformanceTests
         }
 
         File.Copy(
-            Path.Combine(ResolveRepoRoot(), "SharpClaw.DefaultModules.TestHarness.OutOfProcess", "module.json"),
+            Path.Combine(
+                ResolveRepoRoot(),
+                "SharpClaw.DefaultModules",
+                "TestHarness.OutOfProcess",
+                "module.json"),
             Path.Combine(moduleDir, "module.json"),
             overwrite: true);
     }

@@ -178,6 +178,14 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Checkout ModuleSDK test fixture
+        if: matrix.domain == 'Module Foreign Runtime'
+        uses: actions/checkout@v4
+        with:
+          repository: SharpClaw-NET/SharpClaw.ModuleSDK
+          path: SharpClaw.ModuleSDK
+          ref: main
+
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:

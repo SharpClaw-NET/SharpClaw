@@ -10,7 +10,7 @@ namespace SharpClaw.Tests.Modules;
 [TestFixture]
 public sealed class SidecarReadinessInventoryTests
 {
-    private static readonly string[] ExpectedModuleDlls =
+    private static readonly string[] ExpectedPackagedModuleDlls =
     [
         "SharpClaw.Modules.AgentOrchestration.dll",
         "SharpClaw.Modules.EditorCommon.dll",
@@ -21,12 +21,11 @@ public sealed class SidecarReadinessInventoryTests
         "SharpClaw.Modules.Providers.LlamaSharp.dll",
         "SharpClaw.Modules.Providers.Ollama.dll",
         "SharpClaw.Modules.Providers.OpenAICompatible.dll",
-        "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll",
         "SharpClaw.Modules.VS2026Editor.dll",
         "SharpClaw.Modules.VSCodeEditor.dll",
     ];
 
-    private static readonly Dictionary<string, string[]> ExpectedBlockerKeys = new(StringComparer.Ordinal)
+    private static readonly Dictionary<string, string[]> ExpectedPackagedBlockerKeys = new(StringComparer.Ordinal)
     {
         ["sharpclaw_agent_orchestration"] = [],
         ["sharpclaw_editor_common"] = [],
@@ -37,7 +36,6 @@ public sealed class SidecarReadinessInventoryTests
         ["sharpclaw_providers_llamasharp"] = [],
         ["sharpclaw_providers_ollama"] = [],
         ["sharpclaw_providers_openai_compat"] = [],
-        ["sharpclaw_test_harness_out_of_process"] = [],
         ["sharpclaw_vs2026_editor"] = [],
         ["sharpclaw_vscode_editor"] = [],
     };
@@ -46,10 +44,11 @@ public sealed class SidecarReadinessInventoryTests
     public void BundledSidecarReadinessInventoryIncludesEveryBundledModule()
     {
         var reports = AnalyzeBundledModules();
+        var expectedBlockerKeys = ExpectedBlockerKeys();
 
         reports.Select(report => report.ModuleId)
             .Should()
-            .Equal(ExpectedBlockerKeys.Keys.Order(StringComparer.Ordinal));
+            .Equal(expectedBlockerKeys.Keys.Order(StringComparer.Ordinal));
 
         reports.Should().OnlyContain(report => !string.IsNullOrWhiteSpace(report.ModuleType));
         reports.Should().OnlyContain(report => !string.IsNullOrWhiteSpace(report.AssemblyName));
@@ -59,7 +58,7 @@ public sealed class SidecarReadinessInventoryTests
     public void BundledSidecarReadinessInventoryCapturesKnownProtocolGaps()
     {
         var reports = AnalyzeBundledModules();
-        var expected = ExpectedBlockerKeys.ToDictionary(
+        var expected = ExpectedBlockerKeys().ToDictionary(
             pair => pair.Key,
             pair => string.Join("|", pair.Value.Order(StringComparer.Ordinal)),
             StringComparer.Ordinal);
@@ -72,21 +71,7 @@ public sealed class SidecarReadinessInventoryTests
         reports.Where(report => report.IsReadyForSidecarDefault)
             .Select(report => report.ModuleId)
             .Should()
-            .Equal(
-            [
-                "sharpclaw_agent_orchestration",
-                "sharpclaw_editor_common",
-                "sharpclaw_metrics",
-                "sharpclaw_module_dev",
-                "sharpclaw_providers_anthropic",
-                "sharpclaw_providers_google",
-                "sharpclaw_providers_llamasharp",
-                "sharpclaw_providers_ollama",
-                "sharpclaw_providers_openai_compat",
-                "sharpclaw_test_harness_out_of_process",
-                "sharpclaw_vs2026_editor",
-                "sharpclaw_vscode_editor",
-            ]);
+            .Equal(ExpectedReadyModuleIds());
     }
 
     [Test]
@@ -100,7 +85,14 @@ public sealed class SidecarReadinessInventoryTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        sidecarModuleIds.Should().Contain("sharpclaw_test_harness_out_of_process");
+        if (IsDeveloperConfiguration())
+        {
+            sidecarModuleIds.Should().Contain("sharpclaw_test_harness_out_of_process");
+        }
+        else
+        {
+            sidecarModuleIds.Should().NotContain("sharpclaw_test_harness_out_of_process");
+        }
         foreach (var moduleId in sidecarModuleIds)
         {
             reports.Should().ContainKey(moduleId);
@@ -138,13 +130,16 @@ public sealed class SidecarReadinessInventoryTests
             .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
                                 && finding.Key == "tools.job");
 
-        reports["sharpclaw_test_harness_out_of_process"].Findings
-            .Should()
-            .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
-                                && finding.Key == "tools.inline")
-            .And
-            .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
-                                && finding.Key == "tools.job");
+        if (IsDeveloperConfiguration())
+        {
+            reports["sharpclaw_test_harness_out_of_process"].Findings
+                .Should()
+                .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
+                                    && finding.Key == "tools.inline")
+                .And
+                .Contain(finding => finding.Kind == SidecarReadinessFindingKind.CoveredByCurrentProtocol
+                                    && finding.Key == "tools.job");
+        }
 
         reports["sharpclaw_editor_common"].Findings
             .Should()
@@ -165,7 +160,7 @@ public sealed class SidecarReadinessInventoryTests
         var moduleType = typeof(ISharpClawCoreModule);
         var modules = new List<ISharpClawCoreModule>();
 
-        foreach (var dllName in ExpectedModuleDlls)
+        foreach (var dllName in ExpectedModuleDlls())
         {
             var dllPath = Path.Combine(apiOutputDir, dllName);
             File.Exists(dllPath).Should().BeTrue($"'{dllName}' must be present in API output");
@@ -186,6 +181,54 @@ public sealed class SidecarReadinessInventoryTests
         return modules.OrderBy(module => module.Id, StringComparer.Ordinal).ToArray();
     }
 
+    private static IEnumerable<string> ExpectedModuleDlls()
+    {
+        foreach (var dllName in ExpectedPackagedModuleDlls)
+            yield return dllName;
+
+        if (IsDeveloperConfiguration())
+            yield return "SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll";
+    }
+
+    private static IReadOnlyDictionary<string, string[]> ExpectedBlockerKeys()
+    {
+        var expected = new Dictionary<string, string[]>(ExpectedPackagedBlockerKeys, StringComparer.Ordinal);
+        if (IsDeveloperConfiguration())
+            expected["sharpclaw_test_harness_out_of_process"] = [];
+
+        return expected;
+    }
+
+    private static IEnumerable<string> ExpectedReadyModuleIds()
+    {
+        var expected = new List<string>
+        {
+            "sharpclaw_agent_orchestration",
+            "sharpclaw_editor_common",
+            "sharpclaw_metrics",
+            "sharpclaw_module_dev",
+            "sharpclaw_providers_anthropic",
+            "sharpclaw_providers_google",
+            "sharpclaw_providers_llamasharp",
+            "sharpclaw_providers_ollama",
+            "sharpclaw_providers_openai_compat",
+            "sharpclaw_vs2026_editor",
+            "sharpclaw_vscode_editor",
+        };
+
+        if (IsDeveloperConfiguration())
+            expected.Add("sharpclaw_test_harness_out_of_process");
+
+        return expected.Order(StringComparer.Ordinal);
+    }
+
+    private static bool IsDeveloperConfiguration()
+    {
+        var testBinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+        var configuration = new DirectoryInfo(testBinDir).Parent!.Name;
+        return string.Equals(configuration, "Debug", StringComparison.OrdinalIgnoreCase);
+    }
+
     private static string ResolveApiOutputDirectory()
     {
         var testBinDir = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
@@ -193,7 +236,7 @@ public sealed class SidecarReadinessInventoryTests
         var config = new DirectoryInfo(testBinDir).Parent!.Name;
         var tfm = new DirectoryInfo(testBinDir).Name;
 
-        return Path.Combine(solutionRoot, "SharpClaw.Runtime.Host", "bin", config, tfm);
+        return Path.Combine(solutionRoot, "SharpClaw.Runtime", "Host", "bin", config, tfm);
     }
 
     private static IReadOnlyList<(ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo)>
