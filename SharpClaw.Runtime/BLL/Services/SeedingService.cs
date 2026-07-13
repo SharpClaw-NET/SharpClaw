@@ -29,6 +29,7 @@ public sealed class SeedingService(
     AdminPermissionSeedEngine adminPermissions) : IHostedLifecycleService
 {
     private const string AdminRoleName = "Admin";
+    private const int StartupWriterLockRetryAttempts = 8;
 
     public Task StartingAsync(CancellationToken cancellationToken) => SeedAsync(cancellationToken);
 
@@ -62,9 +63,9 @@ public sealed class SeedingService(
                 // No permission set at all - create the full set.
                 var ps = CreateAdminPermissions();
                 db.PermissionSets.Add(ps);
-                await db.SaveChangesAsync(ct);
+                await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
                 existing.PermissionSetId = ps.Id;
-                await db.SaveChangesAsync(ct);
+                await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
             }
             else if (configuration.GetValue<bool>("Admin:ReconcilePermissions"))
             {
@@ -80,11 +81,11 @@ public sealed class SeedingService(
 
         var permissionSet = CreateAdminPermissions();
         db.PermissionSets.Add(permissionSet);
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
 
         var role = new RoleDB { Name = AdminRoleName, PermissionSetId = permissionSet.Id };
         db.Roles.Add(role);
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
 
         return role;
     }
@@ -193,7 +194,7 @@ public sealed class SeedingService(
         if (plan.HasChanges)
         {
             logger.LogInformation("Reconciled admin permissions — added missing grants.");
-            await db.SaveChangesAsync(ct);
+            await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
         }
     }
 
@@ -228,7 +229,7 @@ public sealed class SeedingService(
         };
 
         db.Users.Add(user);
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
     }
 
     private async Task ValidateAnonymousUserAsync(
@@ -287,6 +288,50 @@ public sealed class SeedingService(
             });
         }
 
-        await db.SaveChangesAsync(ct);
+        await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
+    }
+
+    private async Task SaveChangesWithStartupWriterLockRetryAsync(
+        SharpClawDbContext db,
+        CancellationToken ct)
+    {
+        var delay = TimeSpan.FromMilliseconds(125);
+        for (var attempt = 1; ; attempt++)
+        {
+            try
+            {
+                await db.SaveChangesAsync(ct);
+                return;
+            }
+            catch (InvalidOperationException ex)
+                when (IsJsonColdStoreWriterLockConflict(ex)
+                      && attempt < StartupWriterLockRetryAttempts)
+            {
+                logger.LogWarning(
+                    ex,
+                    "Startup seeding hit a transient JSONColdStore writer lock conflict. Retrying attempt {Attempt}/{MaxAttempts} after {DelayMs} ms.",
+                    attempt,
+                    StartupWriterLockRetryAttempts,
+                    (int)delay.TotalMilliseconds);
+
+                await Task.Delay(delay, ct);
+                delay = TimeSpan.FromMilliseconds(Math.Min(delay.TotalMilliseconds * 2, 1_000));
+            }
+        }
+    }
+
+    internal static bool IsJsonColdStoreWriterLockConflict(Exception ex)
+    {
+        for (var current = ex; current is not null; current = current.InnerException)
+        {
+            if (current.Message.Contains(
+                    "JSONColdStore database writer lock is already held",
+                    StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 }

@@ -23,6 +23,25 @@ namespace SharpClaw.Tests.Services;
 public sealed class SeedingServiceTests
 {
     [Test]
+    public void IsJsonColdStoreWriterLockConflict_WhenProviderLockMessageIsNested_ReturnsTrue()
+    {
+        var ex = new InvalidOperationException(
+            "Save failed.",
+            new InvalidOperationException(
+                "The JSONColdStore database writer lock is already held by process 2172."));
+
+        SeedingService.IsJsonColdStoreWriterLockConflict(ex).Should().BeTrue();
+    }
+
+    [Test]
+    public void IsJsonColdStoreWriterLockConflict_WhenUnrelatedInvalidOperation_ReturnsFalse()
+    {
+        var ex = new InvalidOperationException("The provider rejected this query.");
+
+        SeedingService.IsJsonColdStoreWriterLockConflict(ex).Should().BeFalse();
+    }
+
+    [Test]
     public async Task StartingAsync_WhenAnonymousUsernameIsMissing_FailsStartup()
     {
         await using var provider = CreateAnonymousUserProvider(
