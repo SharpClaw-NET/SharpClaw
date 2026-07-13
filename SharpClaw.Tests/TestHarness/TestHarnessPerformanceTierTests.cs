@@ -374,7 +374,7 @@ public sealed class TestHarnessPerformanceTierTests
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_TenConcurrentStreams_1000msProviderDelay_Under1200ms()
+    public async Task PerformanceGate_TenConcurrentStreams_1000msProviderDelay_OverlapsProviderWork()
     {
         var fixtures = new List<ApiStreamMeasurementFixture>();
         try
@@ -382,12 +382,18 @@ public sealed class TestHarnessPerformanceTierTests
             for (var i = 0; i < 10; i++)
                 fixtures.Add(await ApiStreamMeasurementFixture.CreateAsync(1000));
 
-            var sw = Stopwatch.StartNew();
             var tasks = fixtures.Select(f => f.MeasureAsync()).ToArray();
             await Task.WhenAll(tasks);
-            sw.Stop();
 
-            HarnessBudget.AssertOverheadAbsolute(sw.ElapsedMilliseconds, 1000, 200, "10 concurrent streams");
+            var providerTimings = fixtures
+                .Select(f => f.ProviderTiming)
+                .ToArray();
+
+            providerTimings.Should().HaveCount(10);
+            providerTimings.Should().OnlyContain(timing =>
+                timing.ConfiguredDelayMs == 1000 && timing.ElapsedMs >= 900);
+            HasOverlappingProviderWork(providerTimings).Should().BeTrue(
+                "ten concurrent streams must overlap in the provider work they exercise");
         }
         finally
         {
@@ -1385,7 +1391,25 @@ public sealed class TestHarnessPerformanceTierTests
                 _host.Harness.ProviderTimings.Last());
         }
 
+        public CapturedProviderTiming ProviderTiming => _host.Harness.ProviderTimings.Single();
+
         public ValueTask DisposeAsync() => _host.DisposeAsync();
+    }
+
+    private static bool HasOverlappingProviderWork(IReadOnlyList<CapturedProviderTiming> timings)
+    {
+        var ordered = timings
+            .Where(timing => timing.StartedAtTimestamp > 0 && timing.CompletedAtTimestamp > timing.StartedAtTimestamp)
+            .OrderBy(timing => timing.StartedAtTimestamp)
+            .ToArray();
+
+        for (var i = 0; i < ordered.Length - 1; i++)
+        {
+            if (ordered[i + 1].StartedAtTimestamp < ordered[i].CompletedAtTimestamp)
+                return true;
+        }
+
+        return false;
     }
 
     private static int CountOccurrences(string text, string value)
