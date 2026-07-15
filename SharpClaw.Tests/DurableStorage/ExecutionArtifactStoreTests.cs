@@ -92,6 +92,105 @@ public sealed class ExecutionArtifactStoreTests
     }
 
     [Test]
+    public async Task OpenRead_RejectsRangeLengthThatOverflowsTheArtifactEnd()
+    {
+        var root = CreateRoot();
+        var ownerId = Guid.NewGuid();
+        var store = new ExecutionArtifactStore(root, TestKey);
+        var descriptor = await PutAsync(store, ownerId, "range");
+
+        Func<Task> overflowingRange = async () =>
+        {
+            await using var handle = await store.OpenReadAsync(
+                descriptor.Id,
+                ExecutionOwnerKind.AgentJob,
+                ownerId,
+                new ArtifactRange(1, long.MaxValue));
+        };
+
+        await overflowingRange.Should().ThrowAsync<ArgumentOutOfRangeException>();
+    }
+
+    [Test]
+    public async Task OpenRead_RejectsAuthenticatedChunkCountBeyondEncodedFileBounds()
+    {
+        var root = CreateRoot();
+        var ownerId = Guid.NewGuid();
+        var store = new ExecutionArtifactStore(root, TestKey);
+        var descriptor = await PutAsync(store, ownerId, "chunk-count");
+        var path = FindPath(root, descriptor.Id);
+        var encoded = await File.ReadAllBytesAsync(path);
+        var offsets = LocateMetadataOffsets(encoded);
+        BitConverter.GetBytes(100_000).CopyTo(encoded, offsets.ChunkCount);
+        AuthenticateHeader(encoded, offsets.Authentication);
+        await File.WriteAllBytesAsync(path, encoded);
+
+        Func<Task> excessiveChunkCount = async () =>
+        {
+            await using var handle = await store.OpenReadAsync(
+                descriptor.Id,
+                ExecutionOwnerKind.AgentJob,
+                ownerId);
+        };
+
+        await excessiveChunkCount.Should()
+            .ThrowAsync<InvalidDataException>()
+            .WithMessage("Artifact chunk count exceeds configured or encoded bounds.");
+    }
+
+    [Test]
+    public async Task OpenRead_RejectsAuthenticatedLengthBeyondConfiguredMaximum()
+    {
+        var root = CreateRoot();
+        var ownerId = Guid.NewGuid();
+        const int maximumBytes = 64 * 1024;
+        var store = new ExecutionArtifactStore(root, TestKey, maximumBytes);
+        var descriptor = await PutAsync(store, ownerId, "configured-bound");
+        var path = FindPath(root, descriptor.Id);
+        var encoded = await File.ReadAllBytesAsync(path);
+        var offsets = LocateMetadataOffsets(encoded);
+        BitConverter.GetBytes((long)maximumBytes + 1).CopyTo(encoded, offsets.Length);
+        AuthenticateHeader(encoded, offsets.Authentication);
+        await File.WriteAllBytesAsync(path, encoded);
+
+        Func<Task> excessiveLength = async () =>
+        {
+            await using var handle = await store.OpenReadAsync(
+                descriptor.Id,
+                ExecutionOwnerKind.AgentJob,
+                ownerId);
+        };
+
+        await excessiveLength.Should()
+            .ThrowAsync<InvalidDataException>()
+            .WithMessage("Artifact metadata is invalid.");
+    }
+
+    [Test]
+    public async Task PutAndOpenRead_FillsCanonicalChunksAcrossShortSourceReads()
+    {
+        var root = CreateRoot();
+        var ownerId = Guid.NewGuid();
+        var store = new ExecutionArtifactStore(root, TestKey);
+        var payload = RandomNumberGenerator.GetBytes(150_000);
+        await using var source = new ShortReadStream(payload, maximumReadBytes: 17);
+
+        var descriptor = await store.PutAsync(
+            source,
+            new ArtifactWriteRequest(
+                ExecutionOwnerKind.AgentJob,
+                ownerId,
+                "application/octet-stream"));
+        await using var handle = await store.OpenReadAsync(
+            descriptor.Id,
+            ExecutionOwnerKind.AgentJob,
+            ownerId);
+
+        handle.Should().NotBeNull();
+        (await ReadAllAsync(handle!.Content)).Should().Equal(payload);
+    }
+
+    [Test]
     public async Task OpenRead_AuthenticatesHeaderOwnershipAndCiphertext()
     {
         var root = CreateRoot();
@@ -245,10 +344,43 @@ public sealed class ExecutionArtifactStoreTests
         Directory.GetFiles(root, artifactId.ToString("N") + ".scartifact", SearchOption.AllDirectories)
             .Single();
 
+    private static (int Length, int ChunkCount, int Authentication) LocateMetadataOffsets(
+        ReadOnlySpan<byte> encoded)
+    {
+        var offset = 8 + 16 + sizeof(int) + 16 + sizeof(long);
+        var mediaTypeLength = BitConverter.ToInt32(encoded.Slice(offset, sizeof(int)));
+        offset += sizeof(int) + mediaTypeLength;
+        var previewLength = BitConverter.ToInt32(encoded.Slice(offset, sizeof(int)));
+        offset += sizeof(int) + previewLength;
+        var lengthOffset = offset;
+        var chunkCountOffset = lengthOffset + sizeof(long) + 32;
+        return (lengthOffset, chunkCountOffset, chunkCountOffset + sizeof(int));
+    }
+
+    private static void AuthenticateHeader(byte[] encoded, int authenticationOffset)
+    {
+        using var hmac = new HMACSHA256(TestKey);
+        var authentication = hmac.ComputeHash(encoded, 0, authenticationOffset);
+        authentication.CopyTo(encoded, authenticationOffset);
+    }
+
     private static async Task<byte[]> ReadAllAsync(Stream stream)
     {
         await using var output = new MemoryStream();
         await stream.CopyToAsync(output);
         return output.ToArray();
+    }
+
+    private sealed class ShortReadStream(byte[] payload, int maximumReadBytes)
+        : MemoryStream(payload, writable: false)
+    {
+        public override ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            return base.ReadAsync(
+                buffer[..Math.Min(buffer.Length, maximumReadBytes)],
+                cancellationToken);
+        }
     }
 }

@@ -63,7 +63,10 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
 {
     private static readonly byte[] Magic = "SCART001"u8.ToArray();
     private const int ChunkBytes = 64 * 1024;
+    private const int ChunkMetadataBytes = sizeof(int) + 12 + 16 + sizeof(int);
     private const int HeaderAuthenticationBytes = 32;
+    private const long MaximumRepresentableArtifactBytes =
+        (long)int.MaxValue * ChunkBytes;
     private readonly string _root;
     private readonly byte[] _key;
     private readonly long _maxArtifactBytes;
@@ -78,7 +81,8 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
             throw new ArgumentException(
                 "Artifact encryption key must contain 256 bits.",
                 nameof(encryptionKey));
-        if (maxArtifactBytes < ChunkBytes)
+        if (maxArtifactBytes < ChunkBytes
+            || maxArtifactBytes > MaximumRepresentableArtifactBytes)
             throw new ArgumentOutOfRangeException(nameof(maxArtifactBytes));
 
         _root = Path.GetFullPath(Path.Combine(durableRoot, "artifacts"));
@@ -137,8 +141,17 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
                 var buffer = new byte[ChunkBytes];
                 while (true)
                 {
-                    var read = await content.ReadAsync(buffer, cancellationToken)
-                        .ConfigureAwait(false);
+                    var read = 0;
+                    while (read < buffer.Length)
+                    {
+                        var current = await content.ReadAsync(
+                                buffer.AsMemory(read),
+                                cancellationToken)
+                            .ConfigureAwait(false);
+                        if (current == 0)
+                            break;
+                        read += current;
+                    }
                     if (read == 0)
                         break;
                     length = checked(length + read);
@@ -206,7 +219,11 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
         if (!File.Exists(path))
             return null;
 
-        var stream = await ArtifactDecryptStream.OpenAsync(path, _key, cancellationToken)
+        var stream = await ArtifactDecryptStream.OpenAsync(
+                path,
+                _key,
+                _maxArtifactBytes,
+                cancellationToken)
             .ConfigureAwait(false);
         if (stream.Descriptor.Id != artifactId)
         {
@@ -229,8 +246,9 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
                 await stream.DisposeAsync().ConfigureAwait(false);
                 throw new ArgumentOutOfRangeException(nameof(range));
             }
-            var length = range.Length ?? stream.Length - range.Offset;
-            if (length < 0 || range.Offset + length > stream.Length)
+            var availableLength = stream.Length - range.Offset;
+            var length = range.Length ?? availableLength;
+            if (length < 0 || length > availableLength)
             {
                 await stream.DisposeAsync().ConfigureAwait(false);
                 throw new ArgumentOutOfRangeException(nameof(range));
@@ -302,6 +320,7 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
             await using var stream = await ArtifactDecryptStream.OpenAsync(
                     path,
                     _key,
+                    _maxArtifactBytes,
                     cancellationToken)
                 .ConfigureAwait(false);
             var maximumAge = stream.Descriptor.OwnerKind switch
@@ -464,6 +483,7 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
         await using var stream = await ArtifactDecryptStream.OpenAsync(
             path,
             _key,
+            _maxArtifactBytes,
             cancellationToken).ConfigureAwait(false);
         using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
         var buffer = new byte[ChunkBytes];
@@ -490,6 +510,13 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
         artifactId.TryWriteBytes(data);
         BitConverter.TryWriteBytes(data.AsSpan(16), chunkIndex);
         return data;
+    }
+
+    private static int GetRequiredChunkCount(long length)
+    {
+        return length == 0
+            ? 0
+            : checked((int)(((length - 1) / ChunkBytes) + 1));
     }
 
     private sealed class ArtifactDecryptStream : Stream
@@ -530,6 +557,7 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
         public static async Task<ArtifactDecryptStream> OpenAsync(
             string path,
             byte[] key,
+            long maxArtifactBytes,
             CancellationToken cancellationToken)
         {
             var file = new FileStream(
@@ -578,12 +606,25 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
                 var chunkCount = await ReadInt32Async(file, cancellationToken)
                     .ConfigureAwait(false);
                 if (length < 0
+                    || length > maxArtifactBytes
                     || chunkCount < 0
                     || !Enum.IsDefined(ownerKind)
                     || id == Guid.Empty
                     || ownerId == Guid.Empty)
                     throw new InvalidDataException("Artifact metadata is invalid.");
                 var authenticationOffset = file.Position;
+                var encodedBytesAfterMetadata = file.Length - authenticationOffset;
+                var expectedChunkCount = GetRequiredChunkCount(length);
+                var minimumEncodedChunkBytes =
+                    (long)chunkCount * (ChunkMetadataBytes + 1);
+                if (chunkCount != expectedChunkCount
+                    || encodedBytesAfterMetadata < HeaderAuthenticationBytes
+                    || minimumEncodedChunkBytes
+                    > encodedBytesAfterMetadata - HeaderAuthenticationBytes)
+                {
+                    throw new InvalidDataException(
+                        "Artifact chunk count exceeds configured or encoded bounds.");
+                }
                 var authentication = new byte[HeaderAuthenticationBytes];
                 await ExecutionArtifactStore.ReadExactlyAsync(
                     file,
@@ -620,7 +661,12 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
                         cancellationToken).ConfigureAwait(false);
                     var cipherLength = await ReadInt32Async(file, cancellationToken)
                         .ConfigureAwait(false);
-                    if (plainLength < 0 || plainLength > ChunkBytes || cipherLength != plainLength)
+                    var expectedPlainLength = checked((int)Math.Min(
+                        ChunkBytes,
+                        length - plaintextOffset));
+                    if (plainLength != expectedPlainLength
+                        || cipherLength != plainLength
+                        || cipherLength > file.Length - file.Position)
                         throw new InvalidDataException("Artifact chunk metadata is invalid.");
                     chunks.Add(new ChunkInfo(
                         file.Position,
@@ -629,7 +675,7 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
                         nonce,
                         tag));
                     file.Position += cipherLength;
-                    plaintextOffset += plainLength;
+                    plaintextOffset = checked(plaintextOffset + plainLength);
                 }
                 if (plaintextOffset != length || file.Position != file.Length)
                     throw new InvalidDataException("Artifact chunk index is inconsistent.");

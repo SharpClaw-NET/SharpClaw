@@ -1,12 +1,12 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Runtime.BLL.Services.Triggers;
 using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Tasks;
+using SharpClaw.Core.State;
 using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Models;
 using SharpClaw.Core.Tasks.Preflight;
-using SharpClaw.Core.State;
+using SharpClaw.Runtime.BLL.Services.Triggers;
 using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Runtime.BLL.Services;
@@ -146,8 +146,8 @@ public sealed class EfTaskAdministrationHost(
                 $"Task instance {instance.Id} was not found while persisting state.");
         ExecutionStateMapper.Apply(instance, entity);
         var terminalInstances = durablePersistence.PrepareTaskState();
-        await db.SaveChangesAsync(ct);
         await durablePersistence.SealTaskDiagnosticsAsync(terminalInstances, ct);
+        await db.SaveChangesAsync(ct);
     }
 
     public Task AppendLogAsync(
@@ -159,7 +159,7 @@ public sealed class EfTaskAdministrationHost(
     {
         _states.ApplyAll();
         var terminalInstances = durablePersistence.PrepareTaskState();
-        await _states.SaveChangesAsync(ct);
         await durablePersistence.SealTaskDiagnosticsAsync(terminalInstances, ct);
+        await _states.SaveChangesAsync(ct);
     }
 }

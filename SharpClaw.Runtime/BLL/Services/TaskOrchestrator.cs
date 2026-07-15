@@ -164,29 +164,20 @@ public sealed class TaskOrchestrator(
                 persistence,
                 stateStore);
 
-            try
-            {
-                var outcome = await executionEngine.ExecuteAsync(
-                    new TaskPlanExecutionRequest(
-                        instanceId,
-                        plan,
-                        runtime,
-                        scope.ServiceProvider,
-                        host,
-                        runtime.CancellationToken));
-
-                logger.LogDebug(
-                    "Task instance {InstanceId} execution engine finished with {Status} in {ElapsedMs}ms.",
+            var outcome = await executionEngine.ExecuteAsync(
+                new TaskPlanExecutionRequest(
                     instanceId,
-                    outcome.Status,
-                    outcome.Elapsed.TotalMilliseconds);
-            }
-            finally
-            {
-                await persistence.SealTaskDiagnosticsAsync(
-                    [instanceId],
-                    CancellationToken.None);
-            }
+                    plan,
+                    runtime,
+                    scope.ServiceProvider,
+                    host,
+                    runtime.CancellationToken));
+
+            logger.LogDebug(
+                "Task instance {InstanceId} execution engine finished with {Status} in {ElapsedMs}ms.",
+                instanceId,
+                outcome.Status,
+                outcome.Elapsed.TotalMilliseconds);
         }
         finally
         {
