@@ -52,7 +52,6 @@ public sealed class AgentJobService(
 {
     private readonly IConfiguration _configuration = configuration;
     private readonly ILogger<AgentJobService> _logger = logger;
-    private readonly CoreStateSession _states = new(db);
     private static readonly AsyncLocal<Guid?> CurrentExecutionJob = new();
 
     // ═══════════════════════════════════════════════════════════════
@@ -474,6 +473,9 @@ public sealed class AgentJobService(
         string? actionKey, Guid channelId, Guid agentId,
         CancellationToken ct)
     {
+        // A cold resolution must observe the current EF graph after cache
+        // invalidation; do not reuse state identity from an earlier lookup.
+        var states = new CoreStateSession(db);
         var ch = await db.Channels
             .Include(c => c.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
             .Include(c => c.AgentContext!).ThenInclude(ctx => ctx.DefaultResourceSet!).ThenInclude(drs => drs.Entries)
@@ -503,7 +505,7 @@ public sealed class AgentJobService(
 
             permissionSetSnapshotsById = permissionSets.ToDictionary(
                 p => p.Id,
-                p => PermissionSetSnapshot.FromPermissionSet(_states.Map(p)));
+                p => PermissionSetSnapshot.FromPermissionSet(states.Map(p)));
         }
 
         void AddPermissionSetIdToLoad(Guid? permissionSetId)
@@ -524,11 +526,11 @@ public sealed class AgentJobService(
                 moduleRegistry,
                 ch?.DefaultResourceSet is { } channelDefaults
                     ? DefaultResourceSetSnapshot.FromDefaultResourceSet(
-                        _states.Map(channelDefaults))
+                        states.Map(channelDefaults))
                     : null,
                 ch?.AgentContext?.DefaultResourceSet is { } contextDefaults
                     ? DefaultResourceSetSnapshot.FromDefaultResourceSet(
-                        _states.Map(contextDefaults))
+                        states.Map(contextDefaults))
                     : null,
                 Snapshot(channelPermissionSetId),
                 Snapshot(contextPermissionSetId),

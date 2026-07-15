@@ -755,13 +755,15 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
             target.PermissionSet = (PermissionSetDB)EnsureEntity(
                 source.PermissionSet!);
         target.DefaultResourceSetId = source.DefaultResourceSetId;
-        if (source.DefaultResourceSetId is null)
+        if (source.DefaultResourceSet is null)
             target.DefaultResourceSet = null;
         else if (ReferenceMatches(
                      source.DefaultResourceSetId,
                      source.DefaultResourceSet))
             target.DefaultResourceSet = (DefaultResourceSetDB)EnsureEntity(
                 source.DefaultResourceSet!);
+        else
+            target.DefaultResourceSet = null;
         target.DisableChatHeader = source.DisableChatHeader;
         target.CustomChatHeader = source.CustomChatHeader;
         target.DisableToolSchemas = source.DisableToolSchemas;
@@ -792,13 +794,15 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
             target.PermissionSet = (PermissionSetDB)EnsureEntity(
                 source.PermissionSet!);
         target.DefaultResourceSetId = source.DefaultResourceSetId;
-        if (source.DefaultResourceSetId is null)
+        if (source.DefaultResourceSet is null)
             target.DefaultResourceSet = null;
         else if (ReferenceMatches(
                      source.DefaultResourceSetId,
                      source.DefaultResourceSet))
             target.DefaultResourceSet = (DefaultResourceSetDB)EnsureEntity(
                 source.DefaultResourceSet!);
+        else
+            target.DefaultResourceSet = null;
         target.DisableChatHeader = source.DisableChatHeader;
         SyncRelationship(
             source.AllowedAgents,
