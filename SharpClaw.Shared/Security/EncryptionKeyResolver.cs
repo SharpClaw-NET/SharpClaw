@@ -1,4 +1,5 @@
 using SharpClaw.Shared.Instances;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Shared.Security;
 
@@ -17,12 +18,19 @@ public static class EncryptionKeyResolver
     {
         try
         {
-            var keyBase64 = Environment.GetEnvironmentVariable("SHARPCLAW_ENCRYPTION_KEY")
-                ?? (instancePaths is null
-                    ? PersistentKeyStore.GetOrCreate("encryption-key")
-                    : PersistentKeyStore.GetOrCreate("encryption-key", instancePaths));
-            var key = Convert.FromBase64String(keyBase64);
-            return key.Length == 32 ? key : null;
+            var configured = SharpClawInstallationKeyStore.GetConfiguredKeyOrNull();
+            if (configured is not null)
+                return configured.Length == 32 ? configured : null;
+
+            var keyBase64 = instancePaths is null
+                ? PersistentKeyStore.GetOrCreate("encryption-key")
+                : PersistentKeyStore.GetOrCreate("encryption-key", instancePaths);
+            var decoded = Convert.FromBase64String(keyBase64);
+            return decoded.Length == 32 ? decoded : null;
+        }
+        catch (SupprocomSecretsException)
+        {
+            throw;
         }
         catch
         {

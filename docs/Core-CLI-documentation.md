@@ -795,24 +795,26 @@ For tutorial-style walkthroughs, see
 
 ## Env
 
-Manages the core `.env` file (`Infrastructure/Environment/.env`). This
-file controls encryption keys, JWT secrets, database connection strings,
-and other server-side configuration. Changes require a backend restart.
+Manages the deployed Runtime Host assembly's `Environment/.env`. This
+canonical dotenv file controls encryption keys, JWT secrets, database
+connection strings, and other server-side configuration. Changes require a
+backend restart.
 Chat-path runtime switches live under the `Chat` section. Set
-`Chat:DisableDefaultHeaders` to `true` to remove the generated metadata
+`Chat__DisableDefaultHeaders="true"` to remove the generated metadata
 header while keeping explicit agent or channel custom headers available.
-Set `Chat:DisableDefaultSystemPrompt` to `true` to remove the core-generated
+Set `Chat__DisableDefaultSystemPrompt="true"` to remove the core-generated
 native-tool instruction suffix without erasing an agent's own configured
-system prompt. Set `Chat:DisableHeaderTagExpansion` to `true` when explicit
+system prompt. Set `Chat__DisableHeaderTagExpansion="true"` when explicit
 custom headers should be sent as literal text with no built-in tag, resource
-tag, or module-owned tag resolution. Set `Chat:DisableModuleHeaderTags` to `true`
+tag, or module-owned tag resolution. Set
+`Chat__DisableModuleHeaderTags="true"`
 to prevent module-owned custom-header tags from executing. Set
-`Chat:CacheMaxMegabytes` to set the unified chat cache memory budget. That
+`Chat__CacheMaxMegabytes` to set the unified chat cache memory budget. That
 cache keeps header user or agent state and recently-used channel/thread/agent
 token totals hot until the budget is full, then evicts the oldest cached
 objects first. Set it to `0` when every chat turn must force fresh persistence
 and permission reads.
-Set `AgentOrchestration:DisableAccessibleThreadsHeader` to `true` when the
+Set `AgentOrchestration__DisableAccessibleThreadsHeader="true"` when the
 Agent Orchestration module should make the `{{accessible-threads}}`
 custom-header tag empty while leaving its explicit cross-thread tools
 available.
@@ -820,13 +822,13 @@ available.
 ```
 env get
 ```
-Reads and prints the raw JSON content of the core `.env` file.
+Reads and prints the raw canonical dotenv content of the core `.env` file.
 
 ```
 env set
 ```
-Writes the core `.env` file. Paste JSON content into stdin; enter a blank
-line to finish.
+Writes the core `.env` file. Paste canonical dotenv content into stdin; enter
+a blank line to finish.
 
 ```
 env auth
@@ -843,9 +845,10 @@ Reports whether the `.env` file is encrypted (AES-GCM) or plaintext on disk.
 ```
 env unlock
 ```
-Decrypts the `.env` file in-place. The file will be re-encrypted on the
-next backend startup. Use this when you need to inspect or hand-edit the
-file outside the CLI.
+Unprotects the `.env` file through the package protection manager. The file
+is plaintext only for the intentional editing window and is protected again
+by the normal startup protection path. Use this when you need to inspect or
+hand-edit the canonical dotenv document outside the CLI.
 
 ---
 

@@ -121,11 +121,10 @@ with a `Retry-After` header estimated from average processing time.
 
 ## Configuration (.env)
 
-The gateway uses the same JSON-with-comments `.env` pattern as the
-Core and Interface environments. The file lives at
-`SharpClaw.Gateway/Environment/.env` and is loaded via
-`GatewayEnvironment.AddGatewayEnvironment()` using a
-`PhysicalFileProvider` with `ExclusionFilters.None`.
+The gateway uses canonical dotenv files in its deployed assembly-local
+`Environment` directory. `GatewayEnvironment.AddGatewayEnvironment()`
+loads `.env` and the optional `.dev.env` overlay through Supprocom.Secrets;
+the package owns parsing, protection, and recovery.
 
 A default `.env` is auto-created on first run if missing.
 
@@ -135,56 +134,42 @@ The committed gateway template now mirrors the runtime options class. This
 is the shape generated for a missing gateway env file; development mode may
 override endpoint toggles from `.dev.env`.
 
-```jsonc
-{
-  "InternalApi": {
-    "BaseUrl": "http://127.0.0.1:48923",
-    "TimeoutSeconds": "300",
-    "ApiKey": "",
-    "ApiKeyFilePath": "",
-    "GatewayToken": "",
-    "GatewayTokenFilePath": ""
-  },
-  "Gateway": {
-    "RequestQueue": {
-      "Enabled": "true",
-      "MaxConcurrency": "1",
-      "TimeoutSeconds": "30",
-      "MaxRetries": "2",
-      "RetryDelayMs": "500",
-      "MaxQueueSize": "500"
-    },
-    "Endpoints": {
-      "Enabled": "true",
-      "Auth": "false",
-      "Agents": "false",
-      "Channels": "false",
-      "ChannelContexts": "false",
-      "Chat": "false",
-      "ChatStream": "false",
-      "Threads": "false",
-      "ThreadChat": "false",
-      "ThreadWatch": "false",
-      "Jobs": "false",
-      "Models": "false",
-      "LocalModels": "false",
-      "Providers": "false",
-      "Roles": "false",
-      "Users": "false",
-      "Cost": "false",
-      "Tasks": "false",
-      "TaskStreaming": "false",
-      "ToolAwarenessSets": "false",
-      "Resources": "false"
-    },
-    "Modules": {
-      "Modules": {},
-      "Groups": {},
-      "HotReloadEnabled": "false",
-      "DrainTimeoutSeconds": "30"
-    }
-  }
-}
+```dotenv
+InternalApi__BaseUrl="http://127.0.0.1:48923"
+InternalApi__TimeoutSeconds="300"
+InternalApi__ApiKey=""
+InternalApi__ApiKeyFilePath=""
+InternalApi__GatewayToken=""
+InternalApi__GatewayTokenFilePath=""
+Gateway__RequestQueue__Enabled="true"
+Gateway__RequestQueue__MaxConcurrency="1"
+Gateway__RequestQueue__TimeoutSeconds="30"
+Gateway__RequestQueue__MaxRetries="2"
+Gateway__RequestQueue__RetryDelayMs="500"
+Gateway__RequestQueue__MaxQueueSize="500"
+Gateway__Endpoints__Enabled="true"
+Gateway__Endpoints__Auth="false"
+Gateway__Endpoints__Agents="false"
+Gateway__Endpoints__Channels="false"
+Gateway__Endpoints__ChannelContexts="false"
+Gateway__Endpoints__Chat="false"
+Gateway__Endpoints__ChatStream="false"
+Gateway__Endpoints__Threads="false"
+Gateway__Endpoints__ThreadChat="false"
+Gateway__Endpoints__ThreadWatch="false"
+Gateway__Endpoints__Jobs="false"
+Gateway__Endpoints__Models="false"
+Gateway__Endpoints__LocalModels="false"
+Gateway__Endpoints__Providers="false"
+Gateway__Endpoints__Roles="false"
+Gateway__Endpoints__Users="false"
+Gateway__Endpoints__Cost="false"
+Gateway__Endpoints__Tasks="false"
+Gateway__Endpoints__TaskStreaming="false"
+Gateway__Endpoints__ToolAwarenessSets="false"
+Gateway__Endpoints__Resources="false"
+Gateway__Endpoints__Modules__HotReloadEnabled="false"
+Gateway__Endpoints__Modules__DrainTimeoutSeconds="30"
 ```
 
 ### Settings reference

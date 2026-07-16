@@ -218,8 +218,10 @@ The current gateway project exposes the routes listed in this skill. Extra gatew
 ────────────────────────────────────────
 CONFIGURATION (.env)
 ────────────────────────────────────────
-File: SharpClaw.Gateway/Environment/.env (JSON-with-comments, auto-created if missing).
-Loaded via GatewayEnvironment.AddGatewayEnvironment() with PhysicalFileProvider + ExclusionFilters.None.
+File: the deployed Gateway assembly's `Environment/.env` in canonical dotenv format.
+`GatewayEnvironment.AddGatewayEnvironment()` loads it through
+Supprocom.Secrets and applies the optional `.dev.env` overlay. The package
+owns first-run creation, protection, and recovery.
 
 InternalApi settings point the gateway at the core API. BaseUrl defaults to
 http://127.0.0.1:48923 and TimeoutSeconds defaults to 300. ApiKey,

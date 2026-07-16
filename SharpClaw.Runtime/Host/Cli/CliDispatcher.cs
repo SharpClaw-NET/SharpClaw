@@ -35,6 +35,7 @@ using SharpClaw.Runtime.BLL.Services.Triggers;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Chat;
+using Supprocom.Secrets;
 using SharpClaw.Core.Modules;
 using SharpClaw.Runtime.INF.Configuration;
 using SharpClaw.Runtime.INF.DurableStorage;
@@ -3436,7 +3437,7 @@ public static class CliDispatcher
         {
             PrintUsage(
                 "env get                                   Read core .env content",
-                "env set                                   Write core .env (reads from stdin until blank line)",
+                "env set                                   Write core .env dotenv content (reads from stdin until blank line)",
                 "env auth                                  Check env edit authorisation",
                 "env status                                Show encryption status of .env file",
                 "env unlock                                Decrypt .env file in-place (re-locks on next startup)");
@@ -3451,16 +3452,17 @@ public static class CliDispatcher
             "get" => await EnvHandlers.Read(svc),
             "set" => await HandleEnvSet(svc),
             "auth" => await EnvHandlers.CheckAuth(svc),
-            "status" => HandleEnvStatus(),
+            "status" => await HandleEnvStatusAsync(
+                sp.GetRequiredService<ISecretFileProtectionManager>()),
             "unlock" => await HandleEnvUnlockAsync(
-                sp.GetRequiredService<SharpClawInstancePaths>()),
+                sp.GetRequiredService<ISecretFileProtectionManager>()),
             _ => UsageResult($"Unknown sub-command: env {sub}. Try 'env get', 'env set', 'env auth', 'env status', or 'env unlock'.")
         };
     }
 
     private static async Task<IResult> HandleEnvSet(EnvFileService svc)
     {
-        Console.WriteLine("Paste .env JSON content (blank line to finish):");
+        Console.WriteLine("Paste .env dotenv content (blank line to finish):");
         var lines = new List<string>();
         while (true)
         {
@@ -3474,47 +3476,52 @@ public static class CliDispatcher
         return await EnvHandlers.Write(new EnvWriteRequest(content), svc);
     }
 
-    private static IResult HandleEnvStatus()
+    private static async Task<IResult> HandleEnvStatusAsync(
+        ISecretFileProtectionManager protectionManager)
     {
-        var path = LocalEnvironment.ResolveActiveEnvFilePath();
-
-        if (!File.Exists(path))
+        var state = await protectionManager.GetStateAsync();
+        if (state == SecretFileProtectionState.Missing)
         {
             Console.WriteLine("Core .env file not found.");
             return Results.Ok();
         }
 
-        var encrypted = EncryptedEnvFile.IsEncryptedOnDisk(path);
-        Console.WriteLine(encrypted ? "Core .env is encrypted (AES-GCM)." : "Core .env is plaintext.");
+        Console.WriteLine(state == SecretFileProtectionState.Protected
+            ? "Core .env is encrypted (AES-GCM)."
+            : "Core .env is plaintext.");
         return Results.Ok();
     }
 
     private static async Task<IResult> HandleEnvUnlockAsync(
-        SharpClawInstancePaths instancePaths)
+        ISecretFileProtectionManager protectionManager)
     {
-        var path = LocalEnvironment.ResolveActiveEnvFilePath();
-
-        if (!File.Exists(path))
+        var state = await protectionManager.GetStateAsync();
+        if (state == SecretFileProtectionState.Missing)
         {
             Console.WriteLine("Core .env file not found.");
             return Results.Ok();
         }
 
-        if (!EncryptedEnvFile.IsEncryptedOnDisk(path))
+        if (state == SecretFileProtectionState.Plaintext)
         {
             Console.WriteLine("Core .env is already plaintext.");
             return Results.Ok();
         }
 
-        var key = EncryptionKeyResolver.ResolveKey(instancePaths);
-        if (key is null)
+        try
         {
-            Console.Error.WriteLine("Cannot resolve encryption key.");
-            return Results.BadRequest("No encryption key available.");
+            await protectionManager.UnprotectAsync();
+        }
+        catch (SupprocomSecretsException exception)
+        {
+            Console.Error.WriteLine($"Cannot unlock Core .env ({exception.Code}).");
+            return Results.BadRequest(new
+            {
+                error = "Core .env could not be unlocked.",
+                code = exception.Code
+            });
         }
 
-        var json = await EncryptedEnvFile.ReadAsync(path, key);
-        await EncryptedEnvFile.WriteAsync(path, json, key, encrypt: false);
         Console.WriteLine("Core .env decrypted in-place. It will be re-encrypted on the next app startup.");
         return Results.Ok();
     }

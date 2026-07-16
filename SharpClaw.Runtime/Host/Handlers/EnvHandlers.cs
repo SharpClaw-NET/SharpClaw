@@ -27,9 +27,7 @@ public static class EnvHandlers
         try
         {
             var content = await svc.ReadAsync();
-            return content is not null
-                ? Results.Ok(new { content })
-                : Results.NotFound(new { error = "Core .env file not found." });
+            return Results.Ok(new { content });
         }
         catch (UnauthorizedAccessException ex)
         {

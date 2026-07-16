@@ -4,6 +4,8 @@ using System.Text.Json;
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
+using SharpClaw.Configuration;
+using Supprocom.Secrets;
 using Windows.ApplicationModel.DataTransfer;
 
 namespace SharpClaw.Presentation;
@@ -18,7 +20,7 @@ public sealed partial class EnvEditorPage : Page
     private EnvTarget _target;
     private string _envFilePath = string.Empty;
     private readonly List<EnvEntry> _entries = [];
-    private bool _jsonViewActive;
+    private bool _rawViewActive;
 
     public EnvEditorPage()
     {
@@ -49,7 +51,7 @@ public sealed partial class EnvEditorPage : Page
                 ? ResolveGatewayEnvFilePath()
                 : ResolveInterfaceEnvFilePath();
             PathBlock.Text = _envFilePath;
-            LoadEntriesFromFile();
+            await LoadEntriesFromFileAsync();
         }
     }
 
@@ -93,12 +95,6 @@ public sealed partial class EnvEditorPage : Page
                 return;
             }
 
-            if (resp.StatusCode == System.Net.HttpStatusCode.NotFound)
-            {
-                ShowStatus("✗ Core .env file not found on the server.", error: true);
-                return;
-            }
-
             resp.EnsureSuccessStatusCode();
 
             using var stream = await resp.Content.ReadAsStreamAsync();
@@ -116,20 +112,14 @@ public sealed partial class EnvEditorPage : Page
     /// <summary>
     /// Loads the Interface .env content from local disk (client's own file).
     /// </summary>
-    private void LoadEntriesFromFile()
+    private async Task LoadEntriesFromFileAsync()
     {
         _entries.Clear();
         EntriesPanel.Children.Clear();
 
-        if (!File.Exists(_envFilePath))
-        {
-            ShowStatus("✗ .env file not found at path above.", error: true);
-            return;
-        }
-
         try
         {
-            PopulateEntries(File.ReadAllText(_envFilePath));
+            PopulateEntries(await ReadLocalDocumentAsync());
         }
         catch (Exception ex)
         {
@@ -139,8 +129,12 @@ public sealed partial class EnvEditorPage : Page
 
     private void PopulateEntries(string raw)
     {
-        if (!TryParseStructuredJson(raw))
-            ParseEnvLines(raw.Split('\n'));
+        _entries.AddRange(ParseStructuredDocument(raw)
+            .Select(setting => new EnvEntry(
+                setting.Key,
+                setting.Value,
+                string.Empty,
+                isActive: true)));
 
         foreach (var entry in _entries)
             EntriesPanel.Children.Add(BuildEntryRow(entry));
@@ -148,130 +142,41 @@ public sealed partial class EnvEditorPage : Page
         ShowStatus($"✓ Loaded {_entries.Count} setting(s).", error: false, success: true);
     }
 
-    private void ParseEnvLines(string[] lines)
-    {
-        var lastComment = string.Empty;
+    internal static IReadOnlyList<SupprocomSecretSetting> ParseStructuredDocument(
+        string document) =>
+        SupprocomSecretDocument.Parse(document).Settings;
 
-        foreach (var rawLine in lines)
-        {
-            var trimmed = rawLine.Trim();
+    internal static string SerializeStructuredDocument(
+        IEnumerable<SupprocomSecretSetting> settings) =>
+        SupprocomSecretDocument.Serialize(settings);
 
-            // Skip structural braces
-            if (trimmed is "{" or "}" or "") continue;
+    private SupprocomSecretFileStore CreateLocalSecretStore() =>
+        CreateLocalSecretStore(Path.GetDirectoryName(_envFilePath)!);
 
-            // Pure comment line (section header / description)
-            if (trimmed.StartsWith("//") && !trimmed.Contains('"'))
-            {
-                lastComment = trimmed.TrimStart('/').Trim();
-                continue;
-            }
+    internal static SupprocomSecretFileStore CreateLocalSecretStore(
+        string envDirectory,
+        string? installationKeyPath = null) =>
+        new(LocalEnvironment.CreateSecretsOptions(
+            envDirectory,
+            isDevelopment: false,
+            installationKeyPath: installationKeyPath));
 
-            // Commented-out JSON key line: //"Key": { "Sub": "Value" }
-            if (trimmed.StartsWith("//") && trimmed.Contains('"'))
-            {
-                var uncommented = trimmed.TrimStart('/').Trim();
-                if (TryParseJsonLine(uncommented, out var key, out var value))
-                {
-                    _entries.Add(new EnvEntry(key, value, lastComment, isActive: false));
-                    lastComment = string.Empty;
-                }
-                continue;
-            }
+    private Task<string> ReadLocalDocumentAsync() =>
+        ReadLocalDocumentAsync(Path.GetDirectoryName(_envFilePath)!);
 
-            // Active JSON key line: "Key": { "Sub": "Value" }
-            if (trimmed.StartsWith('"'))
-            {
-                var clean = trimmed.TrimEnd(',');
-                if (TryParseJsonLine(clean, out var key, out var value))
-                {
-                    _entries.Add(new EnvEntry(key, value, lastComment, isActive: true));
-                    lastComment = string.Empty;
-                }
-            }
-        }
-    }
+    internal static Task<string> ReadLocalDocumentAsync(
+        string envDirectory,
+        string? installationKeyPath = null) =>
+        CreateLocalSecretStore(envDirectory, installationKeyPath).ReadDocumentAsync();
 
-    private bool TryParseStructuredJson(string json)
-    {
-        try
-        {
-            var stripped = StripJsonComments(json);
-            using var doc = JsonDocument.Parse(stripped,
-                new JsonDocumentOptions { AllowTrailingCommas = true });
+    internal static Task ReplaceLocalDocumentAsync(
+        string envDirectory,
+        string document,
+        string? installationKeyPath = null) =>
+        CreateLocalSecretStore(envDirectory, installationKeyPath).ReplaceDocumentAsync(document);
 
-            if (doc.RootElement.ValueKind != JsonValueKind.Object)
-                return false;
-
-            foreach (var prop in doc.RootElement.EnumerateObject())
-            {
-                string value;
-                if (prop.Value.ValueKind == JsonValueKind.Object)
-                {
-                    var parts = new List<string>();
-                    foreach (var sub in prop.Value.EnumerateObject())
-                        parts.Add($"{sub.Name}={sub.Value}");
-                    value = string.Join(", ", parts);
-                }
-                else
-                {
-                    value = prop.Value.ToString();
-                }
-                _entries.Add(new EnvEntry(prop.Name, value, string.Empty, isActive: true));
-            }
-
-            return _entries.Count > 0;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private static string StripJsonComments(string json)
-    {
-        var sb = new StringBuilder(json.Length);
-        foreach (var line in json.Split('\n'))
-        {
-            if (!line.TrimStart().StartsWith("//"))
-                sb.AppendLine(line);
-        }
-        return sb.ToString();
-    }
-
-    private static bool TryParseJsonLine(string line, out string key, out string value)
-    {
-        key = value = string.Empty;
-
-        // Expected format: "SectionKey": { "SubKey": "Val", ... }
-        // or "SectionKey": "simple-value"
-        var colonIdx = line.IndexOf(':');
-        if (colonIdx < 0) return false;
-
-        key = line[..colonIdx].Trim().Trim('"');
-        var rawValue = line[(colonIdx + 1)..].Trim().TrimEnd(',');
-
-        // Nested object: flatten sub-keys into a display string
-        if (rawValue.StartsWith('{'))
-        {
-            try
-            {
-                using var doc = JsonDocument.Parse(rawValue);
-                var parts = new List<string>();
-                foreach (var prop in doc.RootElement.EnumerateObject())
-                    parts.Add($"{prop.Name}={prop.Value}");
-                value = string.Join(", ", parts);
-                return true;
-            }
-            catch
-            {
-                value = rawValue;
-                return true;
-            }
-        }
-
-        value = rawValue.Trim('"');
-        return true;
-    }
+    private Task SaveLocalDocumentAsync(string document) =>
+        CreateLocalSecretStore().ReplaceDocumentAsync(document);
 
     // ── UI builders ────────────────────────────────────────────────
 
@@ -350,19 +255,17 @@ public sealed partial class EnvEditorPage : Page
     {
         try
         {
-            var json = _jsonViewActive ? JsonTextBox.Text : BuildEnvJson();
+            var content = _rawViewActive ? RawTextBox.Text : BuildEnvDocument();
 
             if (_target == EnvTarget.Core)
             {
                 // Server-side write — the API enforces auth.
-                if (!await SaveCoreViaApiAsync(json))
+                if (!await SaveCoreViaApiAsync(content))
                     return;
             }
             else
             {
-                var dir = Path.GetDirectoryName(_envFilePath)!;
-                Directory.CreateDirectory(dir);
-                File.WriteAllText(_envFilePath, json);
+                await SaveLocalDocumentAsync(content);
             }
 
             ShowStatus("> Saved. Restarting service...", error: false);
@@ -378,41 +281,23 @@ public sealed partial class EnvEditorPage : Page
     {
         try
         {
-            // If in JSON view, re-parse entries from the editor first
-            if (_jsonViewActive)
-                SyncEntriesFromJson();
+            // If in raw mode, re-parse the package document before applying it.
+            if (_rawViewActive && !SyncEntriesFromRaw())
+                return;
 
             // For Core target, persist through the API so the server
             // re-validates auth before any disk write.
             if (_target == EnvTarget.Core)
             {
-                var json = BuildEnvJson();
-                if (!await SaveCoreViaApiAsync(json))
+                var content = BuildEnvDocument();
+                if (!await SaveCoreViaApiAsync(content))
                     return;
             }
 
-            foreach (var entry in _entries)
+            foreach (var entry in _entries.Where(entry => entry.IsActive))
             {
-                if (!entry.IsActive) continue;
-
-                // Parse the flattened "SubKey=val, SubKey2=val2" back into env vars
-                // as "Key:SubKey" = "val" (IConfiguration section format)
-                foreach (var part in entry.Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries))
-                {
-                    var eqIdx = part.IndexOf('=');
-                    if (eqIdx > 0)
-                    {
-                        var subKey = part[..eqIdx].Trim().Trim('"');
-                        var val = part[(eqIdx + 1)..].Trim().Trim('"');
-                        Environment.SetEnvironmentVariable($"{entry.Key}__{subKey}", val);
-                    }
-                    else
-                    {
-                        // Simple value
-                        Environment.SetEnvironmentVariable(entry.Key, entry.Value.Trim('"'));
-                        break;
-                    }
-                }
+                var environmentName = entry.Key.Replace(":", "__", StringComparison.Ordinal);
+                Environment.SetEnvironmentVariable(environmentName, entry.Value);
             }
             ShowStatus("> Applied. Restarting service...", error: false);
             await RestartBackendAsync();
@@ -513,84 +398,46 @@ public sealed partial class EnvEditorPage : Page
         }
     }
 
-    private string BuildEnvJson()
-    {
-        using var ms = new MemoryStream();
-        using var writer = new Utf8JsonWriter(ms, new JsonWriterOptions { Indented = true });
-
-        writer.WriteStartObject();
-
-        foreach (var entry in _entries)
-        {
-            if (!entry.IsActive)
-            {
-                // Write as a comment-hint: we can't write JSON comments, so
-                // inactive entries are simply omitted from the output.
-                // They'll appear as commented lines when we write raw text instead.
-                continue;
-            }
-
-            // Try to reconstruct the nested object from "SubKey=val, ..."
-            var parts = entry.Value.Split(',', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length > 0 && parts[0].Contains('='))
-            {
-                writer.WritePropertyName(entry.Key);
-                writer.WriteStartObject();
-                foreach (var part in parts)
-                {
-                    var eqIdx = part.IndexOf('=');
-                    if (eqIdx > 0)
-                    {
-                        var subKey = part[..eqIdx].Trim().Trim('"');
-                        var val = part[(eqIdx + 1)..].Trim().Trim('"');
-                        writer.WriteString(subKey, val);
-                    }
-                }
-                writer.WriteEndObject();
-            }
-            else
-            {
-                writer.WriteString(entry.Key, entry.Value.Trim('"'));
-            }
-        }
-
-        writer.WriteEndObject();
-        writer.Flush();
-
-        return System.Text.Encoding.UTF8.GetString(ms.ToArray());
-    }
+    private string BuildEnvDocument() =>
+        SerializeStructuredDocument(_entries
+            .Where(entry => entry.IsActive)
+            .Select(entry => new SupprocomSecretSetting(entry.Key, entry.Value)));
 
     // ── View mode toggle ──────────────────────────────────────────
 
     private async void OnViewToggleClick(object sender, RoutedEventArgs e)
     {
-        _jsonViewActive = !_jsonViewActive;
-
-        if (_jsonViewActive)
+        if (!_rawViewActive)
         {
-            // Switching to JSON view — show panel immediately, load content
+            if (!await SyncRawFromFileAsync())
+                return;
+
+            _rawViewActive = true;
+            // Switching to raw dotenv view — show panel immediately, load content
             EntriesScroller.Visibility = Visibility.Collapsed;
-            JsonPanel.Visibility = Visibility.Visible;
-            CopyJsonButton.Visibility = Visibility.Visible;
-            PasteJsonButton.Visibility = Visibility.Visible;
+            RawPanel.Visibility = Visibility.Visible;
+            CopyRawButton.Visibility = Visibility.Visible;
+            PasteRawButton.Visibility = Visibility.Visible;
             ViewToggleLabel.Text = "☰ Options";
             ViewToggleLabel.Foreground = TerminalUI.Brush(0xFF9944);
-            await SyncJsonFromFileAsync();
         }
         else
         {
-            // Switching back to entries view — re-parse from the JSON TextBox
-            SyncEntriesFromJson();
-            JsonPanel.Visibility = Visibility.Collapsed;
+            // Switching back to entries view — re-parse the raw dotenv editor
+            if (!SyncEntriesFromRaw())
+                return;
+
+            _rawViewActive = false;
+            RawPanel.Visibility = Visibility.Collapsed;
             EntriesScroller.Visibility = Visibility.Visible;
-            CopyJsonButton.Visibility = Visibility.Collapsed;
-            PasteJsonButton.Visibility = Visibility.Collapsed;
-            ViewToggleLabel.Text = "{ } JSON";
+            CopyRawButton.Visibility = Visibility.Collapsed;
+            PasteRawButton.Visibility = Visibility.Collapsed;
+            ViewToggleLabel.Text = "Raw dotenv";
             ViewToggleLabel.Foreground = TerminalUI.Brush(0x66CCFF);
         }
     }
 
-    private async Task SyncJsonFromFileAsync()
+    private async Task<bool> SyncRawFromFileAsync()
     {
         if (_target == EnvTarget.Core)
         {
@@ -605,52 +452,75 @@ public sealed partial class EnvEditorPage : Page
                     {
                         using var stream = await resp.Content.ReadAsStreamAsync();
                         using var doc = await JsonDocument.ParseAsync(stream);
-                        JsonTextBox.Text = doc.RootElement.GetProperty("content").GetString()!;
-                        return;
+                        RawTextBox.Text = doc.RootElement.GetProperty("content").GetString()!;
+                        return true;
                     }
                 }
             }
-            catch { /* fall through */ }
+            catch (Exception ex)
+            {
+                ShowStatus($"✗ Failed to load raw dotenv: {ex.Message}", error: true);
+                return false;
+            }
+
+            ShowStatus("✗ Runtime Host did not return an env document.", error: true);
+            return false;
         }
-        else if (File.Exists(_envFilePath))
+        else
         {
             try
             {
-                JsonTextBox.Text = File.ReadAllText(_envFilePath);
-                return;
+                RawTextBox.Text = await ReadLocalDocumentAsync();
+                return true;
             }
-            catch { /* fall through to entries-based generation */ }
+            catch (Exception ex)
+            {
+                ShowStatus($"✗ Failed to load raw dotenv: {ex.Message}", error: true);
+                return false;
+            }
         }
-
-        // Fallback: generate from current entries
-        JsonTextBox.Text = BuildEnvJson();
     }
 
-    private void SyncEntriesFromJson()
+    private bool SyncEntriesFromRaw()
     {
-        var json = JsonTextBox.Text;
-        if (string.IsNullOrWhiteSpace(json)) return;
+        var raw = RawTextBox.Text;
+        if (string.IsNullOrWhiteSpace(raw)) return false;
 
         _entries.Clear();
         EntriesPanel.Children.Clear();
 
-        if (!TryParseStructuredJson(json))
-            ParseEnvLines(json.Split('\n'));
+        IReadOnlyList<SupprocomSecretSetting> settings;
+        try
+        {
+            settings = ParseStructuredDocument(raw);
+        }
+        catch (Exception ex)
+        {
+            ShowStatus($"Invalid dotenv: {ex.Message}", error: true);
+            return false;
+        }
+
+        _entries.AddRange(settings.Select(setting => new EnvEntry(
+            setting.Key,
+            setting.Value,
+            string.Empty,
+            isActive: true)));
 
         foreach (var entry in _entries)
             EntriesPanel.Children.Add(BuildEntryRow(entry));
 
-        ShowStatus($"✓ Refreshed {_entries.Count} setting(s) from JSON.", error: false, success: true);
+        ShowStatus($"✓ Refreshed {_entries.Count} setting(s) from dotenv.", error: false, success: true);
+        return true;
     }
 
     // ── Copy / Paste (Upload) ──────────────────────────────────────
 
-    private void OnCopyJsonClick(object sender, RoutedEventArgs e)
+    private void OnCopyRawClick(object sender, RoutedEventArgs e)
     {
         try
         {
             var dp = new DataPackage();
-            dp.SetText(JsonTextBox.Text);
+            dp.SetText(RawTextBox.Text);
             Clipboard.SetContent(dp);
             ShowStatus("✓ Copied to clipboard.", error: false, success: true);
         }
@@ -660,7 +530,7 @@ public sealed partial class EnvEditorPage : Page
         }
     }
 
-    private async void OnPasteJsonClick(object sender, RoutedEventArgs e)
+    private async void OnPasteRawClick(object sender, RoutedEventArgs e)
     {
         try
         {
@@ -670,7 +540,7 @@ public sealed partial class EnvEditorPage : Page
                 var text = await content.GetTextAsync();
                 if (!string.IsNullOrWhiteSpace(text))
                 {
-                    JsonTextBox.Text = text;
+                    RawTextBox.Text = text;
                     ShowStatus("✓ Pasted from clipboard. Review and save when ready.", error: false, success: true);
                     return;
                 }

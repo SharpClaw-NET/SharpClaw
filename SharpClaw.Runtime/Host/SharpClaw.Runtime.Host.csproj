@@ -7,6 +7,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <SupprocomSecretsTemplateDirectory>$(MSBuildThisFileDirectory)..\INF\Environment</SupprocomSecretsTemplateDirectory>
   </PropertyGroup>
 
   <ItemGroup>
@@ -22,6 +23,7 @@
       <PrivateAssets>all</PrivateAssets>
     </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" />
+    <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 

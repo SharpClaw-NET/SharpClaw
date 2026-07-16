@@ -337,32 +337,34 @@ Guides: docs/guides/Module-User-Guide.md and docs/guides/Module-Agent-Skill.md
 ────────────────────────────────────────
 ENV
 ────────────────────────────────────────
-Manages Infrastructure/Environment/.env. Changes require backend restart.
+Manages the deployed Runtime Host assembly's `Environment/.env` as canonical
+dotenv.
+Changes require backend restart.
 
 Chat switches in Core .env:
-Chat:DisableDefaultHeaders=true removes generated metadata headers, but
+Chat__DisableDefaultHeaders="true" removes generated metadata headers, but
   explicit agent/channel custom headers still run.
-Chat:DisableDefaultSystemPrompt=true removes the core native-tool instruction
+Chat__DisableDefaultSystemPrompt="true" removes the core native-tool instruction
   suffix, but keeps the agent's configured system prompt.
-Chat:DisableHeaderTagExpansion=true sends explicit custom headers as literal
+Chat__DisableHeaderTagExpansion="true" sends explicit custom headers as literal
   text without resolving built-in, resource, or module-owned tags.
-Chat:DisableModuleHeaderTags=true prevents module-owned custom-header tags from
+Chat__DisableModuleHeaderTags="true" prevents module-owned custom-header tags from
   executing.
-Chat:CacheMaxMegabytes=<n> sets the unified chat cache RAM budget. The cache
+Chat__CacheMaxMegabytes="<n>" sets the unified chat cache RAM budget. The cache
   keeps header state and active channel/thread/agent cost snapshots until the
   budget fills; 0 disables it.
-AgentOrchestration:DisableAccessibleThreadsHeader=true suppresses Agent
+AgentOrchestration__DisableAccessibleThreadsHeader="true" suppresses Agent
   Orchestration {{accessible-threads}} output without disabling explicit
   cross-thread tools.
 
-env get                                Print raw JSON content.
+env get                                Print raw dotenv content.
 env set                                Write from stdin (blank line = end).
 env auth                               Pre-check: is current user authorised?
-env status                             Encrypted (AES-GCM) or plaintext?
+env status                             Protected (installation-bound) or plaintext?
 env unlock                             Decrypt in-place; re-encrypts on restart.
 
 Real authorisation enforcement is server-side (auth status, admin flag, or
-EnvEditor:AllowNonAdmin=true in .env).
+EnvEditor__AllowNonAdmin="true" in .env).
 
 ────────────────────────────────────────
 DB  (relational providers only)

@@ -6,27 +6,25 @@ task triggers, provider implementations, or editor integrations. The bundled
 modules are restored from NuGet package payloads; external modules can be added
 separately through the `ExternalModules` section in the Core env file.
 
-The Core env file is `SharpClaw.Runtime/INF/Environment/.env`.
-It uses JSON with comments and is read into `IConfiguration` during startup.
-In development mode, `.dev.env` is loaded after `.env`, so the development file
-can turn on modules without changing the base template. A module is enabled
-only when its module id is explicitly set to `"true"` in `Modules`. A missing
-key or a value of `"false"` keeps that module disabled.
+The deployed Runtime Host assembly's `Environment/.env` uses
+canonical dotenv. In development mode, `.dev.env` is loaded after `.env`, so
+the development file can turn on modules without changing the base template.
+File keys use `__`, while `IConfiguration` uses `:`. A module is enabled only
+when its `Modules__<module_id>` key is explicitly set to `"true"`. A missing key or
+a value of `"false"` keeps that module disabled.
 
-Module-owned configuration uses the same generic env loader. If an enabled
-module reads `IConfiguration["MyModule:EndpointUrl"]`, users can add a
-top-level `"MyModule"` section to Core `.env` without any change to
-`LocalEnvironment`, `ModuleLoader`, or the host startup code. The module owns
-the section name, default values, validation, and documentation. The host only
-loads the JSON tree and makes it available through DI.
+Module-owned configuration uses the same package-backed env loader. If an
+enabled module reads `IConfiguration["MyModule:EndpointUrl"]`, users can add
+`MyModule__EndpointUrl` to the Runtime `.env` without any change to
+`LocalEnvironment`, `ModuleLoader`, or host startup code. The module owns the
+section name, default values, validation, and documentation. The host only
+loads the dotenv document and makes it available through DI.
 
 For example, a third-party module can document this shape:
 
-```jsonc
-"MyModule": {
-  "EndpointUrl": "https://example.internal/api",
-  "RetrySeconds": "15"
-}
+```dotenv
+MyModule__EndpointUrl="https://example.internal/api"
+MyModule__RetrySeconds="15"
 ```
 
 That section is independent from the enablement entry. Users still enable the
@@ -39,11 +37,9 @@ Changes to Core `.env` take effect after the Core process restarts.
 For example, this enables agent orchestration while keeping the VS Code editor
 bridge disabled:
 
-```jsonc
-"Modules": {
-  "sharpclaw_agent_orchestration": "true",
-  "sharpclaw_vscode_editor": "false"
-}
+```dotenv
+Modules__sharpclaw_agent_orchestration="true"
+Modules__sharpclaw_vscode_editor="false"
 ```
 
 Runtime management uses the same module ids. `module list` shows discovered
@@ -114,28 +110,26 @@ operational settings at the top of the section control module host behavior.
 The module ids after them are the bundled modules that exist in the current
 source tree.
 
-```jsonc
-"Modules": {
-  "CrashOnExternalModuleLoadFailure": "true",
-  "EventDispatchTimeoutSeconds": "5",
-  "HealthCheckIntervalSeconds": "60",
-  "HealthCheckFailureThreshold": "3",
-  "HealthCheckTimeoutSeconds": "10",
-  "MaxEnvelopeSizeBytes": "1048576",
-  "UnloadVerifyMaxAttempts": "10",
-  "UnloadVerifyDelayMs": "100",
-  "sharpclaw_agent_orchestration": "false",
-  "sharpclaw_editor_common": "false",
-  "sharpclaw_metrics": "false",
-  "sharpclaw_module_dev": "false",
-  "sharpclaw_providers_anthropic": "true",
-  "sharpclaw_providers_google": "true",
-  "sharpclaw_providers_llamasharp": "true",
-  "sharpclaw_providers_ollama": "true",
-  "sharpclaw_providers_openai_compat": "true",
-  "sharpclaw_vs2026_editor": "false",
-  "sharpclaw_vscode_editor": "false"
-}
+```dotenv
+Modules__CrashOnExternalModuleLoadFailure="true"
+Modules__EventDispatchTimeoutSeconds="5"
+Modules__HealthCheckIntervalSeconds="60"
+Modules__HealthCheckFailureThreshold="3"
+Modules__HealthCheckTimeoutSeconds="10"
+Modules__MaxEnvelopeSizeBytes="1048576"
+Modules__UnloadVerifyMaxAttempts="10"
+Modules__UnloadVerifyDelayMs="100"
+Modules__sharpclaw_agent_orchestration="false"
+Modules__sharpclaw_editor_common="false"
+Modules__sharpclaw_metrics="false"
+Modules__sharpclaw_module_dev="false"
+Modules__sharpclaw_providers_anthropic="true"
+Modules__sharpclaw_providers_google="true"
+Modules__sharpclaw_providers_llamasharp="true"
+Modules__sharpclaw_providers_ollama="true"
+Modules__sharpclaw_providers_openai_compat="true"
+Modules__sharpclaw_vs2026_editor="false"
+Modules__sharpclaw_vscode_editor="false"
 ```
 
 The development template uses the same operational settings and sets every
@@ -152,13 +146,9 @@ default, startup fails if an enabled external module path cannot be loaded;
 set `Modules:CrashOnExternalModuleLoadFailure` to `"false"` only when you want
 startup to continue while investigating a broken local module path.
 
-```jsonc
-"ExternalModules": [
-  {
-    "Path": "C:\\modules\\Custom.Module\\bin\\Debug\\net10.0",
-    "Enabled": true
-  }
-]
+```dotenv
+ExternalModules__0__Path="C:/modules/Custom.Module/bin/Debug/net10.0"
+ExternalModules__0__Enabled="true"
 ```
 
 When an external module is loaded through the runtime loader, SharpClaw can add

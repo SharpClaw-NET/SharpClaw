@@ -2673,12 +2673,12 @@ bytes) after Base64 decoding. Got N bytes.` Both errors advise removing
 
 ## Env file management
 
-SharpClaw uses JSON-with-comments environment files that are loaded into
-`IConfiguration`. Core reads `SharpClaw.Runtime/INF/Environment/.env`
-and, in development, `.dev.env`. The Uno interface reads
-`SharpClaw.Client.Uno/Environment/.env` and `.dev.env` directly from the client
-process. The public gateway reads `SharpClaw.Gateway/Environment/.env`
-and `.dev.env` through `GatewayEnvironment.AddGatewayEnvironment()`.
+SharpClaw uses canonical dotenv environment files loaded through
+`Supprocom.Secrets` into `IConfiguration`. The deployed Runtime Host reads its
+assembly-local `Environment/.env` and, in development, `.dev.env`. The Uno
+interface reads its own assembly-local `Environment/.env` and `.dev.env`.
+The public gateway reads its assembly-local `Environment/.env` and `.dev.env` through
+`GatewayEnvironment.AddGatewayEnvironment()`.
 
 The Core env file is special because it can contain encryption keys, JWT
 secrets, connection strings, and initial admin credentials. It is managed
@@ -2715,25 +2715,28 @@ Read the raw content of the Core `.env` file.
 **Response `200`:**
 
 ```json
-{ "content": "{ ... raw JSON-with-comments content ... }" }
+{ "content": "Admin__Username=admin\\nLogging__Serilog__Enabled=\\\"true\\\"\\n" }
 ```
 
 **Response `403`:** Caller is not authorised (not admin and
 `EnvEditor:AllowNonAdmin` is not enabled).
 
-**Response `404`:** Core `.env` file not found on disk.
+The package-backed store creates a missing active file from
+`Environment/.env.template` before returning its complete plaintext dotenv
+document. A missing or invalid recovery template is reported as a server
+error rather than being silently replaced by SharpClaw code.
 
 ---
 
 ### PUT /env/core
 
-Overwrite the Core `.env` file with new content.
+Overwrite the Core `.env` file with canonical dotenv content.
 
 **Request:**
 
 ```json
 {
-  "content": "string"
+  "content": "Admin__Username=admin\\n"
 }
 ```
 
@@ -2751,11 +2754,14 @@ Overwrite the Core `.env` file with new content.
 
 ### Core `.env` keys
 
-The Core template is `SharpClaw.Runtime/INF/Environment/.env.template`.
-It includes the `Encryption` section for the at-rest encryption key and
-encryption toggles, the `Jwt` section for token signing, issuer, audience,
-and lifetimes, and the `Auth` section for local-only bypass switches.
-`Agent:DisableCustomProviderParameters` is also in the template because it
+The Runtime Host template is its assembly-local `Environment/.env.template` and
+uses one `KEY=value` assignment per line. Nested configuration keys use
+double underscores, such as `Encryption__EncryptDatabase=true`. The package
+owns protection of the active `.env` file; the installation key is stored at
+the configured instance secret path and is never copied with the template.
+The `Jwt` section controls token signing, issuer, audience, and lifetimes,
+and the `Auth` section contains local-only bypass switches.
+`Agent__DisableCustomProviderParameters` is also in the template because it
 is the hardening switch for free-form provider parameters.
 
 The `Chat` section controls chat-path prompt shaping and cache behavior.
@@ -2787,19 +2793,23 @@ module enablement.
 
 ### Interface `.env` keys
 
-The Interface template is `SharpClaw.Client.Uno/Environment/.env.template`.
-`Api:Url` selects the Core API URL and is also passed to a bundled backend
-as `ASPNETCORE_URLS` when the client launches one. `Backend:Enabled`
-controls bundled backend launch. `Gateway:Enabled` is false in the
-template so the public gateway is opt-in, and `Gateway:Url` is used only
-when that bundled gateway is launched. `Processes:Persistent` keeps child
-processes alive after the frontend exits, while `Processes:AutoStart`
+The Interface template is the deployed Client.Uno assembly's
+`Environment/.env.template`.
+It is canonical dotenv, with nested keys written using `__`.
+`Api__Url` selects the Core API URL and is also passed to a bundled backend
+as `ASPNETCORE_URLS` when the client launches one. `Backend__Enabled`
+controls bundled backend launch. `Gateway__Enabled` is false in the
+template so the public gateway is opt-in, and `Gateway__Url` is used only
+when that bundled gateway is launched. `Processes__Persistent` keeps child
+processes alive after the frontend exits, while `Processes__AutoStart`
 registers Windows startup scripts. The `Logging:Serilog` section controls
 frontend logging.
 
 ### Gateway `.env` keys
 
-The Gateway template is `SharpClaw.Gateway/Environment/.env.template`.
+The Gateway template is the deployed Gateway assembly's
+`Environment/.env.template`.
+It is canonical dotenv, with nested keys written using `__`.
 `InternalApi` contains the selected Core API URL, timeout, optional API-key
 override, optional API-key file path, optional gateway service token, and
 optional gateway-token file path. Empty auth values are ignored so normal

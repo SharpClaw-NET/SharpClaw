@@ -19,11 +19,11 @@
 | **Prerequisites** | None |
 | **Platform** | All |
 
-To enable, add to your core `.env` (`Infrastructure/Environment/.env`)
-Modules section:
+To enable, add `Modules__sharpclaw_metrics="true"` to the deployed Runtime
+Host's `Environment/.env`:
 
-```jsonc
-"sharpclaw_metrics": "true"
+```dotenv
+Modules__sharpclaw_metrics="true"
 ```
 
 To disable, set to `"false"` or remove the key (missing = disabled).

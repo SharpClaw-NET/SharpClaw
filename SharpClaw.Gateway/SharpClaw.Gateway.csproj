@@ -17,6 +17,7 @@
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+    <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 

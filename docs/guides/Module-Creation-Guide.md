@@ -56,15 +56,15 @@ Modules can contribute any combination of:
 - **Task pipeline contributions** â€” module methods callable from C# task scripts, parser mappings, trigger attributes, and runtime trigger sources
 - **Seed data** â€” one-time database rows or config inserted on first install
 
-Modules can also own configuration under their own Core `.env` section. The
-env loader is generic: it reads the JSON-with-comments `.env` and `.dev.env`
-files into `IConfiguration`, so the loader does not need a code change when a
-new module introduces a section such as `"MyModule"`. Your module owns the
-section name, the key names, the defaults, and the code that reads them.
-Adding the section to the shipped Core `.env.template` is only needed when the
+Modules can also own configuration in the application host's canonical dotenv
+files. The generic loader reads the deployed Runtime Host's
+`Environment/.env` and `.dev.env` into `IConfiguration`, so the loader does not
+need a code change when a new module introduces keys such as
+`MyModule__EndpointUrl`. Your module owns the key names, defaults, and code that
+reads them. Adding keys to the shipped `.env.template` is only needed when the
 SharpClaw repo itself wants to advertise a bundled module's default settings.
-Third-party modules should document the snippet that users add to their own
-Core `.env`.
+Third-party modules should document the dotenv assignments users add to their
+own Runtime Host `Environment/.env`.
 
 ---
 
@@ -197,24 +197,21 @@ public async Task SeedDataAsync(IServiceProvider services, CancellationToken ct)
 
 ---
 
-## Module configuration from env
+## Module configuration from dotenv
 
-Core `.env` files are JSON-with-comments files loaded into the standard
-`IConfiguration` tree before modules are configured. There is no central
-registry of module env sections and no env-loader switch statement that must be
-updated for each module. If your module needs settings, choose a stable section
-name that belongs to the module, document the keys, and read them from DI in the
-service that uses them.
+The deployed Runtime Host `Environment/.env` and `.dev.env` files are canonical
+dotenv documents loaded into the standard `IConfiguration` tree before modules
+are configured. There is no central registry of module keys and no env-loader
+switch statement that must be updated for each module. If your module needs
+settings, choose stable keys that belong to the module, document them, and read
+them from DI in the service that uses them.
 
-For example, a module with id `my_module` can ask users to add this section next
-to the existing top-level sections in `SharpClaw.Runtime.INF`
-`/Environment/.env`:
+For example, a module with id `my_module` can ask users to add these assignments
+to the deployed Runtime Host's `Environment/.env`:
 
-```jsonc
-"MyModule": {
-  "EndpointUrl": "https://example.internal/api",
-  "RetrySeconds": "15"
-}
+```dotenv
+MyModule__EndpointUrl="https://example.internal/api"
+MyModule__RetrySeconds="15"
 ```
 
 The module code can then consume those values through normal constructor
@@ -235,16 +232,16 @@ public sealed class MyService(IConfiguration configuration)
 ```
 
 Keep defaults in module-owned code so the module still has predictable behavior
-when the section is absent. Use a unique, readable section name rather than a
-generic name such as `"Settings"` or `"Options"`. If a setting is sensitive,
-prefer the Core `.env` because it is the server-side env file and supports the
-same encrypted-at-rest path as the rest of Core configuration.
+when the keys are absent. Use a unique, readable key prefix rather than a
+generic name such as `Settings` or `Options`. If a setting is sensitive, prefer
+the Runtime Host `.env` because it is the server-side env file and uses the
+same protected-at-rest path as the rest of Runtime configuration.
 
 Bundled modules may add their documented defaults to the checked-in
 `.env.template` files for discoverability. Third-party modules should not need a
 SharpClaw source change for configuration; they should ship documentation that
-shows the JSON section to paste into Core `.env`, plus the module enablement
-entry under `Modules`.
+shows the dotenv assignments to paste into the Runtime Host `.env`, plus the
+module enablement assignment under `Modules`.
 
 ---
 
@@ -737,13 +734,10 @@ doc â€” when the module is disabled, tasks bound to those keys are flagged 
 
 ## Enabling your module
 
-1. Add your module ID to the `Modules` section of
-   `Infrastructure/Environment/.env`:
+1. Add your module ID to the Runtime Host's `Environment/.env`:
 
-   ```jsonc
-   "Modules": {
-     "my_module": "true"
-   }
+   ```dotenv
+   Modules__my_module="true"
    ```
 
 2. Restart the application, or use the CLI to enable it at runtime:

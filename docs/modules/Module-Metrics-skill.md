@@ -16,9 +16,8 @@ Default: disabled in base .env, enabled in .dev.env
 Prerequisites: none
 Platform: all
 
-To enable, add to your core .env (Infrastructure/Environment/.env)
-Modules section:
-  "sharpclaw_metrics": "true"
+To enable, add this assignment to the deployed Runtime Host's Environment/.env:
+  Modules__sharpclaw_metrics="true"
 
 To disable, set to "false" or remove the key (missing = disabled).
 

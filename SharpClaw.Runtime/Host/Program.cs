@@ -55,6 +55,7 @@ using SharpClaw.Core.Tools;
 using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Core.Tasks.Preflight;
 using SharpClaw.Core.Tasks.Runtime;
+using Supprocom.Secrets;
 
 // ════════════════════════════════════════════════════════════════════════════
 //  SharpClaw API host — composition root
@@ -138,6 +139,7 @@ var earlyConfiguration = new ConfigurationBuilder()
     .Build();
 
 var encryptionKeyBase64 = earlyConfiguration["Encryption:Key"]
+    ?? SharpClawInstallationKeyStore.GetConfiguredKeyBase64OrNull()
     ?? PersistentKeyStore.GetOrCreate("encryption-key", backendInstancePaths);
 byte[] encryptionKey;
 try
@@ -320,6 +322,14 @@ try
     builder.Configuration.AddLocalEnvironment(
         builder.Environment.IsDevelopment(),
         backendInstancePaths);
+
+    builder.Services.AddSupprocomSecretsFileProtectionManagement(
+        LocalEnvironment.CreateSecretsOptions(
+            Path.Combine(
+                Path.GetDirectoryName(typeof(LocalEnvironment).Assembly.Location)!,
+                "Environment"),
+            builder.Environment.IsDevelopment(),
+            backendInstancePaths));
 
     builder.Host.UseSerilog();
     builder.Logging.AddProvider(new DurableProcessLogLoggerProvider(processLogs));

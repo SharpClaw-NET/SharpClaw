@@ -15,6 +15,7 @@ using SharpClaw.Core.Modules;
 using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -209,7 +210,16 @@ public sealed class ModuleServiceDisableDependencyTests
                 NullLogger<ModuleEventDispatcher>.Instance),
             NullLogger<ModuleService>.Instance,
             new ChatCache(configuration),
+            new UnusedDocumentUpdater(),
             configuration);
+
+    private sealed class UnusedDocumentUpdater : ISecretDocumentUpdater
+    {
+        public Task UpdateDocumentAsync(
+            Func<IReadOnlyList<SupprocomSecretSetting>, IReadOnlyList<SupprocomSecretSetting>> update,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("This disable-dependency fixture does not load external modules.");
+    }
 
     private static JsonElement EmptySchema()
     {

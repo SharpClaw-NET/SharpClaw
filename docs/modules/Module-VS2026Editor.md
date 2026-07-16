@@ -22,11 +22,11 @@
 This module requires the `editor_bridge` and `editor_session` contracts
 exported by the Editor Common module. Both modules must be enabled.
 
-Add **both** keys to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+Add **both** assignments to the deployed Runtime Host's `Environment/.env`:
 
-```jsonc
-"sharpclaw_editor_common": "true",
-"sharpclaw_vs2026_editor": "true"
+```dotenv
+Modules__sharpclaw_editor_common="true"
+Modules__sharpclaw_vs2026_editor="true"
 ```
 
 > ⚠️ If Editor Common is disabled, this module will be **excluded during
@@ -106,13 +106,11 @@ Status is shown in the VS status bar.
 
 Default connection: `ws://localhost:5163/api/editor/bridge`
 
-To change the port, update `SharpClaw.Runtime.Host` listen URL in:
-`Infrastructure/Environment/.env`
+To change the port, update `Api__ListenUrl` in the deployed Runtime Host's
+`Environment/.env`:
 
-```jsonc
-"Api": {
-  "ListenUrl": "http://localhost:5163"
-}
+```dotenv
+Api__ListenUrl="http://localhost:5163"
 ```
 
 ### Building Extension from Source

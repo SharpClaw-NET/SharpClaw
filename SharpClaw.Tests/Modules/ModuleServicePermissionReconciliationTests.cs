@@ -20,6 +20,7 @@ using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -247,9 +248,18 @@ public sealed class ModuleServicePermissionReconciliationTests
                 NullLogger<ModuleEventDispatcher>.Instance),
             NullLogger<ModuleService>.Instance,
             new ChatCache(configuration),
+            new UnusedDocumentUpdater(),
             configuration);
 
         return (service, rootServices);
+    }
+
+    private sealed class UnusedDocumentUpdater : ISecretDocumentUpdater
+    {
+        public Task UpdateDocumentAsync(
+            Func<IReadOnlyList<SupprocomSecretSetting>, IReadOnlyList<SupprocomSecretSetting>> update,
+            CancellationToken cancellationToken = default) =>
+            throw new NotSupportedException("This permission-reconciliation fixture does not load external modules.");
     }
 
     private sealed class DescriptorModule(

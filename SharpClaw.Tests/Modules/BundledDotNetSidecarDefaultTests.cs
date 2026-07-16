@@ -17,6 +17,8 @@ using SharpClaw.TestFixtures.ExternalModule;
 using SharpClaw.Tests.TestHarness;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
+using SharpClaw.Runtime.INF.Configuration;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -562,6 +564,11 @@ public sealed class BundledDotNetSidecarDefaultTests
                 SharpClawInstanceKind.Backend,
                 explicitInstanceRoot: instanceRoot);
             instancePaths.EnsureDirectories();
+            var secretStore = new SupprocomSecretFileStore(
+                LocalEnvironment.CreateSecretsOptions(
+                    Path.Combine(instanceRoot, "Environment"),
+                    isDevelopment: false,
+                    instancePaths));
 
             var configurationValues = new Dictionary<string, string?>
             {
@@ -578,6 +585,10 @@ public sealed class BundledDotNetSidecarDefaultTests
             var services = new ServiceCollection();
             services.AddSingleton<IConfiguration>(configuration);
             services.AddSingleton(instancePaths);
+            services.AddSingleton(secretStore);
+            services.AddSingleton<ISecretDocumentStore>(secretStore);
+            services.AddSingleton<ISecretDocumentUpdater>(secretStore);
+            services.AddSingleton<ISecretFileProtectionManager>(secretStore);
             services.AddLogging();
             services.AddHttpClient();
             services.AddDbContext<SharpClawDbContext>(options =>

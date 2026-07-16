@@ -17,7 +17,7 @@ Solutions to common SharpClaw issues.
 
 1. **Check backend status:**
    - If the Uno client auto-starts the backend, check the Process Lifecycle settings
-   - Verify `Backend:Enabled=true` in Interface .env
+   - Verify `Backend__Enabled="true"` in Interface .env
 
 2. **Restart backend:**
    - Close all SharpClaw instances
@@ -31,7 +31,8 @@ Solutions to common SharpClaw issues.
    ```powershell
    netstat -ano | findstr :48923
    ```
-   If another process is using port 48923, either kill it or change `Api:ListenUrl` in Core .env.
+   If another process is using port 48923, either kill it or change
+   `Api__ListenUrl` in Core .env.
 
 4. **Check logs:**
    - Go to Settings → Gateway → Process Logs (if backend logs are visible there)
@@ -62,8 +63,8 @@ Solutions to common SharpClaw issues.
    - Start gateway again
 
 4. **Verify .env config:**
-   - Ensure `Api:ListenUrl` in Core .env matches the backend's actual bind address
-   - Ensure `Gateway:Url` in Interface .env is set correctly
+   - Ensure `Api__ListenUrl` in Core .env matches the backend's actual bind address
+   - Ensure `Gateway__Url` in Interface .env is set correctly
 
 ## Authentication Issues
 
@@ -83,7 +84,7 @@ Solutions to common SharpClaw issues.
    - If first-time setup didn't complete, you may need to reset the database
 
 2. **Reset admin password:**
-   - Edit Core .env → `Admin:Password` → Save & Restart
+   - Edit Core .env → `Admin__Password` → Save & Restart
    - On next boot, the admin password is updated
 
 3. **Reset database (last resort):**
@@ -106,7 +107,7 @@ Solutions to common SharpClaw issues.
    - Re-authenticate
 
 2. **Check JWT secret consistency:**
-   - Ensure `Jwt:Secret` in Core .env hasn't changed since login
+   - Ensure `Jwt__Secret` in Core .env hasn't changed since login
    - If it changed, all existing tokens are invalidated
 
 ## Provider Issues
@@ -274,7 +275,7 @@ Solutions to common SharpClaw issues.
 
 **Causes:**
 - Persistent mode toggle isn't saved
-- Environment variable override
+- Interface `.env` still contains `Processes__Persistent="false"`
 
 **Solutions:**
 
@@ -284,7 +285,9 @@ Solutions to common SharpClaw issues.
 
 2. **Check Interface .env:**
    - Go to >env → Client Interface
-   - Verify `Processes:Persistent=true`
+   - Verify `Processes__Persistent="true"`
+   - A same-key process environment value does not override the file because
+     SharpClaw gives the active dotenv document precedence.
 
 3. **Test by checking process list:**
    - Close Uno client
@@ -442,7 +445,7 @@ Solutions to common SharpClaw issues.
 
 **Causes:**
 - User is not admin
-- `EnvEditor:AllowNonAdmin=false` in Core .env
+- `EnvEditor__AllowNonAdmin="false"` in Core .env
 
 **Solutions:**
 
@@ -450,7 +453,7 @@ Solutions to common SharpClaw issues.
    - Use the admin credentials configured during first-time setup
 
 2. **Enable non-admin access (as admin):**
-   - Edit Core .env → `EnvEditor:AllowNonAdmin=true` → Save & Restart
+   - Edit Core .env → `EnvEditor__AllowNonAdmin="true"` → Save & Restart
 
 ### "Changes don't persist after restart"
 

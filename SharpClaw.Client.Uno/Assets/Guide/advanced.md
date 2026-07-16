@@ -61,7 +61,7 @@ By default, every user message is prefixed with a metadata header:
 [time: 2025-01-15 14:23:00 UTC | user: alice | via: UnoWindows | role: Developer (SafeShell, Agent) | bio: Senior engineer | agent-role: Assistant (Chat, Log)]
 ```
 
-You can **override** this header at the **agent level** or **channel level** with custom templates. Operators can also turn off generated default headers globally with `Chat:DisableDefaultHeaders=true` in the Core `.env`; explicit agent or channel custom headers still run unless they are cleared or the channel's **Disable Chat Header** setting is enabled.
+You can **override** this header at the **agent level** or **channel level** with custom templates. Operators can also turn off generated default headers globally with `Chat__DisableDefaultHeaders="true"` in the Core `.env`; explicit agent or channel custom headers still run unless they are cleared or the channel's **Disable Chat Header** setting is enabled.
 
 ### Header Tag System
 
@@ -98,7 +98,7 @@ Agents: Alice (guid1), Bob (guid2), Charlie (guid3)
 
 Fields marked with `[HeaderSensitive]` render as `[redacted]`.
 
-Header expansion is on the chat hot path. `Chat:DisableHeaderTagExpansion=true` treats explicit custom headers as literal text, so no built-in tags, resource tags, or module-owned tags are resolved. `Chat:DisableModuleHeaderTags=true` prevents only module-owned header tag resolvers from executing inside custom headers. `AgentOrchestration:DisableAccessibleThreadsHeader=true` makes `{{accessible-threads}}` expand to an empty string when tag expansion is still enabled. `Chat:CacheMaxMegabytes` controls the unified chat cache memory budget for header state and recently-used channel/thread/agent token totals. Set it to `0` only when every message must force fresh persistence and permission reads.
+Header expansion is on the chat hot path. `Chat__DisableHeaderTagExpansion="true"` treats explicit custom headers as literal text, so no built-in tags, resource tags, or module-owned tags are resolved. `Chat__DisableModuleHeaderTags="true"` prevents only module-owned header tag resolvers from executing inside custom headers. `AgentOrchestration__DisableAccessibleThreadsHeader="true"` makes `{{accessible-threads}}` expand to an empty string when tag expansion is still enabled. `Chat__CacheMaxMegabytes` controls the unified chat cache memory budget for header state and recently-used channel/thread/agent token totals. Set it to `0` only when every message must force fresh persistence and permission reads.
 
 ### Setting Custom Headers
 
@@ -123,7 +123,7 @@ To suppress headers entirely:
 - **Agent level**: Set a blank custom header
 - **Channel level**: Enable **Disable Chat Header** in channel settings
 
-For instance-wide behavior, edit Core `.env` and set `Chat:DisableDefaultHeaders=true`. To remove the core-generated native-tool instruction suffix from provider calls, set `Chat:DisableDefaultSystemPrompt=true`; this does not remove the system prompt saved on each agent. To keep an explicit custom header but send it as pure text, set `Chat:DisableHeaderTagExpansion=true`.
+For instance-wide behavior, edit Core `.env` and set `Chat__DisableDefaultHeaders="true"`. To remove the core-generated native-tool instruction suffix from provider calls, set `Chat__DisableDefaultSystemPrompt="true"`; this does not remove the system prompt saved on each agent. To keep an explicit custom header but send it as pure text, set `Chat__DisableHeaderTagExpansion="true"`.
 
 ### Permissions
 
@@ -134,57 +134,59 @@ Custom headers require:
 
 ## Environment Configuration
 
-SharpClaw uses two `.env` files (JSON-with-comments format):
+SharpClaw uses canonical dotenv files. The active `.env` and development
+`.dev.env` files live beside their matching templates in each deployed
+assembly's `Environment` directory.
 
 ### Core .env (API-side)
 
-**Location:** `SharpClaw.Runtime/INF/Environment/.env`
+**Location:** the deployed Runtime Host assembly's `Environment/.env`
 
 **Managed via:** Settings → >env button → **Runtime Host** tab
 
-Core settings include `Encryption:Key` for secret encryption, `Jwt:Secret`
-for token signing, `ConnectionStrings:Postgres` when PostgreSQL is used, and
-`Api:ListenUrl` for the backend bind address. The default backend bind address
+Core settings include `Encryption__Key` for application encryption, `Jwt__Secret`
+for token signing, `ConnectionStrings__Postgres` when PostgreSQL is used, and
+`Api__ListenUrl` for the backend bind address. The default backend bind address
 is `http://127.0.0.1:48923`.
 
 Startup and local runtime behavior is controlled with `Admin:Username` and
-`Admin:Password` for the first admin account, `Browser:Executable` and
-`Browser:Arguments` for localhost browser actions, and the `Local:*` model
-settings such as `Local:GpuLayerCount`, `Local:ContextSize`,
-`Local:KeepLoaded`, and `Local:IdleCooldownMinutes`. `EnvEditor:AllowNonAdmin`
-controls whether non-admin users can edit Core `.env`, and `Backend:Enabled`
+`Admin__Password` for the first admin account, `Browser__Executable` and
+`Browser__Arguments` for localhost browser actions, and the `Local__*` model
+settings such as `Local__GpuLayerCount`, `Local__ContextSize`,
+`Local__KeepLoaded`, and `Local__IdleCooldownMinutes`. `EnvEditor__AllowNonAdmin`
+controls whether non-admin users can edit Core `.env`, and `Backend__Enabled`
 controls backend auto-start.
 
 Chat prompt-shaping and hot-path cache switches live under `Chat`. Use
-`Chat:DisableDefaultHeaders`, `Chat:DisableDefaultSystemPrompt`,
-`Chat:DisableHeaderTagExpansion`, `Chat:DisableModuleHeaderTags`, and
-`Chat:CacheMaxMegabytes` for Core chat behavior. Agent Orchestration owns its
+`Chat__DisableDefaultHeaders`, `Chat__DisableDefaultSystemPrompt`,
+`Chat__DisableHeaderTagExpansion`, `Chat__DisableModuleHeaderTags`, and
+`Chat__CacheMaxMegabytes` for Core chat behavior. Agent Orchestration owns its
 own cross-thread header summary switch:
-`AgentOrchestration:DisableAccessibleThreadsHeader`.
+`AgentOrchestration__DisableAccessibleThreadsHeader`.
 
 ### Interface .env (client-side)
 
-**Location:** `SharpClaw.Client.Uno/Environment/.env`
+**Location:** the deployed Client.Uno assembly's `Environment/.env`
 
 **Managed via:** Settings → >env button → **Client Interface** tab
 
 **Settings:**
-- `Api:Url`: Backend URL (default `http://127.0.0.1:48923`)
-- `Backend:Enabled`: Enable/disable backend auto-launch from Uno client
-- `Gateway:Enabled` / `Gateway:Url`: Gateway auto-launch and URL
-- `Processes:Persistent`: Keep processes running on exit
-- `Processes:AutoStart`: Register Windows startup scripts
+- `Api__Url`: Backend URL (default `http://127.0.0.1:48923`)
+- `Backend__Enabled`: Enable/disable backend auto-launch from Uno client
+- `Gateway__Enabled` / `Gateway__Url`: Gateway auto-launch and URL
+- `Processes__Persistent`: Keep processes running on exit
+- `Processes__AutoStart`: Register Windows startup scripts
 
 ### Editing .env Files
 
 1. Click **>env** button (available on: Login, Boot, Settings sidebar footer)
 2. Select **Runtime Host** or **Client Interface**
-3. Use toggle switches or **JSON** view for raw editing
+3. Use toggle switches or **Raw dotenv** view for raw editing
 4. Click **Save & Restart** to apply changes
 
 **Core .env** requires authorization:
 - Admin users always have access
-- Non-admin users require `EnvEditor:AllowNonAdmin=true`
+- Non-admin users require `EnvEditor__AllowNonAdmin="true"`
 
 **Interface .env** is always editable by the current user.
 

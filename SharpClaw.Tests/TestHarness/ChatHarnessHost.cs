@@ -39,6 +39,8 @@ using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
+using SharpClaw.Runtime.INF.Configuration;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -61,6 +63,7 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
 
     public IServiceProvider RootServices => _root;
     public IServiceProvider Services => _scope.ServiceProvider;
+    public string InstanceRoot => _instanceRoot;
     public SharpClawDbContext Db => Services.GetRequiredService<SharpClawDbContext>();
     public ChatService Chat => Services.GetRequiredService<ChatService>();
     public TestHarnessControl Harness { get; }
@@ -88,6 +91,11 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             SharpClawInstanceKind.Backend,
             explicitInstanceRoot: instanceRoot);
         instancePaths.EnsureDirectories();
+        var secretStore = new SupprocomSecretFileStore(
+            LocalEnvironment.CreateSecretsOptions(
+                Path.Combine(instanceRoot, "Environment"),
+                isDevelopment: false,
+                instancePaths));
 
         var services = new ServiceCollection();
         var databaseRoot = new InMemoryDatabaseRoot();
@@ -99,6 +107,10 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         };
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(instancePaths);
+        services.AddSingleton(secretStore);
+        services.AddSingleton<ISecretDocumentStore>(secretStore);
+        services.AddSingleton<ISecretDocumentUpdater>(secretStore);
+        services.AddSingleton<ISecretFileProtectionManager>(secretStore);
         services.AddLogging();
         services.AddHttpClient();
         services.AddSingleton(new EncryptionOptions

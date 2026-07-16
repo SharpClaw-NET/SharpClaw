@@ -19,10 +19,11 @@
 | **Prerequisites** | None |
 | **Platform** | All |
 
-To enable, add to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+To enable, add `Modules__sharpclaw_editor_common="true"` to the deployed
+Runtime Host's `Environment/.env`:
 
-```jsonc
-"sharpclaw_editor_common": "true"
+```dotenv
+Modules__sharpclaw_editor_common="true"
 ```
 
 To disable, set to `"false"` or remove the key (missing = disabled).

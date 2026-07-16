@@ -24,7 +24,7 @@ selected via a single `.env` key â€” no code changes required.
   - [Applying migrations](#applying-migrations)
   - [Creating new migrations](#creating-new-migrations)
   - [Migration gate](#migration-gate)
-- [Encrypted .env](#encrypted-env)
+- [Protected .env](#protected-env)
 - [Provider-specific notes](#provider-specific-notes)
 
 ---
@@ -44,9 +44,9 @@ selected via a single `.env` key â€” no code changes required.
 
 ## Quick start
 
-1. Open the Core `.env` file (`Infrastructure/Environment/.env`).
-2. Set `Database:Provider` to your chosen provider.
-3. Add the matching connection string under `ConnectionStrings`.
+1. Open the deployed Runtime Host's `Environment/.env` file.
+2. Set `Database__Provider` to your chosen provider.
+3. Add the matching connection string under `ConnectionStrings__<Provider>`.
 4. Start the API. Check logs for any pending migration warnings.
 5. Apply migrations: `POST /admin/db/migrate` or CLI `db migrate`.
 
@@ -54,11 +54,11 @@ selected via a single `.env` key â€” no code changes required.
 
 ## Provider configuration
 
-All configuration lives in the Core `.env` file, which uses
-JSON-with-comments format. The same settings can also be supplied as process
-environment variables by replacing `:` with double underscores. For example,
-`Database:JsonFile:Compression` in JSON becomes
-`Database__JsonFile__Compression` in a systemd environment file.
+All configuration lives in the Runtime host `.env` file, which uses canonical
+dotenv syntax. The same settings can also be supplied as process environment
+variables. File and process keys use double underscores, while the
+`IConfiguration` API exposes colon-separated paths such as
+`Database:JsonFile:Compression`.
 
 Provider behavior belongs in this section, but process placement does not.
 The `JsonFile` data directory is resolved from `SHARPCLAW_DATA_DIR` or the
@@ -95,23 +95,13 @@ path.
 
 Example:
 
-```jsonc
-{
-  "Database": {
-    "Provider": "Postgres",
-    "EnableDetailedErrors": "true",
-    "EnableSensitiveDataLogging": "false"
-  },
-  "Logging": {
-    "Serilog": {
-      "Enabled": "true",
-      "EntityFrameworkCoreMinimumLevel": "Information"
-    }
-  },
-  "ConnectionStrings": {
-    "Postgres": "Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
-  }
-}
+```dotenv
+Database__Provider="Postgres"
+Database__EnableDetailedErrors="true"
+Database__EnableSensitiveDataLogging="false"
+Logging__Serilog__Enabled="true"
+Logging__Serilog__EntityFrameworkCoreMinimumLevel="Information"
+ConnectionStrings__Postgres="Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
 ```
 
 ### JsonFile (default)
@@ -121,32 +111,26 @@ No connection string is needed. Data is stored through the external
 and LINQ flow as the relational providers. Legacy file-format handling, if
 needed, belongs in the provider package rather than in SharpClaw.
 
-```jsonc
-{
-  "Database": {
-    "Provider": "JsonFile",
-    "JsonFile": {
-      "Compression": "Brotli",
-      "StartupMode": "MetadataOnly",
-      "FullScanPolicy": "AllowSilentScans",
-      "FsyncOnWrite": "true",
-      "FlushRetryMaxRetries": "3",
-      "FlushRetryBaseDelayMilliseconds": "200",
-      "TransactionReplayMaxRetries": "3",
-      "ReadRetryMaxRetries": "3",
-      "ReadRetryBaseDelayMilliseconds": "25",
-      "IndexRescanIntervalMinutes": "60",
-      "QuarantineMaxAgeDays": "30",
-      "EnableChecksums": "true",
-      "VerifyChecksumsOnRead": "false",
-      "EnableEventLog": "false",
-      "EventLogRetentionDays": "7",
-      "EnableSnapshots": "false",
-      "SnapshotIntervalHours": "24",
-      "SnapshotRetentionCount": "3"
-    }
-  }
-}
+```dotenv
+Database__Provider="JsonFile"
+Database__JsonFile__Compression="Brotli"
+Database__JsonFile__StartupMode="MetadataOnly"
+Database__JsonFile__FullScanPolicy="AllowSilentScans"
+Database__JsonFile__FsyncOnWrite="true"
+Database__JsonFile__FlushRetryMaxRetries="3"
+Database__JsonFile__FlushRetryBaseDelayMilliseconds="200"
+Database__JsonFile__TransactionReplayMaxRetries="3"
+Database__JsonFile__ReadRetryMaxRetries="3"
+Database__JsonFile__ReadRetryBaseDelayMilliseconds="25"
+Database__JsonFile__IndexRescanIntervalMinutes="60"
+Database__JsonFile__QuarantineMaxAgeDays="30"
+Database__JsonFile__EnableChecksums="true"
+Database__JsonFile__VerifyChecksumsOnRead="false"
+Database__JsonFile__EnableEventLog="false"
+Database__JsonFile__EventLogRetentionDays="7"
+Database__JsonFile__EnableSnapshots="false"
+Database__JsonFile__SnapshotIntervalHours="24"
+Database__JsonFile__SnapshotRetentionCount="3"
 ```
 
 `Compression` accepts `None`, `Auto`, or `Brotli`. `StartupMode` accepts
@@ -157,60 +141,36 @@ saves synchronously in the current package version.
 
 ### PostgreSQL
 
-```jsonc
-{
-  "Database": {
-    "Provider": "Postgres",
-    "Postgres": {
-      "CommandTimeoutSeconds": "30",
-      "EnableRetryOnFailure": "false",
-      "MaxRetryCount": "6",
-      "MaxRetryDelaySeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "Postgres": "Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
-  }
-}
+```dotenv
+Database__Provider="Postgres"
+Database__Postgres__CommandTimeoutSeconds="30"
+Database__Postgres__EnableRetryOnFailure="false"
+Database__Postgres__MaxRetryCount="6"
+Database__Postgres__MaxRetryDelaySeconds="30"
+ConnectionStrings__Postgres="Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
 ```
 
 **Package:** `Npgsql.EntityFrameworkCore.PostgreSQL` (10.0.1)
 
 ### SQL Server
 
-```jsonc
-{
-  "Database": {
-    "Provider": "SqlServer",
-    "SqlServer": {
-      "CommandTimeoutSeconds": "30",
-      "EnableRetryOnFailure": "false",
-      "MaxRetryCount": "6",
-      "MaxRetryDelaySeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "SqlServer": "Server=.;Database=SharpClaw;Trusted_Connection=True;TrustServerCertificate=True"
-  }
-}
+```dotenv
+Database__Provider="SqlServer"
+Database__SqlServer__CommandTimeoutSeconds="30"
+Database__SqlServer__EnableRetryOnFailure="false"
+Database__SqlServer__MaxRetryCount="6"
+Database__SqlServer__MaxRetryDelaySeconds="30"
+ConnectionStrings__SqlServer="Server=.;Database=SharpClaw;Trusted_Connection=True;TrustServerCertificate=True"
 ```
 
 **Package:** `Microsoft.EntityFrameworkCore.SqlServer` (10.0.5)
 
 ### SQLite
 
-```jsonc
-{
-  "Database": {
-    "Provider": "SQLite",
-    "SQLite": {
-      "CommandTimeoutSeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "SQLite": "Data Source=sharpclaw.db"
-  }
-}
+```dotenv
+Database__Provider="SQLite"
+Database__SQLite__CommandTimeoutSeconds="30"
+ConnectionStrings__SQLite="Data Source=sharpclaw.db"
 ```
 
 **Package:** `Microsoft.EntityFrameworkCore.Sqlite` (10.0.5)
@@ -320,11 +280,19 @@ middleware.
 
 ---
 
-## Encrypted .env
+## Protected .env
 
-The Core `.env` supports AES-GCM encryption at rest via
-`Encryption:EncryptDatabase`. Connection strings containing credentials
-are protected by the same encryption key used for provider API keys.
+The active Runtime Host `.env` is protected at rest by the
+`Supprocom.Secrets` installation-bound file-protection path. The installation
+key is selected from the configured installation override or the instance
+secret file, and the package owns encryption, recovery, locking, and canonical
+dotenv serialization. The `.env.template` and `.dev.env.template` files remain
+portable plaintext templates and are never encrypted in place.
+
+`Encryption__EncryptDatabase` controls JSONColdStore database encryption; it
+does not decide whether the `.env` document is protected. The in-document
+`Encryption__Key` is the application/provider encryption override and may differ
+from the installation key used for the protected environment file.
 
 See [Encryption & key management](Core-API-documentation.md#encryption--key-management)
 for key resolution and validation details.

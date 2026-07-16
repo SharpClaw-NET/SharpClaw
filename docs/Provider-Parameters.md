@@ -165,7 +165,7 @@ are **never overwritten** — user-supplied parameters are additive only.
 > please [open a GitHub issue](https://github.com/mkn8rn/SharpClaw/issues)
 > so it can be added with proper validation and documentation.
 
-> The `.env` flag `Agent:DisableCustomProviderParameters=true` disables
+> The `.env` flag `Agent__DisableCustomProviderParameters="true"` disables
 > the escape-hatch entirely. When set, `providerParameters` is ignored
 > and only typed fields are sent.
 

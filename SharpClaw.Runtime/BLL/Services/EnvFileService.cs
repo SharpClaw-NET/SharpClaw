@@ -1,9 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Runtime.INF.Configuration;
 using SharpClaw.Runtime.INF.Persistence;
-using SharpClaw.Shared.Instances;
-using SharpClaw.Shared.Security;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Runtime.BLL.Services;
 
@@ -25,7 +23,7 @@ public sealed class EnvFileService(
     SharpClawDbContext db,
     SessionService session,
     IConfiguration configuration,
-    SharpClawInstancePaths instancePaths)
+    ISecretDocumentStore documentStore)
 {
     /// <summary>
     /// Returns <c>true</c> when the current session user is authorised
@@ -47,26 +45,23 @@ public sealed class EnvFileService(
 
     /// <summary>
     /// Reads the Core <c>.env</c> file and returns its raw content.
-    /// Decrypts transparently if the file is encrypted on disk.
-    /// Returns <c>null</c> when the file does not exist.
+    /// The package-backed document store decrypts protected storage and returns
+    /// the complete plaintext dotenv document.
+    /// The package-backed document store owns first-run, template, and empty-file behavior.
     /// Throws <see cref="UnauthorizedAccessException"/> on auth failure.
     /// </summary>
-    public async Task<string?> ReadAsync(CancellationToken ct = default)
+    public async Task<string> ReadAsync(CancellationToken ct = default)
     {
         if (!await IsAuthorisedAsync(ct))
             throw new UnauthorizedAccessException("Admin login required to read Runtime Host environment.");
 
-        var path = ResolveEnvFilePath();
-        if (!File.Exists(path)) return null;
-
-        var key = EncryptionKeyResolver.ResolveKey(instancePaths);
-        return await EncryptedEnvFile.ReadAsync(path, key, ct);
+        return await documentStore.ReadDocumentAsync(ct);
     }
 
     /// <summary>
     /// Writes the given content to the Core <c>.env</c> file.
-    /// Always writes encrypted when an encryption key is available.
-    /// Creates the directory if it does not exist.
+    /// The package-backed document store validates and atomically protects the
+    /// complete dotenv document.
     /// Throws <see cref="UnauthorizedAccessException"/> on auth failure.
     /// </summary>
     public async Task WriteAsync(string content, CancellationToken ct = default)
@@ -74,11 +69,7 @@ public sealed class EnvFileService(
         if (!await IsAuthorisedAsync(ct))
             throw new UnauthorizedAccessException("Admin login required to edit Runtime Host environment.");
 
-        var path = ResolveEnvFilePath();
-        var key = EncryptionKeyResolver.ResolveKey(instancePaths);
-        // Always write encrypted — auto-lock ensures the file is encrypted
-        // after first startup, and all subsequent writes preserve that.
-        await EncryptedEnvFile.WriteAsync(path, content, key, encrypt: true, ct);
+        await documentStore.ReplaceDocumentAsync(content, ct);
     }
 
     // ── Internals ──────────────────────────────────────────────────
@@ -88,7 +79,4 @@ public sealed class EnvFileService(
         var value = configuration["EnvEditor:AllowNonAdmin"];
         return bool.TryParse(value, out var allowed) && allowed;
     }
-
-    private static string ResolveEnvFilePath() =>
-        LocalEnvironment.ResolveActiveEnvFilePath();
 }

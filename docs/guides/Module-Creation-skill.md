@@ -8,7 +8,8 @@ WHAT A MODULE IS
 A manifest-backed module running in a sidecar process.
 C# modules still implement ISharpClawModule, but the parent host discovers
 module.json and talks to the module through the sidecar protocol.
-Enabled/disabled by the Modules section in Infrastructure/Environment/.env.
+Enabled/disabled by `Modules__<module_id>` in the deployed Runtime Host's
+`Environment/.env`.
 Can be toggled at runtime without restarting the Core API process:
 module enable/disable <id>
 
@@ -148,8 +149,8 @@ Members: Verbs (IReadOnlyList<string>), HandleAsync(string[], ct) → CliResult
 ────────────────────────────────────────
 ENABLING A NEW MODULE
 ────────────────────────────────────────
-Add to Infrastructure/Environment/.env Modules section:
-  "my_module": "true"
+Add to the deployed Runtime Host's Environment/.env:
+  Modules__my_module="true"
 
 Runtime (no restart): module enable my_module
 Verify: module get my_module  →  status should be "enabled"

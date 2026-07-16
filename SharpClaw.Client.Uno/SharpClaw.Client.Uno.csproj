@@ -55,7 +55,12 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="Supprocom.Secrets" />
     <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="SharpClaw.Tests" />
   </ItemGroup>
 
   <!--

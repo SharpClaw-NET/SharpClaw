@@ -185,7 +185,7 @@ For production scenarios, deploy the gateway as a standalone service:
 
 1. Publish `SharpClaw.Gateway` as a self-contained executable
 2. Configure the Core `.env` file with API listen URL and secrets
-3. Set `Backend:Enabled=false` in the client `.env` to prevent auto-launch
+3. Set `Backend__Enabled="false"` in the client `.env` to prevent auto-launch
 4. Run the gateway as a systemd/Windows service
 5. Configure reverse proxy (nginx, Caddy) for HTTPS and public access
 

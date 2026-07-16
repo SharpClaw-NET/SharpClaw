@@ -1,5 +1,7 @@
 using System.Net;
 using System.Net.Sockets;
+using System.Globalization;
+using System.Numerics;
 using System.Reflection;
 using System.Security.Cryptography;
 
@@ -26,6 +28,7 @@ using SharpClaw.Core.Permissions;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.Security;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Runtime.BLL.Services;
 
@@ -43,6 +46,7 @@ public sealed class ModuleService(
     ModuleEventDispatcher eventDispatcher,
     ILogger<ModuleService> logger,
     ChatCache chatCache,
+    ISecretDocumentUpdater documentUpdater,
     IConfiguration? configuration = null,
     SharpClawInstancePaths? instancePaths = null)
 {
@@ -495,7 +499,7 @@ public sealed class ModuleService(
     {
         var canonicalDir = Path.GetFullPath(absoluteDir);
         if (persistDisabledEnvEntry)
-            AddExternalModuleToEnv(canonicalDir);
+            await PersistExternalModuleToEnvAsync(canonicalDir, ct);
 
         if (!Directory.Exists(canonicalDir))
             throw new DirectoryNotFoundException($"External module directory not found: '{canonicalDir}'.");
@@ -1193,135 +1197,114 @@ public sealed class ModuleService(
     }
 
     /// <summary>
-    /// Appends an external module path to the <c>ExternalModules</c> array in the
-    /// Core <c>.env</c> file so it persists across restarts. Skips if the path is
-    /// already present. Uses direct file I/O (no auth check) because this is an
-    /// internal server-side operation triggered by module loading.
+    /// Atomically persists an external module path in the package-owned
+    /// canonical dotenv document. The package holds the per-file writer gate
+    /// while this synchronous transform runs, so concurrent callers cannot
+    /// lose unrelated settings or select the same index.
     /// </summary>
-    private void AddExternalModuleToEnv(string absoluteDir)
+    private async Task PersistExternalModuleToEnvAsync(
+        string absoluteDir,
+        CancellationToken ct)
     {
-        try
+        var canonicalPath = NormalizeExternalModulePath(absoluteDir);
+        var inserted = false;
+
+        await documentUpdater.UpdateDocumentAsync(snapshot =>
         {
-            var envPath = ResolveEnvFilePath();
-            if (!File.Exists(envPath)) return;
+            var usedIndexes = new HashSet<BigInteger>();
 
-            var content = File.ReadAllText(envPath);
-            var canonical = Path.GetFullPath(absoluteDir);
-
-            // Duplicate detection — parse the .env as JSON-with-comments and
-            // walk the typed ExternalModules array. This survives reformatting
-            // and comment changes that the legacy raw-text Contains check
-            // would have missed (audit section 3.2).
-            if (IsExternalModuleAlreadyRegistered(content, canonical))
-                return;
-
-            var normalised = canonical.Replace("\\", "\\\\");
-            var entry = $"    {{ \"Path\": \"{normalised}\", \"Enabled\": false }}";
-
-            // Case 1: ExternalModules array already exists (commented-out or active).
-            //   – Active array: insert before the closing ']'.
-            //   – Commented-out array: uncomment it and insert the entry.
-            var activeArrayIdx = content.IndexOf(
-                ModuleFileNames.ExternalModulesArrayHeader, StringComparison.Ordinal);
-            if (activeArrayIdx >= 0)
+            foreach (var setting in snapshot)
             {
-                // Find the matching ']'.
-                var closeIdx = content.IndexOf(']', activeArrayIdx);
-                if (closeIdx < 0) return;
+                if (!TryGetExternalModuleIndex(setting.Key, out var index, out var isPathField))
+                    continue;
 
-                // Check if there's already at least one entry (non-empty array).
-                var slice = content[activeArrayIdx..closeIdx];
-                var hasEntries = slice.Contains('{');
-                var insertion = hasEntries
-                    ? $",\n{entry}"
-                    : $"\n{entry}\n  ";
+                // Reserve an index for every valid numeric field, including
+                // malformed or partial entries that do not contain Path.
+                usedIndexes.Add(index);
 
-                content = string.Concat(content.AsSpan(0, closeIdx), insertion, content.AsSpan(closeIdx));
-            }
-            else
-            {
-                // Case 2: No ExternalModules section at all — insert before "Modules".
-                var modulesIdx = content.IndexOf(
-                    ModuleFileNames.ModulesObjectKey, StringComparison.Ordinal);
-                var commentIdx = modulesIdx >= 0
-                    ? content.LastIndexOf(
-                        ModuleFileNames.ModulesSectionComment, modulesIdx, StringComparison.Ordinal)
-                    : -1;
-
-                var insertionPoint = commentIdx >= 0
-                    ? commentIdx
-                    : content.LastIndexOf('}');
-
-                if (insertionPoint < 0) return;
-
-                var block = $"\"ExternalModules\": [\n{entry}\n  ],\n\n  ";
-                content = string.Concat(content.AsSpan(0, insertionPoint), block, content.AsSpan(insertionPoint));
-            }
-
-            File.WriteAllText(envPath, content);
-            logger.LogInformation("Added external module path to .env: {Path}",
-                PathGuard.SanitizeForLog(absoluteDir));
-        }
-        catch (Exception ex)
-        {
-            logger.LogWarning(ex, "Failed to persist external module path to .env");
-        }
-    }
-
-    /// <summary>
-    /// Parses the <c>.env</c> JSON-with-comments and returns <c>true</c> when
-    /// the canonical path already appears as an entry in the
-    /// <c>ExternalModules</c> array. Returns <c>false</c> on parse failure so
-    /// the caller falls back to text-based mutation.
-    /// </summary>
-    private static bool IsExternalModuleAlreadyRegistered(string content, string canonicalPath)
-    {
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(content,
-                new System.Text.Json.JsonDocumentOptions
+                if (!isPathField
+                    || !TryCanonicalizePath(setting.Value, out var existingPath))
                 {
-                    AllowTrailingCommas = true,
-                    CommentHandling = System.Text.Json.JsonCommentHandling.Skip,
-                });
-
-            if (doc.RootElement.ValueKind != System.Text.Json.JsonValueKind.Object) return false;
-            if (!doc.RootElement.TryGetProperty("ExternalModules", out var arr)
-                || arr.ValueKind != System.Text.Json.JsonValueKind.Array) return false;
-
-            foreach (var item in arr.EnumerateArray())
-            {
-                if (item.ValueKind != System.Text.Json.JsonValueKind.Object) continue;
-                if (!item.TryGetProperty("Path", out var pathProp)) continue;
-                if (pathProp.ValueKind != System.Text.Json.JsonValueKind.String) continue;
-
-                var existing = pathProp.GetString();
-                if (string.IsNullOrEmpty(existing)) continue;
-
-                if (string.Equals(
-                        Path.GetFullPath(existing),
-                        canonicalPath,
-                        StringComparison.OrdinalIgnoreCase))
-                {
-                    return true;
+                    continue;
                 }
+
+                if (string.Equals(existingPath, canonicalPath, StringComparison.OrdinalIgnoreCase))
+                    return snapshot;
             }
-        }
-        catch
-        {
-            // Malformed .env or unexpected shape — let the caller try the
-            // text-splice path. The duplicate check is best-effort.
-        }
 
-        return false;
+            var nextIndex = BigInteger.Zero;
+            while (usedIndexes.Contains(nextIndex))
+                nextIndex++;
+
+            var indexText = nextIndex.ToString(CultureInfo.InvariantCulture);
+            inserted = true;
+            return snapshot
+                .Concat(
+                [
+                    new SupprocomSecretSetting(
+                        $"ExternalModules:{indexText}:Path", canonicalPath),
+                    new SupprocomSecretSetting(
+                        $"ExternalModules:{indexText}:Enabled", "false")
+                ])
+                .ToArray();
+        }, ct);
+
+        logger.LogInformation(
+            inserted
+                ? "Added external module path to protected environment document."
+                : "External module path was already present in protected environment document.");
     }
 
-    private static string ResolveEnvFilePath()
+    private static bool TryGetExternalModuleIndex(
+        string key,
+        out BigInteger index,
+        out bool isPathField)
     {
-        return Path.Combine(
-            Path.GetDirectoryName(typeof(ModuleService).Assembly.Location)!,
-            ModuleFileNames.EnvironmentDir, ModuleFileNames.EnvFile);
+        index = default;
+        isPathField = false;
+
+        var parts = key.Split(':');
+        if (parts.Length < 2
+            || !string.Equals(parts[0], "ExternalModules", StringComparison.OrdinalIgnoreCase)
+            || !BigInteger.TryParse(
+                parts[1],
+                NumberStyles.None,
+                CultureInfo.InvariantCulture,
+                out index)
+            || index < BigInteger.Zero)
+        {
+            return false;
+        }
+
+        isPathField = parts.Length == 3
+            && string.Equals(parts[2], "Path", StringComparison.OrdinalIgnoreCase);
+        return true;
     }
+
+    private static bool TryCanonicalizePath(string value, out string canonicalPath)
+    {
+        canonicalPath = string.Empty;
+        if (string.IsNullOrWhiteSpace(value))
+            return false;
+
+        try
+        {
+            canonicalPath = NormalizeExternalModulePath(value);
+            return true;
+        }
+        catch (Exception ex) when (
+            ex is ArgumentException
+            or NotSupportedException
+            or PathTooLongException)
+        {
+            // Invalid existing values still reserve their numeric index; they
+            // simply cannot prove that the new path is a duplicate.
+            return false;
+        }
+    }
+
+    private static string NormalizeExternalModulePath(string value)
+        => Path.TrimEndingDirectorySeparator(Path.GetFullPath(value));
 
     // ═══════════════════════════════════════════════════════════════
     // Startup helpers (called from Program.cs via a scope)

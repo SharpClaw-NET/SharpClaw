@@ -500,34 +500,43 @@ Migrations are NEVER automatic. App starts normally with pending migrations
 ────────────────────────────────────────
 ENCRYPTION & KEY MANAGEMENT
 ────────────────────────────────────────
-Provider API keys encrypted at rest with AES-256-GCM.
-Key resolution: Encryption:Key in Core .env (Base64, exactly 32 bytes decoded) → auto-generated via PersistentKeyStore at %LOCALAPPDATA%/SharpClaw/.encryption-key if unset.
+Provider API keys are encrypted at rest with the application encryption key.
+Key resolution: the in-document `Encryption__Key` value is the explicit
+application/provider override. The installation key for protected env files
+and durable process-log/segment encryption comes from the validated
+`SHARPCLAW_ENCRYPTION_KEY` override or the instance secret file through
+Supprocom.Secrets.
 Startup validation: invalid Base64 or wrong key length → backend crashes with clear error message.
 ⚠️ Changing/losing the key makes previously encrypted provider API keys permanently unreadable.
 
 ────────────────────────────────────────
 ENV FILE MANAGEMENT
 ────────────────────────────────────────
-Three .env files use JSON-with-comments and load into IConfiguration. The
-Core env file is server-side and lives under
-SharpClaw.Runtime/INF/Environment. The Interface env file
-lives under SharpClaw.Client.Uno/Environment and controls client process startup and
-URLs. The Gateway env file lives under SharpClaw.Gateway/Environment and
-controls public proxy routing, internal API auth, and queue behavior.
+The Runtime, Client.Uno, and Gateway hosts use canonical dotenv files loaded
+into IConfiguration by Supprocom.Secrets. Each deployed host uses its own
+assembly-local `Environment` directory.
+Each contains `.env` and `.env.template`, with `.dev.env` and
+`.dev.env.template` for development overlays. File keys use `__`; the
+configuration API exposes the same keys with `:` separators.
 
-All /env/core/* endpoints require JWT auth. Caller must be admin OR EnvEditor:AllowNonAdmin=true in Core .env.
+All /env/core/* endpoints require JWT auth. Caller must be admin OR
+`EnvEditor__AllowNonAdmin="true"` in the Core `.env`.
 
 GET  /env/core/auth  → { authorised: bool }  (pre-check — is caller allowed to edit Core .env?)
-GET  /env/core       → { content: "raw JSON string" }  (403 if not authorised, 404 if file missing)
+GET  /env/core       → { content: "raw dotenv string" }  (403 if not authorised; a missing active file is restored from the template, while a missing or invalid template is a server error)
 PUT  /env/core       { content }  → { saved: true }  (403 if not authorised)
 
-Core .env keys include Encryption:Key, EncryptDatabase, EncryptProviderKeys,
-Jwt:Secret, Jwt:Issuer, Jwt:Audience, Jwt:AccessTokenLifetime,
-Jwt:RefreshTokenLifetime, Auth:DisableApiKeyCheck,
-Auth:DisableAccessTokenCheck, Agent:DisableCustomProviderParameters,
-database settings, logging settings, Admin, Local model settings, EnvEditor,
-UniqueNames, ExternalModules, and Modules. Jwt:Secret and Encryption:Key are
-generated per instance when omitted.
+Core `.env` keys include `Encryption__Key`, `Encryption__EncryptDatabase`,
+`Encryption__EncryptProviderKeys`, `Jwt__Secret`, `Jwt__Issuer`, `Jwt__Audience`,
+`Jwt__AccessTokenLifetime`, `Jwt__RefreshTokenLifetime`,
+`Auth__DisableApiKeyCheck`, `Auth__DisableAccessTokenCheck`, database and
+logging settings, `Admin`, local model settings, `EnvEditor`, `UniqueNames`,
+`ExternalModules`, and `Modules`. `Jwt__Secret` and `Encryption__Key` are
+generated per instance when omitted. `SHARPCLAW_ENCRYPTION_KEY` remains the
+installation-key override used by Supprocom.Secrets protected environment
+files and by durable process-log and segment encryption. It is distinct from
+the in-document `Encryption__Key` application/provider encryption override,
+which has higher precedence after the environment document is loaded.
 
 Chat-path switches live under Chat. DisableDefaultHeaders removes the generated
 metadata header but still lets explicit agent/channel custom headers run.
@@ -540,15 +549,14 @@ unified chat cache memory budget. It keeps header user or agent state and
 recently-used channel, thread, and agent token totals hot until the budget is
 full; oldest objects are evicted first. 0 disables chat caching.
 
-AgentOrchestration:DisableAccessibleThreadsHeader keeps Agent Orchestration
+AgentOrchestration__DisableAccessibleThreadsHeader keeps Agent Orchestration
 {{accessible-threads}} output empty without disabling the module's explicit
 cross-thread tools.
 
-Interface .env keys include Api:Url, Backend:Enabled, Gateway:Enabled,
-Gateway:Url, process-startup flags, and logging settings. Gateway .env keys
-include InternalApi:BaseUrl, TimeoutSeconds, ApiKey, ApiKeyFilePath,
-GatewayToken, GatewayTokenFilePath, Gateway:RequestQueue,
-Gateway:Endpoints, and Gateway:Modules.
+Interface .env keys include `Api__Url`, `Backend__Enabled`, `Gateway__Enabled`,
+`Gateway__Url`, process-startup flags, and logging settings. Gateway .env keys
+include `InternalApi__BaseUrl`, timeout, API-key and gateway-token overrides,
+`Gateway__RequestQueue`, `Gateway__Endpoints`, and `Gateway__Modules`.
 
 Changes to Core .env require a backend restart to take effect.
 

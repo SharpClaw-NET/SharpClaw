@@ -19,11 +19,11 @@
 | **Prerequisites** | none for core MDK tools |
 | **Platform** | All |
 
-This module is **disabled by default**. To enable, add to your core
-`.env` (`Infrastructure/Environment/.env`) Modules section:
+This module is **disabled by default**. To enable, add this assignment to the
+deployed Runtime Host's `Environment/.env`:
 
-```jsonc
-"sharpclaw_module_dev": "true"
+```dotenv
+Modules__sharpclaw_module_dev="true"
 ```
 
 To disable, set to `"false"` or remove the key (missing = disabled).

@@ -65,9 +65,10 @@ To remove headers:
 2. Toggle **Disable Chat Header** → On
 
 This is useful for agents that don't need metadata or when testing prompts.
-For an instance-wide switch, set `Chat:DisableDefaultHeaders=true` in the
+For an instance-wide switch, set `Chat__DisableDefaultHeaders="true"` in the
 Core `.env`; this disables generated metadata headers but does not suppress
-explicit agent or channel custom headers. Set `Chat:DisableDefaultSystemPrompt=true`
+explicit agent or channel custom headers. Set
+`Chat__DisableDefaultSystemPrompt="true"`
 to remove the core native-tool instruction suffix while preserving agent system
 prompts.
 
@@ -80,11 +81,11 @@ Override the default header template:
 3. Save
 
 See **Agents & Models** for available tags.
-`Chat:DisableHeaderTagExpansion=true` sends explicit custom headers as literal
-text without resolving tags. `AgentOrchestration:DisableAccessibleThreadsHeader=true`
+`Chat__DisableHeaderTagExpansion="true"` sends explicit custom headers as literal
+text without resolving tags. `AgentOrchestration__DisableAccessibleThreadsHeader="true"`
 makes `{{accessible-threads}}` expand to an empty string when tag expansion is
 still enabled.
-`Chat:DisableModuleHeaderTags=true` stops module-owned header tag resolvers
+`Chat__DisableModuleHeaderTags="true"` stops module-owned header tag resolvers
 from running. `Chat:CacheMaxMegabytes` controls the unified chat cache memory
 budget for header state and recently-used channel/thread/agent token totals
 attached to chat responses.

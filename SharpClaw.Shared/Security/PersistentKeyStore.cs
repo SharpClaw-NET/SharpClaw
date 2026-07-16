@@ -24,7 +24,7 @@ public static class PersistentKeyStore
 
         var filePath = Path.Combine(KeyDirectory, $".{keyName}");
 
-        return GetOrCreateFromFilePath(filePath);
+        return GetOrCreateFromFilePath(filePath, keyName);
     }
 
     /// <summary>
@@ -38,11 +38,14 @@ public static class PersistentKeyStore
         ArgumentNullException.ThrowIfNull(instancePaths);
 
         instancePaths.EnsureDirectories();
-        return GetOrCreateFromFilePath(instancePaths.GetSecretFilePath(keyName));
+        return GetOrCreateFromFilePath(instancePaths.GetSecretFilePath(keyName), keyName);
     }
 
-    private static string GetOrCreateFromFilePath(string filePath)
+    private static string GetOrCreateFromFilePath(string filePath, string keyName)
     {
+        if (string.Equals(keyName, "encryption-key", StringComparison.OrdinalIgnoreCase))
+            return GetOrCreateInstallationKeyAsBase64(filePath);
+
         if (File.Exists(filePath))
             return File.ReadAllText(filePath).Trim();
 
@@ -53,5 +56,21 @@ public static class PersistentKeyStore
             File.SetUnixFileMode(filePath, UnixFileMode.UserRead | UnixFileMode.UserWrite);
 
         return key;
+    }
+
+    private static string GetOrCreateInstallationKeyAsBase64(string filePath)
+    {
+        byte[] key = new SharpClawInstallationKeyStore(filePath)
+            .GetOrCreateKeyAsync()
+            .GetAwaiter()
+            .GetResult();
+        try
+        {
+            return Convert.ToBase64String(key);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(key);
+        }
     }
 }
