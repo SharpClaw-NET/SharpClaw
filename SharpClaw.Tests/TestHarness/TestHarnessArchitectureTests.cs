@@ -6,6 +6,7 @@ using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Tests.TestHarness;
 using SharpClaw.Core.Modules;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -424,21 +425,14 @@ public sealed class TestHarnessArchitectureTests
             })
             .Build();
 
-    private static string ReadModuleFlag(string path, string moduleId)
-    {
-        using var doc = JsonDocument.Parse(
-            File.ReadAllText(path),
-            new JsonDocumentOptions
-            {
-                CommentHandling = JsonCommentHandling.Skip,
-                AllowTrailingCommas = true
-            });
-
-        return doc.RootElement
-            .GetProperty("Modules")
-            .GetProperty(moduleId)
-            .GetString() ?? "false";
-    }
+    private static string ReadModuleFlag(string path, string moduleId) =>
+        SupprocomSecretDocument.Parse(File.ReadAllText(path))
+            .Settings
+            .FirstOrDefault(setting => string.Equals(
+                setting.Key,
+                $"Modules:{moduleId}",
+                StringComparison.OrdinalIgnoreCase))
+            ?.Value ?? "false";
 
     private static string FindSolutionRoot()
     {
