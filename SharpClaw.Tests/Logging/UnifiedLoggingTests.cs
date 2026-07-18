@@ -2,6 +2,8 @@ using System.Text;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Serilog.Extensions.Logging;
+using SharpClaw.Runtime.INF.DurableStorage;
+using SharpClaw.Runtime.INF.Logging;
 using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Shared.Logging;
 
@@ -211,6 +213,68 @@ public sealed class UnifiedLoggingTests
     }
 
     [Test]
+    public async Task ShutdownPersistsTerminalDropSummaryBeforeSealing()
+    {
+        var root = CreateRoot();
+        var originalOutput = Console.Out;
+        var blockingOutput = new BlockingTextWriter();
+        try
+        {
+            await using var store = CreateStore(root);
+            var bootId = Guid.NewGuid();
+            await using var runtime = SharpClawLogRuntime.Create(
+                "core",
+                store,
+                new SharpClawLoggingOptions
+                {
+                    ConsoleEnabled = true,
+                    QueueCapacity = 1,
+                    FlushInterval = TimeSpan.FromMinutes(1),
+                },
+                bootId);
+            using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
+            using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
+            using var moduleFactory = new SharpClawModuleLoggerFactory(
+                factory,
+                new SharpClawModuleLogContext(
+                    "module-a",
+                    "1.2.3",
+                    SharpClawModuleHostKind.RuntimeInProcess,
+                    bootId));
+
+            Console.SetOut(blockingOutput);
+            factory.CreateLogger<UnifiedLoggingTests>().LogInformation("first");
+            blockingOutput.Started.Wait(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            factory.CreateLogger<UnifiedLoggingTests>().LogInformation("queued");
+            moduleFactory.CreateLogger<UnifiedLoggingTests>().LogInformation("terminal drop");
+            runtime.Dispatcher.DroppedRecords.Should().BeGreaterThan(0);
+
+            var shutdown = runtime.FlushAndSealAsync().AsTask();
+            blockingOutput.Release.Set();
+            await shutdown;
+
+            var process = await store.ReadAsync(
+                DurableStreamKey.Process("core", bootId),
+                1,
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            var module = await store.ReadAsync(
+                DurableStreamKey.Module("module-a", bootId),
+                1,
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            process.Records.Should().NotContain(record => record.EventName == "RecordsDropped");
+            module.Records.Should().ContainSingle(record =>
+                record.EventName == "RecordsDropped" &&
+                record.Properties!["DroppedCount"] == "1");
+        }
+        finally
+        {
+            blockingOutput.Release.Set();
+            Console.SetOut(originalOutput);
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
     public async Task ShutdownDrainsAcceptedRecordsSealsKnownStreamsAndIsIdempotent()
     {
         var root = CreateRoot();
@@ -346,6 +410,181 @@ public sealed class UnifiedLoggingTests
     }
 
     [Test]
+    public async Task HttpDiagnosticsAndRenderedOutputExcludeBodiesCredentialsAndUriQueries()
+    {
+        var root = CreateRoot();
+        var originalOutput = Console.Out;
+        var originalError = Console.Error;
+        using var output = new StringWriter();
+        using var error = new StringWriter();
+        try
+        {
+            await using var store = CreateStore(root);
+            var bootId = Guid.NewGuid();
+            await using var runtime = SharpClawLogRuntime.Create(
+                "core",
+                store,
+                new SharpClawLoggingOptions
+                {
+                    MinimumLevel = Serilog.Events.LogEventLevel.Debug,
+                    ConsoleEnabled = true,
+                },
+                bootId);
+            using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
+            using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
+
+            Console.SetOut(output);
+            Console.SetError(error);
+            var logger = factory.CreateLogger<HttpLoggingDelegatingHandler>();
+            const string uri =
+                "https://user:uri-password@example.test/private?token=query-secret";
+            using var client = new HttpClient(
+                new HttpLoggingDelegatingHandler(
+                    logger,
+                    new FixedHttpMessageHandler()));
+            using var request = new HttpRequestMessage(HttpMethod.Post, uri)
+            {
+                Content = new StringContent("request-body-secret"),
+            };
+            request.Headers.TryAddWithoutValidation(
+                "Authorization",
+                "Bearer header-secret");
+            request.Headers.TryAddWithoutValidation("Cookie", "session=cookie-secret");
+            using var response = await client.SendAsync(request);
+            response.StatusCode.Should().Be(System.Net.HttpStatusCode.OK);
+
+            factory.CreateLogger<UnifiedLoggingTests>().LogWarning(
+                new InvalidOperationException(
+                    "failed uri=https://user:uri-password@example.test/private?token=query-secret password=exception-secret"),
+                "request uri={Uri} headers={Headers} body={Body} prompt={Prompt}",
+                uri,
+                "Authorization: Bearer header-secret; Cookie=cookie-secret",
+                "request-body-secret",
+                "prompt-secret");
+
+            await runtime.FlushAndSealAsync();
+
+            var page = await store.ReadAsync(
+                DurableStreamKey.Process("core", bootId),
+                1,
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            page.Records.Should().NotBeEmpty();
+            var durableText = string.Join(
+                Environment.NewLine,
+                page.Records.SelectMany(record =>
+                    new[]
+                    {
+                        record.Message,
+                        record.ExceptionText ?? string.Empty,
+                        string.Join(
+                            Environment.NewLine,
+                            record.Properties?.Values
+                                ?? Enumerable.Empty<string>()),
+                    }));
+            durableText.Should().NotContain("uri-password");
+            durableText.Should().NotContain("query-secret");
+            durableText.Should().NotContain("header-secret");
+            durableText.Should().NotContain("cookie-secret");
+            durableText.Should().NotContain("request-body-secret");
+            durableText.Should().NotContain("response-body-secret");
+            durableText.Should().NotContain("exception-secret");
+            durableText.Should().NotContain("prompt-secret");
+            durableText.Should().Contain("[REDACTED]");
+
+            var consoleText = output + Environment.NewLine + error;
+            consoleText.Should().NotContain("uri-password");
+            consoleText.Should().NotContain("query-secret");
+            consoleText.Should().NotContain("header-secret");
+            consoleText.Should().NotContain("cookie-secret");
+            consoleText.Should().NotContain("request-body-secret");
+            consoleText.Should().NotContain("response-body-secret");
+            consoleText.Should().NotContain("exception-secret");
+            consoleText.Should().NotContain("prompt-secret");
+        }
+        finally
+        {
+            Console.SetOut(originalOutput);
+            Console.SetError(originalError);
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
+    public void BoundedTextTailRetainsOnlyTheConfiguredUtf8Tail()
+    {
+        var tail = new SharpClawBoundedTextTail(128);
+        tail.AppendLine(new string('a', 200));
+        tail.AppendLine("latest-line");
+
+        tail.EncodedBytes.Should().BeLessThanOrEqualTo(128);
+        tail.Snapshot().Should().ContainSingle().Which.Should().Be("latest-line");
+
+        tail.Clear();
+        tail.Count.Should().Be(0);
+        tail.EncodedBytes.Should().Be(0);
+    }
+
+    [Test]
+    public async Task LogReaderReadsASecondRetainedProcessBootThroughTheCursorFacade()
+    {
+        var root = CreateRoot();
+        try
+        {
+            var encryptionKey = Enumerable.Repeat((byte)0x52, 32).ToArray();
+            await using var store = new DurableSegmentStore(new DurableStorageOptions
+            {
+                RootDirectory = root,
+                EncryptionKey = encryptionKey,
+                SegmentMaxBytes = 64 * 1024,
+                SegmentMaxAge = TimeSpan.FromHours(1),
+                MaxRecordBytes = 16 * 1024,
+                AcquireWriterLease = false,
+            });
+            var retainedBootId = Guid.NewGuid();
+            await store.AppendAsync(
+                DurableStreamKey.Process("core", retainedBootId),
+                new DurableRecordWrite(
+                    Guid.NewGuid(),
+                    DateTimeOffset.UtcNow,
+                    "Information",
+                    "retained.boot",
+                    "retained process event"));
+            await store.SealAsync(DurableStreamKey.Process("core", retainedBootId));
+
+            var currentBootId = Guid.NewGuid();
+            await using var runtime = SharpClawLogRuntime.Create(
+                "core",
+                store,
+                new SharpClawLoggingOptions { ConsoleEnabled = false },
+                currentBootId);
+            var artifacts = new ExecutionArtifactStore(
+                Path.Combine(root, "reader-artifacts"),
+                encryptionKey);
+            var diagnostics = new ExecutionDiagnosticStore(
+                store,
+                new DurableCursorCodec(
+                    encryptionKey,
+                    new DurableStreamPathEncoder(root)),
+                artifacts);
+            var reader = new SharpClawLogReader(diagnostics, runtime);
+
+            var page = await reader.ReadProcessLogsAsync(
+                "core",
+                retainedBootId,
+                cursor: null,
+                query: new DurableLogQuery(MaxScanBytes: 1024 * 1024));
+
+            page.Records.Should().ContainSingle(record =>
+                record.Message.Contains("retained process event", StringComparison.Ordinal));
+            page.Records.Single().EventName.Should().Be("retained.boot");
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
     public async Task ModuleLoggerUsesTrustedModuleStreamAndCannotBeReroutedByProperties()
     {
         var root = CreateRoot();
@@ -434,6 +673,38 @@ public sealed class UnifiedLoggingTests
         }
         catch
         {
+        }
+    }
+
+    private sealed class FixedHttpMessageHandler : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken) =>
+            Task.FromResult(new HttpResponseMessage(System.Net.HttpStatusCode.OK)
+            {
+                Content = new StringContent("response-body-secret"),
+            });
+    }
+
+    private sealed class BlockingTextWriter : TextWriter
+    {
+        public ManualResetEventSlim Started { get; } = new();
+
+        public ManualResetEventSlim Release { get; } = new();
+
+        public override Encoding Encoding => Encoding.UTF8;
+
+        public override void Write(char[] buffer, int index, int count)
+        {
+            Started.Set();
+            Release.Wait();
+        }
+
+        public override void WriteLine(string? value)
+        {
+            Started.Set();
+            Release.Wait();
         }
     }
 }

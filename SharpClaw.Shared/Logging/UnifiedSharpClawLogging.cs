@@ -379,6 +379,77 @@ public static class SharpClawLogBounds
     }
 }
 
+public sealed class SharpClawBoundedTextTail
+{
+    private readonly int _maximumBytes;
+    private readonly Queue<string> _lines = [];
+    private readonly object _gate = new();
+    private int _encodedBytes;
+
+    public SharpClawBoundedTextTail(int maximumBytes)
+    {
+        if (maximumBytes <= 0)
+            throw new ArgumentOutOfRangeException(nameof(maximumBytes));
+        _maximumBytes = maximumBytes;
+    }
+
+    public int Count
+    {
+        get
+        {
+            lock (_gate)
+                return _lines.Count;
+        }
+    }
+
+    public int EncodedBytes
+    {
+        get
+        {
+            lock (_gate)
+                return _encodedBytes;
+        }
+    }
+
+    public void AppendLine(string value)
+    {
+        ArgumentNullException.ThrowIfNull(value);
+        var separatorBytes = Encoding.UTF8.GetByteCount(Environment.NewLine);
+        var contentLimit = Math.Max(0, _maximumBytes - separatorBytes);
+        var bounded = SharpClawLogBounds.TruncateUtf8(value, contentLimit, out _);
+        var lineBytes = Encoding.UTF8.GetByteCount(bounded) + separatorBytes;
+        if (lineBytes > _maximumBytes)
+            return;
+
+        lock (_gate)
+        {
+            while (_lines.Count > 0 && _encodedBytes + lineBytes > _maximumBytes)
+            {
+                var removed = _lines.Dequeue();
+                _encodedBytes -= Encoding.UTF8.GetByteCount(removed) + separatorBytes;
+            }
+
+            _lines.Enqueue(bounded);
+            _encodedBytes += lineBytes;
+        }
+    }
+
+    public IReadOnlyList<string> Snapshot()
+    {
+        lock (_gate)
+            return [.. _lines];
+    }
+
+    public void Clear()
+    {
+        lock (_gate)
+        {
+            _lines.Clear();
+            _encodedBytes = 0;
+        }
+    }
+}
+
 internal static class SharpClawLogRedactor
 {
     private static readonly Regex Authorization = new(
@@ -393,11 +464,21 @@ internal static class SharpClawLogRedactor
         @"(https?://[^/@\s:]+:)[^/@\s]+@",
         RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
 
+    private static readonly Regex SensitiveLabeledValue = new(
+        @"((?:body|request[_-]?body|response[_-]?body|prompt|model[_-]?response)\s*[:=]\s*)(?:[\x22']?)[^\s,;}'\x22]+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
+    private static readonly Regex UriQuery = new(
+        @"((?:https?://|/)[^\s?]*\?)[^\s,;}'\x22]+",
+        RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled);
+
     public static string Redact(string value)
     {
         var result = Authorization.Replace(value, "$1[REDACTED]");
         result = Secrets.Replace(result, "$1[REDACTED]");
-        return UriCredentials.Replace(result, "$1[REDACTED]@");
+        result = SensitiveLabeledValue.Replace(result, "$1[REDACTED]");
+        result = UriCredentials.Replace(result, "$1[REDACTED]@");
+        return UriQuery.Replace(result, "$1[REDACTED]");
     }
 
     public static bool IsSecretPropertyName(string name)
@@ -416,6 +497,8 @@ internal static class SharpClawLogRedactor
             || normalized.Contains("encryptionkey", StringComparison.Ordinal)
             || normalized is "body" or "requestbody" or "responsebody"
             || normalized is "prompt" or "modelresponse"
+            || normalized is "uri" or "url" or "query" or "querystring"
+            || normalized is "headers" or "requestheaders" or "responseheaders"
             || normalized.Equals("secret", StringComparison.Ordinal);
     }
 }
@@ -827,6 +910,7 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
     private readonly CancellationTokenSource _timerCancellation = new();
     private readonly ConcurrentDictionary<DurableStreamKey, long> _drops = new();
     private readonly ConcurrentDictionary<DurableStreamKey, byte> _knownStreams = new();
+    private readonly object _intakeGate = new();
     private readonly object _consoleGate = new();
     private readonly Task _worker;
     private readonly Task _timer;
@@ -872,16 +956,22 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
             var stream = ownership is null
                 ? _processStream
                 : DurableStreamKey.Module(ownership.ModuleId, ownership.BootId);
-            _knownStreams.TryAdd(stream, 0);
             var item = new DispatchItem(
                 stream,
                 record,
                 logEvent.Level,
                 Completion: null);
-            if (!TryEnqueue(item))
+            lock (_intakeGate)
             {
-                Interlocked.Increment(ref _droppedRecords);
-                _drops.AddOrUpdate(stream, 1, static (_, count) => count + 1);
+                if (Volatile.Read(ref _shutdown) != 0)
+                    return;
+
+                _knownStreams.TryAdd(stream, 0);
+                if (!TryEnqueue(item))
+                {
+                    Interlocked.Increment(ref _droppedRecords);
+                    _drops.AddOrUpdate(stream, 1, static (_, count) => count + 1);
+                }
             }
         }
         catch (Exception ex)
@@ -910,7 +1000,18 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
 
     public async Task FlushAndSealAsync(CancellationToken cancellationToken = default)
     {
-        if (Interlocked.Exchange(ref _shutdown, 1) != 0)
+        var firstShutdown = false;
+        lock (_intakeGate)
+        {
+            if (Interlocked.Exchange(ref _shutdown, 1) == 0)
+            {
+                firstShutdown = true;
+                _timerCancellation.Cancel();
+                _channel.Writer.TryComplete();
+            }
+        }
+
+        if (!firstShutdown)
         {
             await Task.WhenAll(_worker, _timer)
                 .WaitAsync(cancellationToken)
@@ -918,8 +1019,6 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
             return;
         }
 
-        _timerCancellation.Cancel();
-        _channel.Writer.TryComplete();
         await Task.WhenAll(_timer, _worker)
             .WaitAsync(cancellationToken)
             .ConfigureAwait(false);
@@ -988,22 +1087,8 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
             try
             {
                 if (_drops.TryRemove(item.Stream, out var dropped) && dropped > 0)
-                {
-                    await _records.AppendAsync(
-                            item.Stream,
-                            new DurableRecordWrite(
-                                Guid.NewGuid(),
-                                DateTimeOffset.UtcNow,
-                                "Warning",
-                                "RecordsDropped",
-                                $"Dropped {dropped} operational log record(s) because the bounded dispatcher was full.",
-                                Properties: new Dictionary<string, string>
-                                {
-                                    ["DroppedCount"] = dropped.ToString(CultureInfo.InvariantCulture),
-                                }),
-                            DurableWriteMode.Durable)
+                    await AppendDropSummaryAsync(item.Stream, dropped)
                         .ConfigureAwait(false);
-                }
 
                 var mode = item.Level >= LogEventLevel.Error
                     ? DurableWriteMode.Durable
@@ -1020,6 +1105,7 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
 
         try
         {
+            await FlushDropSummariesAsync().ConfigureAwait(false);
             await FlushKnownStreamsAsync().ConfigureAwait(false);
             foreach (var stream in _knownStreams.Keys)
                 await _records.SealAsync(stream).ConfigureAwait(false);
@@ -1058,6 +1144,39 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
         foreach (var stream in _knownStreams.Keys)
             await _records.FlushAsync(stream).ConfigureAwait(false);
     }
+
+    private async Task FlushDropSummariesAsync()
+    {
+        foreach (var pair in _drops.ToArray())
+        {
+            if (pair.Value <= 0
+                || !_drops.TryRemove(pair.Key, out var dropped)
+                || dropped <= 0)
+            {
+                continue;
+            }
+
+            await AppendDropSummaryAsync(pair.Key, dropped)
+                .ConfigureAwait(false);
+        }
+    }
+
+    private ValueTask<DurableAppendReceipt> AppendDropSummaryAsync(
+        DurableStreamKey stream,
+        long dropped) =>
+        _records.AppendAsync(
+            stream,
+            new DurableRecordWrite(
+                Guid.NewGuid(),
+                DateTimeOffset.UtcNow,
+                "Warning",
+                "RecordsDropped",
+                $"Dropped {dropped} operational log record(s) because the bounded dispatcher was full.",
+                Properties: new Dictionary<string, string>
+                {
+                    ["DroppedCount"] = dropped.ToString(CultureInfo.InvariantCulture),
+                }),
+            DurableWriteMode.Durable);
 
     private void RenderConsole(DurableRecordWrite record)
     {

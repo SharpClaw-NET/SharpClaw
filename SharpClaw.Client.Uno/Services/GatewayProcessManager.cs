@@ -27,7 +27,8 @@ public sealed class GatewayProcessManager : IDisposable
     private readonly string _executablePath;
     private string _backendBaseUrl;
     private string _gatewayUrl;
-    private readonly List<string> _processOutput = [];
+    private readonly SharpClawBoundedTextTail _processOutput =
+        new(SharpClawLogBounds.SidecarTailBytes);
     private readonly object _outputLock = new();
 
     public const string DefaultGatewayUrl = "http://0.0.0.0:48924";
@@ -94,7 +95,7 @@ public sealed class GatewayProcessManager : IDisposable
     /// </summary>
     public IReadOnlyList<string> ProcessOutput
     {
-        get { lock (_outputLock) return [.. _processOutput]; }
+        get { lock (_outputLock) return _processOutput.Snapshot(); }
     }
 
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
@@ -302,7 +303,8 @@ public sealed class GatewayProcessManager : IDisposable
                 $"SharpClaw Gateway not found at '{_executablePath}'. " +
                 "Ensure the gateway is published into the 'gateway' subfolder.");
 
-        lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ── Starting gateway process ──");
+        lock (_outputLock) _processOutput.AppendLine(
+            $"[{DateTime.Now:HH:mm:ss}] ── Starting gateway process ──");
         _logger.LogInformation("Starting bundled gateway process.");
         IsExternal = false;
         _startedByObserver = false;
@@ -385,14 +387,16 @@ public sealed class GatewayProcessManager : IDisposable
             // — nothing can override them.
             psi.EnvironmentVariables["InternalApi__ApiKey"] = resolvedKey;
             psi.ArgumentList.Add($"--InternalApi:ApiKey={resolvedKey}");
-            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}).");
+            lock (_outputLock) _processOutput.AppendLine(
+                $"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}).");
             _logger.LogInformation(
                 "API key forwarded to bundled gateway from {Source}.",
                 ApiKey is not null ? "in-memory" : "file");
         }
         else
         {
-            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ⚠ No API key available to forward — gateway may get 401.");
+            lock (_outputLock) _processOutput.AppendLine(
+                $"[{DateTime.Now:HH:mm:ss}] ⚠ No API key available to forward — gateway may get 401.");
             _logger.LogWarning("No API key available to forward to bundled gateway.");
         }
 
@@ -415,7 +419,8 @@ public sealed class GatewayProcessManager : IDisposable
         {
             psi.EnvironmentVariables["InternalApi__GatewayToken"] = resolvedGatewayToken;
             psi.ArgumentList.Add($"--InternalApi:GatewayToken={resolvedGatewayToken}");
-            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded.");
+            lock (_outputLock) _processOutput.AppendLine(
+                $"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded.");
             _logger.LogInformation("Gateway token forwarded to bundled gateway.");
         }
 
@@ -432,7 +437,8 @@ public sealed class GatewayProcessManager : IDisposable
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] {e.Data}");
+                lock (_outputLock) _processOutput.AppendLine(
+                    $"[{DateTime.Now:HH:mm:ss}] {e.Data}");
                 _logger.LogInformation("Gateway process stdout: {Line}", e.Data);
             }
         };
@@ -440,7 +446,8 @@ public sealed class GatewayProcessManager : IDisposable
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] [stderr] {e.Data}");
+                lock (_outputLock) _processOutput.AppendLine(
+                    $"[{DateTime.Now:HH:mm:ss}] [stderr] {e.Data}");
                 _logger.LogWarning("Gateway process stderr: {Line}", e.Data);
             }
         };

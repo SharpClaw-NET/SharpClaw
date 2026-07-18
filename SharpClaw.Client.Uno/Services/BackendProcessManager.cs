@@ -30,7 +30,8 @@ public sealed class BackendProcessManager : IDisposable
     private bool _startedByObserver;
     private readonly string _executablePath;
     private string _apiUrl;
-    private readonly List<string> _processOutput = [];
+    private readonly SharpClawBoundedTextTail _processOutput =
+        new(SharpClawLogBounds.SidecarTailBytes);
     private readonly object _outputLock = new();
 
     /// <summary>
@@ -66,7 +67,7 @@ public sealed class BackendProcessManager : IDisposable
     /// </summary>
     public IReadOnlyList<string> ProcessOutput
     {
-        get { lock (_outputLock) return [.. _processOutput]; }
+        get { lock (_outputLock) return _processOutput.Snapshot(); }
     }
 
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
@@ -329,7 +330,7 @@ public sealed class BackendProcessManager : IDisposable
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add(e.Data);
+                lock (_outputLock) _processOutput.AppendLine(e.Data);
                 _logger.LogInformation("Backend process stdout: {Line}", e.Data);
             }
         };
@@ -337,7 +338,7 @@ public sealed class BackendProcessManager : IDisposable
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add($"[stderr] {e.Data}");
+                lock (_outputLock) _processOutput.AppendLine($"[stderr] {e.Data}");
                 _logger.LogWarning("Backend process stderr: {Line}", e.Data);
             }
         };

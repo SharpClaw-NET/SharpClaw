@@ -1,8 +1,11 @@
 using System.Net;
+using System.Security.Cryptography;
 using System.Net.Http.Json;
 using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
+using Serilog.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.DTOs.AgentActions;
@@ -12,6 +15,8 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Modules.Foreign;
+using SharpClaw.Shared.DurableStorage;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -30,6 +35,68 @@ public sealed class ForeignModuleHostCapabilityTests
             new { message = "hello" });
 
         response.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
+    }
+
+    [Test]
+    public async Task AuthenticatedHostLogUsesTrustedModuleOperationalStream()
+    {
+        var root = Path.Combine(
+            Path.GetTempPath(),
+            "SharpClaw.Tests",
+            "sidecar-logging",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        try
+        {
+            await using var store = new DurableSegmentStore(new DurableStorageOptions
+            {
+                RootDirectory = root,
+                EncryptionKey = SHA256.HashData("sidecar logging test"u8),
+                SegmentMaxBytes = 64 * 1024,
+                SegmentMaxAge = TimeSpan.FromHours(1),
+                MaxRecordBytes = 16 * 1024,
+                AcquireWriterLease = false,
+            });
+            var bootId = Guid.NewGuid();
+            await using var runtime = SharpClawLogRuntime.Create(
+                "core",
+                store,
+                new SharpClawLoggingOptions { ConsoleEnabled = false },
+                bootId);
+            using var provider = new SerilogLoggerProvider(runtime.SerilogLogger, dispose: false);
+            using var factory = LoggerFactory.Create(builder => builder.AddProvider(provider));
+            await using var services = new ServiceCollection()
+                .AddSingleton(runtime)
+                .AddSingleton<ILoggerFactory>(factory)
+                .BuildServiceProvider();
+            await using var server = ForeignModuleHostCapabilityServer.Start(
+                "sample_module",
+                services);
+            using var client = CreateClient(server);
+
+            using var response = await client.PostAsJsonAsync(
+                ForeignModuleHostCapabilityProtocol.LogPath,
+                new { message = "sidecar host log", level = "Warning" });
+            response.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            await runtime.FlushAndSealAsync();
+            var module = await store.ReadAsync(
+                DurableStreamKey.Module("sample_module", bootId),
+                1,
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            var process = await store.ReadAsync(
+                DurableStreamKey.Process("core", bootId),
+                1,
+                new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+            module.Records.Should().ContainSingle(record =>
+                record.Message.Contains("sidecar host log", StringComparison.Ordinal));
+            process.Records.Should().BeEmpty();
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     [Test]

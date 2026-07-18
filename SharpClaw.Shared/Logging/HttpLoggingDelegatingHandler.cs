@@ -10,6 +10,15 @@ namespace SharpClaw.Shared.Logging;
 public sealed class HttpLoggingDelegatingHandler(
     ILogger<HttpLoggingDelegatingHandler> logger) : DelegatingHandler
 {
+    public HttpLoggingDelegatingHandler(
+        ILogger<HttpLoggingDelegatingHandler> logger,
+        HttpMessageHandler innerHandler)
+        : this(logger)
+    {
+        InnerHandler = innerHandler
+            ?? throw new ArgumentNullException(nameof(innerHandler));
+    }
+
     protected override async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request,
         CancellationToken cancellationToken)

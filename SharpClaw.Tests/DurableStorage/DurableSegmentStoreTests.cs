@@ -1,4 +1,6 @@
 using System.Security.Cryptography;
+using System.IO.Compression;
+using System.Text;
 using System.Text.Json;
 using SharpClaw.Shared.DurableStorage;
 
@@ -206,6 +208,51 @@ public sealed class DurableSegmentStoreTests
                 new DurableReadOptions(MaxScanBytes: 1024 * 1024));
             page.Records.Should().ContainSingle();
         }
+    }
+
+    [Test]
+    public async Task AppendModesExposeBufferedAndDurableFlushSemantics()
+    {
+        var root = CreateRoot();
+        await using var store = CreateStore(root);
+        var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
+
+        store.GetSnapshot().LastSuccessfulFlush.Should().BeNull();
+        await store.AppendAsync(key, Record("buffered"), DurableWriteMode.Buffered);
+        store.GetSnapshot().LastSuccessfulFlush.Should().BeNull();
+
+        await store.AppendAsync(key, Record("durable"), DurableWriteMode.Durable);
+        store.GetSnapshot().LastSuccessfulFlush.Should().NotBeNull();
+    }
+
+    [Test]
+    public async Task ReadAsync_ReadsLegacyAdditiveRecordBodyWithoutMigration()
+    {
+        var root = CreateRoot();
+        var key = DurableStreamKey.Process("runtime", Guid.NewGuid());
+        var record = Record("legacy-body");
+        await using (var writer = CreateUnencryptedStore(root))
+        {
+            await writer.AppendAsync(key, record);
+            await writer.SealAsync(key);
+        }
+
+        var segment = Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
+            .Should().ContainSingle().Subject;
+        RewriteFirstFrameAsLegacyBody(segment);
+
+        await using var recovered = CreateUnencryptedStore(root);
+        var page = await recovered.ReadAsync(
+            key,
+            1,
+            new DurableReadOptions(MaxScanBytes: 1024 * 1024));
+
+        var decoded = page.Records.Should().ContainSingle().Subject;
+        decoded.Message.Should().Be("legacy-body");
+        decoded.EventName.Should().Be(record.EventName);
+        decoded.ExceptionText.Should().BeNull();
+        decoded.Category.Should().BeNull();
+        decoded.Properties.Should().BeNull();
     }
 
     [Test]
@@ -666,6 +713,19 @@ public sealed class DurableSegmentStoreTests
             AcquireWriterLease = false,
         });
 
+    private static DurableSegmentStore CreateUnencryptedStore(string root) =>
+        new(new DurableStorageOptions
+        {
+            RootDirectory = root,
+            EncryptionKey = null,
+            SegmentMaxBytes = 64 * 1024,
+            SegmentMaxAge = TimeSpan.FromHours(1),
+            MaxRecordBytes = 16 * 1024,
+            MaxPageRecords = 1000,
+            MaxPageBytes = 1024 * 1024,
+            AcquireWriterLease = false,
+        });
+
     private static DurableRecordWrite Record(string message) =>
         new(
             Guid.NewGuid(),
@@ -696,5 +756,160 @@ public sealed class DurableSegmentStoreTests
             stream.Position += frameLength;
         }
         return lengths;
+    }
+
+    private static void RewriteFirstFrameAsLegacyBody(string path)
+    {
+        var bytes = File.ReadAllBytes(path);
+        using var input = new MemoryStream(bytes, writable: false);
+        using var reader = new BinaryReader(input);
+        input.Position = 8;
+        var segmentId = new Guid(reader.ReadBytes(16));
+        input.Position = 40;
+        var oldFrameLength = reader.ReadInt32();
+        var oldFrame = reader.ReadBytes(oldFrameLength);
+        using var oldFrameStream = new MemoryStream(oldFrame, writable: false);
+        using var oldFrameReader = new BinaryReader(oldFrameStream);
+        var sequence = oldFrameReader.ReadInt64();
+        var recordId = new Guid(oldFrameReader.ReadBytes(16));
+        var timestamp = oldFrameReader.ReadInt64();
+        var flags = oldFrameReader.ReadByte();
+        var oldBodyLength = oldFrameReader.ReadInt32();
+        oldFrameReader.ReadBytes(12);
+        oldFrameReader.ReadBytes(16);
+        oldFrameReader.ReadBytes(32);
+        var oldPayloadLength = oldFrameReader.ReadInt32();
+        var oldPayload = oldFrameReader.ReadBytes(oldPayloadLength);
+        oldPayload.Should().HaveCount(oldPayloadLength);
+        flags.Should().Be(2);
+
+        byte[] oldBody;
+        using (var compressed = new MemoryStream(oldPayload, writable: false))
+        using (var brotli = new BrotliStream(compressed, CompressionMode.Decompress))
+        using (var body = new MemoryStream())
+        {
+            brotli.CopyTo(body);
+            oldBody = body.ToArray();
+        }
+        oldBody.Should().HaveCount(oldBodyLength);
+
+        var originalFields = new HashSet<string>(
+            [
+                "Level",
+                "EventName",
+                "Message",
+                "ExceptionType",
+                "CorrelationId",
+                "Artifact",
+            ],
+            StringComparer.Ordinal);
+        using var document = JsonDocument.Parse(oldBody);
+        using var legacyBodyStream = new MemoryStream();
+        using (var jsonWriter = new Utf8JsonWriter(legacyBodyStream))
+        {
+            jsonWriter.WriteStartObject();
+            foreach (var property in document.RootElement.EnumerateObject())
+            {
+                if (!originalFields.Contains(property.Name))
+                    continue;
+                jsonWriter.WritePropertyName(property.Name);
+                property.Value.WriteTo(jsonWriter);
+            }
+            jsonWriter.WriteEndObject();
+        }
+        var legacyBody = legacyBodyStream.ToArray();
+        var compressedLegacyBody = Compress(legacyBody);
+        var associatedData = BuildAssociatedData(
+            segmentId,
+            sequence,
+            recordId,
+            timestamp,
+            flags,
+            legacyBody.Length);
+        var digest = ComputeFrameDigest(associatedData, compressedLegacyBody);
+
+        using var newFrameStream = new MemoryStream();
+        using (var frameWriter = new BinaryWriter(
+                   newFrameStream,
+                   Encoding.UTF8,
+                   leaveOpen: true))
+        {
+            frameWriter.Write(sequence);
+            frameWriter.Write(recordId.ToByteArray());
+            frameWriter.Write(timestamp);
+            frameWriter.Write(flags);
+            frameWriter.Write(legacyBody.Length);
+            frameWriter.Write(new byte[12]);
+            frameWriter.Write(new byte[16]);
+            frameWriter.Write(digest);
+            frameWriter.Write(compressedLegacyBody.Length);
+            frameWriter.Write(compressedLegacyBody);
+        }
+        var newFrame = newFrameStream.ToArray();
+
+        using var output = new MemoryStream();
+        output.Write(bytes, 0, 40);
+        using (var writer = new BinaryWriter(
+                   output,
+                   Encoding.UTF8,
+                   leaveOpen: true))
+        {
+            writer.Write(newFrame.Length);
+            writer.Write(newFrame);
+            writer.Flush();
+        }
+        var prefixDigest = SHA256.HashData(output.ToArray());
+        using (var footerWriter = new BinaryWriter(
+                   output,
+                   Encoding.UTF8,
+                   leaveOpen: true))
+        {
+            footerWriter.Write(-1);
+            footerWriter.Write(sequence);
+            footerWriter.Write(1L);
+            footerWriter.Write(prefixDigest);
+        }
+        File.WriteAllBytes(path, output.ToArray());
+    }
+
+    private static byte[] Compress(byte[] source)
+    {
+        using var output = new MemoryStream();
+        using (var brotli = new BrotliStream(
+                   output,
+                   CompressionLevel.Fastest,
+                   leaveOpen: true))
+        {
+            brotli.Write(source);
+        }
+        return output.ToArray();
+    }
+
+    private static byte[] BuildAssociatedData(
+        Guid segmentId,
+        long sequence,
+        Guid recordId,
+        long timestamp,
+        byte flags,
+        int bodyLength)
+    {
+        var data = new byte[53];
+        segmentId.TryWriteBytes(data);
+        BitConverter.TryWriteBytes(data.AsSpan(16), sequence);
+        recordId.TryWriteBytes(data.AsSpan(24));
+        BitConverter.TryWriteBytes(data.AsSpan(40), timestamp);
+        data[48] = flags;
+        BitConverter.TryWriteBytes(data.AsSpan(49), bodyLength);
+        return data;
+    }
+
+    private static byte[] ComputeFrameDigest(
+        byte[] associatedData,
+        byte[] compressed)
+    {
+        using var hash = IncrementalHash.CreateHash(HashAlgorithmName.SHA256);
+        hash.AppendData(associatedData);
+        hash.AppendData(compressed);
+        return hash.GetHashAndReset();
     }
 }
