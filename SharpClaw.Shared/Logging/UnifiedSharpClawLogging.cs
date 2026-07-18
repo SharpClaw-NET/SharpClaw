@@ -163,6 +163,100 @@ public sealed record SharpClawLoggingOptions
     }
 }
 
+public sealed record SharpClawOwnedStoreRetentionOptions
+{
+    public TimeSpan Interval { get; init; } = TimeSpan.FromMinutes(15);
+    public DurableRetentionOptions Retention { get; init; } = new();
+}
+
+public sealed class SharpClawOwnedStoreRetention : IAsyncDisposable
+{
+    private readonly DurableSegmentStore _records;
+    private readonly SharpClawOwnedStoreRetentionOptions _options;
+    private readonly CancellationTokenSource _stop = new();
+    private readonly TaskCompletionSource _firstRun = new(
+        TaskCreationOptions.RunContinuationsAsynchronously);
+    private readonly Task _loop;
+    private Exception? _failure;
+    private int _disposed;
+
+    public SharpClawOwnedStoreRetention(
+        DurableSegmentStore records,
+        SharpClawOwnedStoreRetentionOptions? options = null)
+    {
+        _records = records ?? throw new ArgumentNullException(nameof(records));
+        _options = options ?? new SharpClawOwnedStoreRetentionOptions();
+        if (_options.Interval <= TimeSpan.Zero
+            || _options.Interval > TimeSpan.FromDays(1))
+        {
+            throw new ArgumentOutOfRangeException(nameof(options));
+        }
+
+        _loop = Task.Run(RunAsync);
+    }
+
+    public Task FirstRun => _firstRun.Task;
+    public Task Completion => _loop;
+    public Exception? Failure => Volatile.Read(ref _failure);
+
+    private async Task RunAsync()
+    {
+        try
+        {
+            while (!_stop.IsCancellationRequested)
+            {
+                try
+                {
+                    await _records.ApplyRetentionAsync(
+                            _options.Retention,
+                            _stop.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+                {
+                    break;
+                }
+                catch (Exception exception)
+                {
+                    Interlocked.CompareExchange(ref _failure, exception, null);
+                }
+                finally
+                {
+                    _firstRun.TrySetResult();
+                }
+
+                try
+                {
+                    await Task.Delay(_options.Interval, _stop.Token)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException) when (_stop.IsCancellationRequested)
+                {
+                    break;
+                }
+            }
+        }
+        catch (Exception exception)
+        {
+            Interlocked.CompareExchange(ref _failure, exception, null);
+            _firstRun.TrySetResult();
+        }
+    }
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            await _loop.ConfigureAwait(false);
+            return;
+        }
+
+        _stop.Cancel();
+        await _loop.ConfigureAwait(false);
+        _stop.Dispose();
+    }
+}
+
 public enum SharpClawModuleHostKind
 {
     RuntimeInProcess,
@@ -1005,6 +1099,7 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
     private readonly bool _ownsStore;
     private readonly DurableSegmentStore _records;
     private readonly Serilog.ILogger _serilogLogger;
+    private readonly SharpClawOwnedStoreRetention? _ownedRetention;
     private int _disposed;
 
     private SharpClawLogRuntime(
@@ -1013,7 +1108,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         DurableSegmentStore records,
         SharpClawLogDispatcher dispatcher,
         Serilog.ILogger serilogLogger,
-        bool ownsStore)
+        bool ownsStore,
+        SharpClawOwnedStoreRetention? ownedRetention)
     {
         AppName = appName;
         BootId = bootId;
@@ -1021,6 +1117,7 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         Dispatcher = dispatcher;
         _serilogLogger = serilogLogger;
         _ownsStore = ownsStore;
+        _ownedRetention = ownedRetention;
     }
 
     public string AppName { get; }
@@ -1028,6 +1125,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
     public DurableStreamKey ProcessStream => DurableStreamKey.Process(AppName, BootId);
     public SharpClawLogDispatcher Dispatcher { get; }
     public Serilog.ILogger SerilogLogger => _serilogLogger;
+    public Exception? RetentionFailure => _ownedRetention?.Failure;
+    public Task? RetentionFirstRun => _ownedRetention?.FirstRun;
 
     public Task<DurableOperationalStreamCatalog> EnumerateOperationalStreamsAsync(
         DurableOperationalStreamEnumerationOptions options,
@@ -1038,20 +1137,28 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         string appName,
         DurableSegmentStore records,
         SharpClawLoggingOptions options,
-        Guid? bootId = null)
+        Guid? bootId = null,
+        SharpClawOwnedStoreRetentionOptions? retentionOptions = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(appName);
         ArgumentNullException.ThrowIfNull(records);
         ArgumentNullException.ThrowIfNull(options);
 
-        return CreateCore(appName, records, options, bootId, ownsStore: false);
+        return CreateCore(
+            appName,
+            records,
+            options,
+            bootId,
+            ownsStore: false,
+            retentionOptions: retentionOptions);
     }
 
     public static SharpClawLogRuntime Create(
         string appName,
         SharpClawInstancePaths paths,
         SharpClawLoggingOptions options,
-        Guid? bootId = null)
+        Guid? bootId = null,
+        SharpClawOwnedStoreRetentionOptions? retentionOptions = null)
     {
         ArgumentNullException.ThrowIfNull(paths);
         paths.EnsureDirectories();
@@ -1063,7 +1170,13 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
             EncryptionKey = DurableStorageKeyDerivation.Derive(rootKey, "records"),
             AcquireWriterLease = false,
         });
-        return CreateCore(appName, records, options, bootId, ownsStore: true);
+        return CreateCore(
+            appName,
+            records,
+            options,
+            bootId,
+            ownsStore: true,
+            retentionOptions: retentionOptions);
     }
 
     private static SharpClawLogRuntime CreateCore(
@@ -1071,7 +1184,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         DurableSegmentStore records,
         SharpClawLoggingOptions options,
         Guid? bootId,
-        bool ownsStore)
+        bool ownsStore,
+        SharpClawOwnedStoreRetentionOptions? retentionOptions)
     {
         var resolvedBootId = bootId ?? Guid.NewGuid();
         var dispatcher = new SharpClawLogDispatcher(
@@ -1090,13 +1204,17 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
             .Enrich.FromLogContext()
             .WriteTo.Sink(new SharpClawLogSink(dispatcher))
             .CreateLogger();
+        var ownedRetention = ownsStore
+            ? new SharpClawOwnedStoreRetention(records, retentionOptions)
+            : null;
         return new SharpClawLogRuntime(
             appName,
             resolvedBootId,
             records,
             dispatcher,
             logger,
-            ownsStore);
+            ownsStore,
+            ownedRetention);
     }
 
     public Task FlushAndSealAsync(CancellationToken cancellationToken = default) =>
@@ -1107,6 +1225,8 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
         if (Interlocked.Exchange(ref _disposed, 1) != 0)
             return;
 
+        if (_ownedRetention is not null)
+            await _ownedRetention.DisposeAsync().ConfigureAwait(false);
         await Dispatcher.DisposeAsync().ConfigureAwait(false);
         if (_serilogLogger is IDisposable disposable)
             disposable.Dispose();

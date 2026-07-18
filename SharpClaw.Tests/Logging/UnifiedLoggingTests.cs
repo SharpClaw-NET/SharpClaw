@@ -160,6 +160,57 @@ public sealed class UnifiedLoggingTests
     }
 
     [Test]
+    public async Task OwnedStoreRetentionRunsOnceAndAwaitsCancellation()
+    {
+        var root = CreateRoot();
+        try
+        {
+            await using var store = CreateStore(root);
+            var key = DurableStreamKey.Process("gateway", Guid.NewGuid());
+            await store.AppendAsync(key, new DurableRecordWrite(
+                Guid.NewGuid(),
+                DateTimeOffset.UtcNow,
+                "Information",
+                "retention.test",
+                "old"));
+            await store.SealAsync(key);
+            var segment = Directory.GetFiles(
+                    root,
+                    "*.scseg",
+                    SearchOption.AllDirectories)
+                .Should().ContainSingle().Subject;
+            File.SetLastWriteTimeUtc(segment, DateTime.UtcNow.AddDays(-30));
+
+            var retention = new SharpClawOwnedStoreRetention(
+                store,
+                new SharpClawOwnedStoreRetentionOptions
+                {
+                    Interval = TimeSpan.FromDays(1),
+                    Retention = new DurableRetentionOptions
+                    {
+                        ProcessLogAge = TimeSpan.FromDays(1),
+                        ModuleLogAge = TimeSpan.FromDays(1),
+                        MaximumEncodedBytes = long.MaxValue,
+                        MinimumFreeBytes = 0,
+                        MaximumDeletesPerRun = 1,
+                    },
+                });
+
+            await retention.FirstRun.WaitAsync(TimeSpan.FromSeconds(5));
+            retention.Failure.Should().BeNull();
+            Directory.GetFiles(root, "*.scseg", SearchOption.AllDirectories)
+                .Should().BeEmpty();
+
+            await retention.DisposeAsync();
+            retention.Completion.IsCompleted.Should().BeTrue();
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
     public async Task ShutdownDrainsAcceptedRecordsSealsKnownStreamsAndIsIdempotent()
     {
         var root = CreateRoot();
