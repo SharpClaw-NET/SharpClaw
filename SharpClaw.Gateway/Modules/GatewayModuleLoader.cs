@@ -1,6 +1,7 @@
 using System.Reflection;
 using System.Security.Cryptography;
 using Microsoft.Extensions.Logging;
+using Serilog;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Shared.Security;
@@ -59,7 +60,7 @@ public sealed class GatewayModuleLoader
     /// Duplicate <c>ModuleId</c>s are logged and both contributions are
     /// dropped.
     /// </summary>
-    public static GatewayModuleLoader DiscoverBundled(ILogger logger)
+    public static GatewayModuleLoader DiscoverBundled(Serilog.ILogger logger)
     {
         ArgumentNullException.ThrowIfNull(logger);
 
@@ -78,7 +79,7 @@ public sealed class GatewayModuleLoader
             }
             catch (Exception ex)
             {
-                logger.LogWarning(ex, "Skipping module assembly {Dll}", PathGuard.SanitizeForLog(dll));
+                logger.Warning(ex, "Skipping module assembly {Dll}", PathGuard.SanitizeForLog(dll));
             }
         }
 
@@ -102,7 +103,7 @@ public sealed class GatewayModuleLoader
                 }
                 catch (Exception ex)
                 {
-                    logger.LogWarning(ex, "Failed to instantiate gateway extension {Type}", t.FullName);
+                    logger.Warning(ex, "Failed to instantiate gateway extension {Type}", t.FullName);
                 }
             }
         }
@@ -112,7 +113,7 @@ public sealed class GatewayModuleLoader
         {
             if (group.Count() > 1)
             {
-                logger.LogError(
+                logger.Error(
                     "Duplicate gateway module id {ModuleId}; dropping all {Count} contributions.",
                     group.Key,
                     group.Count());
@@ -166,7 +167,7 @@ public sealed class GatewayModuleLoader
     /// unloading it.
     /// </summary>
     public static (ModuleLoadContext Context, IGatewayModuleExtension Extension)
-        LoadFromDisk(string dllPath, ILogger logger)
+        LoadFromDisk(string dllPath, Microsoft.Extensions.Logging.ILogger logger)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dllPath);
         ArgumentNullException.ThrowIfNull(logger);

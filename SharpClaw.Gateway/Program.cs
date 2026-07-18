@@ -10,7 +10,6 @@ using Serilog;
 using Serilog.Events;
 using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Modules.Hosting;
-using Serilog.Extensions.Logging;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -118,11 +117,7 @@ builder.Services.Configure<GatewayEndpointOptions>(
 builder.Services.Configure<GatewayModuleOptions>(
     builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
 
-using var moduleDiscoveryProvider = new SerilogLoggerProvider(
-    startupLogger,
-    dispose: false);
-var moduleDiscoveryLogger = moduleDiscoveryProvider.CreateLogger("SharpClaw.Gateway.Modules");
-var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(moduleDiscoveryLogger);
+var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(startupLogger);
 foreach (var ext in gatewayModuleLoader.All)
 {
     startupLogger.Information(
