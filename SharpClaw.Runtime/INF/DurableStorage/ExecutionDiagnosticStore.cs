@@ -84,29 +84,6 @@ public sealed class ExecutionDiagnosticStore(
             cancellationToken).ConfigureAwait(false);
     }
 
-    public ValueTask<DurableAppendReceipt> AppendModuleLogAsync(
-        string moduleId,
-        Guid bootId,
-        string message,
-        string level,
-        string eventName = "ModuleDiagnostic",
-        string? exceptionType = null,
-        string? correlationId = null,
-        DurableWriteMode writeMode = DurableWriteMode.Buffered,
-        CancellationToken cancellationToken = default)
-    {
-        return records.AppendAsync(
-            DurableStreamKey.Module(moduleId, bootId),
-            BuildBoundedRecord(
-                message,
-                level,
-                eventName,
-                exceptionType,
-                correlationId),
-            writeMode,
-            cancellationToken);
-    }
-
     public async ValueTask<DurableAppendReceipt> AppendTaskOutputAsync(
         Guid instanceId,
         string data,
@@ -184,7 +161,7 @@ public sealed class ExecutionDiagnosticStore(
             query,
             cancellationToken);
 
-    public ValueTask<DurableLogPageResponse> ReadModuleLogsAsync(
+    public ValueTask<DurableLogPageResponse> ReadOperationalModuleLogsAsync(
         string moduleId,
         Guid bootId,
         string? cursor,

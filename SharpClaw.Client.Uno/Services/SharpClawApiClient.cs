@@ -1,6 +1,6 @@
 using System.Diagnostics;
 using System.Text.Json;
-using SharpClaw.Shared.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Services;
 
@@ -12,17 +12,17 @@ public sealed class SharpClawApiClient : IDisposable
 {
     private readonly HttpClient _http;
     private readonly FrontendInstanceService? _frontendInstance;
-    private readonly DurableProcessLogWriter? _processLogs;
+    private readonly ILogger<SharpClawApiClient> _logger;
     private string? _cachedApiKey;
 
     public SharpClawApiClient(
         string baseUrl,
-        DurableProcessLogWriter? processLogs = null,
+        ILogger<SharpClawApiClient> logger,
         FrontendInstanceService? frontendInstance = null)
     {
         _frontendInstance = frontendInstance;
-        _processLogs = processLogs;
-        _http = new HttpClient(new DebugLoggingHandler(new HttpClientHandler(), processLogs))
+        _logger = logger;
+        _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
             BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromMinutes(10)
@@ -207,45 +207,24 @@ public sealed class SharpClawApiClient : IDisposable
     public void Dispose() => _http.Dispose();
 
     /// <summary>
-    /// Logs full HTTP request/response details to <see cref="Debug.WriteLine(string, string)"/>
-    /// under the <c>SharpClaw.Client.Uno</c> category so they appear in the
-    /// Visual Studio <b>Output › Debug</b> pane when attached.
+    /// Emits bounded request metadata through the process logger. Bodies and
+    /// credential-bearing headers are intentionally never collected.
     /// </summary>
-    private sealed class DebugLoggingHandler(
+    private sealed class HttpLoggingHandler(
         HttpMessageHandler inner,
-        DurableProcessLogWriter? processLogs) : DelegatingHandler(inner)
+        ILogger logger) : DelegatingHandler(inner)
     {
-        private const string Category = "SharpClaw.Client.Uno";
-
-        [Conditional("DEBUG")]
-        private static void Log(string message) => Debug.WriteLine(message, Category);
-
-        private void LogPersistent(string message)
-        {
-            Log(message);
-            processLogs?.AppendDebug(message);
-        }
-
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var id = Guid.NewGuid().ToString("N")[..8];
-
-            LogPersistent($"[{id}] >>> {request.Method} {request.RequestUri}");
-
-            if (request.Content is not null)
-            {
-                var contentType = request.Content.Headers.ContentType?.MediaType ?? "";
-                if (IsTextContent(contentType))
-                {
-                    var body = await request.Content.ReadAsStringAsync(cancellationToken);
-                    LogPersistent($"[{id}] >>> Body:\n{body}");
-                }
-                else
-                {
-                    LogPersistent($"[{id}] >>> Body: <binary {contentType}, {request.Content.Headers.ContentLength} bytes>");
-                }
-            }
+            var path = SafePath(request.RequestUri);
+            logger.LogDebug(
+                "HTTP request {RequestId} started: {Method} {Path}; content length={ContentLength}",
+                id,
+                request.Method,
+                path,
+                request.Content?.Headers.ContentLength);
 
             var sw = Stopwatch.StartNew();
             HttpResponseMessage response;
@@ -256,46 +235,34 @@ public sealed class SharpClawApiClient : IDisposable
             catch (Exception ex)
             {
                 sw.Stop();
-                LogPersistent($"[{id}] !!! FAILED after {sw.ElapsedMilliseconds}ms: {ex.GetType().Name}: {ex.Message}");
-                processLogs?.AppendException(ex, $"HTTP request failed: {request.Method} {request.RequestUri}");
+                logger.LogError(
+                    ex,
+                    "HTTP request {RequestId} failed after {ElapsedMilliseconds}ms: {Method} {Path}",
+                    id,
+                    sw.ElapsedMilliseconds,
+                    request.Method,
+                    path);
                 throw;
             }
             sw.Stop();
 
-            LogPersistent($"[{id}] <<< {(int)response.StatusCode} {response.ReasonPhrase} ({sw.ElapsedMilliseconds}ms)");
-
-            if (response.Content is not null)
-            {
-                var responseContentType = response.Content.Headers.ContentType?.MediaType ?? "";
-                if (IsTextContent(responseContentType)
-                    && responseContentType is not "text/event-stream")
-                {
-                    // Skip full body read for large responses to avoid buffering
-                    // multi-MB payloads (e.g. job details with base64 screenshots)
-                    var contentLength = response.Content.Headers.ContentLength;
-                    if (contentLength is not null and > 4096)
-                    {
-                        LogPersistent($"[{id}] <<< Body: <{responseContentType}, {contentLength:N0} bytes>");
-                    }
-                    else
-                    {
-                        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                        LogPersistent($"[{id}] <<< Body:\n{responseBody}");
-                    }
-                }
-                else
-                {
-                    LogPersistent($"[{id}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
-                }
-            }
+            logger.LogInformation(
+                "HTTP request {RequestId} completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}",
+                id,
+                (int)response.StatusCode,
+                sw.ElapsedMilliseconds,
+                request.Method,
+                path,
+                response.Content?.Headers.ContentLength);
 
             return response;
         }
+    }
 
-        private static bool IsTextContent(string mediaType) =>
-            mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("json", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("form-urlencoded", StringComparison.OrdinalIgnoreCase);
+    private static string SafePath(Uri? uri)
+    {
+        if (uri is null)
+            return string.Empty;
+        return uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
     }
 }

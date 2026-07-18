@@ -1,10 +1,10 @@
-using System.Diagnostics;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using Serilog;
 using SharpClaw.Runtime.Host.Handlers;
 using SharpClaw.Runtime.BLL.Modules;
@@ -56,10 +56,11 @@ public static class CliDispatcher
     private static Guid? _currentChannelId;
     private static Guid? _currentThreadId;
     private static bool _chatMode;
+    private static Microsoft.Extensions.Logging.ILogger? _logger;
     private static bool IsLoggedIn => _currentUser is not null;
 
-    [Conditional("DEBUG")]
-    private static void DebugLog(string message) => Debug.WriteLine(message, "SharpClaw.CLI");
+    private static void DebugLog(string message) =>
+        _logger?.LogDebug("CLI diagnostic: {Message}", message);
 
     private static readonly HashSet<string> PublicCommands =
         ["login", "register", "help", "--help", "-h"];
@@ -86,6 +87,7 @@ public static class CliDispatcher
     /// </summary>
     public static async Task<bool> RunInteractiveAsync(IServiceProvider services, CancellationToken ct)
     {
+        _logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SharpClaw.CLI");
         // SHARPCLAW_FORCE_REPL=1 allows piped/scripted CLI use (e.g. testing,
         // batch scripting) even when stdin is redirected. The REPL loop already
         // exits cleanly on EOF (ReadLine returns null), so this is safe.

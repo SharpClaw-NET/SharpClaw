@@ -2,8 +2,9 @@ using SharpClaw.Configuration;
 using SharpClaw.Services;
 using SharpClaw.Client.Uno;
 using SharpClaw.Shared.Logging;
+using Microsoft.Extensions.Logging;
 using Serilog;
-using Serilog.Events;
+using Serilog.Extensions.Logging;
 using Microsoft.Extensions.Configuration;
 using Uno.Resizetizer;
 
@@ -11,8 +12,7 @@ namespace SharpClaw;
 
 public partial class App : Application
 {
-    private DurableProcessLogWriter? _processLogs;
-    private DurableProcessLogCapture? _processLogCapture;
+    private SharpClawLogRuntime? _logging;
 
     /// <summary>
     /// Initializes the singleton application object. This is the first line of authored code
@@ -31,41 +31,16 @@ public partial class App : Application
     protected async override void OnLaunched(LaunchActivatedEventArgs args)
     {
         var frontendInstance = new FrontendInstanceService();
-        _processLogs = new DurableProcessLogWriter("uno", frontendInstance.Paths);
-        _processLogCapture = DurableProcessLogCapture.Install(_processLogs);
-        RegisterGlobalExceptionLogging(_processLogs);
-
-        var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(
+        var loggingOptions = SharpClawLoggingOptions.FromConfiguration(
             new ConfigurationBuilder()
                 .AddLocalEnvironment(isDevelopment: false)
                 .Build());
-
-        if (serilogOptions.Enabled)
-        {
-            var loggerConfiguration = new LoggerConfiguration()
-                .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
-                    serilogOptions.MinimumLevel,
-                    LogEventLevel.Information))
-                .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
-                    serilogOptions.MicrosoftMinimumLevel,
-                    LogEventLevel.Warning))
-                .MinimumLevel.Override("Uno", SerilogEnvironmentOptions.ParseEnum(
-                    serilogOptions.UnoMinimumLevel,
-                    LogEventLevel.Warning))
-                .Enrich.FromLogContext()
-                .WriteTo.Sink(new DurableProcessLogSerilogSink(_processLogs));
-
-            if (serilogOptions.ConsoleEnabled)
-                loggerConfiguration = loggerConfiguration.WriteTo.Console();
-
-            Log.Logger = loggerConfiguration.CreateLogger();
-        }
-        else
-        {
-            Log.Logger = new LoggerConfiguration()
-                .MinimumLevel.Fatal()
-                .CreateLogger();
-        }
+        _logging = SharpClawLogRuntime.Create(
+            "uno",
+            frontendInstance.Paths,
+            loggingOptions);
+        var logging = _logging;
+        RegisterGlobalExceptionLogging(logging.SerilogLogger);
 
         var builder = this.CreateBuilder(args)
             // Add navigation support for toolkit controls such as TabBar and NavigationView
@@ -77,13 +52,19 @@ public partial class App : Application
 #endif
                 .UseLogging(configure: (context, logBuilder) =>
                 {
-                    // Configure log levels for different categories of logging
                     logBuilder
-                        .AddProvider(new DurableProcessLogLoggerProvider(_processLogs))
+                        .ClearProviders()
+                        .AddSerilog(logging.SerilogLogger, dispose: false)
                         .SetMinimumLevel(
-                            context.HostingEnvironment.IsDevelopment() ?
-                                LogLevel.Information :
-                                LogLevel.Warning)
+                            loggingOptions.MinimumLevel switch
+                            {
+                                Serilog.Events.LogEventLevel.Verbose => LogLevel.Trace,
+                                Serilog.Events.LogEventLevel.Debug => LogLevel.Debug,
+                                Serilog.Events.LogEventLevel.Information => LogLevel.Information,
+                                Serilog.Events.LogEventLevel.Warning => LogLevel.Warning,
+                                Serilog.Events.LogEventLevel.Error => LogLevel.Error,
+                                _ => LogLevel.Critical,
+                            })
 
                         // Default filters for core Uno Platform namespaces
                         .CoreLogLevel(LogLevel.Warning);
@@ -106,9 +87,6 @@ public partial class App : Application
                     //logBuilder.WebAssemblyLogLevel(LogLevel.Debug);
 
                 }, enableUnoLogging: true)
-                .UseSerilog(
-                    consoleLoggingEnabled: serilogOptions.Enabled && serilogOptions.ConsoleEnabled,
-                    fileLoggingEnabled: false)
                 .UseConfiguration(configure: configBuilder =>
                     configBuilder
                         .EmbeddedSource<App>()
@@ -158,7 +136,7 @@ public partial class App : Application
                 )
                 .ConfigureServices((context, services) =>
                 {
-                    services.AddSingleton(_processLogs);
+                    services.AddSingleton(logging);
                     services.AddSingleton(frontendInstance);
                     var isDev = context.HostingEnvironment.IsDevelopment();
                     var configuredApiUrl = LocalEnvironment.LoadApiUrl(isDev);
@@ -168,24 +146,41 @@ public partial class App : Application
                     var backendEnabled = LocalEnvironment.LoadBackendEnabled(isDev);
                     var persistent = LocalEnvironment.LoadProcessesPersistent(isDev);
 
-                    var backendManager = new BackendProcessManager(apiUrl, _processLogs, frontendInstance)
+                    services.AddSingleton<BackendProcessManager>(sp =>
                     {
-                        SkipLaunch = !backendEnabled,
-                        Persistent = persistent,
-                    };
-                    services.AddSingleton(backendManager);
+                        var manager = new BackendProcessManager(
+                            apiUrl,
+                            sp.GetRequiredService<ILogger<BackendProcessManager>>(),
+                            frontendInstance)
+                        {
+                            SkipLaunch = !backendEnabled,
+                            Persistent = persistent,
+                        };
+                        return manager;
+                    });
 
                     var gatewayUrl = LocalEnvironment.LoadGatewayUrl(isDev);
                     var gatewayEnabled = LocalEnvironment.LoadGatewayEnabled(isDev);
 
-                    var gatewayManager = new GatewayProcessManager(gatewayUrl, apiUrl, _processLogs, frontendInstance)
+                    services.AddSingleton<GatewayProcessManager>(sp =>
                     {
-                        SkipLaunch = !gatewayEnabled,
-                        Persistent = persistent,
-                    };
-                    services.AddSingleton(gatewayManager);
+                        var manager = new GatewayProcessManager(
+                            gatewayUrl,
+                            apiUrl,
+                            sp.GetRequiredService<ILogger<GatewayProcessManager>>(),
+                            frontendInstance)
+                        {
+                            SkipLaunch = !gatewayEnabled,
+                            Persistent = persistent,
+                        };
+                        return manager;
+                    });
 
-                    services.AddSingleton(new SharpClawApiClient(apiUrl, _processLogs, frontendInstance));
+                    services.AddSingleton<SharpClawApiClient>(sp =>
+                        new SharpClawApiClient(
+                            apiUrl,
+                            sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
+                            frontendInstance));
                     services.AddSingleton(new FirstSetupMarker(frontendInstance));
                     services.AddSingleton(new ClientSettings(frontendInstance));
                     services.AddSingleton(new AccountStore(frontendInstance));
@@ -233,26 +228,26 @@ public partial class App : Application
 
                 gw?.Dispose();
                 be?.Dispose();
-                _processLogCapture?.Dispose();
-                _processLogs?.Dispose();
-                Log.CloseAndFlush();
+                _logging?.Dispose();
             };
         }
     }
 
-    private static void RegisterGlobalExceptionLogging(DurableProcessLogWriter processLogs)
+    private static void RegisterGlobalExceptionLogging(Serilog.ILogger logger)
     {
         AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
         {
             if (eventArgs.ExceptionObject is Exception exception)
-                processLogs.AppendException(exception, "Unhandled AppDomain exception in Uno.");
+                logger.Error(exception, "Unhandled AppDomain exception in Uno.");
             else
-                processLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+                logger.Error(
+                    "Unhandled AppDomain exception payload: {ExceptionObject}",
+                    eventArgs.ExceptionObject);
         };
 
         TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
         {
-            processLogs.AppendException(eventArgs.Exception, "Unobserved task exception in Uno.");
+            logger.Error(eventArgs.Exception, "Unobserved task exception in Uno.");
         };
     }
 

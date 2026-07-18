@@ -1,4 +1,3 @@
-using System.Diagnostics;
 using System.Net;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
@@ -427,7 +426,7 @@ public sealed class AgentJobService(
                         contextPsId: contextPsId);
                     return result is null ? null : await result;
                 },
-                message => Debug.WriteLine(message, "SharpClaw.CLI")),
+                message => _logger.LogDebug("Agent job diagnostic: {Message}", message)),
             ct);
     }
 

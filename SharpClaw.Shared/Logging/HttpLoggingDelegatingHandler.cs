@@ -1,88 +1,56 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Shared.Logging;
 
 /// <summary>
-/// A <see cref="DelegatingHandler"/> that logs full HTTP request and
-/// response details (method, URI, headers, body, status, timing) via
-/// <see cref="Debug.WriteLine(string, string)"/> so output appears in
-/// the Visual Studio <b>Output › Debug</b> pane under the
-/// <c>SharpClaw.HTTP</c> category.
+/// Emits bounded HTTP metadata only. It never reads request or response
+/// bodies and never records headers, query values, or credential material.
 /// </summary>
-public sealed class HttpLoggingDelegatingHandler : DelegatingHandler
+public sealed class HttpLoggingDelegatingHandler(
+    ILogger<HttpLoggingDelegatingHandler> logger) : DelegatingHandler
 {
-    private const string Category = "SharpClaw.HTTP";
-
-    [Conditional("DEBUG")]
-    private static void Log(string message) => Debug.WriteLine(message, Category);
-
     protected override async Task<HttpResponseMessage> SendAsync(
-        HttpRequestMessage request, CancellationToken cancellationToken)
+        HttpRequestMessage request,
+        CancellationToken cancellationToken)
     {
-        var requestId = Guid.NewGuid().ToString("N")[..8];
-
-        // ── Request ──────────────────────────────────────────────
-        Log($"[{requestId}] >>> {request.Method} {request.RequestUri}");
-        Log($"[{requestId}] >>> Request Headers:\n{request.Headers.ToString().TrimEnd()}");
-
-        if (request.Content is not null)
-        {
-            Log($"[{requestId}] >>> Content Headers:\n{request.Content.Headers.ToString().TrimEnd()}");
-
-            var contentType = request.Content.Headers.ContentType?.MediaType ?? "";
-            if (IsTextContent(contentType))
-            {
-                var body = await request.Content.ReadAsStringAsync(cancellationToken);
-                Log($"[{requestId}] >>> Body:\n{body}");
-            }
-            else
-            {
-                Log($"[{requestId}] >>> Body: <binary {contentType}, {request.Content.Headers.ContentLength} bytes>");
-            }
-        }
-
-        // ── Send + timing ────────────────────────────────────────
-        var sw = Stopwatch.StartNew();
-        HttpResponseMessage response;
+        var stopwatch = Stopwatch.StartNew();
+        var path = SafePath(request.RequestUri);
+        logger.LogDebug(
+            "HTTP request started: {Method} {Path}; content length={ContentLength}",
+            request.Method,
+            path,
+            request.Content?.Headers.ContentLength);
         try
         {
-            response = await base.SendAsync(request, cancellationToken);
+            var response = await base.SendAsync(request, cancellationToken).ConfigureAwait(false);
+            stopwatch.Stop();
+            logger.LogDebug(
+                "HTTP request completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}",
+                (int)response.StatusCode,
+                stopwatch.ElapsedMilliseconds,
+                request.Method,
+                path,
+                response.Content?.Headers.ContentLength);
+            return response;
         }
         catch (Exception ex)
         {
-            sw.Stop();
-            Log($"[{requestId}] !!! FAILED after {sw.ElapsedMilliseconds}ms: {ex}");
+            stopwatch.Stop();
+            logger.LogError(
+                ex,
+                "HTTP request failed after {ElapsedMilliseconds}ms: {Method} {Path}",
+                stopwatch.ElapsedMilliseconds,
+                request.Method,
+                path);
             throw;
         }
-        sw.Stop();
-
-        // ── Response ─────────────────────────────────────────────
-        Log($"[{requestId}] <<< {(int)response.StatusCode} {response.ReasonPhrase} ({sw.ElapsedMilliseconds}ms)");
-        Log($"[{requestId}] <<< Response Headers:\n{response.Headers.ToString().TrimEnd()}");
-
-        if (response.Content is not null)
-        {
-            Log($"[{requestId}] <<< Content Headers:\n{response.Content.Headers.ToString().TrimEnd()}");
-
-            var responseContentType = response.Content.Headers.ContentType?.MediaType ?? "";
-            if (IsTextContent(responseContentType)
-                && responseContentType is not "text/event-stream")
-            {
-                var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                Log($"[{requestId}] <<< Body:\n{responseBody}");
-            }
-            else
-            {
-                Log($"[{requestId}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
-            }
-        }
-
-        return response;
     }
 
-    private static bool IsTextContent(string mediaType) =>
-        mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-        || mediaType.Contains("json", StringComparison.OrdinalIgnoreCase)
-        || mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase)
-        || mediaType.Contains("form-urlencoded", StringComparison.OrdinalIgnoreCase);
+    private static string SafePath(Uri? uri)
+    {
+        if (uri is null)
+            return string.Empty;
+        return uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
+    }
 }

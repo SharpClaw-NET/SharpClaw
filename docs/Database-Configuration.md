@@ -80,7 +80,7 @@ The following `.env` keys control EF Core diagnostics:
 |-----|---------|-------------|
 | `Database:EnableDetailedErrors` | `true` | Enables EF Core detailed error messages. This is generally safe and useful even outside development. |
 | `Database:EnableSensitiveDataLogging` | `false` | Includes parameter values and entity data in EF Core logs. This can expose secrets or personal data in logs, so it should remain off unless you are doing local debugging. |
-| `Logging:Serilog:EntityFrameworkCoreMinimumLevel` | `Warning` | Controls how noisy EF Core logging is once it reaches Serilog. Lower it to `Information` or `Debug` when investigating query and change-tracking behavior. |
+| `Logging:Overrides:Microsoft.EntityFrameworkCore` | `Warning` | Controls how noisy EF Core logging is once it reaches Serilog. Lower it to `Information` or `Debug` when investigating query and change-tracking behavior. |
 
 `Database:Relational:CommandTimeoutSeconds` sets a shared relational command
 timeout for PostgreSQL, SQL Server, and SQLite. Provider-specific
@@ -99,8 +99,8 @@ Example:
 Database__Provider="Postgres"
 Database__EnableDetailedErrors="true"
 Database__EnableSensitiveDataLogging="false"
-Logging__Serilog__Enabled="true"
-Logging__Serilog__EntityFrameworkCoreMinimumLevel="Information"
+Logging__MinimumLevel="Information"
+Logging__Overrides__Microsoft.EntityFrameworkCore="Information"
 ConnectionStrings__Postgres="Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
 ```
 

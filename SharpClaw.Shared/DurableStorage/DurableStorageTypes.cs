@@ -64,7 +64,15 @@ public sealed record DurableRecordWrite(
     string? ExceptionType = null,
     string? CorrelationId = null,
     DurableArtifactReference? Artifact = null,
-    bool Idempotent = false);
+    bool Idempotent = false,
+    string? ExceptionText = null,
+    string? MessageTemplate = null,
+    string? Category = null,
+    int? EventIdId = null,
+    string? EventIdName = null,
+    string? TraceId = null,
+    string? SpanId = null,
+    IReadOnlyDictionary<string, string>? Properties = null);
 
 public sealed record DurableRecord(
     long Sequence,
@@ -75,7 +83,15 @@ public sealed record DurableRecord(
     string Message,
     string? ExceptionType,
     string? CorrelationId,
-    DurableArtifactReference? Artifact);
+    DurableArtifactReference? Artifact,
+    string? ExceptionText = null,
+    string? MessageTemplate = null,
+    string? Category = null,
+    int? EventIdId = null,
+    string? EventIdName = null,
+    string? TraceId = null,
+    string? SpanId = null,
+    IReadOnlyDictionary<string, string>? Properties = null);
 
 public sealed record DurableArtifactReference(
     Guid Id,

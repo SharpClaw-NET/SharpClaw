@@ -3,9 +3,9 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Contracts;
-using SharpClaw.Shared.Logging;
 using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Gateway.Infrastructure;
@@ -19,7 +19,7 @@ public sealed class InternalApiClient(
     HttpClient httpClient,
     IOptions<InternalApiOptions> options,
     IHttpContextAccessor httpContextAccessor,
-    DurableProcessLogWriter processLogs) : IGatewayInternalApi
+    ILogger<InternalApiClient> logger) : IGatewayInternalApi
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -46,9 +46,10 @@ public sealed class InternalApiClient(
 
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            var body = await response.Content.ReadAsStringAsync(ct);
-            Console.WriteLine($"[gateway] 401 on GET {path} — body: {body}");
-            processLogs.AppendDebug($"401 on GET {path} — body: {body}");
+            logger.LogWarning(
+                "Runtime returned unauthorized for {Method} {Path}; attempting credential refresh.",
+                request.Method,
+                SafePath(path));
 
             if (TryInvalidateAndReAttach(request))
             {
@@ -196,14 +197,17 @@ public sealed class InternalApiClient(
         if (!string.IsNullOrEmpty(authHeader) && !request.Headers.Contains("Authorization"))
             request.Headers.TryAddWithoutValidation("Authorization", authHeader);
 
-        Console.WriteLine(
-            $"[gateway] {request.Method} {request.RequestUri} " +
-            $"X-Api-Key: {key.Length} chars, " +
-            $"prefix={key[..Math.Min(6, key.Length)]}.., " +
-            $"suffix=..{key[^Math.Min(4, key.Length)..]} " +
-            $"GwToken={gatewayToken?.Length.ToString() ?? "none"}");
-        processLogs.AppendDebug(
-            $"{request.Method} {request.RequestUri} X-Api-Key: {key.Length} chars, GwToken={gatewayToken?.Length.ToString() ?? "none"}");
+        logger.LogDebug(
+            "Attached internal credentials for {Method} {Path}; gateway token present={GatewayTokenPresent}.",
+            request.Method,
+            SafePath(request.RequestUri?.ToString() ?? string.Empty),
+            gatewayToken is not null);
+    }
+
+    private static string SafePath(string value)
+    {
+        var queryStart = value.IndexOf('?', StringComparison.Ordinal);
+        return queryStart < 0 ? value : value[..queryStart];
     }
 
     /// <summary>

@@ -10,11 +10,7 @@ namespace SharpClaw.Presentation;
 // and thread activity watch (real-time updates from other clients).
 public sealed partial class MainPage
 {
-    private const string ChatLogCategory = "SharpClaw.Chat";
     private const int StreamUiUpdateIntervalMs = 33;
-
-    [Conditional("DEBUG")]
-    private static void ChatLog(string message) => Debug.WriteLine(message, ChatLogCategory);
 
     // ── Thread activity watch ────────────────────────────────────
 
@@ -46,18 +42,15 @@ public sealed partial class MainPage
     private async Task RunThreadWatchAsync(Guid channelId, Guid threadId, CancellationToken ct)
     {
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        ChatLog($"[ThreadWatch] Connecting watch for channel={channelId} thread={threadId}");
         try
         {
             using var resp = await api.GetStreamAsync(
                 $"/channels/{channelId}/chat/threads/{threadId}/watch", ct);
             if (!resp.IsSuccessStatusCode)
             {
-                ChatLog($"[ThreadWatch] Watch returned {(int)resp.StatusCode}");
                 return;
             }
 
-            ChatLog("[ThreadWatch] Connected, reading SSE events...");
             using var stream = await resp.Content.ReadAsStreamAsync(ct);
             using var reader = new StreamReader(stream);
 
@@ -66,10 +59,9 @@ public sealed partial class MainPage
             while (!ct.IsCancellationRequested)
             {
                 var line = await reader.ReadLineAsync(ct);
-                if (line is null) { ChatLog("[ThreadWatch] Stream ended (null)"); break; }
+                if (line is null) { break; }
                 if (line.Length == 0) continue;
 
-                ChatLog($"[ThreadWatch] SSE: {line}");
 
                 if (line.StartsWith("event: "))
                 {
@@ -81,7 +73,6 @@ public sealed partial class MainPage
 
                     if (evtSpan.SequenceEqual("Processing"))
                     {
-                        ChatLog("[ThreadWatch] Event: Processing");
                         DispatcherQueue.TryEnqueue(() =>
                         {
                             ApplyThreadWatchDecision(UnoClientState.ApplyThreadWatchEvent(
@@ -91,7 +82,6 @@ public sealed partial class MainPage
                     }
                     else if (evtSpan.SequenceEqual("NewMessages"))
                     {
-                        ChatLog("[ThreadWatch] Event: NewMessages");
                         DispatcherQueue.TryEnqueue(async () =>
                         {
                             var decision = UnoClientState.ApplyThreadWatchEvent(
@@ -101,7 +91,6 @@ public sealed partial class MainPage
 
                             if (!decision.LoadHistoryNow)
                             {
-                                ChatLog("[ThreadWatch] NewMessages during send — flagging stale");
                                 return;
                             }
 
@@ -118,8 +107,8 @@ public sealed partial class MainPage
                 }
             }
         }
-        catch (OperationCanceledException) { ChatLog("[ThreadWatch] Cancelled (normal)"); }
-        catch (Exception ex) { ChatLog($"[ThreadWatch] Error: {ex.GetType().Name}: {ex.Message}"); }
+        catch (OperationCanceledException) { }
+        catch (Exception) { }
     }
 
     private UnoChatInteractionState CurrentChatInteractionState()
@@ -262,7 +251,6 @@ public sealed partial class MainPage
 
     private async Task LoadHistoryAsync(Guid channelId)
     {
-        ChatLog($"[History] LoadHistoryAsync channel={channelId} thread={_selectedThreadId}");
         _chatBubblePoolUsed = 0;
         MessagesPanel.Children.Clear();
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
@@ -272,11 +260,9 @@ public sealed partial class MainPage
             if (_selectedThreadId is not { } tid) return;
 
             var url = $"/channels/{channelId}/chat/threads/{tid}";
-            ChatLog($"[History] GET {url}");
             using var resp = await api.GetAsync(url);
             if (!resp.IsSuccessStatusCode)
             {
-                ChatLog($"[History] Failed: {(int)resp.StatusCode}");
                 return;
             }
 
@@ -284,8 +270,7 @@ public sealed partial class MainPage
             var messages = await JsonSerializer.DeserializeAsync<List<ChatMessageDto>>(
                 contentStream, Json);
 
-            if (messages is null) { ChatLog("[History] Null response"); return; }
-            ChatLog($"[History] Loaded {messages.Count} messages");
+            if (messages is null) { return; }
 
             var fallbackAgentName = _allAgents.FirstOrDefault(a => a.Id == _selectedAgentId)?.Name;
             foreach (var msg in messages)
@@ -302,7 +287,7 @@ public sealed partial class MainPage
                     clientType: msg.ClientType);
             }
         }
-        catch (Exception ex) { ChatLog($"[History] Error: {ex.GetType().Name}: {ex.Message}"); }
+        catch (Exception) { }
 
         ScrollToBottom();
     }
@@ -594,7 +579,6 @@ public sealed partial class MainPage
             message,
             _selectedAgentId,
             _clientType);
-        ChatLog($"[Stream] POST {request.Path}");
 
         var body = JsonSerializer.Serialize(request.Body, Json);
         var content = new StringContent(body, Encoding.UTF8, "application/json");
@@ -604,7 +588,6 @@ public sealed partial class MainPage
         try
         {
             resp = await api.PostStreamAsync(request.Path, content, ct);
-            ChatLog($"[Stream] Headers: {(int)resp.StatusCode} in {sw.ElapsedMilliseconds}ms");
 
             if (!resp.IsSuccessStatusCode)
             {
@@ -617,7 +600,6 @@ public sealed partial class MainPage
             if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
             {
                 var fallback = await resp.Content.ReadAsStringAsync(ct);
-                ChatLog($"[Stream] Unexpected content-type: {contentType}");
                 bubble.Content.Text = $"✗ Unexpected response: {TerminalUI.Truncate(fallback, 200)}";
                 bubble.Content.Foreground = Brush(0xFF4444);
                 return;
@@ -628,7 +610,6 @@ public sealed partial class MainPage
         }
         catch (OperationCanceledException)
         {
-            ChatLog("[Stream] Cancelled");
             if (_pooledStreamBuilder.Length == 0)
                 bubble.Content.Text = "(cancelled)";
             else
@@ -636,7 +617,6 @@ public sealed partial class MainPage
         }
         catch (Exception ex)
         {
-            ChatLog($"[Stream] Error: {ex.GetType().Name}: {ex.Message}");
             bubble.Content.Text = _pooledStreamBuilder.Length > 0
                 ? _pooledStreamBuilder.ToString() + $"\n✗ {ex.Message}"
                 : $"✗ {ex.Message}";
@@ -645,7 +625,6 @@ public sealed partial class MainPage
         finally
         {
             sw.Stop();
-            ChatLog($"[Stream] End: {sw.ElapsedMilliseconds}ms total");
             resp?.Dispose();
             if (_streamCts == cts)
                 _streamCts = null;
@@ -678,12 +657,10 @@ public sealed partial class MainPage
                     var bytesRead = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
                     if (bytesRead == 0)
                     {
-                        ChatLog($"[Stream] Read #{readCount}: 0B (end of stream)");
                         break;
                     }
 
                     readCount++;
-                    ChatLog($"[Stream] Read #{readCount}: {bytesRead}B");
 
                     var charsDecoded = decoder.GetChars(buffer.AsSpan(0, bytesRead), charBuf, flush: false);
                     lineBuilder.Append(charBuf, 0, charsDecoded);
@@ -724,7 +701,6 @@ public sealed partial class MainPage
         await foreach (var (eventType, dataJson) in events.Reader.ReadAllAsync(ct))
         {
             eventCount++;
-            ChatLog($"[Stream] SSE #{eventCount}: {eventType} {TerminalUI.Truncate(dataJson, 120)}");
 
             if (ProcessSseEvent(eventType, dataJson, bubble, channelId))
             {
@@ -757,7 +733,6 @@ public sealed partial class MainPage
 
         if (!doneReceived)
         {
-            ChatLog("[Stream] Ended without Done event, falling back to LoadCostAsync");
             await LoadCostAsync(channelId);
         }
     }
@@ -783,10 +758,9 @@ public sealed partial class MainPage
                             _needsNewlineBeforeNextDelta = false;
                         }
                         _pooledStreamBuilder.Append(delta);
-                        ChatLog($"[Stream] Delta: +{delta.Length} total={_pooledStreamBuilder.Length}");
                     }
                 }
-                catch (Exception ex) { ChatLog($"[Stream] TextDelta parse error: {ex.Message}"); }
+                catch (Exception) { }
                 return false;
             }
 
@@ -799,9 +773,8 @@ public sealed partial class MainPage
                     var status = doc.RootElement.GetProperty("job").GetProperty("status").GetString() ?? "started";
                     _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
                     _needsNewlineBeforeNextDelta = true;
-                    ChatLog($"[Stream] Tool: ToolCallStart {actionKey} → {status}");
                 }
-                catch (Exception ex) { ChatLog($"[Stream] ToolCallStart parse error: {ex.Message}"); }
+                catch (Exception) { }
                 return false;
             }
 
@@ -814,9 +787,8 @@ public sealed partial class MainPage
                     var status = doc.RootElement.GetProperty("result").GetProperty("status").GetString() ?? "done";
                     _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
                     _needsNewlineBeforeNextDelta = true;
-                    ChatLog($"[Stream] Tool: ToolCallResult {actionKey} → {status}");
                 }
-                catch (Exception ex) { ChatLog($"[Stream] ToolCallResult parse error: {ex.Message}"); }
+                catch (Exception) { }
                 return false;
             }
 
@@ -828,9 +800,8 @@ public sealed partial class MainPage
                     var actionKey = doc.RootElement.GetProperty("pendingJob").GetProperty("actionKey").GetString() ?? "?";
                     _pooledStreamBuilder.Append($"\n⏳ [{actionKey}] awaiting approval");
                     _needsNewlineBeforeNextDelta = true;
-                    ChatLog($"[Stream] Tool: ApprovalRequired {actionKey}");
                 }
-                catch (Exception ex) { ChatLog($"[Stream] ApprovalRequired parse error: {ex.Message}"); }
+                catch (Exception) { }
                 return false;
             }
 
@@ -843,9 +814,8 @@ public sealed partial class MainPage
                     var status = doc.RootElement.GetProperty("approvalOutcome").GetProperty("status").GetString() ?? "resolved";
                     _pooledStreamBuilder.Append($"\n⚙ [{actionKey}] → {status}");
                     _needsNewlineBeforeNextDelta = true;
-                    ChatLog($"[Stream] Tool: ApprovalResult {actionKey} → {status}");
                 }
-                catch (Exception ex) { ChatLog($"[Stream] ApprovalResult parse error: {ex.Message}"); }
+                catch (Exception) { }
                 return false;
             }
 
@@ -855,15 +825,13 @@ public sealed partial class MainPage
                 {
                     using var doc = JsonDocument.Parse(dataJson);
                     var error = doc.RootElement.GetProperty("error").GetString() ?? "Unknown error";
-                    ChatLog($"[Stream] Error event: {error}");
                     bubble.Content.Text = _pooledStreamBuilder.Length > 0
                         ? _pooledStreamBuilder.ToString() + $"\n✗ {error}"
                         : $"✗ {error}";
                     bubble.Content.Foreground = Brush(0xFF4444);
                 }
-                catch (Exception ex)
+                catch (Exception)
                 {
-                    ChatLog($"[Stream] Error parse error: {ex.Message}");
                     bubble.Content.Text = "✗ Stream error";
                     bubble.Content.Foreground = Brush(0xFF4444);
                 }
@@ -901,13 +869,12 @@ public sealed partial class MainPage
 
                             if (channelCost is not null)
                             {
-                                ChatLog($"[Stream] Done: ch={channelCost.TotalTokens} th={threadCost?.TotalTokens}");
                                 RenderInlineCost(channelCost, threadCost);
                             }
                         }
                     }
                 }
-                catch (Exception ex) { ChatLog($"[Stream] Done parse error: {ex.Message}"); }
+                catch (Exception) { }
 
                 // Set final text
                 bubble.Content.Text = _pooledStreamBuilder.Length > 0
@@ -917,7 +884,6 @@ public sealed partial class MainPage
             }
 
             default:
-                ChatLog($"[Stream] Unknown event type: {eventType}");
                 return false;
         }
     }

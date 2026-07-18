@@ -8,6 +8,7 @@ using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Runtime.INF.Logging;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.DurableStorage;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Runtime.BLL.Services;
 
@@ -32,7 +33,7 @@ public sealed class DurableStorageMaintenanceService(
     ExecutionArtifactStore artifacts,
     TaskDiagnosticStateStore taskStates,
     IServiceScopeFactory scopes,
-    ModuleLogService moduleLogs,
+    SharpClawLogRuntime logging,
     DurableStorageMaintenanceOptions options,
     ILogger<DurableStorageMaintenanceService> logger) : BackgroundService
 {
@@ -137,7 +138,7 @@ public sealed class DurableStorageMaintenanceService(
                 artifactSnapshot.EncodedBytes,
                 logSnapshot.ActiveStreams,
                 logSnapshot.SealedSegments,
-                moduleLogs.QueueDepth,
+                logging.Dispatcher.QueueDepth,
                 logSnapshot.LastSuccessfulFlush,
                 _lastRun);
         }

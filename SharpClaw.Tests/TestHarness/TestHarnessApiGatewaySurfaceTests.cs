@@ -21,8 +21,6 @@ using SharpClaw.Contracts.Providers;
 using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Tests.TestHarness;
-using SharpClaw.Shared.Instances;
-using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.TestHarness;
 
@@ -689,20 +687,11 @@ public sealed class TestHarnessApiGatewaySurfaceTests
         {
             BaseAddress = new Uri("http://internal.test")
         };
-        var logsRoot = Path.Combine(Path.GetTempPath(), "SharpClawHarnessGateway", Guid.NewGuid().ToString("N"));
-        var writer = new DurableProcessLogWriter(
-            "gateway-test",
-            new SharpClawInstancePaths(
-                SharpClawInstanceKind.Gateway,
-                logsRoot,
-                logsRoot,
-                logsRoot),
-            TimeSpan.FromMinutes(10));
         var api = new InternalApiClient(
             client,
             Options.Create(new InternalApiOptions { ApiKey = "test-key", GatewayToken = "gateway-token" }),
             new HttpContextAccessor(),
-            writer);
+            NullLogger<InternalApiClient>.Instance);
         return api;
     }
 

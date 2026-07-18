@@ -2715,7 +2715,7 @@ Read the raw content of the Core `.env` file.
 **Response `200`:**
 
 ```json
-{ "content": "Admin__Username=admin\\nLogging__Serilog__Enabled=\\\"true\\\"\\n" }
+{ "content": "Admin__Username=admin\\nLogging__MinimumLevel=\\\"Information\\\"\\n" }
 ```
 
 **Response `403`:** Caller is not authorised (not admin and
@@ -2802,7 +2802,7 @@ controls bundled backend launch. `Gateway__Enabled` is false in the
 template so the public gateway is opt-in, and `Gateway__Url` is used only
 when that bundled gateway is launched. `Processes__Persistent` keeps child
 processes alive after the frontend exits, while `Processes__AutoStart`
-registers Windows startup scripts. The `Logging:Serilog` section controls
+registers Windows startup scripts. The `Logging` section controls
 frontend logging.
 
 ### Gateway `.env` keys

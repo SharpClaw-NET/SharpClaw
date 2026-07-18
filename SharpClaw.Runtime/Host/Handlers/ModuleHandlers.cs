@@ -4,8 +4,8 @@ using Microsoft.Extensions.Logging;
 
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.Host.Routing;
-using SharpClaw.Runtime.INF.Logging;
 using SharpClaw.Runtime.INF.DurableStorage;
+using SharpClaw.Runtime.INF.Logging;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Modules;
@@ -39,7 +39,7 @@ public static class ModuleHandlers
     [MapGet("/{moduleId}/logs")]
     public static async Task<IResult> GetLogs(
         string moduleId,
-        ModuleLogService logService,
+        SharpClawLogReader reader,
         Guid? bootId = null,
         string? cursor = null,
         string? minimumLevel = null,
@@ -51,8 +51,8 @@ public static class ModuleHandlers
         long maxScanBytes = 16 * 1024 * 1024,
         CancellationToken ct = default)
     {
-        var selectedBootId = bootId ?? logService.BootId;
-        var page = await logService.ReadAsync(
+        var selectedBootId = bootId ?? reader.BootId;
+        var page = await reader.ReadModuleLogsAsync(
             moduleId,
             selectedBootId,
             cursor,

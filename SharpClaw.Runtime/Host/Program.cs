@@ -252,59 +252,27 @@ var durableMaintenanceOptions = new DurableStorageMaintenanceOptions
         24)),
 };
 DurableStorageMaintenanceService.ValidateOptions(durableMaintenanceOptions);
-await using var processLogs = new DurableProcessLogWriter("core", durableRecords);
-await using var moduleLogService = new ModuleLogService(executionDiagnostics);
-using var processLogCapture = DurableProcessLogCapture.Install(processLogs);
-
-var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(earlyConfiguration);
+var loggingOptions = SharpClawLoggingOptions.FromConfiguration(earlyConfiguration);
+await using var logging = SharpClawLogRuntime.Create(
+    "core",
+    durableRecords,
+    loggingOptions);
+var startupLogger = logging.SerilogLogger;
 
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 {
     if (eventArgs.ExceptionObject is Exception exception)
-        processLogs.AppendException(exception, "Unhandled AppDomain exception in core.");
+        startupLogger.Error(exception, "Unhandled AppDomain exception in core.");
     else
-        processLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+        startupLogger.Error(
+            "Unhandled AppDomain exception payload: {ExceptionObject}",
+            eventArgs.ExceptionObject);
 };
 
 TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
 {
-    processLogs.AppendException(eventArgs.Exception, "Unobserved task exception in core.");
+    startupLogger.Error(eventArgs.Exception, "Unobserved task exception in core.");
 };
-
-var consoleLevelSwitch = new Serilog.Core.LoggingLevelSwitch(LogEventLevel.Information);
-
-// Serilog configuration.  When disabled in .env we still install a
-// minimum-level Fatal logger so accidental Log.X calls don't NRE.
-if (serilogOptions.Enabled)
-{
-    var loggerConfiguration = new LoggerConfiguration()
-        .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.MinimumLevel,
-            LogEventLevel.Information))
-        .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.MicrosoftMinimumLevel,
-            LogEventLevel.Warning))
-        .MinimumLevel.Override("Microsoft.AspNetCore", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.AspNetCoreMinimumLevel,
-            LogEventLevel.Warning))
-        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.EntityFrameworkCoreMinimumLevel,
-            LogEventLevel.Warning))
-        .Enrich.FromLogContext()
-        .WriteTo.Sink(new DurableProcessLogSerilogSink(processLogs));
-
-    if (serilogOptions.ConsoleEnabled)
-        loggerConfiguration = loggerConfiguration.WriteTo.Console(levelSwitch: consoleLevelSwitch);
-
-    Log.Logger = loggerConfiguration.CreateLogger();
-}
-else
-{
-    consoleLevelSwitch.MinimumLevel = LogEventLevel.Fatal;
-    Log.Logger = new LoggerConfiguration()
-        .MinimumLevel.Fatal()
-        .CreateLogger();
-}
 
 try
 {
@@ -331,10 +299,10 @@ try
             builder.Environment.IsDevelopment(),
             backendInstancePaths));
 
-    builder.Host.UseSerilog();
-    builder.Logging.AddProvider(new DurableProcessLogLoggerProvider(processLogs));
+    builder.Logging.ClearProviders();
+    builder.Host.UseSerilog(logging.SerilogLogger, dispose: false);
 
-    builder.Services.AddSingleton(processLogs);
+    builder.Services.AddSingleton(logging);
     builder.Services.AddSingleton(durableOptions);
     builder.Services.AddSingleton(durableRecords);
     builder.Services.AddSingleton(durableCursors);
@@ -342,15 +310,12 @@ try
     builder.Services.AddSingleton<IExecutionArtifactStore>(artifactStore);
     builder.Services.AddSingleton(artifactStore);
     builder.Services.AddSingleton(executionDiagnostics);
+    builder.Services.AddSingleton<SharpClawLogReader>();
     builder.Services.AddSingleton(taskDiagnosticState);
     builder.Services.AddSingleton(durableMaintenanceOptions);
     builder.Services.AddSingleton(backendInstancePaths);
     builder.Services.AddSingleton(backendInstanceLock);
 
-    // Module log capture — feeds per-module ring buffers for the /modules/{id}/logs API.
-    builder.Services.AddSingleton(moduleLogService);
-    builder.Services.AddSingleton<Microsoft.Extensions.Logging.ILoggerProvider>(
-        new ModuleLogSinkProvider(moduleLogService));
     builder.Services.AddSingleton<DurableStorageMaintenanceService>();
     builder.Services.AddHostedService(sp =>
         sp.GetRequiredService<DurableStorageMaintenanceService>());
@@ -651,7 +616,7 @@ try
             var status = await migrationSvc.GetStatusAsync();
             if (status.Pending.Count > 0)
             {
-                Log.Warning(
+                startupLogger.Warning(
                     "Database has {Count} pending migration(s): {Names}. " +
                     "Run 'db migrate' or POST /admin/db/migrate to apply them.",
                     status.Pending.Count, string.Join(", ", status.Pending));
@@ -695,7 +660,7 @@ try
     {
         if (!enabledModuleIds.Contains(bundledModule.Id))
         {
-            Log.Information("Module '{ModuleId}' ({DisplayName}) is disabled — skipping registration [bundled]",
+            startupLogger.Information("Module '{ModuleId}' ({DisplayName}) is disabled — skipping registration [bundled]",
                 bundledModule.Id, bundledModule.DisplayName);
             disabledBundledCount++;
             continue;
@@ -718,11 +683,11 @@ try
             null => "bundled",
             _ => "bundled-runtime",
         };
-        Log.Information("Module '{ModuleId}' ({DisplayName}) registered [{Runtime}, v{Version}]",
+        startupLogger.Information("Module '{ModuleId}' ({DisplayName}) registered [{Runtime}, v{Version}]",
             registeredModule.Id, registeredModule.DisplayName, runtimeLabel, version);
     }
 
-    Log.Information("Bundled modules: {Registered} registered, {Disabled} disabled, {Total} discovered",
+    startupLogger.Information("Bundled modules: {Registered} registered, {Disabled} disabled, {Total} discovered",
         registeredBundledCount, disabledBundledCount, allBundled.Count);
 
     // ──────── PHASE 16 ─── Module initialization in dependency order ──────
@@ -735,7 +700,7 @@ try
     // Unregister modules excluded during dependency resolution (missing deps, cycles).
     foreach (var (moduleId, reason) in excludedModules)
     {
-        Log.Warning("Module '{ModuleId}' excluded from initialization: {Reason}", moduleId, reason);
+        startupLogger.Warning("Module '{ModuleId}' excluded from initialization: {Reason}", moduleId, reason);
         var runtimeHost = registry.GetRuntimeHost(moduleId);
         app.Services.GetRequiredService<SharpClaw.Runtime.INF.Persistence.Modules.RuntimeModuleDbContextRegistry>()
             .UnregisterModule(moduleId);
@@ -763,7 +728,7 @@ try
 
         if (cascadeMiss.Count > 0)
         {
-            Log.Warning(
+            startupLogger.Warning(
                 "Module '{ModuleId}' skipped — depends on contract(s) whose provider failed: {Contracts}",
                 moduleId, string.Join(", ", cascadeMiss));
 
@@ -785,12 +750,12 @@ try
         {
             var runtimeHost = registry.GetRuntimeHost(moduleId);
             await module.InitializeAsync(runtimeHost?.Services ?? app.Services, CancellationToken.None);
-            Log.Information("Module '{ModuleId}' initialized successfully [bundled]", moduleId);
+            startupLogger.Information("Module '{ModuleId}' initialized successfully [bundled]", moduleId);
             initializedCount++;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Module '{ModuleId}' failed to initialize — unregistering", moduleId);
+            startupLogger.Error(ex, "Module '{ModuleId}' failed to initialize — unregistering", moduleId);
 
             foreach (var export in module.ExportedContracts)
                 failedContracts.Add(export.ContractName);
@@ -818,12 +783,12 @@ try
         var externalModules = await moduleSvc.ScanExternalModulesAsync(app.Services);
         externalLoadedCount = externalModules.Count;
         foreach (var ext in externalModules)
-            Log.Information("Module '{ModuleId}' ({DisplayName}) loaded [external, v{Version}]",
+            startupLogger.Information("Module '{ModuleId}' ({DisplayName}) loaded [external, v{Version}]",
                 ext.ModuleId, ext.DisplayName, ext.Version ?? "unknown");
     }
     catch (Exception ex)
     {
-        Log.Warning(ex, "External module scan failed — continuing without external modules");
+        startupLogger.Warning(ex, "External module scan failed — continuing without external modules");
     }
 
     // Load external modules defined in .env ExternalModules section
@@ -835,18 +800,18 @@ try
         var envModules = await moduleSvc.LoadExternalModulesFromConfigAsync(app.Configuration, app.Services);
         envExternalLoadedCount = envModules.Count;
         foreach (var ext in envModules)
-            Log.Information("Module '{ModuleId}' ({DisplayName}) loaded [env-external, v{Version}]",
+            startupLogger.Information("Module '{ModuleId}' ({DisplayName}) loaded [env-external, v{Version}]",
                 ext.ModuleId, ext.DisplayName, ext.Version ?? "unknown");
     }
     catch (Exception ex)
     {
-        Log.Error(ex, "Env-configured external module load failed - aborting startup");
+        startupLogger.Error(ex, "Env-configured external module load failed - aborting startup");
         throw;
     }
 
     // Module startup summary
     var totalLoaded = initializedCount + externalLoadedCount + envExternalLoadedCount;
-    Log.Information(
+    startupLogger.Information(
         "Module startup complete: {TotalLoaded} loaded ({BundledInit} bundled, {ExternalLoaded} external, {EnvExternalLoaded} env-external), " +
         "{FailedInit} failed, {Disabled} disabled, {Excluded} excluded",
         totalLoaded, initializedCount, externalLoadedCount, envExternalLoadedCount,
@@ -865,7 +830,7 @@ try
     catch (Exception ex)
     {
         Console.Error.WriteLine($"Error: {ex.Message}");
-        Log.Error(ex, "CLI command failed");
+        startupLogger.Error(ex, "CLI command failed");
         return;
     }
 
@@ -883,7 +848,7 @@ try
     //   UseWebSockets                            — required for SSE/WS handlers.
     app.UseMiddleware<DatabaseInitializationGateMiddleware>();
     app.UseMiddleware<ExceptionHandlingMiddleware>();
-    if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
+    if (loggingOptions.RequestLoggingEnabled)
         app.UseSerilogRequestLogging();
     app.UseCors();
     app.UseRouting();
@@ -945,7 +910,7 @@ try
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Module '{ModuleId}' failed to map endpoints", module.Id);
+            startupLogger.Error(ex, "Module '{ModuleId}' failed to map endpoints", module.Id);
         }
     }
     app.MapForeignModuleEndpoints(registry);
@@ -964,7 +929,7 @@ try
     }
     else
     {
-        Log.Information("No webhook trigger host registered - dynamic webhook routes disabled");
+        startupLogger.Information("No webhook trigger host registered - dynamic webhook routes disabled");
     }
 
     // ──────── PHASE 22 ─── Shutdown registrations ─────────────────────────
@@ -985,7 +950,7 @@ try
             try { module.ShutdownAsync().GetAwaiter().GetResult(); }
             catch (Exception ex)
             {
-                Log.Warning(ex, "Module '{ModuleId}' shutdown error", module.Id);
+                startupLogger.Warning(ex, "Module '{ModuleId}' shutdown error", module.Id);
             }
         }
 
@@ -994,7 +959,7 @@ try
             try { runtimeHost.DisposeAsync().AsTask().GetAwaiter().GetResult(); }
             catch (Exception ex)
             {
-                Log.Warning(ex, "Module runtime host disposal error");
+                startupLogger.Warning(ex, "Module runtime host disposal error");
             }
         }
     });
@@ -1020,14 +985,15 @@ try
         discoveryLease.PublishNow();
     }
 
-    Log.Information("SharpClaw API listening on {Urls}", urls);
-    Log.Information("API key written to: {KeyFilePath}", apiKeyProvider.KeyFilePath);
+    startupLogger.Information("SharpClaw API listening on {Urls}", urls);
+    startupLogger.Information("API key written to: {KeyFilePath}", apiKeyProvider.KeyFilePath);
 
     // ──────── PHASE 24 ─── Interactive REPL / headless wait ───────────────
     // Interactive-mode console logging discipline:
     // running, we suppress console logging so Serilog output doesn't scroll
     // over the user's prompt. CLI command/response logs still go to
-    // System.Diagnostics.Debug (VS Output > Debug pane).
+    // Unified logging remains governed by Logging:ConsoleEnabled; CLI text is
+    // written directly as user-facing interactive output.
     //
     // In headless mode (stdin redirected or closed), RunInteractiveAsync
     // skips the REPL and just waits on the cancellation token. Console
@@ -1037,13 +1003,7 @@ try
         Environment.GetEnvironmentVariable("SHARPCLAW_FORCE_REPL"), "1",
         StringComparison.Ordinal);
     var interactive = !Console.IsInputRedirected || forceRepl;
-    if (interactive)
-        consoleLevelSwitch.MinimumLevel = LogEventLevel.Fatal;
-
     await CliDispatcher.RunInteractiveAsync(app.Services, app.Lifetime.ApplicationStopping);
-
-    if (interactive)
-        consoleLevelSwitch.MinimumLevel = LogEventLevel.Information;
 
     discoveryLease?.Dispose();
     await app.Services.ShutdownInfrastructureAsync();
@@ -1051,11 +1011,11 @@ try
 }
 catch (Exception ex)
 {
-    Log.Fatal(ex, "SharpClaw terminated unexpectedly.");
+    startupLogger.Fatal(ex, "SharpClaw terminated unexpectedly.");
 }
 finally
 {
-    await Log.CloseAndFlushAsync();
+    await logging.FlushAndSealAsync();
 }
 
 internal sealed class ModuleEndpointRouteBuilder(

@@ -881,7 +881,7 @@ public sealed class ChatService(
                     extraction.ArgumentsJson,
                     innerCt);
             },
-            message => Debug.WriteLine(message, "SharpClaw.CLI"));
+            message => logger.LogDebug("Chat diagnostic: {Message}", message));
 
     private ChatProviderExecutionSelection? ResolveProviderExecution(
         ProviderState? provider)

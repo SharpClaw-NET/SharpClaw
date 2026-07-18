@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Net.NetworkInformation;
 using SharpClaw.Shared.Logging;
@@ -17,7 +18,7 @@ namespace SharpClaw.Services;
 public sealed class GatewayProcessManager : IDisposable
 {
     private readonly FrontendInstanceService? _frontendInstance;
-    private readonly DurableProcessLogWriter _processLogs;
+    private readonly ILogger<GatewayProcessManager> _logger;
     private readonly Func<bool>? _processOnPortProbe;
     private readonly Func<CancellationToken, Task<bool>>? _gatewayReachabilityProbe;
     private readonly Action<ProcessStartInfo>? _processStartObserver;
@@ -108,12 +109,12 @@ public sealed class GatewayProcessManager : IDisposable
     public GatewayProcessManager(
         string gatewayUrl,
         string backendBaseUrl,
-        DurableProcessLogWriter processLogs,
+        ILogger<GatewayProcessManager> logger,
         FrontendInstanceService? frontendInstance = null)
         : this(
             gatewayUrl,
             backendBaseUrl,
-            processLogs,
+            logger,
             frontendInstance,
             executablePath: null,
             processOnPortProbe: null,
@@ -125,7 +126,7 @@ public sealed class GatewayProcessManager : IDisposable
     internal GatewayProcessManager(
         string gatewayUrl,
         string backendBaseUrl,
-        DurableProcessLogWriter processLogs,
+        ILogger<GatewayProcessManager> logger,
         FrontendInstanceService? frontendInstance,
         string? executablePath,
         Func<bool>? processOnPortProbe,
@@ -133,7 +134,7 @@ public sealed class GatewayProcessManager : IDisposable
         Action<ProcessStartInfo>? processStartObserver)
     {
         _frontendInstance = frontendInstance;
-        _processLogs = processLogs;
+        _logger = logger;
         _processOnPortProbe = processOnPortProbe;
         _gatewayReachabilityProbe = gatewayReachabilityProbe;
         _processStartObserver = processStartObserver;
@@ -302,7 +303,7 @@ public sealed class GatewayProcessManager : IDisposable
                 "Ensure the gateway is published into the 'gateway' subfolder.");
 
         lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ── Starting gateway process ──");
-        _processLogs.AppendDebug("[gateway] Starting bundled gateway process.");
+        _logger.LogInformation("Starting bundled gateway process.");
         IsExternal = false;
         _startedByObserver = false;
 
@@ -384,13 +385,15 @@ public sealed class GatewayProcessManager : IDisposable
             // — nothing can override them.
             psi.EnvironmentVariables["InternalApi__ApiKey"] = resolvedKey;
             psi.ArgumentList.Add($"--InternalApi:ApiKey={resolvedKey}");
-            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}, {resolvedKey.Length} chars, prefix={resolvedKey[..Math.Min(6, resolvedKey.Length)]}..).");
-            _processLogs.AppendDebug($"[gateway] API key forwarded to bundled gateway ({(ApiKey is not null ? "in-memory" : "file")}).");
+            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] API key forwarded to gateway via CLI arg ({(ApiKey is not null ? "in-memory" : "file")}).");
+            _logger.LogInformation(
+                "API key forwarded to bundled gateway from {Source}.",
+                ApiKey is not null ? "in-memory" : "file");
         }
         else
         {
             lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] ⚠ No API key available to forward — gateway may get 401.");
-            _processLogs.AppendDebug("[gateway] No API key available to forward to bundled gateway.");
+            _logger.LogWarning("No API key available to forward to bundled gateway.");
         }
 
         // ── Gateway service token ────────────────────────────────────
@@ -412,8 +415,8 @@ public sealed class GatewayProcessManager : IDisposable
         {
             psi.EnvironmentVariables["InternalApi__GatewayToken"] = resolvedGatewayToken;
             psi.ArgumentList.Add($"--InternalApi:GatewayToken={resolvedGatewayToken}");
-            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded ({resolvedGatewayToken.Length} chars).");
-            _processLogs.AppendDebug("[gateway] Gateway token forwarded to bundled gateway.");
+            lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] Gateway token forwarded.");
+            _logger.LogInformation("Gateway token forwarded to bundled gateway.");
         }
 
         if (_processStartObserver is not null)
@@ -430,7 +433,7 @@ public sealed class GatewayProcessManager : IDisposable
             if (e.Data is not null)
             {
                 lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] {e.Data}");
-                _processLogs.AppendDebug($"[gateway] {e.Data}");
+                _logger.LogInformation("Gateway process stdout: {Line}", e.Data);
             }
         };
         _process.ErrorDataReceived += (_, e) =>
@@ -438,7 +441,7 @@ public sealed class GatewayProcessManager : IDisposable
             if (e.Data is not null)
             {
                 lock (_outputLock) _processOutput.Add($"[{DateTime.Now:HH:mm:ss}] [stderr] {e.Data}");
-                _processLogs.AppendException($"[gateway stderr] {e.Data}");
+                _logger.LogWarning("Gateway process stderr: {Line}", e.Data);
             }
         };
         _process.BeginOutputReadLine();

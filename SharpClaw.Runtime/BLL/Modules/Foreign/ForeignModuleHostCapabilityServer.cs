@@ -14,6 +14,7 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Tasks;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Contracts.Modules.Foreign;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Runtime.BLL.Modules.Foreign;
 
@@ -436,14 +437,30 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     {
         if (string.IsNullOrWhiteSpace(request.Message))
             throw new ArgumentException("Log message is required.", nameof(request));
+        if (Encoding.UTF8.GetByteCount(request.Message) > SharpClawLogBounds.SidecarTailBytes)
+        {
+            throw new ArgumentException(
+                $"Log message exceeds the {SharpClawLogBounds.SidecarTailBytes}-byte limit.",
+                nameof(request));
+        }
 
         var loggerFactory = services.GetService<ILoggerFactory>();
-        var logger = loggerFactory?.CreateLogger($"SharpClaw.Modules.Foreign.{_moduleId}");
-        logger?.Log(
-            ParseLogLevel(request.Level),
-            "Foreign module {ModuleId}: {Message}",
-            _moduleId,
-            request.Message);
+        var logger = loggerFactory?.CreateLogger("SharpClaw.ModuleHost");
+        var runtime = services.GetService<SharpClawLogRuntime>();
+        IDisposable? ownership = runtime is null
+            ? null
+            : SharpClawLogOwnership.Push(new SharpClawModuleLogContext(
+                _moduleId,
+                null,
+                SharpClawModuleHostKind.RuntimeSidecar,
+                runtime.BootId));
+        using (ownership)
+        {
+            logger?.Log(
+                ParseLogLevel(request.Level),
+                "Sidecar module log: {Message}",
+                request.Message);
+        }
 
         return new ForeignModuleCapabilityAck();
     }
@@ -1279,10 +1296,16 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
             throw new ArgumentException("Action key prefix is required.", nameof(actionKeyPrefix));
     }
 
-    private static LogLevel ParseLogLevel(string? level) =>
-        Enum.TryParse<LogLevel>(level, ignoreCase: true, out var parsed)
-            ? parsed
-            : LogLevel.Information;
+    private static LogLevel ParseLogLevel(string? level)
+    {
+        if (Enum.TryParse<LogLevel>(level, ignoreCase: true, out var parsed)
+            && parsed is not LogLevel.None)
+        {
+            return parsed;
+        }
+
+        throw new ArgumentException("Sidecar log level is invalid.", nameof(level));
+    }
 
     private static async Task<CapabilityHttpRequest> ReadRequestAsync(
         NetworkStream stream,

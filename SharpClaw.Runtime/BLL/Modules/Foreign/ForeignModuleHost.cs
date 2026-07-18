@@ -1,8 +1,10 @@
 using System.Diagnostics;
 using System.Net.WebSockets;
 using System.Text;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Runtime.BLL.Modules.Foreign;
 
@@ -19,10 +21,12 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
     private ServiceProvider _serviceProvider;
     private readonly ForeignModuleHostCapabilityServer? _capabilityServer;
     private readonly ForeignModuleProxy _moduleProxy;
-    private readonly StringBuilder _stdout = new();
-    private readonly StringBuilder _stderr = new();
+    private readonly BoundedOutputTail _stdout = new();
+    private readonly BoundedOutputTail _stderr = new();
     private readonly object _stdoutLock = new();
     private readonly object _stderrLock = new();
+    private readonly ILogger? _logger;
+    private readonly SharpClawModuleLogContext? _ownership;
     private readonly TaskCompletionSource<int> _exited =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
     private readonly TaskCompletionSource _drainTcs =
@@ -55,6 +59,15 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
         SourceDirectory = options.ModuleDirectory;
         _moduleProxy = new ForeignModuleProxy(manifest, client, () => ShutdownSidecarAsync(CancellationToken.None));
         Module = _moduleProxy;
+        _logger = options.HostServices?.GetService<ILoggerFactory>()?.CreateLogger("SharpClaw.ModuleHost");
+        var runtime = options.HostServices?.GetService<SharpClawLogRuntime>();
+        _ownership = runtime is null
+            ? null
+            : new SharpClawModuleLogContext(
+                manifest.Id,
+                TryResolveFileVersion(options.ExecutablePath),
+                SharpClawModuleHostKind.RuntimeSidecar,
+                runtime.BootId);
     }
 
     public ISharpClawCoreModule Module { get; }
@@ -296,12 +309,27 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
 
     private void AttachOutputReaders()
     {
-        _process.OutputDataReceived += (_, e) => CaptureLine(_stdout, _stdoutLock, e.Data);
-        _process.ErrorDataReceived += (_, e) => CaptureLine(_stderr, _stderrLock, e.Data);
+        _process.OutputDataReceived += (_, e) => CaptureLine(_stdout, _stdoutLock, e.Data, isError: false);
+        _process.ErrorDataReceived += (_, e) => CaptureLine(_stderr, _stderrLock, e.Data, isError: true);
         _process.Exited += (_, _) =>
         {
-            try { _exited.TrySetResult(_process.ExitCode); }
-            catch { _exited.TrySetResult(-1); }
+            var exitCode = -1;
+            try { exitCode = _process.ExitCode; }
+            catch { }
+
+            if (exitCode != 0 && _logger is not null)
+            {
+                using var ownership = _ownership is null
+                    ? null
+                    : SharpClawLogOwnership.Push(_ownership);
+                _logger.LogError(
+                    "Sidecar module exited with code {ExitCode}; stdout tail={StdoutTail}; stderr tail={StderrTail}",
+                    exitCode,
+                    SnapshotOutput().StandardOutput,
+                    SnapshotOutput().StandardError);
+            }
+
+            _exited.TrySetResult(exitCode);
         };
     }
 
@@ -514,12 +542,70 @@ internal sealed class ForeignModuleHost : IForeignModuleRuntimeHost
     private void ThrowStartupFailure(string message, Exception? innerException = null) =>
         throw new ForeignModuleStartupException(message, SnapshotOutput(), innerException);
 
-    private static void CaptureLine(StringBuilder sink, object syncRoot, string? line)
+    private void CaptureLine(
+        BoundedOutputTail sink,
+        object syncRoot,
+        string? line,
+        bool isError)
     {
         if (line is null)
             return;
 
+        var bounded = SharpClawLogBounds.TruncateUtf8(
+            line,
+            SharpClawLogBounds.SidecarTailBytes,
+            out _);
         lock (syncRoot)
-            sink.AppendLine(line);
+            sink.AppendLine(bounded);
+
+        if (_logger is null)
+            return;
+
+        using var ownership = _ownership is null
+            ? null
+            : SharpClawLogOwnership.Push(_ownership);
+        if (isError)
+        {
+            _logger.LogWarning(
+                "Sidecar module stderr: {Line}",
+                bounded);
+        }
+        else
+        {
+            _logger.LogInformation(
+                "Sidecar module stdout: {Line}",
+                bounded);
+        }
+    }
+
+    private static string? TryResolveFileVersion(string executablePath)
+    {
+        try
+        {
+            return FileVersionInfo.GetVersionInfo(executablePath).FileVersion;
+        }
+        catch
+        {
+            return null;
+        }
+    }
+
+    private sealed class BoundedOutputTail
+    {
+        private readonly StringBuilder _value = new();
+
+        public void AppendLine(string line)
+        {
+            _value.Append(line).AppendLine();
+            var bytes = Encoding.UTF8.GetBytes(_value.ToString());
+            if (bytes.Length <= SharpClawLogBounds.SidecarTailBytes)
+                return;
+
+            var start = bytes.Length - SharpClawLogBounds.SidecarTailBytes;
+            _value.Clear();
+            _value.Append(Encoding.UTF8.GetString(bytes, start, bytes.Length - start));
+        }
+
+        public override string ToString() => _value.ToString();
     }
 }

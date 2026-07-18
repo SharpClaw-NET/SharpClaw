@@ -793,9 +793,10 @@ The permission check is returning denied. Add a log line at the top of
 in your code. Check the `ModuleToolPermission` configuration for that tool.
 
 **Inline tool fires but produces no model output**
-`ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Add a
-`Debug.WriteLine` at the top of the method (category `SharpClaw.CLI`) and check
-the VS debug output.
+`ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Inject an
+`ILogger<T>` into the module service, log a structured diagnostic at the top of
+the method, and inspect the bounded module operational stream for that natural
+logger category.
 
 **Contract requirement not satisfied at startup**
 The module that exports the contract you require either isn't enabled or failed to

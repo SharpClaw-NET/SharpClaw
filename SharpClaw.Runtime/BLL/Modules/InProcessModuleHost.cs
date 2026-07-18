@@ -20,6 +20,7 @@ using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.ModuleHost.InProcess;
 using SharpClaw.Shared.Security;
+using SharpClaw.Shared.Logging;
 using SharpClaw.Core.Modules;
 using SharpClaw.Contracts.Modules.Foreign;
 
@@ -110,7 +111,11 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
                 $"Module class ToolPrefix '{module.ToolPrefix}' does not match manifest toolPrefix '{manifest.ToolPrefix}'.");
         }
 
-        var services = BuildServices(module, assembly, hostServices);
+        var services = BuildServices(
+            module,
+            assembly,
+            hostServices,
+            assembly.GetName().Version?.ToString());
         return new InProcessModuleHost(loadContext, module, services, canonicalModuleDirectory);
     }
 
@@ -187,13 +192,21 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
     private static ServiceProvider BuildServices(
         ISharpClawCoreModule module,
         Assembly moduleAssembly,
-        IServiceProvider hostServices)
+        IServiceProvider hostServices,
+        string? moduleVersion)
     {
         var services = new ServiceCollection();
 
         if (hostServices.GetService<ILoggerFactory>() is { } loggerFactory)
         {
-            services.AddSingleton(loggerFactory);
+            var runtime = hostServices.GetService<SharpClawLogRuntime>();
+            var context = new SharpClawModuleLogContext(
+                module.Id,
+                moduleVersion,
+                SharpClawModuleHostKind.RuntimeInProcess,
+                runtime?.BootId ?? Guid.Empty);
+            services.AddSingleton<ILoggerFactory>(
+                new SharpClawModuleLoggerFactory(loggerFactory, context));
             services.AddSingleton(typeof(ILogger<>), typeof(Logger<>));
         }
         else

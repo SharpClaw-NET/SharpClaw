@@ -1254,7 +1254,15 @@ public sealed class DurableSegmentStore : IAsyncDisposable
             record.Message,
             record.ExceptionType,
             record.CorrelationId,
-            record.Artifact));
+            record.Artifact,
+            record.ExceptionText,
+            record.MessageTemplate,
+            record.Category,
+            record.EventIdId,
+            record.EventIdName,
+            record.TraceId,
+            record.SpanId,
+            record.Properties));
         if (body.Length > _options.MaxRecordBytes)
         {
             throw new ArgumentException(
@@ -1390,7 +1398,15 @@ public sealed class DurableSegmentStore : IAsyncDisposable
                 body.Message,
                 body.ExceptionType,
                 body.CorrelationId,
-                body.Artifact),
+                body.Artifact,
+                body.ExceptionText,
+                body.MessageTemplate,
+                body.Category,
+                body.EventIdId,
+                body.EventIdName,
+                body.TraceId,
+                body.SpanId,
+                body.Properties),
             (flags & 4) != 0);
     }
 
@@ -2155,7 +2171,15 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         string Message,
         string? ExceptionType,
         string? CorrelationId,
-        DurableArtifactReference? Artifact);
+        DurableArtifactReference? Artifact,
+        string? ExceptionText = null,
+        string? MessageTemplate = null,
+        string? Category = null,
+        int? EventIdId = null,
+        string? EventIdName = null,
+        string? TraceId = null,
+        string? SpanId = null,
+        IReadOnlyDictionary<string, string>? Properties = null);
 
     private sealed record DecodedFrame(
         DurableRecord Record,
