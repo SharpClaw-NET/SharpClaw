@@ -33,14 +33,6 @@ public sealed record SharpClawLoggingOptions
     {
         ArgumentNullException.ThrowIfNull(configuration);
 
-        var oldSection = configuration.GetSection("Logging:Serilog");
-        if (oldSection.GetChildren().Any()
-            || configuration["Logging:Serilog"] is not null)
-        {
-            throw new InvalidOperationException(
-                "The 'Logging:Serilog' configuration section is no longer supported; replace it with 'Logging'.");
-        }
-
         var queueCapacity = ReadInt(configuration, "Logging:QueueCapacity", 4096);
         if (queueCapacity is < 16 or > 1_000_000)
             throw new InvalidOperationException("Logging:QueueCapacity must be between 16 and 1000000.");
@@ -55,27 +47,50 @@ public sealed record SharpClawLoggingOptions
                 "Logging:FlushIntervalMilliseconds must be between 10 and 60000.");
         }
 
+        var minimumLevel = ReadLevel(
+            configuration,
+            "Logging:MinimumLevel",
+            LogEventLevel.Information,
+            "Logging:Serilog:MinimumLevel");
+        if (!HasValue(configuration, "Logging:MinimumLevel")
+            && ReadOptionalBool(configuration, "Logging:Serilog:Enabled") is false)
+        {
+            minimumLevel = LogEventLevel.Fatal;
+        }
+
         return new SharpClawLoggingOptions
         {
-            MinimumLevel = ReadLevel(configuration, "Logging:MinimumLevel", LogEventLevel.Information),
+            MinimumLevel = minimumLevel,
             MicrosoftMinimumLevel = ReadLevel(
                 configuration,
                 "Logging:Overrides:Microsoft",
-                LogEventLevel.Warning),
+                LogEventLevel.Warning,
+                "Logging:Serilog:MicrosoftMinimumLevel"),
             AspNetCoreMinimumLevel = ReadLevel(
                 configuration,
                 "Logging:Overrides:Microsoft.AspNetCore",
-                LogEventLevel.Warning),
+                LogEventLevel.Warning,
+                "Logging:Serilog:AspNetCoreMinimumLevel"),
             EntityFrameworkCoreMinimumLevel = ReadLevel(
                 configuration,
                 "Logging:Overrides:Microsoft.EntityFrameworkCore",
-                LogEventLevel.Warning),
+                LogEventLevel.Warning,
+                "Logging:Serilog:EntityFrameworkCoreMinimumLevel"),
             UnoMinimumLevel = ReadLevel(
                 configuration,
                 "Logging:Overrides:Uno",
-                LogEventLevel.Warning),
-            ConsoleEnabled = ReadBool(configuration, "Logging:ConsoleEnabled", false),
-            RequestLoggingEnabled = ReadBool(configuration, "Logging:RequestLoggingEnabled", true),
+                LogEventLevel.Warning,
+                "Logging:Serilog:UnoMinimumLevel"),
+            ConsoleEnabled = ReadBool(
+                configuration,
+                "Logging:ConsoleEnabled",
+                false,
+                "Logging:Serilog:ConsoleEnabled"),
+            RequestLoggingEnabled = ReadBool(
+                configuration,
+                "Logging:RequestLoggingEnabled",
+                true,
+                "Logging:Serilog:RequestLoggingEnabled"),
             QueueCapacity = queueCapacity,
             FlushInterval = TimeSpan.FromMilliseconds(flushMilliseconds),
         };
@@ -84,29 +99,55 @@ public sealed record SharpClawLoggingOptions
     private static LogEventLevel ReadLevel(
         IConfiguration configuration,
         string key,
-        LogEventLevel fallback)
+        LogEventLevel fallback,
+        string? legacyKey = null)
     {
-        var raw = configuration[key];
-        if (string.IsNullOrWhiteSpace(raw))
-            return fallback;
-        if (Enum.TryParse<LogEventLevel>(raw, ignoreCase: true, out var value))
-            return value;
-        throw new InvalidOperationException(
-            $"Configuration value '{key}' must be a Serilog level such as Information, Warning, Error, or Fatal.");
+        var current = configuration[key];
+        if (HasValue(configuration, key))
+        {
+            if (Enum.TryParse<LogEventLevel>(current, ignoreCase: true, out var value))
+                return value;
+            throw new InvalidOperationException(
+                $"Configuration value '{key}' must be a Serilog level such as Information, Warning, Error, or Fatal.");
+        }
+
+        return legacyKey is not null
+               && Enum.TryParse<LogEventLevel>(
+                   configuration[legacyKey],
+                   ignoreCase: true,
+                   out var legacyValue)
+            ? legacyValue
+            : fallback;
     }
 
     private static bool ReadBool(
         IConfiguration configuration,
         string key,
-        bool fallback)
+        bool fallback,
+        string? legacyKey = null)
+    {
+        var current = configuration[key];
+        if (HasValue(configuration, key))
+        {
+            if (bool.TryParse(current, out var value))
+                return value;
+            throw new InvalidOperationException($"Configuration value '{key}' must be true or false.");
+        }
+
+        return legacyKey is not null
+               && bool.TryParse(configuration[legacyKey], out var legacyValue)
+            ? legacyValue
+            : fallback;
+    }
+
+    private static bool? ReadOptionalBool(IConfiguration configuration, string key)
     {
         var raw = configuration[key];
-        if (string.IsNullOrWhiteSpace(raw))
-            return fallback;
-        if (bool.TryParse(raw, out var value))
-            return value;
-        throw new InvalidOperationException($"Configuration value '{key}' must be true or false.");
+        return bool.TryParse(raw, out var value) ? value : null;
     }
+
+    private static bool HasValue(IConfiguration configuration, string key) =>
+        !string.IsNullOrWhiteSpace(configuration[key]);
 
     private static int ReadInt(
         IConfiguration configuration,

@@ -10,7 +10,14 @@ An in-process Runtime module receives a host-owned `SharpClawModuleLoggerFactory
 
 ## Configuration
 
-The only logging configuration section is `Logging`. The old `Logging:Serilog` section is rejected at startup with a replacement message instead of being read as an alias. There is no provider selector, `Logging:Enabled` switch, or file-enabled fallback. To retain only terminal events, set `Logging:MinimumLevel` to `Fatal`.
+The primary logging configuration section is `Logging`. Existing
+`Logging:Serilog` settings are translated in memory when the equivalent new key
+is absent, so an existing private environment file does not prevent startup.
+New `Logging` keys always take precedence. Malformed legacy values and obsolete
+keys such as `FileEnabled` are ignored. Legacy `Enabled=false` maps to a `Fatal`
+minimum level because the durable target remains the single operational
+persistence path. There is no provider selector. To retain only terminal
+events, set `Logging:MinimumLevel` to `Fatal`.
 
 The environment form is shown below. The queue is bounded, the flush interval is finite, and console rendering is disabled by default in service deployments.
 

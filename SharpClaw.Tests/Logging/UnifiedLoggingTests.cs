@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Serilog.Extensions.Logging;
 using SharpClaw.Shared.DurableStorage;
@@ -8,6 +9,66 @@ namespace SharpClaw.Tests.Logging;
 [TestFixture]
 public sealed class UnifiedLoggingTests
 {
+    [Test]
+    public void LegacyConfigurationIsTranslatedWithoutStartupFailure()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Logging:Serilog:Enabled"] = "false",
+                ["Logging:Serilog:ConsoleEnabled"] = "true",
+                ["Logging:Serilog:RequestLoggingEnabled"] = "false",
+                ["Logging:Serilog:MicrosoftMinimumLevel"] = "Error",
+                ["Logging:Serilog:FileEnabled"] = "true",
+            })
+            .Build();
+
+        var options = SharpClawLoggingOptions.FromConfiguration(configuration);
+
+        options.MinimumLevel.Should().Be(Serilog.Events.LogEventLevel.Fatal);
+        options.ConsoleEnabled.Should().BeTrue();
+        options.RequestLoggingEnabled.Should().BeFalse();
+        options.MicrosoftMinimumLevel.Should().Be(Serilog.Events.LogEventLevel.Error);
+    }
+
+    [Test]
+    public void NewConfigurationTakesPrecedenceOverLegacyValues()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Logging:MinimumLevel"] = "Debug",
+                ["Logging:ConsoleEnabled"] = "false",
+                ["Logging:Serilog:Enabled"] = "false",
+                ["Logging:Serilog:MinimumLevel"] = "Fatal",
+                ["Logging:Serilog:ConsoleEnabled"] = "true",
+            })
+            .Build();
+
+        var options = SharpClawLoggingOptions.FromConfiguration(configuration);
+
+        options.MinimumLevel.Should().Be(Serilog.Events.LogEventLevel.Debug);
+        options.ConsoleEnabled.Should().BeFalse();
+    }
+
+    [Test]
+    public void MalformedLegacyConfigurationIsIgnored()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Logging:Serilog:Enabled"] = "not-a-boolean",
+                ["Logging:Serilog:ConsoleEnabled"] = "not-a-boolean",
+                ["Logging:Serilog:MinimumLevel"] = "not-a-level",
+            })
+            .Build();
+
+        var options = SharpClawLoggingOptions.FromConfiguration(configuration);
+
+        options.MinimumLevel.Should().Be(Serilog.Events.LogEventLevel.Information);
+        options.ConsoleEnabled.Should().BeFalse();
+    }
+
     [TestCase(false)]
     [TestCase(true)]
     public async Task OneLoggerEventUsesExactlyOneBootStreamRegardlessOfConsole(bool consoleEnabled)
