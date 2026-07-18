@@ -1,4 +1,5 @@
 using SharpClaw.Contracts.DTOs.Diagnostics;
+using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Shared.Logging;
 
@@ -16,6 +17,11 @@ public sealed class SharpClawLogReader(
     public string AppName => runtime.AppName;
     public Guid BootId => runtime.BootId;
 
+    public Task<DurableOperationalStreamCatalog> EnumerateOperationalStreamsAsync(
+        DurableOperationalStreamEnumerationOptions options,
+        CancellationToken cancellationToken = default) =>
+        runtime.EnumerateOperationalStreamsAsync(options, cancellationToken);
+
     public ValueTask<DurableLogPageResponse> ReadProcessLogsAsync(
         string? cursor,
         DurableLogQuery query,
@@ -23,6 +29,19 @@ public sealed class SharpClawLogReader(
         diagnostics.ReadProcessLogsAsync(
             runtime.AppName,
             runtime.BootId,
+            cursor,
+            query,
+            cancellationToken);
+
+    public ValueTask<DurableLogPageResponse> ReadProcessLogsAsync(
+        string appName,
+        Guid bootId,
+        string? cursor,
+        DurableLogQuery query,
+        CancellationToken cancellationToken = default) =>
+        diagnostics.ReadProcessLogsAsync(
+            appName,
+            bootId,
             cursor,
             query,
             cancellationToken);

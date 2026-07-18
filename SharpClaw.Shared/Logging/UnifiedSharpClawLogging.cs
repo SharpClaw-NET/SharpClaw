@@ -1029,6 +1029,11 @@ public sealed class SharpClawLogRuntime : IAsyncDisposable, IDisposable
     public SharpClawLogDispatcher Dispatcher { get; }
     public Serilog.ILogger SerilogLogger => _serilogLogger;
 
+    public Task<DurableOperationalStreamCatalog> EnumerateOperationalStreamsAsync(
+        DurableOperationalStreamEnumerationOptions options,
+        CancellationToken cancellationToken = default) =>
+        _records.EnumerateOperationalStreamsAsync(options, cancellationToken);
+
     public static SharpClawLogRuntime Create(
         string appName,
         DurableSegmentStore records,

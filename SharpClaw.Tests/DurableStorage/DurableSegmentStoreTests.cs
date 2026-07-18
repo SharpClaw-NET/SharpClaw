@@ -280,6 +280,247 @@ public sealed class DurableSegmentStoreTests
     }
 
     [Test]
+    public async Task OperationalCatalogEnumeratesTypedBootsAcrossRestartWithoutReadingBodies()
+    {
+        var root = CreateRoot();
+        var processBoot = Guid.Empty;
+        var moduleBoot = Guid.NewGuid();
+        var processKey = DurableStreamKey.Process("Runtime/Host", processBoot);
+        var moduleKey = DurableStreamKey.Module("Module/One", moduleBoot);
+        try
+        {
+            await using (var store = CreateStore(root))
+            {
+                await store.AppendAsync(processKey, Record("process"));
+                await store.SealAsync(processKey);
+                await store.AppendAsync(moduleKey, Record("module"));
+
+                var processDirectory = new DurableStreamPathEncoder(root)
+                    .GetStreamDirectory(processKey);
+                var processSegment = Directory.GetFiles(
+                        processDirectory,
+                        "*.scseg")
+                    .Should().ContainSingle().Subject;
+                using (var corrupt = new FileStream(
+                           processSegment,
+                           FileMode.Open,
+                           FileAccess.ReadWrite,
+                           FileShare.ReadWrite))
+                using (var reader = new BinaryReader(
+                           corrupt,
+                           System.Text.Encoding.UTF8,
+                           leaveOpen: true))
+                {
+                    corrupt.Position = 40;
+                    var frameLength = reader.ReadInt32();
+                    frameLength.Should().BeGreaterThan(0);
+                    var payloadPosition = corrupt.Position;
+                    var payload = corrupt.ReadByte();
+                    payload.Should().BeGreaterThanOrEqualTo(0);
+                    corrupt.Position = payloadPosition;
+                    corrupt.WriteByte((byte)(payload ^ 0xFF));
+                    corrupt.Flush(flushToDisk: true);
+                }
+
+                var catalog = await store.EnumerateOperationalStreamsAsync(
+                    new DurableOperationalStreamEnumerationOptions
+                    {
+                        MaxEntries = 10,
+                        MaxScanBytes = 1024 * 1024,
+                        MaxDuration = TimeSpan.FromSeconds(2),
+                    });
+
+                catalog.IdentityGaps.Should().BeEmpty();
+                catalog.Streams.Should().HaveCount(2);
+                var process = catalog.Streams.Single(summary =>
+                    summary.Stream.Kind == DurableStreamKind.ProcessLog);
+                process.AppName.Should().Be("runtime/host");
+                process.ModuleId.Should().BeNull();
+                process.BootId.Should().Be(Guid.Empty);
+                process.HasActiveSegment.Should().BeFalse();
+                process.HasSealedSegments.Should().BeTrue();
+                process.RecordCount.Should().Be(1);
+                process.FirstAvailableSequence.Should().Be(1);
+
+                var module = catalog.Streams.Single(summary =>
+                    summary.Stream.Kind == DurableStreamKind.ModuleLog);
+                module.AppName.Should().BeNull();
+                module.ModuleId.Should().Be("module/one");
+                module.BootId.Should().Be(moduleBoot);
+                module.HasActiveSegment.Should().BeTrue();
+                module.HasSealedSegments.Should().BeFalse();
+                module.RecordCount.Should().Be(1);
+            }
+
+            await using var restarted = CreateStore(root);
+            var afterRestart = await restarted.EnumerateOperationalStreamsAsync(
+                new DurableOperationalStreamEnumerationOptions
+                {
+                    MaxEntries = 10,
+                    MaxScanBytes = 1024 * 1024,
+                    MaxDuration = TimeSpan.FromSeconds(2),
+                });
+            afterRestart.IdentityGaps.Should().BeEmpty();
+            afterRestart.Streams.Select(summary => summary.Stream)
+                .Should().Contain(processKey);
+            afterRestart.Streams.Select(summary => summary.Stream)
+                .Should().Contain(moduleKey);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
+    public async Task OperationalCatalogSkipsMalformedMetadataAndKeepsValidBoots()
+    {
+        var root = CreateRoot();
+        var invalidKey = DurableStreamKey.Process("invalid", Guid.NewGuid());
+        var validKey = DurableStreamKey.Process("valid", Guid.NewGuid());
+        try
+        {
+            await using (var store = CreateStore(root))
+            {
+                await store.AppendAsync(invalidKey, Record("invalid"));
+                await store.SealAsync(invalidKey);
+                await store.AppendAsync(validKey, Record("valid"));
+                await store.SealAsync(validKey);
+            }
+
+            var invalidDirectory = new DurableStreamPathEncoder(root)
+                .GetStreamDirectory(invalidKey);
+            File.WriteAllText(
+                Path.Combine(invalidDirectory, ".stream.manifest"),
+                "{");
+
+            await using var reader = CreateStore(root);
+            var catalog = await reader.EnumerateOperationalStreamsAsync(
+                new DurableOperationalStreamEnumerationOptions
+                {
+                    MaxEntries = 10,
+                    MaxScanBytes = 1024 * 1024,
+                    MaxDuration = TimeSpan.FromSeconds(2),
+                });
+
+            catalog.Streams.Select(summary => summary.Stream)
+                .Should().Contain(validKey);
+            catalog.Streams.Select(summary => summary.Stream)
+                .Should().NotContain(invalidKey);
+            catalog.IdentityGaps.Should().ContainSingle(gap =>
+                gap.Reason == "InvalidSegmentMetadata");
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
+    public async Task OperationalCatalogReportsLegacyIdentityGapInsteadOfScanningBodies()
+    {
+        var root = CreateRoot();
+        var key = DurableStreamKey.Process("legacy", Guid.NewGuid());
+        try
+        {
+            await using (var store = CreateStore(root))
+            {
+                await store.AppendAsync(
+                    key,
+                    Record("legacy body"));
+                await store.SealAsync(key);
+            }
+
+            var directory = new DurableStreamPathEncoder(root)
+                .GetStreamDirectory(key);
+            File.Delete(Path.Combine(directory, ".stream.identity"));
+
+            await using var reader = CreateStore(root);
+            var catalog = await reader.EnumerateOperationalStreamsAsync(
+                new DurableOperationalStreamEnumerationOptions
+                {
+                    MaxEntries = 10,
+                    MaxScanBytes = 1024 * 1024,
+                    MaxDuration = TimeSpan.FromSeconds(2),
+                });
+
+            catalog.Streams.Should().BeEmpty();
+            catalog.IdentityGaps.Should().ContainSingle();
+            catalog.IdentityGaps[0].Kind.Should().Be(DurableStreamKind.ProcessLog);
+            catalog.IdentityGaps[0].Reason
+                .Should().Be("IdentityUnavailableWithoutBodyScan");
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
+    public async Task OperationalCatalogBoundsSummariesAndMetadataScan()
+    {
+        var root = CreateRoot();
+        try
+        {
+            await using (var store = CreateStore(root))
+            {
+                foreach (var app in new[] { "first", "second" })
+                {
+                    var key = DurableStreamKey.Process(app, Guid.NewGuid());
+                    await store.AppendAsync(key, Record(app));
+                    await store.SealAsync(key);
+                }
+            }
+
+            await using var reader = CreateStore(root);
+            var entryBound = await reader.EnumerateOperationalStreamsAsync(
+                new DurableOperationalStreamEnumerationOptions
+                {
+                    MaxEntries = 1,
+                    MaxScanBytes = 1024 * 1024,
+                    MaxDuration = TimeSpan.FromSeconds(2),
+                });
+            (entryBound.Streams.Count + entryBound.IdentityGaps.Count)
+                .Should().BeLessThanOrEqualTo(1);
+            entryBound.HasMore.Should().BeTrue();
+
+            var scanBound = await reader.EnumerateOperationalStreamsAsync(
+                new DurableOperationalStreamEnumerationOptions
+                {
+                    MaxEntries = 10,
+                    MaxScanBytes = 1,
+                    MaxDuration = TimeSpan.FromSeconds(2),
+                });
+            scanBound.Streams.Should().BeEmpty();
+            scanBound.HasMore.Should().BeTrue();
+            scanBound.ScannedBytes.Should().BeLessThanOrEqualTo(1);
+        }
+        finally
+        {
+            DeleteRoot(root);
+        }
+    }
+
+    [Test]
+    public void OperationalKeyParserMatchesWritableKeySemantics()
+    {
+        var bootId = Guid.Empty;
+        var key = DurableStreamKey.Module("Module/With/Slashes", bootId);
+
+        DurableStreamKey.TryParseOperational(
+                key.CanonicalValue,
+                out var parsed,
+                out var appName,
+                out var moduleId,
+                out var parsedBootId)
+            .Should().BeTrue();
+        parsed.Should().Be(key);
+        appName.Should().BeNull();
+        moduleId.Should().Be("module/with/slashes");
+        parsedBootId.Should().Be(Guid.Empty);
+    }
+
+    [Test]
     public async Task Retention_DeletesOnlyASealedPrefixAndPersistsExpiryWatermarks()
     {
         var root = CreateRoot();
@@ -401,6 +642,13 @@ public sealed class DurableSegmentStoreTests
         Directory.CreateDirectory(root);
         _roots.Add(root);
         return root;
+    }
+
+    private void DeleteRoot(string root)
+    {
+        if (Directory.Exists(root))
+            Directory.Delete(root, recursive: true);
+        _roots.Remove(root);
     }
 
     private static DurableSegmentStore CreateStore(

@@ -45,6 +45,68 @@ public readonly record struct DurableStreamKey
             DurableStreamKind.ModuleLog,
             $"module/{NormalizeLogicalName(moduleId)}/{bootId:D}");
 
+    public static bool TryParseOperational(
+        string? canonicalValue,
+        out DurableStreamKey key,
+        out string? appName,
+        out string? moduleId,
+        out Guid bootId)
+    {
+        key = default;
+        appName = null;
+        moduleId = null;
+        bootId = Guid.Empty;
+        if (string.IsNullOrWhiteSpace(canonicalValue))
+            return false;
+
+        var firstSeparator = canonicalValue.IndexOf('/');
+        var lastSeparator = canonicalValue.LastIndexOf('/');
+        if (firstSeparator <= 0
+            || lastSeparator <= firstSeparator + 1
+            || lastSeparator == canonicalValue.Length - 1
+            || !Guid.TryParseExact(
+                canonicalValue[(lastSeparator + 1)..],
+                "D",
+                out bootId))
+        {
+            bootId = Guid.Empty;
+            return false;
+        }
+
+        var kind = canonicalValue[..firstSeparator];
+        var logicalName = canonicalValue[(firstSeparator + 1)..lastSeparator];
+        try
+        {
+            if (kind.Equals("process", StringComparison.Ordinal))
+            {
+                key = Process(logicalName, bootId);
+                appName = logicalName;
+            }
+            else if (kind.Equals("module", StringComparison.Ordinal))
+            {
+                key = Module(logicalName, bootId);
+                moduleId = logicalName;
+            }
+            else
+            {
+                return false;
+            }
+
+            return string.Equals(
+                key.CanonicalValue,
+                canonicalValue,
+                StringComparison.Ordinal);
+        }
+        catch (ArgumentException)
+        {
+            key = default;
+            appName = null;
+            moduleId = null;
+            bootId = Guid.Empty;
+            return false;
+        }
+    }
+
     private static string NormalizeLogicalName(string value)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value);
@@ -131,6 +193,44 @@ public sealed record DurableStreamSummary(
     long EncodedBytes,
     long FirstAvailableSequence,
     long ExpiredRecordCount);
+
+public sealed record DurableOperationalStreamSummary(
+    DurableStreamKey Stream,
+    string? AppName,
+    string? ModuleId,
+    Guid BootId,
+    bool HasActiveSegment,
+    bool HasSealedSegments,
+    long RecordCount,
+    long EncodedBytes,
+    long FirstSequence,
+    long? LastSequence,
+    long FirstAvailableSequence,
+    long ExpiredRecordCount,
+    DateTimeOffset? LastTimestamp);
+
+public sealed record DurableOperationalStreamIdentityGap(
+    DurableStreamKind Kind,
+    string StreamHash,
+    string Reason);
+
+public sealed class DurableOperationalStreamEnumerationOptions
+{
+    public const int HardMaximumEntries = 1024;
+    public const long HardMaximumScanBytes = 64L * 1024 * 1024;
+    public static readonly TimeSpan HardMaximumDuration = TimeSpan.FromSeconds(30);
+
+    public int MaxEntries { get; init; } = 100;
+    public long MaxScanBytes { get; init; } = 4L * 1024 * 1024;
+    public TimeSpan MaxDuration { get; init; } = TimeSpan.FromSeconds(2);
+}
+
+public sealed record DurableOperationalStreamCatalog(
+    IReadOnlyList<DurableOperationalStreamSummary> Streams,
+    IReadOnlyList<DurableOperationalStreamIdentityGap> IdentityGaps,
+    bool HasMore,
+    int ScannedDirectories,
+    long ScannedBytes);
 
 public sealed class DurableRetentionOptions
 {
