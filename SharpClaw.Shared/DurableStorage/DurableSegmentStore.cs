@@ -54,6 +54,14 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         }
     }
 
+    public int MaxRecordBytes => _options.MaxRecordBytes;
+
+    public static int MeasureEncodedRecordBody(DurableRecordWrite record)
+    {
+        ArgumentNullException.ThrowIfNull(record);
+        return SerializeRecordBody(record).Length;
+    }
+
     public async ValueTask<DurableAppendReceipt> AppendAsync(
         DurableStreamKey key,
         DurableRecordWrite record,
@@ -1248,21 +1256,7 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         long sequence,
         DurableRecordWrite record)
     {
-        var body = JsonSerializer.SerializeToUtf8Bytes(new RecordBody(
-            record.Level,
-            record.EventName,
-            record.Message,
-            record.ExceptionType,
-            record.CorrelationId,
-            record.Artifact,
-            record.ExceptionText,
-            record.MessageTemplate,
-            record.Category,
-            record.EventIdId,
-            record.EventIdName,
-            record.TraceId,
-            record.SpanId,
-            record.Properties));
+        var body = SerializeRecordBody(record);
         if (body.Length > _options.MaxRecordBytes)
         {
             throw new ArgumentException(
@@ -1320,6 +1314,23 @@ public sealed class DurableSegmentStore : IAsyncDisposable
         writer.Flush();
         return stream.ToArray();
     }
+
+    private static byte[] SerializeRecordBody(DurableRecordWrite record) =>
+        JsonSerializer.SerializeToUtf8Bytes(new RecordBody(
+            record.Level,
+            record.EventName,
+            record.Message,
+            record.ExceptionType,
+            record.CorrelationId,
+            record.Artifact,
+            record.ExceptionText,
+            record.MessageTemplate,
+            record.Category,
+            record.EventIdId,
+            record.EventIdName,
+            record.TraceId,
+            record.SpanId,
+            record.Properties));
 
     private DurableRecord DecodeFrame(Guid segmentId, byte[] frame) =>
         DecodeFrameEnvelope(segmentId, frame).Record;

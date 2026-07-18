@@ -239,7 +239,17 @@ public static class SharpClawLogBounds
     public const int MessageBytes = 64 * 1024;
     public const int TemplateBytes = 8 * 1024;
     public const int ExceptionBytes = 96 * 1024;
+    public const int LevelBytes = 32;
+    public const int EventNameBytes = 512;
+    public const int ExceptionTypeBytes = 512;
+    public const int CorrelationIdBytes = 256;
+    public const int EventIdNameBytes = 256;
+    public const int CategoryBytes = 512;
+    public const int TraceIdBytes = 256;
+    public const int SpanIdBytes = 256;
     public const int PropertyCount = 32;
+    public const int TrustedPropertyCount = 4;
+    public const int UserPropertyCount = PropertyCount - TrustedPropertyCount;
     public const int PropertyNameBytes = 128;
     public const int PropertyValueBytes = 4 * 1024;
     public const int TotalRecordBytes = 192 * 1024;
@@ -318,9 +328,21 @@ internal static class SharpClawLogRedactor
 
 internal static class SharpClawLogNormalizer
 {
-    public static DurableRecordWrite Normalize(LogEvent logEvent)
+    private static readonly string[] TrustedPropertyNames =
+    [
+        "SharpClaw.ModuleId",
+        "SharpClaw.ModuleVersion",
+        "SharpClaw.ModuleHostKind",
+        "SharpClaw.ModuleBootId",
+    ];
+
+    public static DurableRecordWrite Normalize(
+        LogEvent logEvent,
+        int maxRecordBytes)
     {
         ArgumentNullException.ThrowIfNull(logEvent);
+        if (maxRecordBytes < 1024)
+            throw new ArgumentOutOfRangeException(nameof(maxRecordBytes));
 
         var message = SharpClawLogRedactor.Redact(logEvent.RenderMessage());
         var normalizedMessage = SharpClawLogBounds.TruncateUtf8(
@@ -340,24 +362,51 @@ internal static class SharpClawLogNormalizer
             SharpClawLogRedactor.Redact(logEvent.MessageTemplate.Text),
             SharpClawLogBounds.TemplateBytes,
             out var originalTemplateBytes);
-        var category = GetString(logEvent, "SourceContext");
+        var category = Bound(
+            GetString(logEvent, "SourceContext"),
+            SharpClawLogBounds.CategoryBytes);
         var eventId = GetEventId(logEvent);
-        var eventName = GetString(logEvent, "EventName") ?? eventId.Name ?? "Log";
-        var eventIdName = eventId.Name;
+        var eventName = Bound(
+            GetString(logEvent, "EventName") ?? eventId.Name ?? "Log",
+            SharpClawLogBounds.EventNameBytes) ?? "Log";
+        var eventIdName = Bound(
+            eventId.Name,
+            SharpClawLogBounds.EventIdNameBytes);
         var eventIdId = eventId.Id;
-        var correlationId = GetString(logEvent, "CorrelationId")
-            ?? GetString(logEvent, "RequestId");
-        var traceId = GetString(logEvent, "TraceId");
-        var spanId = GetString(logEvent, "SpanId");
+        var correlationId = Bound(
+            GetString(logEvent, "CorrelationId")
+                ?? GetString(logEvent, "RequestId"),
+            SharpClawLogBounds.CorrelationIdBytes);
+        var traceId = Bound(
+            GetString(logEvent, "TraceId"),
+            SharpClawLogBounds.TraceIdBytes);
+        var spanId = Bound(
+            GetString(logEvent, "SpanId"),
+            SharpClawLogBounds.SpanIdBytes);
+        var exceptionType = Bound(
+            logEvent.Exception?.GetType().FullName,
+            SharpClawLogBounds.ExceptionTypeBytes);
         var properties = CollectProperties(logEvent);
         var ownership = SharpClawLogOwnership.Current;
 
         if (ownership is not null)
         {
-            AddProperty(properties, "SharpClaw.ModuleId", ownership.ModuleId);
-            AddProperty(properties, "SharpClaw.ModuleVersion", ownership.ModuleVersion ?? "unknown");
-            AddProperty(properties, "SharpClaw.ModuleHostKind", ownership.HostKind.ToString());
-            AddProperty(properties, "SharpClaw.ModuleBootId", ownership.BootId.ToString("D"));
+            AddProperty(properties, "SharpClaw.ModuleId", ownership.ModuleId, trusted: true);
+            AddProperty(
+                properties,
+                "SharpClaw.ModuleVersion",
+                ownership.ModuleVersion ?? "unknown",
+                trusted: true);
+            AddProperty(
+                properties,
+                "SharpClaw.ModuleHostKind",
+                ownership.HostKind.ToString(),
+                trusted: true);
+            AddProperty(
+                properties,
+                "SharpClaw.ModuleBootId",
+                ownership.BootId.ToString("D"),
+                trusted: true);
         }
 
         if (originalMessageBytes > SharpClawLogBounds.MessageBytes)
@@ -369,20 +418,15 @@ internal static class SharpClawLogNormalizer
         if (logEvent.Exception is not null)
             AddProperty(properties, "SharpClaw.ExceptionPresent", "true");
 
-        FitTotal(
-            ref normalizedMessage,
-            ref exceptionText,
-            ref template,
-            ref properties,
-            category);
-
-        return new DurableRecordWrite(
+        var record = new DurableRecordWrite(
             Guid.NewGuid(),
             logEvent.Timestamp,
-            NormalizeLevel(logEvent.Level),
+            Bound(
+                NormalizeLevel(logEvent.Level),
+                SharpClawLogBounds.LevelBytes) ?? "I",
             eventName,
             normalizedMessage,
-            logEvent.Exception?.GetType().FullName,
+            exceptionType,
             correlationId,
             ExceptionText: exceptionText,
             MessageTemplate: template,
@@ -392,6 +436,8 @@ internal static class SharpClawLogNormalizer
             TraceId: traceId,
             SpanId: spanId,
             Properties: properties);
+
+        return FitEncodedBody(record, maxRecordBytes);
     }
 
     private static Dictionary<string, string> CollectProperties(LogEvent logEvent)
@@ -401,6 +447,7 @@ internal static class SharpClawLogNormalizer
         {
             if (name is "SourceContext" or "EventId" or "EventName" or "CorrelationId"
                 or "RequestId" or "TraceId" or "SpanId"
+                || IsTrustedPropertyName(name)
                 || SharpClawLogRedactor.IsSecretPropertyName(name))
             {
                 continue;
@@ -415,81 +462,223 @@ internal static class SharpClawLogNormalizer
                 SharpClawLogBounds.PropertyValueBytes,
                 out _);
             AddProperty(result, boundedName, boundedValue);
-            if (result.Count >= SharpClawLogBounds.PropertyCount)
+            if (result.Count >= SharpClawLogBounds.UserPropertyCount)
                 break;
         }
 
         return result;
     }
 
-    private static void FitTotal(
-        ref string message,
-        ref string? exceptionText,
-        ref string template,
-        ref Dictionary<string, string> properties,
-        string? category)
+    private static DurableRecordWrite FitEncodedBody(
+        DurableRecordWrite record,
+        int maxRecordBytes)
     {
-        while (TotalBytes(message, exceptionText, template, properties, category)
-               > SharpClawLogBounds.TotalRecordBytes
-               && properties.Count > 0)
+        var properties = new Dictionary<string, string>(
+            record.Properties
+                ?? new Dictionary<string, string>(StringComparer.Ordinal),
+            StringComparer.Ordinal);
+        record = record with { Properties = properties };
+
+        while (DurableSegmentStore.MeasureEncodedRecordBody(record) > maxRecordBytes
+               && RemoveLastUserProperty(properties))
         {
-            properties.Remove(properties.Keys.Last());
         }
 
-        if (TotalBytes(message, exceptionText, template, properties, category)
-            <= SharpClawLogBounds.TotalRecordBytes)
+        if (DurableSegmentStore.MeasureEncodedRecordBody(record) <= maxRecordBytes)
+            return record;
+
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.Message,
+            static (current, value) => current with { Message = value ?? string.Empty },
+            keepNonNull: true);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.ExceptionText,
+            static (current, value) => current with { ExceptionText = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.MessageTemplate,
+            static (current, value) => current with { MessageTemplate = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.Category,
+            static (current, value) => current with { Category = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.CorrelationId,
+            static (current, value) => current with { CorrelationId = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.EventIdName,
+            static (current, value) => current with { EventIdName = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.TraceId,
+            static (current, value) => current with { TraceId = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.SpanId,
+            static (current, value) => current with { SpanId = value },
+            keepNonNull: false);
+        record = ShrinkField(
+            record,
+            maxRecordBytes,
+            static current => current.EventName,
+            static (current, value) => current with { EventName = value ?? "Log" },
+            keepNonNull: true);
+
+        foreach (var propertyName in TrustedPropertyNames)
         {
-            return;
+            record = ShrinkTrustedProperty(
+                record,
+                propertyName,
+                maxRecordBytes);
         }
 
-        var fixedBytes = Encoding.UTF8.GetByteCount(template)
-            + Encoding.UTF8.GetByteCount(category ?? string.Empty)
-            + properties.Sum(pair => Encoding.UTF8.GetByteCount(pair.Key) + Encoding.UTF8.GetByteCount(pair.Value));
-        var exceptionBudget = Math.Max(
-            0,
-            SharpClawLogBounds.TotalRecordBytes
-                - fixedBytes
-                - Encoding.UTF8.GetByteCount(message));
-        if (exceptionText is not null)
-            exceptionText = SharpClawLogBounds.TruncateUtf8(exceptionText, exceptionBudget, out _);
-
-        if (TotalBytes(message, exceptionText, template, properties, category)
-            > SharpClawLogBounds.TotalRecordBytes)
+        if (DurableSegmentStore.MeasureEncodedRecordBody(record) > maxRecordBytes)
         {
-            var messageBudget = Math.Max(
-                0,
-                SharpClawLogBounds.TotalRecordBytes
-                    - fixedBytes
-                    - Encoding.UTF8.GetByteCount(exceptionText ?? string.Empty));
-            message = SharpClawLogBounds.TruncateUtf8(message, messageBudget, out _);
+            record = record with
+            {
+                Level = "I",
+                EventName = "Log",
+                Message = string.Empty,
+                ExceptionType = null,
+                CorrelationId = null,
+                ExceptionText = null,
+                MessageTemplate = string.Empty,
+                Category = null,
+                EventIdName = null,
+                TraceId = null,
+                SpanId = null,
+            };
         }
+
+        return record;
     }
 
-    private static int TotalBytes(
-        string message,
-        string? exceptionText,
-        string template,
-        Dictionary<string, string> properties,
-        string? category) =>
-        Encoding.UTF8.GetByteCount(message)
-        + Encoding.UTF8.GetByteCount(exceptionText ?? string.Empty)
-        + Encoding.UTF8.GetByteCount(template)
-        + Encoding.UTF8.GetByteCount(category ?? string.Empty)
-        + properties.Sum(pair => Encoding.UTF8.GetByteCount(pair.Key) + Encoding.UTF8.GetByteCount(pair.Value));
+    private static DurableRecordWrite ShrinkTrustedProperty(
+        DurableRecordWrite record,
+        string propertyName,
+        int maxRecordBytes) =>
+        ShrinkField(
+            record,
+            maxRecordBytes,
+            current => current.Properties is not null
+                && current.Properties.TryGetValue(propertyName, out var value)
+                ? value
+                : null,
+            (current, value) =>
+            {
+                var properties = new Dictionary<string, string>(
+                    current.Properties
+                        ?? new Dictionary<string, string>(StringComparer.Ordinal),
+                    StringComparer.Ordinal);
+                if (value is not null)
+                    properties[propertyName] = value;
+                return current with { Properties = properties };
+            },
+            keepNonNull: true);
+
+    private static DurableRecordWrite ShrinkField(
+        DurableRecordWrite record,
+        int maxRecordBytes,
+        Func<DurableRecordWrite, string?> getValue,
+        Func<DurableRecordWrite, string?, DurableRecordWrite> setValue,
+        bool keepNonNull)
+    {
+        var current = getValue(record);
+        if (string.IsNullOrEmpty(current))
+            return record;
+
+        var low = 0;
+        var high = Encoding.UTF8.GetByteCount(current) - 1;
+        string? best = keepNonNull ? string.Empty : null;
+        while (low <= high)
+        {
+            var candidateBytes = low + ((high - low) / 2);
+            var candidate = SharpClawLogBounds.TruncateUtf8(
+                current,
+                candidateBytes,
+                out _);
+            var candidateRecord = setValue(record, candidate);
+            if (DurableSegmentStore.MeasureEncodedRecordBody(candidateRecord)
+                <= maxRecordBytes)
+            {
+                best = candidate;
+                low = candidateBytes + 1;
+            }
+            else
+            {
+                high = candidateBytes - 1;
+            }
+        }
+
+        return setValue(record, best);
+    }
+
+    private static bool RemoveLastUserProperty(
+        Dictionary<string, string> properties)
+    {
+        foreach (var name in properties.Keys.Reverse())
+        {
+            if (IsTrustedPropertyName(name))
+                continue;
+            properties.Remove(name);
+            return true;
+        }
+
+        return false;
+    }
+
+    private static bool IsTrustedPropertyName(string name) =>
+        TrustedPropertyNames.Contains(name, StringComparer.Ordinal);
+
+    private static string? Bound(string? value, int maximumBytes) =>
+        value is null
+            ? null
+            : SharpClawLogBounds.TruncateUtf8(
+                SharpClawLogRedactor.Redact(value),
+                maximumBytes,
+                out _);
 
     private static void AddProperty(
         Dictionary<string, string> properties,
         string name,
-        string value)
+        string value,
+        bool trusted = false)
     {
-        if (string.IsNullOrWhiteSpace(name)
-            || (properties.Count >= SharpClawLogBounds.PropertyCount
-                && !properties.ContainsKey(name)))
+        if (string.IsNullOrWhiteSpace(name))
         {
             return;
         }
 
-        properties[name] = value;
+        var boundedValue = SharpClawLogBounds.TruncateUtf8(
+            SharpClawLogRedactor.Redact(value),
+            SharpClawLogBounds.PropertyValueBytes,
+            out _);
+        if (!trusted
+            && properties.Count >= SharpClawLogBounds.UserPropertyCount
+            && !properties.ContainsKey(name))
+        {
+            return;
+        }
+
+        properties[name] = boundedValue;
     }
 
     private static string? GetString(LogEvent logEvent, string name) =>
@@ -582,7 +771,9 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
 
         try
         {
-            var record = SharpClawLogNormalizer.Normalize(logEvent);
+            var record = SharpClawLogNormalizer.Normalize(
+                logEvent,
+                _records.MaxRecordBytes);
             var ownership = SharpClawLogOwnership.Current;
             var stream = ownership is null
                 ? _processStream
@@ -592,7 +783,6 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
                 stream,
                 record,
                 logEvent.Level,
-                TryEnqueueControl: false,
                 Completion: null);
             if (!TryEnqueue(item))
             {
@@ -618,7 +808,6 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
                     _processStream,
                     null,
                     LogEventLevel.Information,
-                    TryEnqueueControl: true,
                     completion),
                 cancellationToken)
             .ConfigureAwait(false);
@@ -629,13 +818,17 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
     {
         if (Interlocked.Exchange(ref _shutdown, 1) != 0)
         {
-            await _worker.WaitAsync(cancellationToken).ConfigureAwait(false);
+            await Task.WhenAll(_worker, _timer)
+                .WaitAsync(cancellationToken)
+                .ConfigureAwait(false);
             return;
         }
 
         _timerCancellation.Cancel();
         _channel.Writer.TryComplete();
-        await _worker.WaitAsync(cancellationToken).ConfigureAwait(false);
+        await Task.WhenAll(_timer, _worker)
+            .WaitAsync(cancellationToken)
+            .ConfigureAwait(false);
     }
 
     public void RecordFailure(Exception exception)
@@ -754,12 +947,15 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
                     _processStream,
                     null,
                     LogEventLevel.Information,
-                    TryEnqueueControl: true,
                     Completion: null));
             }
         }
         catch (OperationCanceledException) when (_timerCancellation.IsCancellationRequested)
         {
+        }
+        catch (Exception ex)
+        {
+            RecordFailure(ex);
         }
     }
 
@@ -796,7 +992,6 @@ public sealed class SharpClawLogDispatcher : IAsyncDisposable, IDisposable
         DurableStreamKey Stream,
         DurableRecordWrite? Record,
         LogEventLevel Level,
-        bool TryEnqueueControl,
         TaskCompletionSource? Completion);
 }
 
