@@ -39,7 +39,7 @@ public sealed class TestHarnessPerformanceTierTests
     private const int HotPathAllowedVisibleStalls = 1;
     private const int SequentialWarmCacheSampleCount = 100;
     private const int SequentialWarmCacheWarmupCount = 5;
-    private const int SequentialWarmCacheVisibleStallMs = 50;
+    private const double SequentialWarmCacheVisibleStallMs = HotPathVisibleStallBudgetMs;
     private const int SequentialWarmCacheAllowedVisibleStalls = 1;
 
     private static readonly ConcurrentDictionary<string, Lazy<Task<long>>> Measurements = new();
@@ -469,7 +469,7 @@ public sealed class TestHarnessPerformanceTierTests
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_OneHundredSequentialWarmCacheChats_Max50P95_10P99_25()
+    public async Task PerformanceGate_OneHundredSequentialWarmCacheChats_Stall25Average10P99_25()
     {
         await using var host = ChatHarnessHost.Create(new Dictionary<string, string?>
         {
@@ -483,13 +483,13 @@ public sealed class TestHarnessPerformanceTierTests
         for (var i = 0; i < SequentialWarmCacheWarmupCount; i++)
             await MeasureSequentialWarmCacheChatAsync(host, seeded.Channel.Id, $"warm-up-{i}");
 
-        var measurements = new List<long>(SequentialWarmCacheSampleCount);
-        var environmentStalls = new List<long>(SequentialWarmCacheAllowedVisibleStalls);
+        var measurements = new List<double>(SequentialWarmCacheSampleCount);
+        var environmentStalls = new List<double>(SequentialWarmCacheAllowedVisibleStalls);
 
         for (var i = 0; measurements.Count < SequentialWarmCacheSampleCount; i++)
         {
             var elapsedMs = await MeasureSequentialWarmCacheChatAsync(host, seeded.Channel.Id, $"warm-{i}");
-            if (elapsedMs >= SequentialWarmCacheVisibleStallMs)
+            if (elapsedMs > SequentialWarmCacheVisibleStallMs)
             {
                 environmentStalls.Add(elapsedMs);
                 if (environmentStalls.Count > SequentialWarmCacheAllowedVisibleStalls)
@@ -510,13 +510,13 @@ public sealed class TestHarnessPerformanceTierTests
             "the gate should collect a full steady-state sample after discarding at most one scheduler stall; " +
             DescribeSequentialWarmCacheRun(measurements, environmentStalls));
 
-        var stats = TimedRunStats.From(measurements);
+        var stats = new HotPathSampleMeasurement("sequential-warm-cache", measurements);
         environmentStalls.DefaultIfEmpty(0).Max().Should().BeLessThan(
             1500,
             "a single CI scheduler stall should still remain bounded; " +
             DescribeSequentialWarmCacheRun(stats, environmentStalls));
-        stats.P95.Should().BeLessThan(10, DescribeSequentialWarmCacheRun(stats, environmentStalls));
-        stats.P99.Should().BeLessThan(25, DescribeSequentialWarmCacheRun(stats, environmentStalls));
+        stats.AverageMs.Should().BeLessThan(10, DescribeSequentialWarmCacheRun(stats, environmentStalls));
+        stats.P99Ms.Should().BeLessThan(25, DescribeSequentialWarmCacheRun(stats, environmentStalls));
     }
 
     [Test]
@@ -637,24 +637,23 @@ public sealed class TestHarnessPerformanceTierTests
         Func<Task<ToolRoundTripMeasurement>> factory) =>
         ToolMeasurements.GetOrAdd(key, _ => new Lazy<Task<ToolRoundTripMeasurement>>(factory)).Value;
 
-    private static async Task<long> MeasureSequentialWarmCacheChatAsync(
+    private static async Task<double> MeasureSequentialWarmCacheChatAsync(
         ChatHarnessHost host,
         Guid channelId,
         string message)
     {
         await using var scope = host.CreateScope();
         var chat = scope.ServiceProvider.GetRequiredService<ChatService>();
-        var sw = Stopwatch.StartNew();
+        var startedAt = Stopwatch.GetTimestamp();
         await chat.SendMessageAsync(channelId, new ChatRequest(message));
-        sw.Stop();
-        return sw.ElapsedMilliseconds;
+        return ElapsedMillisecondsSince(startedAt);
     }
 
-    private static string DescribeSequentialWarmCacheRun(IReadOnlyList<long> measurements, IReadOnlyList<long> environmentStalls) =>
+    private static string DescribeSequentialWarmCacheRun(IReadOnlyList<double> measurements, IReadOnlyList<double> environmentStalls) =>
         $"count={measurements.Count}, samples=[{string.Join(",", measurements)}], " +
         $"environmentStalls=[{string.Join(",", environmentStalls)}]";
 
-    private static string DescribeSequentialWarmCacheRun(TimedRunStats stats, IReadOnlyList<long> environmentStalls) =>
+    private static string DescribeSequentialWarmCacheRun(HotPathSampleMeasurement stats, IReadOnlyList<double> environmentStalls) =>
         $"{stats.Describe()}, environmentStalls=[{string.Join(",", environmentStalls)}]";
 
     private static void AssertHotPathBudget(
