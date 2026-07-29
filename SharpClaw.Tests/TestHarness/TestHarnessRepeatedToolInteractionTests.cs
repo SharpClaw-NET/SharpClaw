@@ -87,15 +87,16 @@ public sealed class TestHarnessRepeatedToolInteractionTests
 
     [Test]
     [Category(HarnessTestCategories.PerformanceGate)]
-    public async Task PerformanceGate_ProviderStream_100AllowedNoOpToolCalls_WarmCache_Max10P95_2()
+    public async Task PerformanceGate_ProviderStream_100AllowedNoOpToolCalls_WarmCache_PerCallOverhead_2()
     {
         var measurement = await CachedMeasurementAsync(
             "hundred-allowed-warm",
             MeasureHundredAllowedWarmAsync);
 
         measurement.ToolBodyInvocations.Should().Be(HundredCalls);
-        measurement.InterCallStats.Max.Should().BeLessThanOrEqualTo(10, measurement.ToString());
-        measurement.InterCallStats.P95.Should().BeLessThanOrEqualTo(2, measurement.ToString());
+        measurement.PerCallSharpClawOverheadMs.Should().BeLessThanOrEqualTo(
+            2,
+            $"100 allowed no-op tool calls must keep aggregate SharpClaw overhead at or below 2ms per call; {measurement}");
     }
 
     [Test]

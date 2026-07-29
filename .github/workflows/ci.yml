@@ -230,7 +230,7 @@ jobs:
           - domain: Tools Permission Checks
             filter: 'FullyQualifiedName~PerformanceGate_InlineToolPermissionCheck'
           - domain: Tools Provider Stream Serial
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_100AllowedNoOpToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_100DeniedToolCalls'
+            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_100AllowedNoOpToolCalls_WarmCache_PerCallOverhead_2|FullyQualifiedName~PerformanceGate_ProviderStream_100DeniedToolCalls'
           - domain: Tools Provider Stream Parallel
             filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls'
           - domain: Accessible Threads
