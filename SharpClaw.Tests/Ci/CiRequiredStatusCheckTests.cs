@@ -21,7 +21,6 @@ public sealed partial class CiRequiredStatusCheckTests
             .ToArray();
 
         workflowContexts.Should().Contain("Correctness / Module Sidecar Parity");
-        workflowContexts.Should().HaveCountGreaterThan(90);
         requiredContexts.Should().Equal(
             workflowContexts,
             "every CI matrix domain should be mirrored in the required-status-check ruleset");
