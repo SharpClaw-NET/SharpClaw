@@ -7,8 +7,8 @@ namespace SharpClaw.Runtime.INF.Logging;
 
 /// <summary>
 /// Reads bounded operational process and module streams through the existing
-/// authenticated cursor facade. Job, task-log, task-output, and artifact
-/// operations remain owned by <see cref="ExecutionDiagnosticStore"/>.
+/// authenticated cursor facade. Job-log, output, and artifact operations
+/// remain owned by <see cref="ExecutionDiagnosticStore"/>.
 /// </summary>
 public sealed class SharpClawLogReader(
     ExecutionDiagnosticStore diagnostics,

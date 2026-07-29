@@ -1,7 +1,5 @@
 using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Core.Jobs;
-using SharpClaw.Core.Tasks.Administration;
 
 namespace SharpClaw.Runtime.BLL.Services;
 
@@ -70,49 +68,4 @@ internal static class ExecutionStateMapper
         entity.ApprovedByAgentId = state.ApprovedByAgentId;
     }
 
-    public static TaskInstanceState ToCoreState(TaskInstanceDB entity)
-    {
-        ArgumentNullException.ThrowIfNull(entity);
-        return new TaskInstanceState
-        {
-            Id = entity.Id,
-            TaskDefinitionId = entity.TaskDefinitionId,
-            Status = entity.Status,
-            ParameterValuesJson = entity.ParameterValuesJson,
-            ErrorMessage = entity.ErrorMessage,
-            CreatedAt = entity.CreatedAt,
-            StartedAt = entity.StartedAt,
-            CompletedAt = entity.CompletedAt,
-            CallerUserId = entity.CallerUserId,
-            CallerAgentId = entity.CallerAgentId,
-            ChannelId = entity.ChannelId,
-            ContextId = entity.ContextId,
-        };
-    }
-
-    public static TaskInstanceDB ToEntity(TaskInstanceState state)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        var entity = new TaskInstanceDB();
-        Apply(state, entity);
-        return entity;
-    }
-
-    public static void Apply(TaskInstanceState state, TaskInstanceDB entity)
-    {
-        ArgumentNullException.ThrowIfNull(state);
-        ArgumentNullException.ThrowIfNull(entity);
-        entity.Id = state.Id;
-        entity.TaskDefinitionId = state.TaskDefinitionId;
-        entity.Status = state.Status;
-        entity.ParameterValuesJson = state.ParameterValuesJson;
-        entity.ErrorMessage = state.ErrorMessage;
-        entity.CreatedAt = state.CreatedAt;
-        entity.StartedAt = state.StartedAt;
-        entity.CompletedAt = state.CompletedAt;
-        entity.CallerUserId = state.CallerUserId;
-        entity.CallerAgentId = state.CallerAgentId;
-        entity.ChannelId = state.ChannelId;
-        entity.ContextId = state.ContextId;
-    }
 }

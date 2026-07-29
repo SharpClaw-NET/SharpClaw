@@ -1,4 +1,4 @@
-﻿SharpClaw Core CLI — Agent Skill Reference
+SharpClaw Core CLI — Agent Skill Reference
 
 Interactive REPL embedded in the backend process. Dispatches directly to
 the same handlers as the REST API — no HTTP round-trip.
@@ -18,7 +18,7 @@ SESSION STATE
 ────────────────────────────────────────
 Current user    — set on login/register; cleared on logout.
 Current channel — set by channel add (auto) or channel select; used
-                  as default by chat, thread, job list, task start.
+                  as default by chat, thread, job list, job start.
 Current thread  — set by thread select; deselected by thread deselect
                   or channel select. When set, chat includes history.
 Chat mode       — toggled by chat toggle; all input → chat. Escape: !exit.
@@ -129,7 +129,7 @@ context defaults <id> clear <key>
 Default-resource keys (same for channel):
   safeshell, dangshell/dangerousshell, container, website,
   search/searchengine, internaldb, externaldb, displaydevice/display,
-  agent, task, skill, editorsession/editor
+  agent, skill, editorsession/editor
 
 ────────────────────────────────────────
 CHANNEL  (alias: chan)
@@ -212,51 +212,6 @@ AgentJobStatus: Queued, Executing, AwaitingApproval, Completed, Failed,
                 Denied, Cancelled, Paused.
 
 ────────────────────────────────────────
-TASK
-────────────────────────────────────────
-Definitions (compiled C# scripts):
-task create <sourceFilePath>           Validates before upload; prints diagnostics.
-task list | get <id>
-task update <id> <sourceFilePath>      Validates before upload.
-task activate <id> | deactivate <id>
-task delete <id>
-task preflight <taskId> [--param key=value ...]
-  Use preflight to diagnose module-backed triggers registered by the current
-  bundled or external module set.
-
-Instances:
-task start <taskId> [channelId] [--param key=value ...]   Uses active channel.
-task run <taskId> …                    Alias for start.
-task create-queued <taskId> [channelId] [--param key=value ...]
-task start-instance <instanceId>       Start an existing queued instance.
-task instances <taskId>                List instances for a definition.
-task instance <instanceId>
-task outputs <instanceId> [--since <timestamp>]
-task cancel <instanceId>
-task stop <instanceId>
-task pause <instanceId>
-task resume <instanceId>
-task listen <instanceId>               Stream output events (output/log/status/done).
-                                       Ctrl+C stops listening (not the instance).
-
-Scheduling:
-task schedule list
-task schedule get <jobId>
-task schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <n>]
-task schedule update <jobId> --cron <expr> [--timezone <tz>]
-task schedule pause <jobId>
-task schedule resume <jobId>
-task schedule delete <jobId>
-task schedule preview <expr> [--timezone <tz>] [--count N]
-
-Triggers and shortcuts:
-task trigger-sources
-task triggers enable <taskId>
-task triggers disable <taskId>
-task shortcuts install <taskId>
-task shortcuts remove <taskId>
-
-────────────────────────────────────────
 ROLE
 ────────────────────────────────────────
 role list | get <id>
@@ -276,7 +231,6 @@ Global capability flags:
 
 Resource grant flags (each accepts <id>[:<clearance>], 'all' for wildcard):
   --dangerous-shell  --safe-shell  --container  --website  --search-engine
-  --internal-db  --external-db  --input-audio  --agent  --task  --skill
 
 Clearance levels (ascending):
   Unset, ApprovedBySameLevelUser, ApprovedByWhitelistedUser,

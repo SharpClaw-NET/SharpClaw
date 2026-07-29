@@ -73,11 +73,11 @@ public sealed class ChatRuntimePlanningTests
         var defaultResourceKey = ChatCache.KeyDefaultResourceResolution(
             channelId,
             agentId,
-            "task");
+            "document");
         var unrelatedKey = ChatCache.KeyDefaultResourceResolution(
             otherChannelId,
             otherAgentId,
-            "task");
+            "document");
 
         cache.Set(headerKey, "header");
         cache.Set(toolsKey, "tools");

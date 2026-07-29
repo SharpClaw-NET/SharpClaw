@@ -82,7 +82,7 @@ Custom headers support **{{tag}}** placeholders that are expanded at send-time:
 - `{{reasoning-effort}}`: The configured `reasoningEffort` value, rendered only for providers that accept the hint informationally (e.g. LlamaSharp, which has no mechanical reasoning-effort control). Empty string on providers that consume the value on the wire, or when no effort is configured.
 
 **Resource tags** (list all entities of a type):
-- `{{Agents}}`, `{{Models}}`, `{{Providers}}`, `{{Channels}}`, `{{Threads}}`, `{{Roles}}`, `{{Users}}`, `{{Containers}}`, `{{Websites}}`, `{{SearchEngines}}`, `{{DisplayDevices}}`, `{{EditorSessions}}`, `{{Skills}}`, `{{SystemUsers}}`, `{{LocalInfoStores}}`, `{{ExternalInfoStores}}`, `{{ScheduledTasks}}`, `{{Tasks}}`
+- `{{Agents}}`, `{{Models}}`, `{{Providers}}`, `{{Channels}}`, `{{Threads}}`, `{{Roles}}`, `{{Users}}`, `{{Containers}}`, `{{Websites}}`, `{{SearchEngines}}`, `{{DisplayDevices}}`, `{{EditorSessions}}`, `{{Skills}}`, `{{SystemUsers}}`, `{{LocalInfoStores}}`, `{{ExternalInfoStores}}`
 
 **Per-item template:**
 

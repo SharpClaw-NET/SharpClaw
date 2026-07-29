@@ -130,7 +130,6 @@ Click the **▼** or **▶** icon next to a context name in the sidebar to expan
 When a channel is selected, tabs appear in the chat header:
 
 - **[chat]**: Main conversation view
-- **[tasks]**: Task definitions and instances for this channel
 - **[jobs]**: Background jobs submitted by the agent
 - **[settings]**: Channel configuration
 - **[bots]**: Bot integration status (if gateway is enabled)
@@ -158,7 +157,7 @@ Use the inline tool `list_accessible_threads` to discover available threads, the
 
 ## Best Practices
 
-- **Use threads for projects**: One thread per feature, bug, or task
+- **Use threads for projects**: One thread per feature or bug
 - **One-off for quick queries**: Don't clutter history with transient prompts
 - **Name threads descriptively**: Future you will thank you
 - **Set conservative limits**: Long histories cost more tokens and slow down inference

@@ -51,7 +51,7 @@ Shutdown stops intake, cancels periodic flush intake, drains the channel, flushe
 
 ## Execution diagnostics
 
-Job logs, task logs, task output, and artifacts remain explicit `ExecutionDiagnosticStore` semantics. They are not sent through Serilog and are not mirrored into operational process or module streams. Terminal task persistence keeps its existing ordering: apply state, prepare compact state and audit metadata, seal task log and task output streams, then call `SaveChanges`. The operational dispatcher may flush independently and cannot weaken that transaction.
+Job logs and artifacts remain explicit `ExecutionDiagnosticStore` semantics. They are not sent through Serilog and are not mirrored into operational process or module streams. The operational dispatcher may flush independently and cannot weaken that transaction.
 
 ## Retrieval and retention
 

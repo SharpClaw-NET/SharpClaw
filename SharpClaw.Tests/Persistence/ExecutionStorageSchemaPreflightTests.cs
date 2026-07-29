@@ -32,8 +32,6 @@ public sealed class ExecutionStorageSchemaPreflightTests
     }
 
     [TestCase("AgentJobLogEntryDB")]
-    [TestCase("TaskExecutionLogDB")]
-    [TestCase("TaskOutputEntryDB")]
     public void LegacyDiagnosticCollection_RequiresAnExplicitUpgrade(
         string collectionName)
     {
@@ -50,7 +48,6 @@ public sealed class ExecutionStorageSchemaPreflightTests
     }
 
     [TestCase("AgentJobDB")]
-    [TestCase("TaskInstanceDB")]
     public void UnversionedExecutionMetadata_RequiresAnExplicitUpgrade(
         string collectionName)
     {

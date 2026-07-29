@@ -281,7 +281,6 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
     public async Task<ArtifactRetentionResult> ApplyRetentionAsync(
         IReadOnlySet<Guid> protectedArtifactIds,
         TimeSpan jobMaximumAge,
-        TimeSpan taskMaximumAge,
         TimeSpan orphanGraceAge,
         long maximumEncodedBytes,
         long minimumFreeBytes,
@@ -290,7 +289,6 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
     {
         ArgumentNullException.ThrowIfNull(protectedArtifactIds);
         if (jobMaximumAge <= TimeSpan.Zero
-            || taskMaximumAge <= TimeSpan.Zero
             || orphanGraceAge <= TimeSpan.Zero
             || maximumEncodedBytes < 0
             || minimumFreeBytes < 0
@@ -326,7 +324,6 @@ public sealed class ExecutionArtifactStore : IExecutionArtifactStore
             var maximumAge = stream.Descriptor.OwnerKind switch
             {
                 ExecutionOwnerKind.AgentJob => jobMaximumAge,
-                ExecutionOwnerKind.TaskInstance => taskMaximumAge,
                 _ => throw new InvalidDataException(
                     "Artifact owner kind is not supported."),
             };

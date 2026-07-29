@@ -83,7 +83,7 @@ jobs:
           - domain: Persistence Provider Configuration
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
           - domain: JSONColdStore Provider Paths
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.AuthServiceJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleStorageGatewayTests|FullyQualifiedName~SharpClaw.Tests.Modules.InProcessModuleJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskExecutionLifecycleTests.ScheduledJobWorker'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.AuthServiceJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleStorageGatewayTests|FullyQualifiedName~SharpClaw.Tests.Modules.InProcessModuleJsonColdStoreTests'
           - domain: Persistence Instances
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
           - domain: Providers Capabilities
@@ -92,18 +92,6 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpRegexToGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpStringFormatGrammarsTests'
           - domain: LlamaSharp Tool Calling
             filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarShapeTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests'
-          - domain: Tasks Scripts Compiler Parser
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptCompilerTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptParserTests'
-          - domain: Tasks Scripts Semantics Validator
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptSemanticsTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptValidatorTests'
-          - domain: Tasks Step Keys
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskStepKeyAssignmentTests'
-          - domain: Tasks Execution Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskExecutionLifecycleTests'
-          - domain: Tasks Shared Data
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskSharedDataStoreTests'
-          - domain: Tasks Triggers
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskTriggerAttributeParserTests'
           - domain: Chat Prompt Surface
             filter: 'FullyQualifiedName~AllDynamicChatFeaturesDisabled|FullyQualifiedName~HeaderExpansionSwitches|FullyQualifiedName~ModuleHeaderTagContext'
           - domain: Chat Tool Permissions

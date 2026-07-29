@@ -20,9 +20,6 @@ using SharpClaw.Core.Jobs;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
-using SharpClaw.Core.Tasks.Administration;
-using SharpClaw.Core.Tasks.Preflight;
-using SharpClaw.Core.Tasks.Triggers;
 using SharpClaw.Core.Tools;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
@@ -32,7 +29,6 @@ using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.Runtime.INF.DurableStorage;
@@ -149,12 +145,6 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<IExecutionArtifactStore>(sp =>
             sp.GetRequiredService<ExecutionArtifactStore>());
         services.AddSingleton<ExecutionDiagnosticStore>();
-        services.AddSingleton(sp => new TaskDiagnosticStateStore(
-            durableRoot,
-            DurableStorageKeyDerivation.Derive(
-                durableMasterKey,
-                "task-state"),
-            sp.GetRequiredService<IExecutionArtifactStore>()));
         services.AddDbContext<SharpClawDbContext>(options =>
         {
             if (useJsonColdStoreDatabase)
@@ -226,9 +216,6 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddSingleton<ChatNativeToolLoopEngine>();
         services.AddSingleton<ChatProviderExecutionWorkflowEngine>();
         services.AddSingleton<ChatStreamingResponseEngine>();
-        services.AddSingleton<TaskPreflightEngine>();
-        services.AddSingleton<TaskAdministrationWorkflowEngine>();
-        services.AddSingleton<TaskTriggerBindingPlanner>();
         services.AddSingleton<ToolAwarenessSetEngine>();
         services.AddSingleton<ToolAwarenessAdministrationEngine>();
         services.AddSingleton<RuntimeModuleDbContextRegistry>();
@@ -239,7 +226,6 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
             ConnectionString = "Data Source=:memory:",
         });
         services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
-        services.AddSingleton<ForeignModuleTaskContextRegistry>();
         services.AddSingleton<CountingPersistenceEntityResolver>();
         services.AddScoped<TokenService>();
         services.AddScoped<AuthService>();
@@ -270,13 +256,6 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<RoleService>();
         services.AddScoped<EfToolAwarenessAdministrationHost>();
         services.AddScoped<ToolAwarenessSetService>();
-        services.AddScoped<EfTaskPreflightHost>();
-        services.AddScoped<TaskPreflightChecker>();
-        services.AddScoped<TaskTriggerRegistrar>();
-        services.AddScoped<EfTaskAdministrationHost>();
-        services.AddScoped<TaskService>();
-        services.AddScoped<ITaskAuthoring>(sp =>
-            sp.GetRequiredService<TaskService>());
         services.AddScoped<ThreadService>();
         services.AddScoped<HeaderTagProcessor>();
         services.AddScoped<ChatService>();

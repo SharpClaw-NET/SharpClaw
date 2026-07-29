@@ -1,7 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Core.Modules.Sidecar;
 
@@ -9,17 +8,6 @@ namespace SharpClaw.Runtime.BLL.Modules.Sidecar;
 
 public sealed class SidecarReadinessAnalyzer
 {
-    private static readonly Type[] TaskRuntimeServiceTypes =
-    [
-        typeof(ITaskOperationExecutor),
-        typeof(ITaskOperationDescriptorProvider),
-        typeof(ITaskTriggerSource),
-        typeof(ITaskMetricProvider),
-        typeof(ITaskTriggerAttributeHandler),
-        typeof(ITaskTriggerBindingSideEffect),
-        typeof(IWebhookRouteRegistrar)
-    ];
-
     private static readonly Type[] EventSinkServiceTypes =
     [
         typeof(ISharpClawEventSink)
@@ -68,8 +56,7 @@ public sealed class SidecarReadinessAnalyzer
             OverridesSeedData: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.SeedDataAsync)),
             OverridesHealthCheck: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.HealthCheckAsync)),
             OverridesStreamingTools: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.ExecuteToolStreamingAsync)),
-            OverridesJobCompletionBehavior: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.GetJobCompletionBehavior)),
-            IsTaskParserAware: module is ITaskParserAware);
+            OverridesJobCompletionBehavior: DeclaresPublicInstanceMethod(moduleType, nameof(ISharpClawCoreModule.GetJobCompletionBehavior)));
 
         return new ModuleSidecarReadinessFacts(
             module.Id,
@@ -121,13 +108,6 @@ public sealed class SidecarReadinessAnalyzer
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        var taskRuntimeServices = services
-            .Where(descriptor => TaskRuntimeServiceTypes.Any(type => descriptor.ServiceType == type))
-            .Select(DescribeServiceRegistration)
-            .Distinct(StringComparer.Ordinal)
-            .Order(StringComparer.Ordinal)
-            .ToArray();
-
         var eventSinks = services
             .Where(descriptor => EventSinkServiceTypes.Any(type => descriptor.ServiceType == type))
             .Select(DescribeServiceRegistration)
@@ -146,7 +126,6 @@ public sealed class SidecarReadinessAnalyzer
             registrations,
             dbContexts,
             providerPlugins,
-            taskRuntimeServices,
             eventSinks,
             factories,
             configureError);

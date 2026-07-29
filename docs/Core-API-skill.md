@@ -95,7 +95,7 @@ SetRolePermissionsRequest fields:
   Global flags:
   (PermissionClearance enum, default Unset = denied, no approval path)
   Per-resource arrays (each entry is { resourceId, clearance }):
-    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, searchEngineAccesses, localInfoStoreAccesses, externalInfoStoreAccesses, agentAccesses, taskAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses, documentSessionAccesses, nativeApplicationAccesses
+    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, localInfoStores, externalInfoStores, agentAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses, documentSessionAccesses, nativeApplicationAccesses
 
 Wildcard resourceId: ffffffff-ffff-ffff-ffff-ffffffffffff (all resources of that type).
 
@@ -153,7 +153,7 @@ Default resources (per-key):
   PUT    /channels/{id}/defaults/{key}          { resourceId }
   DELETE /channels/{id}/defaults/{key}
 
-Valid default resource keys: dangshell, safeshell, container, website, search, localinfo, externalinfo, displaydevice, agent, task, skill, editor, document, nativeapp.
+Valid default resource keys: dangshell, safeshell, container, website, search, localinfo, externalinfo, displaydevice, agent, skill, editor, document, nativeapp.
 
 Either agentId or contextId (with agent) required on create.
 allowedAgentIds on PUT replaces the set. permissionSetId=00000000-... removes the override; null leaves unchanged.
@@ -169,7 +169,7 @@ All responses embed full AgentSummary objects (id, name, modelId, modelName, pro
 DEFAULT RESOURCES
 ────────────────────────────────────────
 SetDefaultResourcesRequest fields (all Guid?):
-  dangerousShellResourceId, safeShellResourceId, containerResourceId, websiteResourceId, searchEngineResourceId, localInfoStoreResourceId, externalInfoStoreResourceId, displayDeviceResourceId, agentResourceId, taskResourceId, skillResourceId, editorSessionResourceId, documentSessionResourceId, nativeApplicationResourceId
+  dangerousShellResourceId, safeShellResourceId, containerResourceId, websiteResourceId, searchEngineResourceId, localInfoStoreResourceId, externalInfoStoreResourceId, displayDeviceResourceId, agentResourceId, skillResourceId, editorSessionResourceId, documentSessionResourceId, nativeApplicationResourceId
 
 Resolution order for jobs: channel DefaultResourceSet → context DefaultResourceSet → channel/context/role PermissionSet defaults.
 
@@ -248,42 +248,6 @@ module documentation for available transports in the current bundled module
 set.
 
 ────────────────────────────────────────
-TASKS
-────────────────────────────────────────
-POST   /tasks                          { sourceText }  → TaskDefinitionResponse
-POST   /tasks/validate                 { sourceText }  → TaskValidationResponse
-GET    /tasks                          → TaskDefinitionResponse[]
-GET    /tasks/{id}                     → TaskDefinitionResponse
-PUT    /tasks/{id}                     { sourceText?, isActive? }  → TaskDefinitionResponse
-DELETE /tasks/{id}                     → 204
-GET    /tasks/{id}/preflight?param.Name=value  → TaskPreflightResponse
-GET    /tasks/trigger-sources          → TaskTriggerSourceResponse[]
-POST   /tasks/{id}/triggers/enable     → { enabled }
-POST   /tasks/{id}/triggers/disable    → { disabled }
-POST   /tasks/{id}/shortcuts/install   → 204
-DELETE /tasks/{id}/shortcuts           → 204
-
-Instances:
-  POST /tasks/{id}/instances           { channelId?, parameterValues?, startImmediately? }  → TaskInstanceResponse
-  GET  /tasks/{id}/instances           → TaskInstanceSummaryResponse[] / TaskInstanceResponse[] depending on caller use
-  GET  /tasks/{id}/instances/{iid}     → TaskInstanceResponse
-  POST /tasks/{id}/instances/{iid}/start
-  POST /tasks/{id}/instances/{iid}/cancel
-  POST /tasks/{id}/instances/{iid}/stop
-  POST /tasks/{id}/instances/{iid}/pause
-  POST /tasks/{id}/instances/{iid}/resume
-  GET  /tasks/{id}/instances/{iid}/outputs?since={datetime}
-  GET  /tasks/{id}/instances/{iid}/stream   → SSE
-
-TaskDefinitionResponse includes:
-  id, name, description?, outputTypeName?, isActive, parameters[], requirements[], triggers[], createdAt, updatedAt, customId?
-
-TaskPreflightResponse:
-  isBlocked, findings[]: { requirementKind, severity, passed, message, parameterName? }
-
-TaskTriggerSourceResponse:
-  sourceName?, supportedKinds[], type, isCustom
-
 ────────────────────────────────────────
 RESOURCES
 ────────────────────────────────────────
@@ -579,7 +543,6 @@ Context tags (single value):
   {{agent-role}}         → DevOps clearance=Independent (SafeShell[guid,...], ManageAgent[guid,...])
   {{clearance}}          → Independent
   {{grants}}             → CreateSubAgents, SafeShell, ManageAgent  (user grants, name-only)
-  {{agent-grants}}       → SafeShell[guid,...], EditTask[guid,...]  (agent grants with resource IDs)
   {{editor}}             → VisualStudio2026 18.4 file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"
   {{accessible-threads}} → Debug Session [Ops Channel] (guid), Planning [Strategy] (guid)
 
@@ -589,7 +552,7 @@ Resource tags (enumerate entities):
   {{Agents}}             → comma-separated GUIDs (no template)
   {{Agents:{Name} ({Id})}}  → per-item formatted: CodeReview Agent (3fa8...), DevOps Agent (7c9e...)
 
-Supported resource tag names: Agents, Models, Providers, Channels, Threads, Roles, Users, Containers, Websites, SearchEngines, DisplayDevices, EditorSessions, Skills, SystemUsers, LocalInfoStores, ExternalInfoStores, ScheduledTasks, Tasks.
+Supported resource tag names: Agents, Models, Providers, Channels, Threads, Roles, Users, Containers, Websites, SearchEngines, DisplayDevices, EditorSessions, Skills, SystemUsers, LocalInfoStores, ExternalInfoStores.
 
 Note: Some entity types (Containers, Websites, SearchEngines, DisplayDevices, EditorSessions, SystemUsers, LocalInfoStores, ExternalInfoStores) are module-registered resources. They return results only when their owning module is enabled.
 
@@ -648,13 +611,3 @@ Query GET /modules for the authoritative list; each module entry includes a
 Tools array with the exact names to use as dictionary keys.
 
 ────────────────────────────────────────
-TASKS
-────────────────────────────────────────
-Full task reference (endpoints, script language, step kinds, diagnostics, permissions,
-agent tool exposure, scheduling, SSE streaming): Tasks-skill.md
-
-Short summary: tasks are user-defined C# scripts that run as managed background
-processes. Register a definition with POST /tasks, launch an instance with
-POST /tasks/{id}/instances, stream output from GET /tasks/{id}/instances/{iid}/stream.
-Agents with CanInvokeTasksAsTool can start active definitions through the
-Agent Orchestration ao_invoke_task tool.

@@ -15,7 +15,6 @@ using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
 using SharpClaw.Runtime.INF.Persistence;

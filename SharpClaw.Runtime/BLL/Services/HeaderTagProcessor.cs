@@ -161,9 +161,6 @@ public sealed class HeaderTagProcessor(
                 "threads" => Cast(await db.ChatThreads.AsNoTracking().ToListAsync(ct)),
                 "roles" => Cast(await db.Roles.AsNoTracking().ToListAsync(ct)),
                 "users" => Cast(await db.Users.AsNoTracking().ToListAsync(ct)),
-                "tasks" or "taskdefinitions" => Cast(await db.TaskDefinitions
-                    .AsNoTracking()
-                    .ToListAsync(ct)),
                 _ => null
             };
         }

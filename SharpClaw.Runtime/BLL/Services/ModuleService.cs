@@ -9,9 +9,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Contracts.Tasks;
-using SharpClaw.Core.Tasks.Parsing;
-using SharpClaw.Core.Tasks.Registry;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Runtime.BLL.Modules.Sidecar;
@@ -192,7 +189,6 @@ public sealed class ModuleService(
                     ct);
 
                 registry.Register(module, runtimeHost);
-                RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
                 RegisterModulePersistence(module);
 
                 if (manifest is not null)
@@ -206,7 +202,6 @@ public sealed class ModuleService(
                     var names = string.Join(", ",
                         unsatisfied.Select(r => r.ContractName)
                             .Concat(unsatisfiedProtocol.Select(r => r.ContractName)));
-                    UnregisterTaskRuntimeContributions(module);
                     moduleDbContextRegistry.UnregisterModule(moduleId);
                     registry.Unregister(moduleId);
                     throw new InvalidOperationException(
@@ -218,7 +213,6 @@ public sealed class ModuleService(
             catch
             {
                 // Rollback: unregister if init failed
-                UnregisterTaskRuntimeContributions(module);
                 moduleDbContextRegistry.UnregisterModule(moduleId);
                 registry.Unregister(moduleId);
                 if (runtimeHost is not null)
@@ -273,7 +267,6 @@ public sealed class ModuleService(
             runtimeHost = host;
 
             registry.Register(module, runtimeHost);
-            RegisterTaskRuntimeContributions(module, runtimeHost?.Services);
             if (manifest is not null)
                 registry.CacheManifest(moduleId, manifest);
 
@@ -282,7 +275,6 @@ public sealed class ModuleService(
         catch
         {
             if (module is not null)
-                UnregisterTaskRuntimeContributions(module);
             registry.Unregister(moduleId);
             if (runtimeHost is not null)
                 await runtimeHost.DisposeAsync();
@@ -311,7 +303,6 @@ public sealed class ModuleService(
             {
                 logger.LogWarning(ex, "Module '{ModuleId}' shutdown error during disable", moduleId);
             }
-            UnregisterTaskRuntimeContributions(module);
             moduleDbContextRegistry.UnregisterModule(moduleId);
             registry.Unregister(moduleId);
             if (runtimeHost is not null)
@@ -382,7 +373,6 @@ public sealed class ModuleService(
         try
         {
             registry.Register(host.Module, host, isExternal: true);
-            RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
             await host.Module.InitializeAsync(host.Services, ct);
@@ -400,7 +390,6 @@ public sealed class ModuleService(
         }
         catch
         {
-            UnregisterTaskRuntimeContributions(host.Module);
             registry.Unregister(manifest.Id);
             moduleDbContextRegistry.UnregisterModule(manifest.Id);
             await host.DisposeAsync();
@@ -421,7 +410,6 @@ public sealed class ModuleService(
 
         await host.DrainAsync(TimeSpan.FromSeconds(30), ct);
         await host.Module.ShutdownAsync();
-        UnregisterTaskRuntimeContributions(host.Module);
         moduleDbContextRegistry.UnregisterModule(moduleId);
         registry.Unregister(moduleId);
         await host.DisposeAsync();
@@ -535,7 +523,6 @@ public sealed class ModuleService(
         try
         {
             registry.Register(host.Module, host, isExternal: true);
-            RegisterTaskRuntimeContributions(host.Module, host.Services);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
             await host.Module.InitializeAsync(host.Services, ct);
@@ -554,7 +541,6 @@ public sealed class ModuleService(
         }
         catch
         {
-            UnregisterTaskRuntimeContributions(host.Module);
             registry.Unregister(manifest.Id);
             moduleDbContextRegistry.UnregisterModule(manifest.Id);
             await host.DisposeAsync();
@@ -594,37 +580,6 @@ public sealed class ModuleService(
 
         foreach (var registration in registrations)
             moduleDbContextRegistry.Register(registration);
-    }
-
-    private static void RegisterTaskRuntimeContributions(
-        ISharpClawCoreModule module,
-        IServiceProvider? moduleServices = null)
-    {
-        if (module is ForeignModuleProxy foreignModule && moduleServices is null)
-        {
-            foreach (var descriptor in foreignModule.TaskOperationDescriptors)
-                TaskOperationRegistry.Default.Register(descriptor);
-        }
-
-        if (moduleServices is not null)
-        {
-            foreach (var provider in moduleServices.GetServices<ITaskOperationDescriptorProvider>())
-            {
-                foreach (var descriptor in provider.Descriptors)
-                    TaskOperationRegistry.Default.Register(descriptor);
-            }
-        }
-
-        if (module is ITaskParserAware parserAware)
-            TaskScriptParser.RegisterModule(parserAware.ParserExtension);
-    }
-
-    private static void UnregisterTaskRuntimeContributions(ISharpClawCoreModule module)
-    {
-        if (module is ITaskParserAware parserAware)
-            TaskScriptParser.UnregisterModule(parserAware.ParserExtension);
-
-        TaskOperationRegistry.Default.UnregisterOwner(module.Id);
     }
 
     private async Task<(ISharpClawCoreModule Module, IModuleRuntimeHost? Host)> CreateBundledRuntimeAsync(

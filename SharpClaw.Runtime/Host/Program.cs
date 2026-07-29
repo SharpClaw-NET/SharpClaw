@@ -12,17 +12,11 @@ using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.Host.Cli;
 using SharpClaw.Runtime.Host.Handlers;
 using SharpClaw.Runtime.Host.Routing;
-using SharpClaw.Runtime.Host.Webhooks;
 using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Core.Tasks;
-using SharpClaw.Core.Tasks.Triggers;
-using SharpClaw.Runtime.BLL.Services.Triggers;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Runtime.INF.Logging;
-using SharpClaw.Core.Tasks.Parsing;
-using SharpClaw.Core.Tasks.Registry;
 using SharpClaw.Runtime.BLL.Services.Auth;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
@@ -39,7 +33,6 @@ using Microsoft.EntityFrameworkCore;
 using SharpClaw.Shared.Security;
 using Serilog.Events;
 using SharpClaw.Contracts.Permissions;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Agents;
 using SharpClaw.Core.Modules;
 using SharpClaw.Core.Modules.Foreign;
@@ -52,9 +45,6 @@ using SharpClaw.Core.Providers;
 using SharpClaw.Core.Resources;
 using SharpClaw.Core.Threads;
 using SharpClaw.Core.Tools;
-using SharpClaw.Core.Tasks.Administration;
-using SharpClaw.Core.Tasks.Preflight;
-using SharpClaw.Core.Tasks.Runtime;
 using Supprocom.Secrets;
 
 // ════════════════════════════════════════════════════════════════════════════
@@ -82,9 +72,9 @@ using Supprocom.Secrets;
 //             (must run before infrastructure, which uses it for at-rest enc).
 //    PHASE 6  Infrastructure persistence (DbContext + configured EF provider).
 //    PHASE 7  Cross-cutting middleware-shaped services (CORS, auth/JWT).
-//    PHASE 8  Domain services (chat, agents, channels, threads, tasks,
+//    PHASE 8  Domain services (chat, agents, channels, threads,
 //             permissions, env editor, …) and host-side module bridges.
-//    PHASE 9  Task runtime + trigger host + host metric probes.
+//    PHASE 9  Cross-cutting domain services.
 //    PHASE 10 Module system services (registry, dispatcher, health checks,
 //             config store, execution context).
 //    PHASE 11 Bundled-module discovery + per-module ConfigureServices.
@@ -199,10 +189,6 @@ var executionDiagnostics = new ExecutionDiagnosticStore(
     durableRecords,
     durableCursors,
     artifactStore);
-var taskDiagnosticState = new TaskDiagnosticStateStore(
-    durableOptions.RootDirectory,
-    DurableStorageKeyDerivation.Derive(encryptionKey, "task-state"),
-    artifactStore);
 var durableMaintenanceOptions = new DurableStorageMaintenanceOptions
 {
     Interval = TimeSpan.FromMinutes(earlyConfiguration.GetValue(
@@ -213,12 +199,6 @@ var durableMaintenanceOptions = new DurableStorageMaintenanceOptions
         JobLogAge = TimeSpan.FromDays(earlyConfiguration.GetValue(
             "DurableStorage:Retention:JobLogDays",
             30)),
-        TaskLogAge = TimeSpan.FromDays(earlyConfiguration.GetValue(
-            "DurableStorage:Retention:TaskLogDays",
-            30)),
-        TaskOutputAge = TimeSpan.FromDays(earlyConfiguration.GetValue(
-            "DurableStorage:Retention:TaskOutputDays",
-            90)),
         ProcessLogAge = TimeSpan.FromDays(earlyConfiguration.GetValue(
             "DurableStorage:Retention:ProcessLogDays",
             14)),
@@ -243,9 +223,6 @@ var durableMaintenanceOptions = new DurableStorageMaintenanceOptions
         1024L * 1024 * 1024),
     MaximumArtifactDeletesPerRun = earlyConfiguration.GetValue(
         "DurableStorage:Retention:MaximumArtifactDeletesPerRun",
-        10_000),
-    MaximumTaskStateDeletesPerRun = earlyConfiguration.GetValue(
-        "DurableStorage:Retention:MaximumTaskStateDeletesPerRun",
         10_000),
     ArtifactOrphanGraceAge = TimeSpan.FromHours(earlyConfiguration.GetValue(
         "DurableStorage:Retention:ArtifactOrphanGraceHours",
@@ -311,7 +288,6 @@ try
     builder.Services.AddSingleton(artifactStore);
     builder.Services.AddSingleton(executionDiagnostics);
     builder.Services.AddSingleton<SharpClawLogReader>();
-    builder.Services.AddSingleton(taskDiagnosticState);
     builder.Services.AddSingleton(durableMaintenanceOptions);
     builder.Services.AddSingleton(backendInstancePaths);
     builder.Services.AddSingleton(backendInstanceLock);
@@ -425,10 +401,6 @@ try
     builder.Services.AddSingleton<ChatProviderExecutionWorkflowEngine>();
     builder.Services.AddSingleton<ChatStreamingResponseEngine>();
     builder.Services.AddSingleton<ModuleJobToolExecutor>();
-    builder.Services.AddSingleton<TaskPreflightEngine>();
-    builder.Services.AddSingleton<TaskAdministrationWorkflowEngine>();
-    builder.Services.AddSingleton<TaskHostBridgeWorkflowEngine>();
-    builder.Services.AddSingleton<TaskTriggerBindingPlanner>();
     builder.Services.AddSingleton<ToolAwarenessSetEngine>();
     builder.Services.AddSingleton<ToolAwarenessAdministrationEngine>();
 
@@ -486,30 +458,11 @@ try
     builder.Services.AddSingleton<ThreadActivitySignal>();
     builder.Services.AddScoped<RoleService>();
 
-    // ──────── PHASE 9 ──── Task runtime + trigger host + host metric probes
-    builder.Services.AddScoped<EfTaskPreflightHost>();
-    builder.Services.AddScoped<TaskPreflightChecker>();
-    builder.Services.AddScoped<TaskTriggerRegistrar>();
-    builder.Services.AddScoped<EfTaskAdministrationHost>();
-    builder.Services.AddScoped<TaskService>();
-    builder.Services.AddScoped<ITaskAuthoring>(sp => sp.GetRequiredService<TaskService>());
-    builder.Services.AddScoped<ITaskInstanceLauncher, TaskInstanceLauncher>();
+    // ──────── PHASE 9 ──── Cross-cutting domain services
     builder.Services.AddScoped<IGlobalFlagEvaluator, GlobalFlagEvaluator>();
     builder.Services.AddScoped<EnvFileService>();
-    builder.Services.AddScoped<TaskStartupPreparationEngine>();
-    builder.Services.AddScoped<TaskPlanExecutionEngine>();
-    builder.Services.AddScoped<TaskOrchestrator>();
-    builder.Services.AddScoped<IHostAgentBridge, HostAgentBridge>();
-    builder.Services.AddSingleton<ForeignModuleTaskContextRegistry>();
-    builder.Services.AddSingleton<TaskRuntimeRegistry>();
-    builder.Services.AddSingleton<TaskRuntimeHost>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskRuntimeHost>());
     // Trigger host service + built-in sources
-    builder.Services.AddSingleton<TaskTriggerHostService>();
-    builder.Services.AddHostedService(sp => sp.GetRequiredService<TaskTriggerHostService>());
-    builder.Services.AddSingleton<ITaskTriggerSourceRegistry, TaskTriggerSourceRegistry>();
     // Host-side metric probes consumed by the Metrics module's built-in providers.
-    builder.Services.AddSingleton<IHostQueueMetrics, HostQueueMetrics>();
 
     // ──────── PHASE 10 ─── Module system services ──────────────────────────
     // Registry, dispatcher, metrics, health checks, and per-request execution
@@ -914,23 +867,6 @@ try
         }
     }
     app.MapForeignModuleEndpoints(registry);
-
-    // Webhook trigger routes — registered lazily after ApplicationStarted so
-    // that TaskTriggerHostService has loaded its first binding set.  The
-    // WebhookRouteRegistry holds an IRouteBuilder reference and rebinds
-    // routes whenever a webhook trigger source's binding set changes.
-    if (app.Services.GetService<IWebhookTriggerHost>() is { } webhookSource)
-    {
-        var webhookRegistry = new WebhookRouteRegistry(
-            app,
-            webhookSource,
-            app.Services.GetRequiredService<Microsoft.Extensions.Logging.ILogger<WebhookRouteRegistry>>());
-        webhookSource.SetRouteRegistrar(webhookRegistry);
-    }
-    else
-    {
-        startupLogger.Information("No webhook trigger host registered - dynamic webhook routes disabled");
-    }
 
     // ──────── PHASE 22 ─── Shutdown registrations ─────────────────────────
     // Two ApplicationStopping hooks: one for host-side cleanup (api key,

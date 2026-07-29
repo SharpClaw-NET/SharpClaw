@@ -7,7 +7,6 @@ using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Entities.Core.Messages;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -61,9 +60,6 @@ public class SharpClawDbContext(
     public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
 
     // ── Task scripts ──────────────────────────────────────────────
-    public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
-    public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
-    public DbSet<TaskTriggerBindingDB> TaskTriggerBindings => Set<TaskTriggerBindingDB>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -331,42 +327,6 @@ public class SharpClawDbContext(
             });
 
             // ── Task definitions & instances
-        modelBuilder.Entity<TaskDefinitionDB>(e =>
-        {
-            e.HasIndex(d => d.Name).IsUnique();
-            e.HasMany(d => d.Instances)
-                .WithOne(i => i.TaskDefinition)
-                .HasForeignKey(i => i.TaskDefinitionId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasMany(d => d.TriggerBindings)
-                .WithOne(t => t.TaskDefinition)
-                .HasForeignKey(t => t.TaskDefinitionId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<TaskInstanceDB>(e =>
-        {
-            e.Property(i => i.Status).HasConversion<string>();
-            e.Property(i => i.ErrorMessage).HasMaxLength(2_048);
-            e.Property<string?>(ExecutionMetadataColumns.ErrorCode)
-                .HasMaxLength(128);
-            e.Property<DiagnosticCompleteness>(
-                    ExecutionMetadataColumns.DiagnosticCompleteness)
-                .HasConversion<string>();
-            e.Property<long?>(ExecutionMetadataColumns.FinalLogSequence);
-            e.Property<long>(ExecutionMetadataColumns.LogRecordCount);
-            e.Property<long?>(ExecutionMetadataColumns.FinalOutputSequence);
-            e.Property<long>(ExecutionMetadataColumns.OutputRecordCount);
-            e.HasOne(i => i.Channel)
-                .WithMany()
-                .HasForeignKey(i => i.ChannelId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne<ChannelContextDB>()
-                .WithMany()
-                .HasForeignKey(i => i.ContextId)
-                .OnDelete(DeleteBehavior.SetNull);
-        });
-
         modelBuilder.Entity<ExecutionAuditEventDB>(e =>
         {
             e.Property(a => a.OwnerKind).HasConversion<string>();

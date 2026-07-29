@@ -130,8 +130,7 @@ Select the thread from the dropdown to use it. Messages in threads remember prev
 ## Step 7: Explore Advanced Features
 
 - **Roles & Permissions**: Control what agents can do
-- **Jobs**: Background tasks with approval workflows
-- **Tasks**: C# automation scripts for complex workflows
+- **Jobs**: Background agent work with approval workflows
 - **Bot Integrations**: Connect Telegram, Discord, WhatsApp bots
 - **Gateway**: Public-facing API proxy
 

@@ -290,7 +290,7 @@ Show a diff view in VS 2026 for user review (accept/reject).
 
 ### vs26_run_build
 
-Trigger a build task in the connected VS 2026 instance and return
+Trigger a build operation in the connected VS 2026 instance and return
 output.
 
 **Status:** ✅ Fully implemented (async DTE SolutionBuild with OnBuildDone event)

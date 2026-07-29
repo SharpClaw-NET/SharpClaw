@@ -6,12 +6,9 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Diagnostics;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Jobs;
-using SharpClaw.Core.Tasks.Administration;
 using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.DurableStorage;
@@ -134,117 +131,6 @@ public sealed class DurableExecutionPersistence(
         await db.SaveChangesAsync(cancellationToken);
     }
 
-    public async Task AppendTaskLogAsync(
-        TaskExecutionLog log,
-        bool saveChanges,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(log);
-        var receipt = await diagnostics.AppendTaskLogAsync(
-            log.InstanceId,
-            log.Message,
-            log.Level,
-            "TaskLifecycle",
-            recordId: log.RecordId,
-            timestamp: log.Timestamp,
-            cancellationToken: cancellationToken);
-        var instance = await FindTaskInstanceAsync(
-            log.InstanceId,
-            cancellationToken);
-        if (instance is not null)
-        {
-            SetTaskLogSummary(instance, receipt.Sequence, receipt.RecordCount);
-            SetShadow(
-                instance,
-                ExecutionMetadataColumns.DiagnosticCompleteness,
-                DiagnosticCompleteness.Complete);
-        }
-
-        if (saveChanges)
-            await db.SaveChangesAsync(cancellationToken);
-    }
-
-    public async Task AppendTaskOutputAsync(
-        TaskOutputEmission output,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(output);
-        var receipt = await diagnostics.AppendTaskOutputAsync(
-            output.InstanceId,
-            output.Data ?? string.Empty,
-            recordId: output.RecordId,
-            timestamp: output.Timestamp,
-            cancellationToken: cancellationToken);
-        var instance = await FindTaskInstanceAsync(
-            output.InstanceId,
-            cancellationToken);
-        if (instance is null)
-            return;
-
-        SetShadow(
-            instance,
-            ExecutionMetadataColumns.FinalOutputSequence,
-            receipt.Sequence);
-        SetShadow(
-            instance,
-            ExecutionMetadataColumns.OutputRecordCount,
-            receipt.RecordCount);
-        SetShadow(
-            instance,
-            ExecutionMetadataColumns.DiagnosticCompleteness,
-            DiagnosticCompleteness.Complete);
-    }
-
-    public IReadOnlyList<Guid> PrepareTaskState()
-    {
-        var changed = db.ChangeTracker.Entries<TaskInstanceDB>()
-            .Where(entry => entry.State
-                is EntityState.Added or EntityState.Modified)
-            .ToArray();
-        foreach (var entry in changed)
-        {
-            if (!string.IsNullOrWhiteSpace(entry.Entity.ErrorMessage))
-            {
-                entry.Entity.ErrorMessage = BoundUtf8(
-                    entry.Entity.ErrorMessage,
-                    ErrorMessageBytes);
-                SetShadow(
-                    entry.Entity,
-                    ExecutionMetadataColumns.ErrorCode,
-                    "task_execution_failed");
-            }
-
-            SetShadow(
-                entry.Entity,
-                ExecutionMetadataColumns.DiagnosticCompleteness,
-                DiagnosticCompleteness.Complete);
-            TrackStateAudit(
-                Guid.NewGuid(),
-                ExecutionOwnerKind.TaskInstance,
-                entry.Entity.Id,
-                entry.State == EntityState.Added
-                    ? null
-                    : entry.Property(instance => instance.Status)
-                        .OriginalValue.ToString(),
-                entry.Entity.Status.ToString());
-        }
-
-        return changed
-            .Where(entry => IsTerminal(entry.Entity.Status))
-            .Select(entry => entry.Entity.Id)
-            .Distinct()
-            .ToArray();
-    }
-
-    public async Task SealTaskDiagnosticsAsync(
-        IEnumerable<Guid> instanceIds,
-        CancellationToken cancellationToken)
-    {
-        ArgumentNullException.ThrowIfNull(instanceIds);
-        foreach (var instanceId in instanceIds.Distinct())
-            await diagnostics.SealTaskAsync(instanceId, cancellationToken);
-    }
-
     public AgentJobDetailResponse ToJobDetail(
         AgentJobDB job,
         ChannelCostResponse? channelCost = null)
@@ -309,43 +195,6 @@ public sealed class DurableExecutionPersistence(
             job.WorkingDirectory,
             usage,
             channelCost);
-    }
-
-    public TaskInstanceDetailResponse ToTaskDetail(
-        TaskInstanceDB instance,
-        string taskName,
-        ChannelCostResponse? channelCost = null)
-    {
-        ArgumentNullException.ThrowIfNull(instance);
-        var values = db.Entry(instance).CurrentValues;
-        return new TaskInstanceDetailResponse(
-            instance.Id,
-            instance.TaskDefinitionId,
-            taskName,
-            instance.Status,
-            GetShadow<string?>(values, ExecutionMetadataColumns.ErrorCode),
-            instance.ErrorMessage,
-            GetShadow<DiagnosticCompleteness>(
-                values,
-                ExecutionMetadataColumns.DiagnosticCompleteness),
-            GetShadow<long?>(
-                values,
-                ExecutionMetadataColumns.FinalLogSequence),
-            GetShadow<long>(
-                values,
-                ExecutionMetadataColumns.LogRecordCount),
-            GetShadow<long?>(
-                values,
-                ExecutionMetadataColumns.FinalOutputSequence),
-            GetShadow<long>(
-                values,
-                ExecutionMetadataColumns.OutputRecordCount),
-            instance.CreatedAt,
-            instance.StartedAt,
-            instance.CompletedAt,
-            instance.ChannelId,
-            channelCost,
-            instance.ContextId);
     }
 
     private async Task PersistResultAsync(
@@ -422,17 +271,6 @@ public sealed class DurableExecutionPersistence(
             descriptor.Preview);
     }
 
-    private async Task<TaskInstanceDB?> FindTaskInstanceAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken)
-    {
-        return db.TaskInstances.Local
-                   .FirstOrDefault(candidate => candidate.Id == instanceId)
-            ?? await db.TaskInstances.FirstOrDefaultAsync(
-                candidate => candidate.Id == instanceId,
-                cancellationToken);
-    }
-
     private void SetJobLogSummary(
         AgentJobDB job,
         long sequence,
@@ -443,21 +281,6 @@ public sealed class DurableExecutionPersistence(
             ExecutionMetadataColumns.FinalLogSequence,
             sequence);
         SetShadow(job, ExecutionMetadataColumns.LogRecordCount, count);
-    }
-
-    private void SetTaskLogSummary(
-        TaskInstanceDB instance,
-        long sequence,
-        long count)
-    {
-        SetShadow(
-            instance,
-            ExecutionMetadataColumns.FinalLogSequence,
-            sequence);
-        SetShadow(
-            instance,
-            ExecutionMetadataColumns.LogRecordCount,
-            count);
     }
 
     private void TrackJobAudit(AgentJobDB job, Guid decisionId)
@@ -540,11 +363,6 @@ public sealed class DurableExecutionPersistence(
         or AgentJobStatus.Failed
         or AgentJobStatus.Denied
         or AgentJobStatus.Cancelled;
-
-    private static bool IsTerminal(TaskInstanceStatus status) => status is
-        TaskInstanceStatus.Completed
-        or TaskInstanceStatus.Failed
-        or TaskInstanceStatus.Cancelled;
 
     private static string? BoundUtf8(string? value, int maxBytes)
     {

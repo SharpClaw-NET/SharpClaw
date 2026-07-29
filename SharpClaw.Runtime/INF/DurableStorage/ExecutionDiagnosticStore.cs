@@ -2,7 +2,6 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Json;
 using SharpClaw.Contracts.DTOs.Diagnostics;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Shared.DurableStorage;
 
@@ -58,87 +57,6 @@ public sealed class ExecutionDiagnosticStore(
             cancellationToken).ConfigureAwait(false);
     }
 
-    public async ValueTask<DurableAppendReceipt> AppendTaskLogAsync(
-        Guid instanceId,
-        string message,
-        string level,
-        string eventName = "TaskDiagnostic",
-        string? exceptionType = null,
-        string? correlationId = null,
-        Guid? recordId = null,
-        DateTimeOffset? timestamp = null,
-        CancellationToken cancellationToken = default)
-    {
-        return await AppendOwnerLogAsync(
-            DurableStreamKey.TaskLog(instanceId),
-            ExecutionOwnerKind.TaskInstance,
-            instanceId,
-            message,
-            level,
-            eventName,
-            exceptionType,
-            correlationId,
-            recordId,
-            timestamp,
-            DurableWriteMode.Durable,
-            cancellationToken).ConfigureAwait(false);
-    }
-
-    public async ValueTask<DurableAppendReceipt> AppendTaskOutputAsync(
-        Guid instanceId,
-        string data,
-        string mediaType = "application/json",
-        Guid? recordId = null,
-        DateTimeOffset? timestamp = null,
-        CancellationToken cancellationToken = default)
-    {
-        ArgumentNullException.ThrowIfNull(data);
-        var idempotent = recordId is { } suppliedId && suppliedId != Guid.Empty;
-        var resolvedRecordId = idempotent ? recordId!.Value : Guid.NewGuid();
-        var externalize = Encoding.UTF8.GetByteCount(data) > InlineOutputBytes;
-        if (idempotent && externalize)
-        {
-            var existing = await records.FindIdempotentAppendAsync(
-                    DurableStreamKey.TaskOutput(instanceId),
-                    resolvedRecordId,
-                    cancellationToken)
-                .ConfigureAwait(false);
-            if (existing is not null)
-                return existing;
-        }
-        DurableArtifactReference? artifactReference = null;
-        var storedData = data;
-        if (externalize)
-        {
-            await using var content = new MemoryStream(
-                Encoding.UTF8.GetBytes(data),
-                writable: false);
-            var descriptor = await artifacts.PutAsync(
-                content,
-                new ArtifactWriteRequest(
-                    ExecutionOwnerKind.TaskInstance,
-                    instanceId,
-                    mediaType,
-                    BoundPreview(data)),
-                cancellationToken).ConfigureAwait(false);
-            artifactReference = ToArtifactReference(descriptor);
-            storedData = BoundPreview(data);
-        }
-
-        return await records.AppendAsync(
-            DurableStreamKey.TaskOutput(instanceId),
-            new DurableRecordWrite(
-                resolvedRecordId,
-                timestamp ?? DateTimeOffset.UtcNow,
-                "Information",
-                "TaskOutput",
-                storedData,
-                Artifact: artifactReference,
-                Idempotent: idempotent),
-            DurableWriteMode.Durable,
-            cancellationToken).ConfigureAwait(false);
-    }
-
     public ValueTask<DurableLogPageResponse> ReadJobLogsAsync(
         Guid jobId,
         string? cursor,
@@ -146,17 +64,6 @@ public sealed class ExecutionDiagnosticStore(
         CancellationToken cancellationToken = default) =>
         ReadLogsAsync(
             DurableStreamKey.Job(jobId),
-            cursor,
-            query,
-            cancellationToken);
-
-    public ValueTask<DurableLogPageResponse> ReadTaskLogsAsync(
-        Guid instanceId,
-        string? cursor,
-        DurableLogQuery query,
-        CancellationToken cancellationToken = default) =>
-        ReadLogsAsync(
-            DurableStreamKey.TaskLog(instanceId),
             cursor,
             query,
             cancellationToken);
@@ -185,99 +92,15 @@ public sealed class ExecutionDiagnosticStore(
             query,
             cancellationToken);
 
-    public async ValueTask<TaskOutputPageResponse> ReadTaskOutputsAsync(
-        Guid instanceId,
-        string? cursor,
-        int take,
-        int maxBytes,
-        CancellationToken cancellationToken = default)
-    {
-        var stream = DurableStreamKey.TaskOutput(instanceId);
-        var query = new DurableLogQuery(take, maxBytes);
-        var fingerprint = BuildFilterFingerprint(query);
-        var (nextSequence, throughSequence) = DecodeCursor(
-            stream,
-            cursor,
-            fingerprint);
-        var page = await records.ReadAsync(
-            stream,
-            nextSequence,
-            ToReadOptions(query, throughSequence),
-            cancellationToken).ConfigureAwait(false);
-        var nextCursor = EncodeNextCursor(stream, page, fingerprint);
-        return new TaskOutputPageResponse(
-            page.Records.Select(record => new TaskOutputRecordResponse(
-                record.Sequence,
-                record.Timestamp,
-                record.Message,
-                ToArtifactResponse(record.Artifact))).ToArray(),
-            nextCursor,
-            page.HasMore,
-            page.Records.Count,
-            page.ReturnedBytes,
-            page.SnapshotLastSequence,
-            page.FirstAvailableSequence,
-            page.ExpiredRecordCount);
-    }
-
-    public async ValueTask<TaskOutputRecordResponse?> ReadLatestTaskOutputAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken = default)
-    {
-        var stream = DurableStreamKey.TaskOutput(instanceId);
-        var summary = await records.GetSummaryAsync(stream, cancellationToken)
-            .ConfigureAwait(false);
-        if (summary.LastSequence is not { } sequence)
-            return null;
-
-        var page = await records.ReadAsync(
-            stream,
-            sequence,
-            new DurableReadOptions(Take: 1, MaxBytes: 1_048_576),
-            cancellationToken).ConfigureAwait(false);
-        var record = page.Records.SingleOrDefault();
-        return record is null
-            ? null
-            : new TaskOutputRecordResponse(
-                record.Sequence,
-                record.Timestamp,
-                record.Message,
-                ToArtifactResponse(record.Artifact));
-    }
-
     public ValueTask<DurableStreamSummary> GetJobLogSummaryAsync(
         Guid jobId,
         CancellationToken cancellationToken = default) =>
         records.GetSummaryAsync(DurableStreamKey.Job(jobId), cancellationToken);
 
-    public ValueTask<DurableStreamSummary> GetTaskLogSummaryAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken = default) =>
-        records.GetSummaryAsync(DurableStreamKey.TaskLog(instanceId), cancellationToken);
-
-    public ValueTask<DurableStreamSummary> GetTaskOutputSummaryAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken = default) =>
-        records.GetSummaryAsync(DurableStreamKey.TaskOutput(instanceId), cancellationToken);
-
     public ValueTask SealJobAsync(
         Guid jobId,
         CancellationToken cancellationToken = default) =>
         records.SealAsync(DurableStreamKey.Job(jobId), cancellationToken);
-
-    public async ValueTask SealTaskAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken = default)
-    {
-        await records.SealAsync(
-                DurableStreamKey.TaskLog(instanceId),
-                cancellationToken)
-            .ConfigureAwait(false);
-        await records.SealAsync(
-                DurableStreamKey.TaskOutput(instanceId),
-                cancellationToken)
-            .ConfigureAwait(false);
-    }
 
     public DurableStorageSnapshot GetSnapshot() => records.GetSnapshot();
 

@@ -50,7 +50,7 @@
         <local:TerminalSectionHeader Title="Agents" Margin="0,16,0,6" />
         <local:TerminalMenuButton TagKey="Agents"        Label="Agents"         Description="agent profiles &amp; configuration" MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
         <local:TerminalMenuButton TagKey="Roles"         Label="Roles"          Description="permission sets &amp; clearance"    MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
-        <local:TerminalMenuButton TagKey="Jobs"          Label="Jobs"           Description="async agent tasks"            MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
+        <local:TerminalMenuButton TagKey="Jobs"          Label="Jobs"           Description="async agent work"            MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
 
         <local:TerminalSectionHeader Title="Chat" Margin="0,16,0,6" />
         <local:TerminalMenuButton TagKey="Channels"      Label="Channels"       Description="chat channels &amp; threads"       MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />

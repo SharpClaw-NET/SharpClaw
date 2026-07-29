@@ -15,7 +15,6 @@ using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.ModuleHost.InProcess;
@@ -223,7 +222,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         ForwardHostSingleton<IConfiguration>(hostServices, services);
 
         module.ConfigureServices(services);
-        RegisterTaskOperationDescriptorProviders(services, moduleAssembly);
         RegisterHostCapabilities(services, module.Id, hostServices);
 
         return services.BuildServiceProvider();
@@ -281,10 +279,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         ForwardHostScoped<IForeignModuleProtocolContractResolver>(services);
         ForwardHostScoped<IThreadResolver>(services);
         ForwardHostScoped<IGlobalFlagEvaluator>(services);
-        ForwardHostScoped<ITaskAuthoring>(services);
-        ForwardHostScoped<ITaskInstanceLauncher>(services);
-        ForwardHostScoped<IHostAgentBridge>(services);
-        ForwardHostScoped<IHostQueueMetrics>(services);
         ForwardHostScoped<ICliIdResolver>(services);
         ForwardHostScoped<ISharpClawEventSinkRegistry>(services);
     }
@@ -311,26 +305,8 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         services.RemoveAll<IForeignModuleProtocolContractResolver>();
         services.RemoveAll<IThreadResolver>();
         services.RemoveAll<IGlobalFlagEvaluator>();
-        services.RemoveAll<ITaskAuthoring>();
-        services.RemoveAll<ITaskInstanceLauncher>();
-        services.RemoveAll<IHostAgentBridge>();
-        services.RemoveAll<IHostQueueMetrics>();
         services.RemoveAll<ICliIdResolver>();
         services.RemoveAll<ISharpClawEventSinkRegistry>();
-    }
-
-    private static void RegisterTaskOperationDescriptorProviders(
-        IServiceCollection services,
-        Assembly assembly)
-    {
-        foreach (var providerType in assembly.GetTypes()
-                     .Where(type => !type.IsAbstract
-                                    && !type.IsInterface
-                                    && typeof(ITaskOperationDescriptorProvider).IsAssignableFrom(type)
-                                    && type.GetConstructor(Type.EmptyTypes) is not null))
-        {
-            services.AddSingleton(typeof(ITaskOperationDescriptorProvider), providerType);
-        }
     }
 
     private static void ForwardHostSingleton<T>(

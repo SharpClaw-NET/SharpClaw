@@ -481,7 +481,7 @@ Solutions to common SharpClaw issues.
 
 If your issue isn't listed here:
 
-- Check the **[jobs]** or **[tasks]** logs for detailed error messages
+- Check the **[jobs]** logs for detailed error messages
 - View backend/gateway process logs in Settings → Gateway
 - Report bugs via the **Report Issue** button (sidebar footer)
 - Join the Matrix community for real-time help

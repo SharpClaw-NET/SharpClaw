@@ -34,17 +34,6 @@ public sealed class GatewayEndpointOptions
     public bool Cost { get; set; }
 
     /// <summary>
-    /// Scheduler REST surface (<c>/api/tasks</c>). Default off. Pairs with
-    /// <see cref="TaskStreaming"/> for the SSE side.
-    /// </summary>
-    public bool Tasks { get; set; }
-
-    /// <summary>
-    /// Scheduler SSE surface (<c>/api/tasks/.../stream</c>). Default off.
-    /// </summary>
-    public bool TaskStreaming { get; set; }
-
-    /// <summary>
     /// Tool awareness set CRUD (<c>/api/toolawarenesssets</c>). Default off.
     /// </summary>
     public bool ToolAwarenessSets { get; set; }
@@ -110,8 +99,6 @@ public sealed class GatewayEndpointOptions
             nameof(Roles) => Roles,
             nameof(Users) => Users,
             nameof(Cost) => Cost,
-            nameof(Tasks) => Tasks,
-            nameof(TaskStreaming) => TaskStreaming,
             nameof(ToolAwarenessSets) => ToolAwarenessSets,
             nameof(Resources) => Resources,
             nameof(ThreadWatch) => ThreadWatch,

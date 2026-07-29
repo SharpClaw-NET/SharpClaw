@@ -76,8 +76,8 @@ public sealed class ExecutionArtifactStoreTests
         Func<Task> wrongOwner = async () =>
             _ = await store.OpenReadAsync(
                 descriptor.Id,
-                ExecutionOwnerKind.TaskInstance,
-                ownerId);
+                ExecutionOwnerKind.AgentJob,
+                Guid.NewGuid());
         await wrongOwner.Should().ThrowAsync<UnauthorizedAccessException>();
 
         var wrongKeyStore = new ExecutionArtifactStore(
@@ -204,15 +204,14 @@ public sealed class ExecutionArtifactStoreTests
                          FileAccess.Write,
                          FileShare.None))
         {
-            file.Position = 24;
-            await file.WriteAsync(BitConverter.GetBytes(
-                (int)ExecutionOwnerKind.TaskInstance));
+            file.Position = 28;
+            await file.WriteAsync(new byte[] { 0x01 });
         }
 
         Func<Task> tamperedHeader = async () =>
             _ = await store.OpenReadAsync(
                 headerDescriptor.Id,
-                ExecutionOwnerKind.TaskInstance,
+                ExecutionOwnerKind.AgentJob,
                 ownerId);
         await tamperedHeader.Should().ThrowAsync<CryptographicException>();
 
@@ -222,14 +221,22 @@ public sealed class ExecutionArtifactStoreTests
         encoded[^1] ^= 0x20;
         await File.WriteAllBytesAsync(cipherPath, encoded);
 
-        await using var handle = await store.OpenReadAsync(
+        var handle = await store.OpenReadAsync(
             cipherDescriptor.Id,
             ExecutionOwnerKind.AgentJob,
             ownerId);
-        handle.Should().NotBeNull();
-        Func<Task> tamperedCiphertext = async () =>
-            _ = await ReadAllAsync(handle!.Content);
-        await tamperedCiphertext.Should().ThrowAsync<CryptographicException>();
+        try
+        {
+            handle.Should().NotBeNull();
+            Func<Task> tamperedCiphertext = async () =>
+                _ = await ReadAllAsync(handle!.Content);
+            await tamperedCiphertext.Should().ThrowAsync<CryptographicException>();
+        }
+        finally
+        {
+            if (handle is not null)
+                handle.Content.Dispose();
+        }
     }
 
     [Test]
@@ -243,7 +250,6 @@ public sealed class ExecutionArtifactStoreTests
 
         var result = await store.ApplyRetentionAsync(
             new HashSet<Guid> { protectedArtifact.Id },
-            TimeSpan.FromTicks(1),
             TimeSpan.FromTicks(1),
             TimeSpan.FromTicks(1),
             long.MaxValue,
@@ -275,7 +281,6 @@ public sealed class ExecutionArtifactStoreTests
             new HashSet<Guid>(),
             TimeSpan.FromDays(1),
             TimeSpan.FromDays(1),
-            TimeSpan.FromDays(1),
             maximumEncodedBytes: 0,
             minimumFreeBytes: 0,
             maximumDeletes: 10);
@@ -300,7 +305,6 @@ public sealed class ExecutionArtifactStoreTests
 
         var result = await store.ApplyRetentionAsync(
             new HashSet<Guid>(),
-            TimeSpan.FromDays(30),
             TimeSpan.FromDays(30),
             TimeSpan.FromMilliseconds(1),
             maximumEncodedBytes: 0,

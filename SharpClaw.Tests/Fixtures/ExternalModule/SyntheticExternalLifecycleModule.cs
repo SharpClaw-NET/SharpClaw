@@ -4,7 +4,6 @@ using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Contracts.Tasks;
 
 namespace SharpClaw.TestFixtures.ExternalModule;
 
@@ -20,7 +19,6 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
     public const string ResourceType = "SharpClaw.SyntheticExternal.Resource";
     public const string DefaultResourceKey = "synthetic_external_resource";
     public const string DelegateName = "UseSyntheticExternalResourceAsync";
-    public const string TriggerKey = "synthetic_external_schedule";
     public const string ChatText = "external provider response";
 
     public string Id => ModuleId;
@@ -30,7 +28,6 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
     public void ConfigureServices(IServiceCollection services)
     {
         services.AddSingleton<IProviderPlugin, SyntheticExternalProviderPlugin>();
-        services.AddSingleton<ITaskTriggerSource, SyntheticExternalTriggerSource>();
     }
 
     public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() =>
@@ -142,18 +139,6 @@ public sealed class SyntheticExternalLifecycleModule : ISharpClawCoreModule
                 3.21m,
                 "usd",
                 [new ProviderCostDailyBucket(startTime, endTime ?? startTime.AddDays(1), 3.21m)]));
-    }
-
-    private sealed class SyntheticExternalTriggerSource : ITaskTriggerSource
-    {
-        public string? TriggerKey => SyntheticExternalLifecycleModule.TriggerKey;
-
-        public Task StartAsync(
-            IReadOnlyList<ITaskTriggerSourceContext> contexts,
-            CancellationToken ct) =>
-            Task.CompletedTask;
-
-        public Task StopAsync() => Task.CompletedTask;
     }
 
     private sealed class SyntheticExternalProviderClient : IProviderApiClient

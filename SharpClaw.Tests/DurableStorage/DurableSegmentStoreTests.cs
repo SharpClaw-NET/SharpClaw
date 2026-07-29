@@ -115,7 +115,7 @@ public sealed class DurableSegmentStoreTests
     {
         var root = CreateRoot();
         await using var store = CreateStore(root);
-        var key = DurableStreamKey.TaskLog(Guid.NewGuid());
+        var key = DurableStreamKey.Job(Guid.NewGuid());
 
         for (var index = 0; index < 5; index++)
             await store.AppendAsync(key, Record(RandomMessage("skip")));
@@ -189,7 +189,7 @@ public sealed class DurableSegmentStoreTests
     public async Task IdempotentAppend_SurvivesRestartWithoutDuplicatingTheRecord()
     {
         var root = CreateRoot();
-        var key = DurableStreamKey.TaskOutput(Guid.NewGuid());
+        var key = DurableStreamKey.Job(Guid.NewGuid());
         var record = Record("exactly-once") with { Idempotent = true };
 
         await using (var first = CreateStore(root))
@@ -588,8 +588,6 @@ public sealed class DurableSegmentStoreTests
         var result = await store.ApplyRetentionAsync(new DurableRetentionOptions
         {
             JobLogAge = TimeSpan.FromDays(1),
-            TaskLogAge = TimeSpan.FromDays(30),
-            TaskOutputAge = TimeSpan.FromDays(30),
             ProcessLogAge = TimeSpan.FromDays(30),
             ModuleLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
@@ -613,7 +611,7 @@ public sealed class DurableSegmentStoreTests
     public async Task ArtifactReferenceIndex_TracksRetainedRecordsAndPrunesExpiredPrefixes()
     {
         var root = CreateRoot();
-        var key = DurableStreamKey.TaskOutput(Guid.NewGuid());
+        var key = DurableStreamKey.Job(Guid.NewGuid());
         var artifactId = Guid.NewGuid();
         await using var store = CreateStore(root);
         await store.AppendAsync(
@@ -635,9 +633,7 @@ public sealed class DurableSegmentStoreTests
 
         await store.ApplyRetentionAsync(new DurableRetentionOptions
         {
-            JobLogAge = TimeSpan.FromDays(30),
-            TaskLogAge = TimeSpan.FromDays(30),
-            TaskOutputAge = TimeSpan.FromDays(1),
+            JobLogAge = TimeSpan.FromDays(1),
             ProcessLogAge = TimeSpan.FromDays(30),
             ModuleLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,
@@ -664,8 +660,6 @@ public sealed class DurableSegmentStoreTests
         var result = await recovered.ApplyRetentionAsync(new DurableRetentionOptions
         {
             JobLogAge = TimeSpan.FromDays(1),
-            TaskLogAge = TimeSpan.FromDays(30),
-            TaskOutputAge = TimeSpan.FromDays(30),
             ProcessLogAge = TimeSpan.FromDays(30),
             ModuleLogAge = TimeSpan.FromDays(30),
             MaximumEncodedBytes = long.MaxValue,

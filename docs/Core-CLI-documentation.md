@@ -1,4 +1,4 @@
-﻿# SharpClaw Core CLI Reference
+# SharpClaw Core CLI Reference
 
 The SharpClaw CLI is an interactive REPL that runs alongside the API server
 inside the same process. You interact with it on the terminal where you
@@ -22,7 +22,6 @@ that back the REST API — there is no HTTP round-trip.
 - [Thread](#thread)
 - [Chat](#chat)
 - [Job](#job)
-- [Task](#task)
 - [Role](#role)
 - [User](#user)
 - [Bio](#bio)
@@ -62,7 +61,7 @@ Four pieces of state persist across commands within a single run:
 | State | Set by | Cleared by | Used implicitly by |
 |---|---|---|---|
 | Current user / user ID | `login`, `register` | `logout` | All non-public commands |
-| Current channel | `channel add`, `channel select` | `channel delete` (if active), `logout` | `chat`, `thread list/add`, `job list`, `task start` |
+| Current channel | `channel add`, `channel select` | `channel delete` (if active), `logout` | `chat`, `thread list/add`, `job list` |
 | Current thread | `thread select` | `thread deselect`, `thread delete` (if active), `channel select` | `chat` |
 | Chat mode | `chat toggle` | `!exit`, `!chat toggle` | All input |
 
@@ -341,7 +340,7 @@ wildcard grant. Valid keys:
 
 `safeshell`, `dangshell` / `dangerousshell`, `container`, `website`,
 `search` / `searchengine`, `internaldb`, `externaldb`,
-`displaydevice` / `display`, `agent`, `task`, `skill`,
+`displaydevice` / `display`, `agent`, `skill`,
 `editorsession` / `editor`.
 
 ---
@@ -545,94 +544,6 @@ or CLI command when one exists.
 
 ---
 
-## Task
-
-Tasks are user-defined C# scripts compiled and run as managed background
-processes. There are two layers: **definitions** (the compiled source) and
-**instances** (running executions).
-
-### Definitions
-
-```
-task create <sourceFilePath>
-```
-Reads and validates the `.cs` file. Diagnostics (line, column, severity,
-message) are printed before upload if validation fails.
-
-```
-task list
-task get <id>
-task update <id> <sourceFilePath>
-task activate <id>
-task deactivate <id>
-task delete <id>
-task preflight <taskId> [--param key=value ...]
-```
-
-`preflight` evaluates declared requirements without creating an instance.
-This is also the fastest way to diagnose module-backed triggers registered by
-the current bundled or external module set.
-
-### Instances
-
-```
-task start <taskId> [channelId] [--param key=value ...]
-task run <taskId> [channelId] [--param key=value ...]
-```
-`run` is an alias for `start`. Uses the active channel if `channelId` is
-omitted. Multiple `--param` flags may be supplied.
-
-```
-task create-queued <taskId> [channelId] [--param key=value ...]
-```
-Creates a queued instance without starting it immediately.
-
-```
-task start-instance <instanceId>
-```
-Starts an existing queued instance.
-
-```
-task instances <taskId>
-task instance <instanceId>
-task outputs <instanceId> [--since <timestamp>]
-task cancel <instanceId>
-task stop <instanceId>
-task pause <instanceId>
-task resume <instanceId>
-```
-
-```
-task listen <instanceId>
-```
-Streams live task output events to the terminal. Event types: `[output]`,
-`[log]`, `[status]`, `[done]`. Press Ctrl+C to stop listening without
-stopping the instance.
-
-### Scheduling, triggers, and shortcuts
-
-```text
-task schedule list
-task schedule get <jobId>
-task schedule create <taskId> --cron <expr> [--timezone <tz>] [--name <name>]
-task schedule update <jobId> --cron <expr> [--timezone <tz>]
-task schedule pause <jobId>
-task schedule resume <jobId>
-task schedule delete <jobId>
-task schedule preview <expr> [--timezone <tz>] [--count N]
-task trigger-sources
-task triggers enable <taskId>
-task triggers disable <taskId>
-task shortcuts install <taskId>
-task shortcuts remove <taskId>
-```
-
-Use `task schedule preview` before creating a cron entry if you want to inspect
-the next few fire times. Use `task trigger-sources` to discover built-in and
-custom trigger sources available on the current host.
-
----
-
 ## Role
 
 ```
@@ -683,7 +594,7 @@ grant (all resources of that type).
 
 `--dangerous-shell`, `--safe-shell`, `--container`, `--website`,
 `--search-engine`, `--internal-db`, `--external-db`, `--input-audio`,
-`--agent`, `--task`, `--skill`
+`--agent`, `--skill`
 
 Clearance values (ascending): `Unset`, `ApprovedBySameLevelUser`,
 `ApprovedByWhitelistedUser`, `ApprovedByPermittedAgent`,

@@ -25,7 +25,6 @@ public sealed partial class MainPage : Page
     private Guid? _selectedJobId;
     private bool _pendingNewThread;
     private bool _settingsMode;
-    private bool _tasksMode;
     private bool _jobsMode;
     private bool _isSending;
     private bool _isThreadBusy;
@@ -82,29 +81,6 @@ public sealed partial class MainPage : Page
     private readonly List<ComboBoxItem> _jobItemPool = [];
     private int _jobItemPoolUsed;
     private readonly ComboBoxItem _jobNoSelItem = new() { Content = "(none — show chat)" };
-
-    // ── Task view state ──
-    private List<TaskDefinitionDto> _taskDefinitions = [];
-    private Guid? _selectedTaskDefinitionId;
-    private Guid? _selectedTaskInstanceId;
-    private TaskInstanceDetailDto? _currentTaskDetail;
-    private IReadOnlyList<TaskLogDto> _currentTaskLogs = [];
-    private TaskOutputRecordDto? _currentTaskOutput;
-    private bool _suppressTaskDefSelection;
-    private bool _suppressTaskInstSelection;
-    private readonly List<ComboBoxItem> _taskDefItemPool = [];
-    private int _taskDefItemPoolUsed;
-    private readonly List<ComboBoxItem> _taskInstItemPool = [];
-    private int _taskInstItemPoolUsed;
-    private readonly List<JobLogRow> _taskLogPool = [];
-    private int _taskLogPoolUsed;
-    private readonly List<string> _taskTimestampParts = new(3);
-    private List<TaskInstanceSummaryDto> _allTaskInstances = [];
-    private bool _suppressTaskSelection;
-    private readonly List<ComboBoxItem> _taskAllInstItemPool = [];
-    private int _taskAllInstItemPoolUsed;
-    private bool _taskCreateNewMode;
-    private CancellationTokenSource? _taskStreamCts;
 
     // ── Reusable scratch collections ──
     private readonly HashSet<Guid> _sidebarContextChannelIds = [];
@@ -539,11 +515,8 @@ public sealed partial class MainPage : Page
                     ChatTitleBlock.Text = "> Select or create a channel";
                     ChannelTabBar.Visibility = Visibility.Collapsed;
                     _settingsMode = false;
-                    _tasksMode = false;
                     _jobsMode = false;
                     SettingsScroller.Visibility = Visibility.Collapsed;
-                    TaskViewPanel.Visibility = Visibility.Collapsed;
-                    DeallocateTaskView();
                     JobViewPanel.Visibility = Visibility.Collapsed;
                     DeallocateJobView();
                     ThreadSelectorPanel.Visibility = Visibility.Collapsed;
@@ -603,10 +576,9 @@ public sealed partial class MainPage : Page
         _pendingNewThread = false;
         ChatTitleBlock.Text = $"# {title}";
         ChannelTabBar.Visibility = Visibility.Visible;
-        if (_settingsMode || _tasksMode || _jobsMode)
+        if (_settingsMode || _jobsMode)
         {
             _settingsMode = false;
-            _tasksMode = false;
             _jobsMode = false;
             UpdateTabHighlight();
         }
@@ -895,14 +867,13 @@ public sealed partial class MainPage : Page
         DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
     }
 
-    // -- Cost bars, messages, jobs, tasks, settings, navigation --
+    // -- Cost bars, messages, jobs, settings, navigation --
     // Split into partial-class files: MainPage.Chat.cs, MainPage.Jobs.cs,
-    // MainPage.Tasks.cs, MainPage.ChannelSettings.cs, MainPage.Navigation.cs
+    // MainPage.ChannelSettings.cs, MainPage.Navigation.cs
 
     private void ShowChatView()
     {
         JobViewPanel.Visibility = Visibility.Collapsed;
-        TaskViewPanel.Visibility = Visibility.Collapsed;
         SettingsScroller.Visibility = Visibility.Collapsed;
         AgentSelectorPanel.Visibility = Visibility.Visible;
         ThreadSelectorPanel.Visibility = _selectedChannelId is not null ? Visibility.Visible : Visibility.Collapsed;
@@ -913,13 +884,9 @@ public sealed partial class MainPage : Page
     private void OnTabChatClick(object sender, RoutedEventArgs e)
     {
         _settingsMode = false;
-        _tasksMode = false;
         _jobsMode = false;
-        _taskCreateNewMode = false;
         UpdateTabHighlight();
         SettingsScroller.Visibility = Visibility.Collapsed;
-        TaskViewPanel.Visibility = Visibility.Collapsed;
-        DeallocateTaskView();
         JobViewPanel.Visibility = Visibility.Collapsed;
         DeallocateJobView();
         AgentSelectorPanel.Visibility = Visibility.Visible;
@@ -934,9 +901,8 @@ public sealed partial class MainPage : Page
 
     private void UpdateTabHighlight()
     {
-        var chatActive = !_settingsMode && !_tasksMode && !_jobsMode;
+        var chatActive = !_settingsMode && !_jobsMode;
         if (TabChatButton.Content is TextBlock c) c.Foreground = Brush(chatActive ? 0x00FF00 : 0x666666);
-        if (TabTasksButton.Content is TextBlock t) t.Foreground = Brush(_tasksMode ? 0x00FF00 : 0x666666);
         if (TabJobsButton.Content is TextBlock j) j.Foreground = Brush(_jobsMode ? 0x00FF00 : 0x666666);
         if (TabSettingsButton.Content is TextBlock s) s.Foreground = Brush(_settingsMode ? 0x00FF00 : 0x666666);
     }
@@ -996,46 +962,7 @@ public sealed partial class MainPage : Page
         TokenUsageDto? JobCost = null,
         ChannelCostDto? ChannelCost = null);
 
-    // ── Task DTOs ────────────────────────────────────────────────
     [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record TaskDefinitionDto(
-        Guid Id, string Name, string? Description, string? OutputTypeName,
-        bool IsActive, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
-
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record TaskInstanceSummaryDto(
-        Guid Id, Guid TaskDefinitionId, string TaskName, string Status,
-        DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt);
-    private sealed record TaskInstancePageDto(
-        IReadOnlyList<TaskInstanceSummaryDto> Records,
-        string? NextCursor,
-        bool HasMore);
-
-    private sealed record TaskLogDto(string Message, string Level, DateTimeOffset Timestamp);
-    private sealed record TaskLogPageDto(
-        IReadOnlyList<TaskLogDto> Records,
-        string? NextCursor,
-        bool HasMore,
-        int ReturnedRecords,
-        int ReturnedBytes,
-        long SnapshotLastSequence,
-        long FirstAvailableSequence,
-        long ExpiredRecordCount);
-    private sealed record TaskOutputRecordDto(
-        long Sequence,
-        DateTimeOffset Timestamp,
-        string? Data,
-        ArtifactDto? Artifact = null);
-
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record TaskInstanceDetailDto(
-        Guid Id, Guid TaskDefinitionId, string TaskName, string Status,
-        string? ErrorCode, string? ErrorMessage, string DiagnosticCompleteness,
-        long? FinalLogSequence, long LogRecordCount,
-        long? FinalOutputSequence, long OutputRecordCount,
-        DateTimeOffset CreatedAt, DateTimeOffset? StartedAt, DateTimeOffset? CompletedAt,
-        Guid? ChannelId = null, ChannelCostDto? ChannelCost = null);
-
     // ── Cost DTOs ────────────────────────────────────────────────
     private sealed record TokenUsageDto(
         int TotalPromptTokens, int TotalCompletionTokens, int TotalTokens);

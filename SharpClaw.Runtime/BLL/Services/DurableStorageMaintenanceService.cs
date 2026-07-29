@@ -19,7 +19,6 @@ public sealed class DurableStorageMaintenanceOptions
     public long MaximumArtifactBytes { get; init; } = 20L * 1024 * 1024 * 1024;
     public long MinimumFreeBytes { get; init; } = 1024L * 1024 * 1024;
     public int MaximumArtifactDeletesPerRun { get; init; } = 10_000;
-    public int MaximumTaskStateDeletesPerRun { get; init; } = 10_000;
     public TimeSpan ArtifactOrphanGraceAge { get; init; } = TimeSpan.FromHours(24);
 }
 
@@ -31,7 +30,6 @@ public sealed class DurableStorageMaintenanceOptions
 public sealed class DurableStorageMaintenanceService(
     DurableSegmentStore records,
     ExecutionArtifactStore artifacts,
-    TaskDiagnosticStateStore taskStates,
     IServiceScopeFactory scopes,
     SharpClawLogRuntime logging,
     DurableStorageMaintenanceOptions options,
@@ -52,7 +50,6 @@ public sealed class DurableStorageMaintenanceService(
         if (options.MaximumArtifactBytes < 0
             || options.MinimumFreeBytes < 0
             || options.MaximumArtifactDeletesPerRun < 1
-            || options.MaximumTaskStateDeletesPerRun < 1
             || options.ArtifactOrphanGraceAge <= TimeSpan.Zero)
         {
             throw new InvalidOperationException(
@@ -74,21 +71,10 @@ public sealed class DurableStorageMaintenanceService(
             var streamArtifacts = await records.ReadArtifactReferencesAsync(
                     cancellationToken)
                 .ConfigureAwait(false);
-            var taskStateArtifacts = await taskStates
-                .ReadReferencedArtifactIdsAsync(cancellationToken)
-                .ConfigureAwait(false);
-            _ = await taskStates.ApplyRetentionAsync(
-                    databaseProtection.ActiveTaskInstanceIds,
-                    options.Logs.TaskOutputAge,
-                    options.MaximumTaskStateDeletesPerRun,
-                    cancellationToken)
-                .ConfigureAwait(false);
             databaseProtection.ArtifactIds.UnionWith(streamArtifacts);
-            databaseProtection.ArtifactIds.UnionWith(taskStateArtifacts);
             var artifactResult = await artifacts.ApplyRetentionAsync(
                     databaseProtection.ArtifactIds,
                     options.Logs.JobLogAge,
-                    options.Logs.TaskOutputAge,
                     options.ArtifactOrphanGraceAge,
                     options.MaximumArtifactBytes,
                     options.MinimumFreeBytes,
@@ -164,18 +150,10 @@ public sealed class DurableStorageMaintenanceService(
                 ExecutionMetadataColumns.ResultArtifactId))
             .Where(id => id != null)
             .ToListAsync(cancellationToken);
-        var activeTaskInstanceIds = await db.TaskInstances
-            .Where(instance => instance.Status != TaskInstanceStatus.Completed
-                && instance.Status != TaskInstanceStatus.Failed
-                && instance.Status != TaskInstanceStatus.Cancelled)
-            .Select(instance => instance.Id)
-            .ToListAsync(cancellationToken);
         return new DatabaseProtection(
-            artifactIds.Select(id => id!.Value).ToHashSet(),
-            activeTaskInstanceIds.ToHashSet());
+            artifactIds.Select(id => id!.Value).ToHashSet());
     }
 
     private sealed record DatabaseProtection(
-        HashSet<Guid> ArtifactIds,
-        HashSet<Guid> ActiveTaskInstanceIds);
+        HashSet<Guid> ArtifactIds);
 }

@@ -164,8 +164,6 @@ Gateway__Endpoints__Providers="false"
 Gateway__Endpoints__Roles="false"
 Gateway__Endpoints__Users="false"
 Gateway__Endpoints__Cost="false"
-Gateway__Endpoints__Tasks="false"
-Gateway__Endpoints__TaskStreaming="false"
 Gateway__Endpoints__ToolAwarenessSets="false"
 Gateway__Endpoints__Resources="false"
 Gateway__Endpoints__Modules__HotReloadEnabled="false"
@@ -221,7 +219,7 @@ count as violations.
 group, and `EndpointGateMiddleware.ResolveGroup()` maps request paths to
 those names before a controller runs. Auth requests map to `Auth`; channel
 and thread chat stream paths map to `ChatStream`, `ThreadChat`, or `Chat`
-depending on the path; job, model, provider, role, user, cost, task, tool
+depending on the path; job, model, provider, role, user, cost, and tool
 awareness, resource, and local-model paths map to their matching groups.
 `ThreadWatch` handles the thread watch SSE path. Static groups are false in
 the base `.env.template`; module endpoint groups are enabled separately by
@@ -1156,7 +1154,7 @@ traffic before forwarding it to the core API. Endpoint group toggles are the
 main control for deciding which public surfaces are exposed in a deployment.
 
 The gateway still does not own every SharpClaw capability. Env file management,
-the editor bridge WebSocket, scheduler/task-definition controllers,
+the editor bridge WebSocket and module-contributed controllers,
 tool-awareness-set controllers, resource lookup controllers, and module-owned
 surfaces only exist here when a concrete gateway controller or gateway module
 maps them. If a path is only represented by an endpoint toggle and no

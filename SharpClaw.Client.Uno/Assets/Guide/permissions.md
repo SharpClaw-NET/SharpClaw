@@ -101,7 +101,6 @@ Resource permissions are tied to specific instances:
 - **Input Audio Accesses** (`TrAudio`): Use specific audio input devices
 - **Display Device Accesses**: Capture screenshots from specific displays
 - **Agent Management Accesses**: Modify specific agents
-- **Task Manage Accesses**: Edit specific task definitions
 - **Skill Manage Accesses**: Modify specific skills
 - **Agent Header Accesses**: Edit chat headers for specific agents
 - **Channel Header Accesses**: Edit chat headers for specific channels
@@ -212,5 +211,5 @@ This role is assigned to the creating user if they have no role.
 
 ## Next Steps
 
-Continue to **Jobs & Tasks** to learn how agents execute background actions.
+Continue to **Jobs** to learn how agents execute background actions.
 ]]>

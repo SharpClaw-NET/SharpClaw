@@ -2,7 +2,7 @@
 
 SharpClaw modules are runtime feature packages discovered by the Core API at
 startup. A module can add tools, REST endpoints, CLI commands, resource types,
-task triggers, provider implementations, or editor integrations. The bundled
+provider implementations or editor integrations. The bundled
 modules are restored from NuGet package payloads; external modules can be added
 separately through the `ExternalModules` section in the Core env file.
 
@@ -66,7 +66,7 @@ product unless an external module supplies them.
 
 `sharpclaw_agent_orchestration` is the Agent Orchestration module. It owns
 agent lifecycle and orchestration tools such as sub-agent creation, agent
-management, task editing, and skill access. It is disabled in the base template
+management and skill access. It is disabled in the base template
 and enabled in the development template.
 
 `sharpclaw_editor_common` is the shared editor infrastructure module. It
@@ -74,9 +74,9 @@ exports the `editor_bridge` and `editor_session` contracts used by editor
 integrations. It is disabled in the base template and enabled in development.
 Enable it before enabling an editor module when you need editor bridge support.
 
-`sharpclaw_metrics` owns the `MetricThreshold` task trigger and built-in metric
+`sharpclaw_metrics` owns built-in metric
 providers. It is disabled in the base template and enabled in development. If a
-task trigger depends on metric thresholds but never fires, this is the first
+metric threshold depends on metric thresholds but never fires, this is the first
 module to check.
 
 `sharpclaw_module_dev` is the Module Development Kit. It provides module
@@ -172,6 +172,5 @@ editor integrations depend on the shared editor bridge behavior from
 initialize, the editor-specific module may be present but unable to provide a
 working bridge.
 
-If task triggers fail to fire, match the trigger type to the owning module.
 Metric threshold triggers require `sharpclaw_metrics`. Triggers or tools from
 non-bundled modules are available only when an external module supplies them.

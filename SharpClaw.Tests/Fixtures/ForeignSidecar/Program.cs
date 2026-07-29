@@ -96,7 +96,6 @@ async Task HandleAsync(TcpClient client)
                         "moduleContributionDescriptors",
                         "frontendContributions",
                         "lifecycleHooks",
-                        "taskRuntime",
                         "providerPlugins",
                     },
                 });
@@ -315,85 +314,6 @@ async Task HandleAsync(TcpClient client)
                             usageLines = new[] { "sample ping" },
                         },
                     },
-                    taskParser = new
-                    {
-                        operationKeyMappings = new[]
-                        {
-                            new
-                            {
-                                methodName = "SampleTaskOperation",
-                                statementKey = "sample.task.operation",
-                                moduleId,
-                            },
-                        },
-                        eventTriggerMappings = new[]
-                        {
-                            new
-                            {
-                                methodName = "OnSample",
-                                triggerKey = "sample.trigger",
-                                moduleId,
-                            },
-                        },
-                        singleArgExpressionMethods = new[] { "SampleTaskOperation" },
-                        triggerAttributeHandlers = new[]
-                        {
-                            new
-                            {
-                                name = "SampleTrigger",
-                                namedStringArgs = new[] { "Name" },
-                            },
-                        },
-                    },
-                    taskOperationDescriptors = new[]
-                    {
-                        new
-                        {
-                            methodName = "SampleTaskOperation",
-                            operationKey = "sample.task.operation",
-                            ownerId = moduleId,
-                            firstArgIsExpression = true,
-                        },
-                    },
-                    taskOperationExecutors = new[]
-                    {
-                        new
-                        {
-                            moduleId,
-                            operationKeys = new[] { "sample.task.operation" },
-                            supportsInvocation = true,
-                        },
-                    },
-                    taskTriggerSources = new[]
-                    {
-                        new
-                        {
-                            triggerKeys = new[] { "sample.trigger" },
-                            ownsBindingPersistence = false,
-                        },
-                    },
-                    taskTriggerBindingSideEffects = new[]
-                    {
-                        new
-                        {
-                            triggerKey = "sample.trigger",
-                        },
-                    },
-                    taskMetricProviders = new[]
-                    {
-                        new
-                        {
-                            metricName = "sample.metric",
-                            description = "Sample sidecar metric.",
-                        },
-                    },
-                    taskEventSinks = new[]
-                    {
-                        new
-                        {
-                            subscribedEvents = "AllModuleEvents",
-                        },
-                    },
                     providerPlugins = new[]
                     {
                         new
@@ -546,78 +466,6 @@ async Task HandleAsync(TcpClient client)
                     success = true,
                     stdout = BuildCliResult(request.Body),
                     stderr = "",
-                });
-                break;
-
-            case "/.sharpclaw/tasks/operations/execute":
-                await WriteJsonAsync(stream, new
-                {
-                    result = "Continue",
-                    @continue = true,
-                    variableUpdates = new Dictionary<string, object?>
-                    {
-                        ["sidecarOperation"] = "executed",
-                    },
-                    resultVariableValue = "operation-result",
-                    logs = new[] { "operation log" },
-                    outputJson = """{"sidecar":true}""",
-                });
-                break;
-
-            case "/.sharpclaw/tasks/operations/invoke":
-                await WriteJsonAsync(stream, new
-                {
-                    result = "Continue",
-                    variableUpdates = new Dictionary<string, object?>
-                    {
-                        ["sidecarInvocation"] = "executed",
-                    },
-                    resultVariableValue = "invocation-result",
-                    logs = new[] { "invocation log" },
-                });
-                break;
-
-            case "/.sharpclaw/tasks/triggers/attributes/handle":
-                await WriteJsonAsync(stream, BuildTriggerAttributeResult(request.Body));
-                break;
-
-            case "/.sharpclaw/tasks/triggers/start":
-            case "/.sharpclaw/tasks/triggers/stop":
-            case "/.sharpclaw/tasks/triggers/remove-bindings":
-            case "/.sharpclaw/tasks/triggers/bindings/created":
-            case "/.sharpclaw/tasks/triggers/bindings/removed":
-            case "/.sharpclaw/tasks/events/sink":
-                await WriteJsonAsync(stream, new
-                {
-                    accepted = true,
-                });
-                break;
-
-            case "/.sharpclaw/tasks/triggers/binding-value":
-                await WriteJsonAsync(stream, new
-                {
-                    value = "sample-value",
-                });
-                break;
-
-            case "/.sharpclaw/tasks/triggers/binding-filter":
-                await WriteJsonAsync(stream, new
-                {
-                    value = "sample-filter",
-                });
-                break;
-
-            case "/.sharpclaw/tasks/triggers/sync-bindings":
-                await WriteJsonAsync(stream, new
-                {
-                    changed = true,
-                });
-                break;
-
-            case "/.sharpclaw/tasks/metrics/value":
-                await WriteJsonAsync(stream, new
-                {
-                    value = 42.5,
                 });
                 break;
 
@@ -875,31 +723,6 @@ static string BuildProviderChatResult(string kind, string body)
         ? messages.GetArrayLength()
         : 0;
     return $"{kind}:{providerKey}:{model}:{messageCount}";
-}
-
-static object BuildTriggerAttributeResult(string body)
-{
-    using var document = JsonDocument.Parse(body);
-    var root = document.RootElement;
-    var context = root.GetProperty("context");
-    var name = context.GetProperty("namedStringArgs").TryGetProperty("Name", out var nameElement)
-        ? nameElement.GetString()
-        : null;
-
-    return new
-    {
-        trigger = new
-        {
-            triggerKey = "sample.trigger",
-            line = context.GetProperty("line").GetInt32(),
-            parameters = new Dictionary<string, string?>
-            {
-                ["name"] = name,
-                ["attribute"] = context.GetProperty("attributeName").GetString(),
-            },
-        },
-        diagnostics = Array.Empty<object>(),
-    };
 }
 
 static async Task HandleWebSocketEchoAsync(NetworkStream stream, SidecarRequest request)

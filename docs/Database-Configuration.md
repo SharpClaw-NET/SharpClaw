@@ -268,7 +268,7 @@ The `MigrationGate` is an async-safe pause mechanism that prevents data
 corruption during migrations:
 
 - **Normal operation:** Requests pass through the gate with zero overhead
-  (the gate `Task` is already completed).
+  (the gate is already completed).
 - **During migration:** The gate closes, all in-flight requests drain,
   migrations run, then the gate reopens.
 - **Middleware:** `MigrationGateMiddleware` wraps every request in the

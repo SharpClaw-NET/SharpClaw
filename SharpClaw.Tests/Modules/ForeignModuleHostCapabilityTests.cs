@@ -10,10 +10,8 @@ using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Shared.Logging;
@@ -155,7 +153,7 @@ public sealed class ForeignModuleHostCapabilityTests
 
         using var getResponse = await client.PostAsJsonAsync(
             ForeignModuleHostCapabilityProtocol.JobGetPath,
-            new { id = reader.JobId });
+            new { jobId = reader.JobId });
         using var summariesResponse = await client.PostAsJsonAsync(
             ForeignModuleHostCapabilityProtocol.JobListSummariesByActionPrefixPath,
             new
@@ -256,81 +254,12 @@ public sealed class ForeignModuleHostCapabilityTests
     }
 
     [Test]
-    public async Task HostCapabilityServerForwardsTaskAuthoringAndLaunch()
-    {
-        var authoring = new RecordingTaskAuthoring();
-        var launcher = new RecordingTaskLauncher();
-        await using var services = new ServiceCollection()
-            .AddSingleton<ITaskAuthoring>(authoring)
-            .AddSingleton<ITaskInstanceLauncher>(launcher)
-            .BuildServiceProvider();
-        await using var server = ForeignModuleHostCapabilityServer.Start("sample_module", services);
-        using var client = CreateClient(server);
-        var taskId = authoring.TaskId;
-
-        using var validateResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskValidatePath,
-            new { sourceText = "task source" });
-        using var createResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskCreatePath,
-            new { sourceText = "create source" });
-        using var getResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskGetPath,
-            new { id = taskId });
-        using var listResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskListPath,
-            new { });
-        using var updateResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskUpdatePath,
-            new { id = taskId, sourceText = "updated", isActive = false });
-        using var deleteResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskDeletePath,
-            new { id = taskId });
-        using var launchResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.TaskLaunchPath,
-            new
-            {
-                taskDefinitionId = taskId,
-                parameterValues = new Dictionary<string, string>
-                {
-                    ["input"] = "value",
-                },
-                callerAgentId = Guid.Parse("22222222-2222-2222-2222-222222222222"),
-                channelId = Guid.Parse("33333333-3333-3333-3333-333333333333"),
-            });
-
-        validateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        createResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        deleteResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        launchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        authoring.ValidatedSource.Should().Be("task source");
-        authoring.CreatedSource.Should().Be("create source");
-        authoring.Updated.Should().NotBeNull();
-        authoring.Updated!.Value.Id.Should().Be(taskId);
-        authoring.Updated!.Value.SourceText.Should().Be("updated");
-        authoring.Updated!.Value.IsActive.Should().BeFalse();
-        authoring.DeletedId.Should().Be(taskId);
-        launcher.LastLaunch!.Value.TaskDefinitionId.Should().Be(taskId);
-        launcher.LastLaunch!.Value.ParameterValues.Should().ContainKey("input").WhoseValue.Should().Be("value");
-
-        var launchPayload = JsonDocument.Parse(await launchResponse.Content.ReadAsStringAsync());
-        launchPayload.RootElement.GetProperty("instanceId").GetGuid()
-            .Should()
-            .Be(launcher.InstanceId);
-    }
-
-    [Test]
     public async Task HostCapabilityServerForwardsCoreMetricsAndAgentCapabilities()
     {
         var core = new RecordingCoreEntityIds();
-        var metrics = new RecordingQueueMetrics();
         var agents = new RecordingAgentManager();
         await using var services = new ServiceCollection()
             .AddSingleton<ICoreEntityIdProvider>(core)
-            .AddSingleton<IHostQueueMetrics>(metrics)
             .AddSingleton<IAgentManager>(agents)
             .BuildServiceProvider();
         await using var server = ForeignModuleHostCapabilityServer.Start("sample_module", services);
@@ -341,9 +270,6 @@ public sealed class ForeignModuleHostCapabilityTests
             new { });
         using var channelLookupResponse = await client.PostAsJsonAsync(
             ForeignModuleHostCapabilityProtocol.CoreChannelLookupPath,
-            new { });
-        using var metricsResponse = await client.PostAsJsonAsync(
-            ForeignModuleHostCapabilityProtocol.QueueMetricsPath,
             new { });
         using var createAgentResponse = await client.PostAsJsonAsync(
             ForeignModuleHostCapabilityProtocol.AgentCreateSubAgentPath,
@@ -370,7 +296,6 @@ public sealed class ForeignModuleHostCapabilityTests
 
         agentIdsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         channelLookupResponse.StatusCode.Should().Be(HttpStatusCode.OK);
-        metricsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         createAgentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         updateAgentResponse.StatusCode.Should().Be(HttpStatusCode.OK);
         setAgentHeaderResponse.StatusCode.Should().Be(HttpStatusCode.OK);
@@ -380,10 +305,6 @@ public sealed class ForeignModuleHostCapabilityTests
         agentIds.RootElement.GetProperty("ids")[0].GetGuid().Should().Be(core.AgentId);
         var channelLookup = JsonDocument.Parse(await channelLookupResponse.Content.ReadAsStringAsync());
         channelLookup.RootElement.GetProperty("items")[0].GetProperty("name").GetString().Should().Be("Clinic");
-        var metricPayload = JsonDocument.Parse(await metricsResponse.Content.ReadAsStringAsync());
-        metricPayload.RootElement.GetProperty("pendingJobCount").GetDouble().Should().Be(2);
-        metricPayload.RootElement.GetProperty("pendingTaskCount").GetDouble().Should().Be(3);
-        metricPayload.RootElement.GetProperty("schedulerPendingJobCount").GetDouble().Should().Be(5);
         agents.Created.Should().NotBeNull();
         agents.Created!.Value.Name.Should().Be("Helper");
         agents.Created!.Value.ModelId.Should().Be(agents.ModelId);
@@ -914,81 +835,6 @@ public sealed class ForeignModuleHostCapabilityTests
         return document.RootElement.Clone();
     }
 
-    private sealed class RecordingTaskAuthoring : ITaskAuthoring
-    {
-        public Guid TaskId { get; } = Guid.Parse("11111111-1111-1111-1111-111111111111");
-        public string? ValidatedSource { get; private set; }
-        public string? CreatedSource { get; private set; }
-        public (Guid Id, string? SourceText, bool? IsActive)? Updated { get; private set; }
-        public Guid? DeletedId { get; private set; }
-
-        public TaskValidationResponse ValidateDefinition(string sourceText)
-        {
-            ValidatedSource = sourceText;
-            return new TaskValidationResponse(true, []);
-        }
-
-        public Task<TaskDefinitionResponse> CreateDefinitionAsync(
-            CreateTaskDefinitionRequest request,
-            CancellationToken ct = default)
-        {
-            CreatedSource = request.SourceText;
-            return Task.FromResult(Response(TaskId));
-        }
-
-        public Task<TaskDefinitionResponse?> GetDefinitionAsync(Guid id, CancellationToken ct = default) =>
-            Task.FromResult<TaskDefinitionResponse?>(id == TaskId ? Response(id) : null);
-
-        public Task<IReadOnlyList<TaskDefinitionResponse>> ListDefinitionsAsync(CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<TaskDefinitionResponse>>([Response(TaskId)]);
-
-        public Task<TaskDefinitionResponse?> UpdateDefinitionAsync(
-            Guid id,
-            UpdateTaskDefinitionRequest request,
-            CancellationToken ct = default)
-        {
-            Updated = (id, request.SourceText, request.IsActive);
-            return Task.FromResult<TaskDefinitionResponse?>(Response(id));
-        }
-
-        public Task<bool> DeleteDefinitionAsync(Guid id, CancellationToken ct = default)
-        {
-            DeletedId = id;
-            return Task.FromResult(true);
-        }
-
-        private static TaskDefinitionResponse Response(Guid id) =>
-            new(
-                id,
-                "Sample Task",
-                null,
-                null,
-                true,
-                [],
-                [],
-                [],
-                DateTimeOffset.UnixEpoch,
-                DateTimeOffset.UnixEpoch);
-    }
-
-    private sealed class RecordingTaskLauncher : ITaskInstanceLauncher
-    {
-        public Guid InstanceId { get; } = Guid.Parse("44444444-4444-4444-4444-444444444444");
-        public (Guid TaskDefinitionId, IReadOnlyDictionary<string, string>? ParameterValues, Guid? CallerAgentId, Guid? ChannelId, Guid? ContextId)? LastLaunch { get; private set; }
-
-        public Task<Guid> LaunchAsync(
-            Guid taskDefinitionId,
-            IReadOnlyDictionary<string, string>? parameterValues,
-            Guid? callerAgentId,
-            Guid? channelId,
-            Guid? contextId,
-            CancellationToken ct)
-        {
-            LastLaunch = (taskDefinitionId, parameterValues, callerAgentId, channelId, contextId);
-            return Task.FromResult(InstanceId);
-        }
-    }
-
     private sealed class RecordingCoreEntityIds : ICoreEntityIdProvider
     {
         public Guid AgentId { get; } = Guid.Parse("55555555-5555-5555-5555-555555555555");
@@ -1005,13 +851,6 @@ public sealed class ForeignModuleHostCapabilityTests
 
         public Task<List<(Guid Id, string Name)>> GetChannelLookupItemsAsync(CancellationToken ct = default) =>
             Task.FromResult(new List<(Guid Id, string Name)> { (ChannelId, "Clinic") });
-    }
-
-    private sealed class RecordingQueueMetrics : IHostQueueMetrics
-    {
-        public Task<double> GetPendingJobCountAsync(CancellationToken ct) => Task.FromResult(2d);
-        public Task<double> GetPendingTaskCountAsync(CancellationToken ct) => Task.FromResult(3d);
-        public Task<double> GetSchedulerPendingJobCountAsync(CancellationToken ct) => Task.FromResult(5d);
     }
 
     private sealed class RecordingConversationSteering : IConversationSteering

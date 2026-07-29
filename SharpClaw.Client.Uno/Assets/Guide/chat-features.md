@@ -112,12 +112,6 @@ When agents execute tools, server-authoritative markers are injected into the as
 ⚙ [wait] → done
 ```
 
-**Task tool**:
-
-```
-⚙ [task_write_light_data] → done
-```
-
 Notation is generated server-side and included in both streaming events and persisted messages.
 
 ## Inline Tools

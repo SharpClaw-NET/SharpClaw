@@ -57,7 +57,6 @@ fastest way to make that happen.
 - [Roles](#roles)
 - [Default resources](#default-resources)
 - [Local models](#local-models)
-- [Task definitions & instances](Tasks-documentation.md)
 - [Token cost tracking](#token-cost-tracking)
 - [Provider cost](#provider-cost)
 - [Database administration](#database-administration)
@@ -181,24 +180,6 @@ Pending, Downloading, Ready, Failed
 | `Error` | An error occurred during the stream |
 | `Done` | Stream complete; contains the final persisted response |
 
-### TaskInstanceStatus
-
-| Value | Int | Description |
-|-------|-----|-------------|
-| `Queued` | 0 | Instance created, awaiting execution start |
-| `Running` | 1 | Task entry point is actively running |
-| `Paused` | 2 | Execution temporarily suspended; can be resumed |
-| `Completed` | 3 | Entry point ran to completion successfully |
-| `Failed` | 4 | Entry point threw an unhandled exception |
-| `Cancelled` | 5 | Instance was cancelled by a user or agent |
-
-### TaskOutputEventType
-
-| Value | Description |
-|-------|-------------|
-| `Output` | Task-emitted output (from `Emit(...)`) |
-| `Log` | Log message appended during execution |
-| `StatusChange` | Task status changed (started, completed, failed, etc.) |
 | `Done` | Terminal event — no more events will follow |
 
 ---
@@ -1268,7 +1249,7 @@ Clear a single default resource by key.
 **Response `400`:** Invalid key.
 
 Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
-`localinfo`, `externalinfo`, `displaydevice`, `agent`, `task`, `skill`,
+`localinfo`, `externalinfo`, `displaydevice`, `agent`, `skill`,
 `editor`, `document`, `nativeapp`.
 
 ### ContextResponse
@@ -1455,7 +1436,7 @@ Clear a single default resource by key.
 **Response `400`:** Invalid key.
 
 Valid keys: `dangshell`, `safeshell`, `container`, `website`, `search`,
-`localinfo`, `externalinfo`, `displaydevice`, `agent`, `task`, `skill`,
+`localinfo`, `externalinfo`, `displaydevice`, `agent`, `skill`,
 `editor`, `document`, `nativeapp`.
 
 ### ChannelResponse
@@ -2015,7 +1996,6 @@ matches the JSON property names used in the permissions API.
 | `displayDeviceAccesses` | DisplayDevices |
 | `editorSessionAccesses` | EditorSessions |
 | `agentAccesses` | Agents |
-| `taskAccesses` | ScheduledTasks |
 | `skillAccesses` | Skills |
 | `documentSessionAccesses` | DocumentSessions |
 | `nativeApplicationAccesses` | NativeApplications |
@@ -2102,7 +2082,6 @@ don't have.
   "localInfoStoreAccesses": null,
   "externalInfoStoreAccesses": null,
   "agentAccesses": null,
-  "taskAccesses": null,
   "skillAccesses": null,
   "agentHeaderAccesses": null,
   "channelHeaderAccesses": null,
@@ -2174,7 +2153,6 @@ wildcard grant that covers all resources of that type.
   "localInfoStoreAccesses": [],
   "externalInfoStoreAccesses": [],
   "agentAccesses": [],
-  "taskAccesses": [],
   "skillAccesses": [],
   "agentHeaderAccesses": [],
   "channelHeaderAccesses": [],
@@ -2224,7 +2202,6 @@ channel and context level. Resolution order: channel → context.
   "externalInfoStoreResourceId": "guid | null",
   "displayDeviceResourceId": "guid | null",
   "agentResourceId": "guid | null",
-  "taskResourceId": "guid | null",
   "skillResourceId": "guid | null",
   "editorSessionResourceId": "guid | null",
   "documentSessionResourceId": "guid | null",
@@ -2346,25 +2323,20 @@ Delete the local model file and its DB record.
 
 ---
 
-## Task definitions & instances
-
-SharpClaw tasks are user-defined C# scripts that run as managed background
-processes. A **definition** is the registered source; an **instance** is a
-single execution of it. Tasks can orchestrate agents, call HTTP endpoints,
-stream output over SSE, and run as long-lived daemons.
+## Token cost tracking
 
 The full reference — script language, attributes, step kinds, validation
 diagnostic codes, execution lifecycle, permissions, agent tool exposure,
 scheduling, and all endpoint shapes — is in the dedicated
-**[Tasks documentation](Tasks-documentation.md)**.
+
 
 ---
 
 ## Token cost tracking
 
 Token usage is tracked per-message and aggregated at the channel and
-thread level. Cost data is **piggybacked** on the main chat, job,
-and task responses so callers rarely need the dedicated cost endpoints.
+thread level. Cost data is **piggybacked** on the main chat and job
+responses so callers rarely need the dedicated cost endpoints.
 
 ### Piggybacked cost fields
 
@@ -2372,7 +2344,6 @@ and task responses so callers rarely need the dedicated cost endpoints.
 |---------------|----------|----------------|
 | `ChatResponse` | `channelCost`, `threadCost`, `agentCost` | Always (every chat turn) |
 | `AgentJobResponse` | `channelCost`, `jobCost` | `channelCost` on detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`); `jobCost` when core or a module has recorded token usage for that job |
-| `TaskInstanceResponse` | `channelCost` | On `GET .../instances/{instanceId}` when bound to a channel |
 | SSE `Done` event | Inside the `ChatResponse` payload | Always |
 
 ### ChannelCostResponse
@@ -2588,7 +2559,7 @@ migrations.
 {
   "state": "Idle",
   "applied": ["20250601120000_Initial", "20250615090000_AddTokens"],
-  "pending": ["20250701100000_AddTasks"]
+  "pending": ["20250701100000_AddProviders"]
 }
 ```
 
@@ -2613,7 +2584,7 @@ can run at a time.
 ```json
 {
   "applied": 1,
-  "migrations": ["20250701100000_AddTasks"],
+  "migrations": ["20250701100000_AddProviders"],
   "message": "Applied 1 migration(s)."
 }
 ```
@@ -2859,7 +2830,7 @@ case-insensitive.
 | `{{agent-role}}` | Agent role with clearance and resource-ID grants | `DevOps clearance=Independent (SafeShell[...], ManageAgent[...])` |
 | `{{clearance}}` | Agent default clearance level | `Independent` |
 | `{{grants}}` | User permission grant names (name-only) | `CreateSubAgents, SafeShell, ManageAgent` |
-| `{{agent-grants}}` | Agent grants with enumerated resource IDs | `SafeShell[3fa85f64-...], EditTask[7c9e6679-...]` |
+| `{{agent-grants}}` | Agent grants with enumerated resource IDs | `SafeShell[3fa85f64-...], ManageAgent[7c9e6679-...]` |
 | `{{editor}}` | IDE context (type, file, selection) | `VisualStudio2026 18.4 file=Program.cs lang=csharp sel=10-15` |
 | `{{accessible-threads}}` | Cross-channel threads the agent can read | `Debug Session [Ops Channel] (guid)` |
 
@@ -2887,8 +2858,6 @@ that type are resolved from the database and listed individually.
 | `{{SystemUsers}}` | All system users |
 | `{{LocalInfoStores}}` | All local information stores |
 | `{{ExternalInfoStores}}` | All external information stores |
-| `{{ScheduledTasks}}` | All scheduled tasks |
-| `{{Tasks}}` | All task definitions |
 
 Without a per-item template, resource tags emit comma-separated GUIDs.
 With a template, each entity is formatted using `{FieldName}` property
@@ -3314,5 +3283,5 @@ they are not part of the current bundled module set unless a deployment
 supplies them as external modules.
 
 For the current enablement keys and base/development defaults, see the
-[Module Enablement Guide](modules/Module-Enablement-Guide.md). For task and
+[Module Enablement Guide](modules/Module-Enablement-Guide.md). For
 module authoring walkthroughs, also see the `docs/guides/` folder.

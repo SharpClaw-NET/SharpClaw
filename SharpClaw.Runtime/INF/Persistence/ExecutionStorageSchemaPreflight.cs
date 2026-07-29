@@ -1,7 +1,6 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Runtime.INF.Persistence;
@@ -19,8 +18,6 @@ public static class ExecutionStorageSchemaPreflight
     private static readonly string[] LegacyDiagnosticFullNames =
     [
         "SharpClaw.Contracts.Entities.Core.Jobs.AgentJobLogEntryDB",
-        "SharpClaw.Contracts.Entities.Core.Tasks.TaskExecutionLogDB",
-        "SharpClaw.Contracts.Entities.Core.Tasks.TaskOutputEntryDB",
     ];
 
     public static void ValidateJsonStoreBeforeInitialization(
@@ -49,7 +46,6 @@ public static class ExecutionStorageSchemaPreflight
         var affectedCollections = new[]
         {
             (typeof(AgentJobDB).FullName!, typeof(AgentJobDB).Name),
-            (typeof(TaskInstanceDB).FullName!, typeof(TaskInstanceDB).Name),
         };
         var populated = affectedCollections
             .Where(candidate => HasJsonColdStoreRecords(
@@ -134,32 +130,6 @@ public static class ExecutionStorageSchemaPreflight
                     LogRecordCount = EF.Property<long>(
                         job,
                         ExecutionMetadataColumns.LogRecordCount),
-                })
-                .Take(1)
-                .ToListAsync(cancellationToken);
-
-            _ = await db.TaskInstances
-                .AsNoTracking()
-                .Select(instance => new
-                {
-                    ErrorCode = EF.Property<string?>(
-                        instance,
-                        ExecutionMetadataColumns.ErrorCode),
-                    Completeness = EF.Property<DiagnosticCompleteness>(
-                        instance,
-                        ExecutionMetadataColumns.DiagnosticCompleteness),
-                    FinalLogSequence = EF.Property<long?>(
-                        instance,
-                        ExecutionMetadataColumns.FinalLogSequence),
-                    LogRecordCount = EF.Property<long>(
-                        instance,
-                        ExecutionMetadataColumns.LogRecordCount),
-                    FinalOutputSequence = EF.Property<long?>(
-                        instance,
-                        ExecutionMetadataColumns.FinalOutputSequence),
-                    OutputRecordCount = EF.Property<long>(
-                        instance,
-                        ExecutionMetadataColumns.OutputRecordCount),
                 })
                 .Take(1)
                 .ToListAsync(cancellationToken);

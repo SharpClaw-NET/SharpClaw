@@ -19,7 +19,6 @@ public sealed partial class UserGuidePage : Page
         ("agents-models", "Agents & Models"),
         ("chat-features", "Chat Features"),
         ("permissions", "Permissions & Roles"),
-        ("jobs-tasks", "Jobs & Tasks"),
         ("bot-integrations", "Bot Integrations"),
         ("gateway", "Gateway"),
         ("advanced", "Advanced Topics"),

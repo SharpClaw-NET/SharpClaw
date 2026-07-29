@@ -36,7 +36,7 @@ development template enables the built-in groups for local testing.
 
 Built-in groups are Auth, Agents, Channels, ChannelContexts, Chat,
 ChatStream, Threads, ThreadChat, ThreadWatch, Jobs, Models, LocalModels,
-Providers, Roles, Users, Cost, Tasks, TaskStreaming, ToolAwarenessSets, and
+Providers, Roles, Users, Cost, ToolAwarenessSets, and
 Resources. Module-owned routes under /api/modules/* are resolved through the
 gateway module endpoint catalog and use `Gateway:Modules:Modules:{moduleId}`
 plus `Gateway:Modules:Groups:{moduleId}/{groupId}`.
@@ -58,8 +58,6 @@ ResolveGroup priority (first match wins):
   /api/providers*                  → Providers
   /api/roles*                      → Roles
   /api/users*                      → Users
-  /api/tasks* with /stream         → TaskStreaming
-  /api/tasks*                      → Tasks
   /api/toolawarenesssets*          → ToolAwarenessSets
   /api/tool-awareness-sets*        → ToolAwarenessSets
   /api/resources*                  → Resources
@@ -260,7 +258,7 @@ mutation forwarding can serialize POST, PUT, and DELETE traffic before it
 reaches the core API. Endpoint group toggles decide which public surfaces are
 exposed in a deployment.
 
-Env file management, the editor bridge WebSocket, scheduler/task-definition
+Env file management, the editor bridge WebSocket, and module-contributed
 controllers, tool-awareness-set controllers, resource lookup controllers, and
 module-owned surfaces exist here only when a concrete gateway controller or
 gateway module maps them. A toggle by itself does not create a route.

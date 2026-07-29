@@ -9,9 +9,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Modules;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Shared.Logging;
@@ -207,7 +205,7 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                     Deserialize<ForeignModuleJobActionPrefixRequest>(request),
                     ct),
             ForeignModuleHostCapabilityProtocol.JobGetPath =>
-                await GetJobAsync(services, Deserialize<ForeignModuleTaskIdRequest>(request), ct),
+                await GetJobAsync(services, Deserialize<ForeignModuleJobCancelRequest>(request), ct),
             ForeignModuleHostCapabilityProtocol.JobListSummariesByActionPrefixPath =>
                 await ListJobSummariesByActionPrefixAsync(
                     services,
@@ -224,30 +222,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await InvokeProtocolContractAsync(
                     services,
                     Deserialize<ForeignModuleProtocolContractInvokeRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.TaskValidatePath =>
-                ValidateTask(services, Deserialize<ForeignModuleTaskSourceRequest>(request)),
-            ForeignModuleHostCapabilityProtocol.TaskCreatePath =>
-                await CreateTaskAsync(services, Deserialize<ForeignModuleTaskSourceRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskGetPath =>
-                await GetTaskAsync(services, Deserialize<ForeignModuleTaskIdRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskListPath =>
-                await ListTasksAsync(services, ct),
-            ForeignModuleHostCapabilityProtocol.TaskUpdatePath =>
-                await UpdateTaskAsync(services, Deserialize<ForeignModuleTaskUpdateRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskDeletePath =>
-                await DeleteTaskAsync(services, Deserialize<ForeignModuleTaskIdRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskLaunchPath =>
-                await LaunchTaskAsync(services, Deserialize<ForeignModuleTaskLaunchRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.TaskContextExecuteStatementsPath =>
-                await ExecuteTaskContextStatementsAsync(
-                    services,
-                    Deserialize<ForeignModuleTaskContextExecuteStatementsRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.TaskContextExecuteEventHandlerPath =>
-                await ExecuteTaskContextEventHandlerAsync(
-                    services,
-                    Deserialize<ForeignModuleTaskContextExecuteEventHandlerRequest>(request),
                     ct),
             ForeignModuleHostCapabilityProtocol.CoreAgentIdsPath =>
                 new ForeignModuleIdsResponse(await ResolveCoreEntityIds(services).GetAgentIdsAsync(ct)),
@@ -278,85 +252,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                 await ListConversationSteeringAsync(
                     services,
                     Deserialize<ForeignModuleConversationSteeringListRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.QueueMetricsPath =>
-                await GetQueueMetricsAsync(services, ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentChatPath =>
-                await HostAgentChatAsync(services, Deserialize<ForeignModuleHostAgentChatRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentChatStreamPath =>
-                await HostAgentChatStreamAsync(services, Deserialize<ForeignModuleHostAgentChatRequest>(request), ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentChatToThreadPath =>
-                await HostAgentChatToThreadAsync(
-                    services,
-                    Deserialize<ForeignModuleHostAgentChatToThreadRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentParseStructuredResponsePath =>
-                HostAgentParseStructuredResponse(
-                    services,
-                    Deserialize<ForeignModuleHostAgentParseStructuredResponseRequest>(request)),
-            ForeignModuleHostCapabilityProtocol.HostAgentFindModelPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await ResolveHostAgentBridge(services).FindModelAsync(
-                        Deserialize<ForeignModuleHostAgentFindRequest>(request).Search,
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentFindProviderPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await ResolveHostAgentBridge(services).FindProviderAsync(
-                        Deserialize<ForeignModuleHostAgentFindRequest>(request).Search,
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentFindAgentPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await ResolveHostAgentBridge(services).FindAgentAsync(
-                        Deserialize<ForeignModuleHostAgentFindRequest>(request).Search,
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentFindRolePath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await ResolveHostAgentBridge(services).FindRoleAsync(
-                        Deserialize<ForeignModuleHostAgentFindRequest>(request).Search,
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentFindChannelPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await ResolveHostAgentBridge(services).FindChannelAsync(
-                        Deserialize<ForeignModuleHostAgentFindRequest>(request).Search,
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentCreateAgentPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await HostAgentCreateAgentAsync(
-                        services,
-                        Deserialize<ForeignModuleHostAgentCreateAgentRequest>(request),
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentCreateThreadPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await HostAgentCreateThreadAsync(
-                        services,
-                        Deserialize<ForeignModuleHostAgentCreateThreadRequest>(request),
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentCreateRolePath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await HostAgentCreateRoleAsync(
-                        services,
-                        Deserialize<ForeignModuleHostAgentCreateRoleRequest>(request),
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentSetRolePermissionsPath =>
-                await HostAgentSetRolePermissionsAsync(
-                    services,
-                    Deserialize<ForeignModuleHostAgentSetRolePermissionsRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentAssignRolePath =>
-                await HostAgentAssignRoleAsync(
-                    services,
-                    Deserialize<ForeignModuleHostAgentAssignRoleRequest>(request),
-                    ct),
-            ForeignModuleHostCapabilityProtocol.HostAgentCreateChannelPath =>
-                new ForeignModuleHostAgentIdResponse(
-                    await HostAgentCreateChannelAsync(
-                        services,
-                        Deserialize<ForeignModuleHostAgentCreateChannelRequest>(request),
-                        ct)),
-            ForeignModuleHostCapabilityProtocol.HostAgentAddAllowedAgentPath =>
-                await HostAgentAddAllowedAgentAsync(
-                    services,
-                    Deserialize<ForeignModuleHostAgentAddAllowedAgentRequest>(request),
                     ct),
             ForeignModuleHostCapabilityProtocol.AgentCreateSubAgentPath =>
                 await CreateSubAgentAsync(services, Deserialize<ForeignModuleAgentCreateRequest>(request), ct),
@@ -528,12 +423,12 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
 
     private static async Task<ForeignModuleJobGetResponse> GetJobAsync(
         IServiceProvider services,
-        ForeignModuleTaskIdRequest request,
+        ForeignModuleJobCancelRequest request,
         CancellationToken ct)
     {
-        RequireId(request.Id, "Job ID is required.");
+        RequireId(request.JobId, "Job ID is required.");
         return new ForeignModuleJobGetResponse(
-            await ResolveJobReader(services).GetJobAsync(request.Id, ct));
+            await ResolveJobReader(services).GetJobAsync(request.JobId, ct));
     }
 
     private static async Task<ForeignModuleJobSummaryPageResponse> ListJobSummariesByActionPrefixAsync(
@@ -586,182 +481,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
             await invoker.InvokeAsync(request.Operation, request.Parameters, ct));
     }
 
-    private static TaskValidationResponse ValidateTask(
-        IServiceProvider services,
-        ForeignModuleTaskSourceRequest request)
-    {
-        if (string.IsNullOrWhiteSpace(request.SourceText))
-            throw new ArgumentException("Task source text is required.", nameof(request));
-
-        return ResolveTaskAuthoring(services).ValidateDefinition(request.SourceText);
-    }
-
-    private static async Task<TaskDefinitionResponse> CreateTaskAsync(
-        IServiceProvider services,
-        ForeignModuleTaskSourceRequest request,
-        CancellationToken ct)
-    {
-        if (string.IsNullOrWhiteSpace(request.SourceText))
-            throw new ArgumentException("Task source text is required.", nameof(request));
-
-        return await ResolveTaskAuthoring(services)
-            .CreateDefinitionAsync(new CreateTaskDefinitionRequest(request.SourceText), ct);
-    }
-
-    private static async Task<ForeignModuleTaskGetResponse> GetTaskAsync(
-        IServiceProvider services,
-        ForeignModuleTaskIdRequest request,
-        CancellationToken ct)
-    {
-        RequireId(request.Id, "Task definition ID is required.");
-        return new ForeignModuleTaskGetResponse(
-            await ResolveTaskAuthoring(services).GetDefinitionAsync(request.Id, ct));
-    }
-
-    private static async Task<ForeignModuleTaskListResponse> ListTasksAsync(
-        IServiceProvider services,
-        CancellationToken ct) =>
-        new(await ResolveTaskAuthoring(services).ListDefinitionsAsync(ct));
-
-    private static async Task<ForeignModuleTaskGetResponse> UpdateTaskAsync(
-        IServiceProvider services,
-        ForeignModuleTaskUpdateRequest request,
-        CancellationToken ct)
-    {
-        RequireId(request.Id, "Task definition ID is required.");
-        var updated = await ResolveTaskAuthoring(services)
-            .UpdateDefinitionAsync(
-                request.Id,
-                new UpdateTaskDefinitionRequest(request.SourceText, request.IsActive),
-                ct);
-        return new ForeignModuleTaskGetResponse(updated);
-    }
-
-    private static async Task<ForeignModuleTaskDeleteResponse> DeleteTaskAsync(
-        IServiceProvider services,
-        ForeignModuleTaskIdRequest request,
-        CancellationToken ct)
-    {
-        RequireId(request.Id, "Task definition ID is required.");
-        return new ForeignModuleTaskDeleteResponse(
-            await ResolveTaskAuthoring(services).DeleteDefinitionAsync(request.Id, ct));
-    }
-
-    private static async Task<ForeignModuleTaskLaunchResponse> LaunchTaskAsync(
-        IServiceProvider services,
-        ForeignModuleTaskLaunchRequest request,
-        CancellationToken ct)
-    {
-        RequireId(request.TaskDefinitionId, "Task definition ID is required.");
-        var instanceId = await ResolveTaskLauncher(services)
-            .LaunchAsync(
-                request.TaskDefinitionId,
-                request.ParameterValues,
-                request.CallerAgentId,
-                request.ChannelId,
-                request.ContextId,
-                ct);
-        return new ForeignModuleTaskLaunchResponse(instanceId);
-    }
-
-    private static async Task<ForeignModuleTaskContextExecutionResponse> ExecuteTaskContextStatementsAsync(
-        IServiceProvider services,
-        ForeignModuleTaskContextExecuteStatementsRequest request,
-        CancellationToken ct)
-    {
-        var context = ResolveTaskContext(services, request.ContextId);
-        ApplyTaskContextSnapshot(context, request.ChannelId, request.Variables);
-        var result = await context.ExecuteStatementsAsync(
-            [.. request.Statements.Select(ForeignModuleProxy.ToTaskStatementDefinition)],
-            ct);
-        return CreateTaskContextResponse(result, context);
-    }
-
-    private static async Task<ForeignModuleTaskContextExecutionResponse> ExecuteTaskContextEventHandlerAsync(
-        IServiceProvider services,
-        ForeignModuleTaskContextExecuteEventHandlerRequest request,
-        CancellationToken ct)
-    {
-        var registry = ResolveTaskContextRegistry(services);
-        if (!registry.TryGetEventHandler(request.HandlerId, out var context, out var handler))
-        {
-            throw new NotSupportedException(
-                $"Task event handler callback '{request.HandlerId}' is not active.");
-        }
-
-        ApplyTaskContextSnapshot(context, request.ChannelId, request.Variables);
-        await handler.ExecuteBodyAsync(ct);
-        return CreateTaskContextResponse(TaskStatementResult.Continue, context);
-    }
-
-    private static ITaskOperationExecutionContext ResolveTaskContext(
-        IServiceProvider services,
-        string contextId)
-    {
-        if (string.IsNullOrWhiteSpace(contextId))
-            throw new ArgumentException("Task context callback ID is required.", nameof(contextId));
-
-        var registry = ResolveTaskContextRegistry(services);
-        return registry.TryGetContext(contextId, out var context)
-            ? context
-            : throw new NotSupportedException($"Task context callback '{contextId}' is not active.");
-    }
-
-    private static void ApplyTaskContextSnapshot(
-        ITaskOperationExecutionContext context,
-        Guid? channelId,
-        IReadOnlyDictionary<string, JsonElement>? variables)
-    {
-        if (channelId is { } targetChannelId)
-            context.SetChannelId(targetChannelId);
-
-        if (variables is null)
-            return;
-
-        foreach (var (key, value) in variables)
-            context.Variables[key] = ConvertJsonValue(value);
-    }
-
-    private static ForeignModuleTaskContextExecutionResponse CreateTaskContextResponse(
-        TaskStatementResult result,
-        ITaskOperationExecutionContext context) =>
-        new(
-            result,
-            context.ChannelId,
-            context.Variables.ToDictionary(
-                pair => pair.Key,
-                pair => SerializeVariableValue(pair.Value),
-                StringComparer.Ordinal));
-
-    private static object? ConvertJsonValue(JsonElement value) =>
-        value.ValueKind switch
-        {
-            JsonValueKind.Undefined or JsonValueKind.Null => null,
-            JsonValueKind.String => value.GetString(),
-            JsonValueKind.True => true,
-            JsonValueKind.False => false,
-            JsonValueKind.Number when value.TryGetInt64(out var longValue) => longValue,
-            JsonValueKind.Number => value.GetDouble(),
-            _ => value.Clone(),
-        };
-
-    private static JsonElement SerializeVariableValue(object? value)
-    {
-        if (value is JsonElement element)
-            return element.Clone();
-
-        try
-        {
-            return value is null
-                ? JsonSerializer.SerializeToElement((string?)null, JsonOptions)
-                : JsonSerializer.SerializeToElement(value, value.GetType(), JsonOptions);
-        }
-        catch (NotSupportedException)
-        {
-            return JsonSerializer.SerializeToElement(value?.ToString(), JsonOptions);
-        }
-    }
-
     private static async Task<ForeignModuleContextThreadsResponse> GetAccessibleContextThreadsAsync(
         IServiceProvider services,
         ForeignModuleContextAccessibleThreadsRequest request,
@@ -808,135 +527,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         return new ForeignModuleConversationSteeringListResponse(
             await ResolveConversationSteering(services)
                 .ListAsync(request.ChannelId, request.ThreadId, request.Limit, ct));
-    }
-
-    private static async Task<ForeignModuleQueueMetricsResponse> GetQueueMetricsAsync(
-        IServiceProvider services,
-        CancellationToken ct)
-    {
-        var metrics = ResolveQueueMetrics(services);
-        return new ForeignModuleQueueMetricsResponse(
-            await metrics.GetPendingJobCountAsync(ct),
-            await metrics.GetPendingTaskCountAsync(ct),
-            await metrics.GetSchedulerPendingJobCountAsync(ct));
-    }
-
-    private static async Task<ForeignModuleHostAgentTextResponse> HostAgentChatAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentChatRequest request,
-        CancellationToken ct) =>
-        new(await ResolveHostAgentBridge(services).ChatAsync(
-            request.InstanceId,
-            request.TaskName,
-            request.Message,
-            request.AgentId,
-            ct));
-
-    private static async Task<ForeignModuleHostAgentTextResponse> HostAgentChatStreamAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentChatRequest request,
-        CancellationToken ct) =>
-        new(await ResolveHostAgentBridge(services).ChatStreamAsync(
-            request.InstanceId,
-            request.TaskName,
-            request.Message,
-            request.AgentId,
-            ct));
-
-    private static async Task<ForeignModuleHostAgentTextResponse> HostAgentChatToThreadAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentChatToThreadRequest request,
-        CancellationToken ct) =>
-        new(await ResolveHostAgentBridge(services).ChatToThreadAsync(
-            request.InstanceId,
-            request.TaskName,
-            request.ThreadId,
-            request.Message,
-            request.AgentId,
-            ct));
-
-    private static ForeignModuleHostAgentTextResponse HostAgentParseStructuredResponse(
-        IServiceProvider services,
-        ForeignModuleHostAgentParseStructuredResponseRequest request) =>
-        new(ResolveHostAgentBridge(services).ParseStructuredResponse(
-            request.InstanceId,
-            request.Text,
-            request.TypeName));
-
-    private static Task<Guid> HostAgentCreateAgentAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentCreateAgentRequest request,
-        CancellationToken ct) =>
-        ResolveHostAgentBridge(services).CreateAgentAsync(
-            request.InstanceId,
-            request.Name,
-            request.ModelId,
-            request.SystemPrompt,
-            request.CustomId,
-            ct);
-
-    private static Task<Guid> HostAgentCreateThreadAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentCreateThreadRequest request,
-        CancellationToken ct) =>
-        ResolveHostAgentBridge(services).CreateThreadAsync(
-            request.InstanceId,
-            request.ChannelId,
-            request.ThreadName,
-            ct);
-
-    private static Task<Guid> HostAgentCreateRoleAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentCreateRoleRequest request,
-        CancellationToken ct) =>
-        ResolveHostAgentBridge(services).CreateRoleAsync(request.RoleName, ct);
-
-    private static async Task<ForeignModuleCapabilityAck> HostAgentSetRolePermissionsAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentSetRolePermissionsRequest request,
-        CancellationToken ct)
-    {
-        await ResolveHostAgentBridge(services).SetRolePermissionsAsync(
-            request.RoleId,
-            request.RequestJson,
-            ct);
-        return new ForeignModuleCapabilityAck();
-    }
-
-    private static async Task<ForeignModuleCapabilityAck> HostAgentAssignRoleAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentAssignRoleRequest request,
-        CancellationToken ct)
-    {
-        await ResolveHostAgentBridge(services).AssignRoleAsync(
-            request.AgentId,
-            request.RoleId,
-            ct);
-        return new ForeignModuleCapabilityAck();
-    }
-
-    private static Task<Guid> HostAgentCreateChannelAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentCreateChannelRequest request,
-        CancellationToken ct) =>
-        ResolveHostAgentBridge(services).CreateChannelAsync(
-            request.InstanceId,
-            request.Title,
-            request.AgentId,
-            request.CustomId,
-            ct);
-
-    private static async Task<ForeignModuleCapabilityAck> HostAgentAddAllowedAgentAsync(
-        IServiceProvider services,
-        ForeignModuleHostAgentAddAllowedAgentRequest request,
-        CancellationToken ct)
-    {
-        await ResolveHostAgentBridge(services).AddAllowedAgentAsync(
-            request.InstanceId,
-            request.AgentId,
-            request.ChannelId,
-            ct);
-        return new ForeignModuleCapabilityAck();
     }
 
     private static async Task<ForeignModuleAgentCreateResponse> CreateSubAgentAsync(
@@ -1207,14 +797,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
         services.GetService<IForeignModuleProtocolContractResolver>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide a protocol contract resolver.");
 
-    private static ITaskAuthoring ResolveTaskAuthoring(IServiceProvider services) =>
-        services.GetService<ITaskAuthoring>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide task authoring.");
-
-    private static ITaskInstanceLauncher ResolveTaskLauncher(IServiceProvider services) =>
-        services.GetService<ITaskInstanceLauncher>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide a task launcher.");
-
     private static ICoreEntityIdProvider ResolveCoreEntityIds(IServiceProvider services) =>
         services.GetService<ICoreEntityIdProvider>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide core entity lookup.");
@@ -1226,18 +808,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static IConversationSteering ResolveConversationSteering(IServiceProvider services) =>
         services.GetService<IConversationSteering>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide conversation steering.");
-
-    private static IHostQueueMetrics ResolveQueueMetrics(IServiceProvider services) =>
-        services.GetService<IHostQueueMetrics>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide queue metrics.");
-
-    private static IHostAgentBridge ResolveHostAgentBridge(IServiceProvider services) =>
-        services.GetService<IHostAgentBridge>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide an agent bridge.");
-
-    private static ForeignModuleTaskContextRegistry ResolveTaskContextRegistry(IServiceProvider services) =>
-        services.GetService<ForeignModuleTaskContextRegistry>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide task context callbacks.");
 
     private static IAgentManager ResolveAgentManager(IServiceProvider services) =>
         services.GetService<IAgentManager>()

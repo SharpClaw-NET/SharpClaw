@@ -9,7 +9,7 @@ SharpClaw combines AI chat capabilities with advanced agent orchestration, allow
 - Chat with multiple AI models from different providers
 - Create specialized agents with custom roles and permissions
 - Organize conversations into channels and threads
-- Execute tasks and jobs with full approval workflows
+- Execute jobs with full approval workflows
 - Integrate bots across Telegram, Discord, WhatsApp, and more
 - Run a public-facing gateway for external access
 
@@ -37,9 +37,8 @@ SharpClaw combines AI chat capabilities with advanced agent orchestration, allow
 
 **Roles** define what agents and users can do via permission sets.
 
-**Jobs** are background tasks agents can execute (shell commands, screenshots, etc.).
+**Jobs** are background actions agents can execute (shell commands, screenshots, etc.).
 
-**Tasks** are C# automation scripts that can create agents, channels, and orchestrate workflows.
 
 ## Getting Help
 

@@ -9,7 +9,6 @@ using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
 using SharpClaw.Contracts.Modules.Foreign;

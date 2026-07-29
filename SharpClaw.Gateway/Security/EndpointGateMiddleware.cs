@@ -133,13 +133,6 @@ public sealed class EndpointGateMiddleware(
         if (lower.StartsWith("/api/users"))
             return nameof(GatewayEndpointOptions.Users);
 
-        // Task SSE (/api/tasks/.../stream) — must precede generic /api/tasks
-        if (lower.StartsWith("/api/tasks") && lower.Contains("/stream"))
-            return nameof(GatewayEndpointOptions.TaskStreaming);
-
-        if (lower.StartsWith("/api/tasks"))
-            return nameof(GatewayEndpointOptions.Tasks);
-
         if (lower.StartsWith("/api/toolawarenesssets") || lower.StartsWith("/api/tool-awareness-sets"))
             return nameof(GatewayEndpointOptions.ToolAwarenessSets);
 

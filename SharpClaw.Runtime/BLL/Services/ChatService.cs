@@ -17,10 +17,8 @@ using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Models;
-using SharpClaw.Contracts.Tasks;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Runtime.INF.Persistence;
@@ -47,7 +45,6 @@ public sealed class ChatService(
     ChatRequestWorkflowEngine chatWorkflow,
     ChatQueryWorkflowEngine chatQueries,
     EfChatQueryHost chatQueryHost,
-    ChatToolWorkflowEngine chatTools,
     ChatNativeJobToolExecutor chatNativeJobToolExecutor,
     ChatInlineToolExecutor chatInlineToolExecutor,
     ChatNativeToolLoopEngine chatNativeToolLoop,
@@ -74,7 +71,6 @@ public sealed class ChatService(
     private readonly EfChatQueryHost _chatQueryHost = chatQueryHost;
     private readonly HeaderTagProcessor _headerTagProcessor = headerTagProcessor;
     private readonly ChatHeaderWorkflowEngine _chatHeaderWorkflow = chatHeaderWorkflow;
-    private readonly ChatToolWorkflowEngine _chatTools = chatTools;
     private readonly ChatProviderExecutionWorkflowEngine _chatProviderExecution = chatProviderExecution;
     private readonly ChatStreamingResponseEngine _chatStreaming = chatStreaming;
     private readonly ChatHeaderGrantFormatter _headerGrantFormatter = headerGrantFormatter;
@@ -222,7 +218,6 @@ public sealed class ChatService(
                     new ChatServiceNativeToolLoopHost(this),
                     ct,
                     approvalCallback,
-                    request.TaskContext,
                     toolAwareness,
                     threadId,
                     timingRequestId,
@@ -397,7 +392,6 @@ public sealed class ChatService(
     private async Task<string?> BuildChatHeaderAsync(
         ChannelState channel, AgentState agent, string clientType,
         CancellationToken ct,
-        TaskChatContext? taskContext = null,
         string? externalUsername = null, string? externalDisplayName = null,
         CompletionParameters? completionParameters = null,
         string providerKey = "")
@@ -407,7 +401,6 @@ public sealed class ChatService(
                 agent,
                 clientType,
                 _disableDefaultChatHeaders,
-                taskContext,
                 externalUsername,
                 externalDisplayName,
                 completionParameters,
@@ -559,7 +552,6 @@ public sealed class ChatService(
                 new ChatServiceNativeToolLoopHost(this),
                 ct,
                 approvalCallback,
-                request.TaskContext,
                 toolAwareness,
                 threadId,
                 timingRequestId,
@@ -739,7 +731,7 @@ public sealed class ChatService(
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
-    // Task-specific tool handling
+    // Inline module-tool handling
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
 
     /// <summary>
@@ -1091,7 +1083,6 @@ public sealed class ChatService(
                 agent,
                 request.ClientType,
                 ct,
-                taskContext: request.TaskContext,
                 externalUsername: request.ExternalUsername,
                 externalDisplayName: request.ExternalDisplayName,
                 completionParameters: plan.CompletionParameters,
@@ -1194,15 +1185,6 @@ public sealed class ChatService(
     {
         public bool IsInlineTool(string toolName) =>
             service.IsInlineToolName(toolName);
-
-        public Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
-            ChatToolCall toolCall,
-            TaskChatContext? taskContext,
-            CancellationToken ct) =>
-            service._chatTools.TryHandleTaskToolAsync(
-                toolCall,
-                taskContext,
-                ct);
 
         public Task<string> ExecuteInlineToolAsync(
             ChatToolCall toolCall,

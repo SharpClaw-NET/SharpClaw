@@ -14,15 +14,12 @@ public sealed partial class MainPage
     {
         if (_settingsMode || _selectedChannelId is null) return;
         _settingsMode = true;
-        _tasksMode = false;
         _jobsMode = false;
         UpdateTabHighlight();
         MessagesScroller.Visibility = Visibility.Collapsed;
         ChatInputArea.Visibility = Visibility.Collapsed;
         JobViewPanel.Visibility = Visibility.Collapsed;
         DeallocateJobView();
-        TaskViewPanel.Visibility = Visibility.Collapsed;
-        DeallocateTaskView();
         AgentSelectorPanel.Visibility = Visibility.Collapsed;
         ThreadSelectorPanel.Visibility = Visibility.Collapsed;
         OneOffWarning.Visibility = Visibility.Collapsed;

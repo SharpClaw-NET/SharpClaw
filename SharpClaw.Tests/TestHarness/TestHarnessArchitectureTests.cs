@@ -44,12 +44,6 @@ public sealed class TestHarnessArchitectureTests
         "Providers Capabilities",
         "LlamaSharp Schema Conversion",
         "LlamaSharp Tool Calling",
-        "Tasks Scripts Compiler Parser",
-        "Tasks Scripts Semantics Validator",
-        "Tasks Step Keys",
-        "Tasks Execution Lifecycle",
-        "Tasks Shared Data",
-        "Tasks Triggers",
         "Chat Prompt Surface",
         "Chat Tool Permissions",
         "Chat Costs And Budgets",
@@ -279,9 +273,6 @@ public sealed class TestHarnessArchitectureTests
         correctnessDomains.Should().Equal(ExpectedCorrectnessDomains);
         performanceDomains.Should().Equal(ExpectedPerformanceDomains);
 
-        correctnessDomains.Count.Should().BeGreaterThan(65);
-        performanceDomains.Count.Should().BeGreaterThan(15);
-
         workflow.Should().Contain("FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath");
         workflow.Should().Contain("FullyQualifiedName~ApiJob");
         workflow.Should().Contain("FullyQualifiedName~EffectiveToolDefinitionsStayWarmUntilAgentToolSettingsChange");
@@ -297,7 +288,6 @@ public sealed class TestHarnessArchitectureTests
         workflow.Should().NotContain("domain: Frontend\n");
         workflow.Should().NotContain("domain: Persistence\n");
         workflow.Should().NotContain("domain: Providers\n");
-        workflow.Should().NotContain("domain: Tasks\n");
         workflow.Should().NotContain("domain: Chat\n");
         workflow.Should().NotContain("domain: Jobs\n");
         workflow.Should().NotContain("domain: Tools\n");
@@ -309,8 +299,6 @@ public sealed class TestHarnessArchitectureTests
         workflow.Should().NotContain("domain: Gateway Harness Surface\n");
         workflow.Should().NotContain("domain: Frontend Runtime\n");
         workflow.Should().NotContain("domain: Providers Local LlamaSharp\n");
-        workflow.Should().NotContain("domain: Tasks Scripts\n");
-        workflow.Should().NotContain("domain: Tasks Lifecycle\n");
         workflow.Should().NotContain("domain: Chat Pipeline\n");
         workflow.Should().NotContain("domain: Tools Correctness\n");
         workflow.Should().NotContain("domain: Tools Repeated Interactions\n");
@@ -389,7 +377,6 @@ public sealed class TestHarnessArchitectureTests
         var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
         var expectedChecks = ExtractRequiredCheckContextsFromWorkflow(workflow);
 
-        expectedChecks.Count.Should().BeGreaterThan(85);
         requiredChecks.Should().Equal(expectedChecks);
     }
 

@@ -3,13 +3,11 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.DTOs.AgentActions;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Modules;
-using SharpClaw.Core.Tasks.Runtime;
 
 namespace SharpClaw.Tests.Core;
 
@@ -44,7 +42,6 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
         result.ProviderMetadataJson.Should().Be("""{"id":"plain"}""");
         provider.PlainCalls.Should().Be(1);
         provider.NativeCalls.Should().Be(0);
-        host.TaskToolCalls.Should().Be(0);
         host.NativeJobToolCalls.Should().Be(0);
     }
 
@@ -63,34 +60,21 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
         };
         var engine = CreateEngine(registry);
         var host = new RecordingNativeToolLoopHost();
-        var instanceId = Guid.NewGuid();
-        var store = TaskSharedData.GetOrCreate(instanceId);
-        store.RegisterBuiltInTools();
+        var result = await engine.RunBufferedAsync(
+            CreateRequest(
+                provider,
+                host,
+                enableTools: true));
 
-        try
-        {
-            var result = await engine.RunBufferedAsync(
-                CreateRequest(
-                    provider,
-                    host,
-                    enableTools: true,
-                    taskContext: new TaskChatContext(instanceId, "Task")));
-
-            result.AssistantContent.Should().Be("native answer");
-            result.JobResults.Should().BeEmpty();
-            result.TotalPromptTokens.Should().Be(7);
-            result.TotalCompletionTokens.Should().Be(11);
-            result.ProviderMetadataJson.Should().Be("""{"id":"native"}""");
-            provider.PlainCalls.Should().Be(0);
-            provider.NativeCalls.Should().Be(1);
-            provider.LastNativeToolNames.Should().Contain(["alpha", "beta", "task_read_light_data"]);
-            host.TaskToolCalls.Should().Be(0);
-            host.NativeJobToolCalls.Should().Be(0);
-        }
-        finally
-        {
-            TaskSharedData.Remove(instanceId);
-        }
+        result.AssistantContent.Should().Be("native answer");
+        result.JobResults.Should().BeEmpty();
+        result.TotalPromptTokens.Should().Be(7);
+        result.TotalCompletionTokens.Should().Be(11);
+        result.ProviderMetadataJson.Should().Be("""{"id":"native"}""");
+        provider.PlainCalls.Should().Be(0);
+        provider.NativeCalls.Should().Be(1);
+        provider.LastNativeToolNames.Should().Contain(["alpha", "beta"]);
+        host.NativeJobToolCalls.Should().Be(0);
     }
 
     [Test]
@@ -109,44 +93,31 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
         };
         var engine = CreateEngine(registry);
         var host = new RecordingNativeToolLoopHost();
-        var instanceId = Guid.NewGuid();
-        var store = TaskSharedData.GetOrCreate(instanceId);
-        store.RegisterBuiltInTools();
-
-        try
+        var events = new List<ChatNativeToolStreamingLoopEvent>();
+        await foreach (var loopEvent in engine.StreamAsync(
+            CreateStreamingRequest(
+                provider,
+                host,
+                enableTools: true)))
         {
-            var events = new List<ChatNativeToolStreamingLoopEvent>();
-            await foreach (var loopEvent in engine.StreamAsync(
-                CreateStreamingRequest(
-                    provider,
-                    host,
-                    enableTools: true,
-                    taskContext: new TaskChatContext(instanceId, "Task"))))
-            {
-                events.Add(loopEvent);
-            }
+            events.Add(loopEvent);
+        }
 
-            events.Select(loopEvent => loopEvent.Kind).Should().Equal(
-                ChatNativeToolStreamingLoopEventKind.TextDelta,
-                ChatNativeToolStreamingLoopEventKind.TextDelta,
-                ChatNativeToolStreamingLoopEventKind.Completed);
-            events[0].Text.Should().Be("stream ");
-            events[1].Text.Should().Be("answer");
-            var result = events[^1].Result!;
-            result.AssistantContent.Should().Be("stream answer");
-            result.TotalPromptTokens.Should().Be(13);
-            result.TotalCompletionTokens.Should().Be(17);
-            result.ProviderMetadataJson.Should().Be("""{"id":"stream"}""");
-            result.ProviderRounds.Should().Be(1);
-            provider.StreamingCalls.Should().Be(1);
-            provider.LastStreamingToolNames.Should().Contain(["alpha", "beta", "task_read_light_data"]);
-            host.TaskToolCalls.Should().Be(0);
-            host.NativeJobToolCalls.Should().Be(0);
-        }
-        finally
-        {
-            TaskSharedData.Remove(instanceId);
-        }
+        events.Select(loopEvent => loopEvent.Kind).Should().Equal(
+            ChatNativeToolStreamingLoopEventKind.TextDelta,
+            ChatNativeToolStreamingLoopEventKind.TextDelta,
+            ChatNativeToolStreamingLoopEventKind.Completed);
+        events[0].Text.Should().Be("stream ");
+        events[1].Text.Should().Be("answer");
+        var result = events[^1].Result!;
+        result.AssistantContent.Should().Be("stream answer");
+        result.TotalPromptTokens.Should().Be(13);
+        result.TotalCompletionTokens.Should().Be(17);
+        result.ProviderMetadataJson.Should().Be("""{"id":"stream"}""");
+        result.ProviderRounds.Should().Be(1);
+        provider.StreamingCalls.Should().Be(1);
+        provider.LastStreamingToolNames.Should().Contain(["alpha", "beta"]);
+        host.NativeJobToolCalls.Should().Be(0);
     }
 
     [Test]
@@ -180,7 +151,6 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
         result.TotalCompletionTokens.Should().Be(23);
         provider.StreamingCalls.Should().Be(1);
         provider.LastStreamingToolNames.Should().BeEmpty();
-        host.TaskToolCalls.Should().Be(0);
         host.NativeJobToolCalls.Should().Be(0);
     }
 
@@ -259,8 +229,7 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
     private static ChatBufferedProviderExecutionRequest CreateRequest(
         RecordingProviderRoundExecutor provider,
         RecordingNativeToolLoopHost host,
-        bool enableTools,
-        TaskChatContext? taskContext = null)
+        bool enableTools)
         => new(
             provider,
             "model",
@@ -274,14 +243,12 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
             CompletionParameters: null,
             enableTools,
             host,
-            CancellationToken.None,
-            TaskContext: taskContext);
+            CancellationToken.None);
 
     private static ChatStreamingProviderExecutionRequest CreateStreamingRequest(
         RecordingProviderRoundExecutor provider,
         RecordingNativeToolLoopHost host,
-        bool enableTools,
-        TaskChatContext? taskContext = null)
+        bool enableTools)
         => new(
             provider,
             "model",
@@ -295,8 +262,7 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
             CompletionParameters: null,
             enableTools,
             host,
-            CancellationToken.None,
-            TaskContext: taskContext);
+            CancellationToken.None);
 
     private static ChatProviderExecutionWorkflowEngine CreateEngine(
         ModuleRegistry? registry = null)
@@ -398,21 +364,11 @@ public sealed class ChatProviderExecutionWorkflowEngineTests
 
     private sealed class RecordingNativeToolLoopHost : IChatNativeToolLoopHost
     {
-        public int TaskToolCalls { get; private set; }
         public int NativeJobToolCalls { get; private set; }
         public Queue<ChatNativeJobToolExecutionResult> NativeJobResults { get; } = new();
         public (Guid JobId, int PromptTokens, int CompletionTokens)? RecordedTokenUsage { get; private set; }
 
         public bool IsInlineTool(string toolName) => false;
-
-        public Task<(bool Handled, string? Result)> TryHandleTaskToolAsync(
-            ChatToolCall toolCall,
-            TaskChatContext? taskContext,
-            CancellationToken ct)
-        {
-            TaskToolCalls++;
-            return Task.FromResult((false, (string?)null));
-        }
 
         public Task<string> ExecuteInlineToolAsync(
             ChatToolCall toolCall,

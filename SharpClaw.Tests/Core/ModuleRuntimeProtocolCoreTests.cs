@@ -21,8 +21,6 @@ public sealed class ModuleRuntimeProtocolCoreTests
 
         ForeignModuleProtocol.Version.Should().Be(1);
         ForeignModuleProtocol.HandshakePath.Should().Be("/.sharpclaw/handshake");
-        ForeignModuleHostCapabilityProtocol.TaskLaunchPath
-            .Should().Be("/.sharpclaw/host/tasks/launch");
         ForeignModuleEndpointResponseMode.WebSocket.Should().Be("websocket");
         ForeignModuleCapability.ProviderPlugins.Should().Be("providerPlugins");
     }
@@ -38,8 +36,6 @@ public sealed class ModuleRuntimeProtocolCoreTests
             .Should().Be("SharpClaw.Contracts");
         typeof(ForeignModuleProtocolContractInvocationRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleTaskTriggerAttributeHandleRequest).Assembly.GetName().Name
-            .Should().Be("SharpClaw.Contracts");
         typeof(ForeignModuleProviderChatCompletionRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         typeof(ForeignModuleProviderPluginDescriptor).Assembly.GetName().Name
@@ -48,8 +44,6 @@ public sealed class ModuleRuntimeProtocolCoreTests
             .Should().Be("SharpClaw.Core");
 
         typeof(SharpClaw.Contracts.Modules.ModuleManifest).Assembly.GetName().Name
-            .Should().Be("SharpClaw.Contracts");
-        typeof(SharpClaw.Contracts.Tasks.TaskTriggerDefinition).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         typeof(SharpClaw.Contracts.Providers.ChatCompletionMessage).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
@@ -120,28 +114,11 @@ public sealed class ModuleRuntimeProtocolCoreTests
     {
         typeof(ForeignModuleConfigGetRequest).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleTaskLaunchRequest).Assembly.GetName().Name
-            .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleTaskStatementInvocationDescriptor).Assembly.GetName().Name
-            .Should().Be("SharpClaw.Contracts");
-        typeof(ForeignModuleTaskOperationExecutionResponse).Assembly.GetName().Name
-            .Should().Be("SharpClaw.Contracts");
         typeof(ForeignModuleInfoListResponse).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
         typeof(SharpClaw.Contracts.Modules.ModuleInfo).Assembly.GetName().Name
             .Should().Be("SharpClaw.Contracts");
 
-        var descriptor = new ForeignModuleTaskStatementInvocationDescriptor(
-            "module.step",
-            Arguments: ["one"],
-            Body:
-            [
-                new ForeignModuleTaskStatementInvocationDescriptor("module.child")
-            ]);
-
-        descriptor.StatementKey.Should().Be("module.step");
-        descriptor.Body.Should().ContainSingle()
-            .Which.StatementKey.Should().Be("module.child");
     }
 
     [Test]
@@ -179,13 +156,11 @@ public sealed class ModuleRuntimeProtocolCoreTests
                 OverridesSeedData: false,
                 OverridesHealthCheck: false,
                 OverridesStreamingTools: false,
-                OverridesJobCompletionBehavior: false,
-                IsTaskParserAware: false),
+                OverridesJobCompletionBehavior: false),
             new ModuleServiceInventory(
                 Registrations: [],
                 ModuleStorageRegistrationTypes: [],
                 ProviderPluginRegistrations: [],
-                TaskRuntimeServiceRegistrations: [],
                 EventSinkRegistrations: [],
                 FactoryBackedServiceRegistrations: []));
 

@@ -3,8 +3,6 @@ namespace SharpClaw.Shared.DurableStorage;
 public enum DurableStreamKind
 {
     JobLog,
-    TaskLog,
-    TaskOutput,
     ProcessLog,
     ModuleLog,
 }
@@ -28,12 +26,6 @@ public readonly record struct DurableStreamKey
 
     public static DurableStreamKey Job(Guid jobId) =>
         new(DurableStreamKind.JobLog, $"job/{jobId:D}");
-
-    public static DurableStreamKey TaskLog(Guid instanceId) =>
-        new(DurableStreamKind.TaskLog, $"task/{instanceId:D}/log");
-
-    public static DurableStreamKey TaskOutput(Guid instanceId) =>
-        new(DurableStreamKind.TaskOutput, $"task/{instanceId:D}/output");
 
     public static DurableStreamKey Process(string appName, Guid bootId) =>
         new(
@@ -235,8 +227,6 @@ public sealed record DurableOperationalStreamCatalog(
 public sealed class DurableRetentionOptions
 {
     public TimeSpan JobLogAge { get; init; } = TimeSpan.FromDays(30);
-    public TimeSpan TaskLogAge { get; init; } = TimeSpan.FromDays(30);
-    public TimeSpan TaskOutputAge { get; init; } = TimeSpan.FromDays(90);
     public TimeSpan ProcessLogAge { get; init; } = TimeSpan.FromDays(14);
     public TimeSpan ModuleLogAge { get; init; } = TimeSpan.FromDays(14);
     public long MaximumEncodedBytes { get; init; } = 10L * 1024 * 1024 * 1024;
@@ -246,8 +236,6 @@ public sealed class DurableRetentionOptions
     public TimeSpan GetMaximumAge(DurableStreamKind kind) => kind switch
     {
         DurableStreamKind.JobLog => JobLogAge,
-        DurableStreamKind.TaskLog => TaskLogAge,
-        DurableStreamKind.TaskOutput => TaskOutputAge,
         DurableStreamKind.ProcessLog => ProcessLogAge,
         DurableStreamKind.ModuleLog => ModuleLogAge,
         _ => throw new ArgumentOutOfRangeException(nameof(kind)),

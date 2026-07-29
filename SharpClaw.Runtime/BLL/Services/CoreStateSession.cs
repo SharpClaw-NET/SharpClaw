@@ -4,7 +4,6 @@ using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Entities.Core.Messages;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Core.State;
 using SharpClaw.Runtime.INF.Persistence;
 
@@ -42,10 +41,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
         (DefaultResourceSetState)MapEntity(entity);
     public DefaultResourceEntryState Map(DefaultResourceEntryDB entity) =>
         (DefaultResourceEntryState)MapEntity(entity);
-    public TaskDefinitionState Map(TaskDefinitionDB entity) =>
-        (TaskDefinitionState)MapEntity(entity);
-    public TaskTriggerBindingState Map(TaskTriggerBindingDB entity) =>
-        (TaskTriggerBindingState)MapEntity(entity);
     public DomainState Map(BaseEntity entity) => MapEntity(entity);
 
     public IReadOnlyList<AgentState> Map(IEnumerable<AgentDB> entities) =>
@@ -66,10 +61,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
         entities.Select(Map).ToList();
     public IReadOnlyList<ChatMessageState> Map(IEnumerable<ChatMessageDB> entities) =>
         entities.Select(Map).ToList();
-    public IReadOnlyList<TaskDefinitionState> Map(
-        IEnumerable<TaskDefinitionDB> entities) => entities.Select(Map).ToList();
-    public IReadOnlyList<TaskTriggerBindingState> Map(
-        IEnumerable<TaskTriggerBindingDB> entities) => entities.Select(Map).ToList();
 
     public void Track(DomainState state)
     {
@@ -154,8 +145,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
             ChatMessageDB value => MapMessage(value),
             DefaultResourceSetDB value => MapDefaultResourceSet(value),
             DefaultResourceEntryDB value => MapDefaultResourceEntry(value),
-            TaskDefinitionDB value => MapTaskDefinition(value),
-            TaskTriggerBindingDB value => MapTaskTriggerBinding(value),
             _ => throw new NotSupportedException(
                 $"No Core state mapping exists for {entity.GetType().FullName}.")
         };
@@ -417,37 +406,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
         return state;
     }
 
-    private TaskDefinitionState MapTaskDefinition(TaskDefinitionDB entity)
-    {
-        var state = Register(entity, new TaskDefinitionState
-        {
-            Name = entity.Name,
-            SourceText = entity.SourceText
-        });
-        state.Description = entity.Description;
-        state.OutputTypeName = entity.OutputTypeName;
-        state.ParametersJson = entity.ParametersJson;
-        state.RequirementsJson = entity.RequirementsJson;
-        state.TriggersJson = entity.TriggersJson;
-        state.IsActive = entity.IsActive;
-        state.TriggerBindings = entity.TriggerBindings.Select(Map).ToList();
-        return state;
-    }
-
-    private TaskTriggerBindingState MapTaskTriggerBinding(TaskTriggerBindingDB entity)
-    {
-        var state = Register(entity, new TaskTriggerBindingState
-        {
-            Kind = entity.Kind,
-            DefinitionJson = entity.DefinitionJson
-        });
-        state.TaskDefinitionId = entity.TaskDefinitionId;
-        state.TriggerValue = entity.TriggerValue;
-        state.Filter = entity.Filter;
-        state.IsEnabled = entity.IsEnabled;
-        return state;
-    }
-
     private TState Register<TState>(BaseEntity entity, TState state)
         where TState : DomainState
     {
@@ -521,17 +479,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
             },
             DefaultResourceSetState => new DefaultResourceSetDB(),
             DefaultResourceEntryState => new DefaultResourceEntryDB(),
-            TaskDefinitionState value => new TaskDefinitionDB
-            {
-                Name = value.Name,
-                SourceText = value.SourceText
-            },
-            TaskTriggerBindingState value => new TaskTriggerBindingDB
-            {
-                TaskDefinitionId = value.TaskDefinitionId,
-                Kind = value.Kind,
-                DefinitionJson = value.DefinitionJson
-            },
             _ => throw new NotSupportedException(
                 $"No EF entity mapping exists for {state.GetType().FullName}.")
         };
@@ -643,24 +590,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
                     target.DefaultResourceSetId = source.DefaultResourceSetId;
                 target.ResourceKey = source.ResourceKey;
                 target.ResourceId = source.ResourceId;
-                break;
-            case (TaskDefinitionState source, TaskDefinitionDB target):
-                target.Name = source.Name;
-                target.Description = source.Description;
-                target.SourceText = source.SourceText;
-                target.OutputTypeName = source.OutputTypeName;
-                target.ParametersJson = source.ParametersJson;
-                target.RequirementsJson = source.RequirementsJson;
-                target.TriggersJson = source.TriggersJson;
-                target.IsActive = source.IsActive;
-                break;
-            case (TaskTriggerBindingState source, TaskTriggerBindingDB target):
-                target.TaskDefinitionId = source.TaskDefinitionId;
-                target.Kind = source.Kind;
-                target.TriggerValue = source.TriggerValue;
-                target.Filter = source.Filter;
-                target.DefinitionJson = source.DefinitionJson;
-                target.IsEnabled = source.IsEnabled;
                 break;
         }
     }
@@ -991,9 +920,6 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
                     break;
                 case (DefaultResourceEntryState source, DefaultResourceEntryDB target):
                     source.DefaultResourceSetId = target.DefaultResourceSetId;
-                    break;
-                case (TaskTriggerBindingState source, TaskTriggerBindingDB target):
-                    source.TaskDefinitionId = target.TaskDefinitionId;
                     break;
             }
         }

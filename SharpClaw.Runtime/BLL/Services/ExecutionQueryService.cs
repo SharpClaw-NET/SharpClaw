@@ -3,9 +3,7 @@ using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Diagnostics;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Tasks;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Runtime.INF.Persistence;
@@ -80,65 +78,6 @@ public sealed class ExecutionQueryService(
             cursor,
             take,
             cancellationToken);
-    }
-
-    public async Task<TaskInstanceDetailResponse?> GetTaskAsync(
-        Guid instanceId,
-        CancellationToken cancellationToken = default)
-    {
-        var instance = await db.TaskInstances
-            .Include(candidate => candidate.TaskDefinition)
-            .FirstOrDefaultAsync(
-                candidate => candidate.Id == instanceId,
-                cancellationToken);
-        return instance is null
-            ? null
-            : persistence.ToTaskDetail(
-                instance,
-                instance.TaskDefinition.Name);
-    }
-
-    public async Task<TaskInstanceSummaryPageResponse> ListTasksAsync(
-        Guid? taskDefinitionId,
-        string? cursor,
-        int take = DefaultTake,
-        CancellationToken cancellationToken = default)
-    {
-        var boundedTake = BoundTake(take);
-        var scope = taskDefinitionId is { } definitionId
-            ? $"tasks:definition:{definitionId:D}"
-            : "tasks:all";
-        var query = db.TaskInstances
-            .Where(instance => taskDefinitionId == null
-                || instance.TaskDefinitionId == taskDefinitionId)
-            .Include(instance => instance.TaskDefinition)
-            .AsQueryable();
-        query = ApplyCursor(query, scope, cursor);
-        var loaded = await query
-            .OrderByDescending(instance => instance.CreatedAt)
-            .ThenByDescending(instance => instance.Id)
-            .Take(boundedTake + 1)
-            .ToListAsync(cancellationToken);
-        var hasMore = loaded.Count > boundedTake;
-        if (hasMore)
-            loaded.RemoveAt(loaded.Count - 1);
-        var nextCursor = hasMore && loaded.Count > 0
-            ? cursors.Encode(
-                scope,
-                loaded[^1].CreatedAt,
-                loaded[^1].Id)
-            : null;
-        return new TaskInstanceSummaryPageResponse(
-            loaded.Select(instance => new TaskInstanceSummaryResponse(
-                instance.Id,
-                instance.TaskDefinitionId,
-                instance.TaskDefinition.Name,
-                instance.Status,
-                instance.CreatedAt,
-                instance.StartedAt,
-                instance.CompletedAt)).ToArray(),
-            nextCursor,
-            hasMore);
     }
 
     public async Task<ExecutionAuditPageResponse> ReadAuditAsync(

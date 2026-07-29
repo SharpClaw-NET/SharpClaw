@@ -22,9 +22,8 @@ public sealed partial class MainPage
         _selectedChannelId = null; _selectedThreadId = null; _selectedAgentId = null; _selectedJobId = null; _pendingNewThread = false;
         ChatTitleBlock.Text = "> Select or create a channel";
         ChannelTabBar.Visibility = Visibility.Collapsed;
-        _settingsMode = false; _tasksMode = false; _jobsMode = false;
+        _settingsMode = false; _jobsMode = false;
         SettingsScroller.Visibility = Visibility.Collapsed;
-        TaskViewPanel.Visibility = Visibility.Collapsed; DeallocateTaskView();
         JobViewPanel.Visibility = Visibility.Collapsed; DeallocateJobView();
         ThreadSelectorPanel.Visibility = Visibility.Collapsed; OneOffWarning.Visibility = Visibility.Collapsed;
         ShowChatView();

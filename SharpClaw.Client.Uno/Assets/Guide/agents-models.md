@@ -187,7 +187,7 @@ Channels support multiple agents:
 This is useful for:
 
 - Comparing responses from different models
-- Specialized agents for different tasks in the same project
+- Specialized agents for different responsibilities in the same project
 - Fallback agents when primary is unavailable
 
 ## Agent Selection Priority

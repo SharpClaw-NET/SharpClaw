@@ -50,32 +50,6 @@ public sealed class GatewayRouteParityTests
     /// </summary>
     private static readonly HashSet<string> KnownClassicGaps = new(StringComparer.OrdinalIgnoreCase)
     {
-        // Tasks / TaskStreaming — no classic controller projection yet.
-        "POST /tasks/validate",
-        "POST /tasks",
-        "GET /tasks",
-        "GET /tasks/{*}",
-        "PUT /tasks/{*}",
-        "DELETE /tasks/{*}",
-        "GET /tasks/{*}/preflight",
-        "GET /tasks/trigger-sources",
-        "POST /tasks/{*}/triggers/enable",
-        "POST /tasks/{*}/triggers/disable",
-        "POST /tasks/{*}/instances",
-        "GET /tasks/{*}/instances",
-        "GET /tasks/{*}/instances/{*}",
-        "POST /tasks/{*}/instances/{*}/cancel",
-        "POST /tasks/{*}/instances/{*}/stop",
-        "POST /tasks/{*}/instances/{*}/pause",
-        "POST /tasks/{*}/instances/{*}/resume",
-        "POST /tasks/{*}/instances/{*}/start",
-        "GET /tasks/{*}/instances/{*}/outputs",
-        "GET /tasks/{*}/instances/{*}/outputs/latest",
-        "GET /tasks/{*}/instances/{*}/logs",
-        "GET /tasks/{*}/instances/{*}/audit",
-        "GET /tasks/{*}/instances/{*}/artifacts/{*}",
-        "GET /tasks/{*}/instances/{*}/stream",
-
         // Tool awareness sets — no classic controller projection yet.
         "POST /tool-awareness-sets",
         "GET /tool-awareness-sets",

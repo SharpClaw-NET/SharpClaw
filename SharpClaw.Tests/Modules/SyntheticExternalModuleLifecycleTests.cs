@@ -5,7 +5,6 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Runtime.BLL.Services.Triggers;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -181,7 +180,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
         await using var host = CreateSidecarHarness();
         var registry = host.Services.GetRequiredService<ModuleRegistry>();
         var factory = host.Services.GetRequiredService<ProviderApiClientFactory>();
-        var triggerRegistry = new TaskTriggerSourceRegistry([], moduleRegistry: registry);
         var moduleService = host.Services.GetRequiredService<ModuleService>();
 
         var moduleDir = CreateSyntheticExternalModuleDirectory();
@@ -211,7 +209,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
             providerPlugin.Should().NotBeNull();
             providerPlugin!.SupportsCostFeed.Should().BeTrue();
         providerPlugin.CreateCostFeed(new ProviderClientOptions(null)).Should().NotBeNull();
-            triggerRegistry.ResolveByKey(SyntheticExternalLifecycleModule.TriggerKey).Should().NotBeNull();
 
             var seeded = await host.SeedChatAsync(
                 SyntheticExternalLifecycleModule.ProviderKey,
@@ -251,7 +248,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
                 .Should().BeNull();
             factory.IsAvailable(SyntheticExternalLifecycleModule.ProviderKey).Should().BeFalse();
             factory.GetPlugin(SyntheticExternalLifecycleModule.ProviderKey).Should().BeNull();
-            triggerRegistry.ResolveByKey(SyntheticExternalLifecycleModule.TriggerKey).Should().BeNull();
 
             registry.IsRegisteredDefaultResourceKey("agent").Should().BeTrue();
             seeded.Channel.CustomChatHeader.Should().Be("core persisted header");
