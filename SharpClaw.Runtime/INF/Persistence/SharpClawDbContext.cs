@@ -59,7 +59,7 @@ public class SharpClawDbContext(
     public DbSet<ModuleStorageRecordDB> ModuleStorageRecords => Set<ModuleStorageRecordDB>();
     public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
 
-    // ── Task scripts ──────────────────────────────────────────────
+    // ── Module runtime state ──────────────────────────────────────
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -326,7 +326,7 @@ public class SharpClawDbContext(
                 .OnDelete(DeleteBehavior.Cascade);
             });
 
-            // ── Task definitions & instances
+            // ── Execution audit events
         modelBuilder.Entity<ExecutionAuditEventDB>(e =>
         {
             e.Property(a => a.OwnerKind).HasConversion<string>();

@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
 using System.Xml.Linq;
@@ -170,6 +171,54 @@ public sealed class TestHarnessArchitectureTests
             .ToList();
 
         offenders.Should().BeEmpty();
+    }
+
+    [Test]
+    public void TrackedSourceContainsNoRemovedProductTaskSurface()
+    {
+        var root = FindSolutionRoot();
+        var bannedTerms = new[]
+        {
+            "SharpClaw." + "Contracts.Tasks",
+            "SharpClaw." + "Core.Tasks",
+            "ForeignModule" + "Task",
+            "/api/" + "tasks",
+            "\\api\\" + "tasks",
+            "Task" + "Script",
+            "Task" + "Trigger",
+            "Task" + "Runtime",
+            "Task" + "Orchestrator",
+            "Task" + "Instance",
+            "Task" + "Diagnostic",
+            "Task" + "Preflight",
+            "Task" + "Handler",
+            "Task" + "Stream",
+            "Task" + "Service",
+            "Task" + "Operation",
+            "Task" + "Context",
+            "Task" + "Definition",
+            "Task" + "Step",
+            "Task" + "Authoring",
+            "Task" + "Execution",
+            "Task" + "Lifecycle",
+            "/" + "tasks/",
+            "\\" + "tasks\\"
+        };
+
+        var offenders = ReadTrackedTextFiles(root)
+            .Where(path => !IsHistoricalMigrationPath(path))
+            .SelectMany(relativePath =>
+            {
+                var fullPath = Path.Combine(root, relativePath);
+                var text = File.ReadAllText(fullPath);
+                return bannedTerms
+                    .Where(term => text.Contains(term, StringComparison.OrdinalIgnoreCase))
+                    .Select(term => $"{relativePath} contains removed product term '{term}'");
+            })
+            .ToArray();
+
+        offenders.Should().BeEmpty(
+            "ordinary System.Threading.Tasks.Task APIs are allowed, but removed product Task terms are not");
     }
 
     [Test]
@@ -411,6 +460,40 @@ public sealed class TestHarnessArchitectureTests
                     ReadModuleFlag(path, TestHarnessConstants.InProcessModuleId)
             })
             .Build();
+
+    private static IReadOnlyList<string> ReadTrackedTextFiles(string root)
+    {
+        using var process = Process.Start(new ProcessStartInfo
+        {
+            FileName = "git",
+            Arguments = "ls-files -z",
+            WorkingDirectory = root,
+            RedirectStandardOutput = true,
+            RedirectStandardError = true,
+            UseShellExecute = false,
+            CreateNoWindow = true
+        });
+
+        process.Should().NotBeNull("the source tree must be a Git worktree");
+        var output = process!.StandardOutput.ReadToEnd();
+        var error = process.StandardError.ReadToEnd();
+        process.WaitForExit(10_000).Should().BeTrue("git ls-files must finish promptly");
+        process.ExitCode.Should().Be(0, error);
+
+        var binaryExtensions = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        {
+            ".dll", ".exe", ".pdb", ".nupkg", ".png", ".jpg", ".jpeg", ".gif", ".ico",
+            ".woff", ".woff2", ".ttf", ".zip", ".7z", ".pdf", ".sqlite", ".db"
+        };
+
+        return output
+            .Split('\0', StringSplitOptions.RemoveEmptyEntries)
+            .Where(path => !binaryExtensions.Contains(Path.GetExtension(path)))
+            .ToArray();
+    }
+
+    private static bool IsHistoricalMigrationPath(string relativePath) =>
+        relativePath.Contains("Migrations", StringComparison.OrdinalIgnoreCase);
 
     private static string ReadModuleFlag(string path, string moduleId) =>
         SupprocomSecretDocument.Parse(File.ReadAllText(path))
