@@ -140,7 +140,7 @@ public sealed class ModuleLoader
             try
             {
                 var json = File.ReadAllText(manifestPath);
-                var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest);
+                var manifest = SecureJsonOptions.DeserializeManifest(json);
                 if (manifest is not null)
                     manifests[manifest.Id] = manifest;
             }
@@ -170,7 +170,7 @@ public sealed class ModuleLoader
             try
             {
                 var json = File.ReadAllText(manifestPath);
-                var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest);
+                var manifest = SecureJsonOptions.DeserializeManifest(json);
                 if (manifest is not null)
                     runtimeInfos[manifest.Id] = ModuleManifestRuntimeInfo.FromJson(json);
             }

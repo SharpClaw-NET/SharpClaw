@@ -74,7 +74,7 @@ public sealed class TestHarnessArchitectureTests
         "Module API Host Startup",
         "Module Bundled Outputs",
         "Module External Lifecycle",
-        "Module Foreign Runtime",
+        "Module Foreign .NET Runtime",
         "Module Sidecar Parity",
         "Module Harness Integration",
         "Module Harness Cost And Matrix",
@@ -219,6 +219,49 @@ public sealed class TestHarnessArchitectureTests
 
         offenders.Should().BeEmpty(
             "ordinary System.Threading.Tasks.Task APIs are allowed, but removed product Task terms are not");
+    }
+
+    [Test]
+    public void TrackedSourceContainsNoRemovedScriptModuleRuntimeSurface()
+    {
+        var root = FindSolutionRoot();
+        var bannedTerms = new[]
+        {
+            "Is" + "ScriptRuntime",
+            "Is" + "Node",
+            "Is" + "Python",
+            "Ensure" + "ScriptEntrypoint",
+            "Resolve" + "ScriptEntrypoint",
+            "Create" + "ScriptSidecarLaunchOptions",
+            "Node" + "ExecutablePath",
+            "Python" + "ExecutablePath",
+            "SharpClaw.ModuleHost.OutOfProcess." + "Node",
+            "SharpClaw.ModuleHost.OutOfProcess." + "Python",
+            "JavaScript" + "ModuleSdkTests",
+            "Python" + "ModuleSdkTests",
+            "ModuleSdk" + "SourcePaths",
+            "sharpclaw-" + "module-host",
+            "sharpclaw_" + "module_host",
+            "dist/" + "server.js",
+            "pyproject." + "toml",
+            "module." + "mjs",
+            "module." + "py"
+        };
+
+        var offenders = ReadTrackedTextFiles(root)
+            .Where(path => !IsHistoricalMigrationPath(path))
+            .SelectMany(relativePath =>
+            {
+                var fullPath = Path.Combine(root, relativePath);
+                var text = File.ReadAllText(fullPath);
+                return bannedTerms
+                    .Where(term => text.Contains(term, StringComparison.OrdinalIgnoreCase))
+                    .Select(term => $"{relativePath} contains removed module-runtime term '{term}'");
+            })
+            .ToArray();
+
+        offenders.Should().BeEmpty(
+            "the removed JavaScript and Python module runtimes must not retain source or configuration terms");
     }
 
     [Test]

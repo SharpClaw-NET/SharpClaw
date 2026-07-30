@@ -103,6 +103,43 @@ public sealed class SyntheticExternalModuleLifecycleTests
     }
 
     [Test]
+    public async Task DeletedEntrypointManifestPropertyIsRejectedBeforeHostStart()
+    {
+        await using var host = CreateSidecarHarness();
+        var moduleDir = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "deleted-manifest-property",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(moduleDir);
+        File.WriteAllText(
+            Path.Combine(moduleDir, ModuleFileNames.ManifestFile),
+            """
+            {
+              "id": "deleted_manifest_property",
+              "displayName": "Deleted Manifest Property",
+              "version": "1.0.0",
+              "toolPrefix": "dmp",
+              "runtime": "dotnet",
+              "hostMode": "sidecar",
+              "entryAssembly": "missing.dll",
+              "entrypoint": "deleted"
+            }
+            """);
+
+        var moduleService = host.Services.GetRequiredService<ModuleService>();
+        var act = () => moduleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            host.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
+
+        await act.Should().ThrowAsync<JsonException>();
+        host.Services.GetRequiredService<ModuleRegistry>()
+            .GetModule("deleted_manifest_property")
+            .Should().BeNull();
+    }
+
+    [Test]
     public async Task NuGetPackageModuleMaterializesAndLoadsThroughSidecarModuleService()
     {
         await using var host = CreateSidecarHarness();

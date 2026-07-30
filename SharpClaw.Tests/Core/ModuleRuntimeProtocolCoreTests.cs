@@ -74,7 +74,6 @@ public sealed class ModuleRuntimeProtocolCoreTests
             """
             {
               "runtime": " DOTNET ",
-              "entrypoint": "ignored",
               "moduleType": "SharpClaw.Tests.FakeModule",
               "hostMode": "inprocess"
             }

@@ -362,8 +362,7 @@ public sealed class ModuleService(
             throw new FileNotFoundException($"No {ModuleFileNames.ManifestFile} found in '{canonicalModuleDir}'.", manifestPath);
 
         var json = await File.ReadAllTextAsync(manifestPath, ct);
-        var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
-            ?? throw new InvalidOperationException($"Failed to parse manifest in '{canonicalModuleDir}'.");
+        var manifest = SecureJsonOptions.DeserializeManifest(json);
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
         if (registry.GetModule(manifest.Id) is not null)
@@ -459,7 +458,7 @@ public sealed class ModuleService(
             try
             {
                 var json = await File.ReadAllTextAsync(manifestPath, ct);
-                var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest);
+                var manifest = SecureJsonOptions.DeserializeManifest(json);
                 if (manifest is null || registry.GetModule(manifest.Id) is not null)
                     continue;
 
@@ -497,8 +496,7 @@ public sealed class ModuleService(
             throw new FileNotFoundException($"No {ModuleFileNames.ManifestFile} found in '{canonicalDir}'.", manifestPath);
 
         var json = await File.ReadAllTextAsync(manifestPath, ct);
-        var manifest = System.Text.Json.JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
-            ?? throw new InvalidOperationException($"Failed to parse manifest in '{canonicalDir}'.");
+        var manifest = SecureJsonOptions.DeserializeManifest(json);
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
         if (registry.GetModule(manifest.Id) is { } existingModule)
@@ -735,7 +733,9 @@ public sealed class ModuleService(
         if (!File.Exists(manifestPath))
             return ModuleManifestRuntimeInfo.DotNetDefault;
 
-        return ModuleManifestRuntimeInfo.FromJson(File.ReadAllText(manifestPath));
+        var json = File.ReadAllText(manifestPath);
+        _ = SecureJsonOptions.DeserializeManifest(json);
+        return ModuleManifestRuntimeInfo.FromJson(json);
     }
 
     private ForeignModuleHostLaunchOptions CreateDotNetSidecarLaunchOptions(

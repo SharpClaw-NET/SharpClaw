@@ -236,8 +236,7 @@ internal static partial class NuGetModulePackageResolver
     private static (ModuleManifest Manifest, ModuleManifestRuntimeInfo RuntimeInfo) ReadManifest(string manifestPath)
     {
         var json = File.ReadAllText(manifestPath);
-        var manifest = JsonSerializer.Deserialize<ModuleManifest>(json, SecureJsonOptions.Manifest)
-            ?? throw new InvalidOperationException($"Failed to parse module manifest '{manifestPath}'.");
+        var manifest = SecureJsonOptions.DeserializeManifest(json);
         return (manifest, ModuleManifestRuntimeInfo.FromJson(json));
     }
 

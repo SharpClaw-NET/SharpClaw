@@ -121,7 +121,7 @@ public sealed class ConversationSteeringTests
         await steering.AddAsync(new ConversationSteeringRequest(
             seeded.Channel.Id,
             targetThread.Id,
-            "Retry the hot-load after fixing the manifest entrypoint.",
+            "Retry the hot-load after fixing the module manifest.",
             Source: "module_dev",
             Category: "hot_load"));
 
@@ -131,7 +131,7 @@ public sealed class ConversationSteeringTests
         results[0].ThreadId.Should().Be(targetThread.Id);
         results[0].Source.Should().Be("module_dev");
         results[0].Category.Should().Be("hot_load");
-        results[0].Content.Should().Contain("manifest entrypoint");
+        results[0].Content.Should().Contain("module manifest");
     }
 
     [Test]
