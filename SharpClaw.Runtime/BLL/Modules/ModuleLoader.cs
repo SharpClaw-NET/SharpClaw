@@ -196,7 +196,9 @@ public sealed class ModuleLoader
         DotNetModuleHostingMode hostingMode)
     {
         if (!runtimeInfo.IsDotNet)
-            return;
+            throw new NotSupportedException(
+                $"Bundled module '{manifest.Id}' declares unsupported runtime '{runtimeInfo.Runtime}'. " +
+                "SharpClaw supports only .NET module runtimes.");
 
         if (hostingMode == DotNetModuleHostingMode.InProcess)
             return;

@@ -97,11 +97,14 @@ public sealed class InProcessModuleSecretReaderTests
             InProcessPerformanceFixtureModule.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(
-            "dotnet",
-            Path.GetFileName(assemblyPath),
-            typeof(InProcessPerformanceFixtureModule).FullName,
-            "in-process");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        {
+          "runtime": "dotnet",
+          "hostMode": "in-process",
+          "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
+          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+        }
+        """);
 
         await using var host = InProcessModuleHost.Load(
             moduleDir,
@@ -130,11 +133,14 @@ public sealed class InProcessModuleSecretReaderTests
             InProcessPerformanceFixtureModule.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(
-            "dotnet",
-            Path.GetFileName(assemblyPath),
-            typeof(InProcessPerformanceFixtureModule).FullName,
-            "in-process");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        {
+          "runtime": "dotnet",
+          "hostMode": "in-process",
+          "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
+          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+        }
+        """);
 
         await using var host = InProcessModuleHost.Load(
             moduleDir,

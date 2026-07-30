@@ -107,15 +107,21 @@ public sealed class ForeignModuleEndpointProxyTests
 
     private static ModuleManifest Manifest() =>
         new(
-            "sample_node_module",
-            "Sample Node Module",
+            "sample_dotnet_module",
+            "Sample .NET Module",
             "1.0.0",
-            "snm",
-            "dist/server.js",
+            "sdm",
+            "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
     private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        new(ModuleManifestRuntimeInfo.Node, "dist/server.js");
+        ModuleManifestRuntimeInfo.FromJson("""
+        {
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "SharpClaw.TestFixtures.ForeignSidecar.dll"
+        }
+        """);
 
     private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
         TestWorkspace workspace,
@@ -136,7 +142,7 @@ public sealed class ForeignModuleEndpointProxyTests
             HostVersion = "0.1.0-beta",
             Environment = new Dictionary<string, string>
             {
-                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "snm",
+                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "sdm",
             },
         };
     }

@@ -22,7 +22,7 @@ var moduleId = ReadEnv("SHARPCLAW_MODULE_ID");
 var runtime = ReadEnv("SHARPCLAW_MODULE_RUNTIME");
 var hostCapabilitiesAddress = Environment.GetEnvironmentVariable("SHARPCLAW_HOST_CAPABILITIES_ADDRESS");
 var hostCapabilitiesToken = Environment.GetEnvironmentVariable("SHARPCLAW_HOST_CAPABILITIES_TOKEN");
-var toolPrefix = Environment.GetEnvironmentVariable("SHARPCLAW_TEST_TOOL_PREFIX") ?? "snm";
+var toolPrefix = Environment.GetEnvironmentVariable("SHARPCLAW_TEST_TOOL_PREFIX") ?? "sdm";
 
 Console.WriteLine(
     $"ENV|moduleDir={moduleDir}|dataDir={dataDir}|control={controlAddress}|token={token}|moduleId={moduleId}|runtime={runtime}|hostCapabilities={hostCapabilitiesAddress}|hostCapabilitiesToken={hostCapabilitiesToken}");

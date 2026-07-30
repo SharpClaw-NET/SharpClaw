@@ -174,34 +174,21 @@ internal static partial class NuGetModulePackageResolver
         CopyDirectory(moduleRoot, destinationDir);
 
         var (manifest, runtimeInfo) = ReadManifest(Path.Combine(destinationDir, ModuleFileNames.ManifestFile));
-        if (runtimeInfo.IsDotNet)
+        EnsureDotNetRuntime(runtimeInfo);
+        runtimeInfo.EnsureDotNetEntryAssembly(manifest);
+        var entryAssemblyPath = Path.Combine(destinationDir, manifest.EntryAssembly);
+        if (!File.Exists(entryAssemblyPath))
         {
-            runtimeInfo.EnsureDotNetEntryAssembly(manifest);
-            var entryAssemblyPath = Path.Combine(destinationDir, manifest.EntryAssembly);
-            if (!File.Exists(entryAssemblyPath))
-            {
-                var candidate = FindBestEntryAssembly(destinationDir, manifest.EntryAssembly)
-                    ?? throw new FileNotFoundException(
-                        $"NuGet module package contains {ModuleFileNames.ManifestFile}, but entry assembly '{manifest.EntryAssembly}' was not found.");
-                CopyDirectory(Path.GetDirectoryName(candidate)!, destinationDir);
-            }
-
-            if (!File.Exists(Path.Combine(destinationDir, manifest.EntryAssembly)))
-            {
-                throw new FileNotFoundException(
-                    $"NuGet module package did not materialize entry assembly '{manifest.EntryAssembly}' at the module root.");
-            }
-
-            return;
+            var candidate = FindBestEntryAssembly(destinationDir, manifest.EntryAssembly)
+                ?? throw new FileNotFoundException(
+                    $"NuGet module package contains {ModuleFileNames.ManifestFile}, but entry assembly '{manifest.EntryAssembly}' was not found.");
+            CopyDirectory(Path.GetDirectoryName(candidate)!, destinationDir);
         }
 
-        runtimeInfo.EnsureScriptEntrypoint(manifest);
-        var entrypoint = ResolveScriptEntrypointPath(destinationDir, runtimeInfo);
-        if (!File.Exists(entrypoint))
+        if (!File.Exists(Path.Combine(destinationDir, manifest.EntryAssembly)))
         {
             throw new FileNotFoundException(
-                $"NuGet module package did not materialize script entrypoint '{runtimeInfo.Entrypoint}' at the module root.",
-                entrypoint);
+                $"NuGet module package did not materialize entry assembly '{manifest.EntryAssembly}' at the module root.");
         }
     }
 
@@ -233,14 +220,7 @@ internal static partial class NuGetModulePackageResolver
         foreach (var candidate in candidates)
         {
             var (manifest, runtimeInfo) = ReadManifest(Path.Combine(candidate, ModuleFileNames.ManifestFile));
-            if (!runtimeInfo.IsDotNet)
-            {
-                runtimeInfo.EnsureScriptEntrypoint(manifest);
-                if (File.Exists(ResolveScriptEntrypointPath(candidate, runtimeInfo)))
-                    return candidate;
-                continue;
-            }
-
+            EnsureDotNetRuntime(runtimeInfo);
             runtimeInfo.EnsureDotNetEntryAssembly(manifest);
             if (File.Exists(Path.Combine(candidate, manifest.EntryAssembly))
                 || Directory.EnumerateFiles(candidate, manifest.EntryAssembly, SearchOption.AllDirectories).Any())
@@ -325,14 +305,13 @@ internal static partial class NuGetModulePackageResolver
         try
         {
             var (manifest, runtimeInfo) = ReadManifest(manifestPath);
-            if (!runtimeInfo.IsDotNet)
-            {
-                runtimeInfo.EnsureScriptEntrypoint(manifest);
-                return File.Exists(ResolveScriptEntrypointPath(moduleDir, runtimeInfo));
-            }
-
+            EnsureDotNetRuntime(runtimeInfo);
             runtimeInfo.EnsureDotNetEntryAssembly(manifest);
             return File.Exists(Path.Combine(moduleDir, manifest.EntryAssembly));
+        }
+        catch (NotSupportedException)
+        {
+            throw;
         }
         catch
         {
@@ -377,13 +356,11 @@ internal static partial class NuGetModulePackageResolver
             throw new ArgumentException("NuGet module path must be a relative package path.", nameof(modulePath));
     }
 
-    private static string ResolveScriptEntrypointPath(
-        string moduleDir,
-        ModuleManifestRuntimeInfo runtimeInfo)
+    private static void EnsureDotNetRuntime(ModuleManifestRuntimeInfo runtimeInfo)
     {
-        var entrypoint = runtimeInfo.Entrypoint
-            ?? throw new InvalidOperationException("Script module entrypoint is required.");
-        return PathGuard.EnsureContainedIn(Path.Combine(moduleDir, entrypoint), moduleDir);
+        if (!runtimeInfo.IsDotNet)
+            throw new NotSupportedException(
+                $"SharpClaw module packages must declare the .NET runtime, not '{runtimeInfo.Runtime}'.");
     }
 
     [GeneratedRegex(@"^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$", RegexOptions.CultureInvariant)]

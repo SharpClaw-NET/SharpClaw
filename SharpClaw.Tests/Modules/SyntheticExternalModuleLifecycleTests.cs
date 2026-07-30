@@ -67,70 +67,39 @@ public sealed class SyntheticExternalModuleLifecycleTests
     }
 
     [Test]
-    public async Task NuGetPackageWithForeignRuntimeMaterializesScriptEntrypoint()
+    public async Task UnsupportedModuleRuntimeIsRejectedBeforeHostStart()
     {
-        var packageSource = Path.Combine(
+        await using var host = CreateSidecarHarness();
+        var moduleDir = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
-            "foreign-runtime-nuget-source",
+            "unsupported-runtime-modules",
             Guid.NewGuid().ToString("N"));
-        var packageCache = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "foreign-runtime-nuget-cache",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(packageSource);
+        Directory.CreateDirectory(moduleDir);
+        File.WriteAllText(
+            Path.Combine(moduleDir, ModuleFileNames.ManifestFile),
+            """
+            {
+              "id": "unsupported_runtime_module",
+              "displayName": "Unsupported Runtime Module",
+              "version": "1.0.0",
+              "toolPrefix": "urm",
+              "runtime": "unsupported",
+              "hostMode": "sidecar",
+              "entryAssembly": "missing.dll",
+              "minHostVersion": "0.0.0"
+            }
+            """);
 
-        const string packageId = "SharpClaw.Tests.ForeignRuntime.Package";
-        const string version = "1.0.0";
-        CreateForeignRuntimeModulePackage(packageSource, packageId, version);
-
-        var moduleDir = await NuGetModulePackageResolver.ResolveAsync(
-            new NuGetModulePackageReference(packageId, version, packageSource),
-            packageCache);
-
-        File.Exists(Path.Combine(moduleDir, "module.json")).Should().BeTrue();
-        File.Exists(Path.Combine(moduleDir, "module.py")).Should().BeTrue();
-    }
-
-    [TestCase(ModuleManifestRuntimeInfo.Node, "module.mjs")]
-    [TestCase(ModuleManifestRuntimeInfo.Python, "module.py")]
-    public async Task ExternalScriptRuntimeModuleLoadsThroughSidecarModuleService(
-        string runtime,
-        string entrypoint)
-    {
-        await using var host = CreateSidecarHarness(new Dictionary<string, string?>
-        {
-            ["Modules:NodeExecutablePath"] = ResolveForeignSidecarExecutablePath(),
-            ["Modules:PythonExecutablePath"] = ResolveForeignSidecarExecutablePath(),
-        });
-        var registry = host.Services.GetRequiredService<ModuleRegistry>();
         var moduleService = host.Services.GetRequiredService<ModuleService>();
-        var moduleDir = CreateScriptExternalModuleDirectory(runtime, entrypoint);
-        var moduleId = $"synthetic_{runtime}_module";
+        var act = () => moduleService.LoadExternalFromAbsolutePathAsync(
+            moduleDir,
+            host.RootServices,
+            CancellationToken.None,
+            persistDisabledEnvEntry: false);
 
-        try
-        {
-            var response = await moduleService.LoadExternalFromAbsolutePathAsync(
-                moduleDir,
-                host.RootServices,
-                CancellationToken.None,
-                persistDisabledEnvEntry: false);
-
-            response.ModuleId.Should().Be(moduleId);
-            response.ToolPrefix.Should().Be("snm");
-            registry.IsExternal(moduleId).Should().BeTrue();
-            registry.GetModule(moduleId).Should().NotBeNull();
-            registry.GetRuntimeHost(moduleId)
-                .Should()
-                .BeAssignableTo<IForeignModuleRuntimeHost>();
-            registry.GetModule(moduleId)!.GetStorageContracts()
-                .Should()
-                .Contain(contract => contract.StorageName == "sample_records");
-        }
-        finally
-        {
-            if (registry.GetModule(moduleId) is not null)
-                await moduleService.UnloadExternalAsync(moduleId);
-        }
+        await act.Should()
+            .ThrowAsync<NotSupportedException>()
+            .WithMessage("*SharpClaw supports only .NET module runtimes.*");
     }
 
     [Test]
@@ -287,37 +256,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
         return moduleDir;
     }
 
-    private static string CreateScriptExternalModuleDirectory(string runtime, string entrypoint)
-    {
-        var moduleId = $"synthetic_{runtime}_module";
-        var moduleDir = Path.Combine(
-            TestContext.CurrentContext.WorkDirectory,
-            "external-script-modules",
-            Guid.NewGuid().ToString("N"));
-        Directory.CreateDirectory(moduleDir);
-        File.WriteAllText(
-            Path.Combine(moduleDir, entrypoint),
-            runtime == ModuleManifestRuntimeInfo.Python
-                ? "# launched by configured test sidecar executable"
-                : "// launched by configured test sidecar executable");
-        File.WriteAllText(
-            Path.Combine(moduleDir, "module.json"),
-            $$"""
-            {
-              "id": "{{moduleId}}",
-              "displayName": "Synthetic {{runtime}} Module",
-              "version": "1.0.0",
-              "toolPrefix": "snm",
-              "runtime": "{{runtime}}",
-              "entryAssembly": "",
-              "entrypoint": "{{entrypoint}}",
-              "minHostVersion": "0.0.0"
-            }
-            """);
-
-        return moduleDir;
-    }
-
     private static void CreateSyntheticExternalModulePackage(
         string packageSource,
         string packageId,
@@ -352,48 +290,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
 
         foreach (var file in Directory.GetFiles(sourceDir, "*.deps.json"))
             archive.CreateEntryFromFile(file, Path.GetFileName(file));
-    }
-
-    private static void CreateForeignRuntimeModulePackage(
-        string packageSource,
-        string packageId,
-        string version)
-    {
-        var packagePath = Path.Combine(packageSource, $"{packageId}.{version}.nupkg");
-
-        using var archive = ZipFile.Open(packagePath, ZipArchiveMode.Create);
-        WriteTextEntry(
-            archive,
-            "sharpclaw/module.json",
-            """
-            {
-              "id": "synthetic_python_module",
-              "displayName": "Synthetic Python Module",
-              "version": "1.0.0",
-              "toolPrefix": "spm",
-              "runtime": "python",
-              "entrypoint": "module.py",
-              "minHostVersion": "0.0.0"
-            }
-            """);
-        WriteTextEntry(
-            archive,
-            "sharpclaw/module.py",
-            "from sharpclaw_module_host import create_sharpclaw_host\n");
-        WriteTextEntry(
-            archive,
-            $"{packageId}.nuspec",
-            $"""
-            <?xml version="1.0" encoding="utf-8"?>
-            <package>
-              <metadata>
-                <id>{packageId}</id>
-                <version>{version}</version>
-                <authors>SharpClaw.Tests</authors>
-                <description>Synthetic foreign-runtime SharpClaw module package.</description>
-              </metadata>
-            </package>
-            """);
     }
 
     private static void WriteTextEntry(ZipArchive archive, string entryName, string text)
@@ -444,28 +340,6 @@ public sealed class SyntheticExternalModuleLifecycleTests
         File.Exists(hostPath).Should().BeTrue(
             $"shared .NET sidecar host package payload must be copied to test output before tests run: '{hostPath}'");
         return hostPath;
-    }
-
-    private static string ResolveForeignSidecarExecutablePath()
-    {
-        var root = ResolveRepoRoot();
-        var configuration = Directory.GetParent(TestContext.CurrentContext.TestDirectory)!.Name;
-        var appHostName = OperatingSystem.IsWindows()
-            ? "SharpClaw.TestFixtures.ForeignSidecar.exe"
-            : "SharpClaw.TestFixtures.ForeignSidecar";
-        var helperPath = Path.Combine(
-            root,
-            "SharpClaw.Tests",
-            "Fixtures",
-            "ForeignSidecar",
-            "bin",
-            configuration,
-            "net10.0",
-            appHostName);
-
-        File.Exists(helperPath).Should().BeTrue(
-            $"foreign sidecar apphost must be built before script lifecycle tests run: '{helperPath}'");
-        return helperPath;
     }
 
     private static string ResolveRepoRoot()
