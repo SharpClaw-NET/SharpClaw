@@ -1,6 +1,7 @@
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.DependencyInjection;
@@ -35,6 +36,7 @@ using SharpClaw.Core.Modules;
 using SharpClaw.Runtime.INF.Configuration;
 using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Shared.Instances;
+using Console = SharpClaw.Runtime.Host.Cli.CliConsole;
 
 namespace SharpClaw.Runtime.Host.Cli;
 
@@ -46,13 +48,74 @@ public static class CliDispatcher
         Converters = { new System.Text.Json.Serialization.JsonStringEnumConverter() }
     };
 
-    private static string? _currentUser;
-    private static Guid? _currentUserId;
-    private static Guid? _currentChannelId;
-    private static Guid? _currentThreadId;
-    private static bool _chatMode;
-    private static Microsoft.Extensions.Logging.ILogger? _logger;
+    private static readonly AsyncLocal<CliSessionContext?> Session = new();
+
+    internal static CliSessionContext? CurrentSession => Session.Value;
+
+    private static CliSessionContext Context
+        => Session.Value ??= new(System.Console.Out, System.Console.Error, input: null);
+
+    private static string? _currentUser
+    {
+        get => Context.CurrentUser;
+        set => Context.CurrentUser = value;
+    }
+
+    private static Guid? _currentUserId
+    {
+        get => Context.CurrentUserId;
+        set => Context.CurrentUserId = value;
+    }
+
+    private static Guid? _currentChannelId
+    {
+        get => Context.CurrentChannelId;
+        set => Context.CurrentChannelId = value;
+    }
+
+    private static Guid? _currentThreadId
+    {
+        get => Context.CurrentThreadId;
+        set => Context.CurrentThreadId = value;
+    }
+
+    private static bool _chatMode
+    {
+        get => Context.ChatMode;
+        set => Context.ChatMode = value;
+    }
+
+    private static Microsoft.Extensions.Logging.ILogger? _logger
+    {
+        get => Context.Logger;
+        set => Context.Logger = value;
+    }
+
     private static bool IsLoggedIn => _currentUser is not null;
+
+    internal static IDisposable BeginSession(
+        TextWriter output,
+        TextWriter error,
+        System.Threading.Channels.ChannelReader<string?>? input = null)
+    {
+        var previous = Session.Value;
+        Session.Value = new CliSessionContext(output, error, input);
+        return new SessionScope(previous);
+    }
+
+    private sealed class SessionScope(CliSessionContext? previous) : IDisposable
+    {
+        private bool _disposed;
+
+        public void Dispose()
+        {
+            if (_disposed)
+                return;
+
+            _disposed = true;
+            Session.Value = previous;
+        }
+    }
 
     private static void DebugLog(string message) =>
         _logger?.LogDebug("CLI diagnostic: {Message}", message);
@@ -82,6 +145,7 @@ public static class CliDispatcher
     /// </summary>
     public static async Task<bool> RunInteractiveAsync(IServiceProvider services, CancellationToken ct)
     {
+        using var sessionScope = BeginSession(System.Console.Out, System.Console.Error);
         _logger = services.GetRequiredService<ILoggerFactory>().CreateLogger("SharpClaw.CLI");
         // SHARPCLAW_FORCE_REPL=1 allows piped/scripted CLI use (e.g. testing,
         // batch scripting) even when stdin is redirected. The REPL loop already
@@ -266,6 +330,10 @@ public static class CliDispatcher
     /// </summary>
     public static async Task<bool> TryHandleAsync(string[] args, IServiceProvider services)
     {
+        using var transientSession = CurrentSession is null
+            ? BeginSession(System.Console.Out, System.Console.Error)
+            : null;
+
         if (args.Length == 0)
             return false;
 
