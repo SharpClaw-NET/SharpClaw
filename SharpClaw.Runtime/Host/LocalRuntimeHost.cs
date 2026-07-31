@@ -29,6 +29,7 @@ using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Shared.Logging;
 using SharpClaw.Shared.Instances;
+using SharpClaw.Shared.RemoteRuntimeBridge;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Shared.Security;
 using Serilog.Events;
@@ -844,6 +845,25 @@ try
         app.UseMiddleware<MigrationGateMiddleware>();
 
     app.UseWebSockets();
+
+    // The private CLI route uses the existing API key and Gateway token
+    // middleware. It does not enter the public handler or module pipeline.
+    app.Map(
+        RemoteRuntimeBridgePaths.CliControl,
+        async context =>
+        {
+            if (!context.WebSockets.IsWebSocketRequest)
+            {
+                context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                return;
+            }
+
+            var socket = await context.WebSockets.AcceptWebSocketAsync();
+            await RemoteRuntimeCliSession.RunAsync(
+                socket,
+                context.RequestServices,
+                context.RequestAborted);
+        });
 
     // ──────── PHASE 21 ─── Endpoint mapping ───────────────────────────────
     // Liveness check — no auth required.

@@ -323,6 +323,9 @@ public static class CliDispatcher
         return [.. args];
     }
 
+    internal static string[] ParseCommandLine(string input)
+        => ParseArgs(input);
+
     /// <summary>
     /// Tries to handle a CLI command by calling the same handler methods
     /// that back the minimal API endpoints. Returns true if a command was
