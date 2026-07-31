@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Net.Security;
 using System.Security.Cryptography;
@@ -265,6 +266,7 @@ public static class RemoteProxyHost
                 connection.ConnectTimeout));
 
         var app = builder.Build();
+        app.UseWebSockets();
         app.Use(async (context, next) =>
         {
             if (!HasLocalSessionKey(context, connection.LocalApiKey))
@@ -281,6 +283,9 @@ public static class RemoteProxyHost
             new ForwarderRequestConfig
             {
                 ActivityTimeout = connection.ActivityTimeout,
+                AllowResponseBuffering = false,
+                Version = HttpVersion.Version11,
+                VersionPolicy = HttpVersionPolicy.RequestVersionExact,
             },
             new RemoteProxyTransformer());
         return app;

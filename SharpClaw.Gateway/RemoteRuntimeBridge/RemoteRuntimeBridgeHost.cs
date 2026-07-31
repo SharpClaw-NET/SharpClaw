@@ -1,3 +1,4 @@
+using System.Net;
 using System.Net.Http;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
@@ -103,6 +104,7 @@ internal static class RemoteRuntimeBridgeHost
         builder.Services.AddReverseProxy();
 
         var bridgeApp = builder.Build();
+        bridgeApp.UseWebSockets();
         bridgeApp.Use(async (context, next) =>
         {
             var certificate = await context.Connection.GetClientCertificateAsync(
@@ -523,7 +525,12 @@ internal static class RemoteRuntimeBridgeHost
             bridgeApp.MapForwarder(
                 "/{**catch-all}",
             target.TargetBaseUrl,
-            ForwarderRequestConfig.Empty,
+            new ForwarderRequestConfig
+            {
+                AllowResponseBuffering = false,
+                Version = HttpVersion.Version11,
+                VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+            },
             new RemoteRuntimeBridgeTransformer(
                 target.AuthoritativeApiKey,
                 target.AuthoritativeGatewayToken));
