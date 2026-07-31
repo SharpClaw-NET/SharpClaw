@@ -6,6 +6,7 @@ using Microsoft.AspNetCore.Mvc.Routing;
 using NUnit.Framework;
 using SharpClaw.Runtime.Host.Routing;
 using SharpClaw.Gateway.Contracts;
+using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Tests.Gateway;
 
@@ -40,6 +41,9 @@ public sealed class GatewayRouteParityTests
         // publicly. If a module surface needs public projection, it must ship
         // a per-module IGatewayModuleExtension instead.
         "/modules",
+        // Remote Runtime pairing is served by the separate opt-in bridge
+        // listener. These routes are not part of the public Gateway pipeline.
+        RemoteRuntimeBridgePaths.RegistryPrefix,
     };
 
     /// <summary>
