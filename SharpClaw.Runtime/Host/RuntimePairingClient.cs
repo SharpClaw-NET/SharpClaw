@@ -1,4 +1,5 @@
 using System.Net.Http.Json;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -51,14 +52,18 @@ public static class RuntimePairingClient
         var invitation = options.CreateInvitation();
         using var httpClient = CreatePinnedClient(
             gatewayBridgeUri,
-            invitation.GatewayServerPublicKeyHash);
+            invitation.GatewayServerPublicKeyHash,
+            options.ConnectTimeoutSeconds,
+            options.ActivityTimeoutSeconds);
         var pairingClient = new RemoteRuntimePairingClient(httpClient);
         await pairingClient.PairAsync(invitation, instancePaths, cancellationToken);
     }
 
     private static HttpClient CreatePinnedClient(
         Uri gatewayBridgeUri,
-        string expectedServerPublicKeyHash)
+        string expectedServerPublicKeyHash,
+        int connectTimeoutSeconds,
+        int activityTimeoutSeconds)
     {
         if (string.IsNullOrWhiteSpace(expectedServerPublicKeyHash))
         {
@@ -66,15 +71,19 @@ public static class RuntimePairingClient
                 "The pairing invitation does not contain a Gateway certificate fingerprint.");
         }
 
-        var handler = new HttpClientHandler
+        var handler = new SocketsHttpHandler
         {
-            ServerCertificateCustomValidationCallback = (_, certificate, _, _) =>
-                HasPinnedPublicKey(certificate, expectedServerPublicKeyHash),
+            ConnectTimeout = TimeSpan.FromSeconds(connectTimeoutSeconds),
+            SslOptions = new SslClientAuthenticationOptions
+            {
+                RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+                    HasPinnedPublicKey(certificate, expectedServerPublicKeyHash),
+            },
         };
         return new HttpClient(handler)
         {
             BaseAddress = gatewayBridgeUri,
-            Timeout = TimeSpan.FromSeconds(30),
+            Timeout = TimeSpan.FromSeconds(activityTimeoutSeconds),
         };
     }
 

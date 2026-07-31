@@ -393,6 +393,18 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         gatewayBridgeSource.Should().Contain("proxyRequest.Headers.TryAddWithoutValidation(\n                    \"X-Gateway-Token\",");
     }
 
+    [Test]
+    public void Proxy_transport_uses_configured_connect_and_activity_timeouts()
+    {
+        var proxySource = ReadRepositoryFile("SharpClaw.Runtime/Host/RemoteProxyHost.cs");
+        var pairingSource = ReadRepositoryFile("SharpClaw.Runtime/Host/RuntimePairingClient.cs");
+
+        proxySource.Should().Contain("handler.ConnectTimeout = connectTimeout");
+        proxySource.Should().Contain("ActivityTimeout = connection.ActivityTimeout");
+        pairingSource.Should().Contain("ConnectTimeout = TimeSpan.FromSeconds(connectTimeoutSeconds)");
+        pairingSource.Should().Contain("Timeout = TimeSpan.FromSeconds(activityTimeoutSeconds)");
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);

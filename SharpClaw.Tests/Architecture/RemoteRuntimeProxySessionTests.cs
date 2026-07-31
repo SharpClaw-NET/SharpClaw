@@ -29,11 +29,15 @@ public sealed class RemoteRuntimeProxySessionTests
             "http://127.0.0.1:0",
             "https://127.0.0.1:48925",
             "gateway-public-key-hash",
-            certificate);
+            certificate,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(120));
 
         try
         {
             session.LocalApiKey.Should().NotBeNullOrWhiteSpace();
+            session.ConnectTimeout.Should().Be(TimeSpan.FromSeconds(10));
+            session.ActivityTimeout.Should().Be(TimeSpan.FromSeconds(120));
             File.ReadAllText(paths.ApiKeyFilePath).Trim().Should().Be(session.LocalApiKey);
 
             session.PublishDiscovery();
@@ -76,14 +80,18 @@ public sealed class RemoteRuntimeProxySessionTests
             "https://127.0.0.1:48925",
             "gateway-public-key-hash",
             "local-key",
-            certificate);
+            certificate,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(120));
         var nonTlsBridge = () => new RemoteRuntimeProxyConnection(
             paths,
             "http://127.0.0.1:48923",
             "http://127.0.0.1:48925",
             "gateway-public-key-hash",
             "local-key",
-            certificate);
+            certificate,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(120));
 
         publicBind.Should().Throw<InvalidOperationException>();
         nonTlsBridge.Should().Throw<InvalidOperationException>();

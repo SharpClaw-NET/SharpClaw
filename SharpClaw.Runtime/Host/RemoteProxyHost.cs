@@ -1,4 +1,5 @@
 using System.Net.Http;
+using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -22,7 +23,9 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         string gatewayBridgeUrl,
         string gatewayServerPublicKeyHash,
         string localApiKey,
-        X509Certificate2 clientCertificate)
+        X509Certificate2 clientCertificate,
+        TimeSpan connectTimeout,
+        TimeSpan activityTimeout)
     {
         InstancePaths = instancePaths ?? throw new ArgumentNullException(nameof(instancePaths));
         LocalUrl = localUrl ?? throw new ArgumentNullException(nameof(localUrl));
@@ -31,6 +34,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
             ?? throw new ArgumentNullException(nameof(gatewayServerPublicKeyHash));
         LocalApiKey = localApiKey ?? throw new ArgumentNullException(nameof(localApiKey));
         ClientCertificate = clientCertificate ?? throw new ArgumentNullException(nameof(clientCertificate));
+        ConnectTimeout = connectTimeout;
+        ActivityTimeout = activityTimeout;
         Validate();
     }
 
@@ -46,12 +51,18 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
 
     public X509Certificate2 ClientCertificate { get; }
 
+    public TimeSpan ConnectTimeout { get; }
+
+    public TimeSpan ActivityTimeout { get; }
+
     public static RemoteRuntimeProxyConnection Create(
         SharpClawInstancePaths instancePaths,
         string localUrl,
         string gatewayBridgeUrl,
         string gatewayServerPublicKeyHash,
-        X509Certificate2 clientCertificate)
+        X509Certificate2 clientCertificate,
+        TimeSpan connectTimeout,
+        TimeSpan activityTimeout)
     {
         ArgumentNullException.ThrowIfNull(instancePaths);
         var keyBytes = RandomNumberGenerator.GetBytes(32);
@@ -76,7 +87,9 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
                 gatewayBridgeUrl,
                 gatewayServerPublicKeyHash,
                 localApiKey,
-                clientCertificate);
+                clientCertificate,
+                connectTimeout,
+                activityTimeout);
         }
         catch
         {
@@ -158,6 +171,12 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         if (!ClientCertificate.HasPrivateKey)
             throw new InvalidOperationException(
                 "RemoteProxy mode requires the private key for its approved client certificate.");
+
+        if (ConnectTimeout <= TimeSpan.Zero)
+            throw new InvalidOperationException("RemoteProxy mode requires a positive connection timeout.");
+
+        if (ActivityTimeout <= TimeSpan.Zero)
+            throw new InvalidOperationException("RemoteProxy mode requires a positive activity timeout.");
     }
 }
 
@@ -186,7 +205,9 @@ public static class RemoteProxyHost
                 options.LocalUrl,
                 session.State.GatewayBridgeUrl,
                 session.State.GatewayServerPublicKeyHash,
-                clientCertificate);
+                clientCertificate,
+                TimeSpan.FromSeconds(options.ConnectTimeoutSeconds),
+                TimeSpan.FromSeconds(options.ActivityTimeoutSeconds));
             await RunAsync(connection, cancellationToken);
         }
         catch
@@ -240,7 +261,8 @@ public static class RemoteProxyHost
         builder.Services.AddSingleton<IForwarderHttpClientFactory>(
             _ => new ClientCertificateForwarderHttpClientFactory(
                 connection.ClientCertificate,
-                connection.GatewayServerPublicKeyHash));
+                connection.GatewayServerPublicKeyHash,
+                connection.ConnectTimeout));
 
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -256,7 +278,10 @@ public static class RemoteProxyHost
         app.MapForwarder(
             "/{**catch-all}",
             connection.GatewayBridgeUrl,
-            ForwarderRequestConfig.Empty,
+            new ForwarderRequestConfig
+            {
+                ActivityTimeout = connection.ActivityTimeout,
+            },
             new RemoteProxyTransformer());
         return app;
     }
@@ -302,13 +327,15 @@ public static class RemoteProxyHost
 
 internal sealed class ClientCertificateForwarderHttpClientFactory(
     X509Certificate2 clientCertificate,
-    string gatewayServerPublicKeyHash) : ForwarderHttpClientFactory
+    string gatewayServerPublicKeyHash,
+    TimeSpan connectTimeout) : ForwarderHttpClientFactory
 {
     protected override void ConfigureHandler(
         ForwarderHttpClientContext context,
         SocketsHttpHandler handler)
     {
         base.ConfigureHandler(context, handler);
+        handler.ConnectTimeout = connectTimeout;
         handler.SslOptions.ClientCertificates ??= new X509CertificateCollection();
         handler.SslOptions.ClientCertificates.Add(clientCertificate);
         handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
