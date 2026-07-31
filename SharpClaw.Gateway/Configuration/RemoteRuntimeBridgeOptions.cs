@@ -12,6 +12,8 @@ public sealed class RemoteRuntimeBridgeOptions
 
     public string? ServerCertificatePath { get; init; }
 
+    public string? AdministrationKey { get; init; }
+
     public static RemoteRuntimeBridgeOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection(SectionName);
@@ -20,6 +22,7 @@ public sealed class RemoteRuntimeBridgeOptions
             Enabled = section.GetValue("Enabled", false),
             ListenUrl = section.GetValue("ListenUrl", "https://127.0.0.1:48925"),
             ServerCertificatePath = section["ServerCertificatePath"],
+            AdministrationKey = section["AdministrationKey"],
         };
     }
 }

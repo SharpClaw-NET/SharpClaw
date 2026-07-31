@@ -38,7 +38,9 @@ public sealed class RemoteRuntimePairingStore
         Directory.CreateDirectory(directory);
         var templatePath = Path.Combine(directory, ".env.template");
         if (!File.Exists(templatePath))
-            File.WriteAllText(templatePath, string.Empty, Encoding.UTF8);
+            File.WriteAllText(
+                templatePath,
+                "# Remote Runtime pairing state is written after enrollment.\n");
 
         var installationKeyPath = instancePaths.GetSecretFilePath("encryption-key");
         var options = new SupprocomSecretsOptions
@@ -311,6 +313,18 @@ public sealed class RemoteRuntimePairingStore
         {
             CryptographicOperations.ZeroMemory(serial);
         }
+    }
+
+    public async Task<RemoteRuntimeClientCertificate> IssueClientCertificateAsync(
+        Guid pairId,
+        string invitationSecret,
+        CancellationToken cancellationToken = default)
+    {
+        RequireText(invitationSecret, nameof(invitationSecret));
+        var record = await FindAsync(pairId, cancellationToken)
+            ?? throw new RemoteRuntimePairingException("PairNotFound", "The pairing record was not found.");
+        VerifyInvitationSecret(record, invitationSecret);
+        return await IssueClientCertificateAsync(pairId, cancellationToken);
     }
 
     public async Task<RemoteRuntimeClientCertificate> RenewClientCertificateAsync(
@@ -614,6 +628,28 @@ public sealed class RemoteRuntimePairingStore
 
     private static string HashSecret(string secret)
         => Convert.ToBase64String(SHA256.HashData(Encoding.UTF8.GetBytes(secret)));
+
+    private static void VerifyInvitationSecret(
+        RemoteRuntimePairingRecord record,
+        string invitationSecret)
+    {
+        var suppliedHash = Convert.FromBase64String(HashSecret(invitationSecret));
+        var storedHash = Convert.FromBase64String(record.InvitationHash);
+        try
+        {
+            if (!CryptographicOperations.FixedTimeEquals(suppliedHash, storedHash))
+            {
+                throw new RemoteRuntimePairingException(
+                    "InvalidInvitation",
+                    "The pairing invitation is invalid.");
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(suppliedHash);
+            CryptographicOperations.ZeroMemory(storedHash);
+        }
+    }
 
     private static string Base64UrlEncode(ReadOnlySpan<byte> bytes)
         => Convert.ToBase64String(bytes)

@@ -47,7 +47,9 @@ public sealed class RemoteRuntimePairingStoreTests
 
         using var authority = await store.GetOrCreateCertificateAuthorityAsync();
         authority.HasPrivateKey.Should().BeTrue();
-        var issued = await store.IssueClientCertificateAsync(invitation.PairId);
+        var issued = await store.IssueClientCertificateAsync(
+            invitation.PairId,
+            invitation.Secret);
         issued.ProxyRuntimePublicKeyHash.Should().Be(active.ProxyRuntimePublicKeyHash);
         using var clientCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
         clientCertificate.Subject.Should().Contain("proxy-1");
@@ -66,6 +68,12 @@ public sealed class RemoteRuntimePairingStoreTests
             "runtime-2");
         await wrongTarget.Should().ThrowAsync<RemoteRuntimePairingException>()
             .Where(exception => exception.Code == "PairNotAuthorized");
+
+        var wrongSecret = () => store.IssueClientCertificateAsync(
+            invitation.PairId,
+            "wrong-secret");
+        await wrongSecret.Should().ThrowAsync<RemoteRuntimePairingException>()
+            .Where(exception => exception.Code == "InvalidInvitation");
 
         var renewed = await store.RenewClientCertificateAsync(invitation.PairId);
         renewed.CertificateThumbprint.Should().NotBe(issued.CertificateThumbprint);

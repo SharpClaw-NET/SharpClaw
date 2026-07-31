@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Shared.Instances;
+using SharpClaw.Shared.RemoteRuntimeBridge;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace SharpClaw.Runtime.Host;
@@ -325,23 +326,17 @@ internal sealed class ClientCertificateForwarderHttpClientFactory(
         serverCertificate ??= new X509Certificate2(certificate);
         try
         {
-            using var publicKeyAlgorithm = serverCertificate.GetECDsaPublicKey();
-            if (publicKeyAlgorithm is null)
-                return false;
-
-            var publicKey = publicKeyAlgorithm.ExportSubjectPublicKeyInfo();
+            string actualHash;
             try
             {
-                var actualHash = Convert.ToBase64String(SHA256.HashData(publicKey))
-                    .TrimEnd('=')
-                    .Replace('+', '-')
-                    .Replace('/', '_');
-                return string.Equals(actualHash, expectedHash, StringComparison.Ordinal);
+                actualHash = RemoteRuntimeCertificateHash.Compute(serverCertificate);
             }
-            finally
+            catch (InvalidOperationException)
             {
-                CryptographicOperations.ZeroMemory(publicKey);
+                return false;
             }
+
+            return string.Equals(actualHash, expectedHash, StringComparison.Ordinal);
         }
         finally
         {

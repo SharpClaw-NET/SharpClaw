@@ -1,4 +1,6 @@
 using System.Net.Http;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -22,6 +24,7 @@ internal sealed class RemoteRuntimeBridgeListener : IRemoteRuntimeBridgeListener
 internal sealed record RemoteRuntimeBridgeTarget(
     string GatewayInstanceId,
     string AuthoritativeRuntimeInstanceId,
+    string AuthoritativeRuntimeInstallFingerprint,
     string TargetBaseUrl,
     string AuthoritativeApiKey);
 
@@ -91,7 +94,7 @@ internal static class RemoteRuntimeBridgeHost
                 {
                     listenOptions.UseHttps(options.ServerCertificatePath, null, httpsOptions =>
                     {
-                        httpsOptions.ClientCertificateMode = ClientCertificateMode.RequireCertificate;
+                        httpsOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
                         httpsOptions.ClientCertificateValidation = static (_, _, _) => true;
                     });
                 });
@@ -103,28 +106,166 @@ internal static class RemoteRuntimeBridgeHost
         {
             var certificate = await context.Connection.GetClientCertificateAsync(
                 context.RequestAborted);
-            if (certificate is null)
+            if (certificate is null && !IsUnauthenticatedControlPath(context.Request.Path))
             {
                 context.Response.StatusCode = StatusCodes.Status401Unauthorized;
                 return;
             }
 
-            try
+            if (certificate is not null)
             {
-                await pairingStore.RequireActiveCertificateAsync(
-                    certificate,
-                    target.GatewayInstanceId,
-                    target.AuthoritativeRuntimeInstanceId,
-                    context.RequestAborted);
-            }
-            catch (RemoteRuntimePairingException)
-            {
-                context.Response.StatusCode = StatusCodes.Status403Forbidden;
-                return;
+                try
+                {
+                    await pairingStore.RequireActiveCertificateAsync(
+                        certificate,
+                        target.GatewayInstanceId,
+                        target.AuthoritativeRuntimeInstanceId,
+                        context.RequestAborted);
+                }
+                catch (RemoteRuntimePairingException)
+                {
+                    if (!IsUnauthenticatedControlPath(context.Request.Path))
+                    {
+                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        return;
+                    }
+                }
             }
 
             await next(context);
         });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.PairingClaim,
+            async (
+                RemoteRuntimePairingClaimRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var record = await pairingStore.ClaimInvitationAsync(
+                        request.PairId,
+                        request.Secret,
+                        request.ProxyRuntimeInstanceId,
+                        request.CertificateSigningRequestBase64,
+                        request.ProofSignatureBase64,
+                        cancellationToken);
+                    return Results.Ok(ToClaimResponse(record));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.PairingCertificate,
+            async (
+                RemoteRuntimePairingCertificateRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var certificate = await pairingStore.IssueClientCertificateAsync(
+                        request.PairId,
+                        request.Secret,
+                        cancellationToken);
+                    return Results.Ok(new RemoteRuntimePairingCertificateResponse(
+                        Convert.ToBase64String(certificate.CertificateDer),
+                        certificate.ProxyRuntimePublicKeyHash,
+                        certificate.CertificateThumbprint,
+                        certificate.NotAfterUtc));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.AdminInvitation,
+            async (
+                HttpContext context,
+                RemoteRuntimePairingAdminInvitationRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    var invitation = await pairingStore.CreateInvitationAsync(
+                        target.GatewayInstanceId,
+                        ComputeServerPublicKeyHash(options.ServerCertificatePath!),
+                        target.AuthoritativeRuntimeInstanceId,
+                        target.AuthoritativeRuntimeInstallFingerprint,
+                        TimeSpan.FromSeconds(request.LifetimeSeconds),
+                        cancellationToken);
+                    return Results.Ok(invitation);
+                }
+                catch (ArgumentOutOfRangeException exception)
+                {
+                    return Results.Json(
+                        new { error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.AdminApprove,
+            async (
+                HttpContext context,
+                RemoteRuntimePairingAdminApprovalRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    var record = await pairingStore.ApproveClaimAsync(
+                        request.PairId,
+                        request.ProxyRuntimeInstanceId,
+                        request.AuthoritativeRuntimeInstanceId,
+                        cancellationToken);
+                    return Results.Ok(ToClaimResponse(record));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.AdminRevoke,
+            async (
+                HttpContext context,
+                RemoteRuntimePairingAdminRevocationRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    var record = await pairingStore.RevokeAsync(
+                        request.PairId,
+                        cancellationToken);
+                    return Results.Ok(ToClaimResponse(record));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
 
         bridgeApp.MapForwarder(
             "/{**catch-all}",
@@ -132,6 +273,71 @@ internal static class RemoteRuntimeBridgeHost
             ForwarderRequestConfig.Empty,
             new RemoteRuntimeBridgeTransformer(target.AuthoritativeApiKey));
         return bridgeApp;
+    }
+
+    private static bool IsUnauthenticatedControlPath(PathString path)
+        => path.Equals(RemoteRuntimeBridgePaths.PairingClaim, StringComparison.Ordinal)
+            || path.Equals(RemoteRuntimeBridgePaths.PairingCertificate, StringComparison.Ordinal)
+            || path.Equals(RemoteRuntimeBridgePaths.AdminInvitation, StringComparison.Ordinal)
+            || path.Equals(RemoteRuntimeBridgePaths.AdminApprove, StringComparison.Ordinal)
+            || path.Equals(RemoteRuntimeBridgePaths.AdminRevoke, StringComparison.Ordinal);
+
+    private static bool HasLocalAdministrationAccess(
+        HttpContext context,
+        string? expectedKey)
+    {
+        if (string.IsNullOrWhiteSpace(expectedKey)
+            || context.Connection.RemoteIpAddress is not { } remoteAddress
+            || !System.Net.IPAddress.IsLoopback(remoteAddress)
+            || context.Request.Headers.Keys.Any(IsForwardedHeader))
+        {
+            return false;
+        }
+
+        var suppliedKey = context.Request.Headers[RemoteRuntimeBridgePaths.AdministrationKeyHeader].ToString();
+        var suppliedBytes = System.Text.Encoding.UTF8.GetBytes(suppliedKey);
+        var expectedBytes = System.Text.Encoding.UTF8.GetBytes(expectedKey);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(suppliedBytes);
+            CryptographicOperations.ZeroMemory(expectedBytes);
+        }
+    }
+
+    private static bool IsForwardedHeader(string header)
+        => header.Equals("Forwarded", StringComparison.OrdinalIgnoreCase)
+            || header.Equals("X-Forwarded-For", StringComparison.OrdinalIgnoreCase)
+            || header.Equals("X-Forwarded-Host", StringComparison.OrdinalIgnoreCase)
+            || header.Equals("X-Forwarded-Proto", StringComparison.OrdinalIgnoreCase);
+
+    private static RemoteRuntimePairingClaimResponse ToClaimResponse(
+        RemoteRuntimePairingRecord record)
+        => new(
+            record.PairId,
+            record.GetEffectiveStatus(DateTimeOffset.UtcNow).ToString(),
+            record.GatewayInstanceId,
+            record.AuthoritativeRuntimeInstanceId,
+            record.ProxyRuntimeInstanceId ?? string.Empty);
+
+    private static string ComputeServerPublicKeyHash(string certificatePath)
+    {
+        var certificateBytes = File.ReadAllBytes(certificatePath);
+        try
+        {
+            using var certificate = X509CertificateLoader.LoadPkcs12(
+                certificateBytes,
+                password: null,
+                keyStorageFlags: X509KeyStorageFlags.EphemeralKeySet);
+            return RemoteRuntimeCertificateHash.Compute(certificate);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(certificateBytes);
+        }
     }
 
     private sealed class RemoteRuntimeBridgeTransformer(string authoritativeApiKey) : HttpTransformer
@@ -169,10 +375,6 @@ internal sealed class RemoteRuntimeBridgeHostedService(
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         var target = RemoteRuntimeBridgeTargetResolver.Resolve(gatewayPaths);
-        await pairingStore.RequireActiveTargetAsync(
-            target.GatewayInstanceId,
-            target.AuthoritativeRuntimeInstanceId,
-            cancellationToken);
         _bridgeApp = RemoteRuntimeBridgeHost.Build(
             [],
             options,
@@ -242,6 +444,7 @@ internal static class RemoteRuntimeBridgeTargetResolver
         return new RemoteRuntimeBridgeTarget(
             manifest.InstanceId,
             entry.InstanceId,
+            entry.InstallFingerprint,
             entry.BaseUrl,
             apiKey);
     }

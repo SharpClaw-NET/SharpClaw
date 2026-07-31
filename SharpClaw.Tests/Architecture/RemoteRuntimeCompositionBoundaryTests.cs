@@ -91,9 +91,10 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         var source = ReadRepositoryFile(
             "SharpClaw.Gateway/RemoteRuntimeBridge/RemoteRuntimeBridgeHost.cs");
 
-        source.Should().Contain("RequireActiveTargetAsync");
-        source.IndexOf("RequireActiveTargetAsync", StringComparison.Ordinal)
-            .Should().BeLessThan(source.IndexOf("RemoteRuntimeBridgeHost.Build", StringComparison.Ordinal));
+        source.Should().Contain("PairingClaim");
+        source.Should().Contain("PairingCertificate");
+        source.Should().Contain("HasLocalAdministrationAccess");
+        source.Should().Contain("ClientCertificateMode.AllowCertificate");
         source.Should().Contain("RequireActiveCertificateAsync");
     }
 
@@ -262,7 +263,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         source.Should().Contain("ClientCertificates");
         source.Should().Contain("GatewayServerPublicKeyHash");
         source.Should().Contain("HasPinnedPublicKey");
-        source.Should().Contain("ExportSubjectPublicKeyInfo");
+        source.Should().Contain("RemoteRuntimeCertificateHash.Compute");
         source.Should().Contain("PublishDiscovery");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Api-Key\")");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Gateway-Token\")");
