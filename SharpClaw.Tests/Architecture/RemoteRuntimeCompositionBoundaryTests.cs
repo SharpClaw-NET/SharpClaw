@@ -1,4 +1,5 @@
 using System.Reflection;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -6,6 +7,7 @@ using NUnit.Framework;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.RemoteRuntimeBridge;
 using SharpClaw.Runtime.Host;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Architecture;
 
@@ -79,7 +81,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         program.Should().NotContain(
             "MapRemoteRuntimeBridge",
             "the public Gateway pipeline must not own bridge routes");
-        bridge.Should().Contain("MapRemoteRuntimeBridge");
+        bridge.Should().Contain("MapForwarder");
         bridge.Should().Contain("UseHttps");
     }
 
@@ -89,9 +91,10 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         var source = ReadRepositoryFile(
             "SharpClaw.Gateway/RemoteRuntimeBridge/RemoteRuntimeBridgeHost.cs");
 
-        source.Should().Contain("RequireApprovedPair");
-        source.IndexOf("RequireApprovedPair", StringComparison.Ordinal)
-            .Should().BeLessThan(source.IndexOf("UseHttps", StringComparison.Ordinal));
+        source.Should().Contain("RequireActiveTargetAsync");
+        source.IndexOf("RequireActiveTargetAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(source.IndexOf("RemoteRuntimeBridgeHost.Build", StringComparison.Ordinal));
+        source.Should().Contain("RequireActiveCertificateAsync");
     }
 
     [Test]
@@ -129,8 +132,9 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     {
         var services = new ServiceCollection();
         var options = new RemoteRuntimeBridgeOptions { Enabled = false };
+        var paths = CreateGatewayPaths();
 
-        RemoteRuntimeBridgeHost.RegisterServices(services, options);
+        RemoteRuntimeBridgeHost.RegisterServices(services, options, paths);
 
         services.Should().NotContain(
             descriptor => descriptor.ServiceType == typeof(IRemoteRuntimeBridgeListener));
@@ -141,8 +145,9 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     {
         var services = new ServiceCollection();
         var options = new RemoteRuntimeBridgeOptions { Enabled = true };
+        var paths = CreateGatewayPaths();
 
-        RemoteRuntimeBridgeHost.RegisterServices(services, options);
+        RemoteRuntimeBridgeHost.RegisterServices(services, options, paths);
 
         services.Should().ContainSingle(
             descriptor => descriptor.ServiceType == typeof(IRemoteRuntimeBridgeListener));
@@ -154,15 +159,80 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         var options = new RemoteRuntimeBridgeOptions
         {
             Enabled = true,
-            PairingFile = Path.Combine(TestContext.CurrentContext.WorkDirectory, "pairing.json"),
             ServerCertificatePath = Path.Combine(TestContext.CurrentContext.WorkDirectory, "bridge.pfx"),
-            TargetBaseUrl = "http://127.0.0.1:48923",
-            AuthoritativeApiKey = "configuration-is-not-approval",
         };
 
         var action = () => RemoteRuntimeBridgeHost.Build([], options);
 
         action.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void Bridge_options_do_not_contain_target_or_authoritative_key_configuration()
+    {
+        var source = ReadRepositoryFile(
+            "SharpClaw.Gateway/Configuration/RemoteRuntimeBridgeOptions.cs");
+
+        source.Should().NotContain("TargetBaseUrl");
+        source.Should().NotContain("AuthoritativeApiKey");
+        source.Should().NotContain("PairingFile");
+    }
+
+    [Test]
+    public void Bridge_target_comes_from_selected_runtime_discovery_state()
+    {
+        var root = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "bridge-target-" + Guid.NewGuid().ToString("N"));
+        var sharedRoot = Path.Combine(root, "shared");
+
+        try
+        {
+            var gatewayPaths = new SharpClawInstancePaths(
+                SharpClawInstanceKind.Gateway,
+                Path.Combine(root, "gateway"),
+                sharedRoot);
+            gatewayPaths.EnsureDirectories();
+            var manifest = gatewayPaths.Manifest;
+            manifest.SelectedBackendInstanceId = "runtime-selected";
+            gatewayPaths.SaveManifest(manifest);
+
+            var runtimeDirectory = Path.Combine(root, "runtime");
+            var keyPath = Path.Combine(runtimeDirectory, ".api-key");
+            Directory.CreateDirectory(runtimeDirectory);
+            File.WriteAllText(keyPath, "runtime-api-key");
+
+            var discoveryDirectory = Path.Combine(sharedRoot, "discovery", "instances");
+            Directory.CreateDirectory(discoveryDirectory);
+            var entry = new SharpClawDiscoveryEntry
+            {
+                InstanceKind = SharpClawInstanceKind.Backend,
+                InstanceId = "runtime-selected",
+                InstallFingerprint = "runtime-fingerprint",
+                InstanceRoot = runtimeDirectory,
+                BaseUrl = "https://127.0.0.1:48923",
+                RuntimeDirectory = runtimeDirectory,
+                ApiKeyFilePath = keyPath,
+                ProcessId = Environment.ProcessId,
+                StartedAtUtc = DateTimeOffset.UtcNow,
+                LastSeenUtc = DateTimeOffset.UtcNow,
+            };
+            File.WriteAllText(
+                Path.Combine(discoveryDirectory, "backend-runtime-selected.json"),
+                JsonSerializer.Serialize(entry));
+
+            var target = RemoteRuntimeBridgeTargetResolver.Resolve(gatewayPaths);
+
+            target.GatewayInstanceId.Should().Be(manifest.InstanceId);
+            target.AuthoritativeRuntimeInstanceId.Should().Be("runtime-selected");
+            target.TargetBaseUrl.Should().Be("https://127.0.0.1:48923");
+            target.AuthoritativeApiKey.Should().Be("runtime-api-key");
+        }
+        finally
+        {
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
     }
 
     [Test]
@@ -200,4 +270,11 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
         throw new FileNotFoundException($"Could not find repository file '{relativePath}'.");
     }
+
+    private static SharpClawInstancePaths CreateGatewayPaths()
+        => new(
+            SharpClawInstanceKind.Gateway,
+            Path.Combine(
+                TestContext.CurrentContext.WorkDirectory,
+                "bridge-boundary-" + Guid.NewGuid().ToString("N")));
 }

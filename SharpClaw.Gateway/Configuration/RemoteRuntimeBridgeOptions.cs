@@ -10,13 +10,7 @@ public sealed class RemoteRuntimeBridgeOptions
 
     public string ListenUrl { get; init; } = "https://127.0.0.1:48925";
 
-    public string? PairingFile { get; init; }
-
     public string? ServerCertificatePath { get; init; }
-
-    public string? TargetBaseUrl { get; init; }
-
-    public string? AuthoritativeApiKey { get; init; }
 
     public static RemoteRuntimeBridgeOptions FromConfiguration(IConfiguration configuration)
     {
@@ -25,10 +19,7 @@ public sealed class RemoteRuntimeBridgeOptions
         {
             Enabled = section.GetValue("Enabled", false),
             ListenUrl = section.GetValue("ListenUrl", "https://127.0.0.1:48925"),
-            PairingFile = section["PairingFile"],
             ServerCertificatePath = section["ServerCertificatePath"],
-            TargetBaseUrl = section["TargetBaseUrl"],
-            AuthoritativeApiKey = section["AuthoritativeApiKey"],
         };
     }
 }

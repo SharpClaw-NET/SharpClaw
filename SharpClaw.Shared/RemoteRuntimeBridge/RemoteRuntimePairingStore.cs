@@ -463,6 +463,32 @@ public sealed class RemoteRuntimePairingStore
         return record;
     }
 
+    public async Task<RemoteRuntimePairingRecord> RequireActiveTargetAsync(
+        string gatewayInstanceId,
+        string authoritativeRuntimeInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        RequireText(gatewayInstanceId, nameof(gatewayInstanceId));
+        RequireText(authoritativeRuntimeInstanceId, nameof(authoritativeRuntimeInstanceId));
+
+        var now = _utcNow();
+        var record = (await ReadRecordsAsync(cancellationToken)).FirstOrDefault(candidate =>
+            candidate.IsActive(now)
+            && string.Equals(
+                candidate.GatewayInstanceId,
+                gatewayInstanceId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                candidate.AuthoritativeRuntimeInstanceId,
+                authoritativeRuntimeInstanceId,
+                StringComparison.Ordinal));
+
+        return record
+            ?? throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "No approved pairing is active for this Runtime target.");
+    }
+
     private async Task AddRecordAsync(
         RemoteRuntimePairingRecord record,
         CancellationToken cancellationToken)

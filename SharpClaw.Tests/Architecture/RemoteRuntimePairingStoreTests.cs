@@ -57,6 +57,8 @@ public sealed class RemoteRuntimePairingStoreTests
             "gateway-1",
             "runtime-1");
         validated.PairId.Should().Be(invitation.PairId);
+        var target = await store.RequireActiveTargetAsync("gateway-1", "runtime-1");
+        target.PairId.Should().Be(invitation.PairId);
 
         var wrongTarget = () => store.RequireActiveCertificateAsync(
             clientCertificate,

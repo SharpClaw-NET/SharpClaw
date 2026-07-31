@@ -27,7 +27,7 @@ builder.Configuration.AddGatewayEnvironment(
 
 var remoteRuntimeBridgeOptions = RemoteRuntimeBridgeOptions.FromConfiguration(builder.Configuration);
 builder.Services.AddSingleton(remoteRuntimeBridgeOptions);
-RemoteRuntimeBridgeHost.RegisterServices(builder.Services, remoteRuntimeBridgeOptions);
+RemoteRuntimeBridgeHost.RegisterServices(builder.Services, remoteRuntimeBridgeOptions, gatewayPaths);
 
 var gatewayManifest = gatewayPaths.Manifest;
 var configuredGatewayUrl = builder.Configuration["ASPNETCORE_URLS"]
