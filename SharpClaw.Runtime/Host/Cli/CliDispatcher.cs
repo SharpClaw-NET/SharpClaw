@@ -52,8 +52,17 @@ public static class CliDispatcher
 
     internal static CliSessionContext? CurrentSession => Session.Value;
 
+    internal static void ObserveSessionOutput(string text, bool line)
+        => Session.Value?.ObserveOutput(text, line);
+
     private static CliSessionContext Context
-        => Session.Value ??= new(System.Console.Out, System.Console.Error, input: null);
+        => Session.Value ??= new(
+            System.Console.Out,
+            System.Console.Error,
+            input: null,
+            outputObserved: null,
+            promptRequested: null,
+            cancellationToken: default);
 
     private static string? _currentUser
     {
@@ -96,10 +105,19 @@ public static class CliDispatcher
     internal static IDisposable BeginSession(
         TextWriter output,
         TextWriter error,
-        System.Threading.Channels.ChannelReader<string?>? input = null)
+        System.Threading.Channels.ChannelReader<string?>? input = null,
+        Action<string, bool>? outputObserved = null,
+        Action<string, string>? promptRequested = null,
+        CancellationToken cancellationToken = default)
     {
         var previous = Session.Value;
-        Session.Value = new CliSessionContext(output, error, input);
+        Session.Value = new CliSessionContext(
+            output,
+            error,
+            input,
+            outputObserved,
+            promptRequested,
+            cancellationToken);
         return new SessionScope(previous);
     }
 

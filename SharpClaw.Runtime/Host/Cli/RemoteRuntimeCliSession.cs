@@ -22,7 +22,7 @@ internal static class RemoteRuntimeCliSession
         CancellationToken cancellationToken)
     {
         using var sessionCancellation = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
-        var ct = sessionCancellation.Token;
+        var sessionToken = sessionCancellation.Token;
         var frames = Channel.CreateBounded<RemoteRuntimeCliFrame>(new BoundedChannelOptions(64)
         {
             FullMode = BoundedChannelFullMode.Wait,
@@ -44,81 +44,129 @@ internal static class RemoteRuntimeCliSession
         var outputWriter = new RemoteRuntimeCliTextWriter(
             output.Writer,
             RemoteRuntimeCliFrameTypes.Output,
-            ct);
+            sessionToken);
         var errorWriter = new RemoteRuntimeCliTextWriter(
             output.Writer,
             RemoteRuntimeCliFrameTypes.Error,
-            ct);
+            sessionToken);
 
-        var receiveTask = ReceiveFramesAsync(socket, frames.Writer, ct);
-        var sendTask = SendFramesAsync(socket, output.Reader, ct);
+        var receiveTask = ReceiveFramesAsync(socket, frames.Writer, sessionToken);
+        var sendTask = SendFramesAsync(socket, output.Reader, sessionToken);
+        Task? commandTask = null;
+        CancellationTokenSource? commandCancellation = null;
+        string? currentPromptId = null;
         var normalClose = false;
 
         try
         {
-            using var session = CliDispatcher.BeginSession(outputWriter, errorWriter, promptInput.Reader);
-
-            while (await frames.Reader.WaitToReadAsync(ct))
+            while (await frames.Reader.WaitToReadAsync(sessionToken))
             {
                 while (frames.Reader.TryRead(out var frame))
                 {
+                    if (commandTask?.IsCompleted == true)
+                    {
+                        await commandTask;
+                        commandTask = null;
+                        commandCancellation?.Dispose();
+                        commandCancellation = null;
+                        Volatile.Write(ref currentPromptId, null);
+                    }
+
                     if (frame.Type.Equals(RemoteRuntimeCliFrameTypes.Close, StringComparison.OrdinalIgnoreCase))
                     {
                         normalClose = true;
+                        commandCancellation?.Cancel();
                         return;
                     }
 
                     if (frame.Type.Equals(RemoteRuntimeCliFrameTypes.Input, StringComparison.OrdinalIgnoreCase))
                     {
-                        await promptInput.Writer.WriteAsync(frame.Text, ct);
+                        try
+                        {
+                            frame.Validate();
+                            if (!string.Equals(
+                                    frame.PromptId,
+                                    Volatile.Read(ref currentPromptId),
+                                    StringComparison.Ordinal))
+                            {
+                                throw new InvalidOperationException(
+                                    "The CLI input prompt is not active.");
+                            }
+
+                            Volatile.Write(ref currentPromptId, null);
+                            await promptInput.Writer.WriteAsync(frame.Text, sessionToken);
+                        }
+                        catch (Exception exception) when (exception is InvalidOperationException)
+                        {
+                            await WriteErrorAsync(output.Writer, exception.Message, sessionToken);
+                        }
+
+                        continue;
+                    }
+
+                    if (frame.Type.Equals(RemoteRuntimeCliFrameTypes.Cancel, StringComparison.OrdinalIgnoreCase))
+                    {
+                        commandCancellation?.Cancel();
                         continue;
                     }
 
                     if (!frame.Type.Equals(RemoteRuntimeCliFrameTypes.Command, StringComparison.OrdinalIgnoreCase))
                     {
-                        await output.Writer.WriteAsync(
-                            new RemoteRuntimeCliFrame(
-                                RemoteRuntimeCliFrameTypes.Error,
-                                "The CLI frame type is not supported."),
-                            ct);
+                        await WriteErrorAsync(
+                            output.Writer,
+                            "The CLI frame type is not supported.",
+                            sessionToken);
                         continue;
                     }
 
-                    var args = CliDispatcher.ParseCommandLine(frame.Text ?? string.Empty);
-                    if (args.Length == 0)
-                        continue;
-
-                    bool handled;
                     try
                     {
-                        handled = await CliDispatcher.TryHandleAsync(args, services);
-                    }
-                    catch (Exception exception)
-                    {
-                        await output.Writer.WriteAsync(
-                            new RemoteRuntimeCliFrame(
-                                RemoteRuntimeCliFrameTypes.Error,
-                                exception.Message),
-                            ct);
-                        handled = false;
-                    }
+                        frame.Validate();
+                        if (commandTask is not null)
+                            throw new InvalidOperationException("A CLI command is already running.");
 
-                    await output.Writer.WriteAsync(
-                        new RemoteRuntimeCliFrame(
-                            RemoteRuntimeCliFrameTypes.Result,
-                            Handled: handled),
-                        ct);
+                        commandCancellation = CancellationTokenSource.CreateLinkedTokenSource(sessionToken);
+                        commandTask = ExecuteCommandAsync(
+                            frame.Arguments!,
+                            services,
+                            outputWriter,
+                            errorWriter,
+                            promptInput.Reader,
+                            output.Writer,
+                            commandCancellation.Token,
+                            sessionToken,
+                            (promptId, _) => Volatile.Write(ref currentPromptId, promptId),
+                            (promptId, text) => PublishPromptAsync(
+                                output.Writer,
+                                promptId,
+                                text,
+                                sessionToken));
+                    }
+                    catch (Exception exception) when (exception is InvalidOperationException)
+                    {
+                        await WriteErrorAsync(output.Writer, exception.Message, sessionToken);
+                        await output.Writer.WriteAsync(
+                            RemoteRuntimeCliFrame.ExitFrame(2, handled: false),
+                            sessionToken);
+                    }
                 }
             }
         }
-        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        catch (OperationCanceledException) when (sessionToken.IsCancellationRequested)
         {
         }
         finally
         {
+            commandCancellation?.Cancel();
             promptInput.Writer.TryComplete();
             frames.Writer.TryComplete();
             output.Writer.TryComplete();
+
+            if (commandTask is not null)
+            {
+                try { await commandTask.WaitAsync(TimeSpan.FromSeconds(2)); }
+                catch (Exception) { }
+            }
 
             if (normalClose)
             {
@@ -147,8 +195,74 @@ internal static class RemoteRuntimeCliSession
             }
 
             socket.Dispose();
+            commandCancellation?.Dispose();
         }
     }
+
+    private static async Task ExecuteCommandAsync(
+        IReadOnlyList<string> arguments,
+        IServiceProvider services,
+        TextWriter outputWriter,
+        TextWriter errorWriter,
+        ChannelReader<string?> promptInput,
+        ChannelWriter<RemoteRuntimeCliFrame> output,
+        CancellationToken commandCancellation,
+        CancellationToken sessionCancellation,
+        Action<string, string> promptIdObserved,
+        Func<string, string, ValueTask> promptRequested)
+    {
+        await Task.Yield();
+        using var session = CliDispatcher.BeginSession(
+            outputWriter,
+            errorWriter,
+            promptInput,
+            cancellationToken: commandCancellation,
+            promptRequested: (promptId, text) =>
+            {
+                promptIdObserved(promptId, text);
+                promptRequested(promptId, text).AsTask().GetAwaiter().GetResult();
+            });
+
+        try
+        {
+            var handled = await CliDispatcher.TryHandleAsync(arguments.ToArray(), services);
+            commandCancellation.ThrowIfCancellationRequested();
+            await output.WriteAsync(
+                RemoteRuntimeCliFrame.ExitFrame(handled ? 0 : 1, handled),
+                sessionCancellation);
+        }
+        catch (OperationCanceledException) when (commandCancellation.IsCancellationRequested)
+        {
+            await WriteErrorAsync(output, "The CLI command was cancelled.", sessionCancellation);
+            await output.WriteAsync(
+                RemoteRuntimeCliFrame.ExitFrame(130, handled: false),
+                sessionCancellation);
+        }
+        catch (Exception exception)
+        {
+            await WriteErrorAsync(output, exception.Message, sessionCancellation);
+            await output.WriteAsync(
+                RemoteRuntimeCliFrame.ExitFrame(1, handled: false),
+                sessionCancellation);
+        }
+    }
+
+    private static ValueTask PublishPromptAsync(
+        ChannelWriter<RemoteRuntimeCliFrame> output,
+        string promptId,
+        string text,
+        CancellationToken cancellationToken)
+        => output.WriteAsync(
+            RemoteRuntimeCliFrame.PromptFrame(promptId, text),
+            cancellationToken);
+
+    private static ValueTask WriteErrorAsync(
+        ChannelWriter<RemoteRuntimeCliFrame> output,
+        string text,
+        CancellationToken cancellationToken)
+        => output.WriteAsync(
+            new RemoteRuntimeCliFrame(RemoteRuntimeCliFrameTypes.Error, Text: text),
+            cancellationToken);
 
     private static async Task ReceiveFramesAsync(
         WebSocket socket,
@@ -178,7 +292,7 @@ internal static class RemoteRuntimeCliSession
                         await writer.WriteAsync(
                             new RemoteRuntimeCliFrame(
                                 RemoteRuntimeCliFrameTypes.Error,
-                                "The CLI bridge accepts text frames only."),
+                                Text: "The CLI bridge accepts text frames only."),
                             cancellationToken);
                         break;
                     }
@@ -188,7 +302,7 @@ internal static class RemoteRuntimeCliSession
                         await writer.WriteAsync(
                             new RemoteRuntimeCliFrame(
                                 RemoteRuntimeCliFrameTypes.Error,
-                                "The CLI frame exceeds the maximum size."),
+                                Text: "The CLI frame exceeds the maximum size."),
                             cancellationToken);
                         return;
                     }
@@ -215,7 +329,7 @@ internal static class RemoteRuntimeCliSession
                 await writer.WriteAsync(
                     frame ?? new RemoteRuntimeCliFrame(
                         RemoteRuntimeCliFrameTypes.Error,
-                        "The CLI frame is not valid JSON."),
+                        Text: "The CLI frame is not valid JSON."),
                     cancellationToken);
             }
         }
@@ -264,29 +378,30 @@ internal static class RemoteRuntimeCliSession
         public override Encoding Encoding => Encoding.UTF8;
 
         public override void Write(char value)
-            => Publish(value.ToString());
+            => Publish(value.ToString(), line: false);
 
         public override void Write(string? value)
-            => Publish(value ?? string.Empty);
+            => Publish(value ?? string.Empty, line: false);
 
         public override void Write(ReadOnlySpan<char> buffer)
-            => Publish(buffer.ToString());
+            => Publish(buffer.ToString(), line: false);
 
         public override void Write(char[] buffer, int index, int count)
-            => Publish(new string(buffer, index, count));
+            => Publish(new string(buffer, index, count), line: false);
 
         public override void WriteLine()
-            => Publish(string.Empty);
+            => Publish(string.Empty, line: true);
 
         public override void WriteLine(string? value)
-            => Publish(value ?? string.Empty);
+            => Publish(value ?? string.Empty, line: true);
 
-        private void Publish(string text)
+        private void Publish(string text, bool line)
         {
             try
             {
+                CliDispatcher.ObserveSessionOutput(text, line);
                 writer.WriteAsync(
-                        new RemoteRuntimeCliFrame(frameType, text),
+                        new RemoteRuntimeCliFrame(frameType, Text: text),
                         cancellationToken)
                     .AsTask()
                     .GetAwaiter()

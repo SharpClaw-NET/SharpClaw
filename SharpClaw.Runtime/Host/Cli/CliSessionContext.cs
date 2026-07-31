@@ -6,13 +6,22 @@ namespace SharpClaw.Runtime.Host.Cli;
 internal sealed class CliSessionContext(
     TextWriter output,
     TextWriter error,
-    ChannelReader<string?>? input)
+    ChannelReader<string?>? input,
+    Action<string, bool>? outputObserved,
+    Action<string, string>? promptRequested,
+    CancellationToken cancellationToken)
 {
     public TextWriter Output { get; } = output;
 
     public TextWriter Error { get; } = error;
 
     public ChannelReader<string?>? Input { get; } = input;
+
+    private readonly Action<string, bool>? outputObserved = outputObserved;
+    private readonly Action<string, string>? promptRequested = promptRequested;
+    private readonly CancellationToken cancellationToken = cancellationToken;
+    private string pendingPromptText = string.Empty;
+    private bool lastOutputWasLine;
 
     public ILogger? Logger { get; set; }
 
@@ -26,6 +35,24 @@ internal sealed class CliSessionContext(
 
     public bool ChatMode { get; set; }
 
+    public void ObserveOutput(string text, bool line)
+    {
+        if (line)
+        {
+            pendingPromptText = text;
+            lastOutputWasLine = true;
+        }
+        else if (text.Length > 0)
+        {
+            pendingPromptText = lastOutputWasLine
+                ? text
+                : pendingPromptText + text;
+            lastOutputWasLine = false;
+        }
+
+        outputObserved?.Invoke(text, line);
+    }
+
     public string? ReadLine()
     {
         if (Input is null)
@@ -33,7 +60,12 @@ internal sealed class CliSessionContext(
 
         try
         {
-            return Input.ReadAsync().AsTask().GetAwaiter().GetResult();
+            var promptId = Guid.NewGuid().ToString("N");
+            var promptText = pendingPromptText;
+            pendingPromptText = string.Empty;
+            promptRequested?.Invoke(promptId, promptText);
+            var value = Input.ReadAsync(cancellationToken).AsTask().GetAwaiter().GetResult();
+            return value;
         }
         catch (ChannelClosedException)
         {

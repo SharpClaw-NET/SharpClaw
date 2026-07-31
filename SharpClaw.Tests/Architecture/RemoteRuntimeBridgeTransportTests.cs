@@ -158,9 +158,7 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 + RemoteRuntimeBridgePaths.CliControl);
             await cliSocket.ConnectAsync(cliUri, CancellationToken.None);
             var cliCommand = JsonSerializer.SerializeToUtf8Bytes(
-                new RemoteRuntimeCliFrame(
-                    RemoteRuntimeCliFrameTypes.Command,
-                    "help"));
+                RemoteRuntimeCliFrame.CommandFrame(["help"]));
             await cliSocket.SendAsync(
                 cliCommand,
                 WebSocketMessageType.Text,
@@ -173,7 +171,7 @@ public sealed class RemoteRuntimeBridgeTransportTests
             cliOutput.Text.Should().Contain("api=authoritative-api-key");
             cliOutput.Text.Should().Contain("gateway=authoritative-gateway-token");
             var cliResult = await ReceiveCliFrameAsync(cliSocket);
-            cliResult.Type.Should().Be(RemoteRuntimeCliFrameTypes.Result);
+            cliResult.Type.Should().Be(RemoteRuntimeCliFrameTypes.Exit);
             cliResult.Handled.Should().BeTrue();
             await cliSocket.CloseAsync(
                 WebSocketCloseStatus.NormalClosure,
@@ -285,20 +283,18 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 var buffer = new byte[8 * 1024];
                 var received = await socket.ReceiveAsync(buffer, context.RequestAborted);
                 var command = JsonSerializer.Deserialize<RemoteRuntimeCliFrame>(
-                    buffer.AsSpan(0, received.Count))?.Text;
+                    buffer.AsSpan(0, received.Count))?.Arguments;
                 var output = JsonSerializer.SerializeToUtf8Bytes(
                     new RemoteRuntimeCliFrame(
                         RemoteRuntimeCliFrameTypes.Output,
-                        $"command={command};api={context.Request.Headers["X-Api-Key"]};gateway={context.Request.Headers["X-Gateway-Token"]}"));
+                        Text: $"command={string.Join(' ', command ?? [])};api={context.Request.Headers["X-Api-Key"]};gateway={context.Request.Headers["X-Gateway-Token"]}"));
                 await socket.SendAsync(
                     output,
                     WebSocketMessageType.Text,
                     endOfMessage: true,
                     context.RequestAborted);
                 var result = JsonSerializer.SerializeToUtf8Bytes(
-                    new RemoteRuntimeCliFrame(
-                        RemoteRuntimeCliFrameTypes.Result,
-                        Handled: true));
+                    RemoteRuntimeCliFrame.ExitFrame(0, handled: true));
                 await socket.SendAsync(
                     result,
                     WebSocketMessageType.Text,
