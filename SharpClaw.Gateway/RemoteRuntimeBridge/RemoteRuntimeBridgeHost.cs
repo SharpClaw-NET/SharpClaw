@@ -95,7 +95,6 @@ internal static class RemoteRuntimeBridgeHost
                     listenOptions.UseHttps(options.ServerCertificatePath, null, httpsOptions =>
                     {
                         httpsOptions.ClientCertificateMode = ClientCertificateMode.AllowCertificate;
-                        httpsOptions.ClientCertificateValidation = static (_, _, _) => true;
                     });
                 });
         });
@@ -158,6 +157,12 @@ internal static class RemoteRuntimeBridgeHost
                         new { code = exception.Code, error = exception.Message },
                         statusCode: StatusCodes.Status400BadRequest);
                 }
+                catch (ArgumentException exception)
+                {
+                    return Results.Json(
+                        new { error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
             });
 
         bridgeApp.MapPost(
@@ -182,6 +187,12 @@ internal static class RemoteRuntimeBridgeHost
                 {
                     return Results.Json(
                         new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.Json(
+                        new { error = exception.Message },
                         statusCode: StatusCodes.Status400BadRequest);
                 }
             });
@@ -240,6 +251,12 @@ internal static class RemoteRuntimeBridgeHost
                         new { code = exception.Code, error = exception.Message },
                         statusCode: StatusCodes.Status400BadRequest);
                 }
+                catch (ArgumentException exception)
+                {
+                    return Results.Json(
+                        new { error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
             });
 
         bridgeApp.MapPost(
@@ -263,6 +280,12 @@ internal static class RemoteRuntimeBridgeHost
                 {
                     return Results.Json(
                         new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+                catch (ArgumentException exception)
+                {
+                    return Results.Json(
+                        new { error = exception.Message },
                         statusCode: StatusCodes.Status400BadRequest);
                 }
             });
