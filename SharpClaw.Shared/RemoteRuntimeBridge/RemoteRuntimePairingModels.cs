@@ -7,6 +7,7 @@ public enum RemoteRuntimePairStatus
     InvitationIssued,
     ClaimPending,
     Active,
+    Rejected,
     Revoked,
     Expired,
 }

@@ -58,12 +58,30 @@ public class SharpClawDbContext(
     public DbSet<ModuleConfigEntryDB> ModuleConfigEntries => Set<ModuleConfigEntryDB>();
     public DbSet<ModuleStorageRecordDB> ModuleStorageRecords => Set<ModuleStorageRecordDB>();
     public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
+    public DbSet<RemoteRuntimePairingDB> RemoteRuntimePairings => Set<RemoteRuntimePairingDB>();
 
     // ── Module runtime state ──────────────────────────────────────
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
+
+        modelBuilder.Entity<RemoteRuntimePairingDB>(entity =>
+        {
+            entity.HasKey(pairing => pairing.Id);
+            entity.Property(pairing => pairing.Status).HasConversion<string>();
+            entity.Property(pairing => pairing.Revision).IsConcurrencyToken();
+            entity.HasIndex(pairing => pairing.PairId).IsUnique();
+            entity.HasIndex(pairing => pairing.ProxyRuntimeInstanceId);
+            entity.HasIndex(pairing => pairing.ClientCertificateIdentity);
+            entity.HasIndex(pairing => new { pairing.Status, pairing.ExpiresAtUtc });
+            entity.HasIndex(pairing => new
+            {
+                pairing.GatewayInstanceId,
+                pairing.AuthoritativeRuntimeInstanceId,
+            });
+            entity.HasIndex(pairing => new { pairing.CreatedAtUtc, pairing.Id });
+        });
 
         // ── Roles & Users ─────────────────────────────────────────
         modelBuilder.Entity<RoleDB>(e =>
