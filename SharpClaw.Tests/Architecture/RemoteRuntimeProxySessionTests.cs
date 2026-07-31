@@ -27,6 +27,7 @@ public sealed class RemoteRuntimeProxySessionTests
             paths,
             "http://127.0.0.1:0",
             "https://127.0.0.1:48925",
+            "gateway-public-key-hash",
             certificate);
 
         try
@@ -72,12 +73,14 @@ public sealed class RemoteRuntimeProxySessionTests
             paths,
             "http://0.0.0.0:48923",
             "https://127.0.0.1:48925",
+            "gateway-public-key-hash",
             "local-key",
             certificate);
         var nonTlsBridge = () => new RemoteRuntimeProxyConnection(
             paths,
             "http://127.0.0.1:48923",
             "http://127.0.0.1:48925",
+            "gateway-public-key-hash",
             "local-key",
             certificate);
 

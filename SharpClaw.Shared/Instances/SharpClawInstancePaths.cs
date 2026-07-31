@@ -48,6 +48,7 @@ public sealed class SharpClawInstancePaths
         DurableDirectory = Path.Combine(InstanceRoot, "durable", "v1");
         ConfigDirectory = Path.Combine(InstanceRoot, "config");
         RemoteRuntimePairingDirectory = Path.Combine(SecretsDirectory, "remote-runtime-pairing");
+        RemoteRuntimeProxyStateDirectory = Path.Combine(SecretsDirectory, "remote-runtime-proxy");
         DiscoveryDirectory = Path.Combine(SharedRoot, "discovery", "instances");
         DiscoveryEntryPath = Path.Combine(DiscoveryDirectory, $"{instanceKind.ToString().ToLowerInvariant()}-{InstallFingerprint}.json");
         _manifest = new Lazy<SharpClawInstanceManifest>(LoadOrCreateManifest, isThreadSafe: true);
@@ -79,6 +80,8 @@ public sealed class SharpClawInstancePaths
 
     public string RemoteRuntimePairingDirectory { get; }
 
+    public string RemoteRuntimeProxyStateDirectory { get; }
+
     public string DiscoveryDirectory { get; }
 
     public string DiscoveryEntryPath { get; }
@@ -107,6 +110,7 @@ public sealed class SharpClawInstancePaths
         Directory.CreateDirectory(DurableDirectory);
         Directory.CreateDirectory(ConfigDirectory);
         Directory.CreateDirectory(RemoteRuntimePairingDirectory);
+        Directory.CreateDirectory(RemoteRuntimeProxyStateDirectory);
         Directory.CreateDirectory(DiscoveryDirectory);
     }
 

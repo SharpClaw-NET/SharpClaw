@@ -260,6 +260,9 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
         source.Should().Contain("ClientCertificateForwarderHttpClientFactory");
         source.Should().Contain("ClientCertificates");
+        source.Should().Contain("GatewayServerPublicKeyHash");
+        source.Should().Contain("HasPinnedPublicKey");
+        source.Should().Contain("ExportSubjectPublicKeyInfo");
         source.Should().Contain("PublishDiscovery");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Api-Key\")");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Gateway-Token\")");

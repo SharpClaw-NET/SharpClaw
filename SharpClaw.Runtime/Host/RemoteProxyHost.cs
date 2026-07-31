@@ -1,6 +1,4 @@
 using System.Net.Http;
-using System.Net.Http.Headers;
-using System.Net.Security;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
@@ -21,12 +19,15 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         SharpClawInstancePaths instancePaths,
         string localUrl,
         string gatewayBridgeUrl,
+        string gatewayServerPublicKeyHash,
         string localApiKey,
         X509Certificate2 clientCertificate)
     {
         InstancePaths = instancePaths ?? throw new ArgumentNullException(nameof(instancePaths));
         LocalUrl = localUrl ?? throw new ArgumentNullException(nameof(localUrl));
         GatewayBridgeUrl = gatewayBridgeUrl ?? throw new ArgumentNullException(nameof(gatewayBridgeUrl));
+        GatewayServerPublicKeyHash = gatewayServerPublicKeyHash
+            ?? throw new ArgumentNullException(nameof(gatewayServerPublicKeyHash));
         LocalApiKey = localApiKey ?? throw new ArgumentNullException(nameof(localApiKey));
         ClientCertificate = clientCertificate ?? throw new ArgumentNullException(nameof(clientCertificate));
         Validate();
@@ -38,6 +39,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
 
     public string GatewayBridgeUrl { get; }
 
+    public string GatewayServerPublicKeyHash { get; }
+
     public string LocalApiKey { get; }
 
     public X509Certificate2 ClientCertificate { get; }
@@ -46,6 +49,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         SharpClawInstancePaths instancePaths,
         string localUrl,
         string gatewayBridgeUrl,
+        string gatewayServerPublicKeyHash,
         X509Certificate2 clientCertificate)
     {
         ArgumentNullException.ThrowIfNull(instancePaths);
@@ -66,6 +70,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
                 instancePaths,
                 localUrl,
                 gatewayBridgeUrl,
+                gatewayServerPublicKeyHash,
                 localApiKey,
                 clientCertificate);
         }
@@ -123,6 +128,10 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
             throw new InvalidOperationException(
                 "RemoteProxy mode requires an HTTPS Gateway bridge URL from approved pairing state.");
         }
+
+        if (string.IsNullOrWhiteSpace(GatewayServerPublicKeyHash))
+            throw new InvalidOperationException(
+                "RemoteProxy mode requires the approved Gateway server public-key hash.");
 
         if (string.IsNullOrWhiteSpace(LocalApiKey))
             throw new InvalidOperationException("RemoteProxy mode requires a local session API key.");
@@ -193,7 +202,9 @@ public static class RemoteProxyHost
         builder.WebHost.UseUrls(connection.LocalUrl);
         builder.Services.AddReverseProxy();
         builder.Services.AddSingleton<IForwarderHttpClientFactory>(
-            _ => new ClientCertificateForwarderHttpClientFactory(connection.ClientCertificate));
+            _ => new ClientCertificateForwarderHttpClientFactory(
+                connection.ClientCertificate,
+                connection.GatewayServerPublicKeyHash));
 
         var app = builder.Build();
         app.Use(async (context, next) =>
@@ -254,7 +265,8 @@ public static class RemoteProxyHost
 }
 
 internal sealed class ClientCertificateForwarderHttpClientFactory(
-    X509Certificate2 clientCertificate) : ForwarderHttpClientFactory
+    X509Certificate2 clientCertificate,
+    string gatewayServerPublicKeyHash) : ForwarderHttpClientFactory
 {
     protected override void ConfigureHandler(
         ForwarderHttpClientContext context,
@@ -263,10 +275,44 @@ internal sealed class ClientCertificateForwarderHttpClientFactory(
         base.ConfigureHandler(context, handler);
         handler.SslOptions.ClientCertificates ??= new X509CertificateCollection();
         handler.SslOptions.ClientCertificates.Add(clientCertificate);
-        handler.SslOptions.RemoteCertificateValidationCallback = static (
-            _,
-            _,
-            _,
-            errors) => errors == SslPolicyErrors.None;
+        handler.SslOptions.RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+            HasPinnedPublicKey(certificate, gatewayServerPublicKeyHash);
+    }
+
+    private static bool HasPinnedPublicKey(
+        X509Certificate? certificate,
+        string expectedHash)
+    {
+        if (certificate is null)
+            return false;
+
+        var serverCertificate = certificate as X509Certificate2;
+        var ownsCertificate = serverCertificate is null;
+        serverCertificate ??= new X509Certificate2(certificate);
+        try
+        {
+            using var publicKeyAlgorithm = serverCertificate.GetECDsaPublicKey();
+            if (publicKeyAlgorithm is null)
+                return false;
+
+            var publicKey = publicKeyAlgorithm.ExportSubjectPublicKeyInfo();
+            try
+            {
+                var actualHash = Convert.ToBase64String(SHA256.HashData(publicKey))
+                    .TrimEnd('=')
+                    .Replace('+', '-')
+                    .Replace('/', '_');
+                return string.Equals(actualHash, expectedHash, StringComparison.Ordinal);
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(publicKey);
+            }
+        }
+        finally
+        {
+            if (ownsCertificate)
+                serverCertificate.Dispose();
+        }
     }
 }
