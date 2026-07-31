@@ -75,7 +75,7 @@ public static class RemoteRuntimePairingHandlers
             {
                 var certificate = await registry.IssueClientCertificateAsync(
                     request.PairId,
-                    request.Secret,
+                    request.CertificateProofSignatureBase64,
                     cancellationToken);
                 return new RemoteRuntimePairingCertificateResponse(
                     Convert.ToBase64String(certificate.CertificateDer),
@@ -172,7 +172,8 @@ public static class RemoteRuntimePairingHandlers
             ToSnapshot(await registry.RenewAsync(
                 pairId,
                 request.ExpiresAtUtc,
-                cancellationToken)));
+                cancellationToken,
+                request.ProofSignatureBase64)));
 
     [MapPost("/pairings/{pairId:guid}/last-seen")]
     public static Task<IResult> TouchLastSeen(
@@ -312,5 +313,6 @@ public static class RemoteRuntimePairingHandlers
             entry.UpdatedAtUtc,
             entry.Revision,
             entry.ClientCertificateIssuedAtUtc,
-            entry.ClientCertificateExpiresAtUtc);
+            entry.ClientCertificateExpiresAtUtc,
+            entry.InvitationExpiresAtUtc);
 }

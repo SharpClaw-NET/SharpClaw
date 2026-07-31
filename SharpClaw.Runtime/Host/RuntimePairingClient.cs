@@ -55,7 +55,12 @@ public static class RuntimePairingClient
             invitation.GatewayServerPublicKeyHash,
             options.ConnectTimeoutSeconds,
             options.ActivityTimeoutSeconds);
-        var pairingClient = new RemoteRuntimePairingClient(httpClient);
+        var pairingClient = new RemoteRuntimePairingClient(
+            httpClient,
+            sessionSecretsFactory: paths => RemoteRuntimeProxySessionSecrets.Create(
+                paths,
+                options.PrivateKeySecret,
+                options.ClientCertificateSecret));
         await pairingClient.PairAsync(invitation, instancePaths, cancellationToken);
     }
 
@@ -114,6 +119,114 @@ public static class RuntimePairingClient
             options.ProxyRuntimeInstanceId,
             clientCertificate,
             cancellationToken);
+    }
+
+    internal static async Task RenewAndReissueAsync(
+        RuntimeLaunchPlan plan,
+        RemoteRuntimeProxySessionState state,
+        ECDsa privateKey,
+        RemoteRuntimeProxySessionSecrets secrets,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(privateKey);
+        ArgumentNullException.ThrowIfNull(secrets);
+
+        var options = plan.RequireRemoteProxyOptions();
+        if (!Uri.TryCreate(state.GatewayBridgeUrl, UriKind.Absolute, out var gatewayUri)
+            || !string.Equals(gatewayUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairingTargetMismatch",
+                "The stored Gateway bridge URL is invalid.");
+        }
+
+        using var httpClient = CreatePinnedClient(
+            gatewayUri,
+            state.GatewayServerPublicKeyHash,
+            options.ConnectTimeoutSeconds,
+            options.ActivityTimeoutSeconds);
+        var pairingClient = new RemoteRuntimePairingClient(httpClient);
+        var publicKeyHash = RemoteRuntimeCertificateHash.Compute(privateKey);
+        var renewalExpiry = DateTimeOffset.UtcNow.AddDays(30);
+        var renewalPayload = RemoteRuntimePairingProof.CreateRenewalProofPayload(
+            state.PairId,
+            publicKeyHash,
+            renewalExpiry,
+            state.BridgeProtocolMajor);
+        var renewalSignature = privateKey.SignData(renewalPayload, HashAlgorithmName.SHA256);
+        try
+        {
+            await pairingClient.RenewAsync(
+                new RemoteRuntimePairingRenewalRequest(
+                    state.PairId,
+                    renewalExpiry,
+                    Convert.ToBase64String(renewalSignature)),
+                cancellationToken);
+
+            var certificatePayload = RemoteRuntimePairingProof.CreateCertificateProofPayload(
+                state.PairId,
+                publicKeyHash,
+                state.BridgeProtocolMajor);
+            var certificateSignature = privateKey.SignData(
+                certificatePayload,
+                HashAlgorithmName.SHA256);
+            try
+            {
+                var certificate = await pairingClient.IssueClientCertificateAsync(
+                    new RemoteRuntimePairingCertificateRequest(
+                        state.PairId,
+                        Convert.ToBase64String(certificateSignature)),
+                    cancellationToken);
+                using var publicCertificate = X509CertificateLoader.LoadCertificate(
+                    Convert.FromBase64String(certificate.CertificateDerBase64));
+                if (!string.Equals(
+                        RemoteRuntimeCertificateHash.Compute(publicCertificate),
+                        publicKeyHash,
+                        StringComparison.Ordinal)
+                    || !string.Equals(
+                        publicCertificate.Thumbprint,
+                        certificate.CertificateThumbprint,
+                        StringComparison.OrdinalIgnoreCase))
+                {
+                    throw new RemoteRuntimePairingException(
+                        "CertificateMismatch",
+                        "The renewed certificate does not match the stored proxy key.");
+                }
+
+                using var certificateWithKey = publicCertificate.CopyWithPrivateKey(privateKey);
+                var pfx = certificateWithKey.Export(X509ContentType.Pfx);
+                var privateKeyBytes = privateKey.ExportPkcs8PrivateKey();
+                try
+                {
+                    await secrets.SaveAsync(
+                        state with
+                        {
+                            ClientCertificatePfxBase64 = Convert.ToBase64String(pfx),
+                            CertificateNotAfterUtc = certificate.NotAfterUtc,
+                            CertificateThumbprint = certificate.CertificateThumbprint,
+                        },
+                        privateKeyBytes,
+                        cancellationToken);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(pfx);
+                    CryptographicOperations.ZeroMemory(privateKeyBytes);
+                }
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(certificatePayload);
+                CryptographicOperations.ZeroMemory(certificateSignature);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(renewalPayload);
+            CryptographicOperations.ZeroMemory(renewalSignature);
+        }
     }
 
     private static HttpClient CreatePinnedClient(
@@ -245,6 +358,13 @@ internal sealed class RemoteRuntimePairingClient(
             proxyRuntimeInstanceId,
             publicKeyHash);
         var proofSignature = key.SignData(proofPayload, HashAlgorithmName.SHA256);
+        var certificateProofPayload = RemoteRuntimePairingProof.CreateCertificateProofPayload(
+            invitation.PairId,
+            publicKeyHash,
+            invitation.BridgeProtocolMajor);
+        var certificateProofSignature = key.SignData(
+            certificateProofPayload,
+            HashAlgorithmName.SHA256);
 
         try
         {
@@ -261,6 +381,7 @@ internal sealed class RemoteRuntimePairingClient(
 
             var certificate = await WaitForCertificateAsync(
                 invitation,
+                Convert.ToBase64String(certificateProofSignature),
                 cancellationToken);
             using var publicCertificate = X509CertificateLoader.LoadCertificate(
                 Convert.FromBase64String(certificate.CertificateDerBase64));
@@ -296,8 +417,16 @@ internal sealed class RemoteRuntimePairingClient(
                     invitation.AuthoritativeRuntimeInstallFingerprint,
                     certificate.CertificateThumbprint,
                     invitation.BridgeProtocolMajor);
-                await _sessionSecretsFactory(instancePaths)
-                    .SaveAsync(state, cancellationToken);
+                var privateKeyBytes = key.ExportPkcs8PrivateKey();
+                try
+                {
+                    await _sessionSecretsFactory(instancePaths)
+                        .SaveAsync(state, privateKeyBytes, cancellationToken);
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(privateKeyBytes);
+                }
                 return state;
             }
             finally
@@ -310,11 +439,14 @@ internal sealed class RemoteRuntimePairingClient(
             CryptographicOperations.ZeroMemory(certificateSigningRequest);
             CryptographicOperations.ZeroMemory(proofPayload);
             CryptographicOperations.ZeroMemory(proofSignature);
+            CryptographicOperations.ZeroMemory(certificateProofPayload);
+            CryptographicOperations.ZeroMemory(certificateProofSignature);
         }
     }
 
     private async Task<RemoteRuntimePairingCertificateResponse> WaitForCertificateAsync(
         RemoteRuntimePairingInvitation invitation,
+        string certificateProofSignatureBase64,
         CancellationToken cancellationToken)
     {
         var deadline = DateTimeOffset.UtcNow + _approvalTimeout;
@@ -326,7 +458,7 @@ internal sealed class RemoteRuntimePairingClient(
                     RemoteRuntimeBridgePaths.PairingCertificate,
                     new RemoteRuntimePairingCertificateRequest(
                         invitation.PairId,
-                        invitation.Secret),
+                        certificateProofSignatureBase64),
                     cancellationToken);
             }
             catch (RemoteRuntimePairingException exception)
@@ -352,6 +484,22 @@ internal sealed class RemoteRuntimePairingClient(
             }
         }
     }
+
+    internal Task<RemoteRuntimePairingCertificateResponse> IssueClientCertificateAsync(
+        RemoteRuntimePairingCertificateRequest request,
+        CancellationToken cancellationToken)
+        => PostAsync<RemoteRuntimePairingCertificateRequest, RemoteRuntimePairingCertificateResponse>(
+            RemoteRuntimeBridgePaths.PairingCertificate,
+            request,
+            cancellationToken);
+
+    internal Task<RemoteRuntimePairingRegistrySnapshot> RenewAsync(
+        RemoteRuntimePairingRenewalRequest request,
+        CancellationToken cancellationToken)
+        => PostAsync<RemoteRuntimePairingRenewalRequest, RemoteRuntimePairingRegistrySnapshot>(
+            RemoteRuntimeBridgePaths.PairingRenew,
+            request,
+            cancellationToken);
 
     internal async Task ValidateActiveSessionAsync(
         RemoteRuntimeProxySessionState state,

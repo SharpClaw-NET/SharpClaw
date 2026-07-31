@@ -43,6 +43,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             "proxy-a",
             "runtime-a");
         active.Status.Should().Be(RemoteRuntimePairStatus.Active);
+        active.InvitationExpiresAtUtc.Should().BeBefore(active.ExpiresAtUtc);
         (await registry.FindActiveTargetAsync("gateway-a", "runtime-a"))?.PairId.Should().Be(invitation.PairId);
 
         await using (var reopenedDb = workspace.CreateDbContext())
@@ -60,7 +61,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         firstPage.Items.Should().ContainSingle(item => item.PairId == invitation.PairId);
         firstPage.HasMore.Should().BeFalse();
 
-        var renewed = await registry.RenewAsync(invitation.PairId, DateTimeOffset.UtcNow.AddHours(1));
+        var renewed = await registry.RenewAsync(invitation.PairId, DateTimeOffset.UtcNow.AddDays(31));
         renewed.ExpiresAtUtc.Should().BeAfter(active.ExpiresAtUtc);
 
         var touched = await registry.TouchLastSeenAsync(invitation.PairId);
@@ -167,7 +168,11 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             .Intersect(second.Items.Select(item => item.PairId))
             .Should().BeEmpty();
 
-        await registry.ClaimAsync(CreateClaim(invitations[0], "proxy-a"));
+        using var firstClaimMaterial = CreateClaimMaterial(invitations[0], "proxy-a");
+        await registry.ClaimAsync(firstClaimMaterial.Claim);
+        var repeatedClaim = () => registry.ClaimAsync(firstClaimMaterial.Claim);
+        (await repeatedClaim.Should().ThrowAsync<RemoteRuntimePairingRegistryException>())
+            .Which.Code.Should().Be("InvalidPairState");
         await registry.ClaimAsync(CreateClaim(invitations[1], "proxy-b"));
         await registry.ClaimAsync(CreateClaim(otherTarget, "proxy-a"));
 
@@ -175,9 +180,25 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             invitations[0].PairId,
             "proxy-a",
             "runtime-a");
-        var issued = await registry.IssueClientCertificateAsync(
+        var certificateProofPayload = RemoteRuntimePairingProof.CreateCertificateProofPayload(
             invitations[0].PairId,
-            invitations[0].Secret);
+            firstClaimMaterial.PublicKeyHash);
+        var certificateProof = firstClaimMaterial.Key.SignData(
+            certificateProofPayload,
+            HashAlgorithmName.SHA256);
+        var certificateProofBase64 = Convert.ToBase64String(certificateProof);
+        RemoteRuntimeClientCertificate issued;
+        try
+        {
+            issued = await registry.IssueClientCertificateAsync(
+                invitations[0].PairId,
+                certificateProofBase64);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(certificateProofPayload);
+            CryptographicOperations.ZeroMemory(certificateProof);
+        }
         using var issuedCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
         RemoteRuntimeCertificateHash.Compute(issuedCertificate)
             .Should().Be((await registry.FindAsync(invitations[0].PairId))!.ProxyRuntimePublicKeyHash);
@@ -185,6 +206,16 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         issuedEntry!.ClientCertificateIdentity.Should().Be(issued.CertificateThumbprint);
         issuedEntry.ClientCertificateIssuedAtUtc.Should().NotBeNull();
         issuedEntry.ClientCertificateExpiresAtUtc.Should().Be(issued.NotAfterUtc);
+        var repeatedIssue = await registry.IssueClientCertificateAsync(
+            invitations[0].PairId,
+            certificateProofBase64);
+        repeatedIssue.CertificateThumbprint.Should().Be(issued.CertificateThumbprint);
+        repeatedIssue.CertificateDer.Should().Equal(issued.CertificateDer);
+        Func<Task> issueWithInvitationSecret = () => registry.IssueClientCertificateAsync(
+            invitations[0].PairId,
+            invitations[0].Secret);
+        (await issueWithInvitationSecret.Should().ThrowAsync<RemoteRuntimePairingRegistryException>())
+            .Which.Code.Should().Be("InvalidProof");
         (await registry.FindActiveTargetAsync(
             "gateway-a",
             "runtime-a",
@@ -193,18 +224,68 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
 
         var renewed = await registry.RenewAsync(
             invitations[0].PairId,
-            DateTimeOffset.UtcNow.AddHours(2));
-        renewed.ClientCertificateIdentity.Should().BeNull();
+            DateTimeOffset.UtcNow.AddDays(31));
+        renewed.ClientCertificateIdentity.Should().Be(issued.CertificateThumbprint);
+        (await registry.FindActiveTargetAsync(
+            "gateway-a",
+            "runtime-a",
+            certificateIdentity: issued.CertificateThumbprint))!
+            .PairId.Should().Be(invitations[0].PairId);
+
+        var proofRenewalExpiry = DateTimeOffset.UtcNow.AddDays(60);
+        var renewalPayload = RemoteRuntimePairingProof.CreateRenewalProofPayload(
+            invitations[0].PairId,
+            firstClaimMaterial.PublicKeyHash,
+            proofRenewalExpiry);
+        var renewalSignature = firstClaimMaterial.Key.SignData(
+            renewalPayload,
+            HashAlgorithmName.SHA256);
+        try
+        {
+            var proofRenewed = await registry.RenewAsync(
+                invitations[0].PairId,
+                proofRenewalExpiry,
+                proofSignatureBase64: Convert.ToBase64String(renewalSignature));
+            proofRenewed.ClientCertificateIdentity.Should().BeNull();
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(renewalPayload);
+            CryptographicOperations.ZeroMemory(renewalSignature);
+        }
         (await registry.FindActiveTargetAsync(
             "gateway-a",
             "runtime-a",
             certificateIdentity: issued.CertificateThumbprint)).Should().BeNull();
+        var reissuePayload = RemoteRuntimePairingProof.CreateCertificateProofPayload(
+            invitations[0].PairId,
+            firstClaimMaterial.PublicKeyHash);
+        var reissueSignature = firstClaimMaterial.Key.SignData(
+            reissuePayload,
+            HashAlgorithmName.SHA256);
+        try
+        {
+            var reissued = await registry.IssueClientCertificateAsync(
+                invitations[0].PairId,
+                Convert.ToBase64String(reissueSignature));
+            reissued.CertificateThumbprint.Should().NotBe(issued.CertificateThumbprint);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(reissuePayload);
+            CryptographicOperations.ZeroMemory(reissueSignature);
+        }
 
         var activeSecond = await registry.ApproveAsync(
             invitations[1].PairId,
             "proxy-b",
             "runtime-a");
         activeSecond.Status.Should().Be(RemoteRuntimePairStatus.Active);
+        (await registry.FindActiveTargetAsync(
+            "gateway-a",
+            "runtime-a",
+            proxyRuntimeInstanceId: "proxy-b"))!
+            .PairId.Should().Be(invitations[1].PairId);
 
         var approveOtherTarget = () => registry.ApproveAsync(
             otherTarget.PairId,
@@ -307,7 +388,15 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         RemoteRuntimePairingInvitation invitation,
         string proxyRuntimeInstanceId)
     {
-        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        using var material = CreateClaimMaterial(invitation, proxyRuntimeInstanceId);
+        return material.Claim;
+    }
+
+    private static ClaimMaterial CreateClaimMaterial(
+        RemoteRuntimePairingInvitation invitation,
+        string proxyRuntimeInstanceId)
+    {
+        var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
         var request = new CertificateRequest(
             "CN=SharpClaw test proxy",
             key,
@@ -325,12 +414,29 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         var signature = key.SignData(payload, HashAlgorithmName.SHA256);
         CryptographicOperations.ZeroMemory(publicKey);
         CryptographicOperations.ZeroMemory(payload);
-        return new RemoteRuntimePairingClaim(
-            invitation.PairId,
-            invitation.Secret,
-            proxyRuntimeInstanceId,
-            publicKeyHash,
-            Convert.ToBase64String(csr),
-            Convert.ToBase64String(signature));
+        return new ClaimMaterial(
+            new RemoteRuntimePairingClaim(
+                invitation.PairId,
+                invitation.Secret,
+                proxyRuntimeInstanceId,
+                publicKeyHash,
+                Convert.ToBase64String(csr),
+                Convert.ToBase64String(signature)),
+            key,
+            publicKeyHash);
+    }
+
+    private sealed class ClaimMaterial(
+        RemoteRuntimePairingClaim claim,
+        ECDsa key,
+        string publicKeyHash) : IDisposable
+    {
+        public RemoteRuntimePairingClaim Claim { get; } = claim;
+
+        public ECDsa Key { get; } = key;
+
+        public string PublicKeyHash { get; } = publicKeyHash;
+
+        public void Dispose() => Key.Dispose();
     }
 }

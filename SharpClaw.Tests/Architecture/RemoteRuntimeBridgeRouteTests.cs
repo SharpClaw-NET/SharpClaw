@@ -194,6 +194,14 @@ public sealed class RemoteRuntimeBridgeRouteTests
                     string.Empty));
             malformedClaim.StatusCode.Should().Be(HttpStatusCode.BadRequest);
 
+            using var missingRenewalProof = await client.PostAsJsonAsync(
+                RemoteRuntimeBridgePaths.PairingRenew,
+                new RemoteRuntimePairingRenewalRequest(
+                    pairId,
+                    DateTimeOffset.UtcNow.AddHours(2),
+                    string.Empty));
+            missingRenewalProof.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+
             using var normalRequest = await client.GetAsync("/api/health");
             normalRequest.StatusCode.Should().Be(HttpStatusCode.Unauthorized);
         }

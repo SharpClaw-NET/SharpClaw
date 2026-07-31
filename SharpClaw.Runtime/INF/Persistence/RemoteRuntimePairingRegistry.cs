@@ -16,6 +16,7 @@ public sealed class RemoteRuntimePairingRegistry(
 {
     private const int CurrentBridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor;
     private static readonly TimeSpan MaximumInvitationLifetime = TimeSpan.FromMinutes(15);
+    private static readonly TimeSpan DefaultActivePairLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan MaximumRenewalLifetime = TimeSpan.FromDays(365);
     private static readonly SemaphoreSlim ApprovalGate = new(1, 1);
 
@@ -70,6 +71,7 @@ public sealed class RemoteRuntimePairingRegistry(
                 DisplayName = NormalizeOptional(displayName),
                 Description = NormalizeOptional(description),
                 CreatedAtUtc = now,
+                InvitationExpiresAtUtc = now.Add(lifetime),
                 ExpiresAtUtc = now.Add(lifetime),
                 UpdatedAtUtc = now,
                 Revision = 1,
@@ -86,7 +88,7 @@ public sealed class RemoteRuntimePairingRegistry(
                 authoritativeRuntimeInstanceId,
                 authoritativeRuntimeInstallFingerprint,
                 CurrentBridgeProtocolMajor,
-                entity.ExpiresAtUtc);
+                entity.InvitationExpiresAtUtc ?? entity.ExpiresAtUtc);
         }
         finally
         {
@@ -180,6 +182,7 @@ public sealed class RemoteRuntimePairingRegistry(
         entity.ProxyRuntimePublicKeyHash = proxyRuntimePublicKeyHash;
         entity.ProxyRuntimeCertificateSigningRequest = claim.CertificateSigningRequestBase64;
         entity.ClaimedAtUtc = now;
+        entity.InvitationConsumedAtUtc = now;
         entity.StatusReason = null;
         Touch(entity, now);
         await db.SaveChangesAsync(cancellationToken);
@@ -224,9 +227,11 @@ public sealed class RemoteRuntimePairingRegistry(
 
             var now = DateTimeOffset.UtcNow;
             entity.Status = RemoteRuntimePairStatus.Active;
+            entity.ExpiresAtUtc = now.Add(DefaultActivePairLifetime);
             entity.ClientCertificateIdentity = null;
             entity.ClientCertificateIssuedAtUtc = null;
             entity.ClientCertificateExpiresAtUtc = null;
+            entity.EncryptedClientCertificateDer = null;
             entity.ApprovedAtUtc = now;
             entity.StatusReason = null;
             Touch(entity, now);
@@ -273,19 +278,29 @@ public sealed class RemoteRuntimePairingRegistry(
     public async Task<RemoteRuntimePairingRegistryEntry> RenewAsync(
         Guid pairId,
         DateTimeOffset expiresAtUtc,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? proofSignatureBase64 = null)
     {
         RequireJsonColdStore();
         var entity = await RequireEntityAsync(pairId, cancellationToken);
         var now = DateTimeOffset.UtcNow;
-        if (entity.Status != RemoteRuntimePairStatus.Active || expiresAtUtc <= now || expiresAtUtc - now > MaximumRenewalLifetime)
+        if (GetEffectiveStatus(entity, now) != RemoteRuntimePairStatus.Active
+            || expiresAtUtc <= now
+            || expiresAtUtc - now > MaximumRenewalLifetime)
             throw Error("InvalidRenewal", "The pairing renewal is invalid.");
+
+        if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
+            VerifyRenewalProof(entity, expiresAtUtc, proofSignatureBase64);
 
         entity.ExpiresAtUtc = expiresAtUtc;
         entity.RenewedAtUtc = now;
-        entity.ClientCertificateIdentity = null;
-        entity.ClientCertificateIssuedAtUtc = null;
-        entity.ClientCertificateExpiresAtUtc = null;
+        if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
+        {
+            entity.ClientCertificateIdentity = null;
+            entity.ClientCertificateIssuedAtUtc = null;
+            entity.ClientCertificateExpiresAtUtc = null;
+            entity.EncryptedClientCertificateDer = null;
+        }
         entity.StatusReason = null;
         Touch(entity, now);
         await db.SaveChangesAsync(cancellationToken);
@@ -392,16 +407,15 @@ public sealed class RemoteRuntimePairingRegistry(
 
     public async Task<RemoteRuntimeClientCertificate> IssueClientCertificateAsync(
         Guid pairId,
-        string invitationSecret,
+        string certificateProofSignatureBase64,
         CancellationToken cancellationToken = default)
     {
         RequireJsonColdStore();
-        RequireText(invitationSecret, nameof(invitationSecret));
+        RequireText(certificateProofSignatureBase64, nameof(certificateProofSignatureBase64));
 
         var entity = await db.RemoteRuntimePairings
             .SingleOrDefaultAsync(pairing => pairing.PairId == pairId, cancellationToken)
             ?? throw Error("PairNotFound", "The pairing record was not found.");
-        VerifyInvitationSecret(entity.InvitationHash, invitationSecret);
         var effectiveStatus = GetEffectiveStatus(entity, DateTimeOffset.UtcNow);
         if (effectiveStatus == RemoteRuntimePairStatus.ClaimPending)
         {
@@ -415,6 +429,24 @@ public sealed class RemoteRuntimePairingRegistry(
             || string.IsNullOrWhiteSpace(entity.ProxyRuntimeCertificateSigningRequest))
         {
             throw Error("PairNotAuthorized", "The pairing must be active before certificate issue.");
+        }
+
+        var publicKeyHash = VerifyCertificateProof(entity, certificateProofSignatureBase64);
+        if (!string.IsNullOrWhiteSpace(entity.EncryptedClientCertificateDer)
+            && entity.ClientCertificateIssuedAtUtc is { } existingIssuedAt
+            && entity.ClientCertificateExpiresAtUtc is { } existingExpiresAt
+            && !string.IsNullOrWhiteSpace(entity.ClientCertificateIdentity))
+        {
+            var existingEncoded = ApiKeyEncryptor.Decrypt(
+                entity.EncryptedClientCertificateDer,
+                encryptionOptions.Key);
+            var existingDer = Convert.FromBase64String(existingEncoded);
+            return new RemoteRuntimeClientCertificate(
+                existingDer,
+                publicKeyHash,
+                entity.ClientCertificateIdentity,
+                existingExpiresAt,
+                existingIssuedAt);
         }
 
         if (string.IsNullOrWhiteSpace(entity.EncryptedCertificateAuthorityPfx))
@@ -439,8 +471,8 @@ public sealed class RemoteRuntimePairingRegistry(
                 var publicKey = request.PublicKey.ExportSubjectPublicKeyInfo();
                 try
                 {
-                    var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
-                    if (!string.Equals(publicKeyHash, entity.ProxyRuntimePublicKeyHash, StringComparison.Ordinal))
+                    var issuedPublicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+                    if (!string.Equals(issuedPublicKeyHash, entity.ProxyRuntimePublicKeyHash, StringComparison.Ordinal))
                     {
                         throw Error(
                             "PairCredentialMismatch",
@@ -469,14 +501,16 @@ public sealed class RemoteRuntimePairingRegistry(
                             serial);
                         var issuedAt = certificate.NotBefore.ToUniversalTime();
                         var expiresAt = certificate.NotAfter.ToUniversalTime();
+                        var certificateDer = certificate.Export(X509ContentType.Cert);
                         entity.ClientCertificateIdentity = certificate.Thumbprint;
                         entity.ClientCertificateIssuedAtUtc = issuedAt;
                         entity.ClientCertificateExpiresAtUtc = expiresAt;
+                        entity.EncryptedClientCertificateDer = EncryptSecret(Convert.ToBase64String(certificateDer));
                         Touch(entity, DateTimeOffset.UtcNow);
                         await db.SaveChangesAsync(cancellationToken);
                         return new RemoteRuntimeClientCertificate(
-                            certificate.Export(X509ContentType.Cert),
-                            publicKeyHash,
+                            certificateDer,
+                            issuedPublicKeyHash,
                             certificate.Thumbprint ?? string.Empty,
                             expiresAt,
                             issuedAt);
@@ -545,10 +579,13 @@ public sealed class RemoteRuntimePairingRegistry(
         RemoteRuntimePairStatus requiredStatus,
         DateTimeOffset now)
     {
+        var expiration = entity.Status == RemoteRuntimePairStatus.Active
+            ? entity.ExpiresAtUtc
+            : entity.InvitationExpiresAtUtc ?? entity.ExpiresAtUtc;
         var effectiveStatus = entity.Status is (RemoteRuntimePairStatus.InvitationIssued
             or RemoteRuntimePairStatus.ClaimPending
             or RemoteRuntimePairStatus.Active)
-            && entity.ExpiresAtUtc <= now
+            && expiration <= now
             ? RemoteRuntimePairStatus.Expired
             : entity.Status;
         if (effectiveStatus != requiredStatus)
@@ -558,12 +595,17 @@ public sealed class RemoteRuntimePairingRegistry(
     private static RemoteRuntimePairStatus GetEffectiveStatus(
         RemoteRuntimePairingDB entity,
         DateTimeOffset now)
-        => entity.Status is (RemoteRuntimePairStatus.InvitationIssued
+    {
+        var expiration = entity.Status == RemoteRuntimePairStatus.Active
+            ? entity.ExpiresAtUtc
+            : entity.InvitationExpiresAtUtc ?? entity.ExpiresAtUtc;
+        return entity.Status is (RemoteRuntimePairStatus.InvitationIssued
             or RemoteRuntimePairStatus.ClaimPending
             or RemoteRuntimePairStatus.Active)
-            && entity.ExpiresAtUtc <= now
+            && expiration <= now
             ? RemoteRuntimePairStatus.Expired
             : entity.Status;
+    }
 
     private static void VerifyInvitationSecret(string storedHash, string secret)
     {
@@ -651,6 +693,98 @@ public sealed class RemoteRuntimePairingRegistry(
         }
     }
 
+    private static string VerifyCertificateProof(
+        RemoteRuntimePairingDB entity,
+        string proofSignatureBase64)
+        => VerifyProxyProof(
+            entity,
+            proofSignatureBase64,
+            publicKeyHash => RemoteRuntimePairingProof.CreateCertificateProofPayload(
+                entity.PairId,
+                publicKeyHash,
+                entity.BridgeProtocolMajor));
+
+    private static void VerifyRenewalProof(
+        RemoteRuntimePairingDB entity,
+        DateTimeOffset expiresAtUtc,
+        string proofSignatureBase64)
+    {
+        _ = VerifyProxyProof(
+            entity,
+            proofSignatureBase64,
+            publicKeyHash => RemoteRuntimePairingProof.CreateRenewalProofPayload(
+                entity.PairId,
+                publicKeyHash,
+                expiresAtUtc,
+                entity.BridgeProtocolMajor));
+    }
+
+    private static string VerifyProxyProof(
+        RemoteRuntimePairingDB entity,
+        string proofSignatureBase64,
+        Func<string, byte[]> payloadFactory)
+    {
+        RequireText(proofSignatureBase64, nameof(proofSignatureBase64));
+        if (string.IsNullOrWhiteSpace(entity.ProxyRuntimeCertificateSigningRequest)
+            || string.IsNullOrWhiteSpace(entity.ProxyRuntimePublicKeyHash))
+        {
+            throw Error("InvalidProof", "The pairing public key proof is unavailable.");
+        }
+
+        var requestBytes = DecodeBase64(entity.ProxyRuntimeCertificateSigningRequest, "InvalidProof");
+        var proof = DecodeBase64(proofSignatureBase64, "InvalidProof");
+        try
+        {
+            CertificateRequest request;
+            try
+            {
+                request = CertificateRequest.LoadSigningRequest(
+                    requestBytes,
+                    HashAlgorithmName.SHA256);
+            }
+            catch (CryptographicException)
+            {
+                throw Error("InvalidProof", "The pairing certificate request is invalid.");
+            }
+
+            var publicKey = request.PublicKey.ExportSubjectPublicKeyInfo();
+            var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+            try
+            {
+                if (!string.Equals(publicKeyHash, entity.ProxyRuntimePublicKeyHash, StringComparison.Ordinal))
+                    throw Error("PairCredentialMismatch", "The pairing public key does not match the active record.");
+
+                using var verifier = ECDsa.Create();
+                verifier.ImportSubjectPublicKeyInfo(publicKey, out _);
+                var payload = payloadFactory(publicKeyHash);
+                try
+                {
+                    if (!verifier.VerifyData(payload, proof, HashAlgorithmName.SHA256))
+                        throw Error("InvalidProof", "The pairing proof is invalid.");
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                }
+            }
+            catch (CryptographicException)
+            {
+                throw Error("InvalidProof", "The pairing proof key is invalid.");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(publicKey);
+            }
+
+            return publicKeyHash;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(requestBytes);
+            CryptographicOperations.ZeroMemory(proof);
+        }
+    }
+
     private static byte[] DecodeBase64(string value, string errorCode)
     {
         try
@@ -689,7 +823,8 @@ public sealed class RemoteRuntimePairingRegistry(
             entity.UpdatedAtUtc,
             entity.Revision,
             entity.ClientCertificateIssuedAtUtc,
-            entity.ClientCertificateExpiresAtUtc);
+            entity.ClientCertificateExpiresAtUtc,
+            entity.InvitationExpiresAtUtc);
 
     private static void Touch(RemoteRuntimePairingDB entity, DateTimeOffset now)
     {

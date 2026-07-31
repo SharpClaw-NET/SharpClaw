@@ -2,6 +2,8 @@ using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using NUnit.Framework;
 using SharpClaw.Gateway.Configuration;
+using SharpClaw.Gateway.RemoteRuntimeBridge;
+using System.Net;
 
 namespace SharpClaw.Tests.Architecture;
 
@@ -68,5 +70,19 @@ public sealed class RemoteRuntimeBridgeOptionsTests
 
         options.Enabled.Should().BeFalse();
         options.MaxConcurrentRequestsPerPair.Should().Be(64);
+    }
+
+    [Test]
+    public void Listener_binding_resolves_the_configured_host_without_wildcard_fallback()
+    {
+        RemoteRuntimeBridgeHost.ResolveListenAddress(
+                new Uri("https://127.0.0.1:48925"))
+            .Should().Be(IPAddress.Loopback);
+        RemoteRuntimeBridgeHost.ResolveListenAddress(
+                new Uri("https://localhost:48925"))
+            .Should().Be(IPAddress.Loopback);
+        RemoteRuntimeBridgeHost.ResolveListenAddress(
+                new Uri("https://0.0.0.0:48925"))
+            .Should().Be(IPAddress.Any);
     }
 }

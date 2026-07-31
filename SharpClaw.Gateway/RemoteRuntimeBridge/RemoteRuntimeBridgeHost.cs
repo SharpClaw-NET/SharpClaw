@@ -41,6 +41,8 @@ internal sealed record RemoteRuntimeBridgeCredentialMetadata(
 
 internal static class RemoteRuntimeBridgeHost
 {
+    private static readonly object ActivePairItemKey = new();
+
     public static void RegisterServices(
         IServiceCollection services,
         RemoteRuntimeBridgeOptions options,
@@ -100,10 +102,12 @@ internal static class RemoteRuntimeBridgeHost
         var concurrencyLimiter = new RemoteRuntimeBridgeConcurrencyLimiter(options);
         var lastSeen = new RemoteRuntimeBridgeLastSeenGate(
             TimeSpan.FromSeconds(options.LastSeenUpdateIntervalSeconds));
+        var listenAddress = ResolveListenAddress(listenUri);
         var builder = WebApplication.CreateSlimBuilder(args);
         builder.WebHost.ConfigureKestrel(serverOptions =>
         {
-            serverOptions.ListenAnyIP(
+            serverOptions.Listen(
+                listenAddress,
                 listenUri.Port,
                 listenOptions =>
                 {
@@ -150,6 +154,7 @@ internal static class RemoteRuntimeBridgeHost
                         context.Request.Headers[RemoteRuntimeBridgePaths.ProxyIdentityHeader].ToString(),
                         context.RequestAborted,
                         target.AuthoritativeRuntimeInstallFingerprint);
+                    context.Items[ActivePairItemKey] = activePair;
                 }
                 catch (RemoteRuntimePairingException)
                 {
@@ -239,6 +244,37 @@ internal static class RemoteRuntimeBridgeHost
             });
 
         bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.PairingRenew,
+            async (
+                RemoteRuntimePairingRenewalRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (string.IsNullOrWhiteSpace(request.ProofSignatureBase64))
+                {
+                    return Results.Json(
+                        new { code = "InvalidProof", error = "A proxy proof is required." },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+
+                try
+                {
+                    var renewed = await registryClient.RenewAsync(
+                        request.PairId,
+                        new RemoteRuntimeRegistryRenewalRequest(
+                            request.ExpiresAtUtc,
+                            request.ProofSignatureBase64),
+                        cancellationToken);
+                    return Results.Ok(renewed);
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
             RemoteRuntimeBridgePaths.PairingCertificate,
             async (
                 RemoteRuntimePairingCertificateRequest request,
@@ -267,14 +303,20 @@ internal static class RemoteRuntimeBridgeHost
 
         bridgeApp.MapGet(
             RemoteRuntimeBridgePaths.RegistryActive,
-            async (CancellationToken cancellationToken) =>
+            async (HttpContext context, CancellationToken cancellationToken) =>
             {
                 try
                 {
-                    var active = await registryClient.FindActiveAsync(
-                        target.GatewayInstanceId,
-                        target.AuthoritativeRuntimeInstanceId,
-                        cancellationToken);
+                    var active = context.Items.TryGetValue(ActivePairItemKey, out var item)
+                        && item is RemoteRuntimePairingRegistrySnapshot validatedPair
+                        ? validatedPair
+                        : await registryClient.FindActiveAsync(
+                            target.GatewayInstanceId,
+                            target.AuthoritativeRuntimeInstanceId,
+                            cancellationToken,
+                            context.Request.Headers[RemoteRuntimeBridgePaths.ProxyIdentityHeader].ToString(),
+                            context.Connection.ClientCertificate?.Thumbprint,
+                            target.AuthoritativeRuntimeInstallFingerprint);
                     return active is null
                         ? Results.StatusCode(StatusCodes.Status403Forbidden)
                         : Results.Ok(active);
@@ -641,12 +683,34 @@ internal static class RemoteRuntimeBridgeHost
     private static bool IsUnauthenticatedControlPath(PathString path)
         => path.Equals(RemoteRuntimeBridgePaths.PairingClaim, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.PairingCertificate, StringComparison.Ordinal)
+            || path.Equals(RemoteRuntimeBridgePaths.PairingRenew, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminInvitation, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminApprove, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminRevoke, StringComparison.Ordinal)
             || path.Value?.StartsWith(
                 RemoteRuntimeBridgePaths.AdminPairings,
                 StringComparison.Ordinal) == true;
+
+    internal static IPAddress ResolveListenAddress(Uri listenUri)
+    {
+        ArgumentNullException.ThrowIfNull(listenUri);
+        if (IPAddress.TryParse(listenUri.Host, out var address))
+            return address;
+
+        if (string.Equals(listenUri.Host, "localhost", StringComparison.OrdinalIgnoreCase))
+            return IPAddress.Loopback;
+
+        var addresses = Dns.GetHostAddresses(listenUri.Host)
+            .Distinct()
+            .ToArray();
+        if (addresses.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"The Runtime bridge listener host '{listenUri.Host}' must resolve to exactly one address.");
+        }
+
+        return addresses[0];
+    }
 
     private static RemoteRuntimeBridgeWorkKind GetWorkKind(HttpContext context)
     {

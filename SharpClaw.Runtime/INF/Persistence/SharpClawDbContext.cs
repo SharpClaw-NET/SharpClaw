@@ -74,6 +74,7 @@ public class SharpClawDbContext(
             entity.HasIndex(pairing => pairing.PairId).IsUnique();
             entity.HasIndex(pairing => pairing.ProxyRuntimeInstanceId);
             entity.HasIndex(pairing => pairing.ClientCertificateIdentity);
+            entity.HasIndex(pairing => pairing.InvitationExpiresAtUtc);
             entity.HasIndex(pairing => new { pairing.Status, pairing.ExpiresAtUtc });
             entity.HasIndex(pairing => new
             {

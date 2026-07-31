@@ -79,6 +79,48 @@ public sealed class RemoteRuntimeProxySessionSecretsTests
         File.Exists(workspace.ActivePath).Should().BeFalse();
     }
 
+    [Test]
+    public async Task Session_secrets_use_configured_private_key_and_certificate_selectors()
+    {
+        using var workspace = SessionWorkspace.Create();
+        using var certificate = CreateClientCertificate();
+        var pfx = certificate.Export(X509ContentType.Pfx);
+        try
+        {
+            var state = CreateState(pfx, DateTimeOffset.UtcNow.AddMinutes(5));
+            var secrets = RemoteRuntimeProxySessionSecrets.Create(
+                workspace.EnvironmentDirectory,
+                workspace.Paths,
+                "Proxy:PrivateKey",
+                "Proxy:Certificate");
+
+            await secrets.SaveAsync(state);
+
+            var document = SupprocomSecretDocument.Parse(
+                await new SupprocomSecretFileStore(
+                    LocalEnvironment.CreateSecretsOptions(
+                        workspace.EnvironmentDirectory,
+                        isDevelopment: false,
+                        workspace.Paths))
+                    .ReadDocumentAsync());
+            document.Settings.Should().Contain(setting => setting.Key == "Proxy:PrivateKey");
+            document.Settings.Should().Contain(setting => setting.Key == "Proxy:Certificate");
+
+            var restarted = RemoteRuntimeProxySessionSecrets.Create(
+                workspace.EnvironmentDirectory,
+                workspace.Paths,
+                "Proxy:PrivateKey",
+                "Proxy:Certificate");
+            using var privateKey = await restarted.LoadPrivateKeyAsync(state);
+            privateKey.ExportPkcs8PrivateKey().Should().NotBeEmpty();
+            (await restarted.ReadAsync()).Should().BeEquivalentTo(state);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pfx);
+        }
+    }
+
     private static RemoteRuntimeProxySessionState CreateState(
         byte[] pfx,
         DateTimeOffset expiresAtUtc)

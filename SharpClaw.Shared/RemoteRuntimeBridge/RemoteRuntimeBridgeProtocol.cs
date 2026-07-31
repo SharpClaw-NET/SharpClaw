@@ -7,6 +7,7 @@ public static class RemoteRuntimeBridgePaths
     public const string ProxyIdentityHeader = "X-SharpClaw-Bridge-Proxy-Identity";
     public const string PairingClaim = "/__sharpclaw/remote-runtime/pairing/claim";
     public const string PairingCertificate = "/__sharpclaw/remote-runtime/pairing/certificate";
+    public const string PairingRenew = "/__sharpclaw/remote-runtime/pairing/renew";
     public const string AdminInvitation = "/__sharpclaw/remote-runtime/admin/invitation";
     public const string AdminApprove = "/__sharpclaw/remote-runtime/admin/approve";
     public const string AdminRevoke = "/__sharpclaw/remote-runtime/admin/revoke";
@@ -38,7 +39,14 @@ public sealed record RemoteRuntimePairingClaimRequest(
     string ProofSignatureBase64,
     int BridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor);
 
-public sealed record RemoteRuntimePairingCertificateRequest(Guid PairId, string Secret);
+public sealed record RemoteRuntimePairingCertificateRequest(
+    Guid PairId,
+    string CertificateProofSignatureBase64);
+
+public sealed record RemoteRuntimePairingRenewalRequest(
+    Guid PairId,
+    DateTimeOffset ExpiresAtUtc,
+    string ProofSignatureBase64);
 
 public sealed record RemoteRuntimePairingAdminInvitationRequest(int LifetimeSeconds = 300);
 
@@ -86,7 +94,9 @@ public sealed record RemoteRuntimeRegistryDetailsRequest(
     string? DisplayName = null,
     string? Description = null);
 
-public sealed record RemoteRuntimeRegistryRenewalRequest(DateTimeOffset ExpiresAtUtc);
+public sealed record RemoteRuntimeRegistryRenewalRequest(
+    DateTimeOffset ExpiresAtUtc,
+    string? ProofSignatureBase64 = null);
 
 public sealed record RemoteRuntimeRegistryReasonRequest(string Reason);
 
@@ -124,7 +134,8 @@ public sealed record RemoteRuntimePairingRegistrySnapshot(
     DateTimeOffset UpdatedAtUtc,
     long Revision,
     DateTimeOffset? ClientCertificateIssuedAtUtc = null,
-    DateTimeOffset? ClientCertificateExpiresAtUtc = null)
+    DateTimeOffset? ClientCertificateExpiresAtUtc = null,
+    DateTimeOffset? InvitationExpiresAtUtc = null)
 {
     public bool IsActive(DateTimeOffset now)
         => Status == RemoteRuntimePairStatus.Active && ExpiresAtUtc > now;

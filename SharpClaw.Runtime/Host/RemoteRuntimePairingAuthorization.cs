@@ -14,17 +14,39 @@ internal static class RemoteRuntimePairingAuthorization
         cancellationToken.ThrowIfCancellationRequested();
 
         var instancePaths = RuntimeInstancePathResolver.CreateBackend();
-        plan.RequireRemoteProxyOptions();
-        var secrets = RemoteRuntimeProxySessionSecrets.Create(instancePaths);
+        var options = plan.RequireRemoteProxyOptions();
+        var secrets = RemoteRuntimeProxySessionSecrets.Create(
+            instancePaths,
+            options.PrivateKeySecret,
+            options.ClientCertificateSecret);
         var state = await secrets.ReadAsync(cancellationToken);
         if (state is null)
         {
             await RuntimePairingClient.PairAsync(plan, instancePaths, cancellationToken);
             // Reload the protected session after pairing to validate persisted state.
-            state = await RemoteRuntimeProxySessionSecrets.Create(instancePaths)
+            state = await RemoteRuntimeProxySessionSecrets.Create(
+                    instancePaths,
+                    options.PrivateKeySecret,
+                    options.ClientCertificateSecret)
                 .ReadAsync(cancellationToken)
                 ?? throw new InvalidOperationException(
                     "RemoteProxy pairing completed without an active approved session.");
+        }
+
+        if (state.CertificateNotAfterUtc <= DateTimeOffset.UtcNow)
+        {
+            using var privateKey = await secrets.LoadPrivateKeyAsync(
+                state,
+                cancellationToken);
+            await RuntimePairingClient.RenewAndReissueAsync(
+                plan,
+                state,
+                privateKey,
+                secrets,
+                cancellationToken);
+            state = await secrets.ReadAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "RemoteProxy certificate renewal did not persist an active session.");
         }
 
         var clientCertificate = await secrets.LoadClientCertificateAsync(state, cancellationToken);

@@ -49,6 +49,46 @@ public static class RemoteRuntimePairingProof
                 invitationSecret));
     }
 
+    public static byte[] CreateCertificateProofPayload(
+        Guid pairId,
+        string proxyRuntimePublicKeyHash,
+        int bridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+    {
+        RequireText(proxyRuntimePublicKeyHash, nameof(proxyRuntimePublicKeyHash));
+        RequireProtocolMajor(bridgeProtocolMajor);
+        return Encoding.UTF8.GetBytes(
+            string.Join(
+                '|',
+                "certificate",
+                pairId.ToString("D", CultureInfo.InvariantCulture),
+                proxyRuntimePublicKeyHash,
+                bridgeProtocolMajor.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    public static byte[] CreateRenewalProofPayload(
+        Guid pairId,
+        string proxyRuntimePublicKeyHash,
+        DateTimeOffset expiresAtUtc,
+        int bridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+    {
+        RequireText(proxyRuntimePublicKeyHash, nameof(proxyRuntimePublicKeyHash));
+        RequireProtocolMajor(bridgeProtocolMajor);
+        return Encoding.UTF8.GetBytes(
+            string.Join(
+                '|',
+                "renew",
+                pairId.ToString("D", CultureInfo.InvariantCulture),
+                proxyRuntimePublicKeyHash,
+                expiresAtUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture),
+                bridgeProtocolMajor.ToString(CultureInfo.InvariantCulture)));
+    }
+
+    private static void RequireProtocolMajor(int bridgeProtocolMajor)
+    {
+        if (bridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+            throw new ArgumentOutOfRangeException(nameof(bridgeProtocolMajor));
+    }
+
     private static void RequireText(string value, string parameterName)
     {
         if (string.IsNullOrWhiteSpace(value))

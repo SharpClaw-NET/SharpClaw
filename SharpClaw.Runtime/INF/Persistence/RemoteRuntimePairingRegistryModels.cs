@@ -19,6 +19,7 @@ public sealed class RemoteRuntimePairingDB
     public string? ClientCertificateIdentity { get; set; }
     public DateTimeOffset? ClientCertificateIssuedAtUtc { get; set; }
     public DateTimeOffset? ClientCertificateExpiresAtUtc { get; set; }
+    public string? EncryptedClientCertificateDer { get; set; }
     public string? EncryptedCertificateAuthorityPfx { get; set; }
     public string? DisplayName { get; set; }
     public string? Description { get; set; }
@@ -28,6 +29,8 @@ public sealed class RemoteRuntimePairingDB
     public DateTimeOffset? ApprovedAtUtc { get; set; }
     public DateTimeOffset? RenewedAtUtc { get; set; }
     public DateTimeOffset? RevokedAtUtc { get; set; }
+    public DateTimeOffset? InvitationExpiresAtUtc { get; set; }
+    public DateTimeOffset? InvitationConsumedAtUtc { get; set; }
     public DateTimeOffset ExpiresAtUtc { get; set; }
     public DateTimeOffset? LastSeenAtUtc { get; set; }
     public DateTimeOffset UpdatedAtUtc { get; set; }
@@ -75,13 +78,16 @@ public sealed record RemoteRuntimePairingRegistryEntry(
     DateTimeOffset UpdatedAtUtc,
     long Revision,
     DateTimeOffset? ClientCertificateIssuedAtUtc = null,
-    DateTimeOffset? ClientCertificateExpiresAtUtc = null)
+    DateTimeOffset? ClientCertificateExpiresAtUtc = null,
+    DateTimeOffset? InvitationExpiresAtUtc = null)
 {
     public RemoteRuntimePairStatus GetEffectiveStatus(DateTimeOffset now)
         => Status is (RemoteRuntimePairStatus.InvitationIssued
             or RemoteRuntimePairStatus.ClaimPending
             or RemoteRuntimePairStatus.Active)
-            && ExpiresAtUtc <= now
+            && (Status == RemoteRuntimePairStatus.Active
+                ? ExpiresAtUtc
+                : InvitationExpiresAtUtc ?? ExpiresAtUtc) <= now
             ? RemoteRuntimePairStatus.Expired
             : Status;
 
