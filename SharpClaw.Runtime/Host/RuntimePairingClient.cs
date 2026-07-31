@@ -134,7 +134,8 @@ public static class RuntimePairingClient
 internal sealed class RemoteRuntimePairingClient(
     HttpClient httpClient,
     TimeSpan? approvalTimeout = null,
-    TimeSpan? approvalPollInterval = null)
+    TimeSpan? approvalPollInterval = null,
+    Func<SharpClawInstancePaths, RemoteRuntimeProxySessionSecrets>? sessionSecretsFactory = null)
 {
     private static readonly JsonSerializerOptions JsonOptions =
         new(JsonSerializerDefaults.Web)
@@ -144,6 +145,8 @@ internal sealed class RemoteRuntimePairingClient(
 
     private readonly TimeSpan _approvalTimeout = approvalTimeout ?? TimeSpan.FromMinutes(5);
     private readonly TimeSpan _approvalPollInterval = approvalPollInterval ?? TimeSpan.FromSeconds(1);
+    private readonly Func<SharpClawInstancePaths, RemoteRuntimeProxySessionSecrets> _sessionSecretsFactory =
+        sessionSecretsFactory ?? RemoteRuntimeProxySessionSecrets.Create;
 
     public async Task<RemoteRuntimeProxySessionState> PairAsync(
         RemoteRuntimePairingInvitation invitation,
@@ -223,7 +226,7 @@ internal sealed class RemoteRuntimePairingClient(
                     proxyRuntimeInstanceId,
                     Convert.ToBase64String(pfx),
                     certificate.NotAfterUtc);
-                await RemoteRuntimeProxySessionStore.Create(instancePaths)
+                await _sessionSecretsFactory(instancePaths)
                     .SaveAsync(state, cancellationToken);
                 return state;
             }

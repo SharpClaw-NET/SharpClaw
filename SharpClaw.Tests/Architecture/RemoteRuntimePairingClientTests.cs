@@ -25,6 +25,14 @@ public sealed class RemoteRuntimePairingClientTests
             SharpClawInstanceKind.Backend,
             Path.Combine(root, "backend"),
             Path.Combine(root, "shared"));
+        var environmentDirectory = Path.Combine(root, "Environment");
+        Directory.CreateDirectory(environmentDirectory);
+        File.WriteAllText(
+            Path.Combine(environmentDirectory, ".env.template"),
+            "Test__Unrelated=\"keep\"\n");
+        File.WriteAllText(
+            Path.Combine(environmentDirectory, ".dev.env.template"),
+            "Test__Unrelated=\"keep\"\n");
         var invitation = new RemoteRuntimePairingInvitation(
             Guid.NewGuid(),
             "one-time-secret",
@@ -42,7 +50,8 @@ public sealed class RemoteRuntimePairingClientTests
         var client = new RemoteRuntimePairingClient(
             httpClient,
             TimeSpan.FromSeconds(2),
-            TimeSpan.FromMilliseconds(1));
+            TimeSpan.FromMilliseconds(1),
+            instancePaths => RemoteRuntimeProxySessionSecrets.Create(environmentDirectory, instancePaths));
 
         try
         {
@@ -58,7 +67,7 @@ public sealed class RemoteRuntimePairingClientTests
             handler.Claim!.Secret.Should().Be(invitation.Secret);
             handler.Claim.ProofSignatureBase64.Should().NotBeNullOrWhiteSpace();
 
-            var store = RemoteRuntimeProxySessionStore.Create(paths);
+            var store = RemoteRuntimeProxySessionSecrets.Create(environmentDirectory, paths);
             var restored = await store.ReadAsync();
             restored.Should().BeEquivalentTo(state);
             using var certificate = await store.LoadClientCertificateAsync(restored!);

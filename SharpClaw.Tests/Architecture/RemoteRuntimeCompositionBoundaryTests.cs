@@ -76,8 +76,8 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         var source = ReadRepositoryFile(
             "SharpClaw.Runtime/Host/RemoteRuntimePairingAuthorization.cs");
 
-        source.Should().Contain("RemoteRuntimeProxySessionStore.Create");
-        source.Should().Contain("await store.ReadAsync");
+        source.Should().Contain("RemoteRuntimeProxySessionSecrets.Create");
+        source.Should().Contain("await secrets.ReadAsync");
         source.Should().Contain("RuntimePairingClient.PairAsync");
         source.Should().Contain("active approved session");
     }
