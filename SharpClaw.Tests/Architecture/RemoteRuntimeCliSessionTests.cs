@@ -5,7 +5,10 @@ using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Runtime.BLL.Services;
+using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.Host.Cli;
+using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Tests.Architecture;
@@ -18,9 +21,22 @@ public sealed class RemoteRuntimeCliSessionTests
     public async Task WebSocket_session_rejects_unsupported_frames_without_command_services()
     {
         var port = GetFreePort();
+        var instanceRoot = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "remote-cli-session-" + Guid.NewGuid().ToString("N"));
+        var instancePaths = new SharpClawInstancePaths(
+            SharpClawInstanceKind.Backend,
+            instanceRoot);
+        instancePaths.EnsureDirectories();
         var builder = WebApplication.CreateBuilder();
         builder.WebHost.UseKestrel().UseUrls($"http://127.0.0.1:{port}");
+        builder.Services.AddSingleton(instancePaths);
+        builder.Services.AddSingleton<ApiKeyProvider>();
+        builder.Services.AddScoped<SessionService>();
         var app = builder.Build();
+        var apiKeys = app.Services.GetRequiredService<ApiKeyProvider>();
+        app.UseMiddleware<ApiKeyMiddleware>();
+        app.UseMiddleware<JwtSessionMiddleware>();
         app.UseWebSockets();
         app.Map(
             RemoteRuntimeBridgePaths.CliControl,
@@ -33,10 +49,21 @@ public sealed class RemoteRuntimeCliSessionTests
                     context.RequestAborted);
             });
 
-        await app.StartAsync();
+            await app.StartAsync();
         try
         {
+            using var httpClient = new HttpClient
+            {
+                BaseAddress = new Uri($"http://127.0.0.1:{port}"),
+            };
+            using var unauthorized = await httpClient.GetAsync(
+                RemoteRuntimeBridgePaths.CliControl,
+                TestContext.CurrentContext.CancellationToken);
+            unauthorized.StatusCode.Should().Be(HttpStatusCode.Locked);
+
             using var client = new ClientWebSocket();
+            client.Options.SetRequestHeader("X-Api-Key", apiKeys.ApiKey);
+            client.Options.SetRequestHeader("X-Gateway-Token", apiKeys.GatewayToken);
             await client.ConnectAsync(
                 new Uri($"ws://127.0.0.1:{port}{RemoteRuntimeBridgePaths.CliControl}"),
                 TestContext.CurrentContext.CancellationToken);
@@ -55,6 +82,37 @@ public sealed class RemoteRuntimeCliSessionTests
             response.Type.Should().Be(RemoteRuntimeCliFrameTypes.Error);
             response.Text.Should().Be("The CLI frame type is not supported.");
 
+            var commandFrame = JsonSerializer.SerializeToUtf8Bytes(
+                new RemoteRuntimeCliFrame(
+                    RemoteRuntimeCliFrameTypes.Command,
+                    "help"));
+            await client.SendAsync(
+                commandFrame,
+                WebSocketMessageType.Text,
+                endOfMessage: true,
+                TestContext.CurrentContext.CancellationToken);
+
+            var commandOutput = new List<RemoteRuntimeCliFrame>();
+            RemoteRuntimeCliFrame commandResult;
+            do
+            {
+                var frame = await ReceiveFrameAsync(
+                    client,
+                    TestContext.CurrentContext.CancellationToken);
+                commandOutput.Add(frame);
+                commandResult = frame;
+            }
+            while (!commandResult.Type.Equals(
+                RemoteRuntimeCliFrameTypes.Result,
+                StringComparison.OrdinalIgnoreCase));
+
+            commandResult.Handled.Should().BeTrue();
+            commandOutput
+                .Where(frame => frame.Type == RemoteRuntimeCliFrameTypes.Output)
+                .Select(frame => frame.Text)
+                .Should()
+                .Contain(text => text!.Contains("SharpClaw - Shell Agent", StringComparison.Ordinal));
+
             await client.CloseAsync(
                 WebSocketCloseStatus.NormalClosure,
                 "done",
@@ -64,6 +122,9 @@ public sealed class RemoteRuntimeCliSessionTests
         {
             await app.StopAsync();
             await app.DisposeAsync();
+            apiKeys.Cleanup();
+            if (Directory.Exists(instanceRoot))
+                Directory.Delete(instanceRoot, recursive: true);
         }
     }
 
