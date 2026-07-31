@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using FluentAssertions;
 using SharpClaw.Shared.Instances;
@@ -27,11 +29,7 @@ public sealed class RemoteRuntimePairingStoreTests
         var protectedBytes = File.ReadAllBytes(workspace.ActivePath);
         Encoding.UTF8.GetString(protectedBytes).Should().NotContain(invitation.Secret);
 
-        var claim = await store.ClaimInvitationAsync(
-            invitation.PairId,
-            invitation.Secret,
-            "proxy-1",
-            "proxy-key-hash");
+        var claim = await ClaimAsync(store, invitation, "proxy-1");
         claim.Status.Should().Be(RemoteRuntimePairStatus.ClaimPending);
 
         var approved = await store.ApproveClaimAsync(
@@ -64,11 +62,7 @@ public sealed class RemoteRuntimePairingStoreTests
             "install-fingerprint",
             TimeSpan.FromMinutes(5));
 
-        await store.ClaimInvitationAsync(
-            invitation.PairId,
-            invitation.Secret,
-            "proxy-1",
-            "proxy-key-hash");
+        await ClaimAsync(store, invitation, "proxy-1");
 
         var targetChange = () => store.ApproveClaimAsync(
             invitation.PairId,
@@ -77,11 +71,7 @@ public sealed class RemoteRuntimePairingStoreTests
         await targetChange.Should().ThrowAsync<RemoteRuntimePairingException>()
             .Where(exception => exception.Code == "PairTargetMismatch");
 
-        var reuse = () => store.ClaimInvitationAsync(
-            invitation.PairId,
-            invitation.Secret,
-            "proxy-2",
-            "proxy-key-hash-2");
+        var reuse = () => ClaimAsync(store, invitation, "proxy-2");
         await reuse.Should().ThrowAsync<RemoteRuntimePairingException>()
             .Where(exception => exception.Code == "InvalidPairState");
     }
@@ -98,11 +88,7 @@ public sealed class RemoteRuntimePairingStoreTests
             "runtime-1",
             "install-fingerprint",
             TimeSpan.FromMinutes(5));
-        await store.ClaimInvitationAsync(
-            invitation.PairId,
-            invitation.Secret,
-            "proxy-1",
-            "proxy-key-hash");
+        await ClaimAsync(store, invitation, "proxy-1");
 
         now = now.AddMinutes(6);
         var expiredApproval = () => store.ApproveClaimAsync(
@@ -118,11 +104,7 @@ public sealed class RemoteRuntimePairingStoreTests
             "runtime-1",
             "install-fingerprint",
             TimeSpan.FromMinutes(5));
-        await store.ClaimInvitationAsync(
-            secondInvitation.PairId,
-            secondInvitation.Secret,
-            "proxy-1",
-            "proxy-key-hash");
+        await ClaimAsync(store, secondInvitation, "proxy-1");
         await store.ApproveClaimAsync(
             secondInvitation.PairId,
             "proxy-1",
@@ -154,11 +136,7 @@ public sealed class RemoteRuntimePairingStoreTests
             "install-fingerprint-2",
             TimeSpan.FromMinutes(5));
 
-        var claim = () => store.ClaimInvitationAsync(
-            second.PairId,
-            second.Secret,
-            "proxy-1",
-            "proxy-key-hash-2");
+        var claim = () => ClaimAsync(store, second, "proxy-1");
         await claim.Should().ThrowAsync<RemoteRuntimePairingException>()
             .Where(exception => exception.Code == "ProxyAlreadyPaired");
     }
@@ -174,13 +152,67 @@ public sealed class RemoteRuntimePairingStoreTests
             runtimeId,
             "install-fingerprint",
             TimeSpan.FromMinutes(5));
-        await store.ClaimInvitationAsync(
-            invitation.PairId,
-            invitation.Secret,
-            proxyId,
-            "proxy-key-hash");
+        await ClaimAsync(store, invitation, proxyId);
         await store.ApproveClaimAsync(invitation.PairId, proxyId, runtimeId);
         return invitation;
+    }
+
+    [Test]
+    public async Task Claim_requires_proof_of_possession()
+    {
+        using var workspace = PairingWorkspace.Create();
+        var store = workspace.CreateStore();
+        var invitation = await store.CreateInvitationAsync(
+            "gateway-1",
+            "gateway-key-hash",
+            "runtime-1",
+            "install-fingerprint",
+            TimeSpan.FromMinutes(5));
+
+        var rejected = () => store.ClaimInvitationAsync(
+            invitation.PairId,
+            invitation.Secret,
+            "proxy-1",
+            Convert.ToBase64String([1, 2, 3]),
+            Convert.ToBase64String([4, 5, 6]));
+
+        await rejected.Should().ThrowAsync<RemoteRuntimePairingException>()
+            .Where(exception => exception.Code == "InvalidProof");
+    }
+
+    private static async Task<RemoteRuntimePairingRecord> ClaimAsync(
+        RemoteRuntimePairingStore store,
+        RemoteRuntimePairingInvitation invitation,
+        string proxyRuntimeInstanceId)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(
+            $"CN={proxyRuntimeInstanceId}",
+            key,
+            HashAlgorithmName.SHA256);
+        var requestBytes = request.CreateSigningRequest();
+        var publicKey = key.ExportSubjectPublicKeyInfo();
+        var publicKeyHash = Convert.ToBase64String(SHA256.HashData(publicKey))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+        var proofPayload = RemoteRuntimePairingStore.CreateClaimProofPayload(
+            invitation,
+            proxyRuntimeInstanceId,
+            publicKeyHash);
+        var proof = key.SignData(proofPayload, HashAlgorithmName.SHA256);
+
+        var claim = await store.ClaimInvitationAsync(
+            invitation.PairId,
+            invitation.Secret,
+            proxyRuntimeInstanceId,
+            Convert.ToBase64String(requestBytes),
+            Convert.ToBase64String(proof));
+
+        CryptographicOperations.ZeroMemory(publicKey);
+        CryptographicOperations.ZeroMemory(proofPayload);
+        CryptographicOperations.ZeroMemory(proof);
+        return claim;
     }
 
     private sealed class PairingWorkspace : IDisposable

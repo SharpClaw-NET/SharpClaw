@@ -34,6 +34,7 @@ public sealed record RemoteRuntimePairingRecord(
     DateTimeOffset ExpiresAtUtc,
     string? ProxyRuntimeInstanceId,
     string? ProxyRuntimePublicKeyHash,
+    string? ProxyRuntimeCertificateSigningRequest,
     DateTimeOffset? ClaimedAtUtc,
     DateTimeOffset? ApprovedAtUtc,
     DateTimeOffset? RevokedAtUtc)

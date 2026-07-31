@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.Security;
@@ -104,6 +105,7 @@ public sealed class RemoteRuntimePairingStore
             null,
             null,
             null,
+            null,
             null);
 
         await AddRecordAsync(record, cancellationToken);
@@ -122,12 +124,14 @@ public sealed class RemoteRuntimePairingStore
         Guid pairId,
         string secret,
         string proxyRuntimeInstanceId,
-        string proxyRuntimePublicKeyHash,
+        string certificateSigningRequestBase64,
+        string proofSignatureBase64,
         CancellationToken cancellationToken = default)
     {
         RequireText(secret, nameof(secret));
         RequireText(proxyRuntimeInstanceId, nameof(proxyRuntimeInstanceId));
-        RequireText(proxyRuntimePublicKeyHash, nameof(proxyRuntimePublicKeyHash));
+        RequireText(certificateSigningRequestBase64, nameof(certificateSigningRequestBase64));
+        RequireText(proofSignatureBase64, nameof(proofSignatureBase64));
 
         RemoteRuntimePairingRecord? claimed = null;
         await _documentUpdater.UpdateDocumentAsync(settings =>
@@ -145,6 +149,34 @@ public sealed class RemoteRuntimePairingStore
             if (!matches)
                 throw new RemoteRuntimePairingException("InvalidInvitation", "The pairing invitation is invalid.");
 
+            var signingRequest = LoadSigningRequest(certificateSigningRequestBase64);
+            var publicKey = signingRequest.PublicKey.ExportSubjectPublicKeyInfo();
+            var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+            var proof = DecodeBase64(proofSignatureBase64, "InvalidProof");
+            using var verifier = ECDsa.Create();
+            try
+            {
+                verifier.ImportSubjectPublicKeyInfo(publicKey, out _);
+            }
+            catch (CryptographicException)
+            {
+                CryptographicOperations.ZeroMemory(publicKey);
+                CryptographicOperations.ZeroMemory(proof);
+                throw new RemoteRuntimePairingException(
+                    "InvalidProof",
+                    "The pairing proof key is invalid.");
+            }
+
+            var proofPayload = CreateClaimProofPayload(record, secret, proxyRuntimeInstanceId, publicKeyHash);
+            var proofMatches = verifier.VerifyData(proofPayload, proof, HashAlgorithmName.SHA256);
+            CryptographicOperations.ZeroMemory(publicKey);
+            CryptographicOperations.ZeroMemory(proof);
+            CryptographicOperations.ZeroMemory(proofPayload);
+            if (!proofMatches)
+                throw new RemoteRuntimePairingException(
+                    "InvalidProof",
+                    "The pairing proof does not match the invitation claim.");
+
             if (records.Any(existing =>
                     existing.IsActive(now)
                     && string.Equals(
@@ -161,13 +193,34 @@ public sealed class RemoteRuntimePairingStore
             {
                 Status = RemoteRuntimePairStatus.ClaimPending,
                 ProxyRuntimeInstanceId = proxyRuntimeInstanceId,
-                ProxyRuntimePublicKeyHash = proxyRuntimePublicKeyHash,
+                ProxyRuntimePublicKeyHash = publicKeyHash,
+                ProxyRuntimeCertificateSigningRequest = certificateSigningRequestBase64,
                 ClaimedAtUtc = now,
             };
             return ReplaceRecord(settings, claimed);
         }, cancellationToken);
 
         return claimed!;
+    }
+
+    public static byte[] CreateClaimProofPayload(
+        RemoteRuntimePairingInvitation invitation,
+        string proxyRuntimeInstanceId,
+        string proxyRuntimePublicKeyHash)
+    {
+        ArgumentNullException.ThrowIfNull(invitation);
+        RequireText(proxyRuntimeInstanceId, nameof(proxyRuntimeInstanceId));
+        RequireText(proxyRuntimePublicKeyHash, nameof(proxyRuntimePublicKeyHash));
+
+        return Encoding.UTF8.GetBytes(
+            string.Join(
+                '|',
+                invitation.PairId.ToString("D", CultureInfo.InvariantCulture),
+                invitation.GatewayInstanceId,
+                invitation.AuthoritativeRuntimeInstanceId,
+                proxyRuntimeInstanceId,
+                proxyRuntimePublicKeyHash,
+                invitation.Secret));
     }
 
     public async Task<RemoteRuntimePairingRecord> ApproveClaimAsync(
@@ -329,6 +382,7 @@ public sealed class RemoteRuntimePairingStore
                 ParseTimestamp(values, "ExpiresAtUtc"),
                 OptionalValue(values, "ProxyRuntimeInstanceId"),
                 OptionalValue(values, "ProxyRuntimePublicKeyHash"),
+                OptionalValue(values, "ProxyRuntimeCertificateSigningRequest"),
                 OptionalTimestamp(values, "ClaimedAtUtc"),
                 OptionalTimestamp(values, "ApprovedAtUtc"),
                 OptionalTimestamp(values, "RevokedAtUtc")));
@@ -363,6 +417,7 @@ public sealed class RemoteRuntimePairingStore
             result.Add(new SupprocomSecretSetting(prefix + ":ExpiresAtUtc", RemoteRuntimePairingRecord.FormatTimestamp(record.ExpiresAtUtc)));
             AddOptional(result, prefix, "ProxyRuntimeInstanceId", record.ProxyRuntimeInstanceId);
             AddOptional(result, prefix, "ProxyRuntimePublicKeyHash", record.ProxyRuntimePublicKeyHash);
+            AddOptional(result, prefix, "ProxyRuntimeCertificateSigningRequest", record.ProxyRuntimeCertificateSigningRequest);
             AddOptionalTimestamp(result, prefix, "ClaimedAtUtc", record.ClaimedAtUtc);
             AddOptionalTimestamp(result, prefix, "ApprovedAtUtc", record.ApprovedAtUtc);
             AddOptionalTimestamp(result, prefix, "RevokedAtUtc", record.RevokedAtUtc);
@@ -404,6 +459,56 @@ public sealed class RemoteRuntimePairingStore
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
+
+    private static CertificateRequest LoadSigningRequest(string encodedRequest)
+    {
+        var requestBytes = DecodeBase64(encodedRequest, "InvalidProof");
+        try
+        {
+            return CertificateRequest.LoadSigningRequest(
+                requestBytes,
+                HashAlgorithmName.SHA256);
+        }
+        catch (CryptographicException)
+        {
+            throw new RemoteRuntimePairingException(
+                "InvalidProof",
+                "The pairing certificate request is invalid.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(requestBytes);
+        }
+    }
+
+    private static byte[] DecodeBase64(string value, string errorCode)
+    {
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            throw new RemoteRuntimePairingException(
+                errorCode,
+                "The pairing credential encoding is invalid.");
+        }
+    }
+
+    private static byte[] CreateClaimProofPayload(
+        RemoteRuntimePairingRecord record,
+        string secret,
+        string proxyRuntimeInstanceId,
+        string proxyRuntimePublicKeyHash)
+        => Encoding.UTF8.GetBytes(
+            string.Join(
+                '|',
+                record.PairId.ToString("D", CultureInfo.InvariantCulture),
+                record.GatewayInstanceId,
+                record.AuthoritativeRuntimeInstanceId,
+                proxyRuntimeInstanceId,
+                proxyRuntimePublicKeyHash,
+                secret));
 
     private static RemoteRuntimePairingException InvalidDocument()
         => new("InvalidPairingDocument", "The protected pairing document is invalid.");
