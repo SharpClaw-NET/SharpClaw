@@ -89,7 +89,10 @@ public sealed class RemoteRuntimeProxySessionSecretsTests
             "authoritative-runtime",
             "proxy-runtime",
             Convert.ToBase64String(pfx),
-            expiresAtUtc);
+            expiresAtUtc,
+            "runtime-install-fingerprint",
+            "test-certificate-thumbprint",
+            RemoteRuntimeBridgePaths.CurrentProtocolMajor);
 
     private static X509Certificate2 CreateClientCertificate()
     {

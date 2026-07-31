@@ -17,6 +17,8 @@ public sealed class RemoteRuntimePairingDB
     public string? ProxyRuntimePublicKeyHash { get; set; }
     public string? ProxyRuntimeCertificateSigningRequest { get; set; }
     public string? ClientCertificateIdentity { get; set; }
+    public DateTimeOffset? ClientCertificateIssuedAtUtc { get; set; }
+    public DateTimeOffset? ClientCertificateExpiresAtUtc { get; set; }
     public string? EncryptedCertificateAuthorityPfx { get; set; }
     public string? DisplayName { get; set; }
     public string? Description { get; set; }
@@ -71,7 +73,9 @@ public sealed record RemoteRuntimePairingRegistryEntry(
     DateTimeOffset ExpiresAtUtc,
     DateTimeOffset? LastSeenAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    long Revision)
+    long Revision,
+    DateTimeOffset? ClientCertificateIssuedAtUtc = null,
+    DateTimeOffset? ClientCertificateExpiresAtUtc = null)
 {
     public RemoteRuntimePairStatus GetEffectiveStatus(DateTimeOffset now)
         => Status is (RemoteRuntimePairStatus.InvitationIssued
@@ -90,7 +94,8 @@ public sealed record RemoteRuntimePairingClaim(
     string ProxyRuntimeInstanceId,
     string? ProxyRuntimePublicKeyHash,
     string CertificateSigningRequestBase64,
-    string ProofSignatureBase64 = "");
+    string ProofSignatureBase64 = "",
+    int BridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor);
 
 public sealed class RemoteRuntimePairingRegistryException : InvalidOperationException
 {

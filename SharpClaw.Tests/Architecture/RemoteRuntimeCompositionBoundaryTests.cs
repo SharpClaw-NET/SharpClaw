@@ -358,6 +358,14 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             target.TargetBaseUrl.Should().Be("https://127.0.0.1:48923");
             target.AuthoritativeApiKey.Should().Be("runtime-api-key");
             target.AuthoritativeGatewayToken.Should().Be("gateway-service-token");
+
+            entry.BaseUrl = "https://10.0.0.8:48923";
+            File.WriteAllText(
+                Path.Combine(discoveryDirectory, "backend-runtime-selected.json"),
+                JsonSerializer.Serialize(entry));
+            var nonLoopback = () => RemoteRuntimeBridgeTargetResolver.Resolve(gatewayPaths);
+            nonLoopback.Should().Throw<InvalidOperationException>()
+                .WithMessage("*loopback*");
         }
         finally
         {

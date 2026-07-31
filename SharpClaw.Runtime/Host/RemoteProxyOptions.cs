@@ -104,7 +104,7 @@ public sealed record RemoteProxyOptions
             ReadOptionalValue(section, "GatewayServerPublicKeyHash"),
             ReadOptionalValue(section, "AuthoritativeRuntimeInstallFingerprint"),
             ReadOptionalTimestamp(section, "InvitationExpiresAtUtc"),
-            ReadOptionalBoundedInteger(section, "BridgeProtocolMajor", 1, 100, 1));
+            ReadExactProtocolMajor(section));
     }
 
     public RemoteRuntimePairingInvitation CreateInvitation()
@@ -198,6 +198,21 @@ public sealed record RemoteProxyOptions
             return defaultValue;
 
         return ReadBoundedInteger(section, name, minimum, maximum);
+    }
+
+    private static int ReadExactProtocolMajor(IConfigurationSection section)
+    {
+        var value = ReadOptionalBoundedInteger(
+            section,
+            "BridgeProtocolMajor",
+            RemoteRuntimeBridgePaths.CurrentProtocolMajor,
+            RemoteRuntimeBridgePaths.CurrentProtocolMajor,
+            RemoteRuntimeBridgePaths.CurrentProtocolMajor);
+        if (value != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+            throw new InvalidOperationException(
+                $"Runtime:RemoteProxy:BridgeProtocolMajor must be {RemoteRuntimeBridgePaths.CurrentProtocolMajor}.");
+
+        return value;
     }
 
     private static Guid? ReadOptionalGuid(IConfigurationSection section, string name)

@@ -32,7 +32,10 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
     Task<RemoteRuntimePairingRegistrySnapshot?> FindActiveAsync(
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? proxyRuntimeInstanceId = null,
+        string? certificateIdentity = null,
+        string? authoritativeRuntimeInstallFingerprint = null);
 
     Task<RemoteRuntimeRegistryPageResponse> ListAsync(
         string? gatewayInstanceId,
@@ -69,7 +72,8 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken);
+        CancellationToken cancellationToken,
+        string? authoritativeRuntimeInstallFingerprint = null);
 
 }
 
@@ -160,11 +164,18 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
     public async Task<RemoteRuntimePairingRegistrySnapshot?> FindActiveAsync(
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? proxyRuntimeInstanceId = null,
+        string? certificateIdentity = null,
+        string? authoritativeRuntimeInstallFingerprint = null)
     {
         RequireText(gatewayInstanceId, nameof(gatewayInstanceId));
         RequireText(authoritativeRuntimeInstanceId, nameof(authoritativeRuntimeInstanceId));
-        var path = $"{RemoteRuntimeBridgePaths.RegistryActive}?gatewayInstanceId={Uri.EscapeDataString(gatewayInstanceId)}&authoritativeRuntimeInstanceId={Uri.EscapeDataString(authoritativeRuntimeInstanceId)}";
+        var query = $"gatewayInstanceId={Uri.EscapeDataString(gatewayInstanceId)}&authoritativeRuntimeInstanceId={Uri.EscapeDataString(authoritativeRuntimeInstanceId)}";
+        AddActiveQuery(ref query, "proxyRuntimeInstanceId", proxyRuntimeInstanceId);
+        AddActiveQuery(ref query, "certificateIdentity", certificateIdentity);
+        AddActiveQuery(ref query, "authoritativeRuntimeInstallFingerprint", authoritativeRuntimeInstallFingerprint);
+        var path = $"{RemoteRuntimeBridgePaths.RegistryActive}?{query}";
         return await GetAsync<RemoteRuntimePairingRegistrySnapshot>(path, cancellationToken);
     }
 
@@ -250,7 +261,8 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? authoritativeRuntimeInstallFingerprint = null)
     {
         ArgumentNullException.ThrowIfNull(certificate);
         using var key = certificate.GetECDsaPublicKey()
@@ -258,13 +270,23 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
                 "PairNotAuthorized",
                 "The client certificate does not contain an ECDSA public key.");
         var publicKeyHash = RemoteRuntimeCertificateHash.Compute(key);
+        var now = DateTimeOffset.UtcNow;
         var entry = await FindActiveAsync(
             gatewayInstanceId,
             authoritativeRuntimeInstanceId,
-            cancellationToken);
+            cancellationToken,
+            certificateIdentity: certificate.Thumbprint,
+            authoritativeRuntimeInstallFingerprint: authoritativeRuntimeInstallFingerprint);
         if (entry is null
             || !entry.IsActive(DateTimeOffset.UtcNow)
-            || !string.Equals(entry.ProxyRuntimePublicKeyHash, publicKeyHash, StringComparison.Ordinal))
+            || !string.Equals(entry.ProxyRuntimePublicKeyHash, publicKeyHash, StringComparison.Ordinal)
+            || string.IsNullOrWhiteSpace(entry.ClientCertificateIdentity)
+            || !string.Equals(entry.ClientCertificateIdentity, certificate.Thumbprint, StringComparison.OrdinalIgnoreCase)
+            || entry.ClientCertificateIssuedAtUtc > now
+            || entry.ClientCertificateExpiresAtUtc <= now
+            || certificate.NotBefore.ToUniversalTime() > now
+            || certificate.NotAfter.ToUniversalTime() <= now
+            || entry.BridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
         {
             throw new RemoteRuntimePairingException(
                 "PairNotAuthorized",
@@ -349,6 +371,12 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
     {
         if (!string.IsNullOrWhiteSpace(value))
             query.Add($"{name}={Uri.EscapeDataString(value)}");
+    }
+
+    private static void AddActiveQuery(ref string query, string name, string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            query += $"&{name}={Uri.EscapeDataString(value)}";
     }
 
     private static string PairingPath(Guid pairId)

@@ -2,6 +2,7 @@ namespace SharpClaw.Shared.RemoteRuntimeBridge;
 
 public static class RemoteRuntimeBridgePaths
 {
+    public const int CurrentProtocolMajor = 1;
     public const string AdministrationKeyHeader = "X-SharpClaw-Bridge-Admin-Key";
     public const string PairingClaim = "/__sharpclaw/remote-runtime/pairing/claim";
     public const string PairingCertificate = "/__sharpclaw/remote-runtime/pairing/certificate";
@@ -33,7 +34,8 @@ public sealed record RemoteRuntimePairingClaimRequest(
     string Secret,
     string ProxyRuntimeInstanceId,
     string CertificateSigningRequestBase64,
-    string ProofSignatureBase64);
+    string ProofSignatureBase64,
+    int BridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor);
 
 public sealed record RemoteRuntimePairingCertificateRequest(Guid PairId, string Secret);
 
@@ -57,7 +59,8 @@ public sealed record RemoteRuntimePairingCertificateResponse(
     string CertificateDerBase64,
     string ProxyRuntimePublicKeyHash,
     string CertificateThumbprint,
-    DateTimeOffset NotAfterUtc);
+    DateTimeOffset NotAfterUtc,
+    DateTimeOffset? NotBeforeUtc = null);
 
 public sealed record RemoteRuntimeRegistryInvitationRequest(
     string GatewayInstanceId,
@@ -72,8 +75,7 @@ public sealed record RemoteRuntimeRegistryInvitationRequest(
 public sealed record RemoteRuntimeRegistryApprovalRequest(
     Guid PairId,
     string ProxyRuntimeInstanceId,
-    string AuthoritativeRuntimeInstanceId,
-    string? ClientCertificateIdentity = null);
+    string AuthoritativeRuntimeInstanceId);
 
 public sealed record RemoteRuntimeRegistryRejectionRequest(Guid PairId, string Reason);
 
@@ -119,7 +121,9 @@ public sealed record RemoteRuntimePairingRegistrySnapshot(
     DateTimeOffset ExpiresAtUtc,
     DateTimeOffset? LastSeenAtUtc,
     DateTimeOffset UpdatedAtUtc,
-    long Revision)
+    long Revision,
+    DateTimeOffset? ClientCertificateIssuedAtUtc = null,
+    DateTimeOffset? ClientCertificateExpiresAtUtc = null)
 {
     public bool IsActive(DateTimeOffset now)
         => Status == RemoteRuntimePairStatus.Active && ExpiresAtUtc > now;

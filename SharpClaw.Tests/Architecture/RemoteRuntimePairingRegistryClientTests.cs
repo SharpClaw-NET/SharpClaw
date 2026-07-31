@@ -185,7 +185,10 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             entry.AuthoritativeRuntimeInstanceId,
             entry.ProxyRuntimeInstanceId!,
             "certificate-payload",
-            DateTimeOffset.UtcNow.AddHours(1));
+            DateTimeOffset.UtcNow.AddHours(1),
+            entry.AuthoritativeRuntimeInstallFingerprint,
+            entry.ClientCertificateIdentity,
+            RemoteRuntimeBridgePaths.CurrentProtocolMajor);
 
     private static RemoteRuntimePairingRegistrySnapshot CreateEntry(
         X509Certificate2? certificate = null)
@@ -215,7 +218,9 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             DateTimeOffset.UtcNow.AddHours(1),
             null,
             DateTimeOffset.UtcNow,
-            1);
+            1,
+            DateTimeOffset.UtcNow,
+            DateTimeOffset.UtcNow.AddHours(1));
     }
 
     private static X509Certificate2 CreateClientCertificate()

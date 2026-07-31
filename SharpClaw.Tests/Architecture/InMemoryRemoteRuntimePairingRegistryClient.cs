@@ -124,8 +124,7 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
             _entry = current with
             {
                 Status = RemoteRuntimePairStatus.Active,
-                ClientCertificateIdentity = request.ClientCertificateIdentity
-                    ?? current.ProxyRuntimePublicKeyHash,
+                ClientCertificateIdentity = null,
                 ApprovedAtUtc = DateTimeOffset.UtcNow,
             };
             return Task.FromResult(_entry);
@@ -153,7 +152,10 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
     public Task<RemoteRuntimePairingRegistrySnapshot?> FindActiveAsync(
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? proxyRuntimeInstanceId = null,
+        string? certificateIdentity = null,
+        string? authoritativeRuntimeInstallFingerprint = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         lock (_gate)
@@ -164,6 +166,10 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
                 && entry.IsActive(DateTimeOffset.UtcNow)
                 && entry.GatewayInstanceId == gatewayInstanceId
                 && entry.AuthoritativeRuntimeInstanceId == authoritativeRuntimeInstanceId
+                && (proxyRuntimeInstanceId is null || entry.ProxyRuntimeInstanceId == proxyRuntimeInstanceId)
+                && (certificateIdentity is null || entry.ClientCertificateIdentity == certificateIdentity)
+                && (authoritativeRuntimeInstallFingerprint is null
+                    || entry.AuthoritativeRuntimeInstallFingerprint == authoritativeRuntimeInstallFingerprint)
                     ? entry
                     : null);
         }
@@ -287,7 +293,8 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
-        CancellationToken cancellationToken)
+        CancellationToken cancellationToken,
+        string? authoritativeRuntimeInstallFingerprint = null)
     {
         cancellationToken.ThrowIfCancellationRequested();
         using var key = certificate.GetECDsaPublicKey()
@@ -298,8 +305,12 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         var entry = await FindActiveAsync(
             gatewayInstanceId,
             authoritativeRuntimeInstanceId,
-            cancellationToken);
-        if (entry is null || entry.ProxyRuntimePublicKeyHash != publicKeyHash)
+            cancellationToken,
+            certificateIdentity: certificate.Thumbprint,
+            authoritativeRuntimeInstallFingerprint: authoritativeRuntimeInstallFingerprint);
+        if (entry is null
+            || entry.ProxyRuntimePublicKeyHash != publicKeyHash
+            || entry.ClientCertificateIdentity != certificate.Thumbprint)
             throw new RemoteRuntimePairingException(
                 "PairNotAuthorized",
                 "The client certificate is not active.");

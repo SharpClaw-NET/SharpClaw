@@ -188,7 +188,7 @@ public static class RuntimePairingClient
             || string.IsNullOrWhiteSpace(invitation.GatewayServerPublicKeyHash)
             || string.IsNullOrWhiteSpace(invitation.AuthoritativeRuntimeInstanceId)
             || string.IsNullOrWhiteSpace(invitation.AuthoritativeRuntimeInstallFingerprint)
-            || invitation.BridgeProtocolMajor <= 0)
+            || invitation.BridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
         {
             throw new InvalidOperationException("The pairing invitation is incomplete.");
         }
@@ -292,7 +292,10 @@ internal sealed class RemoteRuntimePairingClient(
                     invitation.AuthoritativeRuntimeInstanceId,
                     proxyRuntimeInstanceId,
                     Convert.ToBase64String(pfx),
-                    certificate.NotAfterUtc);
+                    certificate.NotAfterUtc,
+                    invitation.AuthoritativeRuntimeInstallFingerprint,
+                    certificate.CertificateThumbprint,
+                    invitation.BridgeProtocolMajor);
                 await _sessionSecretsFactory(instancePaths)
                     .SaveAsync(state, cancellationToken);
                 return state;
@@ -373,7 +376,13 @@ internal sealed class RemoteRuntimePairingClient(
             + "?gatewayInstanceId="
             + Uri.EscapeDataString(gatewayInstanceId)
             + "&authoritativeRuntimeInstanceId="
-            + Uri.EscapeDataString(authoritativeRuntimeInstanceId);
+            + Uri.EscapeDataString(authoritativeRuntimeInstanceId)
+            + "&proxyRuntimeInstanceId="
+            + Uri.EscapeDataString(proxyRuntimeInstanceId)
+            + "&certificateIdentity="
+            + Uri.EscapeDataString(clientCertificate.Thumbprint ?? string.Empty)
+            + "&authoritativeRuntimeInstallFingerprint="
+            + Uri.EscapeDataString(state.AuthoritativeRuntimeInstallFingerprint ?? string.Empty);
 
         using var response = await httpClient.GetAsync(path, cancellationToken);
         if (!response.IsSuccessStatusCode)
@@ -405,6 +414,19 @@ internal sealed class RemoteRuntimePairingClient(
                 active.ProxyRuntimePublicKeyHash,
                 publicKeyHash,
                 StringComparison.Ordinal)
+            || !string.Equals(
+                active.ClientCertificateIdentity,
+                clientCertificate.Thumbprint,
+                StringComparison.OrdinalIgnoreCase)
+            || !string.Equals(
+                active.AuthoritativeRuntimeInstallFingerprint,
+                state.AuthoritativeRuntimeInstallFingerprint,
+                StringComparison.Ordinal)
+            || active.BridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor
+            || active.ClientCertificateIssuedAtUtc > DateTimeOffset.UtcNow
+            || active.ClientCertificateExpiresAtUtc <= DateTimeOffset.UtcNow
+            || clientCertificate.NotBefore.ToUniversalTime() > DateTimeOffset.UtcNow
+            || clientCertificate.NotAfter.ToUniversalTime() <= DateTimeOffset.UtcNow
             || !active.IsActive(DateTimeOffset.UtcNow))
         {
             throw new RemoteRuntimePairingException(
@@ -480,7 +502,7 @@ internal sealed class RemoteRuntimePairingClient(
             || string.IsNullOrWhiteSpace(invitation.GatewayServerPublicKeyHash)
             || string.IsNullOrWhiteSpace(invitation.AuthoritativeRuntimeInstanceId)
             || string.IsNullOrWhiteSpace(invitation.AuthoritativeRuntimeInstallFingerprint)
-            || invitation.BridgeProtocolMajor <= 0
+            || invitation.BridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor
             || invitation.ExpiresAtUtc <= DateTimeOffset.UtcNow)
         {
             throw new InvalidOperationException("The pairing invitation is invalid or expired.");

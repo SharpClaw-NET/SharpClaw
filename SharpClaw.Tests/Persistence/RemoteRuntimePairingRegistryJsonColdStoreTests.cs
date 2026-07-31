@@ -41,8 +41,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         var active = await registry.ApproveAsync(
             invitation.PairId,
             "proxy-a",
-            "runtime-a",
-            "certificate-thumbprint");
+            "runtime-a");
         active.Status.Should().Be(RemoteRuntimePairStatus.Active);
         (await registry.FindActiveTargetAsync("gateway-a", "runtime-a"))?.PairId.Should().Be(invitation.PairId);
 
@@ -128,7 +127,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
     }
 
     [Test]
-    public async Task Registry_UsesStableCursorAndRejectsSecondActiveTarget()
+    public async Task Registry_AllowsSeveralProxiesPerTargetAndRejectsOneProxyOnSeveralTargets()
     {
         using var workspace = Workspace.Create();
         await using var db = workspace.CreateDbContext();
@@ -136,8 +135,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         var registry = workspace.CreateRegistry(db);
 
         var invitations = new List<RemoteRuntimePairingInvitation>();
-        for (var i = 0; i < 3; i++)
-        {
+        for (var i = 0; i < 2; i++)
             invitations.Add(await registry.CreateInvitationAsync(
                 "gateway-a",
                 "gateway-key-hash",
@@ -145,7 +143,14 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
                 "runtime-fingerprint",
                 TimeSpan.FromMinutes(5),
                 displayName: $"proxy-{i}"));
-        }
+
+        var otherTarget = await registry.CreateInvitationAsync(
+            "gateway-a",
+            "gateway-key-hash",
+            "runtime-b",
+            "runtime-fingerprint-b",
+            TimeSpan.FromMinutes(5),
+            displayName: "other-target");
 
         var first = await registry.ListAsync(new RemoteRuntimePairingRegistryFilter(), take: 2);
         first.Items.Should().HaveCount(2);
@@ -162,29 +167,80 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             .Intersect(second.Items.Select(item => item.PairId))
             .Should().BeEmpty();
 
-        foreach (var invitation in invitations)
-        {
-            await registry.ClaimAsync(CreateClaim(invitation, "proxy-a"));
-        }
+        await registry.ClaimAsync(CreateClaim(invitations[0], "proxy-a"));
+        await registry.ClaimAsync(CreateClaim(invitations[1], "proxy-b"));
+        await registry.ClaimAsync(CreateClaim(otherTarget, "proxy-a"));
 
         await registry.ApproveAsync(
             invitations[0].PairId,
             "proxy-a",
-            "runtime-a",
-            "certificate-0");
+            "runtime-a");
         var issued = await registry.IssueClientCertificateAsync(
             invitations[0].PairId,
             invitations[0].Secret);
         using var issuedCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
         RemoteRuntimeCertificateHash.Compute(issuedCertificate)
             .Should().Be((await registry.FindAsync(invitations[0].PairId))!.ProxyRuntimePublicKeyHash);
-        var approveSecond = () => registry.ApproveAsync(
-            invitations[1].PairId,
-            "proxy-a",
+        var issuedEntry = await registry.FindAsync(invitations[0].PairId);
+        issuedEntry!.ClientCertificateIdentity.Should().Be(issued.CertificateThumbprint);
+        issuedEntry.ClientCertificateIssuedAtUtc.Should().NotBeNull();
+        issuedEntry.ClientCertificateExpiresAtUtc.Should().Be(issued.NotAfterUtc);
+        (await registry.FindActiveTargetAsync(
+            "gateway-a",
             "runtime-a",
-            "certificate-1");
-        (await approveSecond.Should().ThrowAsync<RemoteRuntimePairingRegistryException>())
-            .Which.Code.Should().Be("PairTargetAlreadyActive");
+            certificateIdentity: issued.CertificateThumbprint))!
+            .PairId.Should().Be(invitations[0].PairId);
+
+        var renewed = await registry.RenewAsync(
+            invitations[0].PairId,
+            DateTimeOffset.UtcNow.AddHours(2));
+        renewed.ClientCertificateIdentity.Should().BeNull();
+        (await registry.FindActiveTargetAsync(
+            "gateway-a",
+            "runtime-a",
+            certificateIdentity: issued.CertificateThumbprint)).Should().BeNull();
+
+        var activeSecond = await registry.ApproveAsync(
+            invitations[1].PairId,
+            "proxy-b",
+            "runtime-a");
+        activeSecond.Status.Should().Be(RemoteRuntimePairStatus.Active);
+
+        var approveOtherTarget = () => registry.ApproveAsync(
+            otherTarget.PairId,
+            "proxy-a",
+            "runtime-b");
+        (await registry.ListAsync(
+            new RemoteRuntimePairingRegistryFilter(Status: RemoteRuntimePairStatus.Active),
+            take: 10)).Items.Should().Contain(item => item.ProxyRuntimeInstanceId == "proxy-a");
+        (await approveOtherTarget.Should().ThrowAsync<RemoteRuntimePairingRegistryException>())
+            .Which.Code.Should().Be("ProxyRuntimeAlreadyActive");
+
+        var concurrentInvitations = new[]
+        {
+            await registry.CreateInvitationAsync(
+                "gateway-a",
+                "gateway-key-hash",
+                "runtime-a",
+                "runtime-fingerprint",
+                TimeSpan.FromMinutes(5)),
+            await registry.CreateInvitationAsync(
+                "gateway-a",
+                "gateway-key-hash",
+                "runtime-a",
+                "runtime-fingerprint",
+                TimeSpan.FromMinutes(5)),
+        };
+        await registry.ClaimAsync(CreateClaim(concurrentInvitations[0], "proxy-c"));
+        await registry.ClaimAsync(CreateClaim(concurrentInvitations[1], "proxy-d"));
+        await using var concurrentDbA = workspace.CreateDbContext();
+        await using var concurrentDbB = workspace.CreateDbContext();
+        var concurrentRegistryA = workspace.CreateRegistry(concurrentDbA);
+        var concurrentRegistryB = workspace.CreateRegistry(concurrentDbB);
+        var concurrentApprovals = await Task.WhenAll(
+            concurrentRegistryA.ApproveAsync(concurrentInvitations[0].PairId, "proxy-c", "runtime-a"),
+            concurrentRegistryB.ApproveAsync(concurrentInvitations[1].PairId, "proxy-d", "runtime-a"));
+        concurrentApprovals.Should().OnlyContain(item => item.Status == RemoteRuntimePairStatus.Active);
     }
 
     private sealed class Workspace : IDisposable

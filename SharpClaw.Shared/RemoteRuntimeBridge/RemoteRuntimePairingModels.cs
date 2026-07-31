@@ -26,7 +26,8 @@ public sealed record RemoteRuntimeClientCertificate(
     byte[] CertificateDer,
     string ProxyRuntimePublicKeyHash,
     string CertificateThumbprint,
-    DateTimeOffset NotAfterUtc);
+    DateTimeOffset NotAfterUtc,
+    DateTimeOffset? NotBeforeUtc = null);
 
 public sealed record RemoteRuntimePairingRecord(
     Guid PairId,

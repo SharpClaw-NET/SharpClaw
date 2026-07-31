@@ -98,6 +98,33 @@ public sealed class RemoteRuntimeProxySessionTests
     }
 
     [Test]
+    public void Proxy_session_rejects_protocol_major_mismatch_before_startup()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Runtime:RemoteProxy:Enabled"] = "true",
+                ["Runtime:RemoteProxy:LocalUrl"] = "http://127.0.0.1:48923",
+                ["Runtime:RemoteProxy:GatewayUrl"] = "https://127.0.0.1:48924",
+                ["Runtime:RemoteProxy:GatewayInstanceId"] = "gateway",
+                ["Runtime:RemoteProxy:AuthoritativeRuntimeInstanceId"] = "runtime",
+                ["Runtime:RemoteProxy:ProxyRuntimeInstanceId"] = "proxy",
+                ["Runtime:RemoteProxy:InvitationSecret"] = "secret",
+                ["Runtime:RemoteProxy:PrivateKeySecret"] = "private-key",
+                ["Runtime:RemoteProxy:ClientCertificateSecret"] = "certificate",
+                ["Runtime:RemoteProxy:ConnectTimeoutSeconds"] = "10",
+                ["Runtime:RemoteProxy:ActivityTimeoutSeconds"] = "60",
+                ["Runtime:RemoteProxy:BridgeProtocolMajor"] = "2",
+            })
+            .Build();
+
+        var action = () => RemoteProxyOptions.Bind(configuration);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*BridgeProtocolMajor*");
+    }
+
+    [Test]
     public async Task Incomplete_pairing_invitation_fails_closed_without_creating_local_api_key()
     {
         var root = Path.Combine(

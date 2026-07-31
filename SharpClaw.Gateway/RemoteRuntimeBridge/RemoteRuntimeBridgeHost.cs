@@ -129,7 +129,8 @@ internal static class RemoteRuntimeBridgeHost
                         certificate,
                         target.GatewayInstanceId,
                         target.AuthoritativeRuntimeInstanceId,
-                        context.RequestAborted);
+                        context.RequestAborted,
+                        target.AuthoritativeRuntimeInstallFingerprint);
                 }
                 catch (RemoteRuntimePairingException)
                 {
@@ -282,8 +283,7 @@ internal static class RemoteRuntimeBridgeHost
                         new RemoteRuntimeRegistryApprovalRequest(
                             request.PairId,
                             request.ProxyRuntimeInstanceId,
-                            request.AuthoritativeRuntimeInstanceId,
-                            null),
+                            request.AuthoritativeRuntimeInstanceId),
                         cancellationToken);
                     return Results.Ok(record);
                 }
@@ -764,6 +764,15 @@ internal static class RemoteRuntimeBridgeTargetResolver
         {
             throw new InvalidOperationException(
                 "The selected authoritative Runtime discovery entry has no usable target credentials.");
+        }
+
+        if (!Uri.TryCreate(entry.BaseUrl, UriKind.Absolute, out var targetUri)
+            || !targetUri.IsLoopback
+            || (!string.Equals(targetUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                "The authoritative Runtime discovery entry must use a loopback HTTP or HTTPS URL.");
         }
 
         var apiKey = File.ReadAllText(entry.ApiKeyFilePath).Trim();

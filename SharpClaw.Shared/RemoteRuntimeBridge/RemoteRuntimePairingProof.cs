@@ -17,7 +17,8 @@ public static class RemoteRuntimePairingProof
             invitation.AuthoritativeRuntimeInstanceId,
             proxyRuntimeInstanceId,
             proxyRuntimePublicKeyHash,
-            invitation.Secret);
+            invitation.Secret,
+            invitation.BridgeProtocolMajor);
     }
 
     public static byte[] CreateClaimProofPayload(
@@ -26,13 +27,16 @@ public static class RemoteRuntimePairingProof
         string authoritativeRuntimeInstanceId,
         string proxyRuntimeInstanceId,
         string proxyRuntimePublicKeyHash,
-        string invitationSecret)
+        string invitationSecret,
+        int bridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor)
     {
         RequireText(gatewayInstanceId, nameof(gatewayInstanceId));
         RequireText(authoritativeRuntimeInstanceId, nameof(authoritativeRuntimeInstanceId));
         RequireText(proxyRuntimeInstanceId, nameof(proxyRuntimeInstanceId));
         RequireText(proxyRuntimePublicKeyHash, nameof(proxyRuntimePublicKeyHash));
         RequireText(invitationSecret, nameof(invitationSecret));
+        if (bridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+            throw new ArgumentOutOfRangeException(nameof(bridgeProtocolMajor));
         return Encoding.UTF8.GetBytes(
             string.Join(
                 '|',
@@ -41,6 +45,7 @@ public static class RemoteRuntimePairingProof
                 authoritativeRuntimeInstanceId,
                 proxyRuntimeInstanceId,
                 proxyRuntimePublicKeyHash,
+                bridgeProtocolMajor.ToString(CultureInfo.InvariantCulture),
                 invitationSecret));
     }
 

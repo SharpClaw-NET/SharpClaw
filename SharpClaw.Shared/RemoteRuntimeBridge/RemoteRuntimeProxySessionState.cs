@@ -7,4 +7,7 @@ public sealed record RemoteRuntimeProxySessionState(
     string AuthoritativeRuntimeInstanceId,
     string ProxyRuntimeInstanceId,
     string ClientCertificatePfxBase64,
-    DateTimeOffset CertificateNotAfterUtc);
+    DateTimeOffset CertificateNotAfterUtc,
+    string? AuthoritativeRuntimeInstallFingerprint = null,
+    string? CertificateThumbprint = null,
+    int BridgeProtocolMajor = RemoteRuntimeBridgePaths.CurrentProtocolMajor);

@@ -18,6 +18,9 @@ internal sealed class RemoteRuntimeProxySessionSecrets
     private const string ProxyRuntimeInstanceIdKey = Prefix + "ProxyRuntimeInstanceId";
     private const string ClientCertificatePfxKey = Prefix + "ClientCertificatePfx";
     private const string CertificateNotAfterUtcKey = Prefix + "CertificateNotAfterUtc";
+    private const string AuthoritativeRuntimeInstallFingerprintKey = Prefix + "AuthoritativeRuntimeInstallFingerprint";
+    private const string CertificateThumbprintKey = Prefix + "CertificateThumbprint";
+    private const string BridgeProtocolMajorKey = Prefix + "BridgeProtocolMajor";
 
     private readonly ISecretDocumentStore _documentStore;
     private readonly ISecretDocumentUpdater _documentUpdater;
@@ -92,7 +95,10 @@ internal sealed class RemoteRuntimeProxySessionSecrets
             RequireValue(settings, AuthoritativeRuntimeInstanceIdKey),
             RequireValue(settings, ProxyRuntimeInstanceIdKey),
             RequireValue(settings, ClientCertificatePfxKey),
-            ParseTimestamp(settings, CertificateNotAfterUtcKey));
+            ParseTimestamp(settings, CertificateNotAfterUtcKey),
+            RequireValue(settings, AuthoritativeRuntimeInstallFingerprintKey),
+            RequireValue(settings, CertificateThumbprintKey),
+            ParseProtocolMajor(settings, BridgeProtocolMajorKey));
         ValidateState(state);
         return state;
     }
@@ -132,6 +138,9 @@ internal sealed class RemoteRuntimeProxySessionSecrets
             new(ProxyRuntimeInstanceIdKey, state.ProxyRuntimeInstanceId),
             new(ClientCertificatePfxKey, state.ClientCertificatePfxBase64),
             new(CertificateNotAfterUtcKey, state.CertificateNotAfterUtc.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture)),
+            new(AuthoritativeRuntimeInstallFingerprintKey, state.AuthoritativeRuntimeInstallFingerprint ?? string.Empty),
+            new(CertificateThumbprintKey, state.CertificateThumbprint ?? string.Empty),
+            new(BridgeProtocolMajorKey, state.BridgeProtocolMajor.ToString(CultureInfo.InvariantCulture)),
         ];
 
     private static Guid ParseGuid(
@@ -149,6 +158,18 @@ internal sealed class RemoteRuntimeProxySessionSecrets
                 CultureInfo.InvariantCulture,
                 DateTimeStyles.RoundtripKind,
                 out var value)
+            ? value
+            : throw InvalidValue(key);
+
+    private static int ParseProtocolMajor(
+        IReadOnlyDictionary<string, string> values,
+        string key)
+        => int.TryParse(
+                RequireValue(values, key),
+                NumberStyles.Integer,
+                CultureInfo.InvariantCulture,
+                out var value)
+            && value == RemoteRuntimeBridgePaths.CurrentProtocolMajor
             ? value
             : throw InvalidValue(key);
 
@@ -176,12 +197,16 @@ internal sealed class RemoteRuntimeProxySessionSecrets
         RequireText(state.GatewayServerPublicKeyHash, nameof(state.GatewayServerPublicKeyHash));
         RequireText(state.AuthoritativeRuntimeInstanceId, nameof(state.AuthoritativeRuntimeInstanceId));
         RequireText(state.ProxyRuntimeInstanceId, nameof(state.ProxyRuntimeInstanceId));
+        RequireText(state.AuthoritativeRuntimeInstallFingerprint, nameof(state.AuthoritativeRuntimeInstallFingerprint));
+        RequireText(state.CertificateThumbprint, nameof(state.CertificateThumbprint));
         RequireText(state.ClientCertificatePfxBase64, nameof(state.ClientCertificatePfxBase64));
+        if (state.BridgeProtocolMajor != RemoteRuntimeBridgePaths.CurrentProtocolMajor)
+            throw new InvalidOperationException("The protected proxy session protocol major is unsupported.");
         if (state.CertificateNotAfterUtc <= DateTimeOffset.UtcNow)
             throw new InvalidOperationException("The protected proxy session certificate has expired.");
     }
 
-    private static void RequireText(string value, string name)
+    private static void RequireText(string? value, string name)
     {
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException($"The proxy session value '{name}' is required.", name);

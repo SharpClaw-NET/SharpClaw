@@ -62,7 +62,8 @@ public static class RemoteRuntimePairingHandlers
                 request.ProxyRuntimeInstanceId,
                 null,
                 request.CertificateSigningRequestBase64,
-                request.ProofSignatureBase64), cancellationToken));
+                request.ProofSignatureBase64,
+                request.BridgeProtocolMajor), cancellationToken));
 
     [MapPost("/certificate")]
     public static Task<IResult> Certificate(
@@ -80,7 +81,8 @@ public static class RemoteRuntimePairingHandlers
                     Convert.ToBase64String(certificate.CertificateDer),
                     certificate.ProxyRuntimePublicKeyHash,
                     certificate.CertificateThumbprint,
-                    certificate.NotAfterUtc);
+                    certificate.NotAfterUtc,
+                    certificate.NotBeforeUtc);
             });
 
     [MapGet("/pairings")]
@@ -207,7 +209,6 @@ public static class RemoteRuntimePairingHandlers
                 request.PairId,
                 request.ProxyRuntimeInstanceId,
                 request.AuthoritativeRuntimeInstanceId,
-                request.ClientCertificateIdentity,
                 cancellationToken));
 
     [MapPost("/reject")]
@@ -239,6 +240,9 @@ public static class RemoteRuntimePairingHandlers
     public static async Task<IResult> Active(
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
+        string? proxyRuntimeInstanceId,
+        string? certificateIdentity,
+        string? authoritativeRuntimeInstallFingerprint,
         RemoteRuntimePairingRegistry registry,
         Microsoft.Extensions.Logging.ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
@@ -248,6 +252,9 @@ public static class RemoteRuntimePairingHandlers
             return Results.Ok(await registry.FindActiveTargetAsync(
                 gatewayInstanceId,
                 authoritativeRuntimeInstanceId,
+                proxyRuntimeInstanceId,
+                certificateIdentity,
+                authoritativeRuntimeInstallFingerprint,
                 cancellationToken));
         }
         catch (Exception exception)
@@ -303,5 +310,7 @@ public static class RemoteRuntimePairingHandlers
             entry.ExpiresAtUtc,
             entry.LastSeenAtUtc,
             entry.UpdatedAtUtc,
-            entry.Revision);
+            entry.Revision,
+            entry.ClientCertificateIssuedAtUtc,
+            entry.ClientCertificateExpiresAtUtc);
 }
