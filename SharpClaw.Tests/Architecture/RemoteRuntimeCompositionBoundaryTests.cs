@@ -200,8 +200,10 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
             var runtimeDirectory = Path.Combine(root, "runtime");
             var keyPath = Path.Combine(runtimeDirectory, ".api-key");
+            var gatewayTokenPath = Path.Combine(runtimeDirectory, ".gateway-token");
             Directory.CreateDirectory(runtimeDirectory);
             File.WriteAllText(keyPath, "runtime-api-key");
+            File.WriteAllText(gatewayTokenPath, "gateway-service-token");
 
             var discoveryDirectory = Path.Combine(sharedRoot, "discovery", "instances");
             Directory.CreateDirectory(discoveryDirectory);
@@ -214,6 +216,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
                 BaseUrl = "https://127.0.0.1:48923",
                 RuntimeDirectory = runtimeDirectory,
                 ApiKeyFilePath = keyPath,
+                GatewayTokenFilePath = gatewayTokenPath,
                 ProcessId = Environment.ProcessId,
                 StartedAtUtc = DateTimeOffset.UtcNow,
                 LastSeenUtc = DateTimeOffset.UtcNow,
@@ -228,6 +231,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             target.AuthoritativeRuntimeInstanceId.Should().Be("runtime-selected");
             target.TargetBaseUrl.Should().Be("https://127.0.0.1:48923");
             target.AuthoritativeApiKey.Should().Be("runtime-api-key");
+            target.AuthoritativeGatewayToken.Should().Be("gateway-service-token");
         }
         finally
         {
@@ -258,6 +262,8 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     public void Proxy_forwarding_uses_the_paired_certificate_and_strips_local_credentials()
     {
         var source = ReadRepositoryFile("SharpClaw.Runtime/Host/RemoteProxyHost.cs");
+        var gatewayBridgeSource = ReadRepositoryFile(
+            "SharpClaw.Gateway/RemoteRuntimeBridge/RemoteRuntimeBridgeHost.cs");
 
         source.Should().Contain("ClientCertificateForwarderHttpClientFactory");
         source.Should().Contain("ClientCertificates");
@@ -267,6 +273,9 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         source.Should().Contain("PublishDiscovery");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Api-Key\")");
         source.Should().Contain("proxyRequest.Headers.Remove(\"X-Gateway-Token\")");
+        gatewayBridgeSource.Should().Contain("RemoteRuntimeBridgePaths.CliControl");
+        gatewayBridgeSource.Should().Contain("authoritativeGatewayToken");
+        gatewayBridgeSource.Should().Contain("proxyRequest.Headers.TryAddWithoutValidation(\n                    \"X-Gateway-Token\",");
     }
 
     private static string ReadRepositoryFile(string relativePath)

@@ -47,7 +47,8 @@ public sealed class RemoteRuntimeBridgeRouteTests
             "runtime-1",
             "runtime-install-1",
             "https://127.0.0.1:1",
-            "authoritative-api-key");
+            "authoritative-api-key",
+            "authoritative-gateway-token");
         await using var app = await RemoteRuntimeBridgeHost.BuildAsync(
             [],
             options,

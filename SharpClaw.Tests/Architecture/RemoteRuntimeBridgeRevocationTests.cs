@@ -59,7 +59,8 @@ public sealed class RemoteRuntimeBridgeRevocationTests
             "runtime-1",
             "runtime-install-1",
             "http://127.0.0.1:1",
-            "authoritative-api-key");
+            "authoritative-api-key",
+            "authoritative-gateway-token");
         var options = new RemoteRuntimeBridgeOptions
         {
             Enabled = true,

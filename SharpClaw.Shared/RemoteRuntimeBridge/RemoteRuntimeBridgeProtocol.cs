@@ -8,6 +8,7 @@ public static class RemoteRuntimeBridgePaths
     public const string AdminInvitation = "/__sharpclaw/remote-runtime/admin/invitation";
     public const string AdminApprove = "/__sharpclaw/remote-runtime/admin/approve";
     public const string AdminRevoke = "/__sharpclaw/remote-runtime/admin/revoke";
+    public const string CliControl = "/__sharpclaw/remote-runtime/cli";
 }
 
 public sealed record RemoteRuntimePairingClaimRequest(

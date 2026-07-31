@@ -26,7 +26,8 @@ internal sealed record RemoteRuntimeBridgeTarget(
     string AuthoritativeRuntimeInstanceId,
     string AuthoritativeRuntimeInstallFingerprint,
     string TargetBaseUrl,
-    string AuthoritativeApiKey);
+    string AuthoritativeApiKey,
+    string AuthoritativeGatewayToken);
 
 internal static class RemoteRuntimeBridgeHost
 {
@@ -300,9 +301,11 @@ internal static class RemoteRuntimeBridgeHost
 
             bridgeApp.MapForwarder(
                 "/{**catch-all}",
-                target.TargetBaseUrl,
-                ForwarderRequestConfig.Empty,
-                new RemoteRuntimeBridgeTransformer(target.AuthoritativeApiKey));
+            target.TargetBaseUrl,
+            ForwarderRequestConfig.Empty,
+            new RemoteRuntimeBridgeTransformer(
+                target.AuthoritativeApiKey,
+                target.AuthoritativeGatewayToken));
             return bridgeApp;
         }
         catch
@@ -411,7 +414,9 @@ internal static class RemoteRuntimeBridgeHost
         }
     }
 
-    private sealed class RemoteRuntimeBridgeTransformer(string authoritativeApiKey) : HttpTransformer
+    private sealed class RemoteRuntimeBridgeTransformer(
+        string authoritativeApiKey,
+        string authoritativeGatewayToken) : HttpTransformer
     {
         public override async ValueTask TransformRequestAsync(
             HttpContext httpContext,
@@ -431,6 +436,18 @@ internal static class RemoteRuntimeBridgeHost
             proxyRequest.Headers.Remove("X-Forwarded-Proto");
             proxyRequest.Headers.Remove("Forwarded");
             proxyRequest.Headers.TryAddWithoutValidation("X-Api-Key", authoritativeApiKey);
+            if (httpContext.Request.Path.Equals(
+                    RemoteRuntimeBridgePaths.CliControl,
+                    StringComparison.Ordinal))
+            {
+                proxyRequest.Headers.TryAddWithoutValidation(
+                    "X-Gateway-Token",
+                    authoritativeGatewayToken);
+            }
+            else
+            {
+                proxyRequest.Headers.Remove("X-Gateway-Token");
+            }
         }
     }
 }
@@ -513,12 +530,27 @@ internal static class RemoteRuntimeBridgeTargetResolver
                 "The selected authoritative Runtime API key is empty.");
         }
 
+        if (string.IsNullOrWhiteSpace(entry.GatewayTokenFilePath)
+            || !File.Exists(entry.GatewayTokenFilePath))
+        {
+            throw new InvalidOperationException(
+                "The selected authoritative Runtime discovery entry has no Gateway service token.");
+        }
+
+        var gatewayToken = File.ReadAllText(entry.GatewayTokenFilePath).Trim();
+        if (string.IsNullOrWhiteSpace(gatewayToken))
+        {
+            throw new InvalidOperationException(
+                "The selected authoritative Runtime Gateway service token is empty.");
+        }
+
         return new RemoteRuntimeBridgeTarget(
             manifest.InstanceId,
             entry.InstanceId,
             entry.InstallFingerprint,
             entry.BaseUrl,
-            apiKey);
+            apiKey,
+            gatewayToken);
     }
 
     private static IEnumerable<SharpClawDiscoveryEntry> EnumerateBackendEntries(string sharedRoot)
