@@ -59,11 +59,69 @@ public static class RuntimePairingClient
         await pairingClient.PairAsync(invitation, instancePaths, cancellationToken);
     }
 
+    internal static async Task ValidateActiveSessionAsync(
+        RuntimeLaunchPlan plan,
+        RemoteRuntimeProxySessionState state,
+        X509Certificate2 clientCertificate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(clientCertificate);
+
+        var options = plan.RequireRemoteProxyOptions();
+        if (!string.Equals(
+                state.AuthoritativeRuntimeInstanceId,
+                options.AuthoritativeRuntimeInstanceId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                state.ProxyRuntimeInstanceId,
+                options.ProxyRuntimeInstanceId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                state.GatewayServerPublicKeyHash,
+                options.GatewayServerPublicKeyHash,
+                StringComparison.Ordinal))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairingTargetMismatch",
+                "The stored proxy session does not match the configured Runtime target.");
+        }
+
+        if (!Uri.TryCreate(state.GatewayBridgeUrl, UriKind.Absolute, out var stateGatewayUri)
+            || !Uri.TryCreate(options.GatewayUrl, UriKind.Absolute, out var configuredGatewayUri)
+            || !string.Equals(
+                stateGatewayUri.GetLeftPart(UriPartial.Authority),
+                configuredGatewayUri.GetLeftPart(UriPartial.Authority),
+                StringComparison.OrdinalIgnoreCase))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairingTargetMismatch",
+                "The stored proxy session does not match the configured Gateway target.");
+        }
+
+        using var httpClient = CreatePinnedClient(
+            stateGatewayUri,
+            state.GatewayServerPublicKeyHash,
+            options.ConnectTimeoutSeconds,
+            options.ActivityTimeoutSeconds,
+            clientCertificate);
+        var pairingClient = new RemoteRuntimePairingClient(httpClient);
+        await pairingClient.ValidateActiveSessionAsync(
+            state,
+            options.GatewayInstanceId,
+            options.AuthoritativeRuntimeInstanceId,
+            options.ProxyRuntimeInstanceId,
+            clientCertificate,
+            cancellationToken);
+    }
+
     private static HttpClient CreatePinnedClient(
         Uri gatewayBridgeUri,
         string expectedServerPublicKeyHash,
         int connectTimeoutSeconds,
-        int activityTimeoutSeconds)
+        int activityTimeoutSeconds,
+        X509Certificate2? clientCertificate = null)
     {
         if (string.IsNullOrWhiteSpace(expectedServerPublicKeyHash))
         {
@@ -71,14 +129,23 @@ public static class RuntimePairingClient
                 "The pairing invitation does not contain a Gateway certificate fingerprint.");
         }
 
+        var sslOptions = new SslClientAuthenticationOptions
+        {
+            RemoteCertificateValidationCallback = (_, certificate, _, _) =>
+                HasPinnedPublicKey(certificate, expectedServerPublicKeyHash),
+        };
+        if (clientCertificate is not null)
+        {
+            sslOptions.ClientCertificates = new X509CertificateCollection
+            {
+                clientCertificate,
+            };
+        }
+
         var handler = new SocketsHttpHandler
         {
             ConnectTimeout = TimeSpan.FromSeconds(connectTimeoutSeconds),
-            SslOptions = new SslClientAuthenticationOptions
-            {
-                RemoteCertificateValidationCallback = (_, certificate, _, _) =>
-                    HasPinnedPublicKey(certificate, expectedServerPublicKeyHash),
-            },
+            SslOptions = sslOptions,
         };
         return new HttpClient(handler)
         {
@@ -283,6 +350,69 @@ internal sealed class RemoteRuntimePairingClient(
         }
     }
 
+    internal async Task ValidateActiveSessionAsync(
+        RemoteRuntimeProxySessionState state,
+        string gatewayInstanceId,
+        string authoritativeRuntimeInstanceId,
+        string proxyRuntimeInstanceId,
+        X509Certificate2 clientCertificate,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(state);
+        ArgumentNullException.ThrowIfNull(clientCertificate);
+        RequireText(gatewayInstanceId, nameof(gatewayInstanceId));
+        RequireText(authoritativeRuntimeInstanceId, nameof(authoritativeRuntimeInstanceId));
+        RequireText(proxyRuntimeInstanceId, nameof(proxyRuntimeInstanceId));
+
+        using var key = clientCertificate.GetECDsaPublicKey()
+            ?? throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "The proxy certificate does not contain an ECDSA public key.");
+        var publicKeyHash = RemoteRuntimeCertificateHash.Compute(key);
+        var path = RemoteRuntimeBridgePaths.RegistryActive
+            + "?gatewayInstanceId="
+            + Uri.EscapeDataString(gatewayInstanceId)
+            + "&authoritativeRuntimeInstanceId="
+            + Uri.EscapeDataString(authoritativeRuntimeInstanceId);
+
+        using var response = await httpClient.GetAsync(path, cancellationToken);
+        if (!response.IsSuccessStatusCode)
+        {
+            throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "The authoritative Runtime did not approve the stored proxy session.");
+        }
+
+        var active = await response.Content.ReadFromJsonAsync<RemoteRuntimePairingRegistrySnapshot>(
+            JsonOptions,
+            cancellationToken);
+        if (active is null
+            || active.Status != RemoteRuntimePairStatus.Active
+            || active.PairId != state.PairId
+            || !string.Equals(
+                active.GatewayInstanceId,
+                gatewayInstanceId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                active.AuthoritativeRuntimeInstanceId,
+                authoritativeRuntimeInstanceId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                active.ProxyRuntimeInstanceId,
+                proxyRuntimeInstanceId,
+                StringComparison.Ordinal)
+            || !string.Equals(
+                active.ProxyRuntimePublicKeyHash,
+                publicKeyHash,
+                StringComparison.Ordinal)
+            || !active.IsActive(DateTimeOffset.UtcNow))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairingTargetMismatch",
+                "The authoritative Runtime returned a different or inactive proxy session.");
+        }
+    }
+
     private async Task<TResponse> PostAsync<TRequest, TResponse>(
         string path,
         TRequest request,
@@ -359,6 +489,12 @@ internal sealed class RemoteRuntimePairingClient(
     {
         if (value <= TimeSpan.Zero)
             throw new ArgumentOutOfRangeException(parameterName, "The pairing duration must be positive.");
+    }
+
+    private static void RequireText(string? value, string parameterName)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+            throw new ArgumentException("A nonblank value is required.", parameterName);
     }
 
     private sealed record RemoteRuntimeErrorResponse(string? Code, string? Error);

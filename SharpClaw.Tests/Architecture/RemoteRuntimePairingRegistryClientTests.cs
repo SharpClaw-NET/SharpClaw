@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using FluentAssertions;
 using SharpClaw.Gateway.RemoteRuntimeBridge;
+using SharpClaw.Runtime.Host;
 using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Tests.Architecture;
@@ -66,7 +67,7 @@ public sealed class RemoteRuntimePairingRegistryClientTests
     }
 
     [Test]
-    public async Task Validation_cache_requires_runtime_invalidation_after_revocation()
+    public async Task Validation_reads_current_registry_state_after_revocation()
     {
         using var certificate = CreateClientCertificate();
         var entry = CreateEntry(certificate);
@@ -85,15 +86,6 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             .PairId.Should().Be(entry.PairId);
 
         handler.Active = false;
-        (await client.RequireActiveCertificateAsync(
-            certificate,
-            entry.GatewayInstanceId,
-            entry.AuthoritativeRuntimeInstanceId,
-            CancellationToken.None))
-            .PairId.Should().Be(entry.PairId);
-        handler.ActiveCalls.Should().Be(1);
-
-        client.Invalidate(entry.PairId);
         var action = () => client.RequireActiveCertificateAsync(
             certificate,
             entry.GatewayInstanceId,
@@ -104,6 +96,96 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             .Where(exception => exception.Code == "PairNotAuthorized");
         handler.ActiveCalls.Should().Be(2);
     }
+
+    [Test]
+    public async Task Stored_session_validation_accepts_current_active_target()
+    {
+        using var certificate = CreateClientCertificate();
+        var entry = CreateEntry(certificate);
+        var state = CreateState(entry);
+        var handler = new RegistryHandler(entry);
+        using var httpClient = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("https://runtime.test:48923"),
+        };
+        var client = new RemoteRuntimePairingClient(httpClient);
+
+        await client.ValidateActiveSessionAsync(
+            state,
+            entry.GatewayInstanceId,
+            entry.AuthoritativeRuntimeInstanceId,
+            entry.ProxyRuntimeInstanceId!,
+            certificate,
+            CancellationToken.None);
+
+        handler.ActiveCalls.Should().Be(1);
+        handler.Requests.Should().ContainSingle(request =>
+            request.Method == HttpMethod.Get
+            && request.Uri.AbsolutePath == RemoteRuntimeBridgePaths.RegistryActive
+            && request.Uri.Query.Contains(
+                "gatewayInstanceId=gateway-1",
+                StringComparison.Ordinal));
+    }
+
+    [Test]
+    public async Task Stored_session_validation_rejects_non_active_registry_states()
+    {
+        using var certificate = CreateClientCertificate();
+        var entry = CreateEntry(certificate);
+        var state = CreateState(entry);
+        foreach (var status in new[]
+                 {
+                     RemoteRuntimePairStatus.ClaimPending,
+                     RemoteRuntimePairStatus.Rejected,
+                     RemoteRuntimePairStatus.Revoked,
+                 })
+        {
+            var handler = new RegistryHandler(entry with { Status = status });
+            using var httpClient = new HttpClient(handler)
+            {
+                BaseAddress = new Uri("https://runtime.test:48923"),
+            };
+            var client = new RemoteRuntimePairingClient(httpClient);
+
+            var action = () => client.ValidateActiveSessionAsync(
+                state,
+                entry.GatewayInstanceId,
+                entry.AuthoritativeRuntimeInstanceId,
+                entry.ProxyRuntimeInstanceId!,
+                certificate,
+                CancellationToken.None);
+
+            await action.Should().ThrowAsync<RemoteRuntimePairingException>();
+        }
+
+        var expiredHandler = new RegistryHandler(
+            entry with { ExpiresAtUtc = DateTimeOffset.UtcNow.AddMinutes(-1) });
+        using var expiredHttpClient = new HttpClient(expiredHandler)
+        {
+            BaseAddress = new Uri("https://runtime.test:48923"),
+        };
+        var expiredClient = new RemoteRuntimePairingClient(expiredHttpClient);
+        var expiredAction = () => expiredClient.ValidateActiveSessionAsync(
+            state,
+            entry.GatewayInstanceId,
+            entry.AuthoritativeRuntimeInstanceId,
+            entry.ProxyRuntimeInstanceId!,
+            certificate,
+            CancellationToken.None);
+
+        await expiredAction.Should().ThrowAsync<RemoteRuntimePairingException>();
+    }
+
+    private static RemoteRuntimeProxySessionState CreateState(
+        RemoteRuntimePairingRegistrySnapshot entry)
+        => new(
+            entry.PairId,
+            "https://runtime.test:48923",
+            entry.GatewayServerPublicKeyHash,
+            entry.AuthoritativeRuntimeInstanceId,
+            entry.ProxyRuntimeInstanceId!,
+            "certificate-payload",
+            DateTimeOffset.UtcNow.AddHours(1));
 
     private static RemoteRuntimePairingRegistrySnapshot CreateEntry(
         X509Certificate2? certificate = null)
@@ -148,6 +230,7 @@ public sealed class RemoteRuntimePairingRegistryClientTests
     private sealed class RegistryHandler(RemoteRuntimePairingRegistrySnapshot entry)
         : HttpMessageHandler
     {
+        public RemoteRuntimePairingRegistrySnapshot ActiveEntry { get; set; } = entry;
         public List<RequestRecord> Requests { get; } = [];
         public List<HeaderRecord> RequestHeaders { get; } = [];
         public bool Active { get; set; } = true;
@@ -170,7 +253,7 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             {
                 ActiveCalls++;
                 return JsonResponse(
-                    Active ? entry : null);
+                    Active ? ActiveEntry : null);
             }
 
             if (request.Method == HttpMethod.Delete)

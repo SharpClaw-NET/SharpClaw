@@ -26,7 +26,20 @@ internal static class RemoteRuntimePairingAuthorization
         }
 
         var clientCertificate = await secrets.LoadClientCertificateAsync(state, cancellationToken);
-        return new RemoteRuntimeProxySession(instancePaths, state, clientCertificate);
+        try
+        {
+            await RuntimePairingClient.ValidateActiveSessionAsync(
+                plan,
+                state,
+                clientCertificate,
+                cancellationToken);
+            return new RemoteRuntimeProxySession(instancePaths, state, clientCertificate);
+        }
+        catch
+        {
+            clientCertificate.Dispose();
+            throw;
+        }
     }
 }
 

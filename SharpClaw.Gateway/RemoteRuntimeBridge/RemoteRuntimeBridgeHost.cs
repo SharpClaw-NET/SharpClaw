@@ -212,6 +212,28 @@ internal static class RemoteRuntimeBridgeHost
                 }
             });
 
+        bridgeApp.MapGet(
+            RemoteRuntimeBridgePaths.RegistryActive,
+            async (CancellationToken cancellationToken) =>
+            {
+                try
+                {
+                    var active = await registryClient.FindActiveAsync(
+                        target.GatewayInstanceId,
+                        target.AuthoritativeRuntimeInstanceId,
+                        cancellationToken);
+                    return active is null
+                        ? Results.StatusCode(StatusCodes.Status403Forbidden)
+                        : Results.Ok(active);
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
         bridgeApp.MapPost(
             RemoteRuntimeBridgePaths.AdminInvitation,
             async (

@@ -243,7 +243,6 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
                 Revision = current.Revision + 1,
             };
-            Invalidate(pairId);
             return Task.FromResult(_entry);
         }
     }
@@ -264,7 +263,6 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
                 UpdatedAtUtc = DateTimeOffset.UtcNow,
                 Revision = current.Revision + 1,
             };
-            Invalidate(pairId);
             return Task.FromResult(_entry);
         }
     }
@@ -276,7 +274,6 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         {
             _ = RequireEntry(pairId);
             _entry = null;
-            Invalidate(pairId);
             return Task.CompletedTask;
         }
     }
@@ -302,10 +299,6 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
                 "PairNotAuthorized",
                 "The client certificate is not active.");
         return entry;
-    }
-
-    public void Invalidate(Guid pairId)
-    {
     }
 
     public ValueTask DisposeAsync()

@@ -1,4 +1,5 @@
 using System.Net;
+using System.Net.Http.Json;
 using System.Net.Sockets;
 using System.Security.Authentication;
 using System.Security.Cryptography;
@@ -82,6 +83,15 @@ public sealed class RemoteRuntimeBridgeRevocationTests
             activeResponse.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
             activeResponse.StatusCode.Should().NotBe(HttpStatusCode.Forbidden);
 
+            using var activeRegistryResponse = await client.GetAsync(
+                RemoteRuntimeBridgePaths.RegistryActive
+                + "?gatewayInstanceId=gateway-1&authoritativeRuntimeInstanceId=runtime-1");
+            activeRegistryResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var activeRegistryEntry = await activeRegistryResponse.Content
+                .ReadFromJsonAsync<RemoteRuntimePairingRegistrySnapshot>();
+            activeRegistryEntry.Should().NotBeNull();
+            activeRegistryEntry!.Status.Should().Be(RemoteRuntimePairStatus.Active);
+
             var revoked = await registryClient.RevokeAsync(
                 new RemoteRuntimeRegistryRevocationRequest(
                     registryClient.PairId,
@@ -91,6 +101,11 @@ public sealed class RemoteRuntimeBridgeRevocationTests
 
             using var revokedResponse = await client.GetAsync("/api/health");
             revokedResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
+
+            using var revokedRegistryResponse = await client.GetAsync(
+                RemoteRuntimeBridgePaths.RegistryActive
+                + "?gatewayInstanceId=gateway-1&authoritativeRuntimeInstanceId=runtime-1");
+            revokedRegistryResponse.StatusCode.Should().Be(HttpStatusCode.Forbidden);
         }
         finally
         {

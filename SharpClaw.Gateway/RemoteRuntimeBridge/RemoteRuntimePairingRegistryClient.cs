@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography.X509Certificates;
@@ -71,7 +70,6 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
         string authoritativeRuntimeInstanceId,
         CancellationToken cancellationToken);
 
-    void Invalidate(Guid pairId);
 }
 
 internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairingRegistryClient
@@ -82,8 +80,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
     };
 
     private readonly HttpClient _httpClient;
-    private readonly ConcurrentDictionary<string, CacheEntry> _validationCache = new(StringComparer.Ordinal);
-
     public RemoteRuntimePairingRegistryClient(HttpClient httpClient)
     {
         _httpClient = httpClient ?? throw new ArgumentNullException(nameof(httpClient));
@@ -137,7 +133,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             RemoteRuntimeBridgePaths.RegistryApprove,
             request,
             cancellationToken);
-        Invalidate(result.PairId);
         return result;
     }
 
@@ -149,7 +144,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             RemoteRuntimeBridgePaths.RegistryRevoke,
             request,
             cancellationToken);
-        Invalidate(result.PairId);
         return result;
     }
 
@@ -218,7 +212,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             PairingRenewPath(pairId),
             request,
             cancellationToken);
-        Invalidate(result.PairId);
         return result;
     }
 
@@ -231,7 +224,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             PairingRejectPath(pairId),
             new RemoteRuntimeRegistryRejectionRequest(pairId, reason),
             cancellationToken);
-        Invalidate(result.PairId);
         return result;
     }
 
@@ -242,7 +234,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             response.EnsureSuccessStatusCode();
         else
             await ReadResponseAsync<object>(response, cancellationToken);
-        Invalidate(pairId);
     }
 
     public async Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
@@ -257,13 +248,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
                 "PairNotAuthorized",
                 "The client certificate does not contain an ECDSA public key.");
         var publicKeyHash = RemoteRuntimeCertificateHash.Compute(key);
-        var cacheKey = gatewayInstanceId + "|" + authoritativeRuntimeInstanceId + "|" + publicKeyHash;
-        if (_validationCache.TryGetValue(cacheKey, out var cached)
-            && cached.ExpiresAtUtc > DateTimeOffset.UtcNow)
-        {
-            return cached.Entry;
-        }
-
         var entry = await FindActiveAsync(
             gatewayInstanceId,
             authoritativeRuntimeInstanceId,
@@ -277,28 +261,7 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
                 "The client certificate is not active for this Runtime target.");
         }
 
-        if (_validationCache.Count >= 256)
-        {
-            foreach (var item in _validationCache)
-            {
-                if (item.Value.ExpiresAtUtc <= DateTimeOffset.UtcNow)
-                    _validationCache.TryRemove(item.Key, out _);
-            }
-        }
-
-        _validationCache[cacheKey] = new CacheEntry(
-            entry,
-            DateTimeOffset.UtcNow.AddSeconds(5));
         return entry;
-    }
-
-    public void Invalidate(Guid pairId)
-    {
-        foreach (var item in _validationCache)
-        {
-            if (item.Value.Entry.PairId == pairId)
-                _validationCache.TryRemove(item.Key, out _);
-        }
     }
 
     public ValueTask DisposeAsync()
@@ -389,10 +352,6 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
         => new(
             "PairingResponseInvalid",
             "The authoritative Runtime returned an empty pairing response.");
-
-    private sealed record CacheEntry(
-        RemoteRuntimePairingRegistrySnapshot Entry,
-        DateTimeOffset ExpiresAtUtc);
 
     private sealed record RemoteRuntimeErrorResponse(string? Code, string? Error);
 }

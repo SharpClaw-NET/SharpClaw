@@ -83,6 +83,17 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     }
 
     [Test]
+    public void Remote_proxy_revalidates_stored_session_before_binding()
+    {
+        var source = ReadRepositoryFile(
+            "SharpClaw.Runtime/Host/RemoteRuntimePairingAuthorization.cs");
+
+        source.Should().Contain("RuntimePairingClient.ValidateActiveSessionAsync");
+        source.IndexOf("ValidateActiveSessionAsync", StringComparison.Ordinal)
+            .Should().BeLessThan(source.IndexOf("new RemoteRuntimeProxySession", StringComparison.Ordinal));
+    }
+
+    [Test]
     public void Gateway_bridge_must_use_a_separate_opt_in_pipeline()
     {
         var program = ReadRepositoryFile("SharpClaw.Gateway/Program.cs");
