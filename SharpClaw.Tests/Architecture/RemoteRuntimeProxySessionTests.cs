@@ -29,6 +29,7 @@ public sealed class RemoteRuntimeProxySessionTests
             "http://127.0.0.1:0",
             "https://127.0.0.1:48925",
             "gateway-public-key-hash",
+            "proxy-1",
             certificate,
             TimeSpan.FromSeconds(10),
             TimeSpan.FromSeconds(120));
@@ -80,6 +81,7 @@ public sealed class RemoteRuntimeProxySessionTests
             "https://127.0.0.1:48925",
             "gateway-public-key-hash",
             "local-key",
+            "proxy-1",
             certificate,
             TimeSpan.FromSeconds(10),
             TimeSpan.FromSeconds(120));
@@ -89,6 +91,7 @@ public sealed class RemoteRuntimeProxySessionTests
             "http://127.0.0.1:48925",
             "gateway-public-key-hash",
             "local-key",
+            "proxy-1",
             certificate,
             TimeSpan.FromSeconds(10),
             TimeSpan.FromSeconds(120));

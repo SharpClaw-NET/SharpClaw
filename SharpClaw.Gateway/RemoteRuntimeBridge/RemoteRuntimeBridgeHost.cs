@@ -30,6 +30,15 @@ internal sealed record RemoteRuntimeBridgeTarget(
     string AuthoritativeApiKey,
     string AuthoritativeGatewayToken);
 
+internal enum RemoteRuntimeBridgeCredentialMode
+{
+    DelegatedUser,
+    PairedCliControl,
+}
+
+internal sealed record RemoteRuntimeBridgeCredentialMetadata(
+    RemoteRuntimeBridgeCredentialMode Mode);
+
 internal static class RemoteRuntimeBridgeHost
 {
     public static void RegisterServices(
@@ -87,6 +96,8 @@ internal static class RemoteRuntimeBridgeHost
         }
 
         var concurrencyLimiter = new RemoteRuntimeBridgeConcurrencyLimiter(options);
+        var lastSeen = new RemoteRuntimeBridgeLastSeenGate(
+            TimeSpan.FromSeconds(options.LastSeenUpdateIntervalSeconds));
         var builder = WebApplication.CreateSlimBuilder(args);
         builder.WebHost.ConfigureKestrel(serverOptions =>
         {
@@ -107,12 +118,17 @@ internal static class RemoteRuntimeBridgeHost
         bridgeApp.UseWebSockets();
         bridgeApp.Use(async (context, next) =>
         {
+            var unauthenticatedControl = IsUnauthenticatedControlPath(context.Request.Path);
             var certificate = await context.Connection.GetClientCertificateAsync(
                 context.RequestAborted);
             RemoteRuntimePairingRegistrySnapshot? activePair = null;
-            if (certificate is null && !IsUnauthenticatedControlPath(context.Request.Path))
+            if (certificate is null && !unauthenticatedControl)
             {
-                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                await WriteTransportErrorAsync(
+                    context,
+                    StatusCodes.Status401Unauthorized,
+                    "BridgeCertificateRequired",
+                    "A pairing certificate is required.");
                 return;
             }
 
@@ -129,27 +145,34 @@ internal static class RemoteRuntimeBridgeHost
                         certificate,
                         target.GatewayInstanceId,
                         target.AuthoritativeRuntimeInstanceId,
+                        context.Request.Headers[RemoteRuntimeBridgePaths.ProxyIdentityHeader].ToString(),
                         context.RequestAborted,
                         target.AuthoritativeRuntimeInstallFingerprint);
                 }
                 catch (RemoteRuntimePairingException)
                 {
-                    if (!IsUnauthenticatedControlPath(context.Request.Path))
+                    if (!unauthenticatedControl)
                     {
-                        context.Response.StatusCode = StatusCodes.Status403Forbidden;
+                        await WriteTransportErrorAsync(
+                            context,
+                            StatusCodes.Status403Forbidden,
+                            "BridgePairNotAuthorized",
+                            "The pairing certificate is not authorized for this target.");
                         return;
                     }
                 }
             }
 
             var workKind = GetWorkKind(context);
-            var lease = activePair is null
-                ? null
-                : concurrencyLimiter.TryAcquire(activePair.PairId, workKind);
-            if (activePair is not null && lease is null)
+            var lease = concurrencyLimiter.TryAcquire(activePair?.PairId, workKind);
+            if (lease is null)
             {
-                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
                 context.Response.Headers.RetryAfter = "0";
+                await WriteTransportErrorAsync(
+                    context,
+                    StatusCodes.Status429TooManyRequests,
+                    "BridgeConcurrencyLimit",
+                    "The bridge concurrency limit is active.");
                 return;
             }
 
@@ -160,6 +183,30 @@ internal static class RemoteRuntimeBridgeHost
             finally
             {
                 lease?.Dispose();
+                if (activePair is not null
+                    && context.Response.StatusCode < StatusCodes.Status500InternalServerError
+                    && lastSeen.TryReserve(activePair.PairId))
+                {
+                    try
+                    {
+                        await registryClient.TouchLastSeenAsync(
+                            activePair.PairId,
+                            context.RequestAborted);
+                    }
+                    catch (OperationCanceledException) when (context.RequestAborted.IsCancellationRequested)
+                    {
+                    }
+                    catch (RemoteRuntimePairingException exception)
+                    {
+                        bridgeApp.Logger.LogWarning(
+                            "The bridge could not update pairing LastSeen. Code={Code}.",
+                            exception.Code);
+                    }
+                    catch (HttpRequestException)
+                    {
+                        bridgeApp.Logger.LogWarning("The bridge could not update pairing LastSeen.");
+                    }
+                }
             }
         });
 
@@ -522,8 +569,8 @@ internal static class RemoteRuntimeBridgeHost
                 }
             });
 
-            bridgeApp.MapForwarder(
-                "/{**catch-all}",
+        var cliForwarder = bridgeApp.MapForwarder(
+            RemoteRuntimeBridgePaths.CliControl,
             target.TargetBaseUrl,
             new ForwarderRequestConfig
             {
@@ -534,6 +581,25 @@ internal static class RemoteRuntimeBridgeHost
             new RemoteRuntimeBridgeTransformer(
                 target.AuthoritativeApiKey,
                 target.AuthoritativeGatewayToken));
+        cliForwarder.WithMetadata(
+            new RemoteRuntimeBridgeCredentialMetadata(
+                RemoteRuntimeBridgeCredentialMode.PairedCliControl));
+
+        var delegatedForwarder = bridgeApp.MapForwarder(
+            "/{**catch-all}",
+            target.TargetBaseUrl,
+            new ForwarderRequestConfig
+            {
+                AllowResponseBuffering = false,
+                Version = HttpVersion.Version11,
+                VersionPolicy = HttpVersionPolicy.RequestVersionExact,
+            },
+            new RemoteRuntimeBridgeTransformer(
+                target.AuthoritativeApiKey,
+                target.AuthoritativeGatewayToken));
+        delegatedForwarder.WithMetadata(
+            new RemoteRuntimeBridgeCredentialMetadata(
+                RemoteRuntimeBridgeCredentialMode.DelegatedUser));
         return bridgeApp;
     }
 
@@ -569,6 +635,9 @@ internal static class RemoteRuntimeBridgeHost
 
     private static RemoteRuntimeBridgeWorkKind GetWorkKind(HttpContext context)
     {
+        if (IsUnauthenticatedControlPath(context.Request.Path))
+            return RemoteRuntimeBridgeWorkKind.PairingControl;
+
         if (context.WebSockets.IsWebSocketRequest)
             return RemoteRuntimeBridgeWorkKind.WebSocket;
 
@@ -576,6 +645,19 @@ internal static class RemoteRuntimeBridgeHost
                 value?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true)
             ? RemoteRuntimeBridgeWorkKind.Stream
             : RemoteRuntimeBridgeWorkKind.Request;
+    }
+
+    private static Task WriteTransportErrorAsync(
+        HttpContext context,
+        int statusCode,
+        string code,
+        string message)
+    {
+        context.Response.StatusCode = statusCode;
+        context.Response.ContentType = "application/json";
+        return context.Response.WriteAsJsonAsync(
+            new { code, error = message },
+            context.RequestAborted);
     }
 
     private static bool HasLocalAdministrationAccess(
@@ -648,10 +730,23 @@ internal static class RemoteRuntimeBridgeHost
             proxyRequest.Headers.Remove("X-Forwarded-Host");
             proxyRequest.Headers.Remove("X-Forwarded-Proto");
             proxyRequest.Headers.Remove("Forwarded");
+            foreach (var header in proxyRequest.Headers
+                         .Where(static header => header.Key.StartsWith(
+                             "X-SharpClaw-Bridge-",
+                             StringComparison.OrdinalIgnoreCase))
+                         .Select(static header => header.Key)
+                         .ToArray())
+            {
+                proxyRequest.Headers.Remove(header);
+            }
+            var credentialMode = httpContext.GetEndpoint()?
+                .Metadata
+                .GetMetadata<RemoteRuntimeBridgeCredentialMetadata>()?
+                .Mode
+                ?? throw new InvalidOperationException(
+                    "The bridge forwarder has no trusted credential mode metadata.");
             proxyRequest.Headers.TryAddWithoutValidation("X-Api-Key", authoritativeApiKey);
-            if (httpContext.Request.Path.Equals(
-                    RemoteRuntimeBridgePaths.CliControl,
-                    StringComparison.Ordinal))
+            if (credentialMode == RemoteRuntimeBridgeCredentialMode.PairedCliControl)
             {
                 proxyRequest.Headers.TryAddWithoutValidation(
                     "X-Gateway-Token",
@@ -660,6 +755,28 @@ internal static class RemoteRuntimeBridgeHost
             else
             {
                 proxyRequest.Headers.Remove("X-Gateway-Token");
+            }
+        }
+    }
+
+    private sealed class RemoteRuntimeBridgeLastSeenGate(TimeSpan interval)
+    {
+        private readonly object _gate = new();
+        private readonly Dictionary<Guid, DateTimeOffset> _lastSeen = [];
+
+        public bool TryReserve(Guid pairId)
+        {
+            var now = DateTimeOffset.UtcNow;
+            lock (_gate)
+            {
+                if (_lastSeen.TryGetValue(pairId, out var previous)
+                    && now - previous < interval)
+                {
+                    return false;
+                }
+
+                _lastSeen[pairId] = now;
+                return true;
             }
         }
     }

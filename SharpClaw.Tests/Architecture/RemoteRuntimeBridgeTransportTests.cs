@@ -77,6 +77,7 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 localUrl,
                 gatewayOptions.ListenUrl,
                 RemoteRuntimeCertificateHash.Compute(serverCertificate),
+                "proxy-1",
                 clientCertificate,
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromSeconds(30));
@@ -98,6 +99,15 @@ public sealed class RemoteRuntimeBridgeTransportTests
             var headersBody = await headersResponse.Content.ReadAsStringAsync();
             headersBody.Should().Be(
                 "GET|/api/headers|preserved|authoritative-api-key|");
+            (await registryClient.FindAsync(
+                registryClient.PairId,
+                CancellationToken.None))!
+                .LastSeenAtUtc.Should().NotBeNull();
+
+            using var cliLikeResponse = await client.GetAsync("/api/cli-like");
+            cliLikeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            (await cliLikeResponse.Content.ReadAsStringAsync())
+                .Should().Be("GET|/api/cli-like|preserved|authoritative-api-key|");
 
             var uploadPayload = Enumerable.Range(0, 128)
                 .Select(static value => (byte)value)
@@ -356,7 +366,8 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 return;
             }
 
-            if (context.Request.Path == "/api/headers")
+            if (context.Request.Path == "/api/headers"
+                || context.Request.Path == "/api/cli-like")
             {
                 await context.Response.WriteAsync(
                     string.Join(

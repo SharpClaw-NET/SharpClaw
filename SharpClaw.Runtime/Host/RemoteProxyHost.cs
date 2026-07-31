@@ -24,6 +24,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         string gatewayBridgeUrl,
         string gatewayServerPublicKeyHash,
         string localApiKey,
+        string proxyRuntimeInstanceId,
         X509Certificate2 clientCertificate,
         TimeSpan connectTimeout,
         TimeSpan activityTimeout)
@@ -34,6 +35,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         GatewayServerPublicKeyHash = gatewayServerPublicKeyHash
             ?? throw new ArgumentNullException(nameof(gatewayServerPublicKeyHash));
         LocalApiKey = localApiKey ?? throw new ArgumentNullException(nameof(localApiKey));
+        ProxyRuntimeInstanceId = proxyRuntimeInstanceId
+            ?? throw new ArgumentNullException(nameof(proxyRuntimeInstanceId));
         ClientCertificate = clientCertificate ?? throw new ArgumentNullException(nameof(clientCertificate));
         ConnectTimeout = connectTimeout;
         ActivityTimeout = activityTimeout;
@@ -50,6 +53,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
 
     public string LocalApiKey { get; }
 
+    public string ProxyRuntimeInstanceId { get; }
+
     public X509Certificate2 ClientCertificate { get; }
 
     public TimeSpan ConnectTimeout { get; }
@@ -61,6 +66,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         string localUrl,
         string gatewayBridgeUrl,
         string gatewayServerPublicKeyHash,
+        string proxyRuntimeInstanceId,
         X509Certificate2 clientCertificate,
         TimeSpan connectTimeout,
         TimeSpan activityTimeout)
@@ -88,6 +94,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
                 gatewayBridgeUrl,
                 gatewayServerPublicKeyHash,
                 localApiKey,
+                proxyRuntimeInstanceId,
                 clientCertificate,
                 connectTimeout,
                 activityTimeout);
@@ -169,6 +176,9 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         if (string.IsNullOrWhiteSpace(LocalApiKey))
             throw new InvalidOperationException("RemoteProxy mode requires a local session API key.");
 
+        if (string.IsNullOrWhiteSpace(ProxyRuntimeInstanceId))
+            throw new InvalidOperationException("RemoteProxy mode requires its approved proxy identity.");
+
         if (!ClientCertificate.HasPrivateKey)
             throw new InvalidOperationException(
                 "RemoteProxy mode requires the private key for its approved client certificate.");
@@ -206,6 +216,7 @@ public static class RemoteProxyHost
                 options.LocalUrl,
                 session.State.GatewayBridgeUrl,
                 session.State.GatewayServerPublicKeyHash,
+                session.State.ProxyRuntimeInstanceId,
                 clientCertificate,
                 TimeSpan.FromSeconds(options.ConnectTimeoutSeconds),
                 TimeSpan.FromSeconds(options.ActivityTimeoutSeconds));
@@ -287,7 +298,7 @@ public static class RemoteProxyHost
                 Version = HttpVersion.Version11,
                 VersionPolicy = HttpVersionPolicy.RequestVersionExact,
             },
-            new RemoteProxyTransformer());
+            new RemoteProxyTransformer(connection.ProxyRuntimeInstanceId));
         return app;
     }
 
@@ -307,7 +318,7 @@ public static class RemoteProxyHost
         }
     }
 
-    private sealed class RemoteProxyTransformer : HttpTransformer
+    private sealed class RemoteProxyTransformer(string proxyRuntimeInstanceId) : HttpTransformer
     {
         public override async ValueTask TransformRequestAsync(
             HttpContext httpContext,
@@ -326,6 +337,18 @@ public static class RemoteProxyHost
             proxyRequest.Headers.Remove("X-Forwarded-Host");
             proxyRequest.Headers.Remove("X-Forwarded-Proto");
             proxyRequest.Headers.Remove("Forwarded");
+            foreach (var header in proxyRequest.Headers
+                         .Where(static header => header.Key.StartsWith(
+                             "X-SharpClaw-Bridge-",
+                             StringComparison.OrdinalIgnoreCase))
+                         .Select(static header => header.Key)
+                         .ToArray())
+            {
+                proxyRequest.Headers.Remove(header);
+            }
+            proxyRequest.Headers.TryAddWithoutValidation(
+                RemoteRuntimeBridgePaths.ProxyIdentityHeader,
+                proxyRuntimeInstanceId);
         }
     }
 }

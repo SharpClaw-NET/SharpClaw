@@ -20,6 +20,16 @@ public sealed class RemoteRuntimeBridgeOptions
 
     public int MaxConcurrentWebSocketsPerPair { get; init; } = 8;
 
+    public int MaxConcurrentRequests { get; init; } = 256;
+
+    public int MaxConcurrentStreams { get; init; } = 32;
+
+    public int MaxConcurrentWebSockets { get; init; } = 32;
+
+    public int MaxConcurrentPairingControls { get; init; } = 16;
+
+    public int LastSeenUpdateIntervalSeconds { get; init; } = 30;
+
     public static RemoteRuntimeBridgeOptions FromConfiguration(IConfiguration configuration)
     {
         var section = configuration.GetSection(SectionName);
@@ -57,6 +67,36 @@ public sealed class RemoteRuntimeBridgeOptions
                 8,
                 1,
                 256),
+            MaxConcurrentRequests = ReadBoundedInteger(
+                section,
+                "MaxConcurrentRequests",
+                256,
+                1,
+                4096),
+            MaxConcurrentStreams = ReadBoundedInteger(
+                section,
+                "MaxConcurrentStreams",
+                32,
+                1,
+                256),
+            MaxConcurrentWebSockets = ReadBoundedInteger(
+                section,
+                "MaxConcurrentWebSockets",
+                32,
+                1,
+                256),
+            MaxConcurrentPairingControls = ReadBoundedInteger(
+                section,
+                "MaxConcurrentPairingControls",
+                16,
+                1,
+                256),
+            LastSeenUpdateIntervalSeconds = ReadBoundedInteger(
+                section,
+                "LastSeenUpdateIntervalSeconds",
+                30,
+                1,
+                3600),
         };
     }
 

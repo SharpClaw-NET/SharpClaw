@@ -289,10 +289,27 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         }
     }
 
+    public Task TouchLastSeenAsync(Guid pairId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var current = RequireEntry(pairId);
+            _entry = current with
+            {
+                LastSeenAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                Revision = current.Revision + 1,
+            };
+            return Task.CompletedTask;
+        }
+    }
+
     public async Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
+        string proxyRuntimeInstanceId,
         CancellationToken cancellationToken,
         string? authoritativeRuntimeInstallFingerprint = null)
     {
@@ -306,6 +323,7 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
             gatewayInstanceId,
             authoritativeRuntimeInstanceId,
             cancellationToken,
+            proxyRuntimeInstanceId: proxyRuntimeInstanceId,
             certificateIdentity: certificate.Thumbprint,
             authoritativeRuntimeInstallFingerprint: authoritativeRuntimeInstallFingerprint);
         if (entry is null

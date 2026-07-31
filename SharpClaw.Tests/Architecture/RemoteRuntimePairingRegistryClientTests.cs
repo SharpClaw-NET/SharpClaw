@@ -82,6 +82,7 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             certificate,
             entry.GatewayInstanceId,
             entry.AuthoritativeRuntimeInstanceId,
+            entry.ProxyRuntimeInstanceId!,
             CancellationToken.None))
             .PairId.Should().Be(entry.PairId);
 
@@ -90,6 +91,7 @@ public sealed class RemoteRuntimePairingRegistryClientTests
             certificate,
             entry.GatewayInstanceId,
             entry.AuthoritativeRuntimeInstanceId,
+            entry.ProxyRuntimeInstanceId!,
             CancellationToken.None);
 
         await action.Should().ThrowAsync<RemoteRuntimePairingException>()

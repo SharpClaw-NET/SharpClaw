@@ -76,6 +76,7 @@ public sealed class RemoteRuntimeBridgePerformanceTests
                 localUrl,
                 gatewayOptions.ListenUrl,
                 RemoteRuntimeCertificateHash.Compute(serverCertificate),
+                "proxy-1",
                 clientCertificate,
                 TimeSpan.FromSeconds(10),
                 TimeSpan.FromSeconds(60));

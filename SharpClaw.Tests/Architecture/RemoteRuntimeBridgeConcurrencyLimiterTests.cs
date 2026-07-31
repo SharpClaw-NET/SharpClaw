@@ -44,7 +44,11 @@ public sealed class RemoteRuntimeBridgeConcurrencyLimiterTests
     public void Pair_tracking_is_bounded_and_empty_entries_are_evicted()
     {
         var limiter = new RemoteRuntimeBridgeConcurrencyLimiter(
-            new RemoteRuntimeBridgeOptions { MaxConcurrentRequestsPerPair = 1 });
+            new RemoteRuntimeBridgeOptions
+            {
+                MaxConcurrentRequestsPerPair = 1,
+                MaxConcurrentRequests = 4096,
+            });
         var leases = new List<IDisposable>();
 
         try
@@ -73,5 +77,32 @@ public sealed class RemoteRuntimeBridgeConcurrencyLimiterTests
             foreach (var lease in leases)
                 lease.Dispose();
         }
+    }
+
+    [Test]
+    public void Global_and_pairing_control_limits_apply_across_pairs()
+    {
+        var limiter = new RemoteRuntimeBridgeConcurrencyLimiter(
+            new RemoteRuntimeBridgeOptions
+            {
+                MaxConcurrentRequests = 1,
+                MaxConcurrentPairingControls = 1,
+            });
+        var firstPair = Guid.NewGuid();
+        var secondPair = Guid.NewGuid();
+
+        using var request = limiter.TryAcquire(
+            firstPair,
+            RemoteRuntimeBridgeWorkKind.Request);
+        request.Should().NotBeNull();
+        limiter.TryAcquire(secondPair, RemoteRuntimeBridgeWorkKind.Request)
+            .Should().BeNull();
+
+        using var control = limiter.TryAcquire(
+            pairId: null,
+            RemoteRuntimeBridgeWorkKind.PairingControl);
+        control.Should().NotBeNull();
+        limiter.TryAcquire(null, RemoteRuntimeBridgeWorkKind.PairingControl)
+            .Should().BeNull();
     }
 }

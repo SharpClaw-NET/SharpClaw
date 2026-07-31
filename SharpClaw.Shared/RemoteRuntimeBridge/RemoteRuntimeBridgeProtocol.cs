@@ -4,6 +4,7 @@ public static class RemoteRuntimeBridgePaths
 {
     public const int CurrentProtocolMajor = 1;
     public const string AdministrationKeyHeader = "X-SharpClaw-Bridge-Admin-Key";
+    public const string ProxyIdentityHeader = "X-SharpClaw-Bridge-Proxy-Identity";
     public const string PairingClaim = "/__sharpclaw/remote-runtime/pairing/claim";
     public const string PairingCertificate = "/__sharpclaw/remote-runtime/pairing/certificate";
     public const string AdminInvitation = "/__sharpclaw/remote-runtime/admin/invitation";

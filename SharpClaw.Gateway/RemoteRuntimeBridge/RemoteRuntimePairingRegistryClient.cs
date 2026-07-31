@@ -68,10 +68,13 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
 
     Task DeleteAsync(Guid pairId, CancellationToken cancellationToken);
 
+    Task TouchLastSeenAsync(Guid pairId, CancellationToken cancellationToken);
+
     Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
+        string proxyRuntimeInstanceId,
         CancellationToken cancellationToken,
         string? authoritativeRuntimeInstallFingerprint = null);
 
@@ -257,10 +260,20 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             await ReadResponseAsync<object>(response, cancellationToken);
     }
 
+    public async Task TouchLastSeenAsync(Guid pairId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PostAsync(
+            $"{PairingPath(pairId)}/last-seen",
+            content: null,
+            cancellationToken);
+        await ReadResponseAsync<RemoteRuntimePairingRegistrySnapshot>(response, cancellationToken);
+    }
+
     public async Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
+        string proxyRuntimeInstanceId,
         CancellationToken cancellationToken,
         string? authoritativeRuntimeInstallFingerprint = null)
     {
@@ -275,6 +288,7 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             gatewayInstanceId,
             authoritativeRuntimeInstanceId,
             cancellationToken,
+            proxyRuntimeInstanceId: proxyRuntimeInstanceId,
             certificateIdentity: certificate.Thumbprint,
             authoritativeRuntimeInstallFingerprint: authoritativeRuntimeInstallFingerprint);
         if (entry is null
