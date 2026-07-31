@@ -19,6 +19,27 @@ public static class RuntimePairingClient
             throw new ArgumentException("The launch plan is not PairingClient mode.", nameof(plan));
 
         cancellationToken.ThrowIfCancellationRequested();
+        var instancePaths = RuntimeInstancePathResolver.CreateBackend();
+        await PairAsync(plan, instancePaths, cancellationToken);
+    }
+
+    internal static async Task PairAsync(
+        RuntimeLaunchPlan plan,
+        SharpClawInstancePaths instancePaths,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(instancePaths);
+
+        if (plan.Mode is not RuntimeLaunchMode.PairingClient
+            and not RuntimeLaunchMode.RemoteProxy)
+        {
+            throw new ArgumentException(
+                "The launch plan does not request remote pairing.",
+                nameof(plan));
+        }
+
+        cancellationToken.ThrowIfCancellationRequested();
         var options = plan.RequireRemoteProxyOptions();
         if (!Uri.TryCreate(options.GatewayUrl, UriKind.Absolute, out var gatewayBridgeUri)
             || !string.Equals(gatewayBridgeUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
@@ -28,7 +49,6 @@ public static class RuntimePairingClient
         }
 
         var invitation = options.CreateInvitation();
-        var instancePaths = RuntimeInstancePathResolver.CreateBackend();
         using var httpClient = CreatePinnedClient(
             gatewayBridgeUri,
             invitation.GatewayServerPublicKeyHash);

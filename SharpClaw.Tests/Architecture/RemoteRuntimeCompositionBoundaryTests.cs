@@ -1,5 +1,6 @@
 using System.Reflection;
 using System.Text.Json;
+using System.Net.Http;
 using FluentAssertions;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -67,6 +68,18 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         source.Should().Contain("LoadApprovedSessionAsync");
         source.Should().NotContain("WebApplication.CreateBuilder");
         source.Should().NotContain("Listen");
+    }
+
+    [Test]
+    public void Remote_proxy_attempts_configured_pairing_when_session_is_missing()
+    {
+        var source = ReadRepositoryFile(
+            "SharpClaw.Runtime/Host/RemoteRuntimePairingAuthorization.cs");
+
+        source.Should().Contain("RemoteRuntimeProxySessionStore.Create");
+        source.Should().Contain("await store.ReadAsync");
+        source.Should().Contain("RuntimePairingClient.PairAsync");
+        source.Should().Contain("active approved session");
     }
 
     [Test]
@@ -215,13 +228,19 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     }
 
     [Test]
-    public async Task Remote_proxy_without_an_approved_pair_fails_before_binding()
+    public async Task Remote_proxy_unreachable_pairing_fails_closed_before_binding()
     {
-        var plan = RuntimeLaunchPlan.From([], CreateRemoteConfiguration());
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>(CreateRemoteConfigurationValues())
+            {
+                ["Runtime:RemoteProxy:GatewayUrl"] = "https://127.0.0.1:1",
+            })
+            .Build();
+        var plan = RuntimeLaunchPlan.From([], configuration);
 
         var action = async () => await RemoteProxyHost.RunAsync(plan);
 
-        await action.Should().ThrowAsync<InvalidOperationException>();
+        await action.Should().ThrowAsync<HttpRequestException>();
     }
 
     [Test]
@@ -401,8 +420,12 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
     private static IConfiguration CreateRemoteConfiguration()
         => new ConfigurationBuilder()
-            .AddInMemoryCollection(new Dictionary<string, string?>
-            {
+            .AddInMemoryCollection(CreateRemoteConfigurationValues())
+            .Build();
+
+    private static Dictionary<string, string?> CreateRemoteConfigurationValues()
+        => new()
+        {
                 ["Runtime:RemoteProxy:Enabled"] = "true",
                 ["Runtime:RemoteProxy:LocalUrl"] = "http://127.0.0.1:48923",
                 ["Runtime:RemoteProxy:GatewayUrl"] = "https://gateway.example:48925",
@@ -418,6 +441,5 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
                 ["Runtime:RemoteProxy:GatewayServerPublicKeyHash"] = "gateway-public-key-hash",
                 ["Runtime:RemoteProxy:AuthoritativeRuntimeInstallFingerprint"] = "runtime-fingerprint",
                 ["Runtime:RemoteProxy:InvitationExpiresAtUtc"] = "2099-01-01T00:00:00Z",
-            })
-            .Build();
+        };
 }

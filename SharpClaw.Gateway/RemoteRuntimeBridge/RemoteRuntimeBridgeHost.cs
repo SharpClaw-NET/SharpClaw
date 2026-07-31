@@ -381,8 +381,8 @@ internal static class RemoteRuntimeBridgeHost
         if (context.WebSockets.IsWebSocketRequest)
             return RemoteRuntimeBridgeWorkKind.WebSocket;
 
-        return context.Request.Headers.Accept.Any(value =>
-                value.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+        return context.Request.Headers["Accept"].Any(value =>
+                value?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true)
             ? RemoteRuntimeBridgeWorkKind.Stream
             : RemoteRuntimeBridgeWorkKind.Request;
     }

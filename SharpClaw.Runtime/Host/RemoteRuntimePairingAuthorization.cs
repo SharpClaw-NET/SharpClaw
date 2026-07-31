@@ -15,21 +15,16 @@ internal static class RemoteRuntimePairingAuthorization
 
         var instancePaths = RuntimeInstancePathResolver.CreateBackend();
         plan.RequireRemoteProxyOptions();
-
-        var expectedSessionPath = Path.Combine(
-            instancePaths.RemoteRuntimeProxyStateDirectory,
-            ".env");
-
-        if (!File.Exists(expectedSessionPath))
+        var store = RemoteRuntimeProxySessionStore.Create(instancePaths);
+        var state = await store.ReadAsync(cancellationToken);
+        if (state is null)
         {
-            throw new InvalidOperationException(
-                "RemoteProxy mode requires an existing approved pairing session before binding.");
+            await RuntimePairingClient.PairAsync(plan, instancePaths, cancellationToken);
+            state = await store.ReadAsync(cancellationToken)
+                ?? throw new InvalidOperationException(
+                    "RemoteProxy pairing completed without an active approved session.");
         }
 
-        var store = RemoteRuntimeProxySessionStore.Create(instancePaths);
-        var state = await store.ReadAsync(cancellationToken)
-            ?? throw new InvalidOperationException(
-                "RemoteProxy mode requires an active approved pairing session before binding.");
         var clientCertificate = await store.LoadClientCertificateAsync(state, cancellationToken);
         return new RemoteRuntimeProxySession(instancePaths, state, clientCertificate);
     }

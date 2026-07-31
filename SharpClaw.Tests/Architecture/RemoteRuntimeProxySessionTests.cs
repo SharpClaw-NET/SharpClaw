@@ -90,7 +90,7 @@ public sealed class RemoteRuntimeProxySessionTests
     }
 
     [Test]
-    public async Task Missing_proxy_session_fails_before_creating_proxy_state()
+    public async Task Incomplete_pairing_invitation_fails_closed_without_creating_local_api_key()
     {
         var root = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
@@ -110,9 +110,9 @@ public sealed class RemoteRuntimeProxySessionTests
 
             await action.Should()
                 .ThrowAsync<InvalidOperationException>()
-                .WithMessage("*existing approved pairing session*");
+                .WithMessage("*invitation ID*");
 
-            Directory.Exists(Path.Combine(root, "backend", "secrets")).Should().BeFalse();
+            Directory.Exists(Path.Combine(root, "backend", "secrets")).Should().BeTrue();
             File.Exists(Path.Combine(root, "backend", "runtime", ".api-key")).Should().BeFalse();
         }
         finally
