@@ -2,6 +2,7 @@ using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.Configuration;
 using NUnit.Framework;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Shared.Instances;
@@ -103,8 +104,7 @@ public sealed class RemoteRuntimeProxySessionTests
         {
             var plan = new RuntimeLaunchPlan(
                 RuntimeLaunchMode.RemoteProxy,
-                null,
-                "http://127.0.0.1:48923");
+                new RemoteProxyOptionsForTests().Create());
 
             var action = () => RemoteProxyHost.RunAsync(plan);
 
@@ -134,5 +134,27 @@ public sealed class RemoteRuntimeProxySessionTests
         return request.CreateSelfSigned(
             DateTimeOffset.UtcNow.AddMinutes(-1),
             DateTimeOffset.UtcNow.AddMinutes(5));
+    }
+
+    private sealed class RemoteProxyOptionsForTests
+    {
+        public RemoteProxyOptions Create()
+            => RemoteProxyOptions.Bind(
+                new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Runtime:RemoteProxy:Enabled"] = "true",
+                        ["Runtime:RemoteProxy:LocalUrl"] = "http://127.0.0.1:48923",
+                        ["Runtime:RemoteProxy:GatewayUrl"] = "https://gateway.example:48925",
+                        ["Runtime:RemoteProxy:GatewayInstanceId"] = "gateway-1",
+                        ["Runtime:RemoteProxy:AuthoritativeRuntimeInstanceId"] = "runtime-1",
+                        ["Runtime:RemoteProxy:ProxyRuntimeInstanceId"] = "proxy-1",
+                        ["Runtime:RemoteProxy:InvitationSecret"] = "secret-name",
+                        ["Runtime:RemoteProxy:PrivateKeySecret"] = "private-key-name",
+                        ["Runtime:RemoteProxy:ClientCertificateSecret"] = "certificate-name",
+                        ["Runtime:RemoteProxy:ConnectTimeoutSeconds"] = "10",
+                        ["Runtime:RemoteProxy:ActivityTimeoutSeconds"] = "120",
+                    })
+                    .Build())!;
     }
 }

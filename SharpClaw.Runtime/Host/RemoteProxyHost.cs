@@ -176,13 +176,14 @@ public static class RemoteProxyHost
         using var session = await RemoteRuntimePairingAuthorization.LoadApprovedSessionAsync(
             plan,
             cancellationToken);
+        var options = plan.RequireRemoteProxyOptions();
         var clientCertificate = session.DetachClientCertificate();
         RemoteRuntimeProxyConnection? connection = null;
         try
         {
             connection = RemoteRuntimeProxyConnection.Create(
                 session.InstancePaths,
-                plan.LocalUrl ?? "http://127.0.0.1:48923",
+                options.LocalUrl,
                 session.State.GatewayBridgeUrl,
                 session.State.GatewayServerPublicKeyHash,
                 clientCertificate);

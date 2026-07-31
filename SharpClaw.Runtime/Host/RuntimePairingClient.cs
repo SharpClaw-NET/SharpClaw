@@ -19,53 +19,21 @@ public static class RuntimePairingClient
             throw new ArgumentException("The launch plan is not PairingClient mode.", nameof(plan));
 
         cancellationToken.ThrowIfCancellationRequested();
-        if (string.IsNullOrWhiteSpace(plan.PairingFile))
-        {
-            throw new InvalidOperationException(
-                "PairingClient mode requires a pairing invitation file.");
-        }
-
-        if (!Uri.TryCreate(plan.GatewayBridgeUrl, UriKind.Absolute, out var gatewayBridgeUri)
+        var options = plan.RequireRemoteProxyOptions();
+        if (!Uri.TryCreate(options.GatewayUrl, UriKind.Absolute, out var gatewayBridgeUri)
             || !string.Equals(gatewayBridgeUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
         {
             throw new InvalidOperationException(
                 "PairingClient mode requires an HTTPS Gateway bridge URL.");
         }
 
-        var invitation = ReadInvitation(plan.PairingFile);
+        var invitation = options.CreateInvitation();
         var instancePaths = RuntimeInstancePathResolver.CreateBackend();
         using var httpClient = CreatePinnedClient(
             gatewayBridgeUri,
             invitation.GatewayServerPublicKeyHash);
         var pairingClient = new RemoteRuntimePairingClient(httpClient);
         await pairingClient.PairAsync(invitation, instancePaths, cancellationToken);
-    }
-
-    internal static RemoteRuntimePairingInvitation ReadInvitation(string path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-            throw new ArgumentException("A pairing invitation path is required.", nameof(path));
-
-        try
-        {
-            var invitation = JsonSerializer.Deserialize<RemoteRuntimePairingInvitation>(
-                File.ReadAllText(path),
-                new JsonSerializerOptions(JsonSerializerDefaults.Web)
-                {
-                    PropertyNameCaseInsensitive = true,
-                });
-            if (invitation is null)
-                throw new InvalidOperationException("The pairing invitation file is empty.");
-
-            ValidateInvitation(invitation);
-            return invitation;
-        }
-        catch (JsonException exception)
-        {
-            throw new InvalidOperationException(
-                "The pairing invitation file is not valid JSON.",
-                exception);
-        }
     }
 
     private static HttpClient CreatePinnedClient(

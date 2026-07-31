@@ -14,18 +14,11 @@ internal static class RemoteRuntimePairingAuthorization
         cancellationToken.ThrowIfCancellationRequested();
 
         var instancePaths = RuntimeInstancePathResolver.CreateBackend();
+        plan.RequireRemoteProxyOptions();
+
         var expectedSessionPath = Path.Combine(
             instancePaths.RemoteRuntimeProxyStateDirectory,
             ".env");
-        if (!string.IsNullOrWhiteSpace(plan.PairingFile)
-            && !string.Equals(
-                Path.GetFullPath(plan.PairingFile),
-                Path.GetFullPath(expectedSessionPath),
-                StringComparison.OrdinalIgnoreCase))
-        {
-            throw new InvalidOperationException(
-                "RemoteProxy mode requires the protected pairing session for this Runtime instance.");
-        }
 
         if (!File.Exists(expectedSessionPath))
         {

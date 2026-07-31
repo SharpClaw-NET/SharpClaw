@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Runtime.INF.Configuration;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -8,8 +9,18 @@ public static class RuntimeLauncher
         IReadOnlyList<string> args,
         CancellationToken cancellationToken = default)
     {
+        var instancePaths = RuntimeInstancePathResolver.CreateBackend();
+        var isDevelopment = string.Equals(
+            Environment.GetEnvironmentVariable("DOTNET_ENVIRONMENT"),
+            "Development",
+            StringComparison.OrdinalIgnoreCase)
+            || string.Equals(
+                Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+                "Development",
+                StringComparison.OrdinalIgnoreCase);
         var configuration = new ConfigurationBuilder()
             .AddEnvironmentVariables()
+            .AddLocalEnvironment(isDevelopment, instancePaths)
             .Build();
         var plan = RuntimeLaunchPlan.From(args, configuration);
 

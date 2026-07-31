@@ -105,7 +105,10 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
         source.Should().Contain("Local");
         source.Should().Contain("RemoteProxy");
-        source.Should().Contain("null or \"\" or \"Local\" => RuntimeLaunchMode.Local");
+        source.Should().Contain("RemoteProxyOptions.Bind");
+        source.Should().NotContain("Runtime:Mode");
+        source.Should().NotContain("SHARPCLAW_RUNTIME_MODE");
+        source.Should().NotContain("PairingFile");
     }
 
     [Test]
@@ -116,12 +119,105 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             new ConfigurationBuilder().Build());
 
         plan.Mode.Should().Be(RuntimeLaunchMode.Local);
+        plan.RemoteProxyOptions.Should().BeNull();
+    }
+
+    [Test]
+    public void Explicit_remote_disablement_restores_local_mode()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Runtime:RemoteProxy:Enabled"] = "false",
+                ["Runtime:RemoteProxy:LocalUrl"] = "not-a-url",
+            })
+            .Build();
+
+        var plan = RuntimeLaunchPlan.From([], configuration);
+
+        plan.Mode.Should().Be(RuntimeLaunchMode.Local);
+        plan.RemoteProxyOptions.Should().BeNull();
+    }
+
+    [Test]
+    public void Complete_remote_options_select_remote_proxy_mode()
+    {
+        var plan = RuntimeLaunchPlan.From([], CreateRemoteConfiguration());
+
+        plan.Mode.Should().Be(RuntimeLaunchMode.RemoteProxy);
+        plan.RequireRemoteProxyOptions().LocalUrl.Should().Be("http://127.0.0.1:48923");
+    }
+
+    [Test]
+    public void Pairing_composition_reads_invitation_inputs_from_remote_options()
+    {
+        var plan = RuntimeLaunchPlan.From(["--pair"], CreateRemoteConfiguration());
+
+        plan.Mode.Should().Be(RuntimeLaunchMode.PairingClient);
+        plan.RequireRemoteProxyOptions().CreateInvitation().Secret.Should().Be("secret-name");
+    }
+
+    [Test]
+    public void Partial_remote_options_fail_closed_before_host_selection()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Runtime:RemoteProxy:Enabled"] = "true",
+                ["Runtime:RemoteProxy:LocalUrl"] = "http://127.0.0.1:48923",
+            })
+            .Build();
+
+        var action = () => RuntimeLaunchPlan.From([], configuration);
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*GatewayUrl*");
+    }
+
+    [Test]
+    public void Legacy_mode_configuration_cannot_authorize_proxy_startup()
+    {
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Runtime:Mode"] = "RemoteProxy",
+                ["SHARPCLAW_RUNTIME_MODE"] = "RemoteProxy",
+            })
+            .Build();
+
+        var plan = RuntimeLaunchPlan.From([], configuration);
+
+        plan.Mode.Should().Be(RuntimeLaunchMode.Local);
+    }
+
+    [Test]
+    public void Pairing_composition_requires_remote_options()
+    {
+        var action = () => RuntimeLaunchPlan.From(
+            ["--pair"],
+            new ConfigurationBuilder().Build());
+
+        action.Should().Throw<InvalidOperationException>()
+            .WithMessage("*Runtime:RemoteProxy*");
+    }
+
+    [Test]
+    public void Early_launcher_uses_the_local_environment_loader_without_local_host_services()
+    {
+        var source = ReadRepositoryFile("SharpClaw.Runtime/Host/RuntimeLauncher.cs");
+
+        source.Should().Contain("AddLocalEnvironment");
+        source.Should().Contain("RuntimeLaunchPlan.From");
+        source.Should().NotContain("AddInfrastructure");
+        source.Should().NotContain("LocalRuntimeHost");
+        source.IndexOf("RuntimeLaunchPlan.From", StringComparison.Ordinal)
+            .Should().BeGreaterThan(source.IndexOf("AddLocalEnvironment", StringComparison.Ordinal));
     }
 
     [Test]
     public async Task Remote_proxy_without_an_approved_pair_fails_before_binding()
     {
-        var plan = new RuntimeLaunchPlan(RuntimeLaunchMode.RemoteProxy, null, null);
+        var plan = RuntimeLaunchPlan.From([], CreateRemoteConfiguration());
 
         var action = async () => await RemoteProxyHost.RunAsync(plan);
 
@@ -302,4 +398,26 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             Path.Combine(
                 TestContext.CurrentContext.WorkDirectory,
                 "bridge-boundary-" + Guid.NewGuid().ToString("N")));
+
+    private static IConfiguration CreateRemoteConfiguration()
+        => new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Runtime:RemoteProxy:Enabled"] = "true",
+                ["Runtime:RemoteProxy:LocalUrl"] = "http://127.0.0.1:48923",
+                ["Runtime:RemoteProxy:GatewayUrl"] = "https://gateway.example:48925",
+                ["Runtime:RemoteProxy:GatewayInstanceId"] = "gateway-1",
+                ["Runtime:RemoteProxy:AuthoritativeRuntimeInstanceId"] = "runtime-1",
+                ["Runtime:RemoteProxy:ProxyRuntimeInstanceId"] = "proxy-1",
+                ["Runtime:RemoteProxy:InvitationSecret"] = "secret-name",
+                ["Runtime:RemoteProxy:PrivateKeySecret"] = "private-key-name",
+                ["Runtime:RemoteProxy:ClientCertificateSecret"] = "certificate-name",
+                ["Runtime:RemoteProxy:ConnectTimeoutSeconds"] = "10",
+                ["Runtime:RemoteProxy:ActivityTimeoutSeconds"] = "120",
+                ["Runtime:RemoteProxy:InvitationPairId"] = "d2719a1c-4e19-4da3-9b9f-4925c4f26eb5",
+                ["Runtime:RemoteProxy:GatewayServerPublicKeyHash"] = "gateway-public-key-hash",
+                ["Runtime:RemoteProxy:AuthoritativeRuntimeInstallFingerprint"] = "runtime-fingerprint",
+                ["Runtime:RemoteProxy:InvitationExpiresAtUtc"] = "2099-01-01T00:00:00Z",
+            })
+            .Build();
 }

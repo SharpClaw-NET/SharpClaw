@@ -11,43 +11,36 @@ public enum RuntimeLaunchMode
 
 public sealed record RuntimeLaunchPlan(
     RuntimeLaunchMode Mode,
-    string? PairingFile,
-    string? LocalUrl)
+    RemoteProxyOptions? RemoteProxyOptions)
 {
-    public string? GatewayBridgeUrl { get; init; }
-
     public static RuntimeLaunchPlan From(
         IReadOnlyList<string> args,
         IConfiguration configuration)
     {
-        if (args.Any(static arg => string.Equals(arg, "--pair", StringComparison.OrdinalIgnoreCase)))
+        ArgumentNullException.ThrowIfNull(args);
+        ArgumentNullException.ThrowIfNull(configuration);
+
+        var options = RemoteProxyOptions.Bind(configuration);
+        var pairingRequested = args.Any(static arg =>
+            string.Equals(arg, "--pair", StringComparison.OrdinalIgnoreCase));
+
+        if (options is null)
         {
-            return new RuntimeLaunchPlan(
-                RuntimeLaunchMode.PairingClient,
-                configuration["Runtime:RemoteProxy:PairingFile"],
-                configuration["Runtime:RemoteProxy:LocalUrl"])
+            if (pairingRequested)
             {
-                GatewayBridgeUrl = configuration["Runtime:RemoteProxy:GatewayBridgeUrl"],
-            };
+                throw new InvalidOperationException(
+                    "The --pair composition requires enabled Runtime:RemoteProxy options.");
+            }
+
+            return new RuntimeLaunchPlan(RuntimeLaunchMode.Local, null);
         }
 
-        var configuredMode = configuration["Runtime:Mode"]
-            ?? Environment.GetEnvironmentVariable("SHARPCLAW_RUNTIME_MODE");
-
-        var mode = configuredMode switch
-        {
-            null or "" or "Local" => RuntimeLaunchMode.Local,
-            "RemoteProxy" => RuntimeLaunchMode.RemoteProxy,
-            _ => throw new InvalidOperationException(
-                $"Unsupported Runtime:Mode '{configuredMode}'. Supported values are Local and RemoteProxy."),
-        };
-
         return new RuntimeLaunchPlan(
-            mode,
-            configuration["Runtime:RemoteProxy:PairingFile"],
-            configuration["Runtime:RemoteProxy:LocalUrl"])
-        {
-            GatewayBridgeUrl = configuration["Runtime:RemoteProxy:GatewayBridgeUrl"],
-        };
+            pairingRequested ? RuntimeLaunchMode.PairingClient : RuntimeLaunchMode.RemoteProxy,
+            options);
     }
+
+    public RemoteProxyOptions RequireRemoteProxyOptions()
+        => RemoteProxyOptions ?? throw new InvalidOperationException(
+            "Remote Runtime composition requires enabled Runtime:RemoteProxy options.");
 }
