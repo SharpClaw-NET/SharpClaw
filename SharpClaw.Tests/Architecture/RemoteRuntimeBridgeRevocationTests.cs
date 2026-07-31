@@ -78,6 +78,9 @@ public sealed class RemoteRuntimeBridgeRevocationTests
                 BaseAddress = new Uri($"https://127.0.0.1:{port}"),
                 Timeout = TimeSpan.FromSeconds(5),
             };
+            client.DefaultRequestHeaders.Add(
+                RemoteRuntimeBridgePaths.ProxyIdentityHeader,
+                "proxy-1");
 
             using var activeResponse = await client.GetAsync("/api/health");
             activeResponse.StatusCode.Should().NotBe(HttpStatusCode.Unauthorized);
