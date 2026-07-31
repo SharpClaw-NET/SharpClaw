@@ -312,15 +312,16 @@ public sealed class RemoteRuntimePairingRegistry(
     {
         RequireJsonColdStore();
         var now = DateTimeOffset.UtcNow;
-        var entity = await db.RemoteRuntimePairings
+        var candidates = await db.RemoteRuntimePairings
             .AsNoTracking()
-            .Where(pairing => pairing.Status == RemoteRuntimePairStatus.Active
-                && pairing.GatewayInstanceId == gatewayInstanceId
-                && pairing.AuthoritativeRuntimeInstanceId == authoritativeRuntimeInstanceId
-                && pairing.ExpiresAtUtc > now)
+            .Where(pairing => pairing.GatewayInstanceId == gatewayInstanceId
+                && pairing.AuthoritativeRuntimeInstanceId == authoritativeRuntimeInstanceId)
             .OrderByDescending(pairing => pairing.UpdatedAtUtc)
             .ThenBy(pairing => pairing.Id)
-            .FirstOrDefaultAsync(cancellationToken);
+            .ToListAsync(cancellationToken);
+        var entity = candidates.FirstOrDefault(pairing =>
+            pairing.Status == RemoteRuntimePairStatus.Active
+            && pairing.ExpiresAtUtc > now);
         return entity is null ? null : ToEntry(entity);
     }
 
@@ -381,6 +382,13 @@ public sealed class RemoteRuntimePairingRegistry(
             ?? throw Error("PairNotFound", "The pairing record was not found.");
         VerifyInvitationSecret(entity.InvitationHash, invitationSecret);
         var effectiveStatus = GetEffectiveStatus(entity, DateTimeOffset.UtcNow);
+        if (effectiveStatus == RemoteRuntimePairStatus.ClaimPending)
+        {
+            throw Error(
+                "InvalidPairState",
+                "The pairing is awaiting administrator approval.");
+        }
+
         if (effectiveStatus != RemoteRuntimePairStatus.Active
             || string.IsNullOrWhiteSpace(entity.ProxyRuntimePublicKeyHash)
             || string.IsNullOrWhiteSpace(entity.ProxyRuntimeCertificateSigningRequest))

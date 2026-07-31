@@ -63,7 +63,7 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         return Task.FromResult(invitation);
     }
 
-    public Task<RemoteRuntimePairingRegistrySnapshot> ClaimAsync(
+    public Task<RemoteRuntimePairingClaimResponse> ClaimAsync(
         RemoteRuntimePairingClaimRequest request,
         CancellationToken cancellationToken)
     {
@@ -87,7 +87,12 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
                 Status = RemoteRuntimePairStatus.ClaimPending,
                 ProxyRuntimeInstanceId = request.ProxyRuntimeInstanceId,
             };
-            return Task.FromResult(_entry);
+            return Task.FromResult(new RemoteRuntimePairingClaimResponse(
+                _entry.PairId,
+                _entry.Status.ToString(),
+                _entry.GatewayInstanceId,
+                _entry.AuthoritativeRuntimeInstanceId,
+                _entry.ProxyRuntimeInstanceId ?? string.Empty));
         }
     }
 

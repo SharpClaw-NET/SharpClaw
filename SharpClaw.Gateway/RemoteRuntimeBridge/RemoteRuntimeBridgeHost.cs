@@ -610,15 +610,6 @@ internal static class RemoteRuntimeBridgeHost
             || header.Equals("X-Forwarded-Host", StringComparison.OrdinalIgnoreCase)
             || header.Equals("X-Forwarded-Proto", StringComparison.OrdinalIgnoreCase);
 
-    private static RemoteRuntimePairingClaimResponse ToClaimResponse(
-        RemoteRuntimePairingRecord record)
-        => new(
-            record.PairId,
-            record.GetEffectiveStatus(DateTimeOffset.UtcNow).ToString(),
-            record.GatewayInstanceId,
-            record.AuthoritativeRuntimeInstanceId,
-            record.ProxyRuntimeInstanceId ?? string.Empty);
-
     private static string ComputeServerPublicKeyHash(string certificatePath)
     {
         var certificateBytes = File.ReadAllBytes(certificatePath);

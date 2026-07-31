@@ -20,7 +20,9 @@ internal static class RemoteRuntimePairingAuthorization
         if (state is null)
         {
             await RuntimePairingClient.PairAsync(plan, instancePaths, cancellationToken);
-            state = await secrets.ReadAsync(cancellationToken)
+            // Reload the protected session after pairing to validate persisted state.
+            state = await RemoteRuntimeProxySessionSecrets.Create(instancePaths)
+                .ReadAsync(cancellationToken)
                 ?? throw new InvalidOperationException(
                     "RemoteProxy pairing completed without an active approved session.");
         }

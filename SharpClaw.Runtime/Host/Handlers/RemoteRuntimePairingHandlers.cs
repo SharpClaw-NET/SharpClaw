@@ -240,11 +240,27 @@ public static class RemoteRuntimePairingHandlers
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
         RemoteRuntimePairingRegistry registry,
+        Microsoft.Extensions.Logging.ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
-        => Results.Ok(await registry.FindActiveTargetAsync(
-            gatewayInstanceId,
-            authoritativeRuntimeInstanceId,
-            cancellationToken));
+    {
+        try
+        {
+            return Results.Ok(await registry.FindActiveTargetAsync(
+                gatewayInstanceId,
+                authoritativeRuntimeInstanceId,
+                cancellationToken));
+        }
+        catch (Exception exception)
+        {
+            Microsoft.Extensions.Logging.LoggerExtensions.LogError(
+                loggerFactory.CreateLogger("RemoteRuntimePairingHandlers"),
+                exception,
+                "Remote Runtime pairing active lookup failed for the configured target.");
+            return Results.Json(
+                new { code = "PairingRegistryFailure", error = "The pairing registry lookup failed." },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 
     private static async Task<IResult> ExecuteAsync<T>(Func<Task<T>> operation)
     {

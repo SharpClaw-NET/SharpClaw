@@ -46,6 +46,13 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         active.Status.Should().Be(RemoteRuntimePairStatus.Active);
         (await registry.FindActiveTargetAsync("gateway-a", "runtime-a"))?.PairId.Should().Be(invitation.PairId);
 
+        await using (var reopenedDb = workspace.CreateDbContext())
+        {
+            var reopenedRegistry = workspace.CreateRegistry(reopenedDb);
+            (await reopenedRegistry.FindActiveTargetAsync("gateway-a", "runtime-a"))
+                ?.PairId.Should().Be(invitation.PairId);
+        }
+
         var firstPage = await registry.ListAsync(
             new RemoteRuntimePairingRegistryFilter(
                 GatewayInstanceId: "gateway-a",

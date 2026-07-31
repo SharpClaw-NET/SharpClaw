@@ -2,6 +2,7 @@ using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
+using System.Text.Json.Serialization;
 using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Gateway.RemoteRuntimeBridge;
@@ -12,7 +13,7 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
         RemoteRuntimeRegistryInvitationRequest request,
         CancellationToken cancellationToken);
 
-    Task<RemoteRuntimePairingRegistrySnapshot> ClaimAsync(
+    Task<RemoteRuntimePairingClaimResponse> ClaimAsync(
         RemoteRuntimePairingClaimRequest request,
         CancellationToken cancellationToken);
 
@@ -77,6 +78,7 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
     {
         PropertyNameCaseInsensitive = true,
+        Converters = { new JsonStringEnumConverter() },
     };
 
     private readonly HttpClient _httpClient;
@@ -109,13 +111,21 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
             request,
             cancellationToken);
 
-    public Task<RemoteRuntimePairingRegistrySnapshot> ClaimAsync(
+    public async Task<RemoteRuntimePairingClaimResponse> ClaimAsync(
         RemoteRuntimePairingClaimRequest request,
         CancellationToken cancellationToken)
-        => PostAsync<RemoteRuntimePairingClaimRequest, RemoteRuntimePairingRegistrySnapshot>(
+    {
+        var snapshot = await PostAsync<RemoteRuntimePairingClaimRequest, RemoteRuntimePairingRegistrySnapshot>(
             RemoteRuntimeBridgePaths.RegistryClaim,
             request,
             cancellationToken);
+        return new RemoteRuntimePairingClaimResponse(
+            snapshot.PairId,
+            snapshot.Status.ToString(),
+            snapshot.GatewayInstanceId,
+            snapshot.AuthoritativeRuntimeInstanceId,
+            snapshot.ProxyRuntimeInstanceId ?? string.Empty);
+    }
 
     public Task<RemoteRuntimePairingCertificateResponse> IssueClientCertificateAsync(
         RemoteRuntimePairingCertificateRequest request,
@@ -318,7 +328,9 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
                 cancellationToken);
             throw new RemoteRuntimePairingException(
                 error?.Code ?? "PairingRequestFailed",
-                $"The authoritative Runtime returned HTTP {(int)response.StatusCode}.");
+                error is null
+                    ? $"The authoritative Runtime returned HTTP {(int)response.StatusCode}."
+                    : $"The authoritative Runtime returned HTTP {(int)response.StatusCode}: {error.Error ?? error.Code}.");
         }
 
         return await response.Content.ReadFromJsonAsync<TResponse>(JsonOptions, cancellationToken);

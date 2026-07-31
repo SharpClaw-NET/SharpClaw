@@ -380,7 +380,7 @@ internal sealed class RemoteRuntimePairingClient(
         {
             throw new RemoteRuntimePairingException(
                 "PairNotAuthorized",
-                "The authoritative Runtime did not approve the stored proxy session.");
+                $"The authoritative Runtime did not approve the stored proxy session. HTTP {(int)response.StatusCode}.");
         }
 
         var active = await response.Content.ReadFromJsonAsync<RemoteRuntimePairingRegistrySnapshot>(
@@ -430,7 +430,9 @@ internal sealed class RemoteRuntimePairingClient(
                 cancellationToken);
             throw new RemoteRuntimePairingException(
                 error?.Code ?? "PairingRequestFailed",
-                $"The pairing request failed with HTTP {(int)response.StatusCode}.");
+                error is null
+                    ? $"The pairing request failed with HTTP {(int)response.StatusCode}."
+                    : $"The pairing request failed with HTTP {(int)response.StatusCode}: {error.Error ?? error.Code}.");
         }
 
         return await response.Content.ReadFromJsonAsync<TResponse>(
