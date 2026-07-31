@@ -64,7 +64,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
         source.Should().Contain("Approved");
         source.Should().Contain("Pairing");
-        source.Should().Contain("RequireApproved");
+        source.Should().Contain("LoadApprovedSessionAsync");
         source.Should().NotContain("WebApplication.CreateBuilder");
         source.Should().NotContain("Listen");
     }

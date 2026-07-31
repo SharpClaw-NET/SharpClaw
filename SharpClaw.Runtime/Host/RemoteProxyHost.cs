@@ -54,11 +54,14 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
     {
         ArgumentNullException.ThrowIfNull(instancePaths);
         var keyBytes = RandomNumberGenerator.GetBytes(32);
+        string? localApiKey = null;
+        var keyFileWritten = false;
         try
         {
-            var localApiKey = Convert.ToBase64String(keyBytes);
+            localApiKey = Convert.ToBase64String(keyBytes);
             instancePaths.EnsureDirectories();
             File.WriteAllText(instancePaths.ApiKeyFilePath, localApiKey);
+            keyFileWritten = true;
             if (!OperatingSystem.IsWindows())
             {
                 File.SetUnixFileMode(
@@ -73,6 +76,21 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
                 gatewayServerPublicKeyHash,
                 localApiKey,
                 clientCertificate);
+        }
+        catch
+        {
+            if (keyFileWritten
+                && localApiKey is not null
+                && File.Exists(instancePaths.ApiKeyFilePath)
+                && string.Equals(
+                    File.ReadAllText(instancePaths.ApiKeyFilePath).Trim(),
+                    localApiKey,
+                    StringComparison.Ordinal))
+            {
+                File.Delete(instancePaths.ApiKeyFilePath);
+            }
+
+            throw;
         }
         finally
         {
@@ -144,7 +162,7 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
 
 public static class RemoteProxyHost
 {
-    public static Task RunAsync(
+    public static async Task RunAsync(
         RuntimeLaunchPlan plan,
         CancellationToken cancellationToken = default)
     {
@@ -154,10 +172,27 @@ public static class RemoteProxyHost
             throw new ArgumentException("The launch plan is not RemoteProxy mode.", nameof(plan));
 
         cancellationToken.ThrowIfCancellationRequested();
-        RemoteRuntimePairingAuthorization.RequireApprovedPair(plan.PairingFile);
-
-        throw new NotSupportedException(
-            "RemoteProxy mode requires a locally stored approved pairing session before binding.");
+        using var session = await RemoteRuntimePairingAuthorization.LoadApprovedSessionAsync(
+            plan,
+            cancellationToken);
+        var clientCertificate = session.DetachClientCertificate();
+        RemoteRuntimeProxyConnection? connection = null;
+        try
+        {
+            connection = RemoteRuntimeProxyConnection.Create(
+                session.InstancePaths,
+                plan.LocalUrl ?? "http://127.0.0.1:48923",
+                session.State.GatewayBridgeUrl,
+                session.State.GatewayServerPublicKeyHash,
+                clientCertificate);
+            await RunAsync(connection, cancellationToken);
+        }
+        catch
+        {
+            if (connection is null)
+                clientCertificate.Dispose();
+            throw;
+        }
     }
 
     internal static async Task RunAsync(
@@ -188,9 +223,8 @@ public static class RemoteProxyHost
         if (plan.Mode != RuntimeLaunchMode.RemoteProxy)
             throw new ArgumentException("The launch plan is not RemoteProxy mode.", nameof(plan));
 
-        RemoteRuntimePairingAuthorization.RequireApprovedPair(plan.PairingFile);
         throw new InvalidOperationException(
-            "RemoteProxy mode requires an approved pairing connection before binding.");
+            "RemoteProxy mode requires a loaded approved pairing session before binding.");
     }
 
     internal static WebApplication Build(

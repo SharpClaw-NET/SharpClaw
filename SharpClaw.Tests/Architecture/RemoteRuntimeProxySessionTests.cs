@@ -88,6 +88,42 @@ public sealed class RemoteRuntimeProxySessionTests
         nonTlsBridge.Should().Throw<InvalidOperationException>();
     }
 
+    [Test]
+    public async Task Missing_proxy_session_fails_before_creating_proxy_state()
+    {
+        var root = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "proxy-session-missing-" + Guid.NewGuid().ToString("N"));
+        var previousInstanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");
+        var previousDataDirectory = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
+        Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", Path.Combine(root, "backend"));
+        Environment.SetEnvironmentVariable("SHARPCLAW_DATA_DIR", null);
+
+        try
+        {
+            var plan = new RuntimeLaunchPlan(
+                RuntimeLaunchMode.RemoteProxy,
+                null,
+                "http://127.0.0.1:48923");
+
+            var action = () => RemoteProxyHost.RunAsync(plan);
+
+            await action.Should()
+                .ThrowAsync<InvalidOperationException>()
+                .WithMessage("*existing approved pairing session*");
+
+            Directory.Exists(Path.Combine(root, "backend", "secrets")).Should().BeFalse();
+            File.Exists(Path.Combine(root, "backend", "runtime", ".api-key")).Should().BeFalse();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", previousInstanceRoot);
+            Environment.SetEnvironmentVariable("SHARPCLAW_DATA_DIR", previousDataDirectory);
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
     private static X509Certificate2 CreateClientCertificate()
     {
         using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
