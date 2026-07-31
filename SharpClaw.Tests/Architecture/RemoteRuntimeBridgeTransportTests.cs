@@ -4,6 +4,7 @@ using System.Net.WebSockets;
 using System.Security.Cryptography;
 using System.Security.Cryptography.X509Certificates;
 using System.Text;
+using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
@@ -150,6 +151,35 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 "test complete",
                 CancellationToken.None);
 
+            using var cliSocket = new ClientWebSocket();
+            cliSocket.Options.SetRequestHeader("X-Api-Key", connection.LocalApiKey);
+            var cliUri = new Uri(
+                localUrl.Replace("http://", "ws://", StringComparison.Ordinal)
+                + RemoteRuntimeBridgePaths.CliControl);
+            await cliSocket.ConnectAsync(cliUri, CancellationToken.None);
+            var cliCommand = JsonSerializer.SerializeToUtf8Bytes(
+                new RemoteRuntimeCliFrame(
+                    RemoteRuntimeCliFrameTypes.Command,
+                    "help"));
+            await cliSocket.SendAsync(
+                cliCommand,
+                WebSocketMessageType.Text,
+                endOfMessage: true,
+                CancellationToken.None);
+
+            var cliOutput = await ReceiveCliFrameAsync(cliSocket);
+            cliOutput.Type.Should().Be(RemoteRuntimeCliFrameTypes.Output);
+            cliOutput.Text.Should().Contain("command=help");
+            cliOutput.Text.Should().Contain("api=authoritative-api-key");
+            cliOutput.Text.Should().Contain("gateway=authoritative-gateway-token");
+            var cliResult = await ReceiveCliFrameAsync(cliSocket);
+            cliResult.Type.Should().Be(RemoteRuntimeCliFrameTypes.Result);
+            cliResult.Handled.Should().BeTrue();
+            await cliSocket.CloseAsync(
+                WebSocketCloseStatus.NormalClosure,
+                "test complete",
+                CancellationToken.None);
+
             using var cancellation = new CancellationTokenSource(TimeSpan.FromSeconds(5));
             using var cancellationResponse = await client.GetAsync(
                 "/api/cancel",
@@ -193,6 +223,23 @@ public sealed class RemoteRuntimeBridgeTransportTests
         return ((System.Net.IPEndPoint)listener.LocalEndpoint).Port;
     }
 
+    private static async Task<RemoteRuntimeCliFrame> ReceiveCliFrameAsync(
+        ClientWebSocket socket)
+    {
+        var buffer = new byte[8 * 1024];
+        using var message = new MemoryStream();
+        ValueWebSocketReceiveResult result;
+        do
+        {
+            result = await socket.ReceiveAsync(buffer.AsMemory(), CancellationToken.None);
+            await message.WriteAsync(buffer.AsMemory(0, result.Count));
+        }
+        while (!result.EndOfMessage);
+
+        return JsonSerializer.Deserialize<RemoteRuntimeCliFrame>(
+            message.GetBuffer().AsSpan(0, checked((int)message.Length)))!;
+    }
+
     private sealed class UpstreamHarness : IAsyncDisposable
     {
         private UpstreamHarness(
@@ -226,6 +273,54 @@ public sealed class RemoteRuntimeBridgeTransportTests
             HttpContext context,
             TaskCompletionSource<bool> aborted)
         {
+            if (context.Request.Path == RemoteRuntimeBridgePaths.CliControl)
+            {
+                if (!context.WebSockets.IsWebSocketRequest)
+                {
+                    context.Response.StatusCode = StatusCodes.Status400BadRequest;
+                    return;
+                }
+
+                using var socket = await context.WebSockets.AcceptWebSocketAsync();
+                var buffer = new byte[8 * 1024];
+                var received = await socket.ReceiveAsync(buffer, context.RequestAborted);
+                var command = JsonSerializer.Deserialize<RemoteRuntimeCliFrame>(
+                    buffer.AsSpan(0, received.Count))?.Text;
+                var output = JsonSerializer.SerializeToUtf8Bytes(
+                    new RemoteRuntimeCliFrame(
+                        RemoteRuntimeCliFrameTypes.Output,
+                        $"command={command};api={context.Request.Headers["X-Api-Key"]};gateway={context.Request.Headers["X-Gateway-Token"]}"));
+                await socket.SendAsync(
+                    output,
+                    WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    context.RequestAborted);
+                var result = JsonSerializer.SerializeToUtf8Bytes(
+                    new RemoteRuntimeCliFrame(
+                        RemoteRuntimeCliFrameTypes.Result,
+                        Handled: true));
+                await socket.SendAsync(
+                    result,
+                    WebSocketMessageType.Text,
+                    endOfMessage: true,
+                    context.RequestAborted);
+
+                while (true)
+                {
+                    var close = await socket.ReceiveAsync(buffer, context.RequestAborted);
+                    if (close.MessageType != WebSocketMessageType.Close)
+                        continue;
+
+                    await socket.CloseAsync(
+                        WebSocketCloseStatus.NormalClosure,
+                        "test complete",
+                        context.RequestAborted);
+                    break;
+                }
+
+                return;
+            }
+
             if (context.Request.Path == "/ws")
             {
                 if (!context.WebSockets.IsWebSocketRequest)
