@@ -1,10 +1,137 @@
+using System.Net.Http;
+using System.Net.Http.Headers;
+using System.Net.Security;
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
+using System.Text;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Shared.Instances;
 using Yarp.ReverseProxy.Forwarder;
 
 namespace SharpClaw.Runtime.Host;
+
+internal sealed class RemoteRuntimeProxyConnection : IDisposable
+{
+    private int _disposed;
+
+    public RemoteRuntimeProxyConnection(
+        SharpClawInstancePaths instancePaths,
+        string localUrl,
+        string gatewayBridgeUrl,
+        string localApiKey,
+        X509Certificate2 clientCertificate)
+    {
+        InstancePaths = instancePaths ?? throw new ArgumentNullException(nameof(instancePaths));
+        LocalUrl = localUrl ?? throw new ArgumentNullException(nameof(localUrl));
+        GatewayBridgeUrl = gatewayBridgeUrl ?? throw new ArgumentNullException(nameof(gatewayBridgeUrl));
+        LocalApiKey = localApiKey ?? throw new ArgumentNullException(nameof(localApiKey));
+        ClientCertificate = clientCertificate ?? throw new ArgumentNullException(nameof(clientCertificate));
+        Validate();
+    }
+
+    public SharpClawInstancePaths InstancePaths { get; }
+
+    public string LocalUrl { get; }
+
+    public string GatewayBridgeUrl { get; }
+
+    public string LocalApiKey { get; }
+
+    public X509Certificate2 ClientCertificate { get; }
+
+    public static RemoteRuntimeProxyConnection Create(
+        SharpClawInstancePaths instancePaths,
+        string localUrl,
+        string gatewayBridgeUrl,
+        X509Certificate2 clientCertificate)
+    {
+        ArgumentNullException.ThrowIfNull(instancePaths);
+        var keyBytes = RandomNumberGenerator.GetBytes(32);
+        try
+        {
+            var localApiKey = Convert.ToBase64String(keyBytes);
+            instancePaths.EnsureDirectories();
+            File.WriteAllText(instancePaths.ApiKeyFilePath, localApiKey);
+            if (!OperatingSystem.IsWindows())
+            {
+                File.SetUnixFileMode(
+                    instancePaths.ApiKeyFilePath,
+                    UnixFileMode.UserRead | UnixFileMode.UserWrite);
+            }
+
+            return new RemoteRuntimeProxyConnection(
+                instancePaths,
+                localUrl,
+                gatewayBridgeUrl,
+                localApiKey,
+                clientCertificate);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(keyBytes);
+        }
+    }
+
+    public void PublishDiscovery()
+        => InstancePaths.PublishDiscoveryEntry(
+            LocalUrl,
+            DateTimeOffset.UtcNow,
+            Environment.ProcessId,
+            gatewayTokenFilePath: null);
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        try
+        {
+            if (File.Exists(InstancePaths.ApiKeyFilePath)
+                && string.Equals(
+                    File.ReadAllText(InstancePaths.ApiKeyFilePath).Trim(),
+                    LocalApiKey,
+                    StringComparison.Ordinal))
+            {
+                File.Delete(InstancePaths.ApiKeyFilePath);
+            }
+
+            InstancePaths.DeleteDiscoveryEntry();
+        }
+        finally
+        {
+            ClientCertificate.Dispose();
+        }
+    }
+
+    private void Validate()
+    {
+        if (!Uri.TryCreate(LocalUrl, UriKind.Absolute, out var localUri)
+            || (!string.Equals(localUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(localUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            || !localUri.IsLoopback)
+        {
+            throw new InvalidOperationException(
+                "RemoteProxy mode must bind its local session API to a loopback URL.");
+        }
+
+        if (!Uri.TryCreate(GatewayBridgeUrl, UriKind.Absolute, out var gatewayUri)
+            || !string.Equals(gatewayUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new InvalidOperationException(
+                "RemoteProxy mode requires an HTTPS Gateway bridge URL from approved pairing state.");
+        }
+
+        if (string.IsNullOrWhiteSpace(LocalApiKey))
+            throw new InvalidOperationException("RemoteProxy mode requires a local session API key.");
+
+        if (!ClientCertificate.HasPrivateKey)
+            throw new InvalidOperationException(
+                "RemoteProxy mode requires the private key for its approved client certificate.");
+    }
+}
 
 public static class RemoteProxyHost
 {
@@ -21,7 +148,29 @@ public static class RemoteProxyHost
         RemoteRuntimePairingAuthorization.RequireApprovedPair(plan.PairingFile);
 
         throw new NotSupportedException(
-            "RemoteProxy mode has no transport host configured. Pairing and transport setup are required before binding.");
+            "RemoteProxy mode requires a locally stored approved pairing session before binding.");
+    }
+
+    internal static async Task RunAsync(
+        RemoteRuntimeProxyConnection connection,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
+        connection.PublishDiscovery();
+        await using var app = Build([], connection);
+        try
+        {
+            await app.StartAsync(cancellationToken);
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+        }
+        finally
+        {
+            await app.StopAsync(CancellationToken.None);
+            connection.Dispose();
+        }
     }
 
     public static WebApplication Build(string[] args, RuntimeLaunchPlan plan)
@@ -31,23 +180,54 @@ public static class RemoteProxyHost
             throw new ArgumentException("The launch plan is not RemoteProxy mode.", nameof(plan));
 
         RemoteRuntimePairingAuthorization.RequireApprovedPair(plan.PairingFile);
-        if (string.IsNullOrWhiteSpace(plan.GatewayBridgeUrl))
-        {
-            throw new InvalidOperationException(
-                "RemoteProxy mode requires a fixed Gateway bridge URL before binding.");
-        }
+        throw new InvalidOperationException(
+            "RemoteProxy mode requires an approved pairing connection before binding.");
+    }
 
+    internal static WebApplication Build(
+        string[] args,
+        RemoteRuntimeProxyConnection connection)
+    {
+        ArgumentNullException.ThrowIfNull(connection);
         var builder = WebApplication.CreateSlimBuilder(args);
-        builder.WebHost.UseUrls(plan.LocalUrl ?? "http://127.0.0.1:48923");
+        builder.WebHost.UseUrls(connection.LocalUrl);
         builder.Services.AddReverseProxy();
+        builder.Services.AddSingleton<IForwarderHttpClientFactory>(
+            _ => new ClientCertificateForwarderHttpClientFactory(connection.ClientCertificate));
 
         var app = builder.Build();
+        app.Use(async (context, next) =>
+        {
+            if (!HasLocalSessionKey(context, connection.LocalApiKey))
+            {
+                context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                return;
+            }
+
+            await next(context);
+        });
         app.MapForwarder(
             "/{**catch-all}",
-            plan.GatewayBridgeUrl,
+            connection.GatewayBridgeUrl,
             ForwarderRequestConfig.Empty,
             new RemoteProxyTransformer());
         return app;
+    }
+
+    private static bool HasLocalSessionKey(HttpContext context, string expectedKey)
+    {
+        var suppliedKey = context.Request.Headers["X-Api-Key"].ToString();
+        var suppliedBytes = Encoding.UTF8.GetBytes(suppliedKey);
+        var expectedBytes = Encoding.UTF8.GetBytes(expectedKey);
+        try
+        {
+            return CryptographicOperations.FixedTimeEquals(suppliedBytes, expectedBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(suppliedBytes);
+            CryptographicOperations.ZeroMemory(expectedBytes);
+        }
     }
 
     private sealed class RemoteProxyTransformer : HttpTransformer
@@ -65,6 +245,28 @@ public static class RemoteProxyHost
                 cancellationToken);
             proxyRequest.Headers.Remove("X-Api-Key");
             proxyRequest.Headers.Remove("X-Gateway-Token");
+            proxyRequest.Headers.Remove("X-Forwarded-For");
+            proxyRequest.Headers.Remove("X-Forwarded-Host");
+            proxyRequest.Headers.Remove("X-Forwarded-Proto");
+            proxyRequest.Headers.Remove("Forwarded");
         }
+    }
+}
+
+internal sealed class ClientCertificateForwarderHttpClientFactory(
+    X509Certificate2 clientCertificate) : ForwarderHttpClientFactory
+{
+    protected override void ConfigureHandler(
+        ForwarderHttpClientContext context,
+        SocketsHttpHandler handler)
+    {
+        base.ConfigureHandler(context, handler);
+        handler.SslOptions.ClientCertificates ??= new X509CertificateCollection();
+        handler.SslOptions.ClientCertificates.Add(clientCertificate);
+        handler.SslOptions.RemoteCertificateValidationCallback = static (
+            _,
+            _,
+            _,
+            errors) => errors == SslPolicyErrors.None;
     }
 }

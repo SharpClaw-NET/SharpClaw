@@ -253,6 +253,18 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         proxySource.Should().Contain("MapForwarder");
     }
 
+    [Test]
+    public void Proxy_forwarding_uses_the_paired_certificate_and_strips_local_credentials()
+    {
+        var source = ReadRepositoryFile("SharpClaw.Runtime/Host/RemoteProxyHost.cs");
+
+        source.Should().Contain("ClientCertificateForwarderHttpClientFactory");
+        source.Should().Contain("ClientCertificates");
+        source.Should().Contain("PublishDiscovery");
+        source.Should().Contain("proxyRequest.Headers.Remove(\"X-Api-Key\")");
+        source.Should().Contain("proxyRequest.Headers.Remove(\"X-Gateway-Token\")");
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);
