@@ -11,6 +11,7 @@ namespace SharpClaw.Shared.RemoteRuntimeBridge;
 public sealed class RemoteRuntimePairingStore
 {
     private const string PairPrefix = "Pairs:";
+    private const string CertificateAuthorityPfxKey = "CertificateAuthority:Pfx";
     private const int CurrentBridgeProtocolMajor = 1;
     private static readonly TimeSpan MaximumInvitationLifetime = TimeSpan.FromMinutes(15);
 
@@ -222,6 +223,100 @@ public sealed class RemoteRuntimePairingStore
                 proxyRuntimePublicKeyHash,
                 invitation.Secret));
     }
+
+    public async Task<X509Certificate2> GetOrCreateCertificateAuthorityAsync(
+        CancellationToken cancellationToken = default)
+    {
+        X509Certificate2? authority = null;
+        await _documentUpdater.UpdateDocumentAsync(settings =>
+        {
+            var existing = settings.SingleOrDefault(
+                setting => string.Equals(
+                    setting.Key,
+                    CertificateAuthorityPfxKey,
+                    StringComparison.Ordinal));
+            if (existing is not null)
+            {
+                authority = LoadCertificate(existing.Value);
+                return settings;
+            }
+
+            authority = CreateCertificateAuthority(_utcNow());
+            var pfx = authority.Export(X509ContentType.Pfx);
+            try
+            {
+                return [
+                    ..settings,
+                    new SupprocomSecretSetting(
+                        CertificateAuthorityPfxKey,
+                        Convert.ToBase64String(pfx)),
+                ];
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(pfx);
+            }
+        }, cancellationToken);
+
+        return authority!;
+    }
+
+    public async Task<RemoteRuntimeClientCertificate> IssueClientCertificateAsync(
+        Guid pairId,
+        CancellationToken cancellationToken = default)
+    {
+        var record = await FindAsync(pairId, cancellationToken)
+            ?? throw new RemoteRuntimePairingException("PairNotFound", "The pairing record was not found.");
+        if (!record.IsActive(_utcNow())
+            || string.IsNullOrWhiteSpace(record.ProxyRuntimeCertificateSigningRequest)
+            || string.IsNullOrWhiteSpace(record.ProxyRuntimePublicKeyHash))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "The pairing must be active before certificate issue.");
+        }
+
+        var authority = await GetOrCreateCertificateAuthorityAsync(cancellationToken);
+        var request = LoadSigningRequest(record.ProxyRuntimeCertificateSigningRequest);
+        var publicKey = request.PublicKey.ExportSubjectPublicKeyInfo();
+        var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+        CryptographicOperations.ZeroMemory(publicKey);
+        if (!string.Equals(
+                publicKeyHash,
+                record.ProxyRuntimePublicKeyHash,
+                StringComparison.Ordinal))
+        {
+            throw new RemoteRuntimePairingException(
+                "PairCredentialMismatch",
+                "The pairing certificate request does not match the approved public key.");
+        }
+
+        var notBefore = _utcNow().AddMinutes(-1);
+        var notAfter = notBefore.AddDays(30);
+        var serial = RandomNumberGenerator.GetBytes(16);
+        try
+        {
+            using var certificate = request.Create(
+                authority,
+                notBefore,
+                notAfter,
+                serial);
+            return new RemoteRuntimeClientCertificate(
+                certificate.Export(X509ContentType.Cert),
+                publicKeyHash,
+                certificate.Thumbprint ?? string.Empty,
+                certificate.NotAfter.ToUniversalTime());
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(serial);
+        }
+    }
+
+    public async Task<RemoteRuntimeClientCertificate> RenewClientCertificateAsync(
+        Guid pairId,
+        CancellationToken cancellationToken = default)
+        => await IssueClientCertificateAsync(pairId, cancellationToken);
 
     public async Task<RemoteRuntimePairingRecord> ApproveClaimAsync(
         Guid pairId,
@@ -478,6 +573,48 @@ public sealed class RemoteRuntimePairingStore
         finally
         {
             CryptographicOperations.ZeroMemory(requestBytes);
+        }
+    }
+
+    private static X509Certificate2 CreateCertificateAuthority(DateTimeOffset now)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(
+            "CN=SharpClaw Remote Runtime Bridge CA",
+            key,
+            HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(
+            new X509BasicConstraintsExtension(true, false, 0, true));
+        request.CertificateExtensions.Add(
+            new X509KeyUsageExtension(
+                X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
+                true));
+        request.CertificateExtensions.Add(
+            new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+        return request.CreateSelfSigned(
+            now.AddMinutes(-1),
+            now.AddYears(10));
+    }
+
+    private static X509Certificate2 LoadCertificate(string encodedPfx)
+    {
+        var pfx = DecodeBase64(encodedPfx, "InvalidCertificateAuthority");
+        try
+        {
+            return X509CertificateLoader.LoadPkcs12(
+                pfx,
+                (string?)null,
+                X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+        }
+        catch (CryptographicException)
+        {
+            throw new RemoteRuntimePairingException(
+                "InvalidCertificateAuthority",
+                "The protected certificate authority state is invalid.");
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pfx);
         }
     }
 

@@ -21,6 +21,12 @@ public sealed record RemoteRuntimePairingInvitation(
     int BridgeProtocolMajor,
     DateTimeOffset ExpiresAtUtc);
 
+public sealed record RemoteRuntimeClientCertificate(
+    byte[] CertificateDer,
+    string ProxyRuntimePublicKeyHash,
+    string CertificateThumbprint,
+    DateTimeOffset NotAfterUtc);
+
 public sealed record RemoteRuntimePairingRecord(
     Guid PairId,
     RemoteRuntimePairStatus Status,

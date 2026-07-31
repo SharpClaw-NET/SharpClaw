@@ -44,6 +44,17 @@ public sealed class RemoteRuntimePairingStoreTests
             "runtime-1",
             "proxy-1");
         active.PairId.Should().Be(invitation.PairId);
+
+        using var authority = await store.GetOrCreateCertificateAuthorityAsync();
+        authority.HasPrivateKey.Should().BeTrue();
+        var issued = await store.IssueClientCertificateAsync(invitation.PairId);
+        issued.ProxyRuntimePublicKeyHash.Should().Be(active.ProxyRuntimePublicKeyHash);
+        using var clientCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
+        clientCertificate.Subject.Should().Contain("proxy-1");
+        clientCertificate.HasPrivateKey.Should().BeFalse();
+
+        var renewed = await store.RenewClientCertificateAsync(invitation.PairId);
+        renewed.CertificateThumbprint.Should().NotBe(issued.CertificateThumbprint);
         var updatedProtectedBytes = File.ReadAllBytes(workspace.ActivePath);
         updatedProtectedBytes.Should().NotEqual(protectedBytes);
         updatedProtectedBytes[0].Should().Be(0x01);
