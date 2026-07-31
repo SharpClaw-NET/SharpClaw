@@ -148,6 +148,41 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             descriptor => descriptor.ServiceType == typeof(IRemoteRuntimeBridgeListener));
     }
 
+    [Test]
+    public void Bridge_configuration_alone_cannot_authorize_binding()
+    {
+        var options = new RemoteRuntimeBridgeOptions
+        {
+            Enabled = true,
+            PairingFile = Path.Combine(TestContext.CurrentContext.WorkDirectory, "pairing.json"),
+            ServerCertificatePath = Path.Combine(TestContext.CurrentContext.WorkDirectory, "bridge.pfx"),
+            TargetBaseUrl = "http://127.0.0.1:48923",
+            AuthoritativeApiKey = "configuration-is-not-approval",
+        };
+
+        var action = () => RemoteRuntimeBridgeHost.Build([], options);
+
+        action.Should().Throw<InvalidOperationException>();
+    }
+
+    [Test]
+    public void Both_forwarding_hops_use_the_approved_Yarp_package()
+    {
+        var props = ReadRepositoryFile("Directory.Packages.props");
+        var gatewayProject = ReadRepositoryFile("SharpClaw.Gateway/SharpClaw.Gateway.csproj");
+        var runtimeProject = ReadRepositoryFile(
+            "SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj");
+        var gatewaySource = ReadRepositoryFile(
+            "SharpClaw.Gateway/RemoteRuntimeBridge/RemoteRuntimeBridgeHost.cs");
+        var proxySource = ReadRepositoryFile("SharpClaw.Runtime/Host/RemoteProxyHost.cs");
+
+        props.Should().Contain("Yarp.ReverseProxy\" Version=\"2.3.0");
+        gatewayProject.Should().Contain("PackageReference Include=\"Yarp.ReverseProxy\"");
+        runtimeProject.Should().Contain("PackageReference Include=\"Yarp.ReverseProxy\"");
+        gatewaySource.Should().Contain("MapForwarder");
+        proxySource.Should().Contain("MapForwarder");
+    }
+
     private static string ReadRepositoryFile(string relativePath)
     {
         var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);

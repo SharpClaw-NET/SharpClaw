@@ -21,6 +21,7 @@
     </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
+    <PackageReference Include="Yarp.ReverseProxy" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 

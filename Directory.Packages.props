@@ -36,6 +36,7 @@
     <PackageVersion Include="SharpClaw.ModuleHost.OutOfProcess" Version="0.3.0-alpha.3" />
     <PackageVersion Include="Supprocom.JSONColdStore" Version="0.1.0-alpha.10" />
     <PackageVersion Include="Supprocom.Secrets" Version="0.1.4" />
+    <PackageVersion Include="Yarp.ReverseProxy" Version="2.3.0" />
     <PackageVersion Include="System.Security.Cryptography.Xml" Version="10.0.7" />
     <PackageVersion Include="Uno.UITest.Helpers" Version="1.1.0-dev.92" />
     <PackageVersion Include="Xamarin.UITest" Version="4.4.2" />

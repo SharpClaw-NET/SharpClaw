@@ -14,6 +14,8 @@ public sealed record RuntimeLaunchPlan(
     string? PairingFile,
     string? LocalUrl)
 {
+    public string? GatewayBridgeUrl { get; init; }
+
     public static RuntimeLaunchPlan From(
         IReadOnlyList<string> args,
         IConfiguration configuration)
@@ -23,7 +25,10 @@ public sealed record RuntimeLaunchPlan(
             return new RuntimeLaunchPlan(
                 RuntimeLaunchMode.PairingClient,
                 configuration["Runtime:RemoteProxy:PairingFile"],
-                configuration["Runtime:RemoteProxy:LocalUrl"]);
+                configuration["Runtime:RemoteProxy:LocalUrl"])
+            {
+                GatewayBridgeUrl = configuration["Runtime:RemoteProxy:GatewayBridgeUrl"],
+            };
         }
 
         var configuredMode = configuration["Runtime:Mode"]
@@ -40,6 +45,9 @@ public sealed record RuntimeLaunchPlan(
         return new RuntimeLaunchPlan(
             mode,
             configuration["Runtime:RemoteProxy:PairingFile"],
-            configuration["Runtime:RemoteProxy:LocalUrl"]);
+            configuration["Runtime:RemoteProxy:LocalUrl"])
+        {
+            GatewayBridgeUrl = configuration["Runtime:RemoteProxy:GatewayBridgeUrl"],
+        };
     }
 }
