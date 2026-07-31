@@ -375,6 +375,36 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
     }
 
     [Test]
+    public async Task Bridge_rejects_nonloopback_authoritative_target_before_binding()
+    {
+        var target = new RemoteRuntimeBridgeTarget(
+            "gateway-1",
+            "runtime-1",
+            "runtime-install-1",
+            "https://10.0.0.8:48923",
+            "authoritative-api-key",
+            "authoritative-gateway-token");
+        await using var registryClient = new InMemoryRemoteRuntimePairingRegistryClient(target);
+        var options = new RemoteRuntimeBridgeOptions
+        {
+            Enabled = true,
+            ListenUrl = "https://127.0.0.1:48925",
+            ServerCertificatePath = Path.Combine(
+                TestContext.CurrentContext.WorkDirectory,
+                "missing-bridge-certificate.pfx"),
+        };
+
+        var action = async () => await RemoteRuntimeBridgeHost.BuildAsync(
+            [],
+            options,
+            registryClient,
+            target);
+
+        await action.Should().ThrowAsync<InvalidOperationException>()
+            .WithMessage("*loopback*");
+    }
+
+    [Test]
     public void Both_forwarding_hops_use_the_approved_Yarp_package()
     {
         var props = ReadRepositoryFile("Directory.Packages.props");

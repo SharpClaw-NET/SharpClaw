@@ -81,6 +81,8 @@ internal static class RemoteRuntimeBridgeHost
         if (!options.Enabled)
             throw new InvalidOperationException("The Runtime bridge is disabled.");
 
+        ValidateTarget(target);
+
         if (string.IsNullOrWhiteSpace(options.ServerCertificatePath)
             || !File.Exists(options.ServerCertificatePath))
         {
@@ -602,6 +604,18 @@ internal static class RemoteRuntimeBridgeHost
             new RemoteRuntimeBridgeCredentialMetadata(
                 RemoteRuntimeBridgeCredentialMode.DelegatedUser));
         return bridgeApp;
+    }
+
+    private static void ValidateTarget(RemoteRuntimeBridgeTarget target)
+    {
+        if (!Uri.TryCreate(target.TargetBaseUrl, UriKind.Absolute, out var targetUri)
+            || !targetUri.IsLoopback
+            || (!string.Equals(targetUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase)
+                && !string.Equals(targetUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                "The authoritative Runtime target must use a loopback HTTP or HTTPS URL.");
+        }
     }
 
     private static bool HasClientAuthenticationUsage(X509Certificate2 certificate)
