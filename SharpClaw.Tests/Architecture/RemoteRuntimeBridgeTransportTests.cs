@@ -116,7 +116,7 @@ public sealed class RemoteRuntimeBridgeTransportTests
                 .Single();
             using var handler = new HttpClientHandler
             {
-                    ServerCertificateCustomValidationCallback = (_, presented, _, _) =>
+                ServerCertificateCustomValidationCallback = (_, presented, _, _) =>
                     presented is not null
                     && string.Equals(
                         RemoteRuntimeCertificateHash.Compute(presented),
