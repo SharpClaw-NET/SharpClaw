@@ -9,6 +9,13 @@ public static class RemoteRuntimeBridgePaths
     public const string AdminApprove = "/__sharpclaw/remote-runtime/admin/approve";
     public const string AdminRevoke = "/__sharpclaw/remote-runtime/admin/revoke";
     public const string CliControl = "/__sharpclaw/remote-runtime/cli";
+    public const string RegistryPrefix = "/__sharpclaw/remote-runtime/registry";
+    public const string RegistryInvitation = RegistryPrefix + "/invitation";
+    public const string RegistryClaim = RegistryPrefix + "/claim";
+    public const string RegistryApprove = RegistryPrefix + "/approve";
+    public const string RegistryReject = RegistryPrefix + "/reject";
+    public const string RegistryRevoke = RegistryPrefix + "/revoke";
+    public const string RegistryActive = RegistryPrefix + "/active";
 }
 
 public sealed record RemoteRuntimePairingClaimRequest(
@@ -41,3 +48,23 @@ public sealed record RemoteRuntimePairingCertificateResponse(
     string ProxyRuntimePublicKeyHash,
     string CertificateThumbprint,
     DateTimeOffset NotAfterUtc);
+
+public sealed record RemoteRuntimeRegistryInvitationRequest(
+    string GatewayInstanceId,
+    string GatewayServerPublicKeyHash,
+    string AuthoritativeRuntimeInstanceId,
+    string AuthoritativeRuntimeInstallFingerprint,
+    int LifetimeSeconds = 300,
+    string? DisplayName = null,
+    string? Description = null,
+    string? CertificateAuthorityPfxBase64 = null);
+
+public sealed record RemoteRuntimeRegistryApprovalRequest(
+    Guid PairId,
+    string ProxyRuntimeInstanceId,
+    string AuthoritativeRuntimeInstanceId,
+    string ClientCertificateIdentity);
+
+public sealed record RemoteRuntimeRegistryRejectionRequest(Guid PairId, string Reason);
+
+public sealed record RemoteRuntimeRegistryRevocationRequest(Guid PairId, string Reason);

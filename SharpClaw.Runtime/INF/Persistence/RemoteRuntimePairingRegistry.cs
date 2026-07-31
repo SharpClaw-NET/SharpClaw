@@ -1,4 +1,5 @@
 using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using System.Text;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Enums;
@@ -160,10 +161,11 @@ public sealed class RemoteRuntimePairingRegistry(
         var now = DateTimeOffset.UtcNow;
         RequireStatus(entity, RemoteRuntimePairStatus.InvitationIssued, now);
         VerifyInvitationSecret(entity.InvitationHash, claim.InvitationSecret);
+        var proxyRuntimePublicKeyHash = VerifyClaimProof(entity, claim);
 
         entity.Status = RemoteRuntimePairStatus.ClaimPending;
         entity.ProxyRuntimeInstanceId = claim.ProxyRuntimeInstanceId;
-        entity.ProxyRuntimePublicKeyHash = claim.ProxyRuntimePublicKeyHash;
+        entity.ProxyRuntimePublicKeyHash = proxyRuntimePublicKeyHash;
         entity.ProxyRuntimeCertificateSigningRequest = claim.CertificateSigningRequestBase64;
         entity.ClaimedAtUtc = now;
         entity.StatusReason = null;
@@ -414,6 +416,87 @@ public sealed class RemoteRuntimePairingRegistry(
         {
             CryptographicOperations.ZeroMemory(supplied);
             CryptographicOperations.ZeroMemory(expected);
+        }
+    }
+
+    private static string VerifyClaimProof(
+        RemoteRuntimePairingDB entity,
+        RemoteRuntimePairingClaim claim)
+    {
+        RequireText(claim.ProofSignatureBase64, nameof(claim.ProofSignatureBase64));
+        var requestBytes = DecodeBase64(claim.CertificateSigningRequestBase64, "InvalidProof");
+        var proof = DecodeBase64(claim.ProofSignatureBase64, "InvalidProof");
+        try
+        {
+            CertificateRequest request;
+            try
+            {
+                request = CertificateRequest.LoadSigningRequest(
+                    requestBytes,
+                    HashAlgorithmName.SHA256);
+            }
+            catch (CryptographicException)
+            {
+                throw Error("InvalidProof", "The pairing certificate request is invalid.");
+            }
+
+            var publicKey = request.PublicKey.ExportSubjectPublicKeyInfo();
+            var publicKeyHash = Convert.ToBase64String(SHA256.HashData(publicKey))
+                .TrimEnd('=')
+                .Replace('+', '-')
+                .Replace('/', '_');
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(claim.ProxyRuntimePublicKeyHash)
+                    && !string.Equals(publicKeyHash, claim.ProxyRuntimePublicKeyHash, StringComparison.Ordinal))
+                    throw Error("PairCredentialMismatch", "The pairing proof key does not match the claimed public key.");
+
+                using var verifier = ECDsa.Create();
+                verifier.ImportSubjectPublicKeyInfo(publicKey, out _);
+                var payload = RemoteRuntimePairingProof.CreateClaimProofPayload(
+                    entity.PairId,
+                    entity.GatewayInstanceId,
+                    entity.AuthoritativeRuntimeInstanceId,
+                    claim.ProxyRuntimeInstanceId,
+                    publicKeyHash,
+                    claim.InvitationSecret);
+                try
+                {
+                    if (!verifier.VerifyData(payload, proof, HashAlgorithmName.SHA256))
+                        throw Error("InvalidProof", "The pairing proof does not match the invitation claim.");
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(payload);
+                }
+            }
+            catch (CryptographicException)
+            {
+                throw Error("InvalidProof", "The pairing proof key is invalid.");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(publicKey);
+            }
+
+            return publicKeyHash;
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(requestBytes);
+            CryptographicOperations.ZeroMemory(proof);
+        }
+    }
+
+    private static byte[] DecodeBase64(string value, string errorCode)
+    {
+        try
+        {
+            return Convert.FromBase64String(value);
+        }
+        catch (FormatException)
+        {
+            throw Error(errorCode, "The pairing credential encoding is invalid.");
         }
     }
 

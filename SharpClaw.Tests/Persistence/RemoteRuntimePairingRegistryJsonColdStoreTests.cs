@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Security.Cryptography.X509Certificates;
 using FluentAssertions;
 using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
@@ -33,12 +35,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         row.EncryptedCertificateAuthorityPfx.Should().NotContain(Convert.ToBase64String([1, 2, 3, 4]));
         (await registry.GetCertificateAuthorityPfxAsync(invitation.PairId)).Should().Equal([1, 2, 3, 4]);
 
-        var pending = await registry.ClaimAsync(new RemoteRuntimePairingClaim(
-            invitation.PairId,
-            invitation.Secret,
-            "proxy-a",
-            "proxy-key-hash",
-            "csr"));
+        var pending = await registry.ClaimAsync(CreateClaim(invitation, "proxy-a"));
         pending.Status.Should().Be(RemoteRuntimePairStatus.ClaimPending);
 
         var active = await registry.ApproveAsync(
@@ -85,12 +82,8 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             "runtime-fingerprint",
             TimeSpan.FromMinutes(5));
 
-        var act = () => registry.ClaimAsync(new RemoteRuntimePairingClaim(
-            invitation.PairId,
-            "wrong-secret",
-            "proxy-a",
-            "proxy-key-hash",
-            "csr"));
+        var wrongClaim = CreateClaim(invitation, "proxy-a") with { InvitationSecret = "wrong-secret" };
+        var act = () => registry.ClaimAsync(wrongClaim);
         (await act.Should().ThrowAsync<RemoteRuntimePairingRegistryException>())
             .Which.Code.Should().Be("InvalidInvitation");
 
@@ -140,12 +133,7 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
 
         foreach (var invitation in invitations)
         {
-            await registry.ClaimAsync(new RemoteRuntimePairingClaim(
-                invitation.PairId,
-                invitation.Secret,
-                "proxy-a",
-                "proxy-key-hash",
-                "csr"));
+            await registry.ClaimAsync(CreateClaim(invitation, "proxy-a"));
         }
 
         await registry.ApproveAsync(
@@ -220,5 +208,36 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             if (Directory.Exists(Root))
                 Directory.Delete(Root, recursive: true);
         }
+    }
+
+    private static RemoteRuntimePairingClaim CreateClaim(
+        RemoteRuntimePairingInvitation invitation,
+        string proxyRuntimeInstanceId)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(
+            "CN=SharpClaw test proxy",
+            key,
+            HashAlgorithmName.SHA256);
+        var csr = request.CreateSigningRequest();
+        var publicKey = key.ExportSubjectPublicKeyInfo();
+        var publicKeyHash = Convert.ToBase64String(SHA256.HashData(publicKey))
+            .TrimEnd('=')
+            .Replace('+', '-')
+            .Replace('/', '_');
+        var payload = RemoteRuntimePairingProof.CreateClaimProofPayload(
+            invitation,
+            proxyRuntimeInstanceId,
+            publicKeyHash);
+        var signature = key.SignData(payload, HashAlgorithmName.SHA256);
+        CryptographicOperations.ZeroMemory(publicKey);
+        CryptographicOperations.ZeroMemory(payload);
+        return new RemoteRuntimePairingClaim(
+            invitation.PairId,
+            invitation.Secret,
+            proxyRuntimeInstanceId,
+            publicKeyHash,
+            Convert.ToBase64String(csr),
+            Convert.ToBase64String(signature));
     }
 }

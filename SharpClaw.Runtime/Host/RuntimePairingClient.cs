@@ -170,7 +170,7 @@ internal sealed class RemoteRuntimePairingClient(
                 true));
         var certificateSigningRequest = certificateRequest.CreateSigningRequest();
         var publicKeyHash = RemoteRuntimeCertificateHash.Compute(key);
-        var proofPayload = RemoteRuntimePairingStore.CreateClaimProofPayload(
+        var proofPayload = RemoteRuntimePairingProof.CreateClaimProofPayload(
             invitation,
             proxyRuntimeInstanceId,
             publicKeyHash);

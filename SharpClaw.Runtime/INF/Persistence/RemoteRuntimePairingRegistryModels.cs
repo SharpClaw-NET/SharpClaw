@@ -89,7 +89,8 @@ public sealed record RemoteRuntimePairingClaim(
     string InvitationSecret,
     string ProxyRuntimeInstanceId,
     string ProxyRuntimePublicKeyHash,
-    string CertificateSigningRequestBase64);
+    string CertificateSigningRequestBase64,
+    string ProofSignatureBase64 = "");
 
 public sealed class RemoteRuntimePairingRegistryException : InvalidOperationException
 {
