@@ -263,6 +263,21 @@ public sealed class RemoteRuntimePairingStore
         return authority!;
     }
 
+    public async Task<X509Certificate2> GetCertificateAuthorityPublicCertificateAsync(
+        CancellationToken cancellationToken = default)
+    {
+        using var authority = await GetOrCreateCertificateAuthorityAsync(cancellationToken);
+        var certificateBytes = authority.Export(X509ContentType.Cert);
+        try
+        {
+            return X509CertificateLoader.LoadCertificate(certificateBytes);
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(certificateBytes);
+        }
+    }
+
     public async Task<RemoteRuntimeClientCertificate> IssueClientCertificateAsync(
         Guid pairId,
         CancellationToken cancellationToken = default)
@@ -298,7 +313,17 @@ public sealed class RemoteRuntimePairingStore
         var serial = RandomNumberGenerator.GetBytes(16);
         try
         {
-            using var certificate = request.Create(
+            var clientCertificateRequest = new CertificateRequest(
+                request.SubjectName,
+                request.PublicKey,
+                HashAlgorithmName.SHA256);
+            clientCertificateRequest.CertificateExtensions.Add(
+                new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+            clientCertificateRequest.CertificateExtensions.Add(
+                new X509EnhancedKeyUsageExtension(
+                    [new Oid("1.3.6.1.5.5.7.3.2")],
+                    true));
+            using var certificate = clientCertificateRequest.Create(
                 authority,
                 notBefore,
                 notAfter,

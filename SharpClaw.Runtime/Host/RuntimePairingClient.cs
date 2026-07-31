@@ -165,6 +165,12 @@ internal sealed class RemoteRuntimePairingClient(
             $"CN=sharpclaw-proxy-{proxyRuntimeInstanceId}",
             key,
             HashAlgorithmName.SHA256);
+        certificateRequest.CertificateExtensions.Add(
+            new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+        certificateRequest.CertificateExtensions.Add(
+            new X509EnhancedKeyUsageExtension(
+                [new Oid("1.3.6.1.5.5.7.3.2")],
+                true));
         var certificateSigningRequest = certificateRequest.CreateSigningRequest();
         var publicKeyHash = RemoteRuntimeCertificateHash.Compute(key);
         var proofPayload = RemoteRuntimePairingStore.CreateClaimProofPayload(

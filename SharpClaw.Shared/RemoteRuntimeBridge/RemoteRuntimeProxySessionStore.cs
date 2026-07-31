@@ -123,7 +123,9 @@ public sealed class RemoteRuntimeProxySessionStore
             return X509CertificateLoader.LoadPkcs12(
                 pfxBytes,
                 password: null,
-                keyStorageFlags: X509KeyStorageFlags.EphemeralKeySet);
+                keyStorageFlags: X509KeyStorageFlags.UserKeySet
+                    | X509KeyStorageFlags.PersistKeySet
+                    | X509KeyStorageFlags.Exportable);
         }
         finally
         {
