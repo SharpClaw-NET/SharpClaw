@@ -310,6 +310,194 @@ internal static class RemoteRuntimeBridgeHost
                 }
             });
 
+        bridgeApp.MapGet(
+            RemoteRuntimeBridgePaths.AdminPairings,
+            async (HttpContext context, CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                var query = context.Request.Query;
+                var take = 50;
+                if (query.TryGetValue("take", out var takeValue)
+                    && (!int.TryParse(takeValue.ToString(), out take) || take < 1 || take > 200))
+                {
+                    return Results.BadRequest(new { error = "The pairing page size is invalid." });
+                }
+
+                RemoteRuntimePairStatus? status = null;
+                if (query.TryGetValue("status", out var statusValue)
+                    && !string.IsNullOrWhiteSpace(statusValue))
+                {
+                    if (!Enum.TryParse<RemoteRuntimePairStatus>(
+                            statusValue.ToString(),
+                            ignoreCase: true,
+                            out var parsedStatus))
+                    {
+                        return Results.BadRequest(new { error = "The pairing status filter is invalid." });
+                    }
+
+                    status = parsedStatus;
+                }
+
+                RemoteRuntimeRegistryPageCursor? cursor = null;
+                var cursorCreated = query["cursorCreatedAtUtc"].ToString();
+                var cursorId = query["cursorId"].ToString();
+                if (!string.IsNullOrWhiteSpace(cursorCreated) || !string.IsNullOrWhiteSpace(cursorId))
+                {
+                    if (!DateTimeOffset.TryParse(cursorCreated, out var createdAtUtc)
+                        || !Guid.TryParse(cursorId, out var id))
+                    {
+                        return Results.BadRequest(new { error = "The pairing page cursor is invalid." });
+                    }
+
+                    cursor = new RemoteRuntimeRegistryPageCursor(createdAtUtc, id);
+                }
+
+                try
+                {
+                    return Results.Ok(await registryClient.ListAsync(
+                        query["gatewayInstanceId"].ToString(),
+                        query["authoritativeRuntimeInstanceId"].ToString(),
+                        query["proxyRuntimeInstanceId"].ToString(),
+                        status,
+                        query["search"].ToString(),
+                        take,
+                        cursor,
+                        cancellationToken));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapGet(
+            RemoteRuntimeBridgePaths.AdminPairing,
+            async (
+                HttpContext context,
+                Guid pairId,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    var entry = await registryClient.FindAsync(pairId, cancellationToken);
+                    return entry is null ? Results.NotFound() : Results.Ok(entry);
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPut(
+            RemoteRuntimeBridgePaths.AdminPairing,
+            async (
+                HttpContext context,
+                Guid pairId,
+                RemoteRuntimeRegistryDetailsRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    return Results.Ok(await registryClient.UpdateAsync(
+                        pairId,
+                        request,
+                        cancellationToken));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.AdminPairingRenew,
+            async (
+                HttpContext context,
+                Guid pairId,
+                RemoteRuntimeRegistryRenewalRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    return Results.Ok(await registryClient.RenewAsync(
+                        pairId,
+                        request,
+                        cancellationToken));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapPost(
+            RemoteRuntimeBridgePaths.AdminPairingReject,
+            async (
+                HttpContext context,
+                Guid pairId,
+                RemoteRuntimeRegistryReasonRequest request,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    return Results.Ok(await registryClient.RejectAsync(
+                        pairId,
+                        request.Reason,
+                        cancellationToken));
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
+        bridgeApp.MapDelete(
+            RemoteRuntimeBridgePaths.AdminPairing,
+            async (
+                HttpContext context,
+                Guid pairId,
+                CancellationToken cancellationToken) =>
+            {
+                if (!HasLocalAdministrationAccess(context, options.AdministrationKey))
+                    return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+                try
+                {
+                    await registryClient.DeleteAsync(pairId, cancellationToken);
+                    return Results.NoContent();
+                }
+                catch (RemoteRuntimePairingException exception)
+                {
+                    return Results.Json(
+                        new { code = exception.Code, error = exception.Message },
+                        statusCode: StatusCodes.Status400BadRequest);
+                }
+            });
+
             bridgeApp.MapForwarder(
                 "/{**catch-all}",
             target.TargetBaseUrl,
@@ -345,7 +533,10 @@ internal static class RemoteRuntimeBridgeHost
             || path.Equals(RemoteRuntimeBridgePaths.PairingCertificate, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminInvitation, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminApprove, StringComparison.Ordinal)
-            || path.Equals(RemoteRuntimeBridgePaths.AdminRevoke, StringComparison.Ordinal);
+            || path.Equals(RemoteRuntimeBridgePaths.AdminRevoke, StringComparison.Ordinal)
+            || path.Value?.StartsWith(
+                RemoteRuntimeBridgePaths.AdminPairings,
+                StringComparison.Ordinal) == true;
 
     private static RemoteRuntimeBridgeWorkKind GetWorkKind(HttpContext context)
     {

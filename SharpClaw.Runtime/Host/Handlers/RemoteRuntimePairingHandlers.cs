@@ -60,7 +60,7 @@ public static class RemoteRuntimePairingHandlers
                 request.PairId,
                 request.Secret,
                 request.ProxyRuntimeInstanceId,
-                string.Empty,
+                null,
                 request.CertificateSigningRequestBase64,
                 request.ProofSignatureBase64), cancellationToken));
 
@@ -83,6 +83,120 @@ public static class RemoteRuntimePairingHandlers
                     certificate.NotAfterUtc);
             });
 
+    [MapGet("/pairings")]
+    public static Task<IResult> List(
+        string? gatewayInstanceId,
+        string? authoritativeRuntimeInstanceId,
+        string? proxyRuntimeInstanceId,
+        string? status,
+        string? search,
+        int? take,
+        DateTimeOffset? cursorCreatedAtUtc,
+        Guid? cursorId,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        if (!string.IsNullOrWhiteSpace(status)
+            && !Enum.TryParse<RemoteRuntimePairStatus>(status, ignoreCase: true, out var parsedStatus))
+        {
+            return Task.FromResult<IResult>(
+                Results.BadRequest(new { error = "The pairing status filter is invalid." }));
+        }
+
+        RemoteRuntimePairStatus? filterStatus = null;
+        if (!string.IsNullOrWhiteSpace(status))
+            filterStatus = Enum.Parse<RemoteRuntimePairStatus>(status, ignoreCase: true);
+
+        if ((cursorCreatedAtUtc is null) != (cursorId is null))
+        {
+            return Task.FromResult<IResult>(
+                Results.BadRequest(new { error = "Both cursor values are required." }));
+        }
+
+        var cursor = cursorCreatedAtUtc is { } createdAtUtc && cursorId is { } id
+            ? new RemoteRuntimePairingPageCursor(createdAtUtc, id)
+            : null;
+        return ExecuteAsync(async () =>
+        {
+            var page = await registry.ListAsync(
+                new RemoteRuntimePairingRegistryFilter(
+                    gatewayInstanceId,
+                    authoritativeRuntimeInstanceId,
+                    proxyRuntimeInstanceId,
+                    filterStatus,
+                    search),
+                take ?? 50,
+                cursor,
+                cancellationToken);
+            return new RemoteRuntimeRegistryPageResponse(
+                page.Items.Select(ToSnapshot).ToArray(),
+                page.HasMore,
+                page.Next is { } next
+                    ? new RemoteRuntimeRegistryPageCursor(next.CreatedAtUtc, next.Id)
+                    : null);
+        });
+    }
+
+    [MapGet("/pairings/{pairId:guid}")]
+    public static async Task<IResult> Find(
+        Guid pairId,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        var entry = await registry.FindAsync(pairId, cancellationToken);
+        return entry is null ? Results.NotFound() : Results.Ok(ToSnapshot(entry));
+    }
+
+    [MapPut("/pairings/{pairId:guid}")]
+    public static Task<IResult> Update(
+        Guid pairId,
+        RemoteRuntimeRegistryDetailsRequest request,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(async () =>
+            ToSnapshot(await registry.UpdateDetailsAsync(
+                pairId,
+                request.DisplayName,
+                request.Description,
+                cancellationToken)));
+
+    [MapPost("/pairings/{pairId:guid}/renew")]
+    public static Task<IResult> Renew(
+        Guid pairId,
+        RemoteRuntimeRegistryRenewalRequest request,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(async () =>
+            ToSnapshot(await registry.RenewAsync(
+                pairId,
+                request.ExpiresAtUtc,
+                cancellationToken)));
+
+    [MapPost("/pairings/{pairId:guid}/last-seen")]
+    public static Task<IResult> TouchLastSeen(
+        Guid pairId,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(async () =>
+            ToSnapshot(await registry.TouchLastSeenAsync(pairId, cancellationToken)));
+
+    [MapDelete("/pairings/{pairId:guid}")]
+    public static async Task<IResult> Delete(
+        Guid pairId,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            await registry.DeleteAsync(pairId, cancellationToken);
+            return Results.NoContent();
+        }
+        catch (RemoteRuntimePairingRegistryException exception)
+        {
+            return Results.Json(new { code = exception.Code, error = exception.Message }, statusCode: 400);
+        }
+    }
+
     [MapPost("/approve")]
     public static Task<IResult> Approve(
         RemoteRuntimeRegistryApprovalRequest request,
@@ -103,6 +217,15 @@ public static class RemoteRuntimePairingHandlers
         CancellationToken cancellationToken)
         => ExecuteAsync(
             () => registry.RejectAsync(request.PairId, request.Reason, cancellationToken));
+
+    [MapPost("/pairings/{pairId:guid}/reject")]
+    public static Task<IResult> RejectPairing(
+        Guid pairId,
+        RemoteRuntimeRegistryReasonRequest request,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(async () =>
+            ToSnapshot(await registry.RejectAsync(pairId, request.Reason, cancellationToken)));
 
     [MapPost("/revoke")]
     public static Task<IResult> Revoke(
@@ -138,4 +261,31 @@ public static class RemoteRuntimePairingHandlers
             return Results.Json(new { error = exception.Message }, statusCode: 400);
         }
     }
+
+    private static RemoteRuntimePairingRegistrySnapshot ToSnapshot(
+        RemoteRuntimePairingRegistryEntry entry)
+        => new(
+            entry.Id,
+            entry.PairId,
+            entry.Status,
+            entry.GatewayInstanceId,
+            entry.GatewayServerPublicKeyHash,
+            entry.AuthoritativeRuntimeInstanceId,
+            entry.AuthoritativeRuntimeInstallFingerprint,
+            entry.BridgeProtocolMajor,
+            entry.ProxyRuntimeInstanceId,
+            entry.ProxyRuntimePublicKeyHash,
+            entry.ClientCertificateIdentity,
+            entry.DisplayName,
+            entry.Description,
+            entry.StatusReason,
+            entry.CreatedAtUtc,
+            entry.ClaimedAtUtc,
+            entry.ApprovedAtUtc,
+            entry.RenewedAtUtc,
+            entry.RevokedAtUtc,
+            entry.ExpiresAtUtc,
+            entry.LastSeenAtUtc,
+            entry.UpdatedAtUtc,
+            entry.Revision);
 }

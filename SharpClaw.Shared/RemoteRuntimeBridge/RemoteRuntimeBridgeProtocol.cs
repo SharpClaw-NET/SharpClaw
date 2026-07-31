@@ -17,6 +17,15 @@ public static class RemoteRuntimeBridgePaths
     public const string RegistryReject = RegistryPrefix + "/reject";
     public const string RegistryRevoke = RegistryPrefix + "/revoke";
     public const string RegistryActive = RegistryPrefix + "/active";
+    public const string RegistryPairings = RegistryPrefix + "/pairings";
+    public const string RegistryPairing = RegistryPairings + "/{pairId:guid}";
+    public const string RegistryPairingRenew = RegistryPairing + "/renew";
+    public const string RegistryPairingReject = RegistryPairing + "/reject";
+    public const string RegistryPairingTouch = RegistryPairing + "/last-seen";
+    public const string AdminPairings = "/__sharpclaw/remote-runtime/admin/pairings";
+    public const string AdminPairing = AdminPairings + "/{pairId:guid}";
+    public const string AdminPairingRenew = AdminPairing + "/renew";
+    public const string AdminPairingReject = AdminPairing + "/reject";
 }
 
 public sealed record RemoteRuntimePairingClaimRequest(
@@ -69,6 +78,23 @@ public sealed record RemoteRuntimeRegistryApprovalRequest(
 public sealed record RemoteRuntimeRegistryRejectionRequest(Guid PairId, string Reason);
 
 public sealed record RemoteRuntimeRegistryRevocationRequest(Guid PairId, string Reason);
+
+public sealed record RemoteRuntimeRegistryDetailsRequest(
+    string? DisplayName = null,
+    string? Description = null);
+
+public sealed record RemoteRuntimeRegistryRenewalRequest(DateTimeOffset ExpiresAtUtc);
+
+public sealed record RemoteRuntimeRegistryReasonRequest(string Reason);
+
+public sealed record RemoteRuntimeRegistryPageCursor(
+    DateTimeOffset CreatedAtUtc,
+    Guid Id);
+
+public sealed record RemoteRuntimeRegistryPageResponse(
+    IReadOnlyList<RemoteRuntimePairingRegistrySnapshot> Items,
+    bool HasMore,
+    RemoteRuntimeRegistryPageCursor? Next);
 
 public sealed record RemoteRuntimePairingRegistrySnapshot(
     Guid Id,

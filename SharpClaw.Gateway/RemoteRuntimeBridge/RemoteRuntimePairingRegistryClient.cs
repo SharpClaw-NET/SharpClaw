@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Net.Http.Json;
 using System.Security.Cryptography.X509Certificates;
 using System.Text.Json;
@@ -32,6 +33,37 @@ internal interface IRemoteRuntimePairingRegistryClient : IAsyncDisposable
         string gatewayInstanceId,
         string authoritativeRuntimeInstanceId,
         CancellationToken cancellationToken);
+
+    Task<RemoteRuntimeRegistryPageResponse> ListAsync(
+        string? gatewayInstanceId,
+        string? authoritativeRuntimeInstanceId,
+        string? proxyRuntimeInstanceId,
+        RemoteRuntimePairStatus? status,
+        string? search,
+        int take,
+        RemoteRuntimeRegistryPageCursor? cursor,
+        CancellationToken cancellationToken);
+
+    Task<RemoteRuntimePairingRegistrySnapshot?> FindAsync(
+        Guid pairId,
+        CancellationToken cancellationToken);
+
+    Task<RemoteRuntimePairingRegistrySnapshot> UpdateAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryDetailsRequest request,
+        CancellationToken cancellationToken);
+
+    Task<RemoteRuntimePairingRegistrySnapshot> RenewAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryRenewalRequest request,
+        CancellationToken cancellationToken);
+
+    Task<RemoteRuntimePairingRegistrySnapshot> RejectAsync(
+        Guid pairId,
+        string reason,
+        CancellationToken cancellationToken);
+
+    Task DeleteAsync(Guid pairId, CancellationToken cancellationToken);
 
     Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
@@ -132,6 +164,87 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
         return await GetAsync<RemoteRuntimePairingRegistrySnapshot>(path, cancellationToken);
     }
 
+    public async Task<RemoteRuntimeRegistryPageResponse> ListAsync(
+        string? gatewayInstanceId,
+        string? authoritativeRuntimeInstanceId,
+        string? proxyRuntimeInstanceId,
+        RemoteRuntimePairStatus? status,
+        string? search,
+        int take,
+        RemoteRuntimeRegistryPageCursor? cursor,
+        CancellationToken cancellationToken)
+    {
+        var query = new List<string> { $"take={take}" };
+        AddQuery(query, "gatewayInstanceId", gatewayInstanceId);
+        AddQuery(query, "authoritativeRuntimeInstanceId", authoritativeRuntimeInstanceId);
+        AddQuery(query, "proxyRuntimeInstanceId", proxyRuntimeInstanceId);
+        AddQuery(query, "status", status?.ToString());
+        AddQuery(query, "search", search);
+        if (cursor is { } pageCursor)
+        {
+            AddQuery(query, "cursorCreatedAtUtc", pageCursor.CreatedAtUtc.ToString("O"));
+            AddQuery(query, "cursorId", pageCursor.Id.ToString("D"));
+        }
+
+        return await GetAsync<RemoteRuntimeRegistryPageResponse>(
+                $"{RemoteRuntimeBridgePaths.RegistryPairings}?{string.Join('&', query)}",
+                cancellationToken)
+            ?? throw new RemoteRuntimePairingException(
+                "PairingResponseInvalid",
+                "The authoritative Runtime returned an empty pairing page.");
+    }
+
+    public Task<RemoteRuntimePairingRegistrySnapshot?> FindAsync(
+        Guid pairId,
+        CancellationToken cancellationToken)
+        => GetAsync<RemoteRuntimePairingRegistrySnapshot>(PairingPath(pairId), cancellationToken);
+
+    public async Task<RemoteRuntimePairingRegistrySnapshot> UpdateAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryDetailsRequest request,
+        CancellationToken cancellationToken)
+        => await PutAsync<RemoteRuntimeRegistryDetailsRequest, RemoteRuntimePairingRegistrySnapshot>(
+            PairingPath(pairId),
+            request,
+            cancellationToken)
+            ?? throw InvalidResponse();
+
+    public async Task<RemoteRuntimePairingRegistrySnapshot> RenewAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryRenewalRequest request,
+        CancellationToken cancellationToken)
+    {
+        var result = await PostAsync<RemoteRuntimeRegistryRenewalRequest, RemoteRuntimePairingRegistrySnapshot>(
+            PairingRenewPath(pairId),
+            request,
+            cancellationToken);
+        Invalidate(result.PairId);
+        return result;
+    }
+
+    public async Task<RemoteRuntimePairingRegistrySnapshot> RejectAsync(
+        Guid pairId,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        var result = await PostAsync<RemoteRuntimeRegistryRejectionRequest, RemoteRuntimePairingRegistrySnapshot>(
+            PairingRejectPath(pairId),
+            new RemoteRuntimeRegistryRejectionRequest(pairId, reason),
+            cancellationToken);
+        Invalidate(result.PairId);
+        return result;
+    }
+
+    public async Task DeleteAsync(Guid pairId, CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.DeleteAsync(PairingPath(pairId), cancellationToken);
+        if (response.StatusCode == HttpStatusCode.NoContent)
+            response.EnsureSuccessStatusCode();
+        else
+            await ReadResponseAsync<object>(response, cancellationToken);
+        Invalidate(pairId);
+    }
+
     public async Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
         string gatewayInstanceId,
@@ -218,6 +331,19 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
                 "The authoritative Runtime returned an empty response.");
     }
 
+    private async Task<TResponse?> PutAsync<TRequest, TResponse>(
+        string path,
+        TRequest request,
+        CancellationToken cancellationToken)
+    {
+        using var response = await _httpClient.PutAsJsonAsync(
+            path,
+            request,
+            JsonOptions,
+            cancellationToken);
+        return await ReadResponseAsync<TResponse>(response, cancellationToken);
+    }
+
     private static async Task<TResponse?> ReadResponseAsync<TResponse>(
         HttpResponseMessage response,
         CancellationToken cancellationToken)
@@ -240,6 +366,29 @@ internal sealed class RemoteRuntimePairingRegistryClient : IRemoteRuntimePairing
         if (string.IsNullOrWhiteSpace(value))
             throw new ArgumentException("A nonblank value is required.", parameterName);
     }
+
+    private static void AddQuery(
+        ICollection<string> query,
+        string name,
+        string? value)
+    {
+        if (!string.IsNullOrWhiteSpace(value))
+            query.Add($"{name}={Uri.EscapeDataString(value)}");
+    }
+
+    private static string PairingPath(Guid pairId)
+        => $"{RemoteRuntimeBridgePaths.RegistryPairings}/{pairId:D}";
+
+    private static string PairingRenewPath(Guid pairId)
+        => $"{PairingPath(pairId)}/renew";
+
+    private static string PairingRejectPath(Guid pairId)
+        => $"{RemoteRuntimeBridgePaths.RegistryPairings}/{pairId:D}/reject";
+
+    private static RemoteRuntimePairingException InvalidResponse()
+        => new(
+            "PairingResponseInvalid",
+            "The authoritative Runtime returned an empty pairing response.");
 
     private sealed record CacheEntry(
         RemoteRuntimePairingRegistrySnapshot Entry,

@@ -162,7 +162,6 @@ public sealed class RemoteRuntimePairingRegistry(
         RequireJsonColdStore();
         RequireText(claim.InvitationSecret, nameof(claim.InvitationSecret));
         RequireText(claim.ProxyRuntimeInstanceId, nameof(claim.ProxyRuntimeInstanceId));
-        RequireText(claim.ProxyRuntimePublicKeyHash, nameof(claim.ProxyRuntimePublicKeyHash));
         RequireText(claim.CertificateSigningRequestBase64, nameof(claim.CertificateSigningRequestBase64));
 
         var entity = await db.RemoteRuntimePairings

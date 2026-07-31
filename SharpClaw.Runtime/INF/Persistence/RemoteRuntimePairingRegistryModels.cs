@@ -88,7 +88,7 @@ public sealed record RemoteRuntimePairingClaim(
     Guid PairId,
     string InvitationSecret,
     string ProxyRuntimeInstanceId,
-    string ProxyRuntimePublicKeyHash,
+    string? ProxyRuntimePublicKeyHash,
     string CertificateSigningRequestBase64,
     string ProofSignatureBase64 = "");
 

@@ -102,6 +102,88 @@ public sealed class RemoteRuntimeBridgeRouteTests
             invitation.AuthoritativeRuntimeInstallFingerprint.Should()
                 .Be(target.AuthoritativeRuntimeInstallFingerprint);
 
+            var pairId = registryClient.PairId;
+            var adminPairingPath = RemoteRuntimeBridgePaths.AdminPairing
+                .Replace("{pairId:guid}", pairId.ToString(), StringComparison.Ordinal);
+
+            using var listRequest = new HttpRequestMessage(
+                HttpMethod.Get,
+                RemoteRuntimeBridgePaths.AdminPairings + "?take=10");
+            listRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var listResponse = await client.SendAsync(listRequest);
+            listResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var page = await listResponse.Content
+                .ReadFromJsonAsync<RemoteRuntimeRegistryPageResponse>();
+            page.Should().NotBeNull();
+            page!.Items.Should().ContainSingle(item => item.PairId == pairId);
+
+            using var getRequest = new HttpRequestMessage(HttpMethod.Get, adminPairingPath);
+            getRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var getResponse = await client.SendAsync(getRequest);
+            getResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var updateRequest = new HttpRequestMessage(HttpMethod.Put, adminPairingPath)
+            {
+                Content = JsonContent.Create(
+                    new RemoteRuntimeRegistryDetailsRequest("test-pair", "route test")),
+            };
+            updateRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var updateResponse = await client.SendAsync(updateRequest);
+            updateResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var updated = await updateResponse.Content
+                .ReadFromJsonAsync<RemoteRuntimePairingRegistrySnapshot>();
+            updated.Should().NotBeNull();
+            updated!.DisplayName.Should().Be("test-pair");
+
+            using var renewRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                adminPairingPath + "/renew")
+            {
+                Content = JsonContent.Create(
+                    new RemoteRuntimeRegistryRenewalRequest(DateTimeOffset.UtcNow.AddHours(2))),
+            };
+            renewRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var renewResponse = await client.SendAsync(renewRequest);
+            renewResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+
+            using var rejectRequest = new HttpRequestMessage(
+                HttpMethod.Post,
+                adminPairingPath + "/reject")
+            {
+                Content = JsonContent.Create(new RemoteRuntimeRegistryReasonRequest("test reject")),
+            };
+            rejectRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var rejectResponse = await client.SendAsync(rejectRequest);
+            rejectResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var rejected = await rejectResponse.Content
+                .ReadFromJsonAsync<RemoteRuntimePairingRegistrySnapshot>();
+            rejected.Should().NotBeNull();
+            rejected!.Status.Should().Be(RemoteRuntimePairStatus.Rejected);
+
+            using var deleteRequest = new HttpRequestMessage(HttpMethod.Delete, adminPairingPath);
+            deleteRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var deleteResponse = await client.SendAsync(deleteRequest);
+            deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+            using var missingRequest = new HttpRequestMessage(HttpMethod.Get, adminPairingPath);
+            missingRequest.Headers.Add(
+                RemoteRuntimeBridgePaths.AdministrationKeyHeader,
+                "bridge-admin-key");
+            using var missingResponse = await client.SendAsync(missingRequest);
+            missingResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+
             using var malformedClaim = await client.PostAsJsonAsync(
                 RemoteRuntimeBridgePaths.PairingClaim,
                 new RemoteRuntimePairingClaimRequest(

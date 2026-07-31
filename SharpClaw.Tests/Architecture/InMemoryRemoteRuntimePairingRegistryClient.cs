@@ -164,6 +164,123 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
         }
     }
 
+    public Task<RemoteRuntimeRegistryPageResponse> ListAsync(
+        string? gatewayInstanceId,
+        string? authoritativeRuntimeInstanceId,
+        string? proxyRuntimeInstanceId,
+        RemoteRuntimePairStatus? status,
+        string? search,
+        int take,
+        RemoteRuntimeRegistryPageCursor? cursor,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var entry = _entry;
+            var matches = entry is not null
+                && (string.IsNullOrWhiteSpace(gatewayInstanceId)
+                    || entry.GatewayInstanceId == gatewayInstanceId)
+                && (string.IsNullOrWhiteSpace(authoritativeRuntimeInstanceId)
+                    || entry.AuthoritativeRuntimeInstanceId == authoritativeRuntimeInstanceId)
+                && (string.IsNullOrWhiteSpace(proxyRuntimeInstanceId)
+                    || entry.ProxyRuntimeInstanceId == proxyRuntimeInstanceId)
+                && (status is null || entry.Status == status)
+                && (string.IsNullOrWhiteSpace(search)
+                    || entry.PairId.ToString().Contains(search, StringComparison.OrdinalIgnoreCase));
+            return Task.FromResult(new RemoteRuntimeRegistryPageResponse(
+                matches ? [entry!] : [],
+                HasMore: false,
+                Next: null));
+        }
+    }
+
+    public Task<RemoteRuntimePairingRegistrySnapshot?> FindAsync(
+        Guid pairId,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            return Task.FromResult(
+                _entry?.PairId == pairId ? _entry : null);
+        }
+    }
+
+    public Task<RemoteRuntimePairingRegistrySnapshot> UpdateAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryDetailsRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var current = RequireEntry(pairId);
+            _entry = current with
+            {
+                DisplayName = request.DisplayName,
+                Description = request.Description,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                Revision = current.Revision + 1,
+            };
+            return Task.FromResult(_entry);
+        }
+    }
+
+    public Task<RemoteRuntimePairingRegistrySnapshot> RenewAsync(
+        Guid pairId,
+        RemoteRuntimeRegistryRenewalRequest request,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var current = RequireEntry(pairId);
+            _entry = current with
+            {
+                ExpiresAtUtc = request.ExpiresAtUtc,
+                RenewedAtUtc = DateTimeOffset.UtcNow,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                Revision = current.Revision + 1,
+            };
+            Invalidate(pairId);
+            return Task.FromResult(_entry);
+        }
+    }
+
+    public Task<RemoteRuntimePairingRegistrySnapshot> RejectAsync(
+        Guid pairId,
+        string reason,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            var current = RequireEntry(pairId);
+            _entry = current with
+            {
+                Status = RemoteRuntimePairStatus.Rejected,
+                StatusReason = reason,
+                UpdatedAtUtc = DateTimeOffset.UtcNow,
+                Revision = current.Revision + 1,
+            };
+            Invalidate(pairId);
+            return Task.FromResult(_entry);
+        }
+    }
+
+    public Task DeleteAsync(Guid pairId, CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        lock (_gate)
+        {
+            _ = RequireEntry(pairId);
+            _entry = null;
+            Invalidate(pairId);
+            return Task.CompletedTask;
+        }
+    }
+
     public async Task<RemoteRuntimePairingRegistrySnapshot> RequireActiveCertificateAsync(
         X509Certificate2 certificate,
         string gatewayInstanceId,
@@ -291,4 +408,9 @@ internal sealed class InMemoryRemoteRuntimePairingRegistryClient : IRemoteRuntim
 
     private RemoteRuntimePairingRegistrySnapshot RequireEntry()
         => _entry ?? throw new RemoteRuntimePairingException("PairNotFound", "The test pairing was not created.");
+
+    private RemoteRuntimePairingRegistrySnapshot RequireEntry(Guid pairId)
+        => RequireEntry().PairId == pairId
+            ? _entry!
+            : throw new RemoteRuntimePairingException("PairNotFound", "The test pairing was not created.");
 }

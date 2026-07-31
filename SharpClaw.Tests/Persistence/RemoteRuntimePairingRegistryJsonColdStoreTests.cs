@@ -97,6 +97,30 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
     }
 
     [Test]
+    public async Task Registry_derives_public_key_hash_when_http_claim_omits_it()
+    {
+        using var workspace = Workspace.Create();
+        await using var db = workspace.CreateDbContext();
+        await db.Database.EnsureCreatedAsync();
+        var registry = workspace.CreateRegistry(db);
+        var invitation = await registry.CreateInvitationAsync(
+            "gateway-a",
+            "gateway-key-hash",
+            "runtime-a",
+            "runtime-fingerprint",
+            TimeSpan.FromMinutes(5));
+
+        var pending = await registry.ClaimAsync(
+            CreateClaim(invitation, "proxy-a") with
+            {
+                ProxyRuntimePublicKeyHash = null,
+            });
+
+        pending.Status.Should().Be(RemoteRuntimePairStatus.ClaimPending);
+        pending.ProxyRuntimePublicKeyHash.Should().NotBeNullOrWhiteSpace();
+    }
+
+    [Test]
     public async Task Registry_UsesStableCursorAndRejectsSecondActiveTarget()
     {
         using var workspace = Workspace.Create();
