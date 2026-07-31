@@ -89,6 +89,7 @@ internal static class RemoteRuntimeBridgeHost
 
         var certificateAuthority =
             await pairingStore.GetCertificateAuthorityPublicCertificateAsync(cancellationToken);
+        var concurrencyLimiter = new RemoteRuntimeBridgeConcurrencyLimiter(options);
         var builder = WebApplication.CreateSlimBuilder(args);
         try
         {
@@ -114,6 +115,7 @@ internal static class RemoteRuntimeBridgeHost
             {
                 var certificate = await context.Connection.GetClientCertificateAsync(
                     context.RequestAborted);
+                RemoteRuntimePairingRecord? activePair = null;
                 if (certificate is null && !IsUnauthenticatedControlPath(context.Request.Path))
                 {
                     context.Response.StatusCode = StatusCodes.Status401Unauthorized;
@@ -124,7 +126,7 @@ internal static class RemoteRuntimeBridgeHost
                 {
                     try
                     {
-                        await pairingStore.RequireActiveCertificateAsync(
+                        activePair = await pairingStore.RequireActiveCertificateAsync(
                             certificate,
                             target.GatewayInstanceId,
                             target.AuthoritativeRuntimeInstanceId,
@@ -140,7 +142,25 @@ internal static class RemoteRuntimeBridgeHost
                     }
                 }
 
-                await next(context);
+                var workKind = GetWorkKind(context);
+                var lease = activePair is null
+                    ? null
+                    : concurrencyLimiter.TryAcquire(activePair!.PairId, workKind);
+                if (activePair is not null && lease is null)
+                {
+                    context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                    context.Response.Headers.RetryAfter = "0";
+                    return;
+                }
+
+                try
+                {
+                    await next(context);
+                }
+                finally
+                {
+                    lease?.Dispose();
+                }
             });
 
             bridgeApp.MapPost(
@@ -355,6 +375,17 @@ internal static class RemoteRuntimeBridgeHost
             || path.Equals(RemoteRuntimeBridgePaths.AdminInvitation, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminApprove, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.AdminRevoke, StringComparison.Ordinal);
+
+    private static RemoteRuntimeBridgeWorkKind GetWorkKind(HttpContext context)
+    {
+        if (context.WebSockets.IsWebSocketRequest)
+            return RemoteRuntimeBridgeWorkKind.WebSocket;
+
+        return context.Request.Headers.Accept.Any(value =>
+                value.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase))
+            ? RemoteRuntimeBridgeWorkKind.Stream
+            : RemoteRuntimeBridgeWorkKind.Request;
+    }
 
     private static bool HasLocalAdministrationAccess(
         HttpContext context,
