@@ -52,6 +52,18 @@ public sealed class RemoteRuntimePairingStoreTests
         using var clientCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
         clientCertificate.Subject.Should().Contain("proxy-1");
         clientCertificate.HasPrivateKey.Should().BeFalse();
+        var validated = await store.RequireActiveCertificateAsync(
+            clientCertificate,
+            "gateway-1",
+            "runtime-1");
+        validated.PairId.Should().Be(invitation.PairId);
+
+        var wrongTarget = () => store.RequireActiveCertificateAsync(
+            clientCertificate,
+            "gateway-1",
+            "runtime-2");
+        await wrongTarget.Should().ThrowAsync<RemoteRuntimePairingException>()
+            .Where(exception => exception.Code == "PairNotAuthorized");
 
         var renewed = await store.RenewClientCertificateAsync(invitation.PairId);
         renewed.CertificateThumbprint.Should().NotBe(issued.CertificateThumbprint);

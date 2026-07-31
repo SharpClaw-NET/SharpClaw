@@ -318,6 +318,46 @@ public sealed class RemoteRuntimePairingStore
         CancellationToken cancellationToken = default)
         => await IssueClientCertificateAsync(pairId, cancellationToken);
 
+    public async Task<RemoteRuntimePairingRecord> RequireActiveCertificateAsync(
+        X509Certificate2 certificate,
+        string gatewayInstanceId,
+        string authoritativeRuntimeInstanceId,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(certificate);
+        RequireText(gatewayInstanceId, nameof(gatewayInstanceId));
+        RequireText(authoritativeRuntimeInstanceId, nameof(authoritativeRuntimeInstanceId));
+
+        using var certificateKey = certificate.GetECDsaPublicKey()
+            ?? throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "The client certificate does not contain an ECDSA public key.");
+        var publicKey = certificateKey.ExportSubjectPublicKeyInfo();
+        var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+        CryptographicOperations.ZeroMemory(publicKey);
+        var now = _utcNow();
+        var records = await ReadRecordsAsync(cancellationToken);
+        var record = records.FirstOrDefault(candidate =>
+            candidate.IsActive(now)
+            && string.Equals(
+                candidate.GatewayInstanceId,
+                gatewayInstanceId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                candidate.AuthoritativeRuntimeInstanceId,
+                authoritativeRuntimeInstanceId,
+                StringComparison.Ordinal)
+            && string.Equals(
+                candidate.ProxyRuntimePublicKeyHash,
+                publicKeyHash,
+                StringComparison.Ordinal));
+
+        return record
+            ?? throw new RemoteRuntimePairingException(
+                "PairNotAuthorized",
+                "The client certificate is not active for this Runtime target.");
+    }
+
     public async Task<RemoteRuntimePairingRecord> ApproveClaimAsync(
         Guid pairId,
         string expectedProxyRuntimeInstanceId,
