@@ -19,12 +19,22 @@ public sealed class RemoteRuntimeBridgeOptionsTests
                     ["Gateway:RemoteRuntimeBridge:MaxConcurrentRequestsPerPair"] = "12",
                     ["Gateway:RemoteRuntimeBridge:MaxConcurrentStreamsPerPair"] = "3",
                     ["Gateway:RemoteRuntimeBridge:MaxConcurrentWebSocketsPerPair"] = "2",
+                    ["Gateway:RemoteRuntimeBridge:MaxConcurrentRequests"] = "100",
+                    ["Gateway:RemoteRuntimeBridge:MaxConcurrentStreams"] = "11",
+                    ["Gateway:RemoteRuntimeBridge:MaxConcurrentWebSockets"] = "7",
+                    ["Gateway:RemoteRuntimeBridge:MaxConcurrentPairingControls"] = "5",
+                    ["Gateway:RemoteRuntimeBridge:LastSeenUpdateIntervalSeconds"] = "42",
                 })
                 .Build());
 
         options.MaxConcurrentRequestsPerPair.Should().Be(12);
         options.MaxConcurrentStreamsPerPair.Should().Be(3);
         options.MaxConcurrentWebSocketsPerPair.Should().Be(2);
+        options.MaxConcurrentRequests.Should().Be(100);
+        options.MaxConcurrentStreams.Should().Be(11);
+        options.MaxConcurrentWebSockets.Should().Be(7);
+        options.MaxConcurrentPairingControls.Should().Be(5);
+        options.LastSeenUpdateIntervalSeconds.Should().Be(42);
     }
 
     [Test]

@@ -101,6 +101,37 @@ public sealed class RemoteRuntimeProxySessionTests
     }
 
     [Test]
+    public void Proxy_session_rejects_excess_local_connections_without_queueing()
+    {
+        var root = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "proxy-session-limit-" + Guid.NewGuid().ToString("N"));
+        var paths = new SharpClawInstancePaths(
+            SharpClawInstanceKind.Backend,
+            Path.Combine(root, "backend"),
+            Path.Combine(root, "shared"));
+        using var certificate = CreateClientCertificate();
+        using var session = new RemoteRuntimeProxyConnection(
+            paths,
+            "http://127.0.0.1:48923",
+            "https://127.0.0.1:48925",
+            "gateway-public-key-hash",
+            "local-key",
+            "proxy-1",
+            certificate,
+            TimeSpan.FromSeconds(10),
+            TimeSpan.FromSeconds(120),
+            maxConcurrentConnections: 1);
+
+        using var first = session.TryAcquireConnection();
+        first.Should().NotBeNull();
+        session.TryAcquireConnection().Should().BeNull();
+        first!.Dispose();
+        using var replacement = session.TryAcquireConnection();
+        replacement.Should().NotBeNull();
+    }
+
+    [Test]
     public void Proxy_session_rejects_protocol_major_mismatch_before_startup()
     {
         var configuration = new ConfigurationBuilder()
@@ -177,7 +208,8 @@ public sealed class RemoteRuntimeProxySessionTests
     private sealed class RemoteProxyOptionsForTests
     {
         public RemoteProxyOptions Create()
-            => RemoteProxyOptions.Bind(
+        {
+            var options = RemoteProxyOptions.Bind(
                 new ConfigurationBuilder()
                     .AddInMemoryCollection(new Dictionary<string, string?>
                     {
@@ -192,7 +224,11 @@ public sealed class RemoteRuntimeProxySessionTests
                         ["Runtime:RemoteProxy:ClientCertificateSecret"] = "certificate-name",
                         ["Runtime:RemoteProxy:ConnectTimeoutSeconds"] = "10",
                         ["Runtime:RemoteProxy:ActivityTimeoutSeconds"] = "120",
+                        ["Runtime:RemoteProxy:MaxConcurrentConnections"] = "3",
                     })
                     .Build())!;
+            options.MaxConcurrentConnections.Should().Be(3);
+            return options;
+        }
     }
 }

@@ -22,7 +22,8 @@ public sealed record RemoteProxyOptions
         string? gatewayServerPublicKeyHash,
         string? authoritativeRuntimeInstallFingerprint,
         DateTimeOffset? invitationExpiresAtUtc,
-        int bridgeProtocolMajor)
+        int bridgeProtocolMajor,
+        int maxConcurrentConnections)
     {
         LocalUrl = localUrl;
         GatewayUrl = gatewayUrl;
@@ -39,6 +40,7 @@ public sealed record RemoteProxyOptions
         AuthoritativeRuntimeInstallFingerprint = authoritativeRuntimeInstallFingerprint;
         InvitationExpiresAtUtc = invitationExpiresAtUtc;
         BridgeProtocolMajor = bridgeProtocolMajor;
+        MaxConcurrentConnections = maxConcurrentConnections;
     }
 
     public string LocalUrl { get; }
@@ -70,6 +72,8 @@ public sealed record RemoteProxyOptions
     public DateTimeOffset? InvitationExpiresAtUtc { get; }
 
     public int BridgeProtocolMajor { get; }
+
+    public int MaxConcurrentConnections { get; }
 
     public static RemoteProxyOptions? Bind(IConfiguration configuration)
     {
@@ -104,7 +108,13 @@ public sealed record RemoteProxyOptions
             ReadOptionalValue(section, "GatewayServerPublicKeyHash"),
             ReadOptionalValue(section, "AuthoritativeRuntimeInstallFingerprint"),
             ReadOptionalTimestamp(section, "InvitationExpiresAtUtc"),
-            ReadExactProtocolMajor(section));
+            ReadExactProtocolMajor(section),
+            ReadOptionalBoundedInteger(
+                section,
+                "MaxConcurrentConnections",
+                1,
+                4096,
+                128));
     }
 
     public RemoteRuntimePairingInvitation CreateInvitation()

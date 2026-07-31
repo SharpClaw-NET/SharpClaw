@@ -8,14 +8,18 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Hosting.Server;
+using Microsoft.AspNetCore.Hosting.Server.Features;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.RemoteRuntimeBridge;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.RemoteRuntimeBridge;
+using Yarp.ReverseProxy.Forwarder;
 
 namespace SharpClaw.Tests.Architecture;
 
@@ -23,6 +27,125 @@ namespace SharpClaw.Tests.Architecture;
 [NonParallelizable]
 public sealed class RemoteRuntimeBridgeTransportTests
 {
+    [Test]
+    public async Task Proxy_normalizes_forwarder_service_unavailable_without_rewriting_application_errors()
+    {
+        var context = new DefaultHttpContext();
+        context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+        context.Response.Body = new MemoryStream();
+        context.Features.Set<IForwarderErrorFeature>(new ForwarderErrorFeatureStub());
+
+        await RemoteProxyHost.NormalizeForwarderErrorAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status503ServiceUnavailable);
+        context.Response.ContentType.Should().StartWith("application/json");
+        context.Response.Body.Position = 0;
+        using var reader = new StreamReader(context.Response.Body, leaveOpen: true);
+        (await reader.ReadToEndAsync()).Should().Contain("ProxyServiceUnavailable");
+    }
+
+    [Test]
+    public async Task Proxy_transformer_removes_local_and_authoritative_credentials_before_gateway_forwarding()
+    {
+        var context = new DefaultHttpContext();
+        context.Request.Headers["X-Api-Key"] = "local-proxy-api-key";
+        context.Request.Headers["X-Gateway-Token"] = "authoritative-api-key";
+        context.Request.Headers["X-SharpClaw-Bridge-Authoritative-Key"] = "authoritative-api-key";
+        using var request = new HttpRequestMessage(
+            HttpMethod.Get,
+            "https://gateway.example.test/api/credential-boundary");
+        var transformer = new RemoteProxyHost.RemoteProxyTransformer("proxy-1");
+
+        await transformer.TransformRequestAsync(
+            context,
+            request,
+            "https://gateway.example.test",
+            CancellationToken.None);
+
+        request.Headers.Contains("X-Api-Key").Should().BeFalse();
+        request.Headers.Contains("X-Gateway-Token").Should().BeFalse();
+        request.Headers.Should().NotContainKey("X-SharpClaw-Bridge-Authoritative-Key");
+        request.Headers.GetValues(RemoteRuntimeBridgePaths.ProxyIdentityHeader)
+            .Should().ContainSingle("proxy-1");
+    }
+
+    [Test]
+    public async Task Forwarder_failure_has_stable_transport_error_and_application_5xx_is_preserved()
+    {
+        var root = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "bridge-forwarder-errors-" + Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(root);
+        var serverCertificatePath = Path.Combine(root, "bridge.pfx");
+        using var serverCertificate = CreateServerCertificate();
+        File.WriteAllBytes(
+            serverCertificatePath,
+            serverCertificate.Export(X509ContentType.Pfx));
+
+        var unreachablePort = GetFreePort();
+        var target = new RemoteRuntimeBridgeTarget(
+            "gateway-1",
+            "runtime-1",
+            "runtime-install-1",
+            $"http://127.0.0.1:{unreachablePort}",
+            "authoritative-api-key",
+            "authoritative-gateway-token");
+        await using var registryClient = new InMemoryRemoteRuntimePairingRegistryClient(
+            target,
+            active: true);
+        using var clientCertificate = registryClient.ClientCertificate;
+        await using var app = await RemoteRuntimeBridgeHost.BuildAsync(
+            [],
+            new RemoteRuntimeBridgeOptions
+            {
+                Enabled = true,
+                ListenUrl = $"https://127.0.0.1:{GetFreePort()}",
+                ServerCertificatePath = serverCertificatePath,
+            },
+            registryClient,
+            target);
+
+        try
+        {
+            await app.StartAsync();
+            var address = app.Services
+                .GetRequiredService<IServer>()
+                .Features
+                .Get<IServerAddressesFeature>()!
+                .Addresses
+                .Single();
+            using var handler = new HttpClientHandler
+            {
+                    ServerCertificateCustomValidationCallback = (_, presented, _, _) =>
+                    presented is not null
+                    && string.Equals(
+                        RemoteRuntimeCertificateHash.Compute(presented),
+                        RemoteRuntimeCertificateHash.Compute(serverCertificate),
+                        StringComparison.Ordinal),
+            };
+            handler.ClientCertificates.Add(clientCertificate);
+            using var client = new HttpClient(handler)
+            {
+                BaseAddress = new Uri($"https://127.0.0.1:{new Uri(address).Port}"),
+            };
+            client.DefaultRequestHeaders.Add(
+                RemoteRuntimeBridgePaths.ProxyIdentityHeader,
+                "proxy-1");
+
+            using var response = await client.GetAsync("/api/unavailable");
+            response.StatusCode.Should().Be(HttpStatusCode.BadGateway);
+            response.Content.Headers.ContentType!.MediaType.Should().Be("application/json");
+            (await response.Content.ReadAsStringAsync())
+                .Should().Contain("BridgeBadGateway");
+        }
+        finally
+        {
+            await app.StopAsync();
+            if (Directory.Exists(root))
+                Directory.Delete(root, recursive: true);
+        }
+    }
+
     [Test]
     public async Task Both_yarp_hops_preserve_http_stream_upload_range_websocket_and_cancellation()
     {
@@ -108,6 +231,11 @@ public sealed class RemoteRuntimeBridgeTransportTests
             cliLikeResponse.StatusCode.Should().Be(HttpStatusCode.OK);
             (await cliLikeResponse.Content.ReadAsStringAsync())
                 .Should().Be("GET|/api/cli-like|preserved|authoritative-api-key|");
+
+            using var applicationErrorResponse = await client.GetAsync("/api/application-error");
+            applicationErrorResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            (await applicationErrorResponse.Content.ReadAsStringAsync())
+                .Should().Be("application-error");
 
             var uploadPayload = Enumerable.Range(0, 128)
                 .Select(static value => (byte)value)
@@ -224,6 +352,7 @@ public sealed class RemoteRuntimeBridgeTransportTests
             DateTimeOffset.UtcNow.AddMinutes(5));
     }
 
+
     private static int GetFreePort()
     {
         using var listener = new System.Net.Sockets.TcpListener(IPAddress.Loopback, 0);
@@ -246,6 +375,13 @@ public sealed class RemoteRuntimeBridgeTransportTests
 
         return JsonSerializer.Deserialize<RemoteRuntimeCliFrame>(
             message.GetBuffer().AsSpan(0, checked((int)message.Length)))!;
+    }
+
+    private sealed class ForwarderErrorFeatureStub : IForwarderErrorFeature
+    {
+        public ForwarderError Error => ForwarderError.Request;
+
+        public Exception? Exception => new InvalidOperationException("test forwarder failure");
     }
 
     private sealed class UpstreamHarness : IAsyncDisposable
@@ -378,6 +514,13 @@ public sealed class RemoteRuntimeBridgeTransportTests
                         context.Request.Headers["X-Api-Key"].ToString(),
                         context.Request.Headers["X-Gateway-Token"].ToString()),
                     context.RequestAborted);
+                return;
+            }
+
+            if (context.Request.Path == "/api/application-error")
+            {
+                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+                await context.Response.WriteAsync("application-error", context.RequestAborted);
                 return;
             }
 

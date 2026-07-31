@@ -27,7 +27,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         string proxyRuntimeInstanceId,
         X509Certificate2 clientCertificate,
         TimeSpan connectTimeout,
-        TimeSpan activityTimeout)
+        TimeSpan activityTimeout,
+        int maxConcurrentConnections = 128)
     {
         InstancePaths = instancePaths ?? throw new ArgumentNullException(nameof(instancePaths));
         LocalUrl = localUrl ?? throw new ArgumentNullException(nameof(localUrl));
@@ -40,6 +41,15 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         ClientCertificate = clientCertificate ?? throw new ArgumentNullException(nameof(clientCertificate));
         ConnectTimeout = connectTimeout;
         ActivityTimeout = activityTimeout;
+        if (maxConcurrentConnections is < 1 or > 4096)
+        {
+            throw new ArgumentOutOfRangeException(
+                nameof(maxConcurrentConnections),
+                "The proxy connection limit must be between 1 and 4096.");
+        }
+
+        MaxConcurrentConnections = maxConcurrentConnections;
+        _connectionLimiter = new SemaphoreSlim(maxConcurrentConnections, maxConcurrentConnections);
         Validate();
     }
 
@@ -61,6 +71,10 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
 
     public TimeSpan ActivityTimeout { get; }
 
+    public int MaxConcurrentConnections { get; }
+
+    private readonly SemaphoreSlim _connectionLimiter;
+
     public static RemoteRuntimeProxyConnection Create(
         SharpClawInstancePaths instancePaths,
         string localUrl,
@@ -69,7 +83,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         string proxyRuntimeInstanceId,
         X509Certificate2 clientCertificate,
         TimeSpan connectTimeout,
-        TimeSpan activityTimeout)
+        TimeSpan activityTimeout,
+        int maxConcurrentConnections = 128)
     {
         ArgumentNullException.ThrowIfNull(instancePaths);
         var keyBytes = RandomNumberGenerator.GetBytes(32);
@@ -97,7 +112,8 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
                 proxyRuntimeInstanceId,
                 clientCertificate,
                 connectTimeout,
-                activityTimeout);
+                activityTimeout,
+                maxConcurrentConnections);
         }
         catch
         {
@@ -147,7 +163,24 @@ internal sealed class RemoteRuntimeProxyConnection : IDisposable
         }
         finally
         {
+            _connectionLimiter.Dispose();
             ClientCertificate.Dispose();
+        }
+    }
+
+    internal IDisposable? TryAcquireConnection()
+        => _connectionLimiter.Wait(0)
+            ? new ConnectionLease(_connectionLimiter)
+            : null;
+
+    private sealed class ConnectionLease(SemaphoreSlim limiter) : IDisposable
+    {
+        private int _released;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _released, 1) == 0)
+                limiter.Release();
         }
     }
 
@@ -219,7 +252,8 @@ public static class RemoteProxyHost
                 session.State.ProxyRuntimeInstanceId,
                 clientCertificate,
                 TimeSpan.FromSeconds(options.ConnectTimeoutSeconds),
-                TimeSpan.FromSeconds(options.ActivityTimeoutSeconds));
+                TimeSpan.FromSeconds(options.ActivityTimeoutSeconds),
+                options.MaxConcurrentConnections);
             await RunAsync(connection, cancellationToken);
         }
         catch
@@ -286,7 +320,24 @@ public static class RemoteProxyHost
                 return;
             }
 
+            using var lease = connection.TryAcquireConnection();
+            if (lease is null)
+            {
+                context.Response.StatusCode = StatusCodes.Status429TooManyRequests;
+                context.Response.ContentType = "application/json";
+                context.Response.Headers.RetryAfter = "0";
+                await context.Response.WriteAsJsonAsync(
+                    new
+                    {
+                        code = "ProxyConcurrencyLimit",
+                        error = "The proxy connection limit is active.",
+                    },
+                    context.RequestAborted);
+                return;
+            }
+
             await next(context);
+            await NormalizeForwarderErrorAsync(context);
         });
         app.MapForwarder(
             "/{**catch-all}",
@@ -318,7 +369,32 @@ public static class RemoteProxyHost
         }
     }
 
-    private sealed class RemoteProxyTransformer(string proxyRuntimeInstanceId) : HttpTransformer
+    internal static Task NormalizeForwarderErrorAsync(HttpContext context)
+    {
+        if (context.Features.Get<IForwarderErrorFeature>() is null
+            || context.Response.HasStarted
+            || context.Response.StatusCode is not (StatusCodes.Status502BadGateway
+                or StatusCodes.Status503ServiceUnavailable))
+        {
+            return Task.CompletedTask;
+        }
+
+        var statusCode = context.Response.StatusCode;
+        context.Response.ContentType = "application/json";
+        return context.Response.WriteAsJsonAsync(
+            new
+            {
+                code = statusCode == StatusCodes.Status502BadGateway
+                    ? "ProxyBadGateway"
+                    : "ProxyServiceUnavailable",
+                error = statusCode == StatusCodes.Status502BadGateway
+                    ? "The proxy could not reach Gateway."
+                    : "Gateway is unavailable.",
+            },
+            context.RequestAborted);
+    }
+
+    internal sealed class RemoteProxyTransformer(string proxyRuntimeInstanceId) : HttpTransformer
     {
         public override async ValueTask TransformRequestAsync(
             HttpContext httpContext,

@@ -179,6 +179,7 @@ internal static class RemoteRuntimeBridgeHost
             try
             {
                 await next(context);
+                await NormalizeForwarderErrorAsync(context);
             }
             finally
             {
@@ -658,6 +659,28 @@ internal static class RemoteRuntimeBridgeHost
         return context.Response.WriteAsJsonAsync(
             new { code, error = message },
             context.RequestAborted);
+    }
+
+    private static Task NormalizeForwarderErrorAsync(HttpContext context)
+    {
+        if (context.Features.Get<IForwarderErrorFeature>() is null
+            || context.Response.HasStarted
+            || context.Response.StatusCode is not (StatusCodes.Status502BadGateway
+                or StatusCodes.Status503ServiceUnavailable))
+        {
+            return Task.CompletedTask;
+        }
+
+        var statusCode = context.Response.StatusCode;
+        return WriteTransportErrorAsync(
+            context,
+            statusCode,
+            statusCode == StatusCodes.Status502BadGateway
+                ? "BridgeBadGateway"
+                : "BridgeServiceUnavailable",
+            statusCode == StatusCodes.Status502BadGateway
+                ? "The bridge could not reach the authoritative Runtime."
+                : "The authoritative Runtime is unavailable.");
     }
 
     private static bool HasLocalAdministrationAccess(
