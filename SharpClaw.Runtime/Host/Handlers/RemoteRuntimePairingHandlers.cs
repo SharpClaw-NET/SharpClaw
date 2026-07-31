@@ -64,6 +64,25 @@ public static class RemoteRuntimePairingHandlers
                 request.CertificateSigningRequestBase64,
                 request.ProofSignatureBase64), cancellationToken));
 
+    [MapPost("/certificate")]
+    public static Task<IResult> Certificate(
+        RemoteRuntimePairingCertificateRequest request,
+        RemoteRuntimePairingRegistry registry,
+        CancellationToken cancellationToken)
+        => ExecuteAsync(async ()
+            =>
+            {
+                var certificate = await registry.IssueClientCertificateAsync(
+                    request.PairId,
+                    request.Secret,
+                    cancellationToken);
+                return new RemoteRuntimePairingCertificateResponse(
+                    Convert.ToBase64String(certificate.CertificateDer),
+                    certificate.ProxyRuntimePublicKeyHash,
+                    certificate.CertificateThumbprint,
+                    certificate.NotAfterUtc);
+            });
+
     [MapPost("/approve")]
     public static Task<IResult> Approve(
         RemoteRuntimeRegistryApprovalRequest request,

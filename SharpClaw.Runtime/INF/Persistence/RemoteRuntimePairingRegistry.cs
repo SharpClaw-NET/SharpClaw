@@ -48,40 +48,50 @@ public sealed class RemoteRuntimePairingRegistry(
         var invitationHash = HashSecret(secret);
         CryptographicOperations.ZeroMemory(secretBytes);
 
-        var entity = new RemoteRuntimePairingDB
+        var generatedCertificateAuthorityPfx = certificateAuthorityPfx is null
+            ? CreateCertificateAuthorityPfx(now)
+            : null;
+        try
         {
-            Id = Guid.NewGuid(),
-            PairId = pairId,
-            Status = RemoteRuntimePairStatus.InvitationIssued,
-            GatewayInstanceId = gatewayInstanceId,
-            GatewayServerPublicKeyHash = gatewayServerPublicKeyHash,
-            AuthoritativeRuntimeInstanceId = authoritativeRuntimeInstanceId,
-            AuthoritativeRuntimeInstallFingerprint = authoritativeRuntimeInstallFingerprint,
-            InvitationHash = invitationHash,
-            BridgeProtocolMajor = CurrentBridgeProtocolMajor,
-            EncryptedCertificateAuthorityPfx = certificateAuthorityPfx is null
-                ? null
-                : EncryptSecret(Convert.ToBase64String(certificateAuthorityPfx)),
-            DisplayName = NormalizeOptional(displayName),
-            Description = NormalizeOptional(description),
-            CreatedAtUtc = now,
-            ExpiresAtUtc = now.Add(lifetime),
-            UpdatedAtUtc = now,
-            Revision = 1,
-        };
+            var pfx = certificateAuthorityPfx ?? generatedCertificateAuthorityPfx!;
+            var entity = new RemoteRuntimePairingDB
+            {
+                Id = Guid.NewGuid(),
+                PairId = pairId,
+                Status = RemoteRuntimePairStatus.InvitationIssued,
+                GatewayInstanceId = gatewayInstanceId,
+                GatewayServerPublicKeyHash = gatewayServerPublicKeyHash,
+                AuthoritativeRuntimeInstanceId = authoritativeRuntimeInstanceId,
+                AuthoritativeRuntimeInstallFingerprint = authoritativeRuntimeInstallFingerprint,
+                InvitationHash = invitationHash,
+                BridgeProtocolMajor = CurrentBridgeProtocolMajor,
+                EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(pfx)),
+                DisplayName = NormalizeOptional(displayName),
+                Description = NormalizeOptional(description),
+                CreatedAtUtc = now,
+                ExpiresAtUtc = now.Add(lifetime),
+                UpdatedAtUtc = now,
+                Revision = 1,
+            };
 
-        db.RemoteRuntimePairings.Add(entity);
-        await db.SaveChangesAsync(cancellationToken);
+            db.RemoteRuntimePairings.Add(entity);
+            await db.SaveChangesAsync(cancellationToken);
 
-        return new RemoteRuntimePairingInvitation(
-            pairId,
-            secret,
-            gatewayInstanceId,
-            gatewayServerPublicKeyHash,
-            authoritativeRuntimeInstanceId,
-            authoritativeRuntimeInstallFingerprint,
-            CurrentBridgeProtocolMajor,
-            entity.ExpiresAtUtc);
+            return new RemoteRuntimePairingInvitation(
+                pairId,
+                secret,
+                gatewayInstanceId,
+                gatewayServerPublicKeyHash,
+                authoritativeRuntimeInstanceId,
+                authoritativeRuntimeInstallFingerprint,
+                CurrentBridgeProtocolMajor,
+                entity.ExpiresAtUtc);
+        }
+        finally
+        {
+            if (generatedCertificateAuthorityPfx is not null)
+                CryptographicOperations.ZeroMemory(generatedCertificateAuthorityPfx);
+        }
     }
 
     public async Task<RemoteRuntimePairingRegistryEntry?> FindAsync(
@@ -178,13 +188,12 @@ public sealed class RemoteRuntimePairingRegistry(
         Guid pairId,
         string expectedProxyRuntimeInstanceId,
         string expectedAuthoritativeRuntimeInstanceId,
-        string clientCertificateIdentity,
+        string? clientCertificateIdentity,
         CancellationToken cancellationToken = default)
     {
         RequireJsonColdStore();
         RequireText(expectedProxyRuntimeInstanceId, nameof(expectedProxyRuntimeInstanceId));
         RequireText(expectedAuthoritativeRuntimeInstanceId, nameof(expectedAuthoritativeRuntimeInstanceId));
-        RequireText(clientCertificateIdentity, nameof(clientCertificateIdentity));
 
         var entity = await RequireEntityAsync(pairId, cancellationToken);
         RequireStatus(entity, RemoteRuntimePairStatus.ClaimPending, DateTimeOffset.UtcNow);
@@ -193,6 +202,11 @@ public sealed class RemoteRuntimePairingRegistry(
         {
             throw Error("PairTargetMismatch", "The pairing claim does not match the selected Runtime target.");
         }
+
+        var resolvedCertificateIdentity = string.IsNullOrWhiteSpace(clientCertificateIdentity)
+            ? entity.ProxyRuntimePublicKeyHash
+            : clientCertificateIdentity;
+        RequireText(resolvedCertificateIdentity, nameof(clientCertificateIdentity));
 
         var activeTargetRows = await db.RemoteRuntimePairings
             .AsNoTracking()
@@ -211,7 +225,7 @@ public sealed class RemoteRuntimePairingRegistry(
 
         var now = DateTimeOffset.UtcNow;
         entity.Status = RemoteRuntimePairStatus.Active;
-        entity.ClientCertificateIdentity = clientCertificateIdentity;
+        entity.ClientCertificateIdentity = resolvedCertificateIdentity;
         entity.ApprovedAtUtc = now;
         entity.StatusReason = null;
         Touch(entity, now);
@@ -354,6 +368,108 @@ public sealed class RemoteRuntimePairingRegistry(
         return Convert.FromBase64String(encoded);
     }
 
+    public async Task<RemoteRuntimeClientCertificate> IssueClientCertificateAsync(
+        Guid pairId,
+        string invitationSecret,
+        CancellationToken cancellationToken = default)
+    {
+        RequireJsonColdStore();
+        RequireText(invitationSecret, nameof(invitationSecret));
+
+        var entity = await db.RemoteRuntimePairings
+            .AsNoTracking()
+            .SingleOrDefaultAsync(pairing => pairing.PairId == pairId, cancellationToken)
+            ?? throw Error("PairNotFound", "The pairing record was not found.");
+        VerifyInvitationSecret(entity.InvitationHash, invitationSecret);
+        var effectiveStatus = GetEffectiveStatus(entity, DateTimeOffset.UtcNow);
+        if (effectiveStatus != RemoteRuntimePairStatus.Active
+            || string.IsNullOrWhiteSpace(entity.ProxyRuntimePublicKeyHash)
+            || string.IsNullOrWhiteSpace(entity.ProxyRuntimeCertificateSigningRequest))
+        {
+            throw Error("PairNotAuthorized", "The pairing must be active before certificate issue.");
+        }
+
+        if (string.IsNullOrWhiteSpace(entity.EncryptedCertificateAuthorityPfx))
+            throw Error("InvalidCertificateAuthority", "The pairing certificate authority is missing.");
+
+        var encodedPfx = ApiKeyEncryptor.Decrypt(
+            entity.EncryptedCertificateAuthorityPfx,
+            encryptionOptions.Key);
+        var pfx = Convert.FromBase64String(encodedPfx);
+        try
+        {
+            using var authority = X509CertificateLoader.LoadPkcs12(
+                pfx,
+                password: null,
+                keyStorageFlags: X509KeyStorageFlags.EphemeralKeySet | X509KeyStorageFlags.Exportable);
+            var requestBytes = DecodeBase64(entity.ProxyRuntimeCertificateSigningRequest, "InvalidProof");
+            try
+            {
+                var request = CertificateRequest.LoadSigningRequest(
+                    requestBytes,
+                    HashAlgorithmName.SHA256);
+                var publicKey = request.PublicKey.ExportSubjectPublicKeyInfo();
+                try
+                {
+                    var publicKeyHash = Base64UrlEncode(SHA256.HashData(publicKey));
+                    if (!string.Equals(publicKeyHash, entity.ProxyRuntimePublicKeyHash, StringComparison.Ordinal))
+                    {
+                        throw Error(
+                            "PairCredentialMismatch",
+                            "The pairing certificate request does not match the approved public key.");
+                    }
+
+                    var notBefore = DateTimeOffset.UtcNow.AddMinutes(-1);
+                    var notAfter = notBefore.AddDays(30);
+                    var serial = RandomNumberGenerator.GetBytes(16);
+                    try
+                    {
+                        var certificateRequest = new CertificateRequest(
+                            request.SubjectName,
+                            request.PublicKey,
+                            HashAlgorithmName.SHA256);
+                        certificateRequest.CertificateExtensions.Add(
+                            new X509KeyUsageExtension(X509KeyUsageFlags.DigitalSignature, true));
+                        certificateRequest.CertificateExtensions.Add(
+                            new X509EnhancedKeyUsageExtension(
+                                [new Oid("1.3.6.1.5.5.7.3.2")],
+                                true));
+                        using var certificate = certificateRequest.Create(
+                            authority,
+                            notBefore,
+                            notAfter,
+                            serial);
+                        return new RemoteRuntimeClientCertificate(
+                            certificate.Export(X509ContentType.Cert),
+                            publicKeyHash,
+                            certificate.Thumbprint ?? string.Empty,
+                            certificate.NotAfter.ToUniversalTime());
+                    }
+                    finally
+                    {
+                        CryptographicOperations.ZeroMemory(serial);
+                    }
+                }
+                finally
+                {
+                    CryptographicOperations.ZeroMemory(publicKey);
+                }
+            }
+            catch (CryptographicException)
+            {
+                throw Error("InvalidProof", "The pairing certificate request is invalid.");
+            }
+            finally
+            {
+                CryptographicOperations.ZeroMemory(requestBytes);
+            }
+        }
+        finally
+        {
+            CryptographicOperations.ZeroMemory(pfx);
+        }
+    }
+
     private async Task<RemoteRuntimePairingRegistryEntry> TransitionAsync(
         Guid pairId,
         RemoteRuntimePairStatus requiredStatus,
@@ -402,6 +518,16 @@ public sealed class RemoteRuntimePairingRegistry(
         if (effectiveStatus != requiredStatus)
             throw Error("InvalidPairState", "The pairing is not in the required state.");
     }
+
+    private static RemoteRuntimePairStatus GetEffectiveStatus(
+        RemoteRuntimePairingDB entity,
+        DateTimeOffset now)
+        => entity.Status is (RemoteRuntimePairStatus.InvitationIssued
+            or RemoteRuntimePairStatus.ClaimPending
+            or RemoteRuntimePairStatus.Active)
+            && entity.ExpiresAtUtc <= now
+            ? RemoteRuntimePairStatus.Expired
+            : entity.Status;
 
     private static void VerifyInvitationSecret(string storedHash, string secret)
     {
@@ -549,6 +675,27 @@ public sealed class RemoteRuntimePairingRegistry(
             .TrimEnd('=')
             .Replace('+', '-')
             .Replace('/', '_');
+
+    private static byte[] CreateCertificateAuthorityPfx(DateTimeOffset now)
+    {
+        using var key = ECDsa.Create(ECCurve.NamedCurves.nistP256);
+        var request = new CertificateRequest(
+            "CN=SharpClaw Remote Runtime Bridge CA",
+            key,
+            HashAlgorithmName.SHA256);
+        request.CertificateExtensions.Add(
+            new X509BasicConstraintsExtension(true, false, 0, true));
+        request.CertificateExtensions.Add(
+            new X509KeyUsageExtension(
+                X509KeyUsageFlags.KeyCertSign | X509KeyUsageFlags.CrlSign,
+                true));
+        request.CertificateExtensions.Add(
+            new X509SubjectKeyIdentifierExtension(request.PublicKey, false));
+        using var authority = request.CreateSelfSigned(
+            now.AddMinutes(-1),
+            now.AddYears(10));
+        return authority.Export(X509ContentType.Pfx);
+    }
 
     private static RemoteRuntimePairingRegistryException Error(string code, string message)
         => new(code, message);

@@ -141,6 +141,12 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             "proxy-a",
             "runtime-a",
             "certificate-0");
+        var issued = await registry.IssueClientCertificateAsync(
+            invitations[0].PairId,
+            invitations[0].Secret);
+        using var issuedCertificate = X509CertificateLoader.LoadCertificate(issued.CertificateDer);
+        RemoteRuntimeCertificateHash.Compute(issuedCertificate)
+            .Should().Be((await registry.FindAsync(invitations[0].PairId))!.ProxyRuntimePublicKeyHash);
         var approveSecond = () => registry.ApproveAsync(
             invitations[1].PairId,
             "proxy-a",

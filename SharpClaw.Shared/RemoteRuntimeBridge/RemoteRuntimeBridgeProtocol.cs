@@ -12,6 +12,7 @@ public static class RemoteRuntimeBridgePaths
     public const string RegistryPrefix = "/__sharpclaw/remote-runtime/registry";
     public const string RegistryInvitation = RegistryPrefix + "/invitation";
     public const string RegistryClaim = RegistryPrefix + "/claim";
+    public const string RegistryCertificate = RegistryPrefix + "/certificate";
     public const string RegistryApprove = RegistryPrefix + "/approve";
     public const string RegistryReject = RegistryPrefix + "/reject";
     public const string RegistryRevoke = RegistryPrefix + "/revoke";
@@ -63,8 +64,37 @@ public sealed record RemoteRuntimeRegistryApprovalRequest(
     Guid PairId,
     string ProxyRuntimeInstanceId,
     string AuthoritativeRuntimeInstanceId,
-    string ClientCertificateIdentity);
+    string? ClientCertificateIdentity = null);
 
 public sealed record RemoteRuntimeRegistryRejectionRequest(Guid PairId, string Reason);
 
 public sealed record RemoteRuntimeRegistryRevocationRequest(Guid PairId, string Reason);
+
+public sealed record RemoteRuntimePairingRegistrySnapshot(
+    Guid Id,
+    Guid PairId,
+    RemoteRuntimePairStatus Status,
+    string GatewayInstanceId,
+    string GatewayServerPublicKeyHash,
+    string AuthoritativeRuntimeInstanceId,
+    string AuthoritativeRuntimeInstallFingerprint,
+    int BridgeProtocolMajor,
+    string? ProxyRuntimeInstanceId,
+    string? ProxyRuntimePublicKeyHash,
+    string? ClientCertificateIdentity,
+    string? DisplayName,
+    string? Description,
+    string? StatusReason,
+    DateTimeOffset CreatedAtUtc,
+    DateTimeOffset? ClaimedAtUtc,
+    DateTimeOffset? ApprovedAtUtc,
+    DateTimeOffset? RenewedAtUtc,
+    DateTimeOffset? RevokedAtUtc,
+    DateTimeOffset ExpiresAtUtc,
+    DateTimeOffset? LastSeenAtUtc,
+    DateTimeOffset UpdatedAtUtc,
+    long Revision)
+{
+    public bool IsActive(DateTimeOffset now)
+        => Status == RemoteRuntimePairStatus.Active && ExpiresAtUtc > now;
+}

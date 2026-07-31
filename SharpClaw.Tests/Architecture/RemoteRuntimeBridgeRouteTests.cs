@@ -10,7 +10,6 @@ using Microsoft.Extensions.DependencyInjection;
 using NUnit.Framework;
 using SharpClaw.Gateway.Configuration;
 using SharpClaw.Gateway.RemoteRuntimeBridge;
-using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Tests.Architecture;
@@ -25,10 +24,6 @@ public sealed class RemoteRuntimeBridgeRouteTests
         var root = Path.Combine(
             TestContext.CurrentContext.WorkDirectory,
             "bridge-routes-" + Guid.NewGuid().ToString("N"));
-        var paths = new SharpClawInstancePaths(
-            SharpClawInstanceKind.Gateway,
-            Path.Combine(root, "gateway"),
-            Path.Combine(root, "shared"));
         var certificatePath = Path.Combine(root, "bridge.pfx");
         using var certificate = CreateServerCertificate();
         Directory.CreateDirectory(root);
@@ -41,7 +36,6 @@ public sealed class RemoteRuntimeBridgeRouteTests
             ServerCertificatePath = certificatePath,
             AdministrationKey = "bridge-admin-key",
         };
-        var pairingStore = RemoteRuntimePairingStore.Create(paths);
         var target = new RemoteRuntimeBridgeTarget(
             "gateway-1",
             "runtime-1",
@@ -49,10 +43,11 @@ public sealed class RemoteRuntimeBridgeRouteTests
             "https://127.0.0.1:1",
             "authoritative-api-key",
             "authoritative-gateway-token");
+        await using var registryClient = new InMemoryRemoteRuntimePairingRegistryClient(target);
         await using var app = await RemoteRuntimeBridgeHost.BuildAsync(
             [],
             options,
-            pairingStore,
+            registryClient,
             target);
 
         try
