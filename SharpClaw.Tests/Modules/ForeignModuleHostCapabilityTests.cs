@@ -944,7 +944,7 @@ public sealed class ForeignModuleHostCapabilityTests
     private sealed class RecordingModuleLifecycle : IModuleLifecycleManager
     {
         private readonly EchoModule _module = new();
-        public string ExternalModulesDir => "E:/source/SharpClaw/external-modules";
+        public string ExternalModulesDir => "D:/Source/SharpClaw-NET/SharpClaw/external-modules";
         public string? LoadedDir { get; private set; }
         public string? UnloadedId { get; private set; }
         public string? ReloadedId { get; private set; }

@@ -575,7 +575,7 @@ Examples:
   Output:   Users: marko hash=[redacted], admin hash=[redacted]
 
   Template: [{{time}} | {{editor}}]
-  Output:   [2025-07-14 09:30:00 UTC | VisualStudio2026 18.4.2 workspace=E:\source\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
+  Output:   [2025-07-14 09:30:00 UTC | VisualStudio2026 18.4.2 workspace=D:\Source\SharpClaw-NET\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
 
 ────────────────────────────────────────
 TOOL AWARENESS SETS

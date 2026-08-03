@@ -2958,7 +2958,7 @@ The built-in default header can be reproduced exactly:
 **Output:**
 
 ```
-[2025-07-14 09:30:00 UTC | marko | VisualStudio2026 18.4.2 workspace=E:\source\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
+[2025-07-14 09:30:00 UTC | marko | VisualStudio2026 18.4.2 workspace=D:\Source\SharpClaw-NET\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
 ```
 
 #### GUIDs-only resource list
