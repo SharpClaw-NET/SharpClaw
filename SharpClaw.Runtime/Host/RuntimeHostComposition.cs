@@ -3,6 +3,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
+using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.Host.Api;
 using SharpClaw.Runtime.INF;
 using SharpClaw.Runtime.INF.Persistence;
@@ -29,17 +30,25 @@ internal static class RuntimeHostComposition
         ArgumentNullException.ThrowIfNull(databaseOptions);
         ArgumentNullException.ThrowIfNull(modules);
 
+        var moduleArray = modules.ToArray();
+
         services.AddSingleton(configuration);
         services.AddSingleton(instancePaths);
         services.AddSingleton(encryptionOptions);
+        services.AddHttpClient();
         services.AddInfrastructure(databaseOptions);
         services.AddSingleton<ApiKeyProvider>();
         services.AddSingleton<RuntimeReadinessState>();
         services.AddSingleton<RuntimeDatabaseReadiness>();
         services.AddSingleton<IRuntimeProviderClientFactory, RuntimeProviderClientFactory>();
         services.AddSingleton<IConversationStore, EfConversationStore>();
+        services.AddScoped<IModelRegistrar, RuntimeModelRegistrar>();
 
-        foreach (var module in modules)
+        services.AddSingleton<IModuleStorageContractProvider>(
+            new RuntimeModuleStorageContractProvider(moduleArray));
+        services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+
+        foreach (var module in moduleArray)
             services.AddSingleton<ISharpClawModule>(module);
 
         services.AddSingleton<RuntimeKernelAdapter>();

@@ -15,12 +15,10 @@
     <Compile Remove="Api\ExceptionHandlingMiddleware.cs" />
     <Compile Remove="Api\JwtSessionMiddleware.cs" />
     <Compile Remove="Api\MigrationGateMiddleware.cs" />
-    <Compile Remove="BundledModuleStorageGateway.cs" />
     <Compile Remove="Cli\**\*.cs" />
     <Compile Remove="DatabaseInitializationGate.cs" />
     <Compile Remove="Handlers\**\*.cs" />
     <Compile Remove="HostPersistenceGlobalUsings.cs" />
-    <Compile Remove="ModuleStorageTelemetry.cs" />
     <Compile Remove="Routing\**\*.cs" />
     <Compile Include="Handlers\RemoteRuntimePairingHandlers.cs" />
     <Compile Include="Routing\EndpointMapper.cs" />

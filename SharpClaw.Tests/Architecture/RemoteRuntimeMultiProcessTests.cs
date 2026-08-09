@@ -744,6 +744,10 @@ public sealed class RemoteRuntimeMultiProcessTests
         string destinationDirectory,
         bool skipMutableDirectories)
     {
+        var destinationRoot = Path.GetFullPath(destinationDirectory)
+            .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+        var destinationPrefix = destinationRoot + Path.DirectorySeparatorChar;
+
         Directory.CreateDirectory(destinationDirectory);
         foreach (var file in Directory.EnumerateFiles(sourceDirectory))
         {
@@ -754,8 +758,12 @@ public sealed class RemoteRuntimeMultiProcessTests
         foreach (var directory in Directory.EnumerateDirectories(sourceDirectory))
         {
             var name = Path.GetFileName(directory);
-            if (skipMutableDirectories
-                && name is "Data" or "config" or "durable" or "logs" or "runtime")
+            var fullDirectory = Path.GetFullPath(directory)
+                .TrimEnd(Path.DirectorySeparatorChar, Path.AltDirectorySeparatorChar);
+            if (string.Equals(fullDirectory, destinationRoot, StringComparison.OrdinalIgnoreCase)
+                || fullDirectory.StartsWith(destinationPrefix, StringComparison.OrdinalIgnoreCase)
+                || (skipMutableDirectories
+                    && name is "Data" or "config" or "durable" or "logs" or "runtime" or "process-binaries"))
                 continue;
 
             CopyDirectory(

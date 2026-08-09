@@ -34,6 +34,11 @@ public sealed class RuntimeHostCompositionTests
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
+                ["Modules:sharpclaw_providers_anthropic"] = "false",
+                ["Modules:sharpclaw_providers_google"] = "false",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
+                ["Modules:sharpclaw_providers_ollama"] = "false",
+                ["Modules:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
         using var moduleSet = PackagedDotNetModuleSet.Load(
@@ -116,15 +121,21 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "gpt-3.5-turbo",
                 ["Provider:Endpoint"] = providerServer.Endpoint,
                 ["Provider:ApiKey"] = "normal-payload-test-key",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
             })
             .Build();
 
         using var moduleSet = PackagedDotNetModuleSet.Load(
             Path.Combine(AppContext.BaseDirectory, "modules"),
             configuration);
-        moduleSet.Modules.Should().Contain(module =>
-            module.Identity.Id == "sharpclaw_providers_openai_compat");
+        moduleSet.Modules.Select(module => module.Identity.Id)
+            .Should().BeEquivalentTo(
+                [
+                    "sharpclaw_providers_anthropic",
+                    "sharpclaw_providers_google",
+                    "sharpclaw_providers_llamasharp",
+                    "sharpclaw_providers_ollama",
+                    "sharpclaw_providers_openai_compat",
+                ]);
         var openAiModule = moduleSet.Modules.Single(module =>
             module.Identity.Id == "sharpclaw_providers_openai_compat");
         openAiModule.GetType().Assembly.GetName().Name.Should()
@@ -211,7 +222,6 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "gpt-3.5-turbo",
                 ["Provider:Endpoint"] = providerServer.Endpoint,
                 ["Provider:ApiKey"] = "normal-payload-restart-key",
-                ["Modules:sharpclaw_providers_llamasharp"] = "false",
             })
             .Build();
         var databaseOptions = new DatabaseProviderOptions
@@ -265,6 +275,52 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
+    public async Task NormalHostPayload_LlamaLocalModelStorePersistsThroughRestart()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "llamasharp",
+                ["Provider:Model"] = "local-model",
+            })
+            .Build();
+        var databaseOptions = new DatabaseProviderOptions
+        {
+            Provider = StorageMode.JsonFile,
+        };
+        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
+        databaseOptions.JsonFile.EncryptAtRest = false;
+
+        var modelId = Guid.NewGuid();
+        await RunNormalProductionHostAsync(
+            workspace,
+            configuration,
+            databaseOptions,
+            async app =>
+            {
+                var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
+                var store = ResolveLlamaLocalModelStore(adapter);
+                await InvokeLlamaPlaceholderAsync(store, modelId);
+                (await InvokeLlamaGetByModelIdAsync(store, modelId)).Should().NotBeNull();
+            });
+
+        await RunNormalProductionHostAsync(
+            workspace,
+            configuration,
+            databaseOptions,
+            async app =>
+            {
+                var store = ResolveLlamaLocalModelStore(
+                    app.Services.GetRequiredService<RuntimeKernelAdapter>());
+                var record = await InvokeLlamaGetByModelIdAsync(store, modelId);
+                record.Should().NotBeNull();
+                record!.GetType().GetProperty("ModelId")!.GetValue(record).Should().Be(modelId);
+            });
+    }
+
+    [Test]
+    [NonParallelizable]
     public async Task ProductionJsonColdStore_RestartPreservesDirectChatHistory()
     {
         using var workspace = new TemporaryWorkspace();
@@ -273,6 +329,11 @@ public sealed class RuntimeHostCompositionTests
             {
                 ["Provider:Key"] = "sharpclaw-test",
                 ["Provider:Model"] = "test-harness-model",
+                ["Modules:sharpclaw_providers_anthropic"] = "false",
+                ["Modules:sharpclaw_providers_google"] = "false",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
+                ["Modules:sharpclaw_providers_ollama"] = "false",
+                ["Modules:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
         var databaseOptions = new DatabaseProviderOptions
@@ -364,6 +425,11 @@ public sealed class RuntimeHostCompositionTests
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
                 ["Modules:sharpclaw_test_harness_in_process"] = "false",
+                ["Modules:sharpclaw_providers_anthropic"] = "false",
+                ["Modules:sharpclaw_providers_google"] = "false",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
+                ["Modules:sharpclaw_providers_ollama"] = "false",
+                ["Modules:sharpclaw_providers_openai_compat"] = "false",
             })
             .Build();
 
@@ -494,8 +560,15 @@ public sealed class RuntimeHostCompositionTests
         using var moduleSet = PackagedDotNetModuleSet.Load(
             Path.Combine(AppContext.BaseDirectory, "modules"),
             configuration);
-        moduleSet.Modules.Should().Contain(module =>
-            module.Identity.Id == "sharpclaw_providers_openai_compat");
+        moduleSet.Modules.Select(module => module.Identity.Id)
+            .Should().BeEquivalentTo(
+                [
+                    "sharpclaw_providers_anthropic",
+                    "sharpclaw_providers_google",
+                    "sharpclaw_providers_llamasharp",
+                    "sharpclaw_providers_ollama",
+                    "sharpclaw_providers_openai_compat",
+                ]);
 
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
@@ -531,6 +604,71 @@ public sealed class RuntimeHostCompositionTests
             await adapter.StopAsync();
             await app.StopAsync();
         }
+    }
+
+    private static object ResolveLlamaLocalModelStore(RuntimeKernelAdapter adapter)
+    {
+        var modules = adapter.Graph.Modules.Modules;
+        var moduleIndex = -1;
+        for (var index = 0; index < modules.Count; index++)
+        {
+            if (modules[index].Identity.Id == "sharpclaw_providers_llamasharp")
+            {
+                moduleIndex = index;
+                break;
+            }
+        }
+
+        if (moduleIndex < 0)
+            throw new InvalidOperationException("The LlamaSharp module was not compiled into the graph.");
+
+        var serviceTypes = modules[moduleIndex].ServiceTypes;
+        Type? storeType = null;
+        for (var index = 0; index < serviceTypes.Count; index++)
+        {
+            if (serviceTypes[index].FullName ==
+                "SharpClaw.Modules.Providers.LlamaSharp.Services.LocalModelStore")
+            {
+                storeType = serviceTypes[index];
+                break;
+            }
+        }
+
+        if (storeType is null)
+            throw new InvalidOperationException("The LlamaSharp LocalModelStore was not registered.");
+        return adapter.Graph.GetService(storeType)
+            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore was not composed into the graph.");
+    }
+
+    private static async Task InvokeLlamaPlaceholderAsync(object store, Guid modelId)
+    {
+        var storeType = store.GetType();
+        var resolvedFileType = storeType.Assembly.GetType(
+            "SharpClaw.Providers.LocalCommon.ResolvedModelFile")
+            ?? AppDomain.CurrentDomain.GetAssemblies()
+                .Select(assembly => assembly.GetType("SharpClaw.Providers.LocalCommon.ResolvedModelFile"))
+                .FirstOrDefault(type => type is not null)
+            ?? throw new InvalidOperationException("The LlamaSharp model file contract was not loaded.");
+        var resolvedFile = Activator.CreateInstance(
+            resolvedFileType,
+            "https://example.invalid/model.gguf",
+            "model.gguf",
+            "Q4_K_M")!;
+        var method = storeType.GetMethod("CreateOrReuseDownloadPlaceholderAsync")
+            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore write method was not loaded.");
+        var task = (Task)method.Invoke(
+            store,
+            [modelId, resolvedFile, "https://example.invalid/model.gguf", "model.gguf", CancellationToken.None])!;
+        await task;
+    }
+
+    private static async Task<object?> InvokeLlamaGetByModelIdAsync(object store, Guid modelId)
+    {
+        var method = store.GetType().GetMethod("GetByModelIdAsync")
+            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore read method was not loaded.");
+        var task = (Task)method.Invoke(store, [modelId, CancellationToken.None])!;
+        await task;
+        return task.GetType().GetProperty("Result")!.GetValue(task);
     }
 
     private sealed class TemporaryWorkspace : IDisposable

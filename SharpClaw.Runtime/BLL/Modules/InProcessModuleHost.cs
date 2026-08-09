@@ -357,6 +357,55 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
 
             return inner.InvokeAsync(requestedModuleId, storageName, operation, parameters, ct);
         }
+
+        public Task<ModuleStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
+            string requestedModuleId,
+            string storageName,
+            ModuleStorageMutationAndOutboxRequest request,
+            CancellationToken ct = default)
+        {
+            EnsureModule(requestedModuleId);
+            return inner.CommitMutationAndOutboxAsync(requestedModuleId, storageName, request, ct);
+        }
+
+        public Task<ModuleStorageClaimResult<T>> ClaimAsync<T>(
+            string requestedModuleId,
+            string storageName,
+            ModuleStorageClaimRequest request,
+            CancellationToken ct = default)
+        {
+            EnsureModule(requestedModuleId);
+            return inner.ClaimAsync<T>(requestedModuleId, storageName, request, ct);
+        }
+
+        public Task<ModuleStorageClaimRenewalResult> RenewClaimAsync(
+            string requestedModuleId,
+            string storageName,
+            ModuleStorageClaimRenewalRequest request,
+            CancellationToken ct = default)
+        {
+            EnsureModule(requestedModuleId);
+            return inner.RenewClaimAsync(requestedModuleId, storageName, request, ct);
+        }
+
+        public Task<ModuleStorageClaimRecoveryResult> RecoverClaimAsync(
+            string requestedModuleId,
+            string storageName,
+            ModuleStorageClaimRecoveryRequest request,
+            CancellationToken ct = default)
+        {
+            EnsureModule(requestedModuleId);
+            return inner.RecoverClaimAsync(requestedModuleId, storageName, request, ct);
+        }
+
+        private void EnsureModule(string requestedModuleId)
+        {
+            if (!string.Equals(requestedModuleId, moduleId, StringComparison.Ordinal))
+            {
+                throw new UnauthorizedAccessException(
+                    $"Module '{moduleId}' cannot access storage owned by module '{requestedModuleId}'.");
+            }
+        }
     }
 
     private sealed class ModuleScopedDbContextFactory(

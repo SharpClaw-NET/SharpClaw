@@ -24,6 +24,38 @@ public sealed class BundledModuleStorageGateway(
     public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() =>
         contracts.GetStorageContracts();
 
+    public Task<ModuleStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
+        string moduleId,
+        string storageName,
+        ModuleStorageMutationAndOutboxRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "Atomic module storage commits with outbox delivery are not available because the current host schema has no outbox store.");
+
+    public Task<ModuleStorageClaimResult<T>> ClaimAsync<T>(
+        string moduleId,
+        string storageName,
+        ModuleStorageClaimRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "Typed module storage claims are not available through the current host storage implementation.");
+
+    public Task<ModuleStorageClaimRenewalResult> RenewClaimAsync(
+        string moduleId,
+        string storageName,
+        ModuleStorageClaimRenewalRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "Module storage claim renewal is not available through the current host storage implementation.");
+
+    public Task<ModuleStorageClaimRecoveryResult> RecoverClaimAsync(
+        string moduleId,
+        string storageName,
+        ModuleStorageClaimRecoveryRequest request,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException(
+            "Module storage claim recovery is not available through the current host storage implementation.");
+
     public async Task<JsonElement> InvokeAsync(
         string moduleId,
         string storageName,
@@ -98,6 +130,8 @@ public sealed class BundledModuleStorageGateway(
             found = true,
             key = record.RecordKey,
             value = value.RootElement,
+            revision = Revision(record),
+            indexes = await ReadIndexesAsync(contract, record.RecordKey, ct),
         }, JsonOptions);
     }
 
@@ -858,6 +892,18 @@ public sealed class BundledModuleStorageGateway(
         }
     }
 
+    private async Task<JsonElement> ReadIndexesAsync(
+        ModuleStorageContractDescriptor contract,
+        string key,
+        CancellationToken ct)
+    {
+        var indexes = await Indexes(contract)
+            .AsNoTracking()
+            .Where(index => index.RecordKey == key)
+            .ToListAsync(ct);
+        return IndexesResponse(indexes);
+    }
+
     private static JsonElement RecordsResponse(IReadOnlyList<ModuleStorageRecordDB> records)
     {
         var items = records.Select(record =>
@@ -867,11 +913,31 @@ public sealed class BundledModuleStorageGateway(
             {
                 key = record.RecordKey,
                 value = value.RootElement.Clone(),
+                revision = Revision(record),
             };
         });
 
         return JsonSerializer.SerializeToElement(new { records = items }, JsonOptions);
     }
+
+    private static JsonElement IndexesResponse(IReadOnlyList<ModuleStorageIndexEntryDB> indexes) =>
+        JsonSerializer.SerializeToElement(
+            indexes.GroupBy(index => index.IndexName, StringComparer.Ordinal)
+                .ToDictionary(
+                    group => group.Key,
+                    group => group.Select(ToIndexValue).ToArray(),
+                    StringComparer.Ordinal),
+            JsonOptions);
+
+    private static object ToIndexValue(ModuleStorageIndexEntryDB index) =>
+        index.StringValue is not null ? index.StringValue
+        : index.NumberValue is not null ? index.NumberValue.Value
+        : index.DateTimeValue is not null ? index.DateTimeValue.Value
+        : index.BoolValue is not null ? index.BoolValue.Value
+        : null!;
+
+    private static long Revision(ModuleStorageRecordDB record) =>
+        Math.Max(0, record.UpdatedAt.UtcDateTime.Ticks);
 
     private static int CountRecords(JsonElement response) =>
         response.TryGetProperty("records", out var records) && records.ValueKind == JsonValueKind.Array
