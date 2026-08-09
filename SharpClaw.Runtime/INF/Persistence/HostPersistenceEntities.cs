@@ -4,11 +4,11 @@ using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Runtime.INF.Persistence.Enums;
 
-using HostAccess = SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using HostClearance = SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using HostContext = SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using HostJobs = SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
-using HostMessages = SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using HostAccess = SharpClaw.Contracts.Entities.Core.Access;
+using HostClearance = SharpClaw.Contracts.Entities.Core.Clearance;
+using HostContext = SharpClaw.Contracts.Entities.Core.Context;
+using HostJobs = SharpClaw.Contracts.Entities.Core.Jobs;
+using HostMessages = SharpClaw.Contracts.Entities.Core.Messages;
 
 namespace SharpClaw.Runtime.INF.Persistence
 {
@@ -49,7 +49,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Enums
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core
+namespace SharpClaw.Contracts.Entities.Core
 {
     public sealed class ToolAwarenessSetDB : BaseEntity
     {
@@ -87,7 +87,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Entities.Core
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Access
+namespace SharpClaw.Contracts.Entities.Core.Access
 {
     public sealed class GlobalFlagDB : BaseEntity
     {
@@ -110,7 +110,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Access
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance
+namespace SharpClaw.Contracts.Entities.Core.Clearance
 {
     public sealed class ClearanceAgentWhitelistEntryDB : BaseEntity
     {
@@ -145,7 +145,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Context
+namespace SharpClaw.Contracts.Entities.Core.Context
 {
     public sealed class ChannelContextDB : BaseEntity
     {
@@ -206,7 +206,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Context
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs
+namespace SharpClaw.Contracts.Entities.Core.Jobs
 {
     public sealed class AgentJobDB : BaseEntity
     {
@@ -231,7 +231,7 @@ namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages
+namespace SharpClaw.Contracts.Entities.Core.Messages
 {
     public sealed class ChatMessageDB : BaseEntity
     {

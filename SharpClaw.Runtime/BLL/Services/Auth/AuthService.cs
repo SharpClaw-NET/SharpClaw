@@ -4,6 +4,7 @@ using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.DTOs.Auth;
 using SharpClaw.Contracts.DTOs.Users;
 using SharpClaw.Contracts.Entities.Core;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.Security;
 using SharpClaw.Runtime.BLL.Services;
@@ -184,17 +185,21 @@ public sealed class AuthService(
     public async Task<MeResponse?> GetMeAsync(Guid userId, CancellationToken ct = default)
     {
         var user = await db.Users
-            .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
         if (user is null) return null;
+
+        var roleId = ReadRoleId(user);
+        var role = roleId is { } id
+            ? await db.Roles.FirstOrDefaultAsync(r => r.Id == id, ct)
+            : null;
 
         return new MeResponse(
             user.Id,
             user.Username,
             user.Bio,
-            user.RoleId,
-            user.Role?.Name,
+            roleId,
+            role?.Name,
             user.IsUserAdmin);
     }
 
@@ -210,14 +215,34 @@ public sealed class AuthService(
     {
         await EnsureUserAdminAsync(callerUserId, ct);
 
-        return await db.Users
-            .Include(u => u.Role)
+        var users = await db.Users
             .OrderBy(u => u.Username)
-            .Select(u => new UserEntry(
-                u.Id, u.Username, u.Bio,
-                u.RoleId, u.Role != null ? u.Role.Name : null,
-                u.IsUserAdmin))
             .ToListAsync(ct);
+
+        var roleIds = users
+            .Select(ReadRoleId)
+            .Where(id => id is not null)
+            .Select(id => id!.Value)
+            .ToArray();
+        var roles = await db.Roles
+            .Where(role => roleIds.Contains(role.Id))
+            .ToDictionaryAsync(role => role.Id, ct);
+
+        return users
+            .Select(user =>
+            {
+                var roleId = ReadRoleId(user);
+                return new UserEntry(
+                    user.Id,
+                    user.Username,
+                    user.Bio,
+                    roleId,
+                    roleId is { } id && roles.TryGetValue(id, out var role)
+                        ? role.Name
+                        : null,
+                    user.IsUserAdmin);
+            })
+            .ToList();
     }
 
     /// <summary>
@@ -230,29 +255,29 @@ public sealed class AuthService(
         await EnsureUserAdminAsync(callerUserId, ct);
 
         var user = await db.Users
-            .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == targetUserId, ct);
         if (user is null) return null;
 
+        RoleDB? role = null;
         if (roleId == Guid.Empty)
         {
-            user.RoleId = null;
-            user.Role = null;
+            db.Entry(user).Property<Guid?>("RoleId").CurrentValue = null;
         }
         else
         {
-            var role = await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct)
+            role = await db.Roles.FirstOrDefaultAsync(r => r.Id == roleId, ct)
                 ?? throw new ArgumentException($"Role {roleId} not found.");
-            user.RoleId = role.Id;
-            user.Role = role;
+            db.Entry(user).Property<Guid?>("RoleId").CurrentValue = role.Id;
         }
 
         await db.SaveChangesAsync(ct);
         chatCache.Remove(ChatCache.KeyHeaderUser(targetUserId));
 
+        var assignedRoleId = role?.Id;
+
         return new UserEntry(
             user.Id, user.Username, user.Bio,
-            user.RoleId, user.Role?.Name, user.IsUserAdmin);
+            assignedRoleId, role?.Name, user.IsUserAdmin);
     }
 
     private async Task EnsureUserAdminAsync(Guid userId, CancellationToken ct)
@@ -261,4 +286,7 @@ public sealed class AuthService(
         if (caller is null || !caller.IsUserAdmin)
             throw new UnauthorizedAccessException("Only user admins can perform this action.");
     }
+
+    private Guid? ReadRoleId(UserDB user) =>
+        db.Entry(user).Property<Guid?>("RoleId").CurrentValue;
 }

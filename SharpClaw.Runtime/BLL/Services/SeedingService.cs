@@ -6,8 +6,8 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Clients;
 using SharpClaw.Core.Modules;
@@ -200,7 +200,9 @@ public sealed class SeedingService(
 
     private async Task SeedAdminUserAsync(SharpClawDbContext db, RoleDB adminRole, CancellationToken ct)
     {
-        var hasAdmin = await db.Users.AnyAsync(u => u.RoleId == adminRole.Id, ct);
+        var hasAdmin = await db.Users.AnyAsync(
+            u => EF.Property<Guid?>(u, "RoleId") == adminRole.Id,
+            ct);
         if (hasAdmin)
             return;
 
@@ -224,11 +226,11 @@ public sealed class SeedingService(
             Username = username,
             PasswordHash = hash,
             PasswordSalt = salt,
-            RoleId = adminRole.Id,
             IsUserAdmin = true
         };
 
         db.Users.Add(user);
+        db.Entry(user).Property<Guid?>("RoleId").CurrentValue = adminRole.Id;
         await SaveChangesWithStartupWriterLockRetryAsync(db, ct);
     }
 

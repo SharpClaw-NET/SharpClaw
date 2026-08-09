@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Agents;
@@ -75,9 +75,19 @@ public sealed class EfAgentAdministrationHost(
         CancellationToken ct)
     {
         var entity = await db.Users
-            .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId, ct);
-        return entity is null ? null : _states.Map(entity);
+        if (entity is null)
+            return null;
+
+        var state = _states.Map(entity);
+        var role = await UserRoleAccess.LoadRoleAsync(db, entity, ct);
+        if (role is not null)
+        {
+            state.RoleId = role.Id;
+            state.Role = _states.Map(role);
+        }
+
+        return state;
     }
 
     public async Task<PermissionSetState?> LoadFullPermissionSetAsync(

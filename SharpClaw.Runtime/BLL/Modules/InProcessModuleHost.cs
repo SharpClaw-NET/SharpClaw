@@ -8,10 +8,10 @@ using Microsoft.Extensions.DependencyInjection.Extensions;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Permissions;
 using SharpClaw.Contracts.Persistence;
@@ -383,13 +383,14 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
     private sealed class ModuleReadOnlySharpClawDataContext(
         SharpClawDbContext db) : ISharpClawDataContext
     {
-        public IQueryable<AgentDB> Agents => db.Agents.AsNoTracking();
-        public IQueryable<ChannelDB> Channels => db.Channels.AsNoTracking();
-        public IQueryable<ChannelContextDB> AgentContexts => db.AgentContexts.AsNoTracking();
-        public IQueryable<ChatThreadDB> ChatThreads => db.ChatThreads.AsNoTracking();
-        public IQueryable<ChatMessageDB> ChatMessages => db.ChatMessages.AsNoTracking();
-        public IQueryable<PermissionSetDB> PermissionSets => db.PermissionSets.AsNoTracking();
-        public IQueryable<GlobalFlagDB> GlobalFlags => db.GlobalFlags.AsNoTracking();
-        public IQueryable<RoleDB> Roles => db.Roles.AsNoTracking();
+        public IQueryable<ProviderDB> Providers => db.Providers.AsNoTracking();
+        public IQueryable<ModelDB> Models => db.Models.AsNoTracking();
+        public IQueryable<UserDB> Users => db.Users.AsNoTracking();
+        public IQueryable<RefreshTokenDB> RefreshTokens => db.RefreshTokens.AsNoTracking();
+        public IQueryable<ModuleStateDB> ModuleStates => db.ModuleStates.AsNoTracking();
+        public IQueryable<ModuleConfigEntryDB> ModuleConfigEntries => db.ModuleConfigEntries.AsNoTracking();
+        public IQueryable<ModuleStorageRecordDB> ModuleStorageRecords => db.ModuleStorageRecords.AsNoTracking();
+        public IQueryable<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries =>
+            db.ModuleStorageIndexEntries.AsNoTracking();
     }
 }

@@ -1,7 +1,7 @@
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core;
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
-global using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+global using SharpClaw.Contracts.Entities.Core;
+global using SharpClaw.Contracts.Entities.Core.Access;
+global using SharpClaw.Contracts.Entities.Core.Clearance;
+global using SharpClaw.Contracts.Entities.Core.Context;
+global using SharpClaw.Contracts.Entities.Core.Jobs;
+global using SharpClaw.Contracts.Entities.Core.Messages;
 global using SharpClaw.Runtime.INF.Persistence.Enums;

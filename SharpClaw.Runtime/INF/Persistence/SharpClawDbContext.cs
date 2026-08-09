@@ -2,11 +2,11 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -147,7 +147,7 @@ public class SharpClawDbContext(
             e.HasOne(a => a.Model)
                 .WithMany()
                 .HasForeignKey(a => a.ModelId)
-                .OnDelete(DeleteBehavior.Cascade);
+                .OnDelete(DeleteBehavior.Restrict);
             e.Property(a => a.ResponseFormat).HasConversion(
                     value => SerializeJsonElement(value),
                     value => DeserializeJsonElement(value))

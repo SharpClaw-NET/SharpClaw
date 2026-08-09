@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.State;
@@ -77,13 +77,23 @@ public sealed class EfRoleAdministrationHost(
         CancellationToken ct)
     {
         var user = await db.Users
-            .Include(u => u.Role)
             .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
-        if (user?.Role?.PermissionSetId is not { } permissionSetId)
+        if (user is null)
             return null;
 
-        return await LoadFullPermissionSetAsync(permissionSetId, ct);
+        var roleId = UserRoleAccess.GetRoleId(db, user);
+        if (roleId is not { } id)
+            return null;
+
+        var permissionSetId = await db.Roles
+            .Where(role => role.Id == id)
+            .Select(role => role.PermissionSetId)
+            .FirstOrDefaultAsync(ct);
+        if (permissionSetId is not { } permissionId)
+            return null;
+
+        return await LoadFullPermissionSetAsync(permissionId, ct);
     }
 
     public async Task<bool> IsUserAdminAsync(

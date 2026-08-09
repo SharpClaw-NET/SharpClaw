@@ -103,11 +103,10 @@ public sealed class RoleServiceTests
             Username = "operator",
             PasswordHash = [],
             PasswordSalt = [],
-            RoleId = roleId,
-            Role = role
         };
         host.Db.Roles.Add(role);
         host.Db.Users.Add(user);
+        host.Db.Entry(user).Property<Guid?>("RoleId").CurrentValue = roleId;
         await host.Db.SaveChangesAsync();
         var permissionSetId = permissionSet.Id;
         var flagId = flag.Id;
@@ -120,7 +119,8 @@ public sealed class RoleServiceTests
         (await host.Db.PermissionSets.FindAsync(permissionSetId)).Should().BeNull();
         (await host.Db.GlobalFlags.FindAsync(flagId)).Should().BeNull();
         (await host.Db.ResourceAccesses.FindAsync(accessId)).Should().BeNull();
-        (await host.Db.Users.SingleAsync(stored => stored.Id == user.Id))
-            .RoleId.Should().BeNull();
+        var storedUser = await host.Db.Users.SingleAsync(stored => stored.Id == user.Id);
+        host.Db.Entry(storedUser).Property<Guid?>("RoleId").CurrentValue
+            .Should().BeNull();
     }
 }

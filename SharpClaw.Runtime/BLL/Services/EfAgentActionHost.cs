@@ -44,11 +44,20 @@ public sealed class EfAgentActionHost(SharpClawDbContext db) : IAgentActionHost
         if (caller.UserId is { } userId)
         {
             var user = await db.Users
-                .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
-            return user?.Role?.PermissionSetId is { } permissionSetId
-                ? await LoadPermissionSnapshotAsync(permissionSetId, ct)
+            var userRoleId = user is null
+                ? null
+                : UserRoleAccess.GetRoleId(db, user);
+            if (userRoleId is not { } roleId)
+                return null;
+
+            var permissionSetId = await db.Roles
+                .Where(role => role.Id == roleId)
+                .Select(role => role.PermissionSetId)
+                .FirstOrDefaultAsync(ct);
+            return permissionSetId is { } id
+                ? await LoadPermissionSnapshotAsync(id, ct)
                 : null;
         }
 

@@ -409,12 +409,11 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
                 Username = "harness-user",
                 PasswordHash = [1],
                 PasswordSalt = [2],
-                RoleId = role.Id,
-                Role = role,
                 CreatedAt = now,
                 UpdatedAt = now
             };
             Db.Users.Add(user);
+            Db.Entry(user).Property<Guid?>("RoleId").CurrentValue = role.Id;
             Services.GetRequiredService<SessionService>().UserId = user.Id;
         }
 

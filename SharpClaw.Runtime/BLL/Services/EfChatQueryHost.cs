@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.State;

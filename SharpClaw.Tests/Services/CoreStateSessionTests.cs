@@ -115,13 +115,13 @@ public sealed class CoreStateSessionTests
             Username = "operator",
             PasswordHash = [1],
             PasswordSalt = [2],
-            Role = originalRole
         };
         db.AddRange(originalRole, replacementRole, user);
+        db.Entry(user).Property<Guid?>("RoleId").CurrentValue = originalRole.Id;
         await db.SaveChangesAsync();
         db.ChangeTracker.Clear();
 
-        user = await db.Users.Include(value => value.Role).SingleAsync();
+        user = await db.Users.SingleAsync();
         var states = new CoreStateSession(db);
         var state = states.Map(user);
         state.RoleId = replacementRole.Id;
@@ -129,7 +129,9 @@ public sealed class CoreStateSessionTests
         await states.SaveChangesAsync(CancellationToken.None);
         db.ChangeTracker.Clear();
 
-        (await db.Users.SingleAsync()).RoleId.Should().Be(replacementRole.Id);
+        var stored = await db.Users.SingleAsync();
+        db.Entry(stored).Property<Guid?>("RoleId").CurrentValue
+            .Should().Be(replacementRole.Id);
     }
 
     private static SharpClawDbContext CreateDbContext()

@@ -2257,13 +2257,13 @@ public static class CliDispatcher
 
     /// <summary>
     /// Parses a resource grant argument: <c>id[:clearance]</c>.
-    /// The special value <c>all</c> maps to <see cref="Contracts.WellKnownIds.AllResources"/>.
+    /// The special value <c>all</c> maps to the host wildcard resource identifier.
     /// </summary>
     private static ResourceGrant ParseResourceGrant(string arg)
     {
         var parts = arg.Split(':', 2);
         var resourceId = parts[0].Equals("all", StringComparison.OrdinalIgnoreCase)
-            ? Contracts.WellKnownIds.AllResources
+            ? WellKnownIds.AllResources
             : CliIdMap.Resolve(parts[0]);
 
         var clearance = parts.Length > 1

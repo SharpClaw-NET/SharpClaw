@@ -13,7 +13,7 @@ using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Runtime.BLL.Modules.Sidecar;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Access;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;

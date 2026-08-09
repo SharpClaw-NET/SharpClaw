@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Resources;
 using SharpClaw.Core.State;

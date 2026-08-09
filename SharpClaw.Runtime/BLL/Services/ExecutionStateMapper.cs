@@ -1,4 +1,4 @@
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Core.Jobs;
 
 namespace SharpClaw.Runtime.BLL.Services;

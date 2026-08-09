@@ -2,8 +2,8 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.State;
 using SharpClaw.Runtime.INF.Persistence;
@@ -86,10 +86,17 @@ public sealed class HeaderTagProcessor(
         if (plan.RequiresUser)
         {
             var userEntity = await db.Users
-                .AsNoTracking()
-                .Include(u => u.Role).ThenInclude(r => r!.PermissionSet)
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
             user = userEntity is null ? null : _states.Map(userEntity);
+
+            var userRole = userEntity is null
+                ? null
+                : await UserRoleAccess.LoadRoleAsync(db, userEntity, ct);
+            if (user is not null && userRole is not null)
+            {
+                user.RoleId = userRole.Id;
+                user.Role = _states.Map(userRole);
+            }
 
             if (plan.RequiresUserPermissionSet
                 && user?.Role?.PermissionSetId is { } psId)

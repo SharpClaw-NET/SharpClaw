@@ -4,16 +4,16 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.Modules;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Clients;
 using SharpClaw.Core.Conversation;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -371,12 +371,13 @@ public sealed class ChatService(
 
         var snapshot = await _db.Users
             .Where(u => u.Id == senderUserId.Value)
-            .Select(u => new { u.Username, u.RoleId, RoleName = u.Role != null ? u.Role.Name : null })
             .FirstOrDefaultAsync(ct);
 
         return snapshot is null
             ? (null, null, null)
-            : (snapshot.Username, snapshot.RoleId, snapshot.RoleName);
+            : (snapshot.Username,
+                UserRoleAccess.GetRoleId(_db, snapshot),
+                (await UserRoleAccess.LoadRoleAsync(_db, snapshot, ct))?.Name);
     }
 
     // â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•â•
@@ -966,17 +967,15 @@ public sealed class ChatService(
             CancellationToken ct)
         {
             var user = await service._db.Users
-                .AsNoTracking()
-                .Include(u => u.Role)
-                .ThenInclude(r => r!.PermissionSet)
-                .AsSplitQuery()
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
             if (user is null)
                 return null;
 
+            var role = await UserRoleAccess.LoadRoleAsync(service._db, user, ct);
+
             var grants = new List<string>();
-            if (user.Role?.PermissionSetId is { } psId)
+            if (role?.PermissionSetId is { } psId)
             {
                 var ps = await service._db.PermissionSets
                     .AsNoTracking()
@@ -997,7 +996,7 @@ public sealed class ChatService(
 
             return new ChatHeaderUserState(
                 user.Username,
-                user.Role?.Name,
+                role?.Name,
                 grants,
                 user.Bio);
         }

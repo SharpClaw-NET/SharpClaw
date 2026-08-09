@@ -1,5 +1,5 @@
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Runtime.INF.Persistence;

@@ -3,11 +3,11 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
 using SharpClaw.Contracts.Chat;
 using SharpClaw.Contracts.DTOs.Chat;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
@@ -537,9 +537,12 @@ public sealed class HostContainerProvisioner(SharpClawDbContext db) : IContainer
             return;
 
         var user = await db.Users.FirstOrDefaultAsync(u => u.Id == id, ct);
-        if (user is not null && user.RoleId is null)
+        var userRoleId = user is null
+            ? null
+            : db.Entry(user).Property<Guid?>("RoleId").CurrentValue;
+        if (user is not null && userRoleId is null)
         {
-            user.RoleId = role.Id;
+            db.Entry(user).Property<Guid?>("RoleId").CurrentValue = role.Id;
             await db.SaveChangesAsync(ct);
         }
     }

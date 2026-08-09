@@ -5,9 +5,9 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Jobs;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
@@ -581,12 +581,18 @@ public sealed class AgentJobService(
         if (requiresCallerGrant && callerUserId is { } userId)
         {
             var user = await db.Users
-                .Include(u => u.Role)
                 .FirstOrDefaultAsync(u => u.Id == userId, ct);
 
-            if (user?.Role?.PermissionSetId is { } userPsId)
+            var userRoleId = user is null
+                ? null
+                : UserRoleAccess.GetRoleId(db, user);
+            if (userRoleId is { } userRole)
             {
-                var userPs = await actions.LoadPermissionSetAsync(userPsId, ct);
+                var userRoleEntity = await db.Roles
+                    .FirstOrDefaultAsync(role => role.Id == userRole, ct);
+                var userPs = userRoleEntity?.PermissionSetId is { } userPsId
+                    ? await actions.LoadPermissionSetAsync(userPsId, ct)
+                    : null;
                 callerHasGrant = userPs is not null
                     && jobAdministration.HasMatchingGrant(
                         moduleRegistry,

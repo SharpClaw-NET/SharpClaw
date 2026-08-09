@@ -1,9 +1,9 @@
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
-using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
+using SharpClaw.Contracts.Entities.Core.Access;
+using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Contracts.Entities.Core.Messages;
 using SharpClaw.Core.State;
 using SharpClaw.Runtime.INF.Persistence;
 
@@ -238,8 +238,12 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
         state.IsUserAdmin = entity.IsUserAdmin;
         state.Bio = entity.Bio;
         state.AccessTokensInvalidatedAt = entity.AccessTokensInvalidatedAt;
-        state.RoleId = entity.RoleId;
-        state.Role = entity.Role is null ? null : Map(entity.Role);
+        state.RoleId = db.Entry(entity).Property<Guid?>("RoleId").CurrentValue;
+        state.Role = state.RoleId is { } roleId
+            ? db.Roles.Local.FirstOrDefault(role => role.Id == roleId) is { } role
+                ? Map(role)
+                : null
+            : null;
         return state;
     }
 
@@ -522,11 +526,7 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
                 target.IsUserAdmin = source.IsUserAdmin;
                 target.Bio = source.Bio;
                 target.AccessTokensInvalidatedAt = source.AccessTokensInvalidatedAt;
-                target.RoleId = source.RoleId;
-                if (source.RoleId is null)
-                    target.Role = null;
-                else if (ReferenceMatches(source.RoleId, source.Role))
-                    target.Role = (RoleDB)EnsureEntity(source.Role!);
+                db.Entry(target).Property<Guid?>("RoleId").CurrentValue = source.RoleId;
                 break;
             case (RoleState source, RoleDB target):
                 target.Name = source.Name;
