@@ -5,15 +5,27 @@ using SharpClaw.Core.Kernel;
 namespace SharpClaw.Runtime.BLL.Kernel;
 
 /// <summary>Runs direct chat through one compiled Core kernel graph.</summary>
-public sealed class DirectChatKernel(DirectTurnRunner runner)
+public sealed class DirectChatKernel
 {
-    private readonly DirectTurnRunner _runner =
-        runner ?? throw new ArgumentNullException(nameof(runner));
+    private readonly DirectTurnRunner _runner;
+    private readonly RunScopedConversationResolver _conversationResolver;
 
-    public ValueTask<ChatTurnResult> RunAsync(
+    internal DirectChatKernel(
+        DirectTurnRunner runner,
+        RunScopedConversationResolver conversationResolver)
+    {
+        _runner = runner ?? throw new ArgumentNullException(nameof(runner));
+        _conversationResolver = conversationResolver
+            ?? throw new ArgumentNullException(nameof(conversationResolver));
+    }
+
+    public async ValueTask<ChatTurnResult> RunAsync(
         ChatTurnInput input,
-        CancellationToken cancellationToken = default) =>
-        _runner.RunAsync(input, cancellationToken);
+        CancellationToken cancellationToken = default)
+    {
+        await using var run = _conversationResolver.BeginRun();
+        return await _runner.RunAsync(input, cancellationToken);
+    }
 }
 
 /// <summary>Builds one direct-chat runner over an explicit Core kernel graph.</summary>
@@ -34,6 +46,9 @@ internal static class DirectChatKernelFactory
         ArgumentNullException.ThrowIfNull(profileResolver);
         ArgumentNullException.ThrowIfNull(conversationStore);
 
+        var gatedConversationResolver = new RunScopedConversationResolver(
+            conversationResolver,
+            new ConversationTurnGate());
         var dispatcher = new KernelActionDispatcher(
             graph,
             new KernelActionExecutionContext(
@@ -44,15 +59,17 @@ internal static class DirectChatKernelFactory
         var contextAssembler = graph.CreateChatContextAssembler(dispatcher);
         var providerLoop = new ProviderRoundLoop(providerTransport, graph, dispatcher);
         var toolPipeline = new UnifiedToolPipeline(graph, dispatcher);
-        return new DirectChatKernel(new DirectTurnRunner(
-            graph,
-            dispatcher,
-            conversationResolver,
-            profileResolver,
-            conversationStore,
-            contextAssembler,
-            providerLoop,
-            toolPipeline));
+        return new DirectChatKernel(
+            new DirectTurnRunner(
+                graph,
+                dispatcher,
+                gatedConversationResolver,
+                profileResolver,
+                conversationStore,
+                contextAssembler,
+                providerLoop,
+                toolPipeline),
+            gatedConversationResolver);
     }
 }
 

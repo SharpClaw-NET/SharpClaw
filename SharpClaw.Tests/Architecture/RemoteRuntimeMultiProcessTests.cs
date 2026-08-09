@@ -54,7 +54,8 @@ public sealed class RemoteRuntimeMultiProcessTests
         var runtimeBinary = PrepareHostBinary(
             ResolveBinary("SharpClaw.Runtime\\Host", "SharpClaw.Runtime.Host"),
             Path.Combine(root, "process-binaries", "runtime"),
-            disableBundledModules: true);
+            disableBundledModules: true,
+            includeInProcessTestHarness: true);
         var proxyBinary = PrepareHostBinary(
             ResolveBinary("SharpClaw.Runtime\\Host", "SharpClaw.Runtime.Host"),
             Path.Combine(root, "process-binaries", "proxy"),
@@ -631,7 +632,8 @@ public sealed class RemoteRuntimeMultiProcessTests
     private static string PrepareHostBinary(
         string sourceBinary,
         string destinationDirectory,
-        bool disableBundledModules)
+        bool disableBundledModules,
+        bool includeInProcessTestHarness = false)
     {
         CopyDirectory(
             Path.GetDirectoryName(sourceBinary)!,
@@ -675,7 +677,46 @@ public sealed class RemoteRuntimeMultiProcessTests
                 Directory.Delete(modulesDirectory, recursive: true);
         }
 
+        if (includeInProcessTestHarness)
+        {
+            var testDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
+            var sourceModuleDirectory = Path.Combine(
+                testDirectory,
+                "test-modules",
+                "sharpclaw_test_harness_in_process");
+            Directory.Exists(sourceModuleDirectory).Should().BeTrue(
+                $"the test requires the packaged in-process module at '{sourceModuleDirectory}'");
+
+            var destinationModuleDirectory = Path.Combine(
+                destinationDirectory,
+                "modules",
+                "sharpclaw_test_harness_in_process");
+            CopyDirectory(
+                sourceModuleDirectory,
+                destinationModuleDirectory,
+                skipMutableDirectories: false);
+            SetEnvironmentValue(activePath, "Modules__sharpclaw_test_harness_in_process", "true");
+            SetEnvironmentValue(activePath, "Provider__Key", "sharpclaw-test");
+            SetEnvironmentValue(activePath, "Provider__Model", "test-harness-model");
+        }
+
         return Path.Combine(destinationDirectory, Path.GetFileName(sourceBinary));
+    }
+
+    private static void SetEnvironmentValue(string path, string key, string value)
+    {
+        var lines = File.Exists(path)
+            ? File.ReadAllLines(path).ToList()
+            : [];
+        var prefix = key + "=";
+        var index = lines.FindIndex(line =>
+            line.StartsWith(prefix, StringComparison.OrdinalIgnoreCase));
+        var line = prefix + "\"" + value + "\"";
+        if (index >= 0)
+            lines[index] = line;
+        else
+            lines.Add(line);
+        File.WriteAllLines(path, lines);
     }
 
     private static void DisableModules(string path, IReadOnlyList<string> moduleIds)

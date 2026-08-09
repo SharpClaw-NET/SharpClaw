@@ -14,7 +14,10 @@ internal static class KernelHostEndpoints
         app.MapGet("/echo", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
         app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));
-        app.MapGet("/readyz", () => Results.Ok(new { status = "ready" }));
+        app.MapGet("/readyz", (RuntimeReadinessState readiness) =>
+            readiness.IsReady
+                ? Results.Ok(new { status = "ready" })
+                : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
         app.MapGet("/ping", () => Results.Ok(new { status = "authenticated" }));
         app.MapGet("/env/core", (IConfiguration configuration) => Results.Ok(
             configuration.AsEnumerable()

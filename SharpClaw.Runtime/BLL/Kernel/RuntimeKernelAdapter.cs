@@ -35,6 +35,7 @@ public sealed class RuntimeKernelAdapter
         var plugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
+        ValidateConfiguredProviders(configuration, plugins);
         var providerClient = providerClientFactory.Create(configuration, plugins);
         var conversationResolver = ResolveConversationResolver(Graph, instancePaths);
         var profileResolver = ResolveProfileResolver(Graph, configuration);
@@ -130,5 +131,40 @@ public sealed class RuntimeKernelAdapter
             Guid.Empty,
             modelName,
             configuration["Provider:SystemPrompt"]);
+    }
+
+    private static void ValidateConfiguredProviders(
+        IConfiguration configuration,
+        IReadOnlyList<IProviderPlugin> plugins)
+    {
+        var duplicateProviderKeys = plugins
+            .GroupBy(plugin => plugin.ProviderKey, StringComparer.OrdinalIgnoreCase)
+            .Where(group => group.Count() > 1)
+            .Select(group => group.Key)
+            .OrderBy(key => key, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        if (duplicateProviderKeys.Length > 0)
+        {
+            throw new InvalidOperationException(
+                "Duplicate provider registrations were found: "
+                + string.Join(", ", duplicateProviderKeys));
+        }
+
+        var providerKey = configuration["Provider:Key"]
+            ?? configuration["Providers:Default"];
+        if (string.IsNullOrWhiteSpace(providerKey))
+        {
+            throw new InvalidOperationException(
+                "Provider:Key or Providers:Default must be configured before Runtime readiness.");
+        }
+
+        if (!plugins.Any(plugin => string.Equals(
+                plugin.ProviderKey,
+                providerKey,
+                StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new InvalidOperationException(
+                $"Configured provider '{providerKey}' is not registered by an enabled in-process module.");
+        }
     }
 }

@@ -51,6 +51,38 @@ public sealed class DirectChatKernelTests
         history[1].Role.Should().Be("assistant");
     }
 
+    [Test]
+    public async Task Direct_kernel_serializes_load_provider_and_commit_for_one_conversation()
+    {
+        var conversationId = Guid.NewGuid();
+        var provider = new SequencedProviderClient();
+        var resolver = new SignalingConversationResolver(conversationId);
+        var kernel = DirectChatKernelFactory.CreateFromGraph(
+            new KernelGraphBuilder().Compile(),
+            new ProviderKernelTransport(provider),
+            resolver,
+            new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
+            new InMemoryConversationStore());
+
+        var first = kernel.RunAsync(new ChatTurnInput("first")).AsTask();
+        await provider.FirstCallStarted.Task;
+
+        var second = kernel.RunAsync(new ChatTurnInput("second")).AsTask();
+        await resolver.SecondResolutionStarted.Task;
+        provider.SecondCallStarted.Should().BeFalse();
+
+        provider.ReleaseFirstCall();
+        await Task.WhenAll(first, second);
+
+        provider.Requests.Should().HaveCount(2);
+        provider.Requests[1].Select(message => $"{message.Role}:{message.Content}")
+            .Should()
+            .Equal(
+                "user:first",
+                "assistant:reply-1",
+                "user:second");
+    }
+
     private sealed class RecordingProviderClient : IProviderApiClient
     {
         public string ProviderKey => "test";
@@ -75,6 +107,74 @@ public sealed class DirectChatKernelTests
                 FinishReason = FinishReason.Stop,
                 Usage = new TokenUsage(1, 1),
             });
+        }
+    }
+
+    private sealed class SequencedProviderClient : IProviderApiClient
+    {
+        private readonly TaskCompletionSource _releaseFirstCall =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _callNumber;
+
+        public string ProviderKey => "test";
+
+        public TaskCompletionSource FirstCallStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public List<IReadOnlyList<ChatCompletionMessage>> Requests { get; } = [];
+
+        public bool SecondCallStarted => Volatile.Read(ref _callNumber) > 1;
+
+        public void ReleaseFirstCall() => _releaseFirstCall.TrySetResult();
+
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(["test-model"]);
+
+        public async Task<ChatCompletionResult> ChatCompletionAsync(
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ChatCompletionMessage> messages,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default)
+        {
+            var callNumber = Interlocked.Increment(ref _callNumber);
+            Requests.Add(messages.ToArray());
+            if (callNumber == 1)
+            {
+                FirstCallStarted.TrySetResult();
+                await _releaseFirstCall.Task.WaitAsync(ct);
+            }
+
+            return new ChatCompletionResult
+            {
+                Content = $"reply-{callNumber}",
+                FinishReason = FinishReason.Stop,
+                Usage = new TokenUsage(1, 1),
+            };
+        }
+    }
+
+    private sealed class SignalingConversationResolver(Guid conversationId) : IConversationResolver
+    {
+        private readonly Guid _conversationId = conversationId;
+        private int _resolutionCount;
+
+        public TaskCompletionSource SecondResolutionStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public ValueTask<ConversationSelection> ResolveAsync(
+            ChatTurnInput input,
+            CancellationToken ct)
+        {
+            ct.ThrowIfCancellationRequested();
+            if (Interlocked.Increment(ref _resolutionCount) == 2)
+                SecondResolutionStarted.TrySetResult();
+
+            return ValueTask.FromResult(new ConversationSelection(
+                input.ConversationId.GetValueOrDefault(_conversationId),
+                input.ConversationId is null));
         }
     }
 }
