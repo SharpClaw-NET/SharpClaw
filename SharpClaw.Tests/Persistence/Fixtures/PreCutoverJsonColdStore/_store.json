@@ -1,0 +1,12 @@
+{
+  "storeId": "eb16eb06-f55c-4a1d-9bad-3dc159866dde",
+  "formatVersion": 1,
+  "createdAt": "2026-08-09T13:36:10.3665771+00:00",
+  "providerVersion": "0.1.0-alpha.10\u002Bb631e62c2ca7acbb9a56f4ae0ffaef36eb5b380b",
+  "policy": {
+    "compression": "Brotli",
+    "encryptionEnabled": false,
+    "startupMode": "MetadataOnly",
+    "fullScanPolicy": "AllowSilentScans"
+  }
+}

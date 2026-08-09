@@ -2,7 +2,6 @@ using System.Text.Json;
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Enums;
-using SharpClaw.Runtime.INF.Persistence.Enums;
 
 using HostAccess = SharpClaw.Contracts.Entities.Core.Access;
 using HostClearance = SharpClaw.Contracts.Entities.Core.Clearance;
@@ -18,7 +17,7 @@ namespace SharpClaw.Runtime.INF.Persistence
     }
 }
 
-namespace SharpClaw.Runtime.INF.Persistence.Enums
+namespace SharpClaw.Contracts.Enums
 {
     public enum AgentJobStatus
     {

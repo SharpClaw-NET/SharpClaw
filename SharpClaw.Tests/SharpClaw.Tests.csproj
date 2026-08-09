@@ -60,6 +60,11 @@
   </ItemGroup>
 
   <ItemGroup>
+    <None Include="Persistence\Fixtures\PreCutoverJsonColdStore\**\*"
+          CopyToOutputDirectory="PreserveNewest" />
+  </ItemGroup>
+
+  <ItemGroup>
     <ProjectReference Include="..\SharpClaw.Runtime\Host\SharpClaw.Runtime.Host.csproj" />
     <ProjectReference Include="..\SharpClaw.Client.Uno\SharpClaw.Client.Uno.csproj" />
     <ProjectReference Include="..\SharpClaw.Runtime\BLL\SharpClaw.Runtime.BLL.csproj" />

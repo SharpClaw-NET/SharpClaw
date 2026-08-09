@@ -103,6 +103,21 @@ public sealed class RemoteRuntimeMultiProcessTests
             var runtimeApiKey = ReadRequired(runtimeEntry.ApiKeyFilePath);
             var runtimeFingerprint = runtimeEntry.InstallFingerprint;
 
+            using (var runtimeReadinessClient = new HttpClient
+            {
+                BaseAddress = new Uri(runtimeUrl),
+                Timeout = TimeSpan.FromSeconds(10),
+            })
+            using (var runtimeReadinessResponse = await WaitForAsync(
+                cancellationToken => runtimeReadinessClient.GetAsync(
+                    "/echo",
+                    cancellationToken),
+                StartupTimeout,
+                runtime))
+            {
+                runtimeReadinessResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            }
+
             gateway = StartProcess(
                 gatewayBinary,
                 new Dictionary<string, string?>
@@ -129,6 +144,15 @@ public sealed class RemoteRuntimeMultiProcessTests
             bridgeClient.DefaultRequestHeaders.Add(
                 RemoteRuntimeBridgePaths.AdministrationKeyHeader,
                 "process-admin-key");
+            using (var registryReadinessResponse = await WaitForSuccessfulResponseAsync(
+                cancellationToken => bridgeClient.GetAsync(
+                    RemoteRuntimeBridgePaths.AdminPairings + "?take=1",
+                    cancellationToken),
+                StartupTimeout,
+                gateway))
+            {
+                registryReadinessResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            }
             using var invitationResponse = await WaitForAsync(
                 async cancellationToken =>
                 {
@@ -457,6 +481,47 @@ public sealed class RemoteRuntimeMultiProcessTests
 
         throw new AssertionException(
             $"HTTP operation did not become available. {last?.Message}\n{process.Diagnostics}");
+    }
+
+    private static async Task<HttpResponseMessage> WaitForSuccessfulResponseAsync(
+        Func<CancellationToken, Task<HttpResponseMessage>> operation,
+        TimeSpan timeout,
+        ChildProcess process)
+    {
+        var deadline = DateTimeOffset.UtcNow + timeout;
+        Exception? last = null;
+        while (DateTimeOffset.UtcNow < deadline)
+        {
+            process.ThrowIfExited();
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            using var attemptCancellation = new CancellationTokenSource(
+                remaining < TimeSpan.FromSeconds(2)
+                    ? remaining
+                    : TimeSpan.FromSeconds(2));
+            try
+            {
+                var response = await operation(attemptCancellation.Token);
+                if (response.IsSuccessStatusCode)
+                    return response;
+
+                last = new HttpRequestException(
+                    $"HTTP {(int)response.StatusCode} ({response.StatusCode}).");
+                response.Dispose();
+            }
+            catch (HttpRequestException exception)
+            {
+                last = exception;
+            }
+            catch (OperationCanceledException exception)
+            {
+                last = exception;
+            }
+
+            await Task.Delay(250);
+        }
+
+        throw new AssertionException(
+            $"HTTP operation did not return success. {last?.Message}\n{process.Diagnostics}");
     }
 
     private static async Task<RemoteRuntimeRegistryPageResponse> ReadPairingsAsync(

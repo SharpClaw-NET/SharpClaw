@@ -1,3 +1,5 @@
+using System.Security.Cryptography;
+using System.Text.Json;
 using JSONColdStore;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core;
@@ -12,7 +14,7 @@ namespace SharpClaw.Tests.Persistence;
 public sealed class HostPersistenceCompatibilityTests
 {
     [Test]
-    public async Task JsonColdStore_ReopensPopulatedStoreWithPreCutoverEntityIdentity()
+    public async Task JsonColdStore_ReopensImmutablePreCutoverStoreWithCurrentEntityIdentity()
     {
         const string legacyEntityNamespace = "SharpClaw.Contracts.Entities.Core";
         typeof(AgentDB).FullName.Should().Be($"{legacyEntityNamespace}.AgentDB");
@@ -20,61 +22,51 @@ public sealed class HostPersistenceCompatibilityTests
         typeof(ChatMessageDB).FullName.Should().Be($"{legacyEntityNamespace}.Messages.ChatMessageDB");
         typeof(RoleDB).FullName.Should().Be($"{legacyEntityNamespace}.Clearance.RoleDB");
 
+        var fixtureDirectory = Path.Combine(
+            TestContext.CurrentContext.TestDirectory,
+            "Persistence",
+            "Fixtures",
+            "PreCutoverJsonColdStore");
+        var manifestPath = Path.Combine(fixtureDirectory, "fixture-manifest.json");
+        var manifest = JsonSerializer.Deserialize<PreCutoverFixtureManifest>(
+            await File.ReadAllTextAsync(manifestPath),
+            new JsonSerializerOptions { PropertyNameCaseInsensitive = true })
+            ?? throw new InvalidOperationException("The pre-cutover fixture manifest is empty.");
+
+        manifest.ProducerCommit.Should().Be("a9a01bee8487c24a10e8bb5ea996825077a83158");
+        manifest.ContractsPackage.Should().Be("SharpClaw.Contracts 0.5.0-alpha.3");
+        manifest.ProviderPackage.Should().Be("Supprocom.JSONColdStore 0.1.0-alpha.10");
+
+        foreach (var file in manifest.Files)
+        {
+            var path = Path.Combine(fixtureDirectory, file.Path.Replace('/', Path.DirectorySeparatorChar));
+            File.Exists(path).Should().BeTrue(file.Path);
+            new FileInfo(path).Length.Should().Be(file.Length, file.Path);
+            await using var stream = File.OpenRead(path);
+            Convert.ToHexString(await SHA256.HashDataAsync(stream))
+                .Should().Be(file.Sha256, file.Path);
+        }
+
         var root = Path.Combine(
             Path.GetTempPath(),
             "SharpClaw.Tests",
             "host-persistence-compatibility",
             Guid.NewGuid().ToString("N"));
-        var providerId = Guid.NewGuid();
-        var modelId = Guid.NewGuid();
-        var agentId = Guid.NewGuid();
+        CopyDirectory(fixtureDirectory, root);
 
         try
         {
-            await using (var db = CreateDbContext(root))
-            {
-                await db.Database.EnsureCreatedAsync();
+            await using var reopened = CreateDbContext(root);
+            var persisted = await reopened.Agents
+                .AsNoTracking()
+                .SingleAsync(agent => agent.Id == manifest.ExpectedRecords.AgentId);
 
-                var provider = new ProviderDB
-                {
-                    Id = providerId,
-                    Name = "compatibility-provider",
-                    ProviderKey = "compatibility-provider",
-                };
-                var model = new ModelDB
-                {
-                    Id = modelId,
-                    Name = "compatibility-model",
-                    ProviderId = providerId,
-                    Provider = provider,
-                };
-                var agent = new AgentDB
-                {
-                    Id = agentId,
-                    Name = "compatibility-agent",
-                    ModelId = modelId,
-                    Model = model,
-                };
-
-                db.Providers.Add(provider);
-                db.Models.Add(model);
-                db.Agents.Add(agent);
-                await db.SaveChangesAsync();
-            }
-
-            await using (var reopened = CreateDbContext(root))
-            {
-                var persisted = await reopened.Agents
-                    .AsNoTracking()
-                    .SingleAsync(agent => agent.Id == agentId);
-
-                persisted.Name.Should().Be("compatibility-agent");
-                persisted.ModelId.Should().Be(modelId);
-                (await reopened.Models.AsNoTracking().SingleAsync(model => model.Id == modelId))
-                    .ProviderId.Should().Be(providerId);
-                (await reopened.Providers.AsNoTracking().SingleAsync(provider => provider.Id == providerId))
-                    .ProviderKey.Should().Be("compatibility-provider");
-            }
+            persisted.Name.Should().Be("pre-cutover-agent");
+            persisted.ModelId.Should().Be(manifest.ExpectedRecords.ModelId);
+            (await reopened.Models.AsNoTracking().SingleAsync(model => model.Id == manifest.ExpectedRecords.ModelId))
+                .ProviderId.Should().Be(manifest.ExpectedRecords.ProviderId);
+            (await reopened.Providers.AsNoTracking().SingleAsync(provider => provider.Id == manifest.ExpectedRecords.ProviderId))
+                .ProviderKey.Should().Be("pre-cutover-provider");
         }
         finally
         {
@@ -124,4 +116,33 @@ public sealed class HostPersistenceCompatibilityTests
             .Options;
         return new SharpClawDbContext(options);
     }
+
+    private static void CopyDirectory(string source, string destination)
+    {
+        Directory.CreateDirectory(destination);
+        foreach (var directory in Directory.EnumerateDirectories(source, "*", SearchOption.AllDirectories))
+            Directory.CreateDirectory(directory.Replace(source, destination, StringComparison.Ordinal));
+        foreach (var file in Directory.EnumerateFiles(source, "*", SearchOption.AllDirectories))
+        {
+            var target = file.Replace(source, destination, StringComparison.Ordinal);
+            Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+            File.Copy(file, target);
+        }
+    }
+
+    private sealed record PreCutoverFixtureManifest(
+        string ProducerRepository,
+        string ProducerCommit,
+        string ContractsPackage,
+        string ContractsNupkgSha256,
+        string ContractsDllSha256,
+        string ProviderPackage,
+        string ProviderNupkgSha256,
+        string ProviderDllSha256,
+        ExpectedRecords ExpectedRecords,
+        IReadOnlyList<FixtureFile> Files);
+
+    private sealed record ExpectedRecords(Guid ProviderId, Guid ModelId, Guid AgentId);
+
+    private sealed record FixtureFile(string Path, long Length, string Sha256);
 }
