@@ -6,7 +6,7 @@ using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SharpClaw.Contracts.DTOs.AgentActions;
 using SharpClaw.Contracts.DTOs.Chat;
 using SharpClaw.Contracts.DTOs.Diagnostics;
-using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 using SharpClaw.Core.Jobs;
 using SharpClaw.Runtime.INF.DurableStorage;

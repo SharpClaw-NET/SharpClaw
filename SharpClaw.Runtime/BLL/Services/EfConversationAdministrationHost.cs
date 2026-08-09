@@ -1,7 +1,7 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Entities.Core.Context;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
 using SharpClaw.Core.Conversation;
 using SharpClaw.Core.State;
 using SharpClaw.Runtime.INF.Persistence;

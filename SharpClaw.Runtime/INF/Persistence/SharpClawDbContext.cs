@@ -2,11 +2,11 @@ using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.ChangeTracking;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Entities.Core.Access;
-using SharpClaw.Contracts.Entities.Core.Clearance;
-using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Messages;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
@@ -18,14 +18,14 @@ namespace SharpClaw.Runtime.INF.Persistence;
 public class SharpClawDbContext(
     DbContextOptions<SharpClawDbContext> options) : DbContext(options), ISharpClawDataContext
 {
-    IQueryable<AgentDB> ISharpClawDataContext.Agents => Agents;
-    IQueryable<ChannelDB> ISharpClawDataContext.Channels => Channels;
-    IQueryable<ChannelContextDB> ISharpClawDataContext.AgentContexts => AgentContexts;
-    IQueryable<ChatThreadDB> ISharpClawDataContext.ChatThreads => ChatThreads;
-    IQueryable<ChatMessageDB> ISharpClawDataContext.ChatMessages => ChatMessages;
-    IQueryable<PermissionSetDB> ISharpClawDataContext.PermissionSets => PermissionSets;
-    IQueryable<GlobalFlagDB> ISharpClawDataContext.GlobalFlags => GlobalFlags;
-    IQueryable<RoleDB> ISharpClawDataContext.Roles => Roles;
+    IQueryable<ProviderDB> ISharpClawDataContext.Providers => Providers;
+    IQueryable<ModelDB> ISharpClawDataContext.Models => Models;
+    IQueryable<UserDB> ISharpClawDataContext.Users => Users;
+    IQueryable<RefreshTokenDB> ISharpClawDataContext.RefreshTokens => RefreshTokens;
+    IQueryable<ModuleStateDB> ISharpClawDataContext.ModuleStates => ModuleStates;
+    IQueryable<ModuleConfigEntryDB> ISharpClawDataContext.ModuleConfigEntries => ModuleConfigEntries;
+    IQueryable<ModuleStorageRecordDB> ISharpClawDataContext.ModuleStorageRecords => ModuleStorageRecords;
+    IQueryable<ModuleStorageIndexEntryDB> ISharpClawDataContext.ModuleStorageIndexEntries => ModuleStorageIndexEntries;
 
     public DbSet<UserDB> Users => Set<UserDB>();
     public DbSet<RoleDB> Roles => Set<RoleDB>();
@@ -89,8 +89,8 @@ public class SharpClawDbContext(
         {
             e.HasIndex(r => r.Name).IsUnique();
             e.HasMany(r => r.Users)
-                .WithOne(u => u.Role)
-                .HasForeignKey(u => u.RoleId)
+                .WithOne()
+                .HasForeignKey("RoleId")
                 .OnDelete(DeleteBehavior.SetNull);
             e.HasOne(r => r.PermissionSet)
                 .WithMany()
@@ -125,10 +125,6 @@ public class SharpClawDbContext(
         modelBuilder.Entity<ModelDB>(e =>
         {
             e.HasIndex(m => new { m.Name, m.ProviderId }).IsUnique();
-            e.HasMany(m => m.Agents)
-                .WithOne(a => a.Model)
-                .HasForeignKey(a => a.ModelId)
-                .OnDelete(DeleteBehavior.Restrict);
         });
 
         // ── Tool Awareness Sets ────────────────────────

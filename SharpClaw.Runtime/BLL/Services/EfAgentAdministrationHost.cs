@@ -2,7 +2,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
 using SharpClaw.Contracts.Models;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Agents;

@@ -223,16 +223,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
                     services,
                     Deserialize<ForeignModuleProtocolContractInvokeRequest>(request),
                     ct),
-            ForeignModuleHostCapabilityProtocol.CoreAgentIdsPath =>
-                new ForeignModuleIdsResponse(await ResolveCoreEntityIds(services).GetAgentIdsAsync(ct)),
-            ForeignModuleHostCapabilityProtocol.CoreChannelIdsPath =>
-                new ForeignModuleIdsResponse(await ResolveCoreEntityIds(services).GetChannelIdsAsync(ct)),
-            ForeignModuleHostCapabilityProtocol.CoreAgentLookupPath =>
-                new ForeignModuleLookupItemsResponse([.. (await ResolveCoreEntityIds(services).GetAgentLookupItemsAsync(ct))
-                    .Select(item => new ForeignModuleLookupItem(item.Id, item.Name))]),
-            ForeignModuleHostCapabilityProtocol.CoreChannelLookupPath =>
-                new ForeignModuleLookupItemsResponse([.. (await ResolveCoreEntityIds(services).GetChannelLookupItemsAsync(ct))
-                    .Select(item => new ForeignModuleLookupItem(item.Id, item.Name))]),
             ForeignModuleHostCapabilityProtocol.ContextAccessibleThreadsPath =>
                 await GetAccessibleContextThreadsAsync(
                     services,
@@ -796,10 +786,6 @@ internal sealed class ForeignModuleHostCapabilityServer : IAsyncDisposable
     private static IForeignModuleProtocolContractResolver ResolveProtocolContractResolver(IServiceProvider services) =>
         services.GetService<IForeignModuleProtocolContractResolver>()
         ?? throw new NotSupportedException("The SharpClaw host did not provide a protocol contract resolver.");
-
-    private static ICoreEntityIdProvider ResolveCoreEntityIds(IServiceProvider services) =>
-        services.GetService<ICoreEntityIdProvider>()
-        ?? throw new NotSupportedException("The SharpClaw host did not provide core entity lookup.");
 
     private static IHostContextDataReader ResolveHostContextDataReader(IServiceProvider services) =>
         services.GetService<IHostContextDataReader>()

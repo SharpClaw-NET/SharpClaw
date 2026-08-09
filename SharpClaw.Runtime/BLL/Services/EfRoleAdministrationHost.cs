@@ -1,6 +1,6 @@
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Contracts.Entities.Core.Clearance;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Permissions;
 using SharpClaw.Core.State;

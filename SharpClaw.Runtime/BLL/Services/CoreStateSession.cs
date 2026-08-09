@@ -1,9 +1,9 @@
 using SharpClaw.Contracts.Entities;
 using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Entities.Core.Access;
-using SharpClaw.Contracts.Entities.Core.Clearance;
-using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Contracts.Entities.Core.Messages;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Access;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Clearance;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Context;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Messages;
 using SharpClaw.Core.State;
 using SharpClaw.Runtime.INF.Persistence;
 

@@ -134,7 +134,6 @@ public static class InfrastructureServiceExtensions
 
         services.AddSingleton<MigrationGate>();
         services.AddSingleton<MigrationService>();
-        services.AddScoped<ICoreEntityIdProvider, CoreEntityIdProvider>();
         services.AddScoped<ISharpClawDataContext>(
             sp => sp.GetRequiredService<SharpClawDbContext>());
 

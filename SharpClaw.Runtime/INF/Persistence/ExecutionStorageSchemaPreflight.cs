@@ -1,6 +1,6 @@
 using System.Text;
 using Microsoft.EntityFrameworkCore;
-using SharpClaw.Contracts.Entities.Core.Jobs;
+using SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs;
 using SharpClaw.Contracts.Enums;
 
 namespace SharpClaw.Runtime.INF.Persistence;
@@ -17,7 +17,7 @@ public static class ExecutionStorageSchemaPreflight
 
     private static readonly string[] LegacyDiagnosticFullNames =
     [
-        "SharpClaw.Contracts.Entities.Core.Jobs.AgentJobLogEntryDB",
+        "SharpClaw.Runtime.INF.Persistence.Entities.Core.Jobs.AgentJobLogEntryDB",
     ];
 
     public static void ValidateJsonStoreBeforeInitialization(
