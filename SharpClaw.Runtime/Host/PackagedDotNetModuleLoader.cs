@@ -4,6 +4,7 @@ using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.ModuleHost.InProcess;
+using SharpClaw.Runtime.BLL.Modules;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -27,10 +28,15 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
         IConfiguration configuration)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(modulesRoot);
+        return Load([modulesRoot], configuration);
+    }
+
+    internal static PackagedDotNetModuleSet Load(
+        IReadOnlyList<string> moduleRoots,
+        IConfiguration configuration)
+    {
+        ArgumentNullException.ThrowIfNull(moduleRoots);
         ArgumentNullException.ThrowIfNull(configuration);
-        var root = Path.GetFullPath(modulesRoot);
-        if (!Directory.Exists(root))
-            return new([], []);
 
         var modules = new List<ISharpClawModule>();
         var contexts = new List<ModuleLoadContext>();
@@ -38,29 +44,41 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
 
         try
         {
-            foreach (var manifestPath in Directory.EnumerateFiles(
-                         root,
-                         "module.json",
-                         SearchOption.AllDirectories)
-                     .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
+            foreach (var (root, manifestPath) in moduleRoots
+                         .Where(path => !string.IsNullOrWhiteSpace(path))
+                         .Select(Path.GetFullPath)
+                         .Where(Directory.Exists)
+                         .Distinct(StringComparer.OrdinalIgnoreCase)
+                         .SelectMany(root => Directory.EnumerateFiles(
+                             root,
+                             "module.json",
+                             SearchOption.AllDirectories)
+                             .Select(path => (root, path)))
+                         .OrderBy(item => item.path, StringComparer.OrdinalIgnoreCase))
             {
                 var manifest = ReadManifest(manifestPath);
-                if (!IsEnabled(manifest, configuration) ||
-                    !string.Equals(manifest.Runtime, "dotnet", StringComparison.OrdinalIgnoreCase) ||
-                    !string.Equals(manifest.HostMode, "inprocess", StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
-
                 if (!moduleIds.Add(manifest.Id))
                     throw new InvalidOperationException(
-                        $"The in-process module id '{manifest.Id}' is declared more than once.");
+                        $"The module id '{manifest.Id}' is declared more than once.");
+
+                if (!IsEnabled(manifest, configuration))
+                    continue;
+
+                if (!manifest.RuntimeInfo.IsDotNet)
+                    throw new NotSupportedException(
+                        $"The module '{manifest.Id}' declares unsupported runtime '{manifest.RuntimeInfo.Runtime}'. " +
+                        "SharpClaw supports only .NET module runtimes.");
+
+                if (!manifest.RuntimeInfo.IsInProcessHostMode)
+                    continue;
+
+                manifest.RuntimeInfo.EnsureDotNetEntryAssembly(manifest.Manifest);
 
                 var moduleDirectory = Path.GetDirectoryName(manifestPath)!;
                 var entryPath = ResolveContainedPath(
                     root,
                     moduleDirectory,
-                    manifest.EntryAssembly,
+                    manifest.Manifest.EntryAssembly,
                     manifest.Id,
                     "entry assembly");
                 if (!File.Exists(entryPath))
@@ -68,19 +86,23 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
                         $"The in-process module '{manifest.Id}' entry assembly was not found.",
                         entryPath);
 
+                if (string.IsNullOrWhiteSpace(manifest.Manifest.ModuleType))
+                    throw new InvalidOperationException(
+                        $"The in-process module '{manifest.Id}' must declare moduleType.");
+
                 var loadContext = new ModuleLoadContext(entryPath);
                 var assembly = loadContext.LoadFromAssemblyPath(entryPath);
-                var moduleType = assembly.GetType(manifest.ModuleType, throwOnError: false);
+                var moduleType = assembly.GetType(manifest.Manifest.ModuleType, throwOnError: false);
                 if (moduleType is null)
                     throw new InvalidOperationException(
-                        $"The in-process module '{manifest.Id}' type '{manifest.ModuleType}' was not found.");
+                        $"The in-process module '{manifest.Id}' type '{manifest.Manifest.ModuleType}' was not found.");
 
                 if (!typeof(ISharpClawModule).IsAssignableFrom(moduleType) ||
                     moduleType.IsAbstract ||
                     moduleType.GetConstructor(Type.EmptyTypes) is null)
                 {
                     throw new InvalidOperationException(
-                        $"The in-process module '{manifest.Id}' type '{manifest.ModuleType}' " +
+                        $"The in-process module '{manifest.Id}' type '{manifest.Manifest.ModuleType}' " +
                         "must be a concrete ISharpClawModule with a public parameterless constructor.");
                 }
 
@@ -113,25 +135,24 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
 
     private static PackagedModuleManifest ReadManifest(string path)
     {
-        using var document = JsonDocument.Parse(File.ReadAllText(path));
-        var root = document.RootElement;
-        var id = RequiredString(root, "id", path);
-        var runtime = RequiredString(root, "runtime", path);
-        var hostMode = RequiredString(root, "hostMode", path);
-        var entryAssembly = RequiredString(root, "entryAssembly", path);
-        var moduleType = RequiredString(root, "moduleType", path);
-        var enabled = root.TryGetProperty("enabled", out var enabledValue)
-            ? enabledValue.ValueKind != JsonValueKind.False
-            : root.TryGetProperty("defaultEnabled", out var defaultEnabledValue)
-                ? defaultEnabledValue.ValueKind != JsonValueKind.False
-                : true;
+        var json = File.ReadAllText(path);
+        var manifest = SecureJsonOptions.DeserializeManifest(json);
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
+        using var document = JsonDocument.Parse(
+            json,
+            new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = false,
+            });
+        var enabled = document.RootElement.TryGetProperty("enabled", out _)
+            ? manifest.Enabled
+            : manifest.DefaultEnabled;
 
         return new PackagedModuleManifest(
-            id,
-            runtime,
-            hostMode,
-            entryAssembly,
-            moduleType,
+            manifest.Id,
+            manifest,
+            runtimeInfo,
             enabled);
     }
 
@@ -150,19 +171,6 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
         }
 
         return enabled;
-    }
-
-    private static string RequiredString(JsonElement root, string property, string path)
-    {
-        if (!root.TryGetProperty(property, out var value) ||
-            value.ValueKind != JsonValueKind.String ||
-            string.IsNullOrWhiteSpace(value.GetString()))
-        {
-            throw new InvalidOperationException(
-                $"The module manifest '{path}' requires a nonblank '{property}' value.");
-        }
-
-        return value.GetString()!;
     }
 
     private static string ResolveContainedPath(
@@ -184,9 +192,7 @@ internal sealed class PackagedDotNetModuleSet : IDisposable
 
     private sealed record PackagedModuleManifest(
         string Id,
-        string Runtime,
-        string HostMode,
-        string EntryAssembly,
-        string ModuleType,
+        ModuleManifest Manifest,
+        ModuleManifestRuntimeInfo RuntimeInfo,
         bool IsEnabled);
 }

@@ -322,6 +322,51 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
             concurrentRegistryA.ApproveAsync(concurrentInvitations[0].PairId, "proxy-c", "runtime-a"),
             concurrentRegistryB.ApproveAsync(concurrentInvitations[1].PairId, "proxy-d", "runtime-a"));
         concurrentApprovals.Should().OnlyContain(item => item.Status == RemoteRuntimePairStatus.Active);
+
+        var certificateInvitation = await registry.CreateInvitationAsync(
+            "gateway-a",
+            "gateway-key-hash",
+            "runtime-a",
+            "runtime-fingerprint",
+            TimeSpan.FromMinutes(5),
+            displayName: "concurrent-certificate");
+        using var certificateMaterial = CreateClaimMaterial(certificateInvitation, "proxy-certificate");
+        await registry.ClaimAsync(certificateMaterial.Claim);
+        await registry.ApproveAsync(
+            certificateInvitation.PairId,
+            "proxy-certificate",
+            "runtime-a");
+        var certificatePayload = RemoteRuntimePairingProof.CreateCertificateProofPayload(
+            certificateInvitation.PairId,
+            certificateMaterial.PublicKeyHash);
+        var certificateSignature = certificateMaterial.Key.SignData(
+            certificatePayload,
+            HashAlgorithmName.SHA256);
+        var concurrentCertificateProofBase64 = Convert.ToBase64String(certificateSignature);
+        CryptographicOperations.ZeroMemory(certificatePayload);
+        CryptographicOperations.ZeroMemory(certificateSignature);
+
+        await using var certificateDbA = workspace.CreateDbContext();
+        await using var certificateDbB = workspace.CreateDbContext();
+        var certificateRegistryA = workspace.CreateRegistry(certificateDbA);
+        var certificateRegistryB = workspace.CreateRegistry(certificateDbB);
+        var concurrentCertificates = await Task.WhenAll(
+            certificateRegistryA.IssueClientCertificateAsync(
+                certificateInvitation.PairId,
+                concurrentCertificateProofBase64),
+            certificateRegistryB.IssueClientCertificateAsync(
+                certificateInvitation.PairId,
+                concurrentCertificateProofBase64));
+
+        concurrentCertificates.Should().HaveCount(2);
+        concurrentCertificates
+            .Select(certificate => certificate.CertificateThumbprint)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .Should()
+            .ContainSingle();
+        var finalCertificateEntry = await certificateRegistryA.FindAsync(certificateInvitation.PairId);
+        finalCertificateEntry!.ClientCertificateIdentity.Should()
+            .Be(concurrentCertificates[0].CertificateThumbprint);
     }
 
     private sealed class Workspace : IDisposable

@@ -1,4 +1,5 @@
 using Microsoft.Extensions.Configuration;
+using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
@@ -32,9 +33,11 @@ public sealed class RuntimeKernelAdapter
             _moduleRegistry.Add(module);
 
         Graph = _moduleRegistry.Compile(hostServices);
-        var plugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
+        var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
+        var hostPlugins = hostServices.GetServices<IProviderPlugin>().ToArray();
+        var plugins = graphPlugins.Concat(hostPlugins).ToArray();
         ValidateConfiguredProviders(configuration, plugins);
         var providerClient = providerClientFactory.Create(configuration, plugins);
         var conversationResolver = ResolveConversationResolver(Graph, instancePaths);

@@ -18,7 +18,7 @@ public sealed class RemoteRuntimePairingRegistry(
     private static readonly TimeSpan MaximumInvitationLifetime = TimeSpan.FromMinutes(15);
     private static readonly TimeSpan DefaultActivePairLifetime = TimeSpan.FromDays(30);
     private static readonly TimeSpan MaximumRenewalLifetime = TimeSpan.FromDays(365);
-    private static readonly SemaphoreSlim ApprovalGate = new(1, 1);
+    private static readonly SemaphoreSlim WriteGate = new(1, 1);
 
     public async Task<RemoteRuntimePairingInvitation> CreateInvitationAsync(
         string gatewayInstanceId,
@@ -43,57 +43,65 @@ public sealed class RemoteRuntimePairingRegistry(
                 "The pairing invitation lifetime must be positive and no longer than fifteen minutes.");
         }
 
-        var now = DateTimeOffset.UtcNow;
-        var pairId = Guid.NewGuid();
-        var secretBytes = RandomNumberGenerator.GetBytes(32);
-        var secret = Base64UrlEncode(secretBytes);
-        var invitationHash = HashSecret(secret);
-        CryptographicOperations.ZeroMemory(secretBytes);
-
-        var generatedCertificateAuthorityPfx = certificateAuthorityPfx is null
-            ? CreateCertificateAuthorityPfx(now)
-            : null;
+        await WriteGate.WaitAsync(cancellationToken);
         try
         {
-            var pfx = certificateAuthorityPfx ?? generatedCertificateAuthorityPfx!;
-            var entity = new RemoteRuntimePairingDB
+            var now = DateTimeOffset.UtcNow;
+            var pairId = Guid.NewGuid();
+            var secretBytes = RandomNumberGenerator.GetBytes(32);
+            var secret = Base64UrlEncode(secretBytes);
+            var invitationHash = HashSecret(secret);
+            CryptographicOperations.ZeroMemory(secretBytes);
+
+            var generatedCertificateAuthorityPfx = certificateAuthorityPfx is null
+                ? CreateCertificateAuthorityPfx(now)
+                : null;
+            try
             {
-                Id = Guid.NewGuid(),
-                PairId = pairId,
-                Status = RemoteRuntimePairStatus.InvitationIssued,
-                GatewayInstanceId = gatewayInstanceId,
-                GatewayServerPublicKeyHash = gatewayServerPublicKeyHash,
-                AuthoritativeRuntimeInstanceId = authoritativeRuntimeInstanceId,
-                AuthoritativeRuntimeInstallFingerprint = authoritativeRuntimeInstallFingerprint,
-                InvitationHash = invitationHash,
-                BridgeProtocolMajor = CurrentBridgeProtocolMajor,
-                EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(pfx)),
-                DisplayName = NormalizeOptional(displayName),
-                Description = NormalizeOptional(description),
-                CreatedAtUtc = now,
-                InvitationExpiresAtUtc = now.Add(lifetime),
-                ExpiresAtUtc = now.Add(lifetime),
-                UpdatedAtUtc = now,
-                Revision = 1,
-            };
+                var pfx = certificateAuthorityPfx ?? generatedCertificateAuthorityPfx!;
+                var entity = new RemoteRuntimePairingDB
+                {
+                    Id = Guid.NewGuid(),
+                    PairId = pairId,
+                    Status = RemoteRuntimePairStatus.InvitationIssued,
+                    GatewayInstanceId = gatewayInstanceId,
+                    GatewayServerPublicKeyHash = gatewayServerPublicKeyHash,
+                    AuthoritativeRuntimeInstanceId = authoritativeRuntimeInstanceId,
+                    AuthoritativeRuntimeInstallFingerprint = authoritativeRuntimeInstallFingerprint,
+                    InvitationHash = invitationHash,
+                    BridgeProtocolMajor = CurrentBridgeProtocolMajor,
+                    EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(pfx)),
+                    DisplayName = NormalizeOptional(displayName),
+                    Description = NormalizeOptional(description),
+                    CreatedAtUtc = now,
+                    InvitationExpiresAtUtc = now.Add(lifetime),
+                    ExpiresAtUtc = now.Add(lifetime),
+                    UpdatedAtUtc = now,
+                    Revision = 1,
+                };
 
-            db.RemoteRuntimePairings.Add(entity);
-            await db.SaveChangesAsync(cancellationToken);
+                db.RemoteRuntimePairings.Add(entity);
+                await db.SaveChangesAsync(cancellationToken);
 
-            return new RemoteRuntimePairingInvitation(
-                pairId,
-                secret,
-                gatewayInstanceId,
-                gatewayServerPublicKeyHash,
-                authoritativeRuntimeInstanceId,
-                authoritativeRuntimeInstallFingerprint,
-                CurrentBridgeProtocolMajor,
-                entity.InvitationExpiresAtUtc ?? entity.ExpiresAtUtc);
+                return new RemoteRuntimePairingInvitation(
+                    pairId,
+                    secret,
+                    gatewayInstanceId,
+                    gatewayServerPublicKeyHash,
+                    authoritativeRuntimeInstanceId,
+                    authoritativeRuntimeInstallFingerprint,
+                    CurrentBridgeProtocolMajor,
+                    entity.InvitationExpiresAtUtc ?? entity.ExpiresAtUtc);
+            }
+            finally
+            {
+                if (generatedCertificateAuthorityPfx is not null)
+                    CryptographicOperations.ZeroMemory(generatedCertificateAuthorityPfx);
+            }
         }
         finally
         {
-            if (generatedCertificateAuthorityPfx is not null)
-                CryptographicOperations.ZeroMemory(generatedCertificateAuthorityPfx);
+            WriteGate.Release();
         }
     }
 
@@ -169,24 +177,32 @@ public sealed class RemoteRuntimePairingRegistry(
         if (claim.BridgeProtocolMajor != CurrentBridgeProtocolMajor)
             throw Error("ProtocolMajorMismatch", "The pairing claim uses an unsupported bridge protocol major.");
 
-        var entity = await db.RemoteRuntimePairings
-            .SingleOrDefaultAsync(pairing => pairing.PairId == claim.PairId, cancellationToken)
-            ?? throw Error("PairNotFound", "The pairing record was not found.");
-        var now = DateTimeOffset.UtcNow;
-        RequireStatus(entity, RemoteRuntimePairStatus.InvitationIssued, now);
-        VerifyInvitationSecret(entity.InvitationHash, claim.InvitationSecret);
-        var proxyRuntimePublicKeyHash = VerifyClaimProof(entity, claim);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await db.RemoteRuntimePairings
+                .SingleOrDefaultAsync(pairing => pairing.PairId == claim.PairId, cancellationToken)
+                ?? throw Error("PairNotFound", "The pairing record was not found.");
+            var now = DateTimeOffset.UtcNow;
+            RequireStatus(entity, RemoteRuntimePairStatus.InvitationIssued, now);
+            VerifyInvitationSecret(entity.InvitationHash, claim.InvitationSecret);
+            var proxyRuntimePublicKeyHash = VerifyClaimProof(entity, claim);
 
-        entity.Status = RemoteRuntimePairStatus.ClaimPending;
-        entity.ProxyRuntimeInstanceId = claim.ProxyRuntimeInstanceId;
-        entity.ProxyRuntimePublicKeyHash = proxyRuntimePublicKeyHash;
-        entity.ProxyRuntimeCertificateSigningRequest = claim.CertificateSigningRequestBase64;
-        entity.ClaimedAtUtc = now;
-        entity.InvitationConsumedAtUtc = now;
-        entity.StatusReason = null;
-        Touch(entity, now);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToEntry(entity);
+            entity.Status = RemoteRuntimePairStatus.ClaimPending;
+            entity.ProxyRuntimeInstanceId = claim.ProxyRuntimeInstanceId;
+            entity.ProxyRuntimePublicKeyHash = proxyRuntimePublicKeyHash;
+            entity.ProxyRuntimeCertificateSigningRequest = claim.CertificateSigningRequestBase64;
+            entity.ClaimedAtUtc = now;
+            entity.InvitationConsumedAtUtc = now;
+            entity.StatusReason = null;
+            Touch(entity, now);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToEntry(entity);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task<RemoteRuntimePairingRegistryEntry> ApproveAsync(
@@ -199,7 +215,7 @@ public sealed class RemoteRuntimePairingRegistry(
         RequireText(expectedProxyRuntimeInstanceId, nameof(expectedProxyRuntimeInstanceId));
         RequireText(expectedAuthoritativeRuntimeInstanceId, nameof(expectedAuthoritativeRuntimeInstanceId));
 
-        await ApprovalGate.WaitAsync(cancellationToken);
+        await WriteGate.WaitAsync(cancellationToken);
         try
         {
             var entity = await RequireEntityAsync(pairId, cancellationToken);
@@ -240,7 +256,7 @@ public sealed class RemoteRuntimePairingRegistry(
         }
         finally
         {
-            ApprovalGate.Release();
+            WriteGate.Release();
         }
     }
 
@@ -282,29 +298,37 @@ public sealed class RemoteRuntimePairingRegistry(
         string? proofSignatureBase64 = null)
     {
         RequireJsonColdStore();
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        var now = DateTimeOffset.UtcNow;
-        if (GetEffectiveStatus(entity, now) != RemoteRuntimePairStatus.Active
-            || expiresAtUtc <= now
-            || expiresAtUtc - now > MaximumRenewalLifetime)
-            throw Error("InvalidRenewal", "The pairing renewal is invalid.");
-
-        if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
-            VerifyRenewalProof(entity, expiresAtUtc, proofSignatureBase64);
-
-        entity.ExpiresAtUtc = expiresAtUtc;
-        entity.RenewedAtUtc = now;
-        if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
+        await WriteGate.WaitAsync(cancellationToken);
+        try
         {
-            entity.ClientCertificateIdentity = null;
-            entity.ClientCertificateIssuedAtUtc = null;
-            entity.ClientCertificateExpiresAtUtc = null;
-            entity.EncryptedClientCertificateDer = null;
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            var now = DateTimeOffset.UtcNow;
+            if (GetEffectiveStatus(entity, now) != RemoteRuntimePairStatus.Active
+                || expiresAtUtc <= now
+                || expiresAtUtc - now > MaximumRenewalLifetime)
+                throw Error("InvalidRenewal", "The pairing renewal is invalid.");
+
+            if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
+                VerifyRenewalProof(entity, expiresAtUtc, proofSignatureBase64);
+
+            entity.ExpiresAtUtc = expiresAtUtc;
+            entity.RenewedAtUtc = now;
+            if (!string.IsNullOrWhiteSpace(proofSignatureBase64))
+            {
+                entity.ClientCertificateIdentity = null;
+                entity.ClientCertificateIssuedAtUtc = null;
+                entity.ClientCertificateExpiresAtUtc = null;
+                entity.EncryptedClientCertificateDer = null;
+            }
+            entity.StatusReason = null;
+            Touch(entity, now);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToEntry(entity);
         }
-        entity.StatusReason = null;
-        Touch(entity, now);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToEntry(entity);
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task<RemoteRuntimePairingRegistryEntry> UpdateDetailsAsync(
@@ -314,20 +338,36 @@ public sealed class RemoteRuntimePairingRegistry(
         CancellationToken cancellationToken = default)
     {
         RequireJsonColdStore();
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        entity.DisplayName = NormalizeOptional(displayName);
-        entity.Description = NormalizeOptional(description);
-        Touch(entity, DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToEntry(entity);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            entity.DisplayName = NormalizeOptional(displayName);
+            entity.Description = NormalizeOptional(description);
+            Touch(entity, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToEntry(entity);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task DeleteAsync(Guid pairId, CancellationToken cancellationToken = default)
     {
         RequireJsonColdStore();
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        db.RemoteRuntimePairings.Remove(entity);
-        await db.SaveChangesAsync(cancellationToken);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            db.RemoteRuntimePairings.Remove(entity);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task<RemoteRuntimePairingRegistryEntry?> FindActiveTargetAsync(
@@ -367,11 +407,19 @@ public sealed class RemoteRuntimePairingRegistry(
         CancellationToken cancellationToken = default)
     {
         RequireJsonColdStore();
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        entity.LastSeenAtUtc = DateTimeOffset.UtcNow;
-        Touch(entity, entity.LastSeenAtUtc.Value);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToEntry(entity);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            entity.LastSeenAtUtc = DateTimeOffset.UtcNow;
+            Touch(entity, entity.LastSeenAtUtc.Value);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToEntry(entity);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task SetCertificateAuthorityPfxAsync(
@@ -383,10 +431,18 @@ public sealed class RemoteRuntimePairingRegistry(
         if (certificateAuthorityPfx.IsEmpty)
             throw new ArgumentException("The certificate authority value must not be empty.", nameof(certificateAuthorityPfx));
 
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        entity.EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(certificateAuthorityPfx.Span));
-        Touch(entity, DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(cancellationToken);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            entity.EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(certificateAuthorityPfx.Span));
+            Touch(entity, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(cancellationToken);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     public async Task<byte[]?> GetCertificateAuthorityPfxAsync(
@@ -413,9 +469,12 @@ public sealed class RemoteRuntimePairingRegistry(
         RequireJsonColdStore();
         RequireText(certificateProofSignatureBase64, nameof(certificateProofSignatureBase64));
 
-        var entity = await db.RemoteRuntimePairings
-            .SingleOrDefaultAsync(pairing => pairing.PairId == pairId, cancellationToken)
-            ?? throw Error("PairNotFound", "The pairing record was not found.");
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await db.RemoteRuntimePairings
+                .SingleOrDefaultAsync(pairing => pairing.PairId == pairId, cancellationToken)
+                ?? throw Error("PairNotFound", "The pairing record was not found.");
         var effectiveStatus = GetEffectiveStatus(entity, DateTimeOffset.UtcNow);
         if (effectiveStatus == RemoteRuntimePairStatus.ClaimPending)
         {
@@ -538,6 +597,11 @@ public sealed class RemoteRuntimePairingRegistry(
         {
             CryptographicOperations.ZeroMemory(pfx);
         }
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     private async Task<RemoteRuntimePairingRegistryEntry> TransitionAsync(
@@ -547,12 +611,20 @@ public sealed class RemoteRuntimePairingRegistry(
         CancellationToken cancellationToken)
     {
         RequireJsonColdStore();
-        var entity = await RequireEntityAsync(pairId, cancellationToken);
-        RequireStatus(entity, requiredStatus, DateTimeOffset.UtcNow);
-        transition(entity);
-        Touch(entity, DateTimeOffset.UtcNow);
-        await db.SaveChangesAsync(cancellationToken);
-        return ToEntry(entity);
+        await WriteGate.WaitAsync(cancellationToken);
+        try
+        {
+            var entity = await RequireEntityAsync(pairId, cancellationToken);
+            RequireStatus(entity, requiredStatus, DateTimeOffset.UtcNow);
+            transition(entity);
+            Touch(entity, DateTimeOffset.UtcNow);
+            await db.SaveChangesAsync(cancellationToken);
+            return ToEntry(entity);
+        }
+        finally
+        {
+            WriteGate.Release();
+        }
     }
 
     private async Task<RemoteRuntimePairingDB> RequireEntityAsync(

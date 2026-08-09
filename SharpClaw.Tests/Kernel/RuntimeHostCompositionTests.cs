@@ -1,9 +1,12 @@
 using System.Net;
 using System.Net.Http.Json;
+using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
@@ -20,9 +23,9 @@ public sealed class RuntimeHostCompositionTests
     [NonParallelizable]
     public async Task PackagedInProcessModule_ComposesHostGraphAndServesChat()
     {
-        var moduleRoot = Path.Combine(AppContext.BaseDirectory, "test-modules");
+        var moduleRoot = AppContext.BaseDirectory;
         Directory.Exists(moduleRoot).Should().BeTrue(
-            $"the test build must provide the packaged module payload at '{moduleRoot}'");
+            $"the test build must provide the normal Host module payload at '{moduleRoot}'");
 
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -33,7 +36,10 @@ public sealed class RuntimeHostCompositionTests
             })
             .Build();
         using var moduleSet = PackagedDotNetModuleSet.Load(
-            moduleRoot,
+            [
+                Path.Combine(moduleRoot, "modules"),
+                Path.Combine(moduleRoot, "test-modules"),
+            ],
             configuration);
         moduleSet.Modules.Should().ContainSingle()
             .Which.Identity.Id.Should().Be("sharpclaw_test_harness_in_process");
@@ -97,6 +103,67 @@ public sealed class RuntimeHostCompositionTests
     }
 
     [Test]
+    [NonParallelizable]
+    public async Task ProductionJsonColdStore_RestartPreservesDirectChatHistory()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "sharpclaw-test",
+                ["Provider:Model"] = "test-harness-model",
+            })
+            .Build();
+        var databaseOptions = new DatabaseProviderOptions
+        {
+            Provider = StorageMode.JsonFile,
+        };
+        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
+        databaseOptions.JsonFile.EncryptAtRest = false;
+
+        await RunProductionHostAsync(
+            workspace,
+            configuration,
+            databaseOptions,
+            async app =>
+            {
+                using var client = new HttpClient
+                {
+                    BaseAddress = new Uri(app.Urls.Single()),
+                };
+                using var response = await client.PostAsJsonAsync(
+                    "/chat",
+                    new { message = "restart me" });
+                var body = await response.Content.ReadAsStringAsync();
+
+                response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+                body.Should().Contain("test harness response");
+            });
+
+        var conversationId = Guid.Parse(workspace.InstancePaths.Manifest.InstanceId);
+        IReadOnlyList<string>? history = null;
+        await RunProductionHostAsync(
+            workspace,
+            configuration,
+            databaseOptions,
+            async app =>
+            {
+                await using var scope = app.Services.CreateAsyncScope();
+                var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
+                history = await db.ChatMessages
+                    .AsNoTracking()
+                    .Where(message => message.ChannelId == conversationId)
+                    .OrderBy(message => message.CreatedAt)
+                    .ThenBy(message => message.Id)
+                    .Select(message => message.Content)
+                    .ToListAsync();
+            });
+
+        history.Should().NotBeNull();
+        history!.Should().ContainInOrder("restart me", "test harness response");
+    }
+
+    [Test]
     public void MissingConfiguredProviderFailsBeforeReadiness()
     {
         var configuration = new ConfigurationBuilder()
@@ -104,7 +171,10 @@ public sealed class RuntimeHostCompositionTests
             .Build();
         using var workspace = new TemporaryWorkspace();
         using var moduleSet = PackagedDotNetModuleSet.Load(
-            Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            [
+                Path.Combine(AppContext.BaseDirectory, "modules"),
+                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            ],
             configuration);
         var services = new ServiceCollection();
         RuntimeHostComposition.RegisterServices(
@@ -137,10 +207,121 @@ public sealed class RuntimeHostCompositionTests
             .Build();
 
         using var moduleSet = PackagedDotNetModuleSet.Load(
-            Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            [
+                Path.Combine(AppContext.BaseDirectory, "modules"),
+                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            ],
             configuration);
 
         moduleSet.Modules.Should().BeEmpty();
+    }
+
+    [TestCase("null")]
+    [TestCase("0")]
+    [TestCase("\"false\"")]
+    public void PackagedModuleSet_RejectsNonBooleanEnabledValues(string enabledJson)
+    {
+        using var moduleRoot = new TemporaryModuleRoot();
+        moduleRoot.WriteManifest(
+            "invalid-enabled",
+            $$"""
+            {
+              "id": "invalid-enabled",
+              "displayName": "Invalid enabled",
+              "version": "0.1.0",
+              "toolPrefix": "invalid",
+              "runtime": "dotnet",
+              "hostMode": "inprocess",
+              "entryAssembly": "unused.dll",
+              "moduleType": "Unused.Module",
+              "enabled": {{enabledJson}}
+            }
+            """);
+
+        var act = () => PackagedDotNetModuleSet.Load(
+            moduleRoot.Path,
+            new ConfigurationBuilder().Build());
+
+        act.Should().Throw<JsonException>();
+    }
+
+    [Test]
+    public void PackagedModuleSet_RejectsDuplicateManifestIdentityBeforeLoad()
+    {
+        using var moduleRoot = new TemporaryModuleRoot();
+        const string manifest = """
+            {
+              "id": "duplicate-module",
+              "displayName": "Duplicate module",
+              "version": "0.1.0",
+              "toolPrefix": "duplicate",
+              "runtime": "dotnet",
+              "hostMode": "inprocess",
+              "entryAssembly": "unused.dll",
+              "moduleType": "Unused.Module",
+              "enabled": false
+            }
+            """;
+        moduleRoot.WriteManifest("first", manifest);
+        moduleRoot.WriteManifest("second", manifest);
+
+        var act = () => PackagedDotNetModuleSet.Load(
+            moduleRoot.Path,
+            new ConfigurationBuilder().Build());
+
+        act.Should().Throw<InvalidOperationException>()
+            .Which.Message.Should().Contain("duplicate-module");
+    }
+
+    private static async Task RunProductionHostAsync(
+        TemporaryWorkspace workspace,
+        IConfiguration configuration,
+        DatabaseProviderOptions databaseOptions,
+        Func<WebApplication, Task> operation)
+    {
+        using var moduleSet = PackagedDotNetModuleSet.Load(
+            [
+                Path.Combine(AppContext.BaseDirectory, "modules"),
+                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            ],
+            configuration);
+        moduleSet.Modules.Should().ContainSingle()
+            .Which.Identity.Id.Should().Be("sharpclaw_test_harness_in_process");
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
+        });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddConfiguration(configuration);
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        RuntimeHostComposition.RegisterServices(
+            builder.Services,
+            configuration,
+            workspace.InstancePaths,
+            new EncryptionOptions { Key = new byte[32] },
+            databaseOptions,
+            moduleSet.Modules);
+
+        await using var app = builder.Build();
+        var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
+        var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
+        await adapter.StartAsync("test-host");
+        readiness.MarkReady();
+        KernelHostEndpoints.Map(app);
+
+        try
+        {
+            await app.StartAsync();
+            await operation(app);
+        }
+        finally
+        {
+            readiness.MarkNotReady();
+            await adapter.StopAsync();
+            await app.StopAsync();
+        }
     }
 
     private sealed class TemporaryWorkspace : IDisposable
@@ -174,6 +355,32 @@ public sealed class RuntimeHostCompositionTests
             catch
             {
             }
+        }
+    }
+
+    private sealed class TemporaryModuleRoot : IDisposable
+    {
+        public TemporaryModuleRoot()
+        {
+            Path = System.IO.Path.Combine(
+                System.IO.Path.GetTempPath(),
+                "sharpclaw-module-manifest-" + Guid.NewGuid().ToString("N"));
+            Directory.CreateDirectory(Path);
+        }
+
+        public string Path { get; }
+
+        public void WriteManifest(string moduleDirectory, string json)
+        {
+            var directory = System.IO.Path.Combine(Path, moduleDirectory);
+            Directory.CreateDirectory(directory);
+            File.WriteAllText(System.IO.Path.Combine(directory, "module.json"), json);
+        }
+
+        public void Dispose()
+        {
+            if (Directory.Exists(Path))
+                Directory.Delete(Path, recursive: true);
         }
     }
 }

@@ -9,6 +9,45 @@ namespace SharpClaw.Tests.Kernel;
 public sealed class DirectChatKernelTests
 {
     [Test]
+    public async Task Conversation_gate_serializes_reclamation_with_reacquisition()
+    {
+        var releaseEntered = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var continueRelease = new TaskCompletionSource(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new ConversationTurnGate(() =>
+        {
+            releaseEntered.TrySetResult();
+            continueRelease.Task.GetAwaiter().GetResult();
+        });
+        var conversationId = Guid.NewGuid();
+        var first = await gate.EnterAsync(conversationId, CancellationToken.None);
+
+        var releaseThread = new Thread(() => first.DisposeAsync().GetAwaiter().GetResult())
+        {
+            IsBackground = true,
+        };
+        releaseThread.Start();
+        try
+        {
+            await releaseEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            var second = Task.Run(async () =>
+                await gate.EnterAsync(conversationId, CancellationToken.None));
+            second.IsCompleted.Should().BeFalse();
+
+            continueRelease.SetResult();
+            releaseThread.Join(TimeSpan.FromSeconds(5)).Should().BeTrue();
+            await using var secondLease = await second;
+            gate.ActiveEntryCount.Should().Be(1);
+        }
+        finally
+        {
+            continueRelease.TrySetResult();
+            releaseThread.Join(TimeSpan.FromSeconds(5)).Should().BeTrue();
+        }
+    }
+
+    [Test]
     public async Task Direct_kernel_runs_one_canonical_provider_turn_and_persists_history()
     {
         var provider = new RecordingProviderClient();

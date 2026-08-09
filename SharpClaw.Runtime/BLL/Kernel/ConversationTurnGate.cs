@@ -1,4 +1,3 @@
-using System.Collections.Concurrent;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
 
@@ -7,7 +6,23 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 /// <summary>Serializes complete direct-chat turns for one conversation.</summary>
 internal sealed class ConversationTurnGate
 {
-    private readonly ConcurrentDictionary<Guid, GateEntry> _entries = [];
+    private readonly object _sync = new();
+    private readonly Dictionary<Guid, GateEntry> _entries = [];
+    private readonly Action? _beforeFinalEntryRemoval;
+
+    internal ConversationTurnGate(Action? beforeFinalEntryRemoval = null)
+    {
+        _beforeFinalEntryRemoval = beforeFinalEntryRemoval;
+    }
+
+    internal int ActiveEntryCount
+    {
+        get
+        {
+            lock (_sync)
+                return _entries.Count;
+        }
+    }
 
     public async ValueTask<IAsyncDisposable> EnterAsync(
         Guid conversationId,
@@ -17,17 +32,12 @@ internal sealed class ConversationTurnGate
             throw new ArgumentException("The conversation identifier must not be empty.", nameof(conversationId));
 
         GateEntry entry;
-        while (true)
+        lock (_sync)
         {
-            entry = _entries.GetOrAdd(conversationId, static _ => new GateEntry());
-            Interlocked.Increment(ref entry.References);
-            if (_entries.TryGetValue(conversationId, out var current)
-                && ReferenceEquals(entry, current))
-            {
-                break;
-            }
-
-            ReleaseReference(conversationId, entry);
+            entry = _entries.TryGetValue(conversationId, out var existing)
+                ? existing
+                : _entries[conversationId] = new GateEntry();
+            entry.References++;
         }
 
         try
@@ -44,14 +54,29 @@ internal sealed class ConversationTurnGate
 
     private void Release(Guid conversationId, GateEntry entry)
     {
-        entry.Semaphore.Release();
-        ReleaseReference(conversationId, entry);
+        lock (_sync)
+        {
+            entry.Semaphore.Release();
+            ReleaseReferenceLocked(conversationId, entry);
+        }
     }
 
     private void ReleaseReference(Guid conversationId, GateEntry entry)
     {
-        if (Interlocked.Decrement(ref entry.References) == 0)
-            _entries.TryRemove(new KeyValuePair<Guid, GateEntry>(conversationId, entry));
+        lock (_sync)
+            ReleaseReferenceLocked(conversationId, entry);
+    }
+
+    private void ReleaseReferenceLocked(Guid conversationId, GateEntry entry)
+    {
+        if (entry.References == 1)
+            _beforeFinalEntryRemoval?.Invoke();
+
+        entry.References--;
+        if (entry.References == 0 &&
+            _entries.TryGetValue(conversationId, out var current) &&
+            ReferenceEquals(current, entry))
+            _entries.Remove(conversationId);
     }
 
     private sealed class GateEntry
