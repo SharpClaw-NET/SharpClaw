@@ -116,6 +116,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "gpt-3.5-turbo",
                 ["Provider:Endpoint"] = providerServer.Endpoint,
                 ["Provider:ApiKey"] = "normal-payload-test-key",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
             })
             .Build();
 
@@ -124,6 +125,17 @@ public sealed class RuntimeHostCompositionTests
             configuration);
         moduleSet.Modules.Should().Contain(module =>
             module.Identity.Id == "sharpclaw_providers_openai_compat");
+        var openAiModule = moduleSet.Modules.Single(module =>
+            module.Identity.Id == "sharpclaw_providers_openai_compat");
+        openAiModule.GetType().Assembly.GetName().Name.Should()
+            .Be("SharpClaw.Modules.Providers.OpenAICompatible");
+        Path.GetFullPath(openAiModule.GetType().Assembly.Location)
+            .Should()
+            .Be(Path.GetFullPath(Path.Combine(
+                AppContext.BaseDirectory,
+                "modules",
+                "sharpclaw_providers_openai_compat",
+                "SharpClaw.Modules.Providers.OpenAICompatible.dll")));
         moduleSet.Modules.Should().NotContain(module =>
             module.Identity.Id == "sharpclaw_test_harness_in_process");
 
@@ -199,6 +211,7 @@ public sealed class RuntimeHostCompositionTests
                 ["Provider:Model"] = "gpt-3.5-turbo",
                 ["Provider:Endpoint"] = providerServer.Endpoint,
                 ["Provider:ApiKey"] = "normal-payload-restart-key",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
             })
             .Build();
         var databaseOptions = new DatabaseProviderOptions

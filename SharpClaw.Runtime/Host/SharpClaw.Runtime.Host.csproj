@@ -123,6 +123,10 @@
           DependsOnTargets="_ResolveBundledModuleOutputFiles">
     <RemoveDir Directories="$(OutputPath)modules\sharpclaw_test_harness;$(OutputPath)modules\sharpclaw_test_harness_in_process" />
     <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedInProcessModuleDll)"
+          DestinationFiles="@(_PackagedInProcessModuleDll-&gt;'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedInProcessModuleDll)' != ''" />
     <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
           DestinationFiles="@(_PackagedModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json')"
           SkipUnchangedFiles="true"
@@ -134,6 +138,10 @@
           DependsOnTargets="_ResolveBundledModuleOutputFiles">
     <RemoveDir Directories="$(PublishDir)modules\sharpclaw_test_harness;$(PublishDir)modules\sharpclaw_test_harness_in_process" />
     <Copy SourceFiles="@(_BundledModuleOutputFile)" DestinationFolder="$(PublishDir)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedInProcessModuleDll)"
+          DestinationFiles="@(_PackagedInProcessModuleDll-&gt;'$(PublishDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedInProcessModuleDll)' != ''" />
     <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
           DestinationFiles="@(_PackagedModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json')"
           SkipUnchangedFiles="true"

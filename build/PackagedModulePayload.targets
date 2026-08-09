@@ -2,6 +2,7 @@
   <Target Name="_ResolvePackagedModulePayloadFiles">
     <ItemGroup>
       <_PackagedModuleDll Remove="@(_PackagedModuleDll)" />
+      <_PackagedInProcessModuleDll Remove="@(_PackagedInProcessModuleDll)" />
       <_PackagedModuleDependencyDll Remove="@(_PackagedModuleDependencyDll)" />
       <_PackagedSidecarHostFile Remove="@(_PackagedSidecarHostFile)" />
       <_PackagedModulePayloadDll Remove="@(_PackagedModulePayloadDll)" />
@@ -21,14 +22,34 @@
                           Condition="'$(PkgSharpClaw_Modules_ModuleDev)' != ''" />
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Anthropic.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_Anthropic)' != ''" />
+      <_PackagedInProcessModuleDll Include="$(PkgSharpClaw_Modules_Providers_Anthropic)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Anthropic.dll"
+                                   Condition="'$(PkgSharpClaw_Modules_Providers_Anthropic)' != ''">
+        <ModuleId>sharpclaw_providers_anthropic</ModuleId>
+      </_PackagedInProcessModuleDll>
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Google)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Google.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_Google)' != ''" />
+      <_PackagedInProcessModuleDll Include="$(PkgSharpClaw_Modules_Providers_Google)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Google.dll"
+                                   Condition="'$(PkgSharpClaw_Modules_Providers_Google)' != ''">
+        <ModuleId>sharpclaw_providers_google</ModuleId>
+      </_PackagedInProcessModuleDll>
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_LlamaSharp)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.LlamaSharp.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_LlamaSharp)' != ''" />
+      <_PackagedInProcessModuleDll Include="$(PkgSharpClaw_Modules_Providers_LlamaSharp)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.LlamaSharp.dll"
+                                   Condition="'$(PkgSharpClaw_Modules_Providers_LlamaSharp)' != ''">
+        <ModuleId>sharpclaw_providers_llamasharp</ModuleId>
+      </_PackagedInProcessModuleDll>
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_Ollama)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Ollama.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_Ollama)' != ''" />
+      <_PackagedInProcessModuleDll Include="$(PkgSharpClaw_Modules_Providers_Ollama)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.Ollama.dll"
+                                   Condition="'$(PkgSharpClaw_Modules_Providers_Ollama)' != ''">
+        <ModuleId>sharpclaw_providers_ollama</ModuleId>
+      </_PackagedInProcessModuleDll>
       <_PackagedModuleDll Include="$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.OpenAICompatible.dll"
                           Condition="'$(PkgSharpClaw_Modules_Providers_OpenAICompatible)' != ''" />
+      <_PackagedInProcessModuleDll Include="$(PkgSharpClaw_Modules_Providers_OpenAICompatible)\lib\$(TargetFramework)\SharpClaw.Modules.Providers.OpenAICompatible.dll"
+                                   Condition="'$(PkgSharpClaw_Modules_Providers_OpenAICompatible)' != ''">
+        <ModuleId>sharpclaw_providers_openai_compat</ModuleId>
+      </_PackagedInProcessModuleDll>
       <_PackagedSidecarHostFile Include="$(PkgSharpClaw_ModuleHost_OutOfProcess)\tools\$(TargetFramework)\any\SharpClaw.ModuleHost.OutOfProcess*"
                                 Condition="'$(PkgSharpClaw_ModuleHost_OutOfProcess)' != ''" />
 
