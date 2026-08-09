@@ -20,7 +20,7 @@ public sealed partial class CiRequiredStatusCheckTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        workflowContexts.Should().Contain("Correctness / Module Sidecar Parity");
+        workflowContexts.Should().Contain("Correctness / Runtime Transport");
         requiredContexts.Should().Equal(
             workflowContexts,
             "every CI matrix domain should be mirrored in the required-status-check ruleset");
@@ -97,6 +97,13 @@ public sealed partial class CiRequiredStatusCheckTests
 
     private static string ResolveRepoRoot()
     {
+        var configuredRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot)
+            && File.Exists(Path.Combine(configuredRoot, "Directory.Packages.props")))
+        {
+            return configuredRoot;
+        }
+
         var current = new DirectoryInfo(TestContext.CurrentContext.TestDirectory);
         while (current is not null)
         {

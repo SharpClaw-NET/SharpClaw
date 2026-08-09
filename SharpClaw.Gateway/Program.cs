@@ -1,6 +1,6 @@
 using SharpClaw.Gateway.Contracts;
+using SharpClaw.Gateway;
 using SharpClaw.Gateway.Configuration;
-using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Gateway.Modules;
 using SharpClaw.Gateway.Security;
@@ -338,8 +338,7 @@ app.UseRateLimiter();
 
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapChatStreamProxy();
+app.MapDirectChatGatewayEndpoints();
 
 // ── Module-contributed endpoint groups (Phase 3) ────────────────
 // Must run AFTER UseRateLimiter so RequireRateLimiting on the route

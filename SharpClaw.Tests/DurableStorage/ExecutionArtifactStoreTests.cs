@@ -1,5 +1,7 @@
 using System.Security.Cryptography;
 using SharpClaw.Contracts.Enums;
+using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Runtime.INF.Persistence.Enums;
 using SharpClaw.Runtime.INF.DurableStorage;
 
 namespace SharpClaw.Tests.DurableStorage;

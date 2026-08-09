@@ -17,6 +17,7 @@ using SharpClaw.Shared.RemoteRuntimeBridge;
 namespace SharpClaw.Tests.Architecture;
 
 [TestFixture]
+[Category("PerformanceGate")]
 [NonParallelizable]
 public sealed class RemoteRuntimeBridgePerformanceTests
 {

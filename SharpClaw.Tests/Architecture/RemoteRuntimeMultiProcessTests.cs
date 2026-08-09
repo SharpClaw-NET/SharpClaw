@@ -17,7 +17,12 @@ namespace SharpClaw.Tests.Architecture;
 [NonParallelizable]
 public sealed class RemoteRuntimeMultiProcessTests
 {
-    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(90);
+    private static readonly TimeSpan StartupTimeout = TimeSpan.FromSeconds(
+        int.TryParse(
+            Environment.GetEnvironmentVariable("SHARPCLAW_TEST_STARTUP_TIMEOUT_SECONDS"),
+            out var seconds)
+            ? seconds
+            : 90);
 
     [Test]
     [Category("Integration")]
@@ -125,12 +130,26 @@ public sealed class RemoteRuntimeMultiProcessTests
                 RemoteRuntimeBridgePaths.AdministrationKeyHeader,
                 "process-admin-key");
             using var invitationResponse = await WaitForAsync(
-                () => bridgeClient.PostAsJsonAsync(
-                    RemoteRuntimeBridgePaths.AdminInvitation,
-                    new RemoteRuntimePairingAdminInvitationRequest(120)),
+                async cancellationToken =>
+                {
+                    using var content = new StringContent(
+                        JsonSerializer.Serialize(new RemoteRuntimePairingAdminInvitationRequest(120)),
+                        Encoding.UTF8,
+                        "application/json");
+                    return await bridgeClient.PostAsync(
+                        RemoteRuntimeBridgePaths.AdminInvitation,
+                        content,
+                        cancellationToken);
+                },
                 StartupTimeout,
                 gateway);
-            invitationResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var invitationFailureDiagnostics = invitationResponse.IsSuccessStatusCode
+                ? string.Empty
+                : "\nGateway diagnostics:\n" + gateway.Diagnostics;
+            invitationResponse.StatusCode.Should().Be(
+                HttpStatusCode.OK,
+                because: "the bridge invitation endpoint must be available"
+                    + invitationFailureDiagnostics);
             var invitation = await invitationResponse.Content
                 .ReadFromJsonAsync<RemoteRuntimePairingInvitation>();
             invitation.Should().NotBeNull();
@@ -406,7 +425,7 @@ public sealed class RemoteRuntimeMultiProcessTests
     }
 
     private static async Task<HttpResponseMessage> WaitForAsync(
-        Func<Task<HttpResponseMessage>> operation,
+        Func<CancellationToken, Task<HttpResponseMessage>> operation,
         TimeSpan timeout,
         ChildProcess process)
     {
@@ -415,11 +434,20 @@ public sealed class RemoteRuntimeMultiProcessTests
         while (DateTimeOffset.UtcNow < deadline)
         {
             process.ThrowIfExited();
+            var remaining = deadline - DateTimeOffset.UtcNow;
+            using var attemptCancellation = new CancellationTokenSource(
+                remaining < TimeSpan.FromSeconds(2)
+                    ? remaining
+                    : TimeSpan.FromSeconds(2));
             try
             {
-                return await operation();
+                return await operation(attemptCancellation.Token);
             }
             catch (HttpRequestException exception)
+            {
+                last = exception;
+            }
+            catch (OperationCanceledException exception)
             {
                 last = exception;
             }
@@ -437,7 +465,9 @@ public sealed class RemoteRuntimeMultiProcessTests
         ChildProcess? gatewayProcess = null)
     {
         using var response = await WaitForAsync(
-            () => client.GetAsync(RemoteRuntimeBridgePaths.AdminPairings + "?take=20"),
+            cancellationToken => client.GetAsync(
+                RemoteRuntimeBridgePaths.AdminPairings + "?take=20",
+                cancellationToken),
             TimeSpan.FromSeconds(10),
             process);
         var body = await response.Content.ReadAsStringAsync();
@@ -500,18 +530,37 @@ public sealed class RemoteRuntimeMultiProcessTests
     private static string ResolveBinary(string project, string assemblyName)
     {
         var testDirectory = Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!;
-        var solutionRoot = Path.GetFullPath(Path.Combine(testDirectory, "..", "..", "..", ".."));
-        var configuration = new DirectoryInfo(testDirectory).Parent!.Name;
-        var targetFramework = new DirectoryInfo(testDirectory).Name;
-        var path = Path.Combine(
-            solutionRoot,
-            project,
-            "bin",
-            configuration,
-            targetFramework,
-            assemblyName + ".dll");
-        File.Exists(path).Should().BeTrue($"the test requires the built process '{path}'");
-        return path;
+        var solutionRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
+            ?? Path.GetFullPath(Path.Combine(testDirectory, "..", "..", "..", ".."));
+        var outputDirectory = new DirectoryInfo(testDirectory);
+        var parentDirectory = outputDirectory.Parent;
+        var configuration = parentDirectory?.Name is "Debug" or "Release"
+            ? parentDirectory.Name
+            : outputDirectory.Name;
+        var targetFramework = parentDirectory?.Name is "Debug" or "Release"
+            ? outputDirectory.Name
+            : null;
+        var artifactRoot = Environment.GetEnvironmentVariable("SHARPCLAW_ARTIFACTS_PATH");
+        var candidates = new[]
+        {
+            string.IsNullOrWhiteSpace(artifactRoot)
+                ? null
+                : Path.Combine(
+                    artifactRoot,
+                    "bin",
+                    assemblyName,
+                    configuration.ToLowerInvariant(),
+                    assemblyName + ".dll"),
+            targetFramework is null
+                ? null
+                : Path.Combine(solutionRoot, project, "bin", configuration, targetFramework, assemblyName + ".dll"),
+            Path.Combine(solutionRoot, project, "bin", configuration, assemblyName + ".dll"),
+            Path.Combine(testDirectory, assemblyName + ".dll"),
+        };
+
+        var path = candidates.FirstOrDefault(File.Exists);
+        path.Should().NotBeNull($"the test requires a built process named '{assemblyName}.dll'");
+        return path!;
     }
 
     private static string PrepareHostBinary(
@@ -668,7 +717,7 @@ public sealed class RemoteRuntimeMultiProcessTests
                 }
             }
 
-            await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(15)));
+            await Task.WhenAny(exited, Task.Delay(TimeSpan.FromSeconds(2)));
             process.Dispose();
         }
     }

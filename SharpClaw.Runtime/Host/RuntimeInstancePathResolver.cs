@@ -8,11 +8,13 @@ internal static class RuntimeInstancePathResolver
     {
         var dataDirectory = Environment.GetEnvironmentVariable("SHARPCLAW_DATA_DIR");
         var instanceRoot = Environment.GetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT");
+        var sharedRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SHARED_ROOT");
         if (string.IsNullOrWhiteSpace(instanceRoot) && !string.IsNullOrWhiteSpace(dataDirectory))
             instanceRoot = Path.GetDirectoryName(Path.GetFullPath(dataDirectory));
 
         return new SharpClawInstancePaths(
             SharpClawInstanceKind.Backend,
-            instanceRoot);
+            instanceRoot,
+            sharedRoot);
     }
 }

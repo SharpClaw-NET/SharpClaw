@@ -91,6 +91,13 @@ public sealed class PublishScriptDeploymentTests
 
     private static string FindSolutionRoot()
     {
+        var configuredRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot)
+            && File.Exists(Path.Combine(configuredRoot, "SharpClaw.slnx")))
+        {
+            return configuredRoot;
+        }
+
         var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);
         while (directory is not null)
         {

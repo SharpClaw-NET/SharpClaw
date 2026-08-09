@@ -11,6 +11,23 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Api\DatabaseInitializationGateMiddleware.cs" />
+    <Compile Remove="Api\ExceptionHandlingMiddleware.cs" />
+    <Compile Remove="Api\JwtSessionMiddleware.cs" />
+    <Compile Remove="Api\MigrationGateMiddleware.cs" />
+    <Compile Remove="BundledModuleStorageGateway.cs" />
+    <Compile Remove="Cli\**\*.cs" />
+    <Compile Remove="DatabaseInitializationGate.cs" />
+    <Compile Remove="Handlers\**\*.cs" />
+    <Compile Remove="HostPersistenceGlobalUsings.cs" />
+    <Compile Remove="ModuleStorageTelemetry.cs" />
+    <Compile Remove="Routing\**\*.cs" />
+    <Compile Include="Handlers\RemoteRuntimePairingHandlers.cs" />
+    <Compile Include="Routing\EndpointMapper.cs" />
+    <Compile Include="Routing\MapAttributes.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
   </ItemGroup>
 
@@ -25,6 +42,7 @@
     </PackageReference>
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
+    <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
     <PackageReference Include="Yarp.ReverseProxy" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
@@ -85,10 +103,14 @@
           DependsOnTargets="_ResolvePackagedModulePayloadFiles">
     <ItemGroup>
       <_BundledModuleOutputFile Remove="@(_BundledModuleOutputFile)" />
-      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug'" />
+      <_BundledModuleDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
+      <_BundledModuleDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.OutOfProcess.dll" Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' == ''" />
+      <_NonHostDll Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\*.dll"
+                   Exclude="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.OutOfProcess\$(Configuration.ToLower())\SharpClaw.*.dll"
+                   Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
       <_NonHostDll Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
                    Exclude="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.*.dll"
-                   Condition="'$(Configuration)' == 'Debug'" />
+                   Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' == ''" />
       <_BundledModuleManifest Include="$(MSBuildProjectDirectory)\..\..\SharpClaw.DefaultModules\TestHarness.OutOfProcess\module.json" Condition="'$(Configuration)' == 'Debug'">
         <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
       </_BundledModuleManifest>

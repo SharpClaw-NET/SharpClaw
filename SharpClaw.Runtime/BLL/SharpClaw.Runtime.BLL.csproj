@@ -30,4 +30,17 @@
     <Folder Include="Services\Triggers\Sources\" />
   </ItemGroup>
 
+  <!--
+    The old application orchestration tree depended on the removed Core domain
+    model. Runtime BLL now exposes only the direct-chat kernel adapter and the
+    package-backed environment service while feature modules move to their
+    canonical contribution contracts.
+  -->
+  <ItemGroup>
+    <Compile Remove="**\*.cs" />
+    <Compile Include="GlobalUsings.cs" />
+    <Compile Include="CorePackageDependency.cs" />
+    <Compile Include="Kernel\**\*.cs" />
+  </ItemGroup>
+
 </Project>

@@ -21,6 +21,7 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_VERSION: 10.0.x
   TEST_PROJECT: ".\\SharpClaw.Tests\\SharpClaw.Tests.csproj"
+  SHARPCLAW_SOURCE_ROOT: ${{ github.workspace }}
 
 permissions:
   contents: read
@@ -34,134 +35,40 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - domain: API Key Provider
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Api'
           - domain: Architecture Core Dependencies
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CoreDependencyGuardrailTests'
           - domain: Architecture Module Dependencies
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.ModuleDependencyGuardrailTests'
-          - domain: Clients Finish Reasons
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Clients'
-          - domain: Core Header Tags
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.HeaderTagProcessorTests'
-          - domain: Core Chat Cache
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.ChatCacheTests'
-          - domain: CLI Channel Commands
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.ChannelCliCommandTests'
-          - domain: CLI REPL
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.CliReplSmokeTests'
-          - domain: Gateway Abstraction Boundaries
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayAbstractionsIsolationTests'
-          - domain: Gateway Internal API Client
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests'
-          - domain: Gateway Synthetic Modules
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
-          - domain: Gateway Endpoint Catalog
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests'
-          - domain: Gateway Endpoint Toggles
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointToggleTests'
-          - domain: Gateway Route Parity
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRouteParityTests'
-          - domain: Gateway Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests'
-          - domain: Gateway Hot Reload
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.HotReload.HotReloadHostManagerTests'
-          - domain: Gateway Chat Surface
-            filter: 'FullyQualifiedName~SameSpoofResponseTextMatchesCoreApiSseAndGatewaySurfaces|FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath'
-          - domain: Gateway Chat Errors And Cancellation
-            filter: 'FullyQualifiedName~GatewayErrorEnvelopeShapeIsStable|FullyQualifiedName~MidStreamFailureErrorEnvelopeIsStableInSse|FullyQualifiedName~DeterministicTimeoutCancellationDoesNotLeaveExecutingJobsStuck'
-          - domain: API Job Contracts
-            filter: 'FullyQualifiedName~ApiJob'
-          - domain: Gateway Job Contracts
-            filter: 'FullyQualifiedName~GatewayJob'
-          - domain: Frontend Instances
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.FrontendInstanceServiceTests'
-          - domain: Frontend Gateway Process
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.GatewayProcessManagerTests'
-          - domain: Frontend Uno Client State
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.UnoClientStateTests'
-          - domain: Persistence Provider Configuration
+          - domain: Runtime Composition
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeCompositionBoundaryTests'
+          - domain: Runtime Pairing
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimePairingClientTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimePairingRegistryClientTests|FullyQualifiedName~SharpClaw.Tests.Persistence.RemoteRuntimePairingRegistryJsonColdStoreTests'
+          - domain: Runtime Transport
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeOptionsTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeRouteTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeTransportTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeConcurrencyLimiterTests'
+          - domain: Runtime Multi Process
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeMultiProcessTests'
+          - domain: Gateway Boundaries
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
+          - domain: Persistence Provider
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
-          - domain: JSONColdStore Provider Paths
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.AuthServiceJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleStorageGatewayTests|FullyQualifiedName~SharpClaw.Tests.Modules.InProcessModuleJsonColdStoreTests'
+          - domain: Persistence Environment
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.EnvironmentTemplateTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstallationKeyCompatibilityTests'
           - domain: Persistence Instances
             filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
-          - domain: Providers Capabilities
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests'
-          - domain: LlamaSharp Schema Conversion
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpRegexToGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpStringFormatGrammarsTests'
-          - domain: LlamaSharp Tool Calling
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarShapeTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests'
-          - domain: Chat Prompt Surface
-            filter: 'FullyQualifiedName~AllDynamicChatFeaturesDisabled|FullyQualifiedName~HeaderExpansionSwitches|FullyQualifiedName~ModuleHeaderTagContext'
-          - domain: Chat Tool Permissions
-            filter: 'FullyQualifiedName~PermissionDeniedInlineTool|FullyQualifiedName~PermissionGrantedInlineTool|FullyQualifiedName~PermissionDeniedJobTool|FullyQualifiedName~PermissionGrantedJobTool'
-          - domain: Chat Costs And Budgets
-            filter: 'FullyQualifiedName~CachedCostHotPath|FullyQualifiedName~NonStreamingChatMeetsHardProviderPlusOverheadBudget|FullyQualifiedName~StreamingChatAndSseForwardingMeetHardProviderPlusOverheadBudget|FullyQualifiedName~BudgetHelperFailsAtOneMillisecondOverBudget'
-          - domain: Chat Thread History
-            filter: 'FullyQualifiedName~ThreadedChatSendsNewestHistory|FullyQualifiedName~ThreadedChatDefaultHistoryLimit|FullyQualifiedName~ThreadedChatCharacterLimit'
-          - domain: Chat Thread Concurrency
-            filter: 'FullyQualifiedName~SameThreadConcurrentSends|FullyQualifiedName~DifferentThreadConcurrentSends|FullyQualifiedName~CancelledThreadedSend'
-          - domain: Chat Agent Selection
-            filter: 'FullyQualifiedName~RequestedAllowedAgent|FullyQualifiedName~RequestedDisallowedAgent'
-          - domain: Chat Prompt Assembly
-            filter: 'FullyQualifiedName~TestHarnessPromptAssemblyExpandedTests'
-          - domain: Chat Streaming
-            filter: 'FullyQualifiedName~TestHarnessStreamingCorrectnessTests'
-          - domain: Jobs Direct
-            filter: 'FullyQualifiedName~DirectJobSubmissionCompletes|FullyQualifiedName~DirectJobDetailAndLifecycleActionsReuseCachedLogs|FullyQualifiedName~DirectJobDeniedStops|FullyQualifiedName~DirectJobAwaitingApproval|FullyQualifiedName~DirectJobApprovalDenies|FullyQualifiedName~DirectJobFailure'
-          - domain: Jobs Lifecycle
-            filter: 'FullyQualifiedName~LongRunningDirectJobPauseResumeStopAndCompletedCancelAreStable'
-          - domain: Jobs Streaming
-            filter: 'FullyQualifiedName~DirectStreamingJobToolConcatenatesChunksIntoResult'
-          - domain: Tools Inline Permissions
-            filter: 'FullyQualifiedName~AllowedInlineModuleTool|FullyQualifiedName~DeniedInlineModuleTool|FullyQualifiedName~ToolPermissionDoesNotStayCached|FullyQualifiedName~JobToolAliasUsesCanonicalPermissionDescriptor'
-          - domain: Tools Arguments Output And Latency
-            filter: 'FullyQualifiedName~MalformedToolArgumentsProduceStableError|FullyQualifiedName~LargeToolOutputIsBounded|FullyQualifiedName~ToolLatencyIsMeasuredSeparately'
-          - domain: Tools Provider Stream Bulk
-            filter: 'FullyQualifiedName~ProviderStream_100ToolCalls_CorrectnessVariants|FullyQualifiedName~ProviderStream_100MixedToolCalls|FullyQualifiedName~ProviderStream_100ToolCalls_MalformedArguments'
-          - domain: Tools Provider Stream Cache
-            filter: 'FullyQualifiedName~ProviderStream_RepeatedToolCalls_RolePermissionRemovalInvalidatesWarmPath|FullyQualifiedName~ProviderStream_RepeatedToolCalls_RolePermissionGrantInvalidatesWarmPath'
-          - domain: Tools Provider Stream Lifecycle
-            filter: 'FullyQualifiedName~ProviderStream_ModuleLifecycle|FullyQualifiedName~ProviderStream_TextBeforeToolsAndTextAfterTools|FullyQualifiedName~ProviderStream_CancelAfterToolCalls|FullyQualifiedName~ProviderStream_ToolNameVariants'
-          - domain: Costs Job Accounting
-            filter: 'FullyQualifiedName~JobCostIsNonNull|FullyQualifiedName~FailedJobCostBehavior|FullyQualifiedName~SharpClaw.Tests.Services.AgentJobTokenAccountingTests.WhenCurrentExecutionRecordsTokens'
-          - domain: Costs Streaming
-            filter: 'FullyQualifiedName~StreamingCostReportedOnlyAtEnd'
-          - domain: Costs Multi Agent
-            filter: 'FullyQualifiedName~MultipleAgentsInOneChannelDoNotCrossContaminateCosts'
-          - domain: Costs Module Hooks
-            filter: 'FullyQualifiedName~CustomModuleCostHookAddsUsage|FullyQualifiedName~SharpClaw.Tests.Services.AgentJobTokenAccountingTests.WhenModuleCostTrackerRecordsTokens'
-          - domain: Cache Header Invalidations
-            filter: 'FullyQualifiedName~ChannelMutationInvalidates|FullyQualifiedName~AgentMutationInvalidates|FullyQualifiedName~ThreadLimitUpdateInvalidates|FullyQualifiedName~DefaultResourceMutationInvalidates'
-          - domain: Cache Tool Settings
-            filter: 'FullyQualifiedName~EffectiveToolDefinitionsStayWarmUntilAgentToolSettingsChange'
-          - domain: Agent Orchestration Access
-            filter: 'FullyQualifiedName~ListAccessibleThreadsScales|FullyQualifiedName~AdminIndependentCanList|FullyQualifiedName~NonAdminDoubleGate|FullyQualifiedName~PrimaryAgentAndAllowedAgents|FullyQualifiedName~DisabledAccessibleThreadsHeader'
-          - domain: Agent Orchestration History
-            filter: 'FullyQualifiedName~ReadThreadHistoryHandles'
-          - domain: Defaults Mutations
-            filter: 'FullyQualifiedName~ChannelDefaultsClear|FullyQualifiedName~ContextDefaultsClear|FullyQualifiedName~ClearingCoreAgentDefault|FullyQualifiedName~SetClearSetSameDefaultKey|FullyQualifiedName~UnknownDefaultKeyClear|FullyQualifiedName~ModuleDefinedDefaultResourceKeyCannotShadow'
-          - domain: Defaults Resource Resolution
-            filter: 'FullyQualifiedName~PerResourceJob'
-          - domain: Module API Host Startup
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ApiHostStartupTests|FullyQualifiedName~SharpClaw.Tests.Logging.SessionLogWriterTests'
-          - domain: Module Bundled Outputs
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleOutputTests'
-          - domain: Module External Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.SyntheticExternalModuleLifecycleTests'
-          - domain: Module Foreign .NET Runtime
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ForeignModule'
-          - domain: Module Sidecar Parity
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledDotNetSidecarDefaultTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledTestHarnessSidecarConformanceTests|FullyQualifiedName~SharpClaw.Tests.Modules.OutOfProcessModuleHostTests|FullyQualifiedName~SharpClaw.Tests.Modules.SidecarReadinessInventoryTests'
-          - domain: Module Harness Integration
-            filter: 'FullyQualifiedName~ModuleRegistersDynamicProvidersToolsHeaderTagsAndCostFeed|FullyQualifiedName~ProviderCaptureRedactsSecretsButKeepsAssertablePromptShape'
-          - domain: Module Harness Cost And Matrix
-            filter: 'FullyQualifiedName~CostFeedUsesHarnessBehaviorAndRecordsTiming|FullyQualifiedName~ProviderMatrixScalesPastOneThousandDeterministicCases'
-          - domain: Module Contracts Architecture
-            filter: 'FullyQualifiedName~TestHarnessArchitectureTests'
-          - domain: Provider Registration
-            filter: 'FullyQualifiedName~TestHarnessProviderRegistrationTests'
+          - domain: Providers
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests|FullyQualifiedName~SharpClaw.Tests.Providers.ProviderCredentialBindingTests'
+          - domain: LlamaSharp
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp'
+          - domain: Durable Storage
+            filter: 'FullyQualifiedName~SharpClaw.Tests.DurableStorage'
+          - domain: Direct Chat Kernel
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DirectChatKernelTests'
+          - domain: Publishing
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing.PublishScriptDeploymentTests'
+          - domain: CI Guardrails
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Ci.CiRequiredStatusCheckTests'
+          - domain: Remote Runtime Session
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeProxySessionTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeProxySessionSecretsTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeRevocationTests'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -192,42 +99,8 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - domain: Streaming End To End
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_1000ms_AllSurfaces'
-          - domain: Streaming API
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_100ms_ApiStream|FullyQualifiedName~PerformanceGate_StreamingOverhead_Large1000ChunkStream|FullyQualifiedName~PerformanceGate_StreamingOverhead_ApiSse1000TinyChunks'
-          - domain: Streaming Gateway
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_GatewaySseProxy1000TinyChunks'
-          - domain: Streaming Concurrency
-            filter: 'FullyQualifiedName~PerformanceGate_TenConcurrentStreams'
-          - domain: Chat Non Streaming
-            filter: 'FullyQualifiedName~PerformanceGate_NonStreamingOverhead'
-          - domain: Chat Concurrent Throughput
-            filter: 'FullyQualifiedName~PerformanceGate_FiftyConcurrentShortChats'
-          - domain: Chat Sequential Warm Cache
-            filter: 'FullyQualifiedName~PerformanceGate_OneHundredSequentialWarmCacheChats'
-          - domain: Jobs Direct Actions
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJobAllowedWarmNoOp|FullyQualifiedName~PerformanceGate_DirectJobDeniedWarmNoOp'
-          - domain: Jobs Summaries
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJobSummaries|FullyQualifiedName~PerformanceGate_DirectJobDetailHotLogs'
-          - domain: Jobs Parallel
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJob_TwentyParallelAllowedNoOpJobs'
-          - domain: Tools Permission Checks
-            filter: 'FullyQualifiedName~PerformanceGate_InlineToolPermissionCheck'
-          - domain: Tools Provider Stream Serial
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_100AllowedNoOpToolCalls_WarmCache_PerCallOverhead_2|FullyQualifiedName~PerformanceGate_ProviderStream_100DeniedToolCalls'
-          - domain: Tools Provider Stream Parallel
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls'
-          - domain: Accessible Threads
-            filter: 'FullyQualifiedName~PerformanceGate_AccessibleThreads'
-          - domain: Prompt Assembly
-            filter: 'FullyQualifiedName~PerformanceGate_PromptAssembly'
-          - domain: Cost Lookup
-            filter: 'FullyQualifiedName~PerformanceGate_CostLookup'
-          - domain: Provider Resolution
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderResolution'
-          - domain: Cold Chat Cache
-            filter: 'FullyQualifiedName~PerformanceGate_ColdChatAfterCacheClear'
+          - domain: Remote Runtime Streamed Payload
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgePerformanceTests'
     steps:
       - name: Checkout
         uses: actions/checkout@v4

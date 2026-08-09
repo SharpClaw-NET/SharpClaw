@@ -27,10 +27,9 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         launcherIndex.Should().BeLessThan(localHostIndex);
 
         var localSource = ReadRepositoryFile("SharpClaw.Runtime/Host/LocalRuntimeHost.cs");
-        localSource.IndexOf("new DurableSegmentStore", StringComparison.Ordinal)
-            .Should().BeGreaterThanOrEqualTo(0);
-        localSource.IndexOf("TryHandleAsync", StringComparison.Ordinal)
-            .Should().BeGreaterThanOrEqualTo(0);
+        localSource.Should().Contain("DirectChatKernelFactory");
+        localSource.Should().Contain("KernelHostEndpoints.Map");
+        localSource.Should().NotContain("TryHandleAsync");
     }
 
     [Test]
@@ -456,17 +455,23 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
 
     private static string ReadRepositoryFile(string relativePath)
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);
-
-        while (directory is not null)
+        var starts = new[]
         {
-            var candidate = Path.Combine(directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
-            if (File.Exists(candidate))
-            {
-                return File.ReadAllText(candidate);
-            }
+            Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT"),
+            Directory.GetCurrentDirectory(),
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+        };
 
-            directory = directory.Parent;
+        foreach (var start in starts.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var directory = new DirectoryInfo(start!);
+            while (directory is not null)
+            {
+                var candidate = Path.Combine(directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
+                if (File.Exists(candidate))
+                    return File.ReadAllText(candidate);
+                directory = directory.Parent;
+            }
         }
 
         throw new FileNotFoundException($"Could not find repository file '{relativePath}'.");

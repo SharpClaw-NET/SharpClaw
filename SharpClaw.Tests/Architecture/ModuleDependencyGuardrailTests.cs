@@ -28,7 +28,7 @@ public class ModuleDependencyGuardrailTests
     {
         var assemblies = new[]
         {
-            typeof(SharpClaw.Runtime.Host.DatabaseInitializationGate).Assembly,
+            typeof(SharpClaw.Runtime.Host.LocalRuntimeHost).Assembly,
             typeof(SharpClaw.Gateway.Configuration.GatewayEnvironment).Assembly,
             typeof(ModuleDependencyGuardrailTests).Assembly,
         };
@@ -145,7 +145,7 @@ public class ModuleDependencyGuardrailTests
         var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var packageIds = GetModulePayloadPackageIds(project).ToList();
-        var assetsPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
+        var assetsPath = FindAssetsPath(projectPath);
 
         File.Exists(assetsPath).Should().BeTrue("restore must produce project.assets.json before architecture tests run");
 
@@ -176,7 +176,7 @@ public class ModuleDependencyGuardrailTests
         var projectPath = FindFileFromTestAssembly(projectLocation.Directory, projectLocation.ProjectFile);
         var project = XDocument.Load(projectPath);
         var packageIds = GetModuleFacingPackageIds(project).ToList();
-        var assetsPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
+        var assetsPath = FindAssetsPath(projectPath);
 
         File.Exists(assetsPath).Should().BeTrue("restore must produce project.assets.json before architecture tests run");
 
@@ -234,20 +234,55 @@ public class ModuleDependencyGuardrailTests
 
     private static string FindFileFromTestAssembly(string projectDirectory, string fileName)
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);
+        var starts = new[]
+        {
+            Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT"),
+            Directory.GetCurrentDirectory(),
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+        };
 
+        foreach (var start in starts.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var directory = new DirectoryInfo(start!);
+            while (directory is not null)
+            {
+                var candidate = Path.Combine(directory.FullName, projectDirectory, fileName);
+                if (File.Exists(candidate))
+                    return candidate;
+                directory = directory.Parent;
+            }
+        }
+
+        throw new FileNotFoundException($"Could not find {projectDirectory}\\{fileName} from test assembly location.");
+    }
+
+    private static string FindAssetsPath(string projectPath)
+    {
+        var normalPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
+        if (File.Exists(normalPath))
+            return normalPath;
+
+        var projectName = Path.GetFileNameWithoutExtension(projectPath);
+        var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
         {
-            var candidate = Path.Combine(directory.FullName, projectDirectory, fileName);
-            if (File.Exists(candidate))
+            var artifactProjectRoot = Path.Combine(directory.FullName, "obj", projectName);
+            if (Directory.Exists(artifactProjectRoot))
             {
-                return candidate;
+                var match = Directory.GetFiles(
+                        artifactProjectRoot,
+                        "project.assets.json",
+                        SearchOption.AllDirectories)
+                    .OrderBy(path => path, StringComparer.OrdinalIgnoreCase)
+                    .FirstOrDefault();
+                if (match is not null)
+                    return match;
             }
 
             directory = directory.Parent;
         }
 
-        throw new FileNotFoundException($"Could not find {projectDirectory}\\{fileName} from test assembly location.");
+        return normalPath;
     }
 
     private static IEnumerable<string> GetModulePayloadPackageIds(XDocument project)

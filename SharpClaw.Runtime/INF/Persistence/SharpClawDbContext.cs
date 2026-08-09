@@ -144,6 +144,10 @@ public class SharpClawDbContext(
         modelBuilder.Entity<AgentDB>(e =>
         {
             e.HasIndex(a => a.Name).IsUnique();
+            e.HasOne(a => a.Model)
+                .WithMany()
+                .HasForeignKey(a => a.ModelId)
+                .OnDelete(DeleteBehavior.Cascade);
             e.Property(a => a.ResponseFormat).HasConversion(
                     value => SerializeJsonElement(value),
                     value => DeserializeJsonElement(value))
