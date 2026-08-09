@@ -1,6 +1,7 @@
 using System.Text.Json;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Tests.Kernel;
@@ -12,7 +13,8 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var conversationId = Guid.NewGuid();
-        var kernel = DirectChatKernelFactory.Create(
+        var kernel = DirectChatKernelFactory.CreateFromGraph(
+            new KernelGraphBuilder().Compile(),
             new ProviderKernelTransport(provider),
             new SingleConversationResolver(conversationId),
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
@@ -30,7 +32,8 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
-        var kernel = DirectChatKernelFactory.Create(
+        var kernel = DirectChatKernelFactory.CreateFromGraph(
+            new KernelGraphBuilder().Compile(),
             new ProviderKernelTransport(provider),
             new SingleConversationResolver(Guid.NewGuid()),
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),

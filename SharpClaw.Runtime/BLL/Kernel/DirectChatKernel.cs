@@ -16,10 +16,11 @@ public sealed class DirectChatKernel(DirectTurnRunner runner)
         _runner.RunAsync(input, cancellationToken);
 }
 
-/// <summary>Builds the default direct-chat graph without feature-domain services.</summary>
-public static class DirectChatKernelFactory
+/// <summary>Builds one direct-chat runner over an explicit Core kernel graph.</summary>
+internal static class DirectChatKernelFactory
 {
-    public static DirectChatKernel Create(
+    internal static DirectChatKernel CreateFromGraph(
+        KernelGraph graph,
         IKernelProviderTransport providerTransport,
         IConversationResolver conversationResolver,
         IChatProfileResolver profileResolver,
@@ -27,12 +28,12 @@ public static class DirectChatKernelFactory
         RequestPrincipal? caller = null,
         ExtensionFeatureSet? features = null)
     {
+        ArgumentNullException.ThrowIfNull(graph);
         ArgumentNullException.ThrowIfNull(providerTransport);
         ArgumentNullException.ThrowIfNull(conversationResolver);
         ArgumentNullException.ThrowIfNull(profileResolver);
         ArgumentNullException.ThrowIfNull(conversationStore);
 
-        var graph = new KernelGraphBuilder().Compile();
         var dispatcher = new KernelActionDispatcher(
             graph,
             new KernelActionExecutionContext(

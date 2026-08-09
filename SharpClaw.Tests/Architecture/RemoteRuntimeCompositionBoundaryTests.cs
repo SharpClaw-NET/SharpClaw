@@ -27,7 +27,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
         launcherIndex.Should().BeLessThan(localHostIndex);
 
         var localSource = ReadRepositoryFile("SharpClaw.Runtime/Host/LocalRuntimeHost.cs");
-        localSource.Should().Contain("DirectChatKernelFactory");
+        localSource.Should().Contain("RuntimeKernelAdapter");
         localSource.Should().Contain("KernelHostEndpoints.Map");
         localSource.Should().NotContain("TryHandleAsync");
     }
