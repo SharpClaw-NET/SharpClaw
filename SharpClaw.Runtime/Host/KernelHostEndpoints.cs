@@ -70,4 +70,3 @@ internal static class KernelHostEndpoints
 }
 
 public sealed record DirectChatRequest(string Message, Guid? ConversationId = null);
-
