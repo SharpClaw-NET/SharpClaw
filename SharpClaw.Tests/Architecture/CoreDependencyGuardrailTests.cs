@@ -58,7 +58,14 @@ public class CoreDependencyGuardrailTests
 
         includes.Should().Contain("Kernel\\**\\*.cs");
         includes.Should().NotContain(include => include.Contains("Services", StringComparison.OrdinalIgnoreCase));
-        includes.Should().NotContain(include => include.Contains("Modules", StringComparison.OrdinalIgnoreCase));
+        includes.Should().NotContain(
+            include => include.Contains("Modules", StringComparison.OrdinalIgnoreCase)
+                       && !string.Equals(
+                           include,
+                           "Modules\\SecureJsonOptions.cs",
+                           StringComparison.OrdinalIgnoreCase),
+            because: "SecureJsonOptions is the canonical strict module-manifest parser. "
+                   + "The removed module orchestration surface must remain excluded.");
     }
 
     private static string FindSolutionRoot()
