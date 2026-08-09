@@ -3,6 +3,7 @@ using System.Net.Http.Json;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
@@ -92,6 +93,89 @@ public sealed class RuntimeHostCompositionTests
 
             response.StatusCode.Should().Be(HttpStatusCode.OK, body);
             body.Should().Contain("test harness response");
+            readiness.IsReady.Should().BeTrue();
+        }
+        finally
+        {
+            readiness.MarkNotReady();
+            await adapter.StopAsync();
+            await app.StopAsync();
+        }
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task NormalHostPayload_ComposesPackagedProviderAndExecutesChat()
+    {
+        await using var providerServer = await FakeOpenAiServer.CreateAsync();
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "custom",
+                ["Provider:Model"] = "gpt-3.5-turbo",
+                ["Provider:Endpoint"] = providerServer.Endpoint,
+                ["Provider:ApiKey"] = "normal-payload-test-key",
+            })
+            .Build();
+
+        using var moduleSet = PackagedDotNetModuleSet.Load(
+            Path.Combine(AppContext.BaseDirectory, "modules"),
+            configuration);
+        moduleSet.Modules.Should().Contain(module =>
+            module.Identity.Id == "sharpclaw_providers_openai_compat");
+        moduleSet.Modules.Should().NotContain(module =>
+            module.Identity.Id == "sharpclaw_test_harness_in_process");
+
+        var databaseOptions = new DatabaseProviderOptions
+        {
+            Provider = StorageMode.JsonFile,
+        };
+        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
+        databaseOptions.JsonFile.EncryptAtRest = false;
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
+        });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddConfiguration(configuration);
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        RuntimeHostComposition.RegisterServices(
+            builder.Services,
+            configuration,
+            workspace.InstancePaths,
+            new EncryptionOptions { Key = new byte[32] },
+            databaseOptions,
+            moduleSet.Modules);
+
+        await using var app = builder.Build();
+        var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
+        var graphPlugins = (IEnumerable<IProviderPlugin>?)adapter.Graph.GetService(
+            typeof(IEnumerable<IProviderPlugin>));
+        graphPlugins.Should().NotBeNull();
+        graphPlugins!.Should().Contain(plugin => plugin.ProviderKey == "custom");
+
+        var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
+        await adapter.StartAsync("normal-provider-test");
+        readiness.MarkReady();
+        KernelHostEndpoints.Map(app);
+
+        try
+        {
+            await app.StartAsync();
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(app.Urls.Single()),
+            };
+            using var response = await client.PostAsJsonAsync(
+                "/chat",
+                new { message = "normal packaged provider" });
+            var body = await response.Content.ReadAsStringAsync();
+
+            response.StatusCode.Should().Be(HttpStatusCode.OK, body);
+            body.Should().Contain("normal packaged provider response");
             readiness.IsReady.Should().BeTrue();
         }
         finally
@@ -382,5 +466,52 @@ public sealed class RuntimeHostCompositionTests
             if (Directory.Exists(Path))
                 Directory.Delete(Path, recursive: true);
         }
+    }
+
+    private sealed class FakeOpenAiServer : IAsyncDisposable
+    {
+        private readonly WebApplication _app;
+
+        private FakeOpenAiServer(WebApplication app)
+        {
+            _app = app;
+        }
+
+        public string Endpoint => _app.Urls.Single() + "/v1";
+
+        public static async Task<FakeOpenAiServer> CreateAsync()
+        {
+            var builder = WebApplication.CreateBuilder();
+            builder.WebHost.UseUrls("http://127.0.0.1:0");
+            var app = builder.Build();
+            app.MapPost(
+                "/v1/chat/completions",
+                () => Results.Json(new
+                {
+                    id = "normal-provider-test",
+                    choices = new[]
+                    {
+                        new
+                        {
+                            index = 0,
+                            message = new
+                            {
+                                role = "assistant",
+                                content = "normal packaged provider response",
+                            },
+                            finish_reason = "stop",
+                        },
+                    },
+                    usage = new
+                    {
+                        prompt_tokens = 1,
+                        completion_tokens = 1,
+                    },
+                }));
+            await app.StartAsync();
+            return new FakeOpenAiServer(app);
+        }
+
+        public ValueTask DisposeAsync() => _app.DisposeAsync();
     }
 }
