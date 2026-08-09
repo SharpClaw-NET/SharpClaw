@@ -469,7 +469,7 @@ public sealed class RemoteRuntimeCompositionBoundaryTests
             {
                 var candidate = Path.Combine(directory.FullName, relativePath.Replace('/', Path.DirectorySeparatorChar));
                 if (File.Exists(candidate))
-                    return File.ReadAllText(candidate);
+                    return File.ReadAllText(candidate).Replace("\r\n", "\n", StringComparison.Ordinal);
                 directory = directory.Parent;
             }
         }
