@@ -67,29 +67,63 @@ public static class LocalRuntimeHost
                 Path.Combine(instancePaths.DataDirectory, "database")),
             moduleSet.Modules);
 
-        var app = builder.Build();
+        await using var app = builder.Build();
         var apiKeyProvider = app.Services.GetRequiredService<ApiKeyProvider>();
         var kernel = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        await app.Services
-            .GetRequiredService<RuntimeDatabaseReadiness>()
-            .ValidateAsync();
-        await kernel.StartAsync("0.1.0-beta");
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
-        readiness.MarkReady();
-        instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
-        app.Lifetime.ApplicationStopping.Register(() =>
+        var databaseReadiness = app.Services.GetRequiredService<RuntimeDatabaseReadiness>();
+        var runtimeStarted = false;
+        var appStarted = false;
+        try
+        {
+            await kernel.RunRuntimeLifecycleActionAsync(
+                RuntimeLifecycleActionCatalog.StartPrepare,
+                null,
+                cancellationToken => new ValueTask(
+                    databaseReadiness.ValidateAsync(cancellationToken)));
+            await kernel.StartAsync("0.1.0-beta");
+            runtimeStarted = true;
+
+            app.UseMiddleware<ApiKeyMiddleware>();
+            KernelHostEndpoints.Map(app);
+            app.MapHandlers();
+
+            await kernel.RunRuntimeLifecycleActionAsync(
+                RuntimeLifecycleActionCatalog.StartBind,
+                runtimeBaseUrl,
+                async cancellationToken =>
+                {
+                    await app.StartAsync(cancellationToken);
+                    appStarted = true;
+                    readiness.MarkReady();
+                    instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
+                });
+
+            await app.WaitForShutdownAsync();
+        }
+        finally
         {
             readiness.MarkNotReady();
-            kernel.StopAsync().AsTask().GetAwaiter().GetResult();
-            apiKeyProvider.Cleanup();
-            instancePaths.DeleteDiscoveryEntry();
-        });
+            if (runtimeStarted)
+            {
+                await kernel.StopAsync(
+                    CancellationToken.None,
+                    _ =>
+                    {
+                        apiKeyProvider.Cleanup();
+                        instancePaths.DeleteDiscoveryEntry();
+                        return ValueTask.CompletedTask;
+                    });
+            }
+            else
+            {
+                apiKeyProvider.Cleanup();
+                instancePaths.DeleteDiscoveryEntry();
+            }
 
-        app.UseMiddleware<ApiKeyMiddleware>();
-        KernelHostEndpoints.Map(app);
-        app.MapHandlers();
-
-        await app.RunAsync();
+            if (appStarted)
+                await app.StopAsync(CancellationToken.None);
+        }
     }
 
 }

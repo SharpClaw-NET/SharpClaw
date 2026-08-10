@@ -67,6 +67,28 @@ public sealed class RuntimeKernelAdapter
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
+    public ValueTask RunRuntimeLifecycleActionAsync(
+        SharpClawActionKey actionKey,
+        object? payload,
+        Func<CancellationToken, ValueTask> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeLifecycleActionCatalog.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a Runtime lifecycle action.",
+                nameof(actionKey));
+        }
+
+        return RunRuntimeLifecycleActionCoreAsync(
+            actionKey,
+            payload,
+            CreateHostExecutionContext(),
+            terminal,
+            cancellationToken);
+    }
+
     internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
         KernelActionExecutionContext executionContext,
         TRequest request,
@@ -114,33 +136,77 @@ public sealed class RuntimeKernelAdapter
         if (_started)
             throw new InvalidOperationException("The Runtime kernel has already started.");
 
-        await _moduleRegistry.StartAsync(
-            Graph,
-            new KernelActionExecutionContext(
-                caller ?? RequestPrincipal.Anonymous,
-                features ?? ExtensionFeatureSet.Empty,
-                Guid.NewGuid(),
-                Guid.NewGuid()),
+        var effectiveCaller = caller ?? RequestPrincipal.Anonymous;
+        var effectiveFeatures = features ?? ExtensionFeatureSet.Empty;
+        var executionContext = CreateHostExecutionContext(effectiveCaller, effectiveFeatures);
+        await RunRuntimeLifecycleActionCoreAsync(
+            RuntimeLifecycleActionCatalog.StartConfigure,
             hostVersion,
-            features ?? ExtensionFeatureSet.Empty,
+            executionContext,
+            ct => _moduleRegistry.StartAsync(
+                Graph,
+                executionContext,
+                hostVersion,
+                effectiveFeatures,
+                ct),
             cancellationToken);
         _started = true;
     }
 
-    public async ValueTask StopAsync(CancellationToken cancellationToken = default)
+    public async ValueTask StopAsync(
+        CancellationToken cancellationToken = default,
+        Func<CancellationToken, ValueTask>? onComplete = null)
     {
         if (!_started)
             return;
 
-        await _moduleRegistry.StopAsync(
-            new KernelActionExecutionContext(
-                RequestPrincipal.Anonymous,
-                ExtensionFeatureSet.Empty,
-                Guid.NewGuid(),
-                Guid.NewGuid()),
+        var executionContext = CreateHostExecutionContext();
+        await RunRuntimeLifecycleActionCoreAsync(
+            RuntimeLifecycleActionCatalog.StopPrepare,
+            null,
+            executionContext,
+            ct => _moduleRegistry.StopAsync(
+                executionContext,
+                ct),
             cancellationToken);
         _started = false;
+        await RunRuntimeLifecycleActionCoreAsync(
+            RuntimeLifecycleActionCatalog.StopComplete,
+            null,
+            executionContext,
+            onComplete ?? (static _ => ValueTask.CompletedTask),
+            cancellationToken);
     }
+
+    private async ValueTask RunRuntimeLifecycleActionCoreAsync(
+        SharpClawActionKey actionKey,
+        object? payload,
+        KernelActionExecutionContext executionContext,
+        Func<CancellationToken, ValueTask> terminal,
+        CancellationToken cancellationToken)
+    {
+        var descriptor = Graph.GetStandardAction(actionKey);
+        await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext,
+            descriptor,
+            new KernelActionEnvelope(actionKey, payload),
+            async (_, ct) =>
+            {
+                await terminal(ct);
+                return true;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+    }
+
+    private static KernelActionExecutionContext CreateHostExecutionContext(
+        RequestPrincipal? caller = null,
+        ExtensionFeatureSet? features = null) =>
+        new(
+            caller ?? RequestPrincipal.Anonymous,
+            features ?? ExtensionFeatureSet.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid());
 
     private static IConversationResolver ResolveConversationResolver(
         KernelGraph graph,
