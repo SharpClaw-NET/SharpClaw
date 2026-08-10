@@ -269,11 +269,11 @@ public static class RemoteProxyHost
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(connection);
-        connection.PublishDiscovery();
         await using var app = Build([], connection);
         try
         {
             await app.StartAsync(cancellationToken);
+            connection.PublishDiscovery();
             await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)

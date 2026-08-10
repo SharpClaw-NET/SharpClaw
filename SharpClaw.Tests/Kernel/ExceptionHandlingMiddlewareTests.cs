@@ -1,4 +1,5 @@
 using System.Text;
+using System.Net.Http;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -26,6 +27,21 @@ public sealed class ExceptionHandlingMiddlewareTests
         response.Should().Contain("An internal server error occurred.");
         response.Should().NotContain("provider secret and storage detail");
     }
+
+    [Test]
+    public Task InvalidOperationFailure_ReturnsStable500WithoutInternalDetails()
+        => AssertGeneralFailureIsRedactedAsync(
+            new InvalidOperationException("manifest path and provider registration detail"));
+
+    [Test]
+    public Task NotSupportedFailure_ReturnsStable500WithoutInternalDetails()
+        => AssertGeneralFailureIsRedactedAsync(
+            new NotSupportedException("unsupported provider capability detail"));
+
+    [Test]
+    public Task HttpRequestFailure_ReturnsStable500WithoutInternalDetails()
+        => AssertGeneralFailureIsRedactedAsync(
+            new HttpRequestException("upstream address and transport detail"));
 
     [Test]
     public async Task RequestCancellation_ReturnsClientClosedStatusWithoutServerErrorBody()
@@ -65,6 +81,23 @@ public sealed class ExceptionHandlingMiddlewareTests
     {
         body.Position = 0;
         return await new StreamReader(body, Encoding.UTF8, leaveOpen: true).ReadToEndAsync();
+    }
+
+    private static async Task AssertGeneralFailureIsRedactedAsync(Exception exception)
+    {
+        await using var body = new MemoryStream();
+        var context = new DefaultHttpContext();
+        context.Response.Body = body;
+        var middleware = new ExceptionHandlingMiddleware(
+            _ => throw exception,
+            NullLogger<ExceptionHandlingMiddleware>.Instance);
+
+        await middleware.InvokeAsync(context);
+
+        context.Response.StatusCode.Should().Be(StatusCodes.Status500InternalServerError);
+        var response = await ReadBodyAsync(body);
+        response.Should().Contain("An internal server error occurred.");
+        response.Should().NotContain(exception.Message);
     }
 
     private sealed class StartedResponseFeature : IHttpResponseFeature
