@@ -12,7 +12,6 @@
 
   <ItemGroup>
     <Compile Remove="Api\DatabaseInitializationGateMiddleware.cs" />
-    <Compile Remove="Api\ExceptionHandlingMiddleware.cs" />
     <Compile Remove="Api\JwtSessionMiddleware.cs" />
     <Compile Remove="Api\MigrationGateMiddleware.cs" />
     <Compile Remove="Cli\**\*.cs" />

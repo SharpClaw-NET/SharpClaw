@@ -279,6 +279,16 @@ public sealed class RuntimeHostCompositionTests
                 "caller-fail",
                 "idempotency-fail");
             failedResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            failedResponse.Body.Should().Contain("request context probe failure");
+
+            var failedStreamResponse = await SendAuthenticatedAsync(
+                client,
+                "/chat/stream",
+                "caller-fail",
+                "idempotency-stream-fail");
+            failedStreamResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
+            failedStreamResponse.Body.Should().Contain("request context probe failure");
+            failedStreamResponse.ContentType.Should().Be("application/json");
             probe.FailureSubject = null;
 
             var afterFailureResponse = await SendAuthenticatedChatAsync(
@@ -689,13 +699,13 @@ public sealed class RuntimeHostCompositionTests
             .Which.Message.Should().Contain("duplicate-module");
     }
 
-    private static async Task<(HttpStatusCode StatusCode, string Body)> SendAuthenticatedChatAsync(
+    private static async Task<(HttpStatusCode StatusCode, string Body, string? ContentType)> SendAuthenticatedChatAsync(
         HttpClient client,
         string subject,
         string idempotencyKey)
         => await SendAuthenticatedAsync(client, "/chat", subject, idempotencyKey);
 
-    private static async Task<(HttpStatusCode StatusCode, string Body)> SendAuthenticatedAsync(
+    private static async Task<(HttpStatusCode StatusCode, string Body, string? ContentType)> SendAuthenticatedAsync(
         HttpClient client,
         string path,
         string subject,
@@ -708,7 +718,10 @@ public sealed class RuntimeHostCompositionTests
         request.Headers.Add("X-Test-Subject", subject);
         request.Headers.Add("Idempotency-Key", idempotencyKey);
         using var response = await client.SendAsync(request);
-        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+        return (
+            response.StatusCode,
+            await response.Content.ReadAsStringAsync(),
+            response.Content.Headers.ContentType?.MediaType);
     }
 
     private static async Task RunProductionHostAsync(
@@ -933,7 +946,7 @@ public sealed class RuntimeHostCompositionTests
         {
             probe.Record(context);
             if (probe.ShouldFail(context.Caller.SubjectId))
-                throw new InvalidOperationException("request context probe failure");
+                throw new ApplicationException("request context probe failure");
             await probe.Release.Task.WaitAsync(cancellationToken);
             return await control.ProceedAsync(cancellationToken);
         }

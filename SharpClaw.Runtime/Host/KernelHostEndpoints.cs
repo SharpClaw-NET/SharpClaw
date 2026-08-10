@@ -9,6 +9,7 @@ using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
+using SharpClaw.Runtime.Host.Api;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -16,6 +17,7 @@ internal static class KernelHostEndpoints
 {
     public static void Map(WebApplication app)
     {
+        app.UseMiddleware<ExceptionHandlingMiddleware>();
         app.MapGet("/echo", () => Results.Ok(new { status = "ok" }));
         app.MapGet("/health", () => Results.Ok(new { status = "healthy" }));
         app.MapGet("/healthz", () => Results.Ok(new { status = "healthy" }));

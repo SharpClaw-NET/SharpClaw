@@ -1,7 +1,6 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
-using SharpClaw.Core.Clients;
 using SharpClaw.Contracts.Providers;
 
 namespace SharpClaw.Runtime.Host.Api;
@@ -20,21 +19,6 @@ public sealed class ExceptionHandlingMiddleware(
         try
         {
             await next(context);
-        }
-        catch (CompletionParameterValidationException ex)
-        {
-            logger.LogWarning(ex, "Completion parameter validation failed on {Method} {Path}", context.Request.Method, context.Request.Path);
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    error = "Invalid completion parameters",
-                    provider = ex.ProviderKey,
-                    validationErrors = ex.ValidationErrors,
-                }, JsonOptions));
-            }
         }
         catch (InvalidOperationException ex)
         {
