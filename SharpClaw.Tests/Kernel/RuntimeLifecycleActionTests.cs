@@ -182,8 +182,8 @@ public sealed class RuntimeLifecycleActionTests
     [Test]
     public void Production_source_maps_each_K01_action_to_the_runtime_boundary()
     {
-        var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
-        root.Should().NotBeNullOrWhiteSpace();
+        var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
+            ?? FindSourceRoot();
 
         var adapterSource = File.ReadAllText(Path.Combine(
             root!,
@@ -217,6 +217,19 @@ public sealed class RuntimeLifecycleActionTests
         cleanupSource.Should().Contain("Interlocked.Exchange(ref _completionAttempted, 1)");
         LifecycleActionNames.Should().OnlyContain(name =>
             SharpClawActionCatalog.Kernel.Any(action => action.Value == name));
+    }
+
+    private static string FindSourceRoot()
+    {
+        for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
+             directory is not null;
+             directory = directory.Parent)
+        {
+            if (Directory.Exists(Path.Combine(directory.FullName, "SharpClaw.Runtime")))
+                return directory.FullName;
+        }
+
+        throw new AssertionException("The SharpClaw source root could not be located.");
     }
 
     private static RuntimeKernelAdapter CreateAdapter(

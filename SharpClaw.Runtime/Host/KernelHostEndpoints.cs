@@ -26,11 +26,7 @@ internal static class KernelHostEndpoints
                 ? Results.Ok(new { status = "ready" })
                 : Results.StatusCode(StatusCodes.Status503ServiceUnavailable));
         app.MapGet("/ping", () => Results.Ok(new { status = "authenticated" }));
-        app.MapGet("/env/core", (IConfiguration configuration) => Results.Ok(
-            configuration.AsEnumerable()
-                .Where(static pair => pair.Value is not null)
-                .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-                .ToDictionary(static pair => pair.Key, static pair => pair.Value)));
+        app.MapGet("/env/core", ReadEnvironmentAsync);
         app.MapPost("/chat", RunChatAsync);
         app.MapPost("/chat/stream", StreamChatAsync);
     }
@@ -54,6 +50,22 @@ internal static class KernelHostEndpoints
             cancellationToken);
         return Results.Ok(result);
     }
+
+    private static Task<IResult> ReadEnvironmentAsync(
+        HttpContext context,
+        IConfiguration configuration,
+        RuntimeKernelAdapter runtimeKernel,
+        CancellationToken cancellationToken) =>
+        runtimeKernel.RunSecurityActionAsync(
+            CreateExecutionContext(context),
+            new SharpClawActionKey("security.secret.read"),
+            new RuntimeSecurityActionInvocation("read", "/env/core"),
+            (_, _) => ValueTask.FromResult<IResult>(Results.Ok(
+                configuration.AsEnumerable()
+                    .Where(static pair => pair.Value is not null)
+                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+                    .ToDictionary(static pair => pair.Key, static pair => pair.Value))),
+            cancellationToken).AsTask();
 
     private static async Task StreamChatAsync(
         HttpContext context,
@@ -103,14 +115,15 @@ internal static class KernelHostEndpoints
             : ExtensionFeatureSet.Empty;
 
         return new KernelActionExecutionContext(
-            CreatePrincipal(context.User),
+            CreatePrincipal(context),
             features,
             traceId,
             idempotencyKey);
     }
 
-    private static RequestPrincipal CreatePrincipal(ClaimsPrincipal? user)
+    private static RequestPrincipal CreatePrincipal(HttpContext context)
     {
+        var user = context.User;
         if (user?.Identity?.IsAuthenticated != true)
             return RequestPrincipal.Anonymous;
 

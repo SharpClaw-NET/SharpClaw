@@ -127,6 +127,55 @@ public sealed class RuntimeKernelAdapter
         return typedResult;
     }
 
+    /// <summary>
+    /// Runs one guarded security terminal through the singleton dispatcher.
+    /// The invocation carries operation metadata only and never carries secrets.
+    /// </summary>
+    public async ValueTask<TResult> RunSecurityActionAsync<TResult>(
+        KernelActionExecutionContext executionContext,
+        SharpClawActionKey actionKey,
+        RuntimeSecurityActionInvocation invocation,
+        Func<RuntimeSecurityActionInvocation, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionContext);
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeSecurityActionManifest.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a published Runtime security action.",
+                nameof(actionKey));
+        }
+
+        var descriptor = Graph.GetStandardAction(actionKey);
+        var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext,
+            descriptor,
+            new KernelActionEnvelope(actionKey, invocation),
+            async (envelope, ct) =>
+            {
+                if (envelope.Payload is not RuntimeSecurityActionInvocation effectiveInvocation)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Security action '{actionKey.Value}' returned an invalid invocation payload.");
+                }
+
+                var terminalResult = await terminal(effectiveInvocation, ct);
+                return terminalResult!;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+
+        if (result is not TResult typedResult)
+        {
+            throw new KernelActionExecutionException(
+                $"Security action '{actionKey.Value}' returned an invalid result type.");
+        }
+
+        return typedResult;
+    }
+
     public async ValueTask StartAsync(
         string hostVersion,
         RequestPrincipal? caller = null,
