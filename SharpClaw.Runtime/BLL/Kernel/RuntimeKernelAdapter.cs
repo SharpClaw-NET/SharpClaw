@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
@@ -161,21 +162,67 @@ public sealed class RuntimeKernelAdapter
             return;
 
         var executionContext = CreateHostExecutionContext();
-        await RunRuntimeLifecycleActionCoreAsync(
-            RuntimeLifecycleActionCatalog.StopPrepare,
-            null,
-            executionContext,
-            ct => _moduleRegistry.StopAsync(
-                executionContext,
-                ct),
-            cancellationToken);
-        _started = false;
-        await RunRuntimeLifecycleActionCoreAsync(
-            RuntimeLifecycleActionCatalog.StopComplete,
-            null,
-            executionContext,
-            onComplete ?? (static _ => ValueTask.CompletedTask),
-            cancellationToken);
+        var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
+        var completionInvoked = false;
+        ExceptionDispatchInfo? failure = null;
+
+        async ValueTask CompleteHostAsync(CancellationToken _)
+        {
+            completionInvoked = true;
+            await completion(CancellationToken.None);
+        }
+
+        try
+        {
+            try
+            {
+                await RunRuntimeLifecycleActionCoreAsync(
+                    RuntimeLifecycleActionCatalog.StopPrepare,
+                    null,
+                    executionContext,
+                    ct => _moduleRegistry.StopAsync(
+                        executionContext,
+                        ct),
+                    cancellationToken);
+            }
+            catch (Exception exception)
+            {
+                failure = ExceptionDispatchInfo.Capture(exception);
+            }
+            finally
+            {
+                _started = false;
+                try
+                {
+                    await RunRuntimeLifecycleActionCoreAsync(
+                        RuntimeLifecycleActionCatalog.StopComplete,
+                        null,
+                        executionContext,
+                        CompleteHostAsync,
+                        CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(exception);
+                }
+            }
+        }
+        finally
+        {
+            if (!completionInvoked)
+            {
+                try
+                {
+                    await completion(CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(exception);
+                }
+            }
+        }
+
+        failure?.Throw();
     }
 
     private async ValueTask RunRuntimeLifecycleActionCoreAsync(

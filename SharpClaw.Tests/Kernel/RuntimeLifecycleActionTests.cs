@@ -64,7 +64,7 @@ public sealed class RuntimeLifecycleActionTests
     [Test]
     public async Task Cancelled_K01_action_does_not_run_its_terminal_or_start_the_host()
     {
-        var probe = new LifecycleProbe { Cancel = true };
+        var probe = new LifecycleProbe { CancelAction = "runtime.start.prepare" };
         using var workspace = new TemporaryWorkspace();
         var adapter = CreateAdapter(workspace, probe);
         var terminalCalls = 0;
@@ -84,6 +84,30 @@ public sealed class RuntimeLifecycleActionTests
     }
 
     [Test]
+    public Task StopPrepareCancellation_still_runs_host_cleanup() =>
+        AssertCleanupAfterStopInterceptionAsync(
+            "runtime.stop.prepare",
+            cancel: true);
+
+    [Test]
+    public Task StopPrepareFailure_still_runs_host_cleanup() =>
+        AssertCleanupAfterStopInterceptionAsync(
+            "runtime.stop.prepare",
+            cancel: false);
+
+    [Test]
+    public Task StopCompleteCancellation_still_runs_host_cleanup() =>
+        AssertCleanupAfterStopInterceptionAsync(
+            "runtime.stop.complete",
+            cancel: true);
+
+    [Test]
+    public Task StopCompleteFailure_still_runs_host_cleanup() =>
+        AssertCleanupAfterStopInterceptionAsync(
+            "runtime.stop.complete",
+            cancel: false);
+
+    [Test]
     public void Production_source_maps_each_K01_action_to_the_runtime_boundary()
     {
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
@@ -100,12 +124,22 @@ public sealed class RuntimeLifecycleActionTests
             "SharpClaw.Runtime",
             "Host",
             "LocalRuntimeHost.cs"));
+        var cleanupSource = File.ReadAllText(Path.Combine(
+            root!,
+            "SharpClaw.Runtime",
+            "BLL",
+            "Kernel",
+            "RuntimeHostCleanup.cs"));
 
         hostSource.Should().Contain("RuntimeLifecycleActionCatalog.StartPrepare");
         hostSource.Should().Contain("RuntimeLifecycleActionCatalog.StartBind");
         adapterSource.Should().Contain("RuntimeLifecycleActionCatalog.StartConfigure");
         adapterSource.Should().Contain("RuntimeLifecycleActionCatalog.StopPrepare");
         adapterSource.Should().Contain("RuntimeLifecycleActionCatalog.StopComplete");
+        hostSource.Should().Contain("new RuntimeHostCleanup(");
+        hostSource.Should().Contain("_ => cleanup.RunAsync()");
+        hostSource.Should().Contain("if (!cleanup.Attempted)");
+        cleanupSource.Should().Contain("Interlocked.Exchange(ref _attempted, 1)");
         LifecycleActionNames.Should().OnlyContain(name =>
             SharpClawActionCatalog.Kernel.Any(action => action.Value == name));
     }
@@ -147,15 +181,59 @@ public sealed class RuntimeLifecycleActionTests
 
     private static SharpClawActionKey Action(string value) => new(value);
 
+    private static async Task AssertCleanupAfterStopInterceptionAsync(
+        string actionName,
+        bool cancel)
+    {
+        var probe = new LifecycleProbe
+        {
+            CancelAction = cancel ? actionName : null,
+            FailureAction = cancel ? null : actionName,
+        };
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        await adapter.StartAsync("test-host");
+
+        var cleanupEvents = new ConcurrentQueue<string>();
+        var cleanup = new RuntimeHostCleanup(
+            () => cleanupEvents.Enqueue("not-ready"),
+            () => cleanupEvents.Enqueue("discovery"),
+            () => cleanupEvents.Enqueue("api-key"),
+            () =>
+            {
+                cleanupEvents.Enqueue("listener");
+                return ValueTask.CompletedTask;
+            });
+
+        Func<Task> stop = async () => await adapter.StopAsync(
+            onComplete: _ => cleanup.RunAsync());
+        if (cancel)
+            await stop.Should().ThrowAsync<KernelActionCancelledException>();
+        else
+            await stop.Should().ThrowAsync<KernelActionFailedException>();
+
+        cleanup.Attempted.Should().BeTrue();
+        cleanupEvents.Should().Equal("not-ready", "discovery", "api-key", "listener");
+        probe.Actions.Should().Contain(actionName);
+    }
+
     private sealed class LifecycleProbe
     {
         public ConcurrentQueue<string> Actions { get; } = new();
 
         public ConcurrentQueue<string> Terminals { get; } = new();
 
-        public bool Cancel { get; init; }
+        public string? CancelAction { get; init; }
+
+        public string? FailureAction { get; init; }
 
         public void Record(string actionKey) => Actions.Enqueue(actionKey);
+
+        public bool ShouldCancel(string actionKey) =>
+            string.Equals(CancelAction, actionKey, StringComparison.Ordinal);
+
+        public bool ShouldFail(string actionKey) =>
+            string.Equals(FailureAction, actionKey, StringComparison.Ordinal);
     }
 
     private sealed class LifecycleInterceptor(LifecycleProbe probe)
@@ -167,11 +245,21 @@ public sealed class RuntimeLifecycleActionTests
             CancellationToken cancellationToken)
         {
             probe.Record(context.ActionKey.Value);
-            return probe.Cancel
-                ? ValueTask.FromResult(control.Cancel(
+            if (probe.ShouldCancel(context.ActionKey.Value))
+            {
+                return ValueTask.FromResult(control.Cancel(
                     "K01_TEST_CANCELLED",
-                    "The K01 lifecycle test cancelled this action."))
-                : control.ProceedAsync(cancellationToken);
+                    "The K01 lifecycle test cancelled this action."));
+            }
+
+            if (probe.ShouldFail(context.ActionKey.Value))
+            {
+                return ValueTask.FromResult(control.Fail(new ExecutionError(
+                    "K01_TEST_FAILED",
+                    "The K01 lifecycle test failed this action.")));
+            }
+
+            return control.ProceedAsync(cancellationToken);
         }
     }
 

@@ -1,3 +1,4 @@
+using System.Runtime.ExceptionServices;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Configuration;
@@ -73,7 +74,16 @@ public static class LocalRuntimeHost
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var databaseReadiness = app.Services.GetRequiredService<RuntimeDatabaseReadiness>();
         var runtimeStarted = false;
-        var appStarted = false;
+        var appStartAttempted = false;
+        ExceptionDispatchInfo? failure = null;
+        var cleanup = new RuntimeHostCleanup(
+            readiness.MarkNotReady,
+            instancePaths.DeleteDiscoveryEntry,
+            apiKeyProvider.Cleanup,
+            () => appStartAttempted
+                ? new ValueTask(app.StopAsync(CancellationToken.None))
+                : ValueTask.CompletedTask);
+
         try
         {
             await kernel.RunRuntimeLifecycleActionAsync(
@@ -93,37 +103,48 @@ public static class LocalRuntimeHost
                 runtimeBaseUrl,
                 async cancellationToken =>
                 {
+                    appStartAttempted = true;
                     await app.StartAsync(cancellationToken);
-                    appStarted = true;
                     readiness.MarkReady();
                     instancePaths.PublishDiscoveryEntry(runtimeBaseUrl);
                 });
 
             await app.WaitForShutdownAsync();
         }
+        catch (Exception exception)
+        {
+            failure = ExceptionDispatchInfo.Capture(exception);
+        }
         finally
         {
-            readiness.MarkNotReady();
             if (runtimeStarted)
             {
-                await kernel.StopAsync(
-                    CancellationToken.None,
-                    _ =>
-                    {
-                        apiKeyProvider.Cleanup();
-                        instancePaths.DeleteDiscoveryEntry();
-                        return ValueTask.CompletedTask;
-                    });
-            }
-            else
-            {
-                apiKeyProvider.Cleanup();
-                instancePaths.DeleteDiscoveryEntry();
+                try
+                {
+                    await kernel.StopAsync(
+                        CancellationToken.None,
+                        _ => cleanup.RunAsync());
+                }
+                catch (Exception exception)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(exception);
+                }
             }
 
-            if (appStarted)
-                await app.StopAsync(CancellationToken.None);
+            if (!cleanup.Attempted)
+            {
+                try
+                {
+                    await cleanup.RunAsync();
+                }
+                catch (Exception exception)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(exception);
+                }
+            }
         }
+
+        failure?.Throw();
     }
 
 }
