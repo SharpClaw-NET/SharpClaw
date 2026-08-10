@@ -3,6 +3,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Shared.Instances;
 
@@ -76,7 +77,17 @@ public sealed class RuntimeKernelAdapterTests
 
         adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
             .Should().BeTrue();
+        var executionContext = new KernelActionExecutionContext(
+            new RequestPrincipal(
+                "request-user",
+                "Request user",
+                new HashSet<string>(StringComparer.Ordinal),
+                true),
+            ExtensionFeatureSet.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid());
         var result = await adapter.RunRequestAsync(
+            executionContext,
             "request-payload",
             static (payload, _) => ValueTask.FromResult(payload.Length));
 

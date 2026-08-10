@@ -1,8 +1,13 @@
+using System.Diagnostics;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Runtime.Host;
@@ -29,6 +34,7 @@ internal static class KernelHostEndpoints
     }
 
     private static async Task<IResult> RunChatAsync(
+        HttpContext context,
         DirectChatRequest request,
         RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
@@ -38,6 +44,7 @@ internal static class KernelHostEndpoints
             return Results.BadRequest(new { error = "Message is required." });
 
         var result = await runtimeKernel.RunRequestAsync(
+            CreateExecutionContext(context),
             request,
             (effectiveRequest, ct) => kernel.RunAsync(
                 new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
@@ -64,6 +71,7 @@ internal static class KernelHostEndpoints
 
         context.Response.ContentType = "text/event-stream";
         var result = await runtimeKernel.RunRequestAsync(
+            CreateExecutionContext(context),
             request,
             (effectiveRequest, ct) => kernel.RunAsync(
                 new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
@@ -77,6 +85,67 @@ internal static class KernelHostEndpoints
             finishReason = result.Completion.FinishReason.ToString(),
         });
         await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+    }
+
+    internal static KernelActionExecutionContext CreateExecutionContext(HttpContext context)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        var traceId = CreateIdentity(
+            Activity.Current?.TraceId.ToString() ?? context.TraceIdentifier,
+            "trace");
+        var idempotencyKey = ResolveIdempotencyKey(context, traceId);
+        var features = context.Items.TryGetValue(typeof(ExtensionFeatureSet), out var value)
+            && value is ExtensionFeatureSet activeFeatures
+            ? activeFeatures
+            : ExtensionFeatureSet.Empty;
+
+        return new KernelActionExecutionContext(
+            CreatePrincipal(context.User),
+            features,
+            traceId,
+            idempotencyKey);
+    }
+
+    private static RequestPrincipal CreatePrincipal(ClaimsPrincipal? user)
+    {
+        if (user?.Identity?.IsAuthenticated != true)
+            return RequestPrincipal.Anonymous;
+
+        var subjectId = user.FindFirst(ClaimTypes.NameIdentifier)?.Value
+            ?? user.FindFirst("sub")?.Value
+            ?? user.Identity.Name;
+        if (string.IsNullOrWhiteSpace(subjectId))
+            throw new InvalidOperationException(
+                "The authenticated HTTP principal has no stable subject identifier.");
+
+        var displayName = user.FindFirst(ClaimTypes.Name)?.Value
+            ?? user.Identity.Name;
+        var roles = user.Claims
+            .Where(static claim => claim.Type == ClaimTypes.Role || claim.Type == "role")
+            .Select(static claim => claim.Value)
+            .Where(static role => !string.IsNullOrWhiteSpace(role))
+            .ToHashSet(StringComparer.Ordinal);
+        return new RequestPrincipal(subjectId, displayName, roles, true);
+    }
+
+    private static Guid ResolveIdempotencyKey(HttpContext context, Guid traceId)
+    {
+        var header = context.Request.Headers["Idempotency-Key"].ToString();
+        return string.IsNullOrWhiteSpace(header)
+            ? traceId
+            : CreateIdentity(header, "idempotency");
+    }
+
+    private static Guid CreateIdentity(string? value, string purpose)
+    {
+        if (Guid.TryParse(value, out var identity) && identity != Guid.Empty)
+            return identity;
+        if (string.IsNullOrWhiteSpace(value))
+            return Guid.NewGuid();
+
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes($"SharpClaw:{purpose}:{value}"));
+        return new Guid(digest.AsSpan(0, 16));
     }
 }
 

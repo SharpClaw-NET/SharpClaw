@@ -20,7 +20,8 @@ public sealed class RuntimeKernelAdapter
         IConversationStore conversationStore,
         IEnumerable<ISharpClawModule> modules,
         SharpClawInstancePaths instancePaths,
-        IRuntimeProviderClientFactory providerClientFactory)
+        IRuntimeProviderClientFactory providerClientFactory,
+        KernelGraphCompileOptions? graphCompileOptions = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hostServices);
@@ -33,7 +34,7 @@ public sealed class RuntimeKernelAdapter
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
             _moduleRegistry.Add(module);
 
-        Graph = _moduleRegistry.Compile(hostServices);
+        Graph = _moduleRegistry.Compile(hostServices, graphCompileOptions);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
@@ -67,14 +68,17 @@ public sealed class RuntimeKernelAdapter
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
     internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
+        KernelActionExecutionContext executionContext,
         TRequest request,
         Func<TRequest, CancellationToken, ValueTask<TResult>> terminal,
         CancellationToken cancellationToken = default)
     {
+        ArgumentNullException.ThrowIfNull(executionContext);
         ArgumentNullException.ThrowIfNull(terminal);
         var descriptor = Graph.GetStandardAction(
             new SharpClawActionKey("runtime.request.receive"));
-        var result = await _actionDispatcher.RunRequiredAsync<KernelActionEnvelope, object>(
+        var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext,
             descriptor,
             new KernelActionEnvelope(descriptor.Key, request),
             async (envelope, ct) =>
