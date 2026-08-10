@@ -153,20 +153,31 @@ public sealed class ClientActionDispatcher
             await _navigationGate.WaitAsync(cancellationToken);
             try
             {
-                if (prepared.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
+                if (invocation.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
                     throw new ClientActionConflictException(
                         $"Navigation '{prepared.Route}' conflicted with a newer navigation.");
 
+                var receipt = new ClientCommitReceipt();
+                var terminalSucceeded = 0;
                 await RunActionAsync(
                     context,
                     ClientActionCatalog.NavigationCommit,
                     prepared,
-                    async (value, token) =>
+                    async (_, token) =>
                     {
-                        await terminal(value, token);
-                        return true;
+                        if (Volatile.Read(ref terminalSucceeded) != 0)
+                            return receipt;
+
+                        await terminal(prepared, token);
+                        Volatile.Write(ref terminalSucceeded, 1);
+                        return receipt;
                     },
                     cancellationToken);
+
+                if (Volatile.Read(ref terminalSucceeded) == 0)
+                    throw new ClientActionConflictException(
+                        $"Navigation '{prepared.Route}' was not committed by the host.");
+
                 Interlocked.Increment(ref _navigationVersion);
             }
             finally
@@ -226,23 +237,34 @@ public sealed class ClientActionDispatcher
             await gate.WaitAsync(cancellationToken);
             try
             {
-                var currentVersion = GetStateVersion(prepared.StateKey);
-                if (prepared.ExpectedVersion != currentVersion)
+                var currentVersion = GetStateVersion(invocation.StateKey);
+                if (invocation.ExpectedVersion != currentVersion)
                     throw new ClientActionConflictException(
-                        $"State '{prepared.StateKey}' changed from version {prepared.ExpectedVersion}.");
+                        $"State '{invocation.StateKey}' changed from version {invocation.ExpectedVersion}.");
 
+                var receipt = new ClientCommitReceipt();
+                var terminalSucceeded = 0;
                 await RunActionAsync(
                     context,
                     ClientActionCatalog.StateCommit,
                     prepared,
                     async (_, token) =>
                     {
+                        if (Volatile.Read(ref terminalSucceeded) != 0)
+                            return receipt;
+
                         await terminal(token);
-                        return true;
+                        Volatile.Write(ref terminalSucceeded, 1);
+                        return receipt;
                     },
                     cancellationToken);
+
+                if (Volatile.Read(ref terminalSucceeded) == 0)
+                    throw new ClientActionConflictException(
+                        $"State '{invocation.StateKey}' was not committed by the host.");
+
                 return _stateVersions.AddOrUpdate(
-                    prepared.StateKey,
+                    invocation.StateKey,
                     1,
                     static (_, version) => checked(version + 1));
             }
@@ -328,6 +350,10 @@ public sealed class ClientActionDispatcher
             ExtensionFeatureSet.Empty,
             Guid.NewGuid(),
             Guid.NewGuid());
+
+    private sealed class ClientCommitReceipt
+    {
+    }
 
     private sealed class ClientRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
     {

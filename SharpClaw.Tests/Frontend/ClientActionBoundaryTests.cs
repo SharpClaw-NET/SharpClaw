@@ -222,6 +222,36 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task Completed_cancelled_and_failed_commands_do_not_leak_contexts()
+    {
+        var probe = new ClientProbe();
+        var dispatcher = CreateDispatcher(probe);
+
+        await dispatcher.RunCommandAsync("completed", static _ => ValueTask.FromResult(true));
+
+        probe.CancelAction = ClientActionCatalog.CommandDispatch.Value;
+        await FluentActions.Invoking(async () => await dispatcher.RunCommandAsync(
+                "cancelled",
+                static _ => ValueTask.FromResult(true)))
+            .Should().ThrowAsync<KernelActionCancelledException>();
+
+        probe.CancelAction = null;
+        probe.FailureAction = ClientActionCatalog.CommandDispatch.Value;
+        await FluentActions.Invoking(async () => await dispatcher.RunCommandAsync(
+                "failed",
+                static _ => ValueTask.FromResult(true)))
+            .Should().ThrowAsync<KernelActionFailedException>();
+
+        probe.FailureAction = null;
+        await dispatcher.RunCommandAsync("after-failure", static _ => ValueTask.FromResult(true));
+
+        var groups = probe.Observations.GroupBy(static item => item.TraceId).ToArray();
+        groups.Should().HaveCount(4);
+        groups.Should().OnlyContain(group =>
+            group.Select(static item => item.IdempotencyKey).Distinct().Count() == 1);
+    }
+
+    [Test]
     public async Task Navigation_serializes_commits_and_rejects_stale_versions()
     {
         var probe = new ClientProbe();
@@ -250,6 +280,55 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task Navigation_repeat_runs_the_host_terminal_once()
+    {
+        var probe = new ClientProbe
+        {
+            RepeatAction = ClientActionCatalog.NavigationCommit.Value,
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var terminalCalls = 0;
+
+        await dispatcher.NavigateAsync(
+            "repeat-navigation",
+            null,
+            (_, _) =>
+            {
+                Interlocked.Increment(ref terminalCalls);
+                return ValueTask.CompletedTask;
+            });
+
+        terminalCalls.Should().Be(1);
+        probe.Attempts(ClientActionCatalog.NavigationCommit.Value).Should().Be(2);
+        dispatcher.GetNavigationVersionForTest().Should().Be(1);
+    }
+
+    [Test]
+    public async Task Navigation_result_replacement_cannot_claim_a_host_commit()
+    {
+        var probe = new ClientProbe
+        {
+            ReplaceResultAction = ClientActionCatalog.NavigationCommit.Value,
+            ReplacementResult = new object(),
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var terminalCalls = 0;
+
+        await FluentActions.Invoking(async () => await dispatcher.NavigateAsync(
+                "replaced-navigation",
+                null,
+                (_, _) =>
+                {
+                    Interlocked.Increment(ref terminalCalls);
+                    return ValueTask.CompletedTask;
+                }))
+            .Should().ThrowAsync<KernelActionExecutionException>();
+
+        terminalCalls.Should().Be(0);
+        dispatcher.GetNavigationVersionForTest().Should().Be(0);
+    }
+
+    [Test]
     public async Task State_commits_serialize_and_reject_stale_versions()
     {
         var probe = new ClientProbe();
@@ -274,6 +353,57 @@ public sealed class ClientActionBoundaryTests
         await FluentActions.Invoking(async () => await second)
             .Should().ThrowAsync<ClientActionConflictException>();
         dispatcher.GetStateVersion("settings").Should().Be(version + 1);
+    }
+
+    [Test]
+    public async Task State_repeat_runs_the_host_terminal_once()
+    {
+        var probe = new ClientProbe
+        {
+            RepeatAction = ClientActionCatalog.StateCommit.Value,
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var terminalCalls = 0;
+        var version = dispatcher.GetStateVersion("repeat-state");
+
+        var committedVersion = await dispatcher.CommitStateAsync(
+            "repeat-state",
+            version,
+            _ =>
+            {
+                Interlocked.Increment(ref terminalCalls);
+                return ValueTask.CompletedTask;
+            });
+
+        terminalCalls.Should().Be(1);
+        probe.Attempts(ClientActionCatalog.StateCommit.Value).Should().Be(2);
+        committedVersion.Should().Be(version + 1);
+    }
+
+    [Test]
+    public async Task State_result_replacement_cannot_claim_a_host_commit()
+    {
+        var probe = new ClientProbe
+        {
+            ReplaceResultAction = ClientActionCatalog.StateCommit.Value,
+            ReplacementResult = new object(),
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var terminalCalls = 0;
+        var version = dispatcher.GetStateVersion("replaced-state");
+
+        await FluentActions.Invoking(async () => await dispatcher.CommitStateAsync(
+                "replaced-state",
+                version,
+                _ =>
+                {
+                    Interlocked.Increment(ref terminalCalls);
+                    return ValueTask.CompletedTask;
+                }))
+            .Should().ThrowAsync<KernelActionExecutionException>();
+
+        terminalCalls.Should().Be(0);
+        dispatcher.GetStateVersion("replaced-state").Should().Be(version);
     }
 
     [Test]
@@ -328,6 +458,61 @@ public sealed class ClientActionBoundaryTests
             .Should().Contain("client.gateway.restart");
     }
 
+    [Test]
+    public void Client_inventory_covers_pages_contributions_and_streams()
+    {
+        var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
+            ?? FindSourceRoot();
+        var clientRoot = Path.Combine(root, "SharpClaw.Client.Uno");
+        var requiredSource = new Dictionary<string, string[]>(StringComparer.Ordinal)
+        {
+            [Path.Combine("Presentation", "MainModel.cs")] = [
+                "NavigateViewModelAsync",
+                "RunCommandAsync",
+            ],
+            [Path.Combine("Presentation", "MainPage.Chat.cs")] = [
+                "GetStreamAsync",
+                "PostStreamAsync",
+            ],
+            [Path.Combine("Presentation", "LoginModel.cs")] = [
+                "Actions.RunCommandAsync",
+                "Navigation.NavigateViewModelAsync",
+            ],
+            [Path.Combine("Presentation", "LoginPage.xaml.cs")] = [
+                "Api.PostAsync",
+                "SetAccessTokenAsync",
+                "SaveAccountAsync",
+                "RemoveAccountAsync",
+            ],
+            [Path.Combine("Presentation", "ChatActionContributionBuilders.cs")] = [
+                "context.Api.GetAsync",
+                "context.Api.PostAsync",
+            ],
+            [Path.Combine("Presentation", "SettingsContributionBuilders.cs")] = [
+                "context.Api.GetAsync",
+                "context.Api.PostAsync",
+                "context.Api.DeleteAsync",
+            ],
+            [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
+                "Actions.RunCommandAsync",
+                "client.gateway.restart",
+                "client.autostart.update",
+            ],
+            [Path.Combine("Services", "SharpClawApiClient.cs")] = [
+                "_clientActions.RunCommandAsync",
+                "GetStreamAsync",
+                "PostStreamAsync",
+            ],
+        };
+
+        foreach (var requirement in requiredSource)
+        {
+            var source = File.ReadAllText(Path.Combine(clientRoot, requirement.Key));
+            foreach (var marker in requirement.Value)
+                source.Should().Contain(marker, requirement.Key);
+        }
+    }
+
     private static ClientActionDispatcher CreateDispatcher(ClientProbe probe)
     {
         const string moduleId = "k05-client-test";
@@ -377,9 +562,9 @@ public sealed class ClientActionBoundaryTests
 
         public ClientCommandInvocation? Replacement { get; init; }
 
-        public string? CancelAction { get; init; }
+        public string? CancelAction { get; set; }
 
-        public string? FailureAction { get; init; }
+        public string? FailureAction { get; set; }
 
         public int TerminalCalls;
 
