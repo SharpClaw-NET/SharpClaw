@@ -165,7 +165,7 @@ public sealed class RuntimeKernelAdapter
                         $"Security action '{actionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                baseAllowed = await baseDecision(effectiveInvocation, ct);
+                baseAllowed = await baseDecision(invocation, ct);
                 return baseAllowed;
             },
             Graph.ActionSnapshot,

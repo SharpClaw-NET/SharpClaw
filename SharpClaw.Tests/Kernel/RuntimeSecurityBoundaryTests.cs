@@ -177,6 +177,37 @@ public sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
+    public async Task Api_key_input_replacement_cannot_grant_invalid_base_authority()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var probe = new SecurityProbe
+        {
+            ReplaceInputAction = "security.api_key.resolve",
+            ReplacementInvocation = new RuntimeSecurityActionInvocation(
+                "authorize",
+                "/allowed")
+        };
+        var adapter = CreateAdapter(workspace, probe);
+        RuntimeSecurityActionInvocation? baseInvocation = null;
+
+        var allowed = await adapter.RunSecurityDecisionAsync(
+            ExecutionContext("api-user"),
+            Action("security.api_key.resolve"),
+            new RuntimeSecurityActionInvocation("deny", "/denied"),
+            (invocation, _) =>
+            {
+                baseInvocation = invocation;
+                return ValueTask.FromResult(
+                    invocation.Operation == "authorize"
+                    && invocation.Resource == "/allowed");
+            });
+
+        allowed.Should().BeFalse();
+        baseInvocation.Should().Be(
+            new RuntimeSecurityActionInvocation("deny", "/denied"));
+    }
+
+    [Test]
     public async Task Repeatable_pairing_decision_does_not_repeat_the_mutation_terminal()
     {
         using var workspace = new TemporaryWorkspace();
@@ -493,6 +524,10 @@ public sealed class RuntimeSecurityBoundaryTests
 
         public bool ReplaceResultValue { get; init; }
 
+        public string? ReplaceInputAction { get; init; }
+
+        public RuntimeSecurityActionInvocation? ReplacementInvocation { get; init; }
+
         public int NestedDispatches;
     }
 
@@ -581,6 +616,19 @@ public sealed class RuntimeSecurityBoundaryTests
                 return control.ReplaceResult(
                     probe.ReplaceResultValue,
                     "K03 result boundary test");
+            }
+
+            if (string.Equals(
+                    probe.ReplaceInputAction,
+                    context.ActionKey.Value,
+                    StringComparison.Ordinal)
+                && probe.ReplacementInvocation is { } replacement)
+            {
+                return await control.ProceedWithInputAsync(
+                    new ActionReplacement<KernelActionEnvelope>(
+                        context.Action with { Payload = replacement },
+                        "K03 input boundary test"),
+                    cancellationToken);
             }
 
             return await control.ProceedAsync(cancellationToken);
