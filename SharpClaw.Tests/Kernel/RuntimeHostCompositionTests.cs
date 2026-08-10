@@ -279,7 +279,8 @@ public sealed class RuntimeHostCompositionTests
                 "caller-fail",
                 "idempotency-fail");
             failedResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-            failedResponse.Body.Should().Contain("request context probe failure");
+            failedResponse.Body.Should().Contain("An internal server error occurred.");
+            failedResponse.Body.Should().NotContain("request context probe failure");
 
             var failedStreamResponse = await SendAuthenticatedAsync(
                 client,
@@ -287,7 +288,8 @@ public sealed class RuntimeHostCompositionTests
                 "caller-fail",
                 "idempotency-stream-fail");
             failedStreamResponse.StatusCode.Should().Be(HttpStatusCode.InternalServerError);
-            failedStreamResponse.Body.Should().Contain("request context probe failure");
+            failedStreamResponse.Body.Should().Contain("An internal server error occurred.");
+            failedStreamResponse.Body.Should().NotContain("request context probe failure");
             failedStreamResponse.ContentType.Should().Be("application/json");
             probe.FailureSubject = null;
 
