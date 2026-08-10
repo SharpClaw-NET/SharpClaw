@@ -6,6 +6,7 @@ using SharpClaw.Runtime.INF.DurableStorage;
 namespace SharpClaw.Tests.DurableStorage;
 
 [TestFixture]
+[FixtureLifeCycle(LifeCycle.InstancePerTestCase)]
 public sealed class ExecutionArtifactStoreTests
 {
     private static readonly byte[] TestKey =
