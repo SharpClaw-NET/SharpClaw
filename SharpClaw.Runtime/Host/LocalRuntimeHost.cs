@@ -123,7 +123,8 @@ public static class LocalRuntimeHost
                 {
                     await kernel.StopAsync(
                         CancellationToken.None,
-                        _ => cleanup.RunAsync());
+                        _ => cleanup.BeginAsync(),
+                        _ => cleanup.CompleteAsync());
                 }
                 catch (Exception exception)
                 {
@@ -131,11 +132,23 @@ public static class LocalRuntimeHost
                 }
             }
 
-            if (!cleanup.Attempted)
+            if (!cleanup.PreparationAttempted)
             {
                 try
                 {
-                    await cleanup.RunAsync();
+                    await cleanup.BeginAsync();
+                }
+                catch (Exception exception)
+                {
+                    failure ??= ExceptionDispatchInfo.Capture(exception);
+                }
+            }
+
+            if (!cleanup.CompletionAttempted)
+            {
+                try
+                {
+                    await cleanup.CompleteAsync();
                 }
                 catch (Exception exception)
                 {

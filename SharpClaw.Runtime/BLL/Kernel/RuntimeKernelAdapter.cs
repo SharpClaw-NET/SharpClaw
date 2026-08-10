@@ -156,15 +156,49 @@ public sealed class RuntimeKernelAdapter
 
     public async ValueTask StopAsync(
         CancellationToken cancellationToken = default,
+        Func<CancellationToken, ValueTask>? onPrepare = null,
         Func<CancellationToken, ValueTask>? onComplete = null)
     {
         if (!_started)
             return;
 
         var executionContext = CreateHostExecutionContext();
+        var prepare = onPrepare ?? (static _ => ValueTask.CompletedTask);
         var completion = onComplete ?? (static _ => ValueTask.CompletedTask);
+        var prepareInvoked = false;
+        var moduleStopInvoked = 0;
         var completionInvoked = false;
         ExceptionDispatchInfo? failure = null;
+
+        async ValueTask PrepareHostAndModulesAsync(CancellationToken _)
+        {
+            prepareInvoked = true;
+            ExceptionDispatchInfo? prepareFailure = null;
+            try
+            {
+                await prepare(CancellationToken.None);
+            }
+            catch (Exception exception)
+            {
+                prepareFailure = ExceptionDispatchInfo.Capture(exception);
+            }
+
+            if (Interlocked.Exchange(ref moduleStopInvoked, 1) == 0)
+            {
+                try
+                {
+                    await _moduleRegistry.StopAsync(
+                        executionContext,
+                        CancellationToken.None);
+                }
+                catch (Exception exception)
+                {
+                    prepareFailure ??= ExceptionDispatchInfo.Capture(exception);
+                }
+            }
+
+            prepareFailure?.Throw();
+        }
 
         async ValueTask CompleteHostAsync(CancellationToken _)
         {
@@ -180,9 +214,7 @@ public sealed class RuntimeKernelAdapter
                     RuntimeLifecycleActionCatalog.StopPrepare,
                     null,
                     executionContext,
-                    ct => _moduleRegistry.StopAsync(
-                        executionContext,
-                        ct),
+                    PrepareHostAndModulesAsync,
                     cancellationToken);
             }
             catch (Exception exception)
@@ -191,6 +223,18 @@ public sealed class RuntimeKernelAdapter
             }
             finally
             {
+                if (!prepareInvoked)
+                {
+                    try
+                    {
+                        await PrepareHostAndModulesAsync(CancellationToken.None);
+                    }
+                    catch (Exception exception)
+                    {
+                        failure ??= ExceptionDispatchInfo.Capture(exception);
+                    }
+                }
+
                 _started = false;
                 try
                 {

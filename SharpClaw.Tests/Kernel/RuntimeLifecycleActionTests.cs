@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
 using System.Text.Json;
+using Microsoft.AspNetCore.Builder;
+using Microsoft.AspNetCore.Hosting;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
@@ -59,6 +62,7 @@ public sealed class RuntimeLifecycleActionTests
             "runtime.start.prepare",
             "runtime.start.bind",
             "runtime.stop.complete");
+        probe.ModuleStopCount.Should().Be(1);
     }
 
     [Test]
@@ -108,6 +112,74 @@ public sealed class RuntimeLifecycleActionTests
             cancel: false);
 
     [Test]
+    [NonParallelizable]
+    public async Task Shutdown_stops_listener_before_modules_and_rejects_new_requests()
+    {
+        var probe = new LifecycleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(workspace, probe);
+        await adapter.StartAsync("test-host");
+
+        var requestCount = 0;
+        var builder = WebApplication.CreateBuilder();
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        var app = builder.Build();
+        app.MapGet(
+            "/shutdown-probe",
+            () =>
+            {
+                Interlocked.Increment(ref requestCount);
+                return Results.Ok();
+            });
+        await app.StartAsync();
+
+        using var client = new HttpClient
+        {
+            BaseAddress = new Uri(app.Urls.Single()),
+        };
+        var cleanup = new RuntimeHostCleanup(
+            () => probe.ShutdownEvents.Enqueue("not-ready"),
+            () => probe.ShutdownEvents.Enqueue("discovery"),
+            () => probe.ShutdownEvents.Enqueue("api-key"),
+            async () =>
+            {
+                probe.ShutdownEvents.Enqueue("listener");
+                await app.StopAsync(CancellationToken.None);
+                using var timeout = new CancellationTokenSource(TimeSpan.FromSeconds(2));
+                try
+                {
+                    await client.GetAsync("/shutdown-probe", timeout.Token);
+                }
+                catch (HttpRequestException)
+                {
+                }
+                catch (TaskCanceledException)
+                {
+                }
+            });
+
+        try
+        {
+            await adapter.StopAsync(
+                onPrepare: _ => cleanup.BeginAsync(),
+                onComplete: _ => cleanup.CompleteAsync());
+
+            requestCount.Should().Be(0);
+            probe.ModuleStopCount.Should().Be(1);
+            probe.ShutdownEvents.Should().Equal(
+                "not-ready",
+                "listener",
+                "module-stop",
+                "discovery",
+                "api-key");
+        }
+        finally
+        {
+            await app.DisposeAsync();
+        }
+    }
+
+    [Test]
     public void Production_source_maps_each_K01_action_to_the_runtime_boundary()
     {
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
@@ -137,9 +209,12 @@ public sealed class RuntimeLifecycleActionTests
         adapterSource.Should().Contain("RuntimeLifecycleActionCatalog.StopPrepare");
         adapterSource.Should().Contain("RuntimeLifecycleActionCatalog.StopComplete");
         hostSource.Should().Contain("new RuntimeHostCleanup(");
-        hostSource.Should().Contain("_ => cleanup.RunAsync()");
-        hostSource.Should().Contain("if (!cleanup.Attempted)");
-        cleanupSource.Should().Contain("Interlocked.Exchange(ref _attempted, 1)");
+        hostSource.Should().Contain("_ => cleanup.BeginAsync()");
+        hostSource.Should().Contain("_ => cleanup.CompleteAsync()");
+        hostSource.Should().Contain("if (!cleanup.PreparationAttempted)");
+        hostSource.Should().Contain("if (!cleanup.CompletionAttempted)");
+        cleanupSource.Should().Contain("Interlocked.Exchange(ref _preparationAttempted, 1)");
+        cleanupSource.Should().Contain("Interlocked.Exchange(ref _completionAttempted, 1)");
         LifecycleActionNames.Should().OnlyContain(name =>
             SharpClawActionCatalog.Kernel.Any(action => action.Value == name));
     }
@@ -206,14 +281,17 @@ public sealed class RuntimeLifecycleActionTests
             });
 
         Func<Task> stop = async () => await adapter.StopAsync(
-            onComplete: _ => cleanup.RunAsync());
+            onPrepare: _ => cleanup.BeginAsync(),
+            onComplete: _ => cleanup.CompleteAsync());
         if (cancel)
             await stop.Should().ThrowAsync<KernelActionCancelledException>();
         else
             await stop.Should().ThrowAsync<KernelActionFailedException>();
 
-        cleanup.Attempted.Should().BeTrue();
-        cleanupEvents.Should().Equal("not-ready", "discovery", "api-key", "listener");
+        cleanup.PreparationAttempted.Should().BeTrue();
+        cleanup.CompletionAttempted.Should().BeTrue();
+        cleanupEvents.Should().Equal("not-ready", "listener", "discovery", "api-key");
+        probe.ModuleStopCount.Should().Be(1);
         probe.Actions.Should().Contain(actionName);
     }
 
@@ -223,11 +301,23 @@ public sealed class RuntimeLifecycleActionTests
 
         public ConcurrentQueue<string> Terminals { get; } = new();
 
+        public ConcurrentQueue<string> ShutdownEvents { get; } = new();
+
+        private int _moduleStopCount;
+
+        public int ModuleStopCount => Volatile.Read(ref _moduleStopCount);
+
         public string? CancelAction { get; init; }
 
         public string? FailureAction { get; init; }
 
         public void Record(string actionKey) => Actions.Enqueue(actionKey);
+
+        public void RecordModuleStop()
+        {
+            Interlocked.Increment(ref _moduleStopCount);
+            ShutdownEvents.Enqueue("module-stop");
+        }
 
         public bool ShouldCancel(string actionKey) =>
             string.Equals(CancelAction, actionKey, StringComparison.Ordinal);
@@ -292,8 +382,11 @@ public sealed class RuntimeLifecycleActionTests
         public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
 
-        public ValueTask StopAsync(CancellationToken cancellationToken) =>
-            ValueTask.CompletedTask;
+        public ValueTask StopAsync(CancellationToken cancellationToken)
+        {
+            probe.RecordModuleStop();
+            return ValueTask.CompletedTask;
+        }
     }
 
     private sealed class LifecycleProviderClientFactory(IProviderApiClient client)
