@@ -37,6 +37,11 @@ internal static class RuntimeCliSession
                 _ => ValueTask.FromResult(command),
                 cancellationToken);
         }
+        catch (KernelActionCancelledException)
+        {
+            await RunCancellationAsync(runtimeKernel, context, error);
+            return 130;
+        }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
             await RunCancellationAsync(runtimeKernel, context, error);
@@ -58,7 +63,7 @@ internal static class RuntimeCliSession
                 context,
                 RuntimeCliActionCatalog.Execute,
                 new RuntimeCliActionInvocation("execute", command.Name, command.Arguments.Count),
-                _ => ExecuteAsync(command, kernel, cancellationToken),
+                cancellation => ExecuteAsync(command, kernel, cancellation),
                 cancellationToken);
 
             if (!result.Succeeded)
@@ -73,6 +78,11 @@ internal static class RuntimeCliSession
                     },
                     CancellationToken.None);
             }
+        }
+        catch (KernelActionCancelledException)
+        {
+            await RunCancellationAsync(runtimeKernel, context, error);
+            return 130;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {
@@ -103,6 +113,11 @@ internal static class RuntimeCliSession
                 new RuntimeCliActionInvocation("complete", command.Name, command.Arguments.Count),
                 _ => ValueTask.FromResult(result.ExitCode),
                 cancellationToken);
+        }
+        catch (KernelActionCancelledException)
+        {
+            await RunCancellationAsync(runtimeKernel, context, error);
+            return 130;
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
         {

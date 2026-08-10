@@ -21,7 +21,9 @@ namespace SharpClaw.Runtime.Host;
 /// <summary>Builds and runs the authoritative local Runtime composition.</summary>
 public static class LocalRuntimeHost
 {
-    public static async Task RunAsync(string[] args)
+    public static async Task RunAsync(
+        string[] args,
+        CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(args);
 
@@ -102,7 +104,7 @@ public static class LocalRuntimeHost
                     kernel.Kernel,
                     Console.Out,
                     Console.Error,
-                    CancellationToken.None);
+                    cancellationToken);
                 return;
             }
 

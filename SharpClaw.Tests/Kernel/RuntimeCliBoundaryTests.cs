@@ -184,6 +184,98 @@ public sealed class RuntimeCliBoundaryTests
     }
 
     [Test]
+    public async Task Local_cli_typed_action_cancellation_runs_cancel_and_output_without_failure()
+    {
+        using var workspace = new TemporaryWorkspace();
+        using var hostServices = new ServiceCollection().BuildServiceProvider();
+        var probe = new CliProbe
+        {
+            CancelAction = RuntimeCliActionCatalog.Execute.Value,
+        };
+        var adapter = CreateAdapter(workspace, hostServices, probe);
+
+        await adapter.StartAsync("k04-test");
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var exitCode = await RuntimeCliSession.RunAsync(
+                ["--cli", "help"],
+                adapter,
+                adapter.Kernel,
+                output,
+                error,
+                CancellationToken.None);
+
+            exitCode.Should().Be(130);
+            error.ToString().Should().Be(
+                "The Runtime CLI command was cancelled." + Environment.NewLine);
+            probe.Actions().Should().Equal(
+                "runtime.cli.parse",
+                "runtime.cli.command.select",
+                "runtime.cli.execute",
+                "runtime.cli.cancel",
+                "runtime.cli.output.write");
+            probe.Actions().Should().NotContain("runtime.cli.fail");
+            probe.Actions().Should().NotContain("runtime.cli.complete");
+        }
+        finally
+        {
+            await adapter.StopAsync();
+        }
+    }
+
+    [Test]
+    public async Task Local_cli_action_cancellation_reaches_in_flight_chat_without_caller_cancellation()
+    {
+        using var workspace = new TemporaryWorkspace();
+        using var hostServices = new ServiceCollection().BuildServiceProvider();
+        using var actionCancellation = new CancellationTokenSource();
+        var probe = new CliProbe
+        {
+            BlockChatUntilCancellation = true,
+            ExecuteCancellationSource = actionCancellation,
+        };
+        var adapter = CreateAdapter(workspace, hostServices, probe);
+
+        await adapter.StartAsync("k04-test");
+        try
+        {
+            using var output = new StringWriter();
+            using var error = new StringWriter();
+            var session = RuntimeCliSession.RunAsync(
+                ["--cli", "chat", "cancel me"],
+                adapter,
+                adapter.Kernel,
+                output,
+                error,
+                CancellationToken.None).AsTask();
+
+            await probe.ChatStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            actionCancellation.Cancel();
+
+            var exitCode = await session.WaitAsync(TimeSpan.FromSeconds(5));
+            await probe.ChatCancellationObserved.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            exitCode.Should().Be(130);
+            error.ToString().Should().Be(
+                "The Runtime CLI command was cancelled." + Environment.NewLine);
+            probe.Actions().Should().ContainInOrder(
+                "runtime.cli.parse",
+                "runtime.cli.command.select",
+                "runtime.cli.execute",
+                "runtime.cli.cancel",
+                "runtime.cli.output.write");
+            probe.Actions().Should().NotContain("runtime.cli.fail");
+            probe.Actions().Should().NotContain("runtime.cli.complete");
+        }
+        finally
+        {
+            await adapter.StopAsync();
+        }
+    }
+
+    [Test]
     public async Task Concurrent_cli_sessions_use_distinct_root_contexts_without_a_second_dispatcher()
     {
         using var workspace = new TemporaryWorkspace();
@@ -270,6 +362,11 @@ public sealed class RuntimeCliBoundaryTests
             "SharpClaw.Runtime",
             "Host",
             "RuntimeCliSession.cs"));
+        var programSource = File.ReadAllText(Path.Combine(
+            root,
+            "SharpClaw.Runtime",
+            "Host",
+            "Program.cs"));
 
         var kernelStart = hostSource.IndexOf(
             "await kernel.StartAsync",
@@ -305,6 +402,12 @@ public sealed class RuntimeCliBoundaryTests
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Complete");
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Fail");
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Cancel");
+        sessionSource.Should().Contain("catch (KernelActionCancelledException)");
+        sessionSource.Should().Contain(
+            "cancellation => ExecuteAsync(command, kernel, cancellation)");
+        hostSource.Should().Contain("CancellationToken cancellationToken = default");
+        programSource.Should().Contain("Console.CancelKeyPress");
+        programSource.Should().Contain("processCancellation.Token");
     }
 
     private static RuntimeKernelAdapter CreateAdapter(
@@ -312,7 +415,7 @@ public sealed class RuntimeCliBoundaryTests
         IServiceProvider hostServices,
         CliProbe probe)
     {
-        var provider = new CliProvider();
+        var provider = new CliProvider(probe);
         var moduleId = "k04-cli-test";
         var grants = RuntimeCliActionCatalog.All.ToDictionary(
             action => action.Value,
@@ -390,6 +493,18 @@ public sealed class RuntimeCliBoundaryTests
     {
         public ConcurrentQueue<CliObservation> Observations { get; } = new();
 
+        public string? CancelAction { get; init; }
+
+        public bool BlockChatUntilCancellation { get; init; }
+
+        public CancellationTokenSource? ExecuteCancellationSource { get; init; }
+
+        public TaskCompletionSource<bool> ChatStarted { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ChatCancellationObserved { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
         public IReadOnlyList<string> Actions() =>
             Observations.Select(static observation => observation.Action).ToArray();
 
@@ -431,6 +546,24 @@ public sealed class RuntimeCliBoundaryTests
             CancellationToken cancellationToken)
         {
             probe.Record(context);
+            if (string.Equals(
+                    probe.CancelAction,
+                    context.ActionKey.Value,
+                    StringComparison.Ordinal))
+            {
+                return ValueTask.FromResult<IActionOutcome<object>>(
+                    control.Cancel("K04_TEST_CANCELLED", "The test action was cancelled."));
+            }
+
+            if (string.Equals(
+                    context.ActionKey.Value,
+                    RuntimeCliActionCatalog.Execute.Value,
+                    StringComparison.Ordinal) &&
+                probe.ExecuteCancellationSource is { } actionCancellation)
+            {
+                return control.ProceedAsync(actionCancellation.Token);
+            }
+
             return control.ProceedAsync(cancellationToken);
         }
     }
@@ -474,7 +607,7 @@ public sealed class RuntimeCliBoundaryTests
             IReadOnlyList<IProviderPlugin> plugins) => provider;
     }
 
-    private sealed class CliProvider : IProviderPlugin, IProviderApiClient
+    private sealed class CliProvider(CliProbe probe) : IProviderPlugin, IProviderApiClient
     {
         public string ProviderKey => "k04-test";
         public string DisplayName => "K04 test";
@@ -490,20 +623,36 @@ public sealed class RuntimeCliBoundaryTests
             CancellationToken cancellationToken = default) =>
             Task.FromResult<IReadOnlyList<string>>(["k04-model"]);
 
-        public Task<ChatCompletionResult> ChatCompletionAsync(
+        public async Task<ChatCompletionResult> ChatCompletionAsync(
             string model,
             string? systemPrompt,
             IReadOnlyList<ChatCompletionMessage> messages,
             int? maxCompletionTokens = null,
             Dictionary<string, JsonElement>? providerParameters = null,
             CompletionParameters? completionParameters = null,
-            CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ChatCompletionResult
+            CancellationToken cancellationToken = default)
+        {
+            probe.ChatStarted.TrySetResult(true);
+            if (probe.BlockChatUntilCancellation)
+            {
+                try
+                {
+                    await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+                }
+                catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+                {
+                    probe.ChatCancellationObserved.TrySetResult(true);
+                    throw;
+                }
+            }
+
+            return new ChatCompletionResult
             {
                 Content = "k04-response",
                 FinishReason = FinishReason.Stop,
                 Usage = new TokenUsage(1, 1),
-            });
+            };
+        }
     }
 
     private sealed class EmptyCapabilities : IModelCapabilityResolver
