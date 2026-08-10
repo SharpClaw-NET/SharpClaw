@@ -30,14 +30,18 @@ internal static class KernelHostEndpoints
 
     private static async Task<IResult> RunChatAsync(
         DirectChatRequest request,
+        RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
         CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(request.Message))
             return Results.BadRequest(new { error = "Message is required." });
 
-        var result = await kernel.RunAsync(
-            new ChatTurnInput(request.Message, request.ConversationId),
+        var result = await runtimeKernel.RunRequestAsync(
+            request,
+            (effectiveRequest, ct) => kernel.RunAsync(
+                new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
+                ct),
             cancellationToken);
         return Results.Ok(result);
     }
@@ -45,6 +49,7 @@ internal static class KernelHostEndpoints
     private static async Task StreamChatAsync(
         HttpContext context,
         DirectChatRequest request,
+        RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
         CancellationToken cancellationToken)
     {
@@ -58,8 +63,11 @@ internal static class KernelHostEndpoints
         }
 
         context.Response.ContentType = "text/event-stream";
-        var result = await kernel.RunAsync(
-            new ChatTurnInput(request.Message, request.ConversationId),
+        var result = await runtimeKernel.RunRequestAsync(
+            request,
+            (effectiveRequest, ct) => kernel.RunAsync(
+                new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
+                ct),
             cancellationToken);
         var payload = JsonSerializer.Serialize(new
         {

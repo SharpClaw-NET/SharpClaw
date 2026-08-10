@@ -11,6 +11,7 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 public sealed class RuntimeKernelAdapter
 {
     private readonly KernelModuleRegistry _moduleRegistry;
+    private readonly KernelActionDispatcher _actionDispatcher;
     private bool _started;
 
     public RuntimeKernelAdapter(
@@ -33,6 +34,13 @@ public sealed class RuntimeKernelAdapter
             _moduleRegistry.Add(module);
 
         Graph = _moduleRegistry.Compile(hostServices);
+        _actionDispatcher = new KernelActionDispatcher(
+            Graph,
+            new KernelActionExecutionContext(
+                RequestPrincipal.Anonymous,
+                ExtensionFeatureSet.Empty,
+                Guid.NewGuid(),
+                Guid.NewGuid()));
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
@@ -45,6 +53,7 @@ public sealed class RuntimeKernelAdapter
 
         Kernel = DirectChatKernelFactory.CreateFromGraph(
             Graph,
+            _actionDispatcher,
             new ProviderKernelTransport(providerClient),
             conversationResolver,
             profileResolver,
@@ -54,6 +63,42 @@ public sealed class RuntimeKernelAdapter
     public KernelGraph Graph { get; }
 
     public DirectChatKernel Kernel { get; }
+
+    public IActionDispatcher ActionDispatcher => _actionDispatcher;
+
+    internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
+        TRequest request,
+        Func<TRequest, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        var descriptor = Graph.GetStandardAction(
+            new SharpClawActionKey("runtime.request.receive"));
+        var result = await _actionDispatcher.RunRequiredAsync<KernelActionEnvelope, object>(
+            descriptor,
+            new KernelActionEnvelope(descriptor.Key, request),
+            async (envelope, ct) =>
+            {
+                if (envelope.Payload is not TRequest effectiveRequest)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Runtime request action returned payload type '{envelope.Payload?.GetType().FullName ?? "<null>"}'.");
+                }
+
+                var terminalResult = await terminal(effectiveRequest, ct);
+                return terminalResult!;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+
+        if (result is not TResult typedResult)
+        {
+            throw new KernelActionExecutionException(
+                $"Runtime request action returned result type '{result?.GetType().FullName ?? "<null>"}'.");
+        }
+
+        return typedResult;
+    }
 
     public async ValueTask StartAsync(
         string hostVersion,

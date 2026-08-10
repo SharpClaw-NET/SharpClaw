@@ -7,6 +7,7 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.BLL.Kernel;
@@ -79,6 +80,10 @@ public sealed class RuntimeHostCompositionTests
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         readiness.IsReady.Should().BeFalse();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
+        app.Services.GetRequiredService<IActionDispatcher>()
+            .Should().BeSameAs(adapter.ActionDispatcher);
+        adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
+            .Should().BeTrue();
         await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
         await adapter.StartAsync("test-host");
         readiness.MarkReady();
@@ -98,6 +103,16 @@ public sealed class RuntimeHostCompositionTests
 
             response.StatusCode.Should().Be(HttpStatusCode.OK, body);
             body.Should().Contain("test harness response");
+
+            using var streamResponse = await client.PostAsJsonAsync(
+                "/chat/stream",
+                new { message = "stream hello" });
+            var streamBody = await streamResponse.Content.ReadAsStringAsync();
+
+            streamResponse.StatusCode.Should().Be(HttpStatusCode.OK, streamBody);
+            streamResponse.Content.Headers.ContentType!.MediaType
+                .Should().Be("text/event-stream");
+            streamBody.Should().Contain("test harness response");
             readiness.IsReady.Should().BeTrue();
         }
         finally

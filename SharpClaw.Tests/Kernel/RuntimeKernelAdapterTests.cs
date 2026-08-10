@@ -54,6 +54,36 @@ public sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
+    public async Task Adapter_dispatches_request_ingress_through_the_compiled_action_graph()
+    {
+        var provider = new RecordingProviderClient();
+        var module = new ProviderModule(provider);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "test",
+                ["Provider:Model"] = "test-model",
+            })
+            .Build();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = new RuntimeKernelAdapter(
+            configuration,
+            new ServiceCollection().BuildServiceProvider(),
+            new InMemoryConversationStore(),
+            [module],
+            workspace.CreateInstancePaths(),
+            new RecordingProviderClientFactory(provider));
+
+        adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
+            .Should().BeTrue();
+        var result = await adapter.RunRequestAsync(
+            "request-payload",
+            static (payload, _) => ValueTask.FromResult(payload.Length));
+
+        result.Should().Be("request-payload".Length);
+    }
+
+    [Test]
     public async Task Adapter_uses_the_instance_manifest_for_restart_stable_direct_chat_history()
     {
         var configuration = new ConfigurationBuilder()

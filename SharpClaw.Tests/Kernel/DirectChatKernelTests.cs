@@ -52,8 +52,10 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var conversationId = Guid.NewGuid();
+        var graph = new KernelGraphBuilder().Compile();
         var kernel = DirectChatKernelFactory.CreateFromGraph(
-            new KernelGraphBuilder().Compile(),
+            graph,
+            CreateDispatcher(graph),
             new ProviderKernelTransport(provider),
             new SingleConversationResolver(conversationId),
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
@@ -71,8 +73,10 @@ public sealed class DirectChatKernelTests
     {
         var provider = new RecordingProviderClient();
         var store = new InMemoryConversationStore();
+        var graph = new KernelGraphBuilder().Compile();
         var kernel = DirectChatKernelFactory.CreateFromGraph(
-            new KernelGraphBuilder().Compile(),
+            graph,
+            CreateDispatcher(graph),
             new ProviderKernelTransport(provider),
             new SingleConversationResolver(Guid.NewGuid()),
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
@@ -96,8 +100,10 @@ public sealed class DirectChatKernelTests
         var conversationId = Guid.NewGuid();
         var provider = new SequencedProviderClient();
         var resolver = new SignalingConversationResolver(conversationId);
+        var graph = new KernelGraphBuilder().Compile();
         var kernel = DirectChatKernelFactory.CreateFromGraph(
-            new KernelGraphBuilder().Compile(),
+            graph,
+            CreateDispatcher(graph),
             new ProviderKernelTransport(provider),
             resolver,
             new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
@@ -119,8 +125,17 @@ public sealed class DirectChatKernelTests
             .Equal(
                 "user:first",
                 "assistant:reply-1",
-                "user:second");
+            "user:second");
     }
+
+    private static KernelActionDispatcher CreateDispatcher(KernelGraph graph) =>
+        new(
+            graph,
+            new KernelActionExecutionContext(
+                RequestPrincipal.Anonymous,
+                ExtensionFeatureSet.Empty,
+                Guid.NewGuid(),
+                Guid.NewGuid()));
 
     private sealed class RecordingProviderClient : IProviderApiClient
     {

@@ -33,14 +33,14 @@ internal static class DirectChatKernelFactory
 {
     internal static DirectChatKernel CreateFromGraph(
         KernelGraph graph,
+        KernelActionDispatcher dispatcher,
         IKernelProviderTransport providerTransport,
         IConversationResolver conversationResolver,
         IChatProfileResolver profileResolver,
-        IConversationStore conversationStore,
-        RequestPrincipal? caller = null,
-        ExtensionFeatureSet? features = null)
+        IConversationStore conversationStore)
     {
         ArgumentNullException.ThrowIfNull(graph);
+        ArgumentNullException.ThrowIfNull(dispatcher);
         ArgumentNullException.ThrowIfNull(providerTransport);
         ArgumentNullException.ThrowIfNull(conversationResolver);
         ArgumentNullException.ThrowIfNull(profileResolver);
@@ -49,13 +49,6 @@ internal static class DirectChatKernelFactory
         var gatedConversationResolver = new RunScopedConversationResolver(
             conversationResolver,
             new ConversationTurnGate());
-        var dispatcher = new KernelActionDispatcher(
-            graph,
-            new KernelActionExecutionContext(
-                caller ?? RequestPrincipal.Anonymous,
-                features ?? ExtensionFeatureSet.Empty,
-                Guid.NewGuid(),
-                Guid.NewGuid()));
         var contextAssembler = graph.CreateChatContextAssembler(dispatcher);
         var providerLoop = new ProviderRoundLoop(providerTransport, graph, dispatcher);
         var toolPipeline = new UnifiedToolPipeline(graph, dispatcher);

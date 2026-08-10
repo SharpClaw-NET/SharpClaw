@@ -42,6 +42,8 @@ internal static class RuntimeHostComposition
         services.AddSingleton<RuntimeDatabaseReadiness>();
         services.AddSingleton<IRuntimeProviderClientFactory, RuntimeProviderClientFactory>();
         services.AddSingleton<IConversationStore, EfConversationStore>();
+        services.AddSingleton<IActionDispatcher>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimeKernelAdapter>().ActionDispatcher);
         services.AddScoped<IModelRegistrar, RuntimeModelRegistrar>();
 
         services.AddSingleton<IModuleStorageContractProvider>(
