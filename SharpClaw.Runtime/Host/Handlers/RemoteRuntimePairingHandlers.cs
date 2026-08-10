@@ -1,5 +1,6 @@
 using Microsoft.AspNetCore.Http;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.Host.Routing;
@@ -19,48 +20,50 @@ public static class RemoteRuntimePairingHandlers
         RuntimeKernelAdapter runtimeKernel,
         CancellationToken cancellationToken)
     {
-        return await runtimeKernel.RunSecurityActionAsync(
+        if (!await AuthorizeAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
             new SharpClawActionKey("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation("create-invitation", RemoteRuntimeBridgePaths.RegistryPrefix),
-            async (_, ct) =>
-            {
-                try
-                {
-                    byte[]? certificateAuthorityPfx = null;
-                    try
-                    {
-                        if (!string.IsNullOrWhiteSpace(request.CertificateAuthorityPfxBase64))
-                            certificateAuthorityPfx = Convert.FromBase64String(request.CertificateAuthorityPfxBase64);
+            runtimeKernel,
+            cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
 
-                        var invitation = await registry.CreateInvitationAsync(
-                            request.GatewayInstanceId,
-                            request.GatewayServerPublicKeyHash,
-                            request.AuthoritativeRuntimeInstanceId,
-                            request.AuthoritativeRuntimeInstallFingerprint,
-                            TimeSpan.FromSeconds(request.LifetimeSeconds),
-                            request.DisplayName,
-                            request.Description,
-                            certificateAuthorityPfx,
-                            ct);
-                        return Results.Ok(invitation);
-                    }
-                    finally
-                    {
-                        if (certificateAuthorityPfx is not null)
-                            System.Security.Cryptography.CryptographicOperations.ZeroMemory(certificateAuthorityPfx);
-                    }
-                }
-                catch (RemoteRuntimePairingRegistryException exception)
-                {
-                    return Results.Json(new { code = exception.Code, error = exception.Message }, statusCode: 400);
-                }
-                catch (ArgumentException exception)
-                {
-                    return Results.Json(new { error = exception.Message }, statusCode: 400);
-                }
-            },
-            cancellationToken);
+        try
+        {
+            byte[]? certificateAuthorityPfx = null;
+            try
+            {
+                if (!string.IsNullOrWhiteSpace(request.CertificateAuthorityPfxBase64))
+                    certificateAuthorityPfx = Convert.FromBase64String(request.CertificateAuthorityPfxBase64);
+
+                var invitation = await registry.CreateInvitationAsync(
+                    request.GatewayInstanceId,
+                    request.GatewayServerPublicKeyHash,
+                    request.AuthoritativeRuntimeInstanceId,
+                    request.AuthoritativeRuntimeInstallFingerprint,
+                    TimeSpan.FromSeconds(request.LifetimeSeconds),
+                    request.DisplayName,
+                    request.Description,
+                    certificateAuthorityPfx,
+                    cancellationToken);
+                return Results.Ok(invitation);
+            }
+            finally
+            {
+                if (certificateAuthorityPfx is not null)
+                    System.Security.Cryptography.CryptographicOperations.ZeroMemory(certificateAuthorityPfx);
+            }
+        }
+        catch (RemoteRuntimePairingRegistryException exception)
+        {
+            return Results.Json(new { code = exception.Code, error = exception.Message }, statusCode: 400);
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.Json(new { error = exception.Message }, statusCode: 400);
+        }
     }
 
     [MapPost("/claim")]
@@ -180,16 +183,18 @@ public static class RemoteRuntimePairingHandlers
         RuntimeKernelAdapter runtimeKernel,
         CancellationToken cancellationToken)
     {
-        return await runtimeKernel.RunSecurityActionAsync(
+        if (!await AuthorizeAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
             new SharpClawActionKey("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation("find", $"/pairings/{pairId:D}"),
-            async (_, ct) =>
-            {
-                var entry = await registry.FindAsync(pairId, ct);
-                return entry is null ? Results.NotFound() : Results.Ok(ToSnapshot(entry));
-            },
-            cancellationToken);
+            runtimeKernel,
+            cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var entry = await registry.FindAsync(pairId, cancellationToken);
+        return entry is null ? Results.NotFound() : Results.Ok(ToSnapshot(entry));
     }
 
     [MapPut("/pairings/{pairId:guid}")]
@@ -254,25 +259,29 @@ public static class RemoteRuntimePairingHandlers
         RemoteRuntimePairingRegistry registry,
         RuntimeKernelAdapter runtimeKernel,
         CancellationToken cancellationToken)
-        => await runtimeKernel.RunSecurityActionAsync(
+    {
+        if (!await AuthorizeAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
             new SharpClawActionKey("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation("delete", $"/pairings/{pairId:D}"),
-            async (_, ct) =>
-            {
-                try
-                {
-                    await registry.DeleteAsync(pairId, ct);
-                    return Results.NoContent();
-                }
-                catch (RemoteRuntimePairingRegistryException exception)
-                {
-                    return Results.Json(
-                        new { code = exception.Code, error = exception.Message },
-                        statusCode: 400);
-                }
-            },
-            cancellationToken);
+            runtimeKernel,
+            cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            await registry.DeleteAsync(pairId, cancellationToken);
+            return Results.NoContent();
+        }
+        catch (RemoteRuntimePairingRegistryException exception)
+        {
+            return Results.Json(
+                new { code = exception.Code, error = exception.Message },
+                statusCode: 400);
+        }
+    }
 
     [MapPost("/approve")]
     public static Task<IResult> Approve(
@@ -351,62 +360,83 @@ public static class RemoteRuntimePairingHandlers
         RuntimeKernelAdapter runtimeKernel,
         Microsoft.Extensions.Logging.ILoggerFactory loggerFactory,
         CancellationToken cancellationToken)
-        => await runtimeKernel.RunSecurityActionAsync(
+    {
+        if (!await AuthorizeAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
             new SharpClawActionKey("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation("active-lookup", "/active"),
-            async (_, ct) =>
-            {
-                try
-                {
-                    return Results.Ok(await registry.FindActiveTargetAsync(
+            runtimeKernel,
+            cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            return Results.Ok(await registry.FindActiveTargetAsync(
                 gatewayInstanceId,
                 authoritativeRuntimeInstanceId,
                 proxyRuntimeInstanceId,
                 certificateIdentity,
                 authoritativeRuntimeInstallFingerprint,
-                ct));
-                }
-                catch (Exception exception)
-                {
-                    Microsoft.Extensions.Logging.LoggerExtensions.LogError(
-                        loggerFactory.CreateLogger("RemoteRuntimePairingHandlers"),
-                        exception,
-                        "Remote Runtime pairing active lookup failed for the configured target.");
-                    return Results.Json(
-                        new { code = "PairingRegistryFailure", error = "The pairing registry lookup failed." },
-                        statusCode: StatusCodes.Status500InternalServerError);
-                }
-            },
-            cancellationToken);
+                cancellationToken));
+        }
+        catch (Exception exception)
+        {
+            Microsoft.Extensions.Logging.LoggerExtensions.LogError(
+                loggerFactory.CreateLogger("RemoteRuntimePairingHandlers"),
+                exception,
+                "Remote Runtime pairing active lookup failed for the configured target.");
+            return Results.Json(
+                new { code = "PairingRegistryFailure", error = "The pairing registry lookup failed." },
+                statusCode: StatusCodes.Status500InternalServerError);
+        }
+    }
 
-    private static Task<IResult> ExecuteAsync<T>(
+    private static async Task<IResult> ExecuteAsync<T>(
         HttpContext context,
         RuntimeKernelAdapter runtimeKernel,
         string operationName,
         string resource,
         Func<CancellationToken, Task<T>> operation,
         CancellationToken cancellationToken)
-        => runtimeKernel.RunSecurityActionAsync(
+    {
+        if (!await AuthorizeAsync(
             KernelHostEndpoints.CreateExecutionContext(context),
             new SharpClawActionKey("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation(operationName, resource),
-            async (_, ct) =>
-            {
-                try
-                {
-                    return Results.Ok(await operation(ct));
-                }
-                catch (RemoteRuntimePairingRegistryException exception)
-                {
-                    return Results.Json(new { code = exception.Code, error = exception.Message }, statusCode: 400);
-                }
-                catch (ArgumentException exception)
-                {
-                    return Results.Json(new { error = exception.Message }, statusCode: 400);
-                }
-            },
-            cancellationToken).AsTask();
+            runtimeKernel,
+            cancellationToken))
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        try
+        {
+            return Results.Ok(await operation(cancellationToken));
+        }
+        catch (RemoteRuntimePairingRegistryException exception)
+        {
+            return Results.Json(new { code = exception.Code, error = exception.Message }, statusCode: 400);
+        }
+        catch (ArgumentException exception)
+        {
+            return Results.Json(new { error = exception.Message }, statusCode: 400);
+        }
+    }
+
+    private static ValueTask<bool> AuthorizeAsync(
+        KernelActionExecutionContext executionContext,
+        SharpClawActionKey actionKey,
+        RuntimeSecurityActionInvocation invocation,
+        RuntimeKernelAdapter runtimeKernel,
+        CancellationToken cancellationToken) =>
+        runtimeKernel.RunSecurityDecisionAsync(
+            executionContext,
+            actionKey,
+            invocation,
+            static (_, _) => ValueTask.FromResult(true),
+            cancellationToken);
 
     private static RemoteRuntimePairingRegistrySnapshot ToSnapshot(
         RemoteRuntimePairingRegistryEntry entry)

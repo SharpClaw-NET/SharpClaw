@@ -51,21 +51,26 @@ internal static class KernelHostEndpoints
         return Results.Ok(result);
     }
 
-    private static Task<IResult> ReadEnvironmentAsync(
+    private static async Task<IResult> ReadEnvironmentAsync(
         HttpContext context,
         IConfiguration configuration,
         RuntimeKernelAdapter runtimeKernel,
-        CancellationToken cancellationToken) =>
-        runtimeKernel.RunSecurityActionAsync(
+        CancellationToken cancellationToken)
+    {
+        var allowed = await runtimeKernel.RunSecurityDecisionAsync(
             CreateExecutionContext(context),
             new SharpClawActionKey("security.secret.read"),
             new RuntimeSecurityActionInvocation("read", "/env/core"),
-            (_, _) => ValueTask.FromResult<IResult>(Results.Ok(
-                configuration.AsEnumerable()
-                    .Where(static pair => pair.Value is not null)
-                    .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
-                    .ToDictionary(static pair => pair.Key, static pair => pair.Value))),
-            cancellationToken).AsTask();
+            static (_, _) => ValueTask.FromResult(true),
+            cancellationToken);
+        if (!allowed)
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+
+        return Results.Ok(configuration.AsEnumerable()
+            .Where(static pair => pair.Value is not null)
+            .OrderBy(static pair => pair.Key, StringComparer.Ordinal)
+            .ToDictionary(static pair => pair.Key, static pair => pair.Value));
+    }
 
     private static async Task StreamChatAsync(
         HttpContext context,

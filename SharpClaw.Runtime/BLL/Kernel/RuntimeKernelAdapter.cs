@@ -22,7 +22,8 @@ public sealed class RuntimeKernelAdapter
         IEnumerable<ISharpClawModule> modules,
         SharpClawInstancePaths instancePaths,
         IRuntimeProviderClientFactory providerClientFactory,
-        KernelGraphCompileOptions? graphCompileOptions = null)
+        KernelGraphCompileOptions? graphCompileOptions = null,
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hostServices);
@@ -42,7 +43,8 @@ public sealed class RuntimeKernelAdapter
                 RequestPrincipal.Anonymous,
                 ExtensionFeatureSet.Empty,
                 Guid.NewGuid(),
-                Guid.NewGuid()));
+                Guid.NewGuid()),
+            repeatEvidenceAuthority: repeatEvidenceAuthority);
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
@@ -128,19 +130,20 @@ public sealed class RuntimeKernelAdapter
     }
 
     /// <summary>
-    /// Runs one guarded security terminal through the singleton dispatcher.
+    /// Runs one repeat-safe security decision through the singleton dispatcher.
     /// The invocation carries operation metadata only and never carries secrets.
+    /// Protected work must run after this method returns.
     /// </summary>
-    public async ValueTask<TResult> RunSecurityActionAsync<TResult>(
+    public async ValueTask<bool> RunSecurityDecisionAsync(
         KernelActionExecutionContext executionContext,
         SharpClawActionKey actionKey,
         RuntimeSecurityActionInvocation invocation,
-        Func<RuntimeSecurityActionInvocation, CancellationToken, ValueTask<TResult>> terminal,
+        Func<RuntimeSecurityActionInvocation, CancellationToken, ValueTask<bool>> baseDecision,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(executionContext);
         ArgumentNullException.ThrowIfNull(invocation);
-        ArgumentNullException.ThrowIfNull(terminal);
+        ArgumentNullException.ThrowIfNull(baseDecision);
         if (!RuntimeSecurityActionManifest.Contains(actionKey))
         {
             throw new ArgumentException(
@@ -149,6 +152,7 @@ public sealed class RuntimeKernelAdapter
         }
 
         var descriptor = Graph.GetStandardAction(actionKey);
+        var baseAllowed = false;
         var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
             executionContext,
             descriptor,
@@ -161,19 +165,21 @@ public sealed class RuntimeKernelAdapter
                         $"Security action '{actionKey.Value}' returned an invalid invocation payload.");
                 }
 
-                var terminalResult = await terminal(effectiveInvocation, ct);
-                return terminalResult!;
+                baseAllowed = await baseDecision(effectiveInvocation, ct);
+                return baseAllowed;
             },
             Graph.ActionSnapshot,
             cancellationToken);
 
-        if (result is not TResult typedResult)
+        if (result is not bool actionAllowed)
         {
             throw new KernelActionExecutionException(
                 $"Security action '{actionKey.Value}' returned an invalid result type.");
         }
 
-        return typedResult;
+        // A module can restrict the host decision, but it cannot grant authority
+        // when the host decision did not allow the request.
+        return baseAllowed && actionAllowed;
     }
 
     public async ValueTask StartAsync(

@@ -39,16 +39,16 @@ public sealed class RuntimeSecurityBoundaryTests
         probe.Snapshot = adapter.Graph.ActionSnapshot;
 
         var requests = RuntimeSecurityActionManifest.Required
-            .Select((key, index) => adapter.RunSecurityActionAsync(
+            .Select((key, index) => adapter.RunSecurityDecisionAsync(
                 ExecutionContext($"security-user-{index}"),
                 key,
                 new RuntimeSecurityActionInvocation(key.Value, $"/security/{index}"),
-                static (invocation, _) => ValueTask.FromResult(invocation.Operation)))
+                static (_, _) => ValueTask.FromResult(true)))
             .ToArray();
 
         (await Task.WhenAll(requests.Select(static request => request.AsTask())))
             .Should()
-            .Equal(RuntimeSecurityActionManifest.Required.Select(static key => key.Value));
+            .OnlyContain(static allowed => allowed);
 
         probe.Observations.Should().HaveCount(RuntimeSecurityActionManifest.Required.Count + 1);
         for (var index = 0; index < RuntimeSecurityActionManifest.Required.Count; index++)
@@ -111,6 +111,133 @@ public sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
+    public async Task Api_key_repeat_does_not_repeat_the_protected_pipeline()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var probe = new SecurityProbe { RepeatAction = "security.api_key.resolve" };
+        var configuration = Configuration();
+        var adapter = CreateAdapter(
+            workspace,
+            probe,
+            configuration,
+            new MatchingRepeatEvidenceAuthority());
+        var keyProvider = new ApiKeyProvider(workspace.Paths);
+        var context = HttpContext("api-user");
+        context.Request.Path = "/protected";
+        context.Request.Headers["X-Api-Key"] = keyProvider.ApiKey;
+        var nextCalls = 0;
+
+        var middleware = new ApiKeyMiddleware(
+            _ =>
+            {
+                Interlocked.Increment(ref nextCalls);
+                return Task.CompletedTask;
+            },
+            keyProvider,
+            configuration,
+            adapter);
+
+        await middleware.InvokeAsync(context);
+
+        nextCalls.Should().Be(1);
+        probe.Observations.Count(observation => observation.Action == "security.api_key.resolve")
+            .Should().Be(2);
+    }
+
+    [Test]
+    public async Task Api_key_result_replacement_cannot_grant_invalid_base_authority()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var probe = new SecurityProbe
+        {
+            ReplaceResultAction = "security.api_key.resolve",
+            ReplaceResultValue = true,
+        };
+        var configuration = Configuration();
+        var adapter = CreateAdapter(workspace, probe, configuration);
+        var keyProvider = new ApiKeyProvider(workspace.Paths);
+        var context = HttpContext("api-user");
+        context.Request.Path = "/protected";
+        context.Response.Body = new MemoryStream();
+        var nextCalls = 0;
+        var middleware = new ApiKeyMiddleware(
+            _ =>
+            {
+                Interlocked.Increment(ref nextCalls);
+                return Task.CompletedTask;
+            },
+            keyProvider,
+            configuration,
+            adapter);
+
+        await middleware.InvokeAsync(context);
+
+        nextCalls.Should().Be(0);
+        context.Response.StatusCode.Should().Be(StatusCodes.Status423Locked);
+    }
+
+    [Test]
+    public async Task Repeatable_pairing_decision_does_not_repeat_the_mutation_terminal()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var probe = new SecurityProbe { RepeatAction = "security.remote_pairing.validate" };
+        var adapter = CreateAdapter(
+            workspace,
+            probe,
+            repeatEvidenceAuthority: new MatchingRepeatEvidenceAuthority());
+        var baseDecisionCalls = 0;
+        var mutationCalls = 0;
+
+        var allowed = await adapter.RunSecurityDecisionAsync(
+            ExecutionContext("pairing-admin"),
+            Action("security.remote_pairing.validate"),
+            new RuntimeSecurityActionInvocation("approve", "/approve"),
+            (_, _) =>
+            {
+                Interlocked.Increment(ref baseDecisionCalls);
+                return ValueTask.FromResult(true);
+            });
+        if (allowed)
+            Interlocked.Increment(ref mutationCalls);
+
+        allowed.Should().BeTrue();
+        baseDecisionCalls.Should().Be(1);
+        mutationCalls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task Security_result_replacement_can_restrict_but_cannot_grant_the_base_decision()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var restrictingProbe = new SecurityProbe
+        {
+            ReplaceResultAction = "security.remote_pairing.validate",
+            ReplaceResultValue = false,
+        };
+        var restrictingAdapter = CreateAdapter(workspace, restrictingProbe);
+        var restricted = await restrictingAdapter.RunSecurityDecisionAsync(
+            ExecutionContext("pairing-admin"),
+            Action("security.remote_pairing.validate"),
+            new RuntimeSecurityActionInvocation("revoke", "/revoke"),
+            static (_, _) => ValueTask.FromResult(true));
+        restricted.Should().BeFalse();
+
+        using var secondWorkspace = new TemporaryWorkspace();
+        var grantingProbe = new SecurityProbe
+        {
+            ReplaceResultAction = "security.remote_pairing.validate",
+            ReplaceResultValue = true,
+        };
+        var grantingAdapter = CreateAdapter(secondWorkspace, grantingProbe);
+        var granted = await grantingAdapter.RunSecurityDecisionAsync(
+            ExecutionContext("pairing-admin"),
+            Action("security.remote_pairing.validate"),
+            new RuntimeSecurityActionInvocation("revoke", "/revoke"),
+            static (_, _) => ValueTask.FromResult(false));
+        granted.Should().BeFalse();
+    }
+
+    [Test]
     public async Task Session_administrator_secret_and_pairing_actions_fail_closed()
     {
         using var workspace = new TemporaryWorkspace();
@@ -130,7 +257,7 @@ public sealed class RuntimeSecurityBoundaryTests
             var adapter = CreateAdapter(workspace, probe);
             var terminalCalled = false;
 
-            Func<Task> action = async () => await adapter.RunSecurityActionAsync(
+            Func<Task> action = async () => await adapter.RunSecurityDecisionAsync(
                 ExecutionContext($"denied-{actionName}"),
                 Action(actionName),
                 new RuntimeSecurityActionInvocation("authorize", "/security"),
@@ -157,7 +284,7 @@ public sealed class RuntimeSecurityBoundaryTests
         cancellation.Cancel();
         var terminalCalled = false;
 
-        Func<Task> action = async () => await adapter.RunSecurityActionAsync(
+        Func<Task> action = async () => await adapter.RunSecurityDecisionAsync(
             ExecutionContext("cancelled-user"),
             Action("security.remote_pairing.validate"),
             new RuntimeSecurityActionInvocation("validate", "/pairings"),
@@ -180,7 +307,7 @@ public sealed class RuntimeSecurityBoundaryTests
         var adapter = CreateAdapter(workspace, probe);
         var terminalCalled = false;
 
-        Func<Task> action = async () => await adapter.RunSecurityActionAsync(
+        Func<Task> action = async () => await adapter.RunSecurityDecisionAsync(
             ExecutionContext("failed-user"),
             Action("security.secret.delete"),
             new RuntimeSecurityActionInvocation("delete", "/env/core"),
@@ -211,9 +338,11 @@ public sealed class RuntimeSecurityBoundaryTests
         var pairingSource = File.ReadAllText(Path.Combine(
             root!, "SharpClaw.Runtime", "Host", "Handlers", "RemoteRuntimePairingHandlers.cs"));
 
-        apiKeySource.Should().Contain("RunSecurityActionAsync");
+        apiKeySource.Should().Contain("RunSecurityDecisionAsync");
+        apiKeySource.Should().Contain("await next(context)");
         endpointSource.Should().Contain("security.secret.read");
-        pairingSource.Should().Contain("RunSecurityActionAsync");
+        pairingSource.Should().Contain("RunSecurityDecisionAsync");
+        pairingSource.Should().NotContain("RunSecurityActionAsync");
         pairingSource.Should().NotContain("return Task.FromResult<IResult>(");
         hostProject.Should().Contain("Compile Remove=\"Api\\JwtSessionMiddleware.cs\"");
         hostProject.Should().Contain("Compile Remove=\"Handlers\\**\\*.cs\"");
@@ -239,7 +368,8 @@ public sealed class RuntimeSecurityBoundaryTests
     private static RuntimeKernelAdapter CreateAdapter(
         TemporaryWorkspace workspace,
         SecurityProbe probe,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
         var provider = new SecurityProvider();
         var moduleId = "security-boundary-test";
@@ -282,7 +412,8 @@ public sealed class RuntimeSecurityBoundaryTests
                                 typeof(object)));
                     })
                     .ToArray(),
-            });
+            },
+            repeatEvidenceAuthority);
     }
 
     private static IConfiguration Configuration() => new ConfigurationBuilder()
@@ -356,7 +487,36 @@ public sealed class RuntimeSecurityBoundaryTests
 
         public string? FailureAction { get; init; }
 
+        public string? RepeatAction { get; init; }
+
+        public string? ReplaceResultAction { get; init; }
+
+        public bool ReplaceResultValue { get; init; }
+
         public int NestedDispatches;
+    }
+
+    private sealed class MatchingRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
+    {
+        public ValueTask<KernelActionRepeatEvidence?> AuthorizeAsync(
+            KernelActionRepeatEvidenceRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            return ValueTask.FromResult<KernelActionRepeatEvidence?>(new(
+                Guid.NewGuid().ToString("N"),
+                request.RequiredKind,
+                request.ActionKey,
+                request.ActionVersion,
+                request.IdempotencyScope,
+                request.IdempotencyKey,
+                request.PriorInvocationId,
+                request.PriorAttempt,
+                request.NextInvocationId,
+                request.NextAttempt,
+                request.RequestedAt,
+                request.RequestedAt.AddMinutes(1)));
+        }
     }
 
     private sealed record SecurityObservation(string Action, string Subject, int Depth);
@@ -397,6 +557,30 @@ public sealed class RuntimeSecurityBoundaryTests
                     StringComparison.Ordinal))
             {
                 throw new InvalidOperationException("K03 test action failure.");
+            }
+
+            if (string.Equals(
+                    probe.RepeatAction,
+                    context.ActionKey.Value,
+                    StringComparison.Ordinal)
+                && context.Attempt == 1)
+            {
+                return await control.RepeatAsync(
+                    new ActionRepeatRequest<KernelActionEnvelope>(
+                        context.Action,
+                        "K03 repeat boundary test",
+                        null),
+                    cancellationToken);
+            }
+
+            if (string.Equals(
+                    probe.ReplaceResultAction,
+                    context.ActionKey.Value,
+                    StringComparison.Ordinal))
+            {
+                return control.ReplaceResult(
+                    probe.ReplaceResultValue,
+                    "K03 result boundary test");
             }
 
             return await control.ProceedAsync(cancellationToken);

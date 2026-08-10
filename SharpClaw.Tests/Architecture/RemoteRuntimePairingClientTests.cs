@@ -173,6 +173,8 @@ public sealed class RemoteRuntimePairingClientTests
 
         private static byte[] CreateCertificateDer(string certificateSigningRequestBase64)
         {
+            var now = DateTimeOffset.UtcNow;
+            var notBefore = now.AddMinutes(-1);
             var request = CertificateRequest.LoadSigningRequest(
                 Convert.FromBase64String(certificateSigningRequestBase64),
                 HashAlgorithmName.SHA256);
@@ -184,12 +186,13 @@ public sealed class RemoteRuntimePairingClientTests
             authorityRequest.CertificateExtensions.Add(
                 new X509BasicConstraintsExtension(true, false, 0, true));
             using var authority = authorityRequest.CreateSelfSigned(
-                DateTimeOffset.UtcNow.AddMinutes(-1),
-                DateTimeOffset.UtcNow.AddMinutes(5));
+                notBefore,
+                now.AddMinutes(30));
+            var leafNotAfter = authority.NotAfter.ToUniversalTime().AddSeconds(-1);
             using var certificate = request.Create(
                 authority,
-                DateTimeOffset.UtcNow.AddMinutes(-1),
-                DateTimeOffset.UtcNow.AddMinutes(5),
+                notBefore,
+                leafNotAfter,
                 RandomNumberGenerator.GetBytes(16));
             return certificate.Export(X509ContentType.Cert);
         }
