@@ -94,6 +94,18 @@ public static class LocalRuntimeHost
             await kernel.StartAsync("0.1.0-beta");
             runtimeStarted = true;
 
+            if (RuntimeCliCommandLine.IsRequested(args))
+            {
+                Environment.ExitCode = await RuntimeCliSession.RunAsync(
+                    args,
+                    kernel,
+                    kernel.Kernel,
+                    Console.Out,
+                    Console.Error,
+                    CancellationToken.None);
+                return;
+            }
+
             app.UseMiddleware<ApiKeyMiddleware>();
             KernelHostEndpoints.Map(app);
             app.MapHandlers();

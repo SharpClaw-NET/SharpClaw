@@ -70,6 +70,57 @@ public sealed class RuntimeKernelAdapter
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
+    internal KernelActionExecutionContext CreateCliExecutionContext(
+        RequestPrincipal? caller = null,
+        ExtensionFeatureSet? features = null) =>
+        CreateHostExecutionContext(caller, features);
+
+    internal async ValueTask<TResult> RunCliActionAsync<TResult>(
+        KernelActionExecutionContext executionContext,
+        SharpClawActionKey actionKey,
+        RuntimeCliActionInvocation invocation,
+        Func<CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionContext);
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeCliActionCatalog.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a published Runtime CLI action.",
+                nameof(actionKey));
+        }
+
+        var descriptor = Graph.GetStandardAction(actionKey);
+        var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext,
+            descriptor,
+            new KernelActionEnvelope(actionKey, invocation),
+            async (envelope, ct) =>
+            {
+                if (envelope.Payload is not RuntimeCliActionInvocation)
+                {
+                    throw new KernelActionExecutionException(
+                        $"CLI action '{actionKey.Value}' returned an invalid invocation payload.");
+                }
+
+                return (object?)await terminal(ct) ??
+                    throw new KernelActionExecutionException(
+                        $"CLI action '{actionKey.Value}' returned a null result.");
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+
+        if (result is not TResult typedResult)
+        {
+            throw new KernelActionExecutionException(
+                $"CLI action '{actionKey.Value}' returned an invalid result type.");
+        }
+
+        return typedResult;
+    }
+
     public ValueTask RunRuntimeLifecycleActionAsync(
         SharpClawActionKey actionKey,
         object? payload,
