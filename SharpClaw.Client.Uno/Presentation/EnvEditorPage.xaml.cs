@@ -265,7 +265,10 @@ public sealed partial class EnvEditorPage : Page
             }
             else
             {
-                await SaveLocalDocumentAsync(content);
+                var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
+                await actions.RunCommandAsync(
+                    "client.environment.save",
+                    _ => new ValueTask(SaveLocalDocumentAsync(content)));
             }
 
             ShowStatus("> Saved. Restarting service...", error: false);
@@ -294,11 +297,19 @@ public sealed partial class EnvEditorPage : Page
                     return;
             }
 
-            foreach (var entry in _entries.Where(entry => entry.IsActive))
-            {
-                var environmentName = entry.Key.Replace(":", "__", StringComparison.Ordinal);
-                Environment.SetEnvironmentVariable(environmentName, entry.Value);
-            }
+            var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
+            await actions.RunCommandAsync(
+                "client.environment.apply",
+                _ =>
+                {
+                    foreach (var entry in _entries.Where(entry => entry.IsActive))
+                    {
+                        var environmentName = entry.Key.Replace(":", "__", StringComparison.Ordinal);
+                        Environment.SetEnvironmentVariable(environmentName, entry.Value);
+                    }
+
+                    return ValueTask.CompletedTask;
+                });
             ShowStatus("> Applied. Restarting service...", error: false);
             await RestartBackendAsync();
         }
@@ -328,20 +339,26 @@ public sealed partial class EnvEditorPage : Page
             return;
         }
 
-        backend.Stop();
-        apiClient.InvalidateApiKey();
-
-        // Brief pause to let the process release the port.
-        await Task.Delay(500);
-
         try
         {
-            await backend.EnsureStartedAsync();
+            var actions = services.GetRequiredService<ClientActionDispatcher>();
+            await actions.RunCommandAsync(
+                "client.backend.restart",
+                async token =>
+                {
+                    backend.Stop();
+                    apiClient.InvalidateApiKey();
+                    await Task.Delay(500, token);
+                    await backend.EnsureStartedAsync(token);
+                });
 
             // Wait for the API to become reachable.
             for (var i = 0; i < 20; i++)
             {
-                if (await backend.IsApiReachableAsync())
+                var reachable = await actions.RunCommandAsync(
+                    "client.backend.health",
+                    token => new ValueTask<bool>(backend.IsApiReachableAsync(token)));
+                if (reachable)
                 {
                     ShowStatus("✓ Service restarted successfully.", error: false, success: true);
                     return;

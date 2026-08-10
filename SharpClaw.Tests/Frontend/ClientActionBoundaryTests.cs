@@ -319,6 +319,11 @@ public sealed class ClientActionBoundaryTests
             .Should().Contain("RunCommandAsync");
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml.cs"))
             .Should().Contain("client.provider.ollama.probe");
+        var environmentSource = File.ReadAllText(
+            Path.Combine(clientRoot, "Presentation", "EnvEditorPage.xaml.cs"));
+        environmentSource.Should().Contain("client.environment.save");
+        environmentSource.Should().Contain("client.environment.apply");
+        environmentSource.Should().Contain("client.backend.restart");
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "SettingsPage.xaml.cs"))
             .Should().Contain("client.gateway.restart");
     }
