@@ -53,7 +53,7 @@ public sealed partial class DashboardPage : Page
     {
         if (App.Services is not { } services) return;
 
-        var navigator = services.GetRequiredService<INavigator>();
-        _ = navigator.NavigateRouteAsync(this, "Main");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main");
     }
 }

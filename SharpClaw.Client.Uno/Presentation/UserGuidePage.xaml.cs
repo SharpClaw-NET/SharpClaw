@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
+using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
@@ -175,6 +176,7 @@ public sealed partial class UserGuidePage : Page
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "Main");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main");
     }
 }

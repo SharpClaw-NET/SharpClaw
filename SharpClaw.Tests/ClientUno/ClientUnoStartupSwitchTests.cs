@@ -139,8 +139,10 @@ public sealed class ClientUnoStartupSwitchTests
 
         using var api = new SharpClawApiClient(
             "http://127.0.0.1:48923",
-            NullLogger<SharpClawApiClient>.Instance);
-        var boot = new BootModel(backend, gateway, api);
+            NullLogger<SharpClawApiClient>.Instance,
+            frontendInstance: null,
+            clientActions: new ClientActionDispatcher());
+var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
 
         var result = await boot.RunGatewayStepAsync(CancellationToken.None);
 

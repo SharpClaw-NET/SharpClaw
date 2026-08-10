@@ -1,6 +1,12 @@
+using SharpClaw.Services;
+
 namespace SharpClaw.Presentation;
 
-public partial record LoginModel(IDispatcher Dispatcher, INavigator Navigator, IAuthenticationService Authentication)
+public partial record LoginModel(
+    IDispatcher Dispatcher,
+    ClientNavigationService Navigation,
+    IAuthenticationService Authentication,
+    ClientActionDispatcher Actions)
 {
     public string Title { get; } = "Login";
 
@@ -13,10 +19,21 @@ public partial record LoginModel(IDispatcher Dispatcher, INavigator Navigator, I
         var username = await Username ?? string.Empty;
         var password = await Password ?? string.Empty;
 
-        var success = await Authentication.LoginAsync(Dispatcher, new Dictionary<string, string> { { nameof(Username), username }, { nameof(Password), password } });
+        var success = await Actions.RunCommandAsync(
+            "auth.login",
+            async cancellationToken => await Authentication.LoginAsync(
+                Dispatcher,
+                new Dictionary<string, string>
+                {
+                    { nameof(Username), username },
+                    { nameof(Password), password },
+                }),
+            token);
         if (success)
         {
-            await Navigator.NavigateViewModelAsync<MainModel>(this, qualifier: Qualifiers.ClearBackStack);
+            await Navigation.NavigateViewModelAsync<MainModel>(
+                this,
+                qualifier: Qualifiers.ClearBackStack);
         }
     }
 

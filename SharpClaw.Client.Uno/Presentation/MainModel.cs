@@ -1,16 +1,21 @@
+using SharpClaw.Services;
+
 namespace SharpClaw.Presentation;
 
 public partial record MainModel
 {
-    private INavigator _navigator;
+    private readonly ClientNavigationService _navigation;
+    private readonly ClientActionDispatcher _actions;
 
     public MainModel(
         IStringLocalizer localizer,
         IOptions<AppConfig> appInfo,
         IAuthenticationService authentication,
-        INavigator navigator)
+        ClientNavigationService navigation,
+        ClientActionDispatcher actions)
     {
-        _navigator = navigator;
+        _navigation = navigation;
+        _actions = actions;
         _authentication = authentication;
         Title = "Main";
         Title += $" - {localizer["ApplicationName"]}";
@@ -24,12 +29,21 @@ public partial record MainModel
     public async Task GoToSecond()
     {
         var name = await Name;
-        await _navigator.NavigateViewModelAsync<SecondModel>(this, data: new Entity(name!));
+        await _navigation.NavigateViewModelAsync<SecondModel>(
+            this,
+            data: new Entity(name!));
     }
 
     public async ValueTask Logout(CancellationToken token)
     {
-        await _authentication.LogoutAsync(token);
+        await _actions.RunCommandAsync(
+            "auth.logout",
+            async cancellationToken =>
+            {
+                await _authentication.LogoutAsync(cancellationToken);
+                return true;
+            },
+            token);
     }
 
     private IAuthenticationService _authentication;

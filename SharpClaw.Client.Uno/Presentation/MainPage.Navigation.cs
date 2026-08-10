@@ -12,9 +12,6 @@ public sealed partial class MainPage
     private static string? LoadLocalSetting(string key)
         => App.Services?.GetService<ClientSettings>()?.Get(key);
 
-    private static void SaveLocalSetting(string key, string? value)
-        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
-
     // ── Navigation ───────────────────────────────────────────────
 
     private async void OnNewChannelClick(object sender, RoutedEventArgs e)
@@ -37,15 +34,17 @@ public sealed partial class MainPage
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "Settings");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Settings");
     }
 
-    private void OnLogoutClick(object sender, RoutedEventArgs e)
+    private async void OnLogoutClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
         var api = services.GetRequiredService<SharpClawApiClient>();
-        api.SetAccessToken(null!);
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "Login", qualifier: Qualifiers.ClearBackStack);
+        await api.SetAccessTokenAsync(null);
+        await services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
     }
 
     private async void OnReportIssueClick(object sender, RoutedEventArgs e) => await Windows.System.Launcher.LaunchUriAsync(new Uri("https://github.com/mkn8rn/SharpClaw/issues"));
@@ -56,13 +55,15 @@ public sealed partial class MainPage
     private void OnLegalNoticesClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "LegalNotices");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "LegalNotices");
     }
 
     private void OnUserGuideClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "UserGuide");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "UserGuide");
     }
 
     // ── Role assignment (right-click context menu) ─────────────

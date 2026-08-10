@@ -28,14 +28,18 @@ public sealed class ClientSettings
     };
 
     private readonly FrontendInstanceService _frontendInstance;
+    private readonly ClientActionDispatcher _actions;
     private readonly object _lock = new();
     private Dictionary<string, string> _values;
     private string _settingsPath;
     private Guid? _activeUserId;
 
-    public ClientSettings(FrontendInstanceService frontendInstance)
+    public ClientSettings(
+        FrontendInstanceService frontendInstance,
+        ClientActionDispatcher actions)
     {
         _frontendInstance = frontendInstance;
+        _actions = actions;
         _settingsPath = _frontendInstance.ClientSettingsPath;
         _values = Load();
     }
@@ -48,17 +52,29 @@ public sealed class ClientSettings
     /// Saves current in-memory state, then loads the target user's settings file
     /// from the frontend instance root.
     /// </summary>
-    public void SwitchUser(Guid userId)
+    public async Task SwitchUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            if (_values.Count > 0)
-                Flush();
+        var expectedVersion = _actions.GetStateVersion(StateKey);
+        await _actions.CommitStateAsync(
+            StateKey,
+            expectedVersion,
+            _ =>
+            {
+                lock (_lock)
+                {
+                    if (_values.Count > 0)
+                        Flush();
 
-            _activeUserId = userId;
-            _settingsPath = _frontendInstance.GetUserSettingsPath(userId);
-            _values = Load();
-        }
+                    _activeUserId = userId;
+                    _settingsPath = _frontendInstance.GetUserSettingsPath(userId);
+                    _values = Load();
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
 
     /// <summary>
@@ -74,40 +90,65 @@ public sealed class ClientSettings
     /// Writes or removes a setting. Passing <c>null</c> removes the key.
     /// Changes are flushed to disk immediately.
     /// </summary>
-    public void Set(string key, string? value)
+    public async Task SetAsync(
+        string key,
+        string? value,
+        CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            if (value is null)
-                _values.Remove(key);
-            else
-                _values[key] = value;
+        var expectedVersion = _actions.GetStateVersion(StateKey);
+        await _actions.CommitStateAsync(
+            StateKey,
+            expectedVersion,
+            _ =>
+            {
+                lock (_lock)
+                {
+                    if (value is null)
+                        _values.Remove(key);
+                    else
+                        _values[key] = value;
 
-            Flush();
-        }
+                    Flush();
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
 
     /// <summary>
     /// Deletes the settings file from disk and clears in-memory state.
     /// Called by the Danger Zone reset flow.
     /// </summary>
-    public void Reset()
+    public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            _values.Clear();
-            _activeUserId = null;
-            _settingsPath = _frontendInstance.ClientSettingsPath;
-            try { File.Delete(_settingsPath); } catch { /* best-effort */ }
-            try
+        var expectedVersion = _actions.GetStateVersion(StateKey);
+        await _actions.CommitStateAsync(
+            StateKey,
+            expectedVersion,
+            _ =>
             {
-                var usersDir = _frontendInstance.UsersSettingsDirectory;
-                if (Directory.Exists(usersDir))
-                    Directory.Delete(usersDir, recursive: true);
-            }
-            catch { /* best-effort */ }
-        }
+                lock (_lock)
+                {
+                    _values.Clear();
+                    _activeUserId = null;
+                    _settingsPath = _frontendInstance.ClientSettingsPath;
+                    try { File.Delete(_settingsPath); } catch { /* best-effort */ }
+                    try
+                    {
+                        var usersDir = _frontendInstance.UsersSettingsDirectory;
+                        if (Directory.Exists(usersDir))
+                            Directory.Delete(usersDir, recursive: true);
+                    }
+                    catch { /* best-effort */ }
+                }
+
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
+
+    private const string StateKey = "client.settings";
 
     // ── Internal ─────────────────────────────────────────────────
 

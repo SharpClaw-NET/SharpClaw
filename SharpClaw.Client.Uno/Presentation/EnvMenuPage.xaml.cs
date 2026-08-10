@@ -17,7 +17,8 @@ public sealed partial class EnvMenuPage : Page
     {
         if (App.Services is not { } services) return;
         var route = string.IsNullOrEmpty(PendingOrigin) ? "Login" : PendingOrigin;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, route);
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, route);
     }
 
     private async void OnAppCoreClick(object sender, RoutedEventArgs e)
@@ -35,7 +36,8 @@ public sealed partial class EnvMenuPage : Page
 
         StatusBlock.Visibility = Visibility.Collapsed;
         EnvEditorPage.PendingTarget = EnvTarget.Core;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvEditor");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvEditor");
     }
 
     private void OnAppInterfaceClick(object sender, RoutedEventArgs e)
@@ -43,7 +45,8 @@ public sealed partial class EnvMenuPage : Page
         if (App.Services is not { } services) return;
         StatusBlock.Visibility = Visibility.Collapsed;
         EnvEditorPage.PendingTarget = EnvTarget.Interface;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvEditor");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvEditor");
     }
 
     private void OnGatewayClick(object sender, RoutedEventArgs e)
@@ -51,7 +54,8 @@ public sealed partial class EnvMenuPage : Page
         if (App.Services is not { } services) return;
         StatusBlock.Visibility = Visibility.Collapsed;
         EnvEditorPage.PendingTarget = EnvTarget.Gateway;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvEditor");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvEditor");
     }
 }
 

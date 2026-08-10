@@ -373,16 +373,24 @@ public sealed partial class EnvEditorPage : Page
             return;
         }
 
-        gateway.Stop();
-        await Task.Delay(500);
-
         try
         {
-            await gateway.EnsureStartedAsync();
+            var actions = services.GetRequiredService<ClientActionDispatcher>();
+            await actions.RunCommandAsync(
+                "client.gateway.restart",
+                async token =>
+                {
+                    gateway.Stop();
+                    await Task.Delay(500, token);
+                    await gateway.EnsureStartedAsync(token);
+                });
 
             for (var i = 0; i < 20; i++)
             {
-                if (await gateway.IsGatewayReachableAsync())
+                var reachable = await actions.RunCommandAsync(
+                    "client.gateway.health",
+                    token => new ValueTask<bool>(gateway.IsGatewayReachableAsync(token)));
+                if (reachable)
                 {
                     ShowStatus("✓ Gateway restarted successfully.", error: false, success: true);
                     return;
@@ -593,7 +601,8 @@ public sealed partial class EnvEditorPage : Page
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 
     private void ShowStatus(string text, bool error, bool success = false)

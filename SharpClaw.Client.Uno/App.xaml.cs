@@ -176,14 +176,23 @@ public partial class App : Application
                         return manager;
                     });
 
+                    services.AddSingleton<ClientActionDispatcher>();
+                    services.AddSingleton<ClientNavigationService>();
                     services.AddSingleton<SharpClawApiClient>(sp =>
                         new SharpClawApiClient(
                             apiUrl,
                             sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
-                            frontendInstance));
-                    services.AddSingleton(new FirstSetupMarker(frontendInstance));
-                    services.AddSingleton(new ClientSettings(frontendInstance));
-                    services.AddSingleton(new AccountStore(frontendInstance));
+                            frontendInstance,
+                            sp.GetRequiredService<ClientActionDispatcher>()));
+                    services.AddSingleton(sp => new FirstSetupMarker(
+                        frontendInstance,
+                        sp.GetRequiredService<ClientActionDispatcher>()));
+                    services.AddSingleton(sp => new ClientSettings(
+                        frontendInstance,
+                        sp.GetRequiredService<ClientActionDispatcher>()));
+                    services.AddSingleton(sp => new AccountStore(
+                        frontendInstance,
+                        sp.GetRequiredService<ClientActionDispatcher>()));
                     var moduleStateCache = new ModuleStateCache();
                     var contributionRegistry = new ModuleFrontendContributionRegistry(moduleStateCache);
                     services.AddSingleton(moduleStateCache);
@@ -208,7 +217,8 @@ public partial class App : Application
 
                 // Show the terminal-style boot screen which handles
                 // connection, retry, and then navigates to Login/Main.
-                await navigator.NavigateRouteAsync(this, "Boot", qualifier: Qualifiers.Nested);
+                await services.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Boot", Qualifiers.Nested);
             });
 
         // Dispose managed processes when the app window closes.

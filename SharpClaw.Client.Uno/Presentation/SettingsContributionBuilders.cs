@@ -139,10 +139,13 @@ internal sealed class ResourceListSettingsContributionBuilder(string key) : ISet
         }
 
         selector.SelectedIndex = selectedIndex;
-        selector.SelectionChanged += (_, _) =>
+        selector.SelectionChanged += async (_, _) =>
         {
             if (selector.SelectedItem is not ComboBoxItem { Tag: string value }) return;
-            settings?.Set(settingKey, string.IsNullOrWhiteSpace(value) ? null : value);
+            if (settings is not null)
+                await settings.SetAsync(
+                    settingKey,
+                    string.IsNullOrWhiteSpace(value) ? null : value);
             context.Status(string.IsNullOrWhiteSpace(value) ? "Selection cleared." : "Selection saved.",
                 string.IsNullOrWhiteSpace(value) ? 0x808080 : 0x00FF00);
         };

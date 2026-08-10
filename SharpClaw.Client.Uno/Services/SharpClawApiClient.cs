@@ -13,15 +13,18 @@ public sealed class SharpClawApiClient : IDisposable
     private readonly HttpClient _http;
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
+    private readonly ClientActionDispatcher _clientActions;
     private string? _cachedApiKey;
 
     public SharpClawApiClient(
         string baseUrl,
         ILogger<SharpClawApiClient> logger,
-        FrontendInstanceService? frontendInstance = null)
+        FrontendInstanceService? frontendInstance,
+        ClientActionDispatcher clientActions)
     {
         _frontendInstance = frontendInstance;
         _logger = logger;
+        _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
         _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
             BaseAddress = new Uri(baseUrl),
@@ -48,51 +51,27 @@ public sealed class SharpClawApiClient : IDisposable
 
     public async Task<HttpResponseMessage> GetAsync(
         string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: false, ct);
 
     public async Task<HttpResponseMessage> PostAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: false, ct);
 
     public async Task<HttpResponseMessage> PostStreamAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-    }
+        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: true, ct);
 
     public async Task<HttpResponseMessage> GetStreamAsync(
         string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-    }
+        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: true, ct);
 
     public async Task<HttpResponseMessage> PutAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Put, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("PUT", path, content, responseHeadersRead: false, ct);
 
     public async Task<HttpResponseMessage> DeleteAsync(
         string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Delete, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("DELETE", path, null, responseHeadersRead: false, ct);
 
     /// <summary>
     /// GET + deserialize a JSON list, swallowing errors and returning <c>null</c> on failure.
@@ -115,8 +94,51 @@ public sealed class SharpClawApiClient : IDisposable
     public async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct = default)
     {
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
+        ArgumentNullException.ThrowIfNull(request);
+        return await _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.send",
+                request.Method.Method,
+                SafePath(request.RequestUri),
+                Guid.NewGuid()),
+            async (_, actionToken) =>
+            {
+                AttachApiKey(request);
+                return await _http.SendAsync(request, actionToken);
+            },
+            ct);
+    }
+
+    private Task<HttpResponseMessage> SendClientCommandAsync(
+        string method,
+        string path,
+        HttpContent? content,
+        bool responseHeadersRead,
+        CancellationToken cancellationToken)
+    {
+        return _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.send",
+                method,
+                SafePath(new Uri(path, UriKind.RelativeOrAbsolute)),
+                Guid.NewGuid()),
+            async (invocation, actionToken) =>
+            {
+                using var request = new HttpRequestMessage(
+                    new HttpMethod(invocation.Method),
+                    path)
+                {
+                    Content = content,
+                };
+                AttachApiKey(request);
+                return await _http.SendAsync(
+                    request,
+                    responseHeadersRead
+                        ? HttpCompletionOption.ResponseHeadersRead
+                        : HttpCompletionOption.ResponseContentRead,
+                    actionToken);
+            },
+            cancellationToken).AsTask();
     }
 
     /// <summary>
@@ -170,7 +192,21 @@ public sealed class SharpClawApiClient : IDisposable
     /// Stores the JWT access token returned by <c>/auth/login</c>.
     /// Subsequent requests include it as a Bearer token.
     /// </summary>
-    public void SetAccessToken(string token) => _accessToken = token;
+    public async ValueTask SetAccessTokenAsync(
+        string? token,
+        CancellationToken cancellationToken = default)
+    {
+        var expectedVersion = _clientActions.GetStateVersion("client.auth");
+        await _clientActions.CommitStateAsync(
+            "client.auth",
+            expectedVersion,
+            _ =>
+            {
+                _accessToken = token;
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+    }
 
     /// <summary>Current access token, if any.</summary>
     public string? AccessToken => _accessToken;

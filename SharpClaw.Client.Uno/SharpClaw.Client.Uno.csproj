@@ -55,6 +55,7 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Core" />
     <PackageReference Include="Supprocom.Secrets" />
     <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>

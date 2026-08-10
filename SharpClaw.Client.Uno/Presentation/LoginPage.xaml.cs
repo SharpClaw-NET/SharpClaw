@@ -101,14 +101,14 @@ public sealed partial class LoginPage : Page
 
                 if (login?.AccessToken is not null)
                 {
-                    Api.SetAccessToken(login.AccessToken);
+                    await Api.SetAccessTokenAsync(login.AccessToken);
                     await PersistLoginAsync(username, login, rememberMe);
                     ShowStatus("✓ Authenticated.", error: false, success: true);
                     await Task.Delay(400);
 
-                    var navigator = App.Services!.GetRequiredService<INavigator>();
                     var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                    await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
+                    await App.Services!.GetRequiredService<ClientNavigationService>()
+                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
                     return;
                 }
             }
@@ -187,7 +187,7 @@ public sealed partial class LoginPage : Page
             .ToList();
 
         foreach (var stale in accounts.Where(a => !validAccounts.Contains(a)))
-            store.RemoveAccount(stale.UserId);
+            _ = store.RemoveAccountAsync(stale.UserId);
 
         if (validAccounts.Count == 0)
         {
@@ -236,10 +236,7 @@ public sealed partial class LoginPage : Page
             row.Children.Add(btn);
 
             var removeBtn = TerminalUI.RemoveButton(() =>
-            {
-                store.RemoveAccount(captured.UserId);
-                PopulateSavedAccounts();
-            });
+                _ = RemoveSavedAccountAsync(store, captured.UserId));
             removeBtn.VerticalAlignment = VerticalAlignment.Center;
             Grid.SetColumn(removeBtn, 1);
             row.Children.Add(removeBtn);
@@ -266,7 +263,7 @@ public sealed partial class LoginPage : Page
             if (userId is not { } uid) return;
 
             var store = App.Services!.GetRequiredService<AccountStore>();
-            store.SaveAccount(new AccountStore.SavedAccount
+            await store.SaveAccountAsync(new AccountStore.SavedAccount
             {
                 UserId = uid,
                 Username = username,
@@ -277,7 +274,7 @@ public sealed partial class LoginPage : Page
                 RememberMe = rememberMe,
             });
 
-            App.Services!.GetRequiredService<ClientSettings>().SwitchUser(uid);
+            await App.Services!.GetRequiredService<ClientSettings>().SwitchUserAsync(uid);
         }
         catch { /* best-effort — login still succeeds */ }
     }
@@ -302,10 +299,10 @@ public sealed partial class LoginPage : Page
 
                 if (login?.AccessToken is not null)
                 {
-                    Api.SetAccessToken(login.AccessToken);
+                    await Api.SetAccessTokenAsync(login.AccessToken);
 
                     var store = App.Services!.GetRequiredService<AccountStore>();
-                    store.SaveAccount(new AccountStore.SavedAccount
+                    await store.SaveAccountAsync(new AccountStore.SavedAccount
                     {
                         UserId = account.UserId,
                         Username = account.Username,
@@ -316,7 +313,8 @@ public sealed partial class LoginPage : Page
                         RememberMe = true,
                     });
 
-                    App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
+                    await App.Services!.GetRequiredService<ClientSettings>()
+                        .SwitchUserAsync(account.UserId);
 
                     // Pre-populate module caches for the session
                     var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
@@ -325,9 +323,9 @@ public sealed partial class LoginPage : Page
                     ShowStatus("✓ Authenticated.", error: false, success: true);
                     await Task.Delay(400);
 
-                    var navigator = App.Services!.GetRequiredService<INavigator>();
                     var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                    await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
+                    await App.Services!.GetRequiredService<ClientNavigationService>()
+                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
                     return;
                 }
             }
@@ -335,7 +333,8 @@ public sealed partial class LoginPage : Page
             // Refresh failed — remove the stale account entirely.
             // The user will need to log in with credentials.
             var s = App.Services?.GetService<AccountStore>();
-            s?.RemoveAccount(account.UserId);
+            if (s is not null)
+                await s.RemoveAccountAsync(account.UserId);
 
             ShowStatus($"Session for {account.Username} is no longer valid. Please log in.", error: true);
             PopulateSavedAccounts();
@@ -348,6 +347,12 @@ public sealed partial class LoginPage : Page
         {
             _isBusy = false;
         }
+    }
+
+    private async Task RemoveSavedAccountAsync(AccountStore store, Guid userId)
+    {
+        await store.RemoveAccountAsync(userId);
+        PopulateSavedAccounts();
     }
 
     private void ApplyMode()
@@ -393,6 +398,7 @@ public sealed partial class LoginPage : Page
     {
         if (App.Services is not { } services) return;
         EnvMenuPage.PendingOrigin = "Login";
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 }

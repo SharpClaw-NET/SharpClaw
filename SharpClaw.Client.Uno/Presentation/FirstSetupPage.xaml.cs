@@ -71,9 +71,9 @@ public sealed partial class FirstSetupPage : Page
             if (!redo)
             {
                 // User chose to skip — stamp current version and go to Main
-                setupMarker.MarkCompleted();
-                var navigator = App.Services!.GetRequiredService<INavigator>();
-                await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+                await setupMarker.MarkCompletedAsync();
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
                 return;
             }
 
@@ -502,10 +502,10 @@ public sealed partial class FirstSetupPage : Page
         AppendStep("Completed first-time setup!");
         await Task.Delay(1000);
 
-        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
+        await App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompletedAsync();
 
-        var navigator = App.Services!.GetRequiredService<INavigator>();
-        await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+        await App.Services!.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
     }
 
     // ── Input callbacks ─────────────────────────────────────────
@@ -565,11 +565,20 @@ public sealed partial class FirstSetupPage : Page
             AppendStep("Checking Ollama connection…");
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var check = await http.GetAsync(endpoint!.TrimEnd('/') + "/api/tags");
-                if (!check.IsSuccessStatusCode)
+                var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
+                var statusCode = await actions.RunCommandAsync(
+                    "client.provider.ollama.probe",
+                    async token =>
+                    {
+                        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                        using var check = await http.GetAsync(
+                            endpoint!.TrimEnd('/') + "/api/tags",
+                            token);
+                        return (int)check.StatusCode;
+                    });
+                if (statusCode is < 200 or >= 300)
                 {
-                    ReplaceLastStep($"Ollama unreachable ({(int)check.StatusCode}). Check the endpoint and try again.", error: true);
+                    ReplaceLastStep($"Ollama unreachable ({statusCode}). Check the endpoint and try again.", error: true);
                     return;
                 }
                 ReplaceLastStep("Ollama connection OK.", done: true);
@@ -799,7 +808,7 @@ public sealed partial class FirstSetupPage : Page
 
     private async void OnSkipSetupClick(object sender, RoutedEventArgs e)
     {
-        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
+        await App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompletedAsync();
 
         // Cancel any pending input steps
         _providerTcs?.TrySetResult(false);
@@ -813,8 +822,8 @@ public sealed partial class FirstSetupPage : Page
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
 
-        var navigator = App.Services!.GetRequiredService<INavigator>();
-        await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+        await App.Services!.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
     }
 
     private void OnRoleSkipClick(object sender, RoutedEventArgs e)

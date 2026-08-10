@@ -17,6 +17,7 @@ public sealed partial class SettingsPage : Page
     private static FontFamily Mono => TerminalUI.Mono;
     private static SolidColorBrush Trans => TerminalUI.Transparent;
     private SharpClawApiClient Api => App.Services!.GetRequiredService<SharpClawApiClient>();
+    private ClientActionDispatcher Actions => App.Services!.GetRequiredService<ClientActionDispatcher>();
 
     private string _activeTab = "Providers";
 
@@ -615,9 +616,6 @@ public sealed partial class SettingsPage : Page
     }
 
 
-    private static void SaveLocalSetting(string key, string? value)
-        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
-
     private static string? LoadLocalSetting(string key)
         => App.Services?.GetService<ClientSettings>()?.Get(key);
 
@@ -627,12 +625,13 @@ public sealed partial class SettingsPage : Page
 
     private GatewayProcessManager? Gateway => App.Services?.GetService<GatewayProcessManager>();
 
-    /// <summary>Creates a raw <see cref="HttpClient"/> pointed at the gateway.</summary>
-    private HttpClient CreateGatewayClient()
-    {
-        var gw = Gateway ?? throw new InvalidOperationException("GatewayProcessManager not registered.");
-        return new HttpClient { BaseAddress = new Uri(gw.ClientUrl), Timeout = TimeSpan.FromSeconds(10) };
-    }
+    private ValueTask<bool> IsGatewayReachableAsync(
+        GatewayProcessManager gateway,
+        CancellationToken cancellationToken = default) =>
+        Actions.RunCommandAsync(
+            "client.gateway.health",
+            token => new ValueTask<bool>(gateway.IsGatewayReachableAsync(token)),
+            cancellationToken);
 
     private async Task LoadGatewayAsync()
     {
@@ -756,7 +755,7 @@ public sealed partial class SettingsPage : Page
         }
 
         // ── Probe current state ──────────────────────────────────
-        var reachable = await gw.IsGatewayReachableAsync();
+        var reachable = await IsGatewayReachableAsync(gw);
         ApplyState(reachable, gw.IsRunning, gw.IsExternal);
 
         // ── Log console ──────────────────────────────────────────
@@ -872,8 +871,13 @@ public sealed partial class SettingsPage : Page
             statusIndicator.Foreground = B(0xFFCC00);
             try
             {
-                gw.ApiKey = Api.CachedApiKey;
-                await gw.EnsureStartedAsync();
+                await Actions.RunCommandAsync(
+                    "client.gateway.start",
+                    async token =>
+                    {
+                        gw.ApiKey = Api.CachedApiKey;
+                        await gw.EnsureStartedAsync(token);
+                    });
                 var ready = false;
                 for (var i = 0; i < 12; i++)
                 {
@@ -888,7 +892,7 @@ public sealed partial class SettingsPage : Page
                         startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
                         return;
                     }
-                    if (await gw.IsGatewayReachableAsync())
+                    if (await IsGatewayReachableAsync(gw))
                     {
                         ready = true;
                         break;
@@ -914,9 +918,15 @@ public sealed partial class SettingsPage : Page
             }
         };
 
-        stopBtn.Click += (_, _) =>
+        stopBtn.Click += async (_, _) =>
         {
-            gw.Stop();
+            await Actions.RunCommandAsync(
+                "client.gateway.stop",
+                _ =>
+                {
+                    gw.Stop();
+                    return ValueTask.CompletedTask;
+                });
             ApplyState(false, false, false);
             gwStatusBlock.Text = "Gateway stopped.";
             gwStatusBlock.Foreground = B(0xFF8800);
@@ -933,10 +943,15 @@ public sealed partial class SettingsPage : Page
             statusIndicator.Foreground = B(0xFFCC00);
             try
             {
-                gw.Stop();
-                await Task.Delay(500);
-                gw.ApiKey = Api.CachedApiKey;
-                gw.Start();
+                await Actions.RunCommandAsync(
+                    "client.gateway.restart",
+                    async token =>
+                    {
+                        gw.Stop();
+                        await Task.Delay(500, token);
+                        gw.ApiKey = Api.CachedApiKey;
+                        gw.Start();
+                    });
 
                 var ready = false;
                 for (var i = 0; i < 12; i++)
@@ -951,7 +966,7 @@ public sealed partial class SettingsPage : Page
                         gwStatusBlock.Foreground = B(0xFF4444);
                         return;
                     }
-                    if (await gw.IsGatewayReachableAsync())
+                    if (await IsGatewayReachableAsync(gw))
                     {
                         ready = true;
                         break;
@@ -978,7 +993,7 @@ public sealed partial class SettingsPage : Page
         refreshBtn.Click += async (_, _) =>
         {
             refreshBtn.IsEnabled = false;
-            var online = await gw.IsGatewayReachableAsync();
+            var online = await IsGatewayReachableAsync(gw);
             ApplyState(online, gw.IsRunning, gw.IsExternal);
             RefreshLogConsole();
             refreshBtn.IsEnabled = true;
@@ -1072,15 +1087,26 @@ public sealed partial class SettingsPage : Page
                 ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
                 : "Processes only run when the app is open (unless persistent mode is on and they're already running).";
 
-            autoStartToggle.Toggled += (_, _) =>
+            autoStartToggle.Toggled += async (_, _) =>
             {
                 var on = autoStartToggle.IsOn;
+                await Actions.RunCommandAsync(
+                    "client.autostart.update",
+                    _ =>
+                    {
+                        if (backend is not null)
+                            WindowsStartupManager.SetBackendAutoStart(
+                                on && !backend.SkipLaunch,
+                                backend.ExecutablePath,
+                                backend.ApiUrl);
 
-                if (backend is not null)
-                    WindowsStartupManager.SetBackendAutoStart(on && !backend.SkipLaunch, backend.ExecutablePath, backend.ApiUrl);
-
-                if (gw is not null)
-                    WindowsStartupManager.SetGatewayAutoStart(on && !gw.SkipLaunch, gw.ExecutablePath, gw.GatewayUrl);
+                        if (gw is not null)
+                            WindowsStartupManager.SetGatewayAutoStart(
+                                on && !gw.SkipLaunch,
+                                gw.ExecutablePath,
+                                gw.GatewayUrl);
+                        return ValueTask.CompletedTask;
+                    });
 
                 autoStartStatus.Text = on
                     ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
@@ -1412,15 +1438,16 @@ public sealed partial class SettingsPage : Page
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        var navigator = services.GetRequiredService<INavigator>();
-        _ = navigator.NavigateRouteAsync(this, "Main");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main");
     }
 
     private void OnEnvClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
         EnvMenuPage.PendingOrigin = "Settings";
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 
     // ═══════════════════════════════════════════════════════════════
@@ -1718,24 +1745,52 @@ public sealed partial class SettingsPage : Page
         try
         {
             var gateway = App.Services?.GetService<GatewayProcessManager>();
-            gateway?.Dispose();
+            if (gateway is not null)
+            {
+                await Actions.RunCommandAsync(
+                    "client.gateway.stop",
+                    _ =>
+                    {
+                        gateway.Dispose();
+                        return ValueTask.CompletedTask;
+                    });
+            }
         }
         catch { /* best-effort */ }
 
         try
         {
             var backend = App.Services?.GetService<BackendProcessManager>();
-            backend?.Stop();
+            if (backend is not null)
+            {
+                await Actions.RunCommandAsync(
+                    "client.backend.stop",
+                    _ =>
+                    {
+                        backend.Stop();
+                        return ValueTask.CompletedTask;
+                    });
+            }
         }
         catch (Exception ex) { errors.Add($"Stop backend: {ex.Message}"); }
 
         // 3. Clear frontend-only preferences (client-settings.json) in memory
         //    so they are not re-flushed to disk before the directory is deleted.
-        try { App.Services?.GetService<ClientSettings>()?.Reset(); }
+        try
+        {
+            var settings = App.Services?.GetService<ClientSettings>();
+            if (settings is not null)
+                await settings.ResetAsync();
+        }
         catch (Exception ex) { errors.Add($"Client settings: {ex.Message}"); }
 
         // 3b. Clear saved account store.
-        try { App.Services?.GetService<AccountStore>()?.Reset(); }
+        try
+        {
+            var accounts = App.Services?.GetService<AccountStore>();
+            if (accounts is not null)
+                await accounts.ResetAsync();
+        }
         catch (Exception ex) { errors.Add($"Account store: {ex.Message}"); }
 
         // 4. Clean only the frontend-owned instance root. This also removes
@@ -1746,7 +1801,16 @@ public sealed partial class SettingsPage : Page
         {
             var frontend = App.Services?.GetService<FrontendInstanceService>();
             if (frontend is not null)
-                await DeleteWithRetryAsync(frontend.Paths.InstanceRoot, "Frontend instance", errors);
+            {
+                await Actions.RunCommandAsync(
+                    "client.factory-reset.files",
+                    token => new ValueTask(
+                        DeleteWithRetryAsync(
+                            frontend.Paths.InstanceRoot,
+                            "Frontend instance",
+                            errors,
+                            token)));
+            }
         }
         catch (Exception ex)
         {
@@ -1778,18 +1842,23 @@ public sealed partial class SettingsPage : Page
         // Navigate back to boot page so the app restarts the connection flow.
         if (App.Services is { } services)
         {
-            var navigator = services.GetRequiredService<INavigator>();
-            await navigator.NavigateRouteAsync(this, "Boot", qualifier: Qualifiers.ClearBackStack);
+            await services.GetRequiredService<ClientNavigationService>()
+                .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack);
         }
     }
 
-    private static async Task DeleteWithRetryAsync(string path, string label, List<string> errors)
+    private static async Task DeleteWithRetryAsync(
+        string path,
+        string label,
+        List<string> errors,
+        CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(path)) return;
 
         const int maxAttempts = 3;
         for (int i = 1; i <= maxAttempts; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 Directory.Delete(path, recursive: true);
@@ -1797,7 +1866,7 @@ public sealed partial class SettingsPage : Page
             }
             catch when (i < maxAttempts)
             {
-                await Task.Delay(1000);
+                await Task.Delay(1000, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -1812,7 +1881,10 @@ public sealed partial class SettingsPage : Page
     /// the backend process and must survive a factory reset so the client can
     /// re-authenticate against a still-running (external/dev) backend.
     /// </summary>
-    private static async Task CleanDirectoryPreservingAuthFilesAsync(string path, List<string> errors)
+    private static async Task CleanDirectoryPreservingAuthFilesAsync(
+        string path,
+        List<string> errors,
+        CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(path))
             return;
@@ -1830,7 +1902,11 @@ public sealed partial class SettingsPage : Page
 
         foreach (var dir in Directory.EnumerateDirectories(path))
         {
-            await DeleteWithRetryAsync(dir, $"LocalAppData/{Path.GetFileName(dir)}", errors);
+            await DeleteWithRetryAsync(
+                dir,
+                $"LocalAppData/{Path.GetFileName(dir)}",
+                errors,
+                cancellationToken);
         }
     }
 }

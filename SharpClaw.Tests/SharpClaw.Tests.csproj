@@ -57,6 +57,8 @@
     <Compile Include="Publishing\**\*.cs" />
     <Compile Include="Ci\**\*.cs" />
     <Compile Include="Kernel\**\*.cs" />
+    <Compile Include="Frontend\**\*.cs" />
+    <Compile Include="ClientUno\**\*.cs" />
   </ItemGroup>
 
   <ItemGroup>

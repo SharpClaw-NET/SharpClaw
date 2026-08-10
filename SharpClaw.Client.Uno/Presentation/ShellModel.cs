@@ -1,21 +1,25 @@
+using SharpClaw.Services;
+
 namespace SharpClaw.Presentation;
 
 public class ShellModel
 {
-    private readonly INavigator _navigator;
+    private readonly ClientNavigationService _navigation;
 
     public ShellModel(
         IAuthenticationService authentication,
-        INavigator navigator)
+        ClientNavigationService navigation)
     {
-        _navigator = navigator;
+        _navigation = navigation;
         _authentication = authentication;
         _authentication.LoggedOut += LoggedOut;
     }
 
     private async void LoggedOut(object? sender, EventArgs e)
     {
-        await _navigator.NavigateViewModelAsync<LoginModel>(this, qualifier: Qualifiers.ClearBackStack);
+        await _navigation.NavigateViewModelAsync<LoginModel>(
+            this,
+            qualifier: Qualifiers.ClearBackStack);
     }
 
     private readonly IAuthenticationService _authentication;

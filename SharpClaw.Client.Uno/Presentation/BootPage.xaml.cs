@@ -55,7 +55,8 @@ public sealed partial class BootPage : Page
             services.GetRequiredService<BackendProcessManager>(),
             services.GetRequiredService<GatewayProcessManager>(),
             services.GetRequiredService<SharpClawApiClient>(),
-            services.GetRequiredService<FrontendInstanceService>());
+            services.GetRequiredService<FrontendInstanceService>(),
+            services.GetRequiredService<ClientActionDispatcher>());
 
         // Cancel any in-flight connection attempt from a previous visit.
         _retryCts?.Cancel();
@@ -73,7 +74,7 @@ public sealed partial class BootPage : Page
     // ---------------------------------------------------------------
     private async Task RunConnectionFlowAsync(string? customUrl, CancellationToken ct)
     {
-        _model!.ApplyCustomUrl(customUrl);
+        await _model!.ApplyCustomUrlAsync(customUrl, ct);
         _model.IsAwaitingInput = false;
         var diag = ImmutableArray.CreateBuilder<DiagnosticLine>();
 
@@ -154,8 +155,8 @@ public sealed partial class BootPage : Page
 
                 // No auto-login — navigate to login page
                 await Task.Delay(1000, CancellationToken.None);
-                var navigator = App.Services!.GetRequiredService<INavigator>();
-                await navigator.NavigateRouteAsync(this, "Login", qualifier: Qualifiers.ClearBackStack);
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
                 return;
             }
 
@@ -449,7 +450,7 @@ public sealed partial class BootPage : Page
                 ? atProp.GetString() : null;
             if (accessToken is null) return false;
 
-            api.SetAccessToken(accessToken);
+            await api.SetAccessTokenAsync(accessToken, ct);
 
             // Update stored tokens with fresh values
             account.AccessToken = accessToken;
@@ -459,10 +460,11 @@ public sealed partial class BootPage : Page
                 account.RefreshToken = rt.GetString();
             if (root.TryGetProperty("refreshTokenExpiresAt", out var rtExp) && rtExp.ValueKind != JsonValueKind.Null)
                 account.RefreshTokenExpiresAt = rtExp.GetDateTimeOffset();
-            store!.SaveAccount(account);
+            await store!.SaveAccountAsync(account, ct);
 
             // Switch per-user settings
-            App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
+            await App.Services!.GetRequiredService<ClientSettings>()
+                .SwitchUserAsync(account.UserId, ct);
 
             // Pre-populate module caches for the session
             await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
@@ -472,8 +474,8 @@ public sealed partial class BootPage : Page
             var needsSetup = !setupMarker.IsCompleted;
             var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
             var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
-            var navigator = App.Services!.GetRequiredService<INavigator>();
-            await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
+            await App.Services!.GetRequiredService<ClientNavigationService>()
+                .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
             return true;
         }
         catch
@@ -486,6 +488,7 @@ public sealed partial class BootPage : Page
     {
         if (App.Services is not { } services) return;
         EnvMenuPage.PendingOrigin = "Boot";
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 }
