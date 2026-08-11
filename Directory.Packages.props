@@ -24,7 +24,7 @@
     <PackageVersion Include="SharpClaw.Modules.VSCodeEditor" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.AgentOrchestration" Version="0.1.1-beta" />
     <PackageVersion Include="SharpClaw.Modules.Metrics" Version="0.1.1-beta" />
-    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="0.1.1-beta" />
+    <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="0.1.1-beta.5" />
     <PackageVersion Include="SharpClaw.Providers.Common" Version="0.1.4-beta" />
     <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="0.1.4-beta" />
     <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="0.1.4-beta" />
