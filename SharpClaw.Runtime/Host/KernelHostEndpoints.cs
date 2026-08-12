@@ -89,21 +89,20 @@ internal static class KernelHostEndpoints
         }
 
         context.Response.ContentType = "text/event-stream";
-        var result = await runtimeKernel.RunRequestAsync(
-            CreateExecutionContext(context),
-            request,
-            (effectiveRequest, ct) => kernel.RunAsync(
-                new ChatTurnInput(effectiveRequest.Message, effectiveRequest.ConversationId),
-                ct),
-            cancellationToken);
-        var payload = JsonSerializer.Serialize(new
+        await foreach (var chunk in runtimeKernel.RunRequestStreamAsync(
+                           CreateExecutionContext(context),
+                           request,
+                           (effectiveRequest, ct) => kernel.StreamAsync(
+                               new ChatTurnInput(
+                                   effectiveRequest.Message,
+                                   effectiveRequest.ConversationId),
+                               ct),
+                           cancellationToken))
         {
-            conversationId = result.ConversationId,
-            turnId = result.TurnId,
-            content = result.Completion.Content,
-            finishReason = result.Completion.FinishReason.ToString(),
-        });
-        await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+            var payload = JsonSerializer.Serialize(chunk);
+            await context.Response.WriteAsync($"data: {payload}\n\n", cancellationToken);
+            await context.Response.Body.FlushAsync(cancellationToken);
+        }
     }
 
     internal static KernelActionExecutionContext CreateExecutionContext(HttpContext context)

@@ -18,7 +18,7 @@
     <PackageVersion Include="Newtonsoft.Json" Version="13.0.4" />
     <PackageVersion Include="SharpClaw.Contracts" Version="0.5.0-beta.2" />
     <PackageVersion Include="SharpClaw.Gateway.Contracts" Version="0.1.0" />
-    <PackageVersion Include="SharpClaw.Core" Version="0.5.0-beta.2" />
+    <PackageVersion Include="SharpClaw.Core" Version="0.5.0-beta.3" />
     <PackageVersion Include="SharpClaw.Modules.EditorCommon" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.VS2026Editor" Version="0.1.1-alpha" />
     <PackageVersion Include="SharpClaw.Modules.VSCodeEditor" Version="0.1.1-alpha" />

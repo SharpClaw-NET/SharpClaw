@@ -95,6 +95,63 @@ public sealed class DirectChatKernelTests
     }
 
     [Test]
+    public async Task Direct_kernel_streams_the_complete_turn_and_commits_history()
+    {
+        var provider = new RecordingProviderClient();
+        var store = new InMemoryConversationStore();
+        var conversationId = Guid.NewGuid();
+        var graph = new KernelGraphBuilder().Compile();
+        var kernel = DirectChatKernelFactory.CreateFromGraph(
+            graph,
+            CreateDispatcher(graph),
+            new ProviderKernelTransport(provider),
+            new SingleConversationResolver(conversationId),
+            new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
+            store);
+        var chunks = new List<ChatStreamChunk>();
+
+        await foreach (var chunk in kernel.StreamAsync(new ChatTurnInput("stream hello")))
+            chunks.Add(chunk);
+
+        chunks.Should().HaveCount(2);
+        chunks[0].Delta.Should().Be("reply");
+        chunks[0].IsFinished.Should().BeFalse();
+        chunks[1].IsFinished.Should().BeTrue();
+        chunks[1].Finished!.Content.Should().Be("reply");
+
+        var history = await store.LoadHistoryAsync(conversationId, CancellationToken.None);
+        history.Select(message => $"{message.Role}:{message.Content}")
+            .Should()
+            .Equal("user:stream hello", "assistant:reply");
+    }
+
+    [Test]
+    public async Task Direct_kernel_stream_cancellation_stops_before_commit()
+    {
+        var provider = new BlockingProviderClient();
+        var store = new InMemoryConversationStore();
+        var conversationId = Guid.NewGuid();
+        var graph = new KernelGraphBuilder().Compile();
+        var kernel = DirectChatKernelFactory.CreateFromGraph(
+            graph,
+            CreateDispatcher(graph),
+            new ProviderKernelTransport(provider),
+            new SingleConversationResolver(conversationId),
+            new FixedChatProfileResolver(new ChatProfile("test", Guid.NewGuid(), "test-model")),
+            store);
+        using var cancellation = new CancellationTokenSource();
+        var consume = ConsumeAsync(
+            kernel.StreamAsync(new ChatTurnInput("cancel stream"), cancellation.Token),
+            cancellation.Token);
+
+        await provider.Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        cancellation.Cancel();
+
+        Assert.ThrowsAsync<OperationCanceledException>(async () => await consume);
+        (await store.LoadHistoryAsync(conversationId, CancellationToken.None)).Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Direct_kernel_serializes_load_provider_and_commit_for_one_conversation()
     {
         var conversationId = Guid.NewGuid();
@@ -136,6 +193,15 @@ public sealed class DirectChatKernelTests
                 ExtensionFeatureSet.Empty,
                 Guid.NewGuid(),
                 Guid.NewGuid()));
+
+    private static async Task ConsumeAsync(
+        IAsyncEnumerable<ChatStreamChunk> stream,
+        CancellationToken cancellationToken)
+    {
+        await foreach (var _ in stream.WithCancellation(cancellationToken))
+        {
+        }
+    }
 
     private sealed class RecordingProviderClient : IProviderApiClient
     {
@@ -206,6 +272,35 @@ public sealed class DirectChatKernelTests
                 Content = $"reply-{callNumber}",
                 FinishReason = FinishReason.Stop,
                 Usage = new TokenUsage(1, 1),
+            };
+        }
+    }
+
+    private sealed class BlockingProviderClient : IProviderApiClient
+    {
+        public string ProviderKey => "test";
+
+        public TaskCompletionSource Started { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<string>>(["test-model"]);
+
+        public async Task<ChatCompletionResult> ChatCompletionAsync(
+            string model,
+            string? systemPrompt,
+            IReadOnlyList<ChatCompletionMessage> messages,
+            int? maxCompletionTokens = null,
+            Dictionary<string, JsonElement>? providerParameters = null,
+            CompletionParameters? completionParameters = null,
+            CancellationToken ct = default)
+        {
+            Started.TrySetResult();
+            await Task.Delay(Timeout.InfiniteTimeSpan, ct);
+            return new ChatCompletionResult
+            {
+                Content = "unreachable",
+                FinishReason = FinishReason.Stop,
             };
         }
     }

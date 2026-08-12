@@ -115,6 +115,8 @@ public sealed class RuntimeHostCompositionTests
             streamResponse.Content.Headers.ContentType!.MediaType
                 .Should().Be("text/event-stream");
             streamBody.Should().Contain("test harness response");
+            streamBody.Split("data: ", StringSplitOptions.RemoveEmptyEntries)
+                .Should().HaveCountGreaterThan(1);
             readiness.IsReady.Should().BeTrue();
         }
         finally

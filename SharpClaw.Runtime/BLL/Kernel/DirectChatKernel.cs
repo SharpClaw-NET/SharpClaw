@@ -26,6 +26,17 @@ public sealed class DirectChatKernel
         await using var run = _conversationResolver.BeginRun();
         return await _runner.RunAsync(input, cancellationToken);
     }
+
+    public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(
+        ChatTurnInput input,
+        [System.Runtime.CompilerServices.EnumeratorCancellation]
+        CancellationToken cancellationToken = default)
+    {
+        await using var run = _conversationResolver.BeginRun();
+        await foreach (var chunk in _runner.StreamAsync(input, cancellationToken)
+                           .WithCancellation(cancellationToken))
+            yield return chunk;
+    }
 }
 
 /// <summary>Builds one direct-chat runner over an explicit Core kernel graph.</summary>

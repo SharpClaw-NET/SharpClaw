@@ -1,4 +1,6 @@
 using System.Runtime.ExceptionServices;
+using System.Runtime.CompilerServices;
+using System.Threading.Channels;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
@@ -178,6 +180,92 @@ public sealed class RuntimeKernelAdapter
         }
 
         return typedResult;
+    }
+
+    internal async IAsyncEnumerable<TResult> RunRequestStreamAsync<TRequest, TResult>(
+        KernelActionExecutionContext executionContext,
+        TRequest request,
+        Func<TRequest, CancellationToken, IAsyncEnumerable<TResult>> terminal,
+        [EnumeratorCancellation] CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(executionContext);
+        ArgumentNullException.ThrowIfNull(terminal);
+
+        using var linkedCancellation = CancellationTokenSource.CreateLinkedTokenSource(
+            cancellationToken);
+        var channel = Channel.CreateBounded<TResult>(new BoundedChannelOptions(32)
+        {
+            SingleReader = true,
+            SingleWriter = true,
+            FullMode = BoundedChannelFullMode.Wait,
+        });
+        var dispatchTask = DispatchRequestStreamAsync(
+            executionContext,
+            request,
+            terminal,
+            channel.Writer,
+            linkedCancellation.Token);
+
+        try
+        {
+            await foreach (var item in channel.Reader.ReadAllAsync(cancellationToken))
+                yield return item;
+
+            await dispatchTask;
+        }
+        finally
+        {
+            linkedCancellation.Cancel();
+            try
+            {
+                await dispatchTask;
+            }
+            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+            }
+        }
+    }
+
+    private async Task DispatchRequestStreamAsync<TRequest, TResult>(
+        KernelActionExecutionContext executionContext,
+        TRequest request,
+        Func<TRequest, CancellationToken, IAsyncEnumerable<TResult>> terminal,
+        ChannelWriter<TResult> writer,
+        CancellationToken cancellationToken)
+    {
+        Exception? failure = null;
+        try
+        {
+            await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                executionContext,
+                Graph.GetStandardAction(new SharpClawActionKey("runtime.request.receive")),
+                new KernelActionEnvelope(
+                    new SharpClawActionKey("runtime.request.receive"),
+                    request),
+                async (envelope, ct) =>
+                {
+                    if (envelope.Payload is not TRequest effectiveRequest)
+                    {
+                        throw new KernelActionExecutionException(
+                            $"Runtime request action returned payload type '{envelope.Payload?.GetType().FullName ?? "<null>"}'.");
+                    }
+
+                    await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct))
+                        await writer.WriteAsync(item, ct);
+
+                    return true;
+                },
+                Graph.ActionSnapshot,
+                cancellationToken);
+        }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+        finally
+        {
+            writer.TryComplete(failure);
+        }
     }
 
     /// <summary>
