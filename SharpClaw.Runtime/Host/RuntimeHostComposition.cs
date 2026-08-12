@@ -56,7 +56,12 @@ internal static class RuntimeHostComposition
         services.AddSingleton<RuntimeKernelAdapter>();
         services.AddSingleton<IRuntimePersistenceActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
+        services.AddSingleton<IRuntimeTransactionActionBoundary>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddScoped<RuntimePersistenceActionRunner>();
+        services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
+            RuntimeTransactionActionRunnerAccessor>();
+        services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
         services.AddSingleton<DirectChatKernel>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().Kernel);
     }

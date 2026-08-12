@@ -12,7 +12,9 @@ using SharpClaw.Shared.Instances;
 namespace SharpClaw.Runtime.BLL.Kernel;
 
 /// <summary>Composes one Runtime-owned adapter over the Core kernel.</summary>
-public sealed class RuntimeKernelAdapter : IRuntimePersistenceActionBoundary
+public sealed class RuntimeKernelAdapter :
+    IRuntimePersistenceActionBoundary,
+    IRuntimeTransactionActionBoundary
 {
     private readonly KernelModuleRegistry _moduleRegistry;
     private readonly KernelActionDispatcher _actionDispatcher;
@@ -43,6 +45,7 @@ public sealed class RuntimeKernelAdapter : IRuntimePersistenceActionBoundary
         RuntimeProviderActionManifest.Validate(Graph);
         RuntimeToolActionManifest.Validate(Graph);
         RuntimePersistenceActionManifest.Validate(Graph);
+        RuntimeTransactionActionManifest.Validate(Graph);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
@@ -225,6 +228,56 @@ public sealed class RuntimeKernelAdapter : IRuntimePersistenceActionBoundary
             throw new KernelActionExecutionException(
                 $"Persistence action '{invocation.ActionKey.Value}' completed without running its save terminal.");
         }
+    }
+
+    async ValueTask<RuntimeTransactionActionResult>
+        IRuntimeTransactionActionBoundary.RunTransactionActionAsync(
+            RuntimeTransactionActionInvocation invocation,
+            Func<CancellationToken, ValueTask<RuntimeTransactionActionResult>> terminal,
+            CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeTransactionActionManifest.Contains(invocation.ActionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{invocation.ActionKey.Value}' is not a published Runtime transaction action.",
+                nameof(invocation));
+        }
+
+        var terminalCompleted = false;
+        var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            CreateHostExecutionContext(),
+            Graph.GetStandardAction(invocation.ActionKey),
+            new KernelActionEnvelope(invocation.ActionKey, invocation),
+            async (envelope, actionCancellationToken) =>
+            {
+                if (envelope.Payload is not RuntimeTransactionActionInvocation)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Transaction action '{invocation.ActionKey.Value}' returned an invalid invocation payload.");
+                }
+
+                var terminalResult = await terminal(actionCancellationToken);
+                terminalCompleted = true;
+                return terminalResult;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+
+        if (!terminalCompleted)
+        {
+            throw new KernelActionExecutionException(
+                $"Transaction action '{invocation.ActionKey.Value}' completed without running its terminal.");
+        }
+
+        if (result is not RuntimeTransactionActionResult transactionResult)
+        {
+            throw new KernelActionExecutionException(
+                $"Transaction action '{invocation.ActionKey.Value}' returned an invalid result type.");
+        }
+
+        return transactionResult;
     }
 
     internal async IAsyncEnumerable<TResult> RunRequestStreamAsync<TRequest, TResult>(

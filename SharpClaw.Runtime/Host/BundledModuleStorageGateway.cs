@@ -1,10 +1,9 @@
-using System.Data;
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.Storage;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Runtime.INF.Persistence;
@@ -14,6 +13,7 @@ namespace SharpClaw.Runtime.Host;
 public sealed class BundledModuleStorageGateway(
     SharpClawDbContext db,
     IModuleStorageContractProvider contracts,
+    IRuntimeTransactionActionRunnerAccessor transactionRunnerAccessor,
     IModuleStorageTelemetry? telemetry = null) : IModuleStorageGateway
 {
     private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
@@ -265,32 +265,55 @@ public sealed class BundledModuleStorageGateway(
         CancellationToken ct)
     {
         var claim = ReadClaim(contract, parameters);
-        await using var transaction = await BeginClaimTransactionAsync(ct);
+        var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
+        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        try
+        {
+            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct);
+            if (records.Count == 0)
+            {
+                if (transaction is not null)
+                    await transactionRunner.CommitAsync(transaction, ct);
+                return RecordsResponse([]);
+            }
 
-        var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct);
-        if (records.Count == 0)
+            ValidateClaimPatchIndexedFields(contract, claim.Patch, claim.IndexUpdates);
+
+            foreach (var record in records)
+                record.ValueJson = ApplyPatch(record.ValueJson, claim.Patch);
+
+            await ReplaceClaimIndexesAsync(
+                contract,
+                records.Select(record => record.RecordKey).ToArray(),
+                claim.IndexUpdates,
+                ct);
+
+            await db.SaveChangesThroughKernelAsync(ct);
+            if (transaction is not null)
+                await transactionRunner.CommitAsync(transaction, ct);
+
+            return RecordsResponse(records);
+        }
+        catch (Exception exception)
         {
             if (transaction is not null)
-                await transaction.CommitAsync(ct);
-            return RecordsResponse([]);
+            {
+                try
+                {
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                }
+                catch (Exception rollbackException)
+                {
+                    throw new AggregateException(
+                        "The module storage transaction failed and rollback also failed.",
+                        exception,
+                        rollbackException);
+                }
+            }
+
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
         }
-
-        ValidateClaimPatchIndexedFields(contract, claim.Patch, claim.IndexUpdates);
-
-        foreach (var record in records)
-            record.ValueJson = ApplyPatch(record.ValueJson, claim.Patch);
-
-        await ReplaceClaimIndexesAsync(
-            contract,
-            records.Select(record => record.RecordKey).ToArray(),
-            claim.IndexUpdates,
-            ct);
-
-        await db.SaveChangesThroughKernelAsync(ct);
-        if (transaction is not null)
-            await transaction.CommitAsync(ct);
-
-        return RecordsResponse(records);
     }
 
     private async Task<IReadOnlyList<ModuleStorageRecordDB>> LoadQueryRecordsAsync(
@@ -447,14 +470,6 @@ public sealed class BundledModuleStorageGateway(
                     db.ModuleStorageIndexEntries.Add(CreateIndexEntry(contract, key, indexName, value));
             }
         }
-    }
-
-    private async Task<IDbContextTransaction?> BeginClaimTransactionAsync(CancellationToken ct)
-    {
-        if (db.Database.CurrentTransaction is not null)
-            return null;
-
-        return await db.Database.BeginTransactionAsync(IsolationLevel.Serializable, ct);
     }
 
     private IQueryable<ModuleStorageRecordDB> Records(ModuleStorageContractDescriptor contract) =>

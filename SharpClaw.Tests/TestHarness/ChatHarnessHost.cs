@@ -30,6 +30,7 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.Runtime.INF.DurableStorage;
 using SharpClaw.Shared.DurableStorage;
@@ -263,6 +264,10 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<ModuleService>();
         services.AddScoped<ModuleExecutionContext>();
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+        services.AddSingleton<IRuntimeTransactionActionBoundary, TestRuntimeTransactionActionBoundary>();
+        services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
+            RuntimeTransactionActionRunnerAccessor>();
+        services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
         services.AddScoped<IModuleConfigStore>(sp =>
         {
             var context = sp.GetRequiredService<ModuleExecutionContext>();

@@ -12,6 +12,7 @@ using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.TestFixtures.ExternalModule;
 using SharpClaw.Tests.TestHarness;
@@ -624,6 +625,10 @@ public sealed class BundledDotNetSidecarDefaultTests
             services.AddSingleton<ISharpClawEventSinkRegistry>(
                 sp => sp.GetRequiredService<ModuleEventDispatcher>());
             services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+            services.AddSingleton<IRuntimeTransactionActionBoundary, TestRuntimeTransactionActionBoundary>();
+            services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
+                RuntimeTransactionActionRunnerAccessor>();
+            services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
             services.AddScoped<ModuleService>();
 
             var root = services.BuildServiceProvider();
