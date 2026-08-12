@@ -40,6 +40,7 @@ public sealed class RuntimeKernelAdapter
 
         Graph = _moduleRegistry.Compile(hostServices, graphCompileOptions);
         RuntimeProviderActionManifest.Validate(Graph);
+        RuntimeToolActionManifest.Validate(Graph);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
