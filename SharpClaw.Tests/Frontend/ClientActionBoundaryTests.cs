@@ -6,6 +6,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
+using SharpClaw.Presentation;
 using SharpClaw.Services;
 
 namespace SharpClaw.Tests.Frontend;
@@ -693,6 +694,66 @@ public sealed class ClientActionBoundaryTests
         api.AccessToken.Should().BeNull();
         source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
         source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+    }
+
+    [Test]
+    public async Task Registration_cleanup_failure_rethrows_and_leaves_anonymous_authority()
+    {
+        var userId = Guid.NewGuid();
+        var source = new ClientActionContextSource();
+        var probe = new ClientProbe();
+        var dispatcher = CreateDispatcher(probe, source);
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = request => request.RequestUri!.AbsolutePath switch
+            {
+                "/auth/login" => JsonResponse(new
+                {
+                    accessToken = "registration-login-token",
+                    refreshToken = "registration-refresh-token",
+                }),
+                "/auth/me" => JsonResponse(new
+                {
+                    id = userId,
+                    username = "registered-user",
+                }),
+                _ => new HttpResponseMessage(HttpStatusCode.OK),
+            },
+        };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            source,
+            "test-api-key");
+        var session = new ClientSessionService(api);
+        var statusMessages = new List<string>();
+
+        var action = () => LoginPage.RegisterAsync(
+            () => Task.FromResult(JsonResponse(new { created = true })),
+            async () =>
+            {
+                var result = await session.LoginAsync(
+                    "registered-user",
+                    "password",
+                    rememberMe: true);
+                result.Should().NotBeNull();
+                probe.FailureAction = ClientActionCatalog.StateCommit.Value;
+                await session.RunAuthenticatedContinuationAsync(
+                    static () => Task.FromException(
+                        new InvalidOperationException("registration continuation failed")));
+            },
+            (message, _, _) => statusMessages.Add(message));
+
+        await action.Should().ThrowAsync<ClientSessionCleanupException>();
+        api.AccessToken.Should().BeNull();
+        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
+        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+        statusMessages.Should().ContainSingle(message =>
+            message.Contains("Account created", StringComparison.Ordinal));
+        statusMessages.Should().NotContain(message =>
+            message.Contains("cleanup failed", StringComparison.OrdinalIgnoreCase));
     }
 
     [Test]

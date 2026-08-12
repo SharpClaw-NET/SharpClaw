@@ -133,22 +133,22 @@ public sealed partial class LoginPage : Page
 
         try
         {
-            var body = JsonSerializer.Serialize(
-                new { username, password }, JsonOptions);
-            var content = new StringContent(body, Encoding.UTF8, "application/json");
-
-            var response = await Api.PostAsync("/auth/register", content);
-
-            if (response.IsSuccessStatusCode)
-            {
-                ShowStatus("✓ Account created. Logging in...", error: false, success: true);
-                await Task.Delay(400);
-                await LoginAsync(username, password);
-                return;
-            }
-
-            var error = await response.Content.ReadAsStringAsync();
-            ShowStatus($"✗ Registration failed: {error}", error: true);
+            await RegisterAsync(
+                async () =>
+                {
+                    var body = JsonSerializer.Serialize(
+                        new { username, password }, JsonOptions);
+                    using var content = new StringContent(
+                        body, Encoding.UTF8, "application/json");
+                    return await Api.PostAsync("/auth/register", content);
+                },
+                () => LoginAsync(username, password),
+                ShowStatus,
+                static () => Task.Delay(400));
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -157,6 +157,39 @@ public sealed partial class LoginPage : Page
         finally
         {
             _isBusy = false;
+        }
+    }
+
+    internal static async Task RegisterAsync(
+        Func<Task<HttpResponseMessage>> register,
+        Func<Task> login,
+        Action<string, bool, bool> showStatus,
+        Func<Task>? delay = null)
+    {
+        ArgumentNullException.ThrowIfNull(register);
+        ArgumentNullException.ThrowIfNull(login);
+        ArgumentNullException.ThrowIfNull(showStatus);
+
+        try
+        {
+            using var response = await register();
+
+            if (response.IsSuccessStatusCode)
+            {
+                showStatus("✓ Account created. Logging in...", false, true);
+                if (delay is not null)
+                    await delay();
+
+                await login();
+                return;
+            }
+
+            var error = await response.Content.ReadAsStringAsync();
+            showStatus($"✗ Registration failed: {error}", true, false);
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
     }
 
