@@ -95,6 +95,92 @@ public sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
+    public async Task Request_stream_replace_result_without_terminal_fails_closed()
+    {
+        var provider = new RecordingProviderClient();
+        var module = new StreamReplacementModule(provider);
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "test",
+                ["Provider:Model"] = "test-model",
+            })
+            .Build();
+        using var workspace = new TemporaryWorkspace();
+        var conversationStore = new InMemoryConversationStore();
+        var actionKey = new SharpClawActionKey("runtime.request.receive");
+        var descriptor = KernelActionCatalog.DescriptorFor(actionKey).ToDescriptor();
+        var types = KernelSchemaIdentity.ActionTypes(
+            descriptor,
+            typeof(KernelActionEnvelope),
+            typeof(object));
+        var adapter = new RuntimeKernelAdapter(
+            configuration,
+            new ServiceCollection().BuildServiceProvider(),
+            conversationStore,
+            [module],
+            workspace.CreateInstancePaths(),
+            new RecordingProviderClientFactory(provider),
+            new KernelGraphCompileOptions
+            {
+                ActionModuleCapabilityGrants = new Dictionary<
+                    string,
+                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+                {
+                    [module.Identity.Id] = new Dictionary<
+                        string,
+                        ActionInterceptionCapabilities>(StringComparer.Ordinal)
+                    {
+                        [actionKey.Value] = descriptor.Capabilities,
+                    },
+                },
+                SensitiveActionApprovals =
+                [
+                    new KernelSensitiveActionApproval(
+                        module.Identity.Id,
+                        actionKey,
+                        descriptor.Version,
+                        types.ActionType.AssemblyQualifiedName!,
+                        types.ResultType.AssemblyQualifiedName!,
+                        KernelSchemaIdentity.Action(
+                            descriptor,
+                            typeof(KernelActionEnvelope),
+                            typeof(object))),
+                ],
+            });
+        var conversationId = Guid.NewGuid();
+        var executionContext = new KernelActionExecutionContext(
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid());
+        var chunks = new List<ChatStreamChunk>();
+
+        Func<Task> consume = async () =>
+        {
+            await foreach (var chunk in adapter.RunRequestStreamAsync(
+                               executionContext,
+                               "stream-request",
+                               (_, ct) => adapter.Kernel.StreamAsync(
+                                   new ChatTurnInput("must-not-run", conversationId),
+                                   ct)))
+            {
+                chunks.Add(chunk);
+            }
+        };
+
+        await consume.Should()
+            .ThrowAsync<KernelActionExecutionException>()
+            .WithMessage("*without running its terminal*");
+
+        chunks.Should().BeEmpty();
+        provider.Messages.Should().BeEmpty();
+        (await conversationStore.LoadHistoryAsync(
+            conversationId,
+            CancellationToken.None)).Should().BeEmpty();
+    }
+
+    [Test]
     public async Task Adapter_uses_the_instance_manifest_for_restart_stable_direct_chat_history()
     {
         var configuration = new ConfigurationBuilder()
@@ -198,6 +284,44 @@ public sealed class RuntimeKernelAdapterTests
             Stopped = true;
             return ValueTask.CompletedTask;
         }
+    }
+
+    private sealed class StreamReplacementModule(IProviderPlugin provider) : ISharpClawModule
+    {
+        public ModuleIdentity Identity { get; } =
+            new("stream-replacement-module", "Stream replacement module", "stream-replace");
+
+        public void Configure(ISharpClawModuleBuilder module)
+        {
+            module.Services.AddSingleton<IProviderPlugin>(provider);
+            module.Services.AddSingleton<StreamReplacementInterceptor>();
+            module.Hooks.For(new SharpClawActionKey("runtime.request.receive"))
+                .Use<StreamReplacementInterceptor>(new HookOrdering(
+                    "stream-replacement-test",
+                    HookPriority.Normal,
+                    [],
+                    [],
+                    TimeSpan.FromSeconds(5),
+                    HookFailurePolicy.FailAction));
+        }
+
+        public ValueTask StartAsync(ModuleStartContext context, CancellationToken cancellationToken) =>
+            ValueTask.CompletedTask;
+
+        public ValueTask StopAsync(CancellationToken cancellationToken) =>
+            ValueTask.CompletedTask;
+    }
+
+    private sealed class StreamReplacementInterceptor
+        : IActionInterceptor<KernelActionEnvelope, object>
+    {
+        public ValueTask<IActionOutcome<object>> InvokeAsync(
+            ActionContext<KernelActionEnvelope> context,
+            IActionControl<KernelActionEnvelope, object> control,
+            CancellationToken cancellationToken) =>
+            ValueTask.FromResult(control.ReplaceResult(
+                true,
+                "K06 stream replacement test"));
     }
 
     private sealed class RecordingProviderClientFactory(IProviderApiClient client)

@@ -234,6 +234,7 @@ public sealed class RuntimeKernelAdapter
         CancellationToken cancellationToken)
     {
         Exception? failure = null;
+        var terminalCompleted = false;
         try
         {
             await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
@@ -253,10 +254,17 @@ public sealed class RuntimeKernelAdapter
                     await foreach (var item in terminal(effectiveRequest, ct).WithCancellation(ct))
                         await writer.WriteAsync(item, ct);
 
+                    terminalCompleted = true;
                     return true;
                 },
                 Graph.ActionSnapshot,
                 cancellationToken);
+
+            if (!terminalCompleted)
+            {
+                throw new KernelActionExecutionException(
+                    "Runtime request stream action completed without running its terminal.");
+            }
         }
         catch (Exception exception)
         {
