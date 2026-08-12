@@ -19,6 +19,7 @@ using SharpClaw.Contracts.Enums;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Core.Modules;
 using SharpClaw.Contracts.Modules.Foreign;
 using SharpClaw.Core.Permissions;
@@ -44,12 +45,32 @@ public sealed class ModuleService(
     ILogger<ModuleService> logger,
     ChatCache chatCache,
     ISecretDocumentUpdater documentUpdater,
+    IRuntimeModuleActionBoundaryAccessor moduleActionBoundaryAccessor,
     IConfiguration? configuration = null,
     SharpClawInstancePaths? instancePaths = null)
 {
     private static readonly ModuleLifecycleProjectionEngine ModuleProjection = new();
     private static readonly ModuleDisableDependencyEngine ModuleDisableDependencies = new();
     private static readonly ModulePermissionReconciliationEngine ModulePermissionReconciliation = new();
+
+    private async Task RunModulePreparationAsync(
+        string actionName,
+        RuntimeModuleActionInvocation invocation,
+        CancellationToken ct)
+    {
+        var allowed = await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey(actionName),
+                invocation,
+                static (_, _) => new ValueTask<bool>(true),
+                ct);
+        if (!allowed)
+        {
+            throw new InvalidOperationException(
+                $"Module action '{actionName}' rejected module '{invocation.ModuleId}'.");
+        }
+    }
 
     // ═══════════════════════════════════════════════════════════════
     // Queries
@@ -152,6 +173,21 @@ public sealed class ModuleService(
     public async Task<ModuleStateResponse> EnableAsync(
         string moduleId, IServiceProvider rootServices, CancellationToken ct = default)
     {
+        var invocation = new RuntimeModuleActionInvocation(moduleId, "enable");
+        await RunModulePreparationAsync("module.enable.prepare", invocation, ct);
+        return await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.enable.commit"),
+                invocation,
+                (_, actionCancellationToken) => new ValueTask<ModuleStateResponse>(
+                    EnableCoreAsync(moduleId, rootServices, actionCancellationToken)),
+                ct);
+    }
+
+    private async Task<ModuleStateResponse> EnableCoreAsync(
+        string moduleId, IServiceProvider rootServices, CancellationToken ct)
+    {
         var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
 
@@ -182,6 +218,14 @@ public sealed class ModuleService(
             IModuleRuntimeHost? runtimeHost = null;
             try
             {
+                await RunModulePreparationAsync(
+                    "module.discover",
+                    new RuntimeModuleActionInvocation(moduleId, "enable"),
+                    ct);
+                await RunModulePreparationAsync(
+                    "module.validate",
+                    new RuntimeModuleActionInvocation(moduleId, "enable"),
+                    ct);
                 (module, runtimeHost) = await CreateBundledRuntimeAsync(
                     bundledModule,
                     manifest,
@@ -208,6 +252,10 @@ public sealed class ModuleService(
                         $"Module '{moduleId}' has unsatisfied contract dependencies: {names}");
                 }
 
+                await RunModulePreparationAsync(
+                    "module.configure",
+                    new RuntimeModuleActionInvocation(moduleId, "enable"),
+                    ct);
                 await module.InitializeAsync(runtimeHost?.Services ?? rootServices, ct);
             }
             catch
@@ -288,6 +336,21 @@ public sealed class ModuleService(
     /// </summary>
     public async Task<ModuleStateResponse> DisableAsync(string moduleId, CancellationToken ct = default)
     {
+        var invocation = new RuntimeModuleActionInvocation(moduleId, "disable");
+        await RunModulePreparationAsync("module.disable.prepare", invocation, ct);
+        return await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.disable.commit"),
+                invocation,
+                (_, actionCancellationToken) => new ValueTask<ModuleStateResponse>(
+                    DisableCoreAsync(moduleId, actionCancellationToken)),
+                ct);
+    }
+
+    private async Task<ModuleStateResponse> DisableCoreAsync(
+        string moduleId, CancellationToken ct)
+    {
         var bundledModule = loader.GetBundledModule(moduleId)
             ?? throw new ArgumentException($"Unknown module: {moduleId}");
         var module = registry.GetModule(moduleId) ?? bundledModule;
@@ -298,15 +361,40 @@ public sealed class ModuleService(
         if (registry.GetModule(moduleId) is not null)
         {
             var runtimeHost = registry.GetRuntimeHost(moduleId);
-            try { await module.ShutdownAsync(); }
+            try
+            {
+                await moduleActionBoundaryAccessor
+                    .GetRequiredBoundary()
+                    .RunModuleActionAsync(
+                        new SharpClawActionKey("module.stop"),
+                        module.Identity,
+                        async (_, actionCancellationToken) =>
+                        {
+                            await module.ShutdownAsync();
+                            return true;
+                        },
+                        CancellationToken.None);
+            }
             catch (Exception ex)
             {
                 logger.LogWarning(ex, "Module '{ModuleId}' shutdown error during disable", moduleId);
             }
-            moduleDbContextRegistry.UnregisterModule(moduleId);
-            registry.Unregister(moduleId);
-            if (runtimeHost is not null)
-                await runtimeHost.DisposeAsync();
+            var unloaded = await moduleActionBoundaryAccessor
+                .GetRequiredBoundary()
+                .RunModuleActionAsync(
+                    new SharpClawActionKey("module.unload"),
+                    new RuntimeModuleActionInvocation(moduleId, "disable"),
+                    async (_, _) =>
+                    {
+                        moduleDbContextRegistry.UnregisterModule(moduleId);
+                        registry.Unregister(moduleId);
+                        if (runtimeHost is not null)
+                            await runtimeHost.DisposeAsync();
+                        return true;
+                    },
+                    CancellationToken.None);
+            if (!unloaded)
+                throw new InvalidOperationException($"Module '{moduleId}' did not unload successfully.");
         }
 
         // Update DB
@@ -351,6 +439,21 @@ public sealed class ModuleService(
     public async Task<ModuleStateResponse> LoadExternalAsync(
         string moduleDir, IServiceProvider hostServices, CancellationToken ct = default)
     {
+        var invocation = new RuntimeModuleActionInvocation(moduleDir, "load-external");
+        await RunModulePreparationAsync("module.enable.prepare", invocation, ct);
+        return await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.enable.commit"),
+                invocation,
+                (_, actionCancellationToken) => new ValueTask<ModuleStateResponse>(
+                    LoadExternalCoreAsync(moduleDir, hostServices, actionCancellationToken)),
+                ct);
+    }
+
+    private async Task<ModuleStateResponse> LoadExternalCoreAsync(
+        string moduleDir, IServiceProvider hostServices, CancellationToken ct)
+    {
         // Validate that moduleDir resolves strictly inside the external-modules root.
         var externalRoot = ResolveExternalModulesDir();
         var combinedModuleDir = Path.Combine(externalRoot, moduleDir);
@@ -365,6 +468,15 @@ public sealed class ModuleService(
         var manifest = SecureJsonOptions.DeserializeManifest(json);
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
 
+        await RunModulePreparationAsync(
+            "module.discover",
+            new RuntimeModuleActionInvocation(manifest.Id, "load-external"),
+            ct);
+        await RunModulePreparationAsync(
+            "module.validate",
+            new RuntimeModuleActionInvocation(manifest.Id, "load-external"),
+            ct);
+
         if (registry.GetModule(manifest.Id) is not null)
             throw new InvalidOperationException($"Module '{manifest.Id}' is already loaded.");
 
@@ -374,6 +486,10 @@ public sealed class ModuleService(
             registry.Register(host.Module, host, isExternal: true);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
+            await RunModulePreparationAsync(
+                "module.configure",
+                new RuntimeModuleActionInvocation(manifest.Id, "load-external"),
+                ct);
             await host.Module.InitializeAsync(host.Services, ct);
 
             // Reconcile: backfill wildcard grants for newly registered
@@ -406,12 +522,52 @@ public sealed class ModuleService(
 
         var host = registry.GetRuntimeHost(moduleId)
             ?? throw new ArgumentException($"Module '{moduleId}' is not an external module.");
+        var invocation = new RuntimeModuleActionInvocation(moduleId, "unload-external");
 
-        await host.DrainAsync(TimeSpan.FromSeconds(30), ct);
-        await host.Module.ShutdownAsync();
-        moduleDbContextRegistry.UnregisterModule(moduleId);
-        registry.Unregister(moduleId);
-        await host.DisposeAsync();
+        var drained = await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.lease.drain"),
+                invocation,
+                async (_, actionCancellationToken) =>
+                {
+                    await host.DrainAsync(TimeSpan.FromSeconds(30), actionCancellationToken);
+                    return true;
+                },
+                ct);
+        if (!drained)
+            throw new InvalidOperationException($"Module '{moduleId}' did not drain successfully.");
+
+        var stopped = await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.stop"),
+                host.Module.Identity,
+                async (_, _) =>
+                {
+                    await host.Module.ShutdownAsync();
+                    return true;
+                },
+                ct);
+        if (!stopped)
+            throw new InvalidOperationException($"Module '{moduleId}' did not stop successfully.");
+
+        var unloaded = await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.unload"),
+                invocation,
+                async (_, _) =>
+                {
+                    moduleDbContextRegistry.UnregisterModule(moduleId);
+                    registry.Unregister(moduleId);
+                    await host.DisposeAsync();
+                    return true;
+                },
+                ct);
+        if (!unloaded)
+            throw new InvalidOperationException($"Module '{moduleId}' did not unload successfully.");
+
         InvalidateModuleRuntimeState();
 
         logger.LogInformation("External module '{ModuleId}' unloaded", moduleId);
@@ -484,6 +640,28 @@ public sealed class ModuleService(
         CancellationToken ct = default,
         bool persistDisabledEnvEntry = true)
     {
+        var invocation = new RuntimeModuleActionInvocation(absoluteDir, "load-external-absolute");
+        await RunModulePreparationAsync("module.enable.prepare", invocation, ct);
+        return await moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.enable.commit"),
+                invocation,
+                (_, actionCancellationToken) => new ValueTask<ModuleStateResponse>(
+                    LoadExternalFromAbsolutePathCoreAsync(
+                        absoluteDir,
+                        hostServices,
+                        actionCancellationToken,
+                        persistDisabledEnvEntry)),
+                ct);
+    }
+
+    private async Task<ModuleStateResponse> LoadExternalFromAbsolutePathCoreAsync(
+        string absoluteDir,
+        IServiceProvider hostServices,
+        CancellationToken ct,
+        bool persistDisabledEnvEntry)
+    {
         var canonicalDir = Path.GetFullPath(absoluteDir);
         if (persistDisabledEnvEntry)
             await PersistExternalModuleToEnvAsync(canonicalDir, ct);
@@ -498,6 +676,15 @@ public sealed class ModuleService(
         var json = await File.ReadAllTextAsync(manifestPath, ct);
         var manifest = SecureJsonOptions.DeserializeManifest(json);
         var runtimeInfo = ModuleManifestRuntimeInfo.FromJson(json);
+
+        await RunModulePreparationAsync(
+            "module.discover",
+            new RuntimeModuleActionInvocation(manifest.Id, "load-external-absolute"),
+            ct);
+        await RunModulePreparationAsync(
+            "module.validate",
+            new RuntimeModuleActionInvocation(manifest.Id, "load-external-absolute"),
+            ct);
 
         if (registry.GetModule(manifest.Id) is { } existingModule)
         {
@@ -523,6 +710,10 @@ public sealed class ModuleService(
             registry.Register(host.Module, host, isExternal: true);
             RegisterModulePersistence(host.Module);
             registry.CacheManifest(manifest.Id, manifest);
+            await RunModulePreparationAsync(
+                "module.configure",
+                new RuntimeModuleActionInvocation(manifest.Id, "load-external-absolute"),
+                ct);
             await host.Module.InitializeAsync(host.Services, ct);
 
             // Reconcile: backfill wildcard grants for newly registered

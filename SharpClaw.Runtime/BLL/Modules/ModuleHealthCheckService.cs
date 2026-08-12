@@ -6,6 +6,7 @@ using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 
 using SharpClaw.Runtime.BLL.Services;
+using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Modules;
 
@@ -21,7 +22,8 @@ public sealed class ModuleHealthCheckService(
     ModuleEventDispatcher eventDispatcher,
     IServiceProvider rootServices,
     IConfiguration configuration,
-    ILogger<ModuleHealthCheckService> logger) : BackgroundService
+    ILogger<ModuleHealthCheckService> logger,
+    IRuntimeModuleActionBoundaryAccessor moduleActionBoundaryAccessor) : BackgroundService
 {
     private readonly ConcurrentDictionary<string, ModuleHealthStatus> _latestStatus = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, int> _failureCounts = new(StringComparer.Ordinal);
@@ -66,6 +68,7 @@ public sealed class ModuleHealthCheckService(
                     cts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
 
                     var status = await module.HealthCheckAsync(cts.Token);
+                    status = await RunHealthActionAsync(module.Id, status, cts.Token);
                     _latestStatus[module.Id] = status;
 
                     var decision = ApplyHealthDecision(module.Id, status, threshold);
@@ -90,6 +93,7 @@ public sealed class ModuleHealthCheckService(
                 {
                     // Health check timeout — treat as failure
                     var status = new ModuleHealthStatus(false, "Health check timed out");
+                    status = await RunHealthActionAsync(module.Id, status, stoppingToken);
                     _latestStatus[module.Id] = status;
 
                     var decision = ApplyHealthDecision(module.Id, status, threshold);
@@ -105,6 +109,7 @@ public sealed class ModuleHealthCheckService(
                 catch (Exception ex)
                 {
                     var status = new ModuleHealthStatus(false, $"Health check threw: {ex.Message}");
+                    status = await RunHealthActionAsync(module.Id, status, stoppingToken);
                     _latestStatus[module.Id] = status;
 
                     var decision = ApplyHealthDecision(module.Id, status, threshold);
@@ -154,6 +159,18 @@ public sealed class ModuleHealthCheckService(
 
         return decision;
     }
+
+    private ValueTask<ModuleHealthStatus> RunHealthActionAsync(
+        string moduleId,
+        ModuleHealthStatus status,
+        CancellationToken cancellationToken) =>
+        moduleActionBoundaryAccessor
+            .GetRequiredBoundary()
+            .RunModuleActionAsync(
+                new SharpClawActionKey("module.health.check"),
+                new RuntimeModuleActionInvocation(moduleId, "health-check"),
+                (_, _) => new ValueTask<ModuleHealthStatus>(status),
+                cancellationToken);
 
     private async Task AutoDisableAsync(string moduleId, int threshold)
     {

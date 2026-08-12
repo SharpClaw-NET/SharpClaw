@@ -7,6 +7,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Runtime.BLL.Modules;
+using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts;
 using SharpClaw.Contracts.Entities.Core;
@@ -234,6 +235,7 @@ public sealed class ModuleServicePermissionReconciliationTests
         var rootServices = new ServiceCollection()
             .AddSingleton<IConfiguration>(configuration)
             .AddSingleton(registry)
+            .AddSingleton<IRuntimeModuleActionBoundary, TestRuntimeModuleActionBoundary>()
             .BuildServiceProvider();
         var service = new ModuleService(
             db,
@@ -248,6 +250,7 @@ public sealed class ModuleServicePermissionReconciliationTests
             NullLogger<ModuleService>.Instance,
             new ChatCache(configuration),
             new UnusedDocumentUpdater(),
+            new RuntimeModuleActionBoundaryAccessor(rootServices),
             configuration);
 
         return (service, rootServices);

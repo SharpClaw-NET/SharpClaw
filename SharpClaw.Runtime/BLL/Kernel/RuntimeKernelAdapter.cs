@@ -14,7 +14,8 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 /// <summary>Composes one Runtime-owned adapter over the Core kernel.</summary>
 public sealed class RuntimeKernelAdapter :
     IRuntimePersistenceActionBoundary,
-    IRuntimeTransactionActionBoundary
+    IRuntimeTransactionActionBoundary,
+    IRuntimeModuleActionBoundary
 {
     private readonly KernelModuleRegistry _moduleRegistry;
     private readonly KernelActionDispatcher _actionDispatcher;
@@ -46,6 +47,7 @@ public sealed class RuntimeKernelAdapter :
         RuntimeToolActionManifest.Validate(Graph);
         RuntimePersistenceActionManifest.Validate(Graph);
         RuntimeTransactionActionManifest.Validate(Graph);
+        RuntimeModuleActionManifest.Validate(Graph);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
@@ -54,6 +56,7 @@ public sealed class RuntimeKernelAdapter :
                 Guid.NewGuid(),
                 Guid.NewGuid()),
             repeatEvidenceAuthority: repeatEvidenceAuthority);
+        DispatchModuleCompositionActions();
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
             ?? [];
@@ -150,6 +153,130 @@ public sealed class RuntimeKernelAdapter :
             CreateHostExecutionContext(),
             terminal,
             cancellationToken);
+    }
+
+    public async ValueTask<TResult> RunModuleActionAsync<TResult>(
+        SharpClawActionKey actionKey,
+        object? payload,
+        Func<object?, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeModuleActionManifest.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a published Runtime module action.",
+                nameof(actionKey));
+        }
+
+        var executionContext = CreateHostExecutionContext();
+        try
+        {
+            var terminalState = 0;
+            var terminalResult = new TaskCompletionSource<TResult>(
+                TaskCreationOptions.RunContinuationsAsynchronously);
+            var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                executionContext,
+                Graph.GetStandardAction(actionKey),
+                new KernelActionEnvelope(actionKey, payload),
+                async (envelope, actionCancellationToken) =>
+                {
+                    if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
+                    {
+                        var repeated = await terminalResult.Task;
+                        return repeated is null
+                            ? throw new KernelActionExecutionException(
+                                $"Module action '{actionKey.Value}' returned a null repeated result.")
+                            : repeated;
+                    }
+
+                    try
+                    {
+                        var value = await terminal(envelope.Payload, actionCancellationToken);
+                        if (value is null)
+                        {
+                            throw new KernelActionExecutionException(
+                                $"Module action '{actionKey.Value}' returned a null result.");
+                        }
+
+                        terminalResult.TrySetResult(value);
+                        return value;
+                    }
+                    catch (Exception exception)
+                    {
+                        terminalResult.TrySetException(exception);
+                        throw;
+                    }
+                },
+                Graph.ActionSnapshot,
+                cancellationToken);
+
+            if (Volatile.Read(ref terminalState) == 0)
+            {
+                throw new KernelActionExecutionException(
+                    $"Module action '{actionKey.Value}' completed without running its terminal.");
+            }
+
+            if (result is not TResult typedResult)
+            {
+                throw new KernelActionExecutionException(
+                    $"Module action '{actionKey.Value}' returned an invalid result type.");
+            }
+
+            return typedResult;
+        }
+        catch (KernelActionCancelledException exception)
+        {
+            await DispatchModuleLifecycleOutcomeAsync(
+                new SharpClawActionKey("module.lifecycle.cancel"),
+                payload,
+                executionContext,
+                exception);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            await DispatchModuleLifecycleOutcomeAsync(
+                new SharpClawActionKey("module.lifecycle.cancel"),
+                payload,
+                executionContext,
+                exception);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await DispatchModuleLifecycleOutcomeAsync(
+                new SharpClawActionKey("module.lifecycle.fail"),
+                payload,
+                executionContext,
+                exception);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+    }
+
+    private async ValueTask DispatchModuleLifecycleOutcomeAsync(
+        SharpClawActionKey actionKey,
+        object? payload,
+        KernelActionExecutionContext executionContext,
+        Exception originalException)
+    {
+        try
+        {
+            await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                executionContext,
+                Graph.GetStandardAction(actionKey),
+                new KernelActionEnvelope(actionKey, payload),
+                static (_, _) => ValueTask.FromResult<object>(true),
+                Graph.ActionSnapshot,
+                CancellationToken.None);
+        }
+        catch (Exception outcomeException)
+        {
+            throw new AggregateException(originalException, outcomeException);
+        }
     }
 
     internal async ValueTask<TResult> RunRequestAsync<TRequest, TResult>(
@@ -444,9 +571,7 @@ public sealed class RuntimeKernelAdapter :
             RuntimeLifecycleActionCatalog.StartConfigure,
             hostVersion,
             executionContext,
-            ct => _moduleRegistry.StartAsync(
-                Graph,
-                executionContext,
+            ct => StartModulesThroughActionsAsync(
                 hostVersion,
                 effectiveFeatures,
                 ct),
@@ -487,9 +612,7 @@ public sealed class RuntimeKernelAdapter :
             {
                 try
                 {
-                    await _moduleRegistry.StopAsync(
-                        executionContext,
-                        CancellationToken.None);
+                    await StopModulesThroughActionsAsync(CancellationToken.None);
                 }
                 catch (Exception exception)
                 {
@@ -588,6 +711,104 @@ public sealed class RuntimeKernelAdapter :
             },
             Graph.ActionSnapshot,
             cancellationToken);
+    }
+
+    private async ValueTask StartModulesThroughActionsAsync(
+        string hostVersion,
+        ExtensionFeatureSet features,
+        CancellationToken cancellationToken)
+    {
+        foreach (var module in _moduleRegistry.Modules)
+        {
+            var context = new ModuleStartContext(
+                module.Identity,
+                hostVersion,
+                Graph.ActionSnapshot.ContractHash,
+                features);
+            var started = await RunModuleActionAsync(
+                new SharpClawActionKey("module.start"),
+                context,
+                async (payload, ct) =>
+                {
+                    if (payload is not ModuleStartContext effectiveContext)
+                    {
+                        throw new KernelActionExecutionException(
+                            "The module.start action returned an invalid ModuleStartContext replacement.");
+                    }
+
+                    await module.StartAsync(effectiveContext, ct);
+                    return true;
+                },
+                cancellationToken);
+            if (!started)
+            {
+                throw new KernelActionExecutionException(
+                    $"Module '{module.Identity.Id}' did not start successfully.");
+            }
+        }
+    }
+
+    private async ValueTask StopModulesThroughActionsAsync(CancellationToken cancellationToken)
+    {
+        for (var index = _moduleRegistry.Modules.Count - 1; index >= 0; index--)
+        {
+            var module = _moduleRegistry.Modules[index];
+            var stopped = await RunModuleActionAsync(
+                new SharpClawActionKey("module.stop"),
+                module.Identity,
+                async (_, ct) =>
+                {
+                    await module.StopAsync(ct);
+                    return true;
+                },
+                cancellationToken);
+            if (!stopped)
+            {
+                throw new KernelActionExecutionException(
+                    $"Module '{module.Identity.Id}' did not stop successfully.");
+            }
+        }
+    }
+
+    private void DispatchModuleCompositionActions()
+    {
+        foreach (var module in _moduleRegistry.Modules)
+        {
+            var invocation = new RuntimeModuleActionInvocation(
+                module.Identity.Id,
+                "composition");
+            foreach (var actionName in new[]
+            {
+                "module.discover",
+                "module.validate",
+                "module.configure",
+            })
+            {
+                var allowed = RunModuleActionAsync(
+                        new SharpClawActionKey(actionName),
+                        invocation,
+                        static (_, _) => new ValueTask<bool>(true))
+                    .GetAwaiter()
+                    .GetResult();
+                if (!allowed)
+                {
+                    throw new KernelGraphCompilationException(
+                        $"Module action '{actionName}' rejected module '{module.Identity.Id}'.");
+                }
+            }
+        }
+
+        var graphAllowed = RunModuleActionAsync(
+                new SharpClawActionKey("module.graph.compile"),
+                new RuntimeModuleActionInvocation("<graph>", "composition"),
+                static (_, _) => new ValueTask<bool>(true))
+            .GetAwaiter()
+            .GetResult();
+        if (!graphAllowed)
+        {
+            throw new KernelGraphCompilationException(
+                "The module.graph.compile action rejected the compiled graph.");
+        }
     }
 
     private static KernelActionExecutionContext CreateHostExecutionContext(

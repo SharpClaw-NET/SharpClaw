@@ -11,6 +11,7 @@ using SharpClaw.Runtime.Host;
 using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
+using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Runtime.BLL.Services.Auth;
 using SharpClaw.Core.Agents;
@@ -265,9 +266,12 @@ internal sealed class ChatHarnessHost : IAsyncDisposable
         services.AddScoped<ModuleExecutionContext>();
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
         services.AddSingleton<IRuntimeTransactionActionBoundary, TestRuntimeTransactionActionBoundary>();
+        services.AddSingleton<IRuntimeModuleActionBoundary, TestRuntimeModuleActionBoundary>();
         services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
             RuntimeTransactionActionRunnerAccessor>();
         services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
+        services.AddScoped<IRuntimeModuleActionBoundaryAccessor,
+            RuntimeModuleActionBoundaryAccessor>();
         services.AddScoped<IModuleConfigStore>(sp =>
         {
             var context = sp.GetRequiredService<ModuleExecutionContext>();
