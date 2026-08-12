@@ -2,6 +2,7 @@ using System.Collections.Generic;
 using System.Diagnostics;
 using System.Net;
 using System.Net.Http.Headers;
+using System.Runtime.ExceptionServices;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Configuration;
@@ -113,58 +114,99 @@ public sealed class RequestQueueProcessor(
     RequestQueueService queue,
     InternalApiClient coreApi,
     IOptions<RequestQueueOptions> options,
-    ILogger<RequestQueueProcessor> logger) : BackgroundService
+    ILogger<RequestQueueProcessor> logger,
+    GatewayBackgroundActionBoundary backgroundActions) : BackgroundService
 {
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        if (!queue.Enabled)
+        var serviceInvocation = new GatewayBackgroundServiceInvocation(
+            "gateway.request-queue");
+        Exception? failure = null;
+        try
         {
-            logger.LogInformation("Request queue is disabled — processor will not start.");
-            return;
-        }
+            await backgroundActions.StartAsync(serviceInvocation, stoppingToken);
 
-        var opts = options.Value;
-        logger.LogInformation(
-            "Request queue processor started. Concurrency={Concurrency}, Timeout={Timeout}s, " +
-            "MaxRetries={MaxRetries}, RetryDelay={RetryDelay}ms, QueueCapacity={Capacity}.",
-            opts.MaxConcurrency, opts.TimeoutSeconds, opts.MaxRetries, opts.RetryDelayMs, opts.MaxQueueSize);
-
-        if (opts.MaxConcurrency <= 1)
-        {
-            while (!stoppingToken.IsCancellationRequested)
+            if (!queue.Enabled)
             {
-                var request = await queue.DequeueAsync(stoppingToken);
-                await ProcessRequestAsync(request, opts, stoppingToken);
+                logger.LogInformation("Request queue is disabled — processor will not start.");
+                return;
             }
-        }
-        else
-        {
-            using var semaphore = new SemaphoreSlim(opts.MaxConcurrency, opts.MaxConcurrency);
-            var tasks = new List<Task>();
 
-            while (!stoppingToken.IsCancellationRequested)
+            var opts = options.Value;
+            logger.LogInformation(
+                "Request queue processor started. Concurrency={Concurrency}, Timeout={Timeout}s, " +
+                "MaxRetries={MaxRetries}, RetryDelay={RetryDelay}ms, QueueCapacity={Capacity}.",
+                opts.MaxConcurrency, opts.TimeoutSeconds, opts.MaxRetries, opts.RetryDelayMs, opts.MaxQueueSize);
+
+            if (opts.MaxConcurrency <= 1)
             {
-                var request = await queue.DequeueAsync(stoppingToken);
-                await semaphore.WaitAsync(stoppingToken);
-
-                tasks.Add(Task.Run(async () =>
+                while (!stoppingToken.IsCancellationRequested)
                 {
-                    try
-                    {
-                        await ProcessRequestAsync(request, opts, stoppingToken);
-                    }
-                    finally
-                    {
-                        semaphore.Release();
-                    }
-                }, stoppingToken));
-
-                tasks.RemoveAll(t => t.IsCompleted);
+                    var request = await queue.DequeueAsync(stoppingToken);
+                    await RunTickAsync(request, opts, stoppingToken);
+                }
             }
+            else
+            {
+                using var semaphore = new SemaphoreSlim(opts.MaxConcurrency, opts.MaxConcurrency);
+                var tasks = new List<Task>();
 
-            await Task.WhenAll(tasks);
+                while (!stoppingToken.IsCancellationRequested)
+                {
+                    var request = await queue.DequeueAsync(stoppingToken);
+                    await semaphore.WaitAsync(stoppingToken);
+
+                    tasks.Add(Task.Run(async () =>
+                    {
+                        try
+                        {
+                            await RunTickAsync(request, opts, stoppingToken);
+                        }
+                        finally
+                        {
+                            semaphore.Release();
+                        }
+                    }, stoppingToken));
+
+                    tasks.RemoveAll(t => t.IsCompleted);
+                }
+
+                await Task.WhenAll(tasks);
+            }
         }
+        catch (Exception exception)
+        {
+            failure = exception;
+        }
+        finally
+        {
+            try
+            {
+                await backgroundActions.StopAsync(serviceInvocation, CancellationToken.None);
+            }
+            catch (Exception stopFailure)
+            {
+                failure = failure is null
+                    ? stopFailure
+                    : new AggregateException(failure, stopFailure);
+            }
+        }
+
+        if (failure is not null)
+            ExceptionDispatchInfo.Capture(failure).Throw();
     }
+
+    private ValueTask RunTickAsync(
+        QueuedRequest request,
+        RequestQueueOptions opts,
+        CancellationToken cancellationToken) =>
+        backgroundActions.ExecuteTickAsync(
+            new GatewayBackgroundTickInvocation(
+                "gateway.request-queue",
+                "request.forward",
+                request.Id),
+            async ct => await ProcessRequestAsync(request, opts, ct),
+            cancellationToken);
 
     private async Task ProcessRequestAsync(
         QueuedRequest request, RequestQueueOptions opts, CancellationToken ct)

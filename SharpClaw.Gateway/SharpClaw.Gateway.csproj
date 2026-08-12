@@ -28,6 +28,7 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Core" />
     <PackageReference Include="SharpClaw.Gateway.Contracts" />
     <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />

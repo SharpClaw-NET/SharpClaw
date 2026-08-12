@@ -166,6 +166,7 @@ builder.Services.Configure<RequestQueueOptions>(
 
 builder.Services.AddSingleton<QueueMetrics>();
 builder.Services.AddSingleton<RequestQueueService>();
+builder.Services.AddSingleton<GatewayBackgroundActionBoundary>();
 builder.Services.AddHostedService<RequestQueueProcessor>();
 builder.Services.AddScoped<GatewayRequestDispatcher>();
 builder.Services.AddHttpContextAccessor();
