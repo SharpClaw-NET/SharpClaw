@@ -191,6 +191,10 @@ public sealed partial class LoginPage : Page
         {
             throw;
         }
+        catch (Exception ex)
+        {
+            showStatus($"✗ {ex.Message}", true, false);
+        }
     }
 
     private void OnToggleModeClick(object sender, RoutedEventArgs e)

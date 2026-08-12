@@ -717,6 +717,7 @@ public sealed class ClientActionBoundaryTests
                     id = userId,
                     username = "registered-user",
                 }),
+                "/auth/register" => new HttpResponseMessage(HttpStatusCode.Created),
                 _ => new HttpResponseMessage(HttpStatusCode.OK),
             },
         };
@@ -731,7 +732,14 @@ public sealed class ClientActionBoundaryTests
         var statusMessages = new List<string>();
 
         var action = () => LoginPage.RegisterAsync(
-            () => Task.FromResult(JsonResponse(new { created = true })),
+            async () =>
+            {
+                using var content = new StringContent(
+                    "{\"username\":\"registered-user\",\"password\":\"password\"}",
+                    Encoding.UTF8,
+                    "application/json");
+                return await api.PostAsync("/auth/register", content);
+            },
             async () =>
             {
                 var result = await session.LoginAsync(
