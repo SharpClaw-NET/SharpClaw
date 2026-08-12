@@ -5,6 +5,7 @@ using Microsoft.UI;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
 using Windows.ApplicationModel.DataTransfer;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
@@ -450,7 +451,12 @@ public sealed partial class BootPage : Page
                 ? atProp.GetString() : null;
             if (accessToken is null) return false;
 
-            await api.SetAccessTokenAsync(accessToken, ct);
+            await api.SetAccessTokenAsync(
+                accessToken,
+                ct,
+                ClientActionContextSource.ForAuthenticatedUser(
+                    account.UserId,
+                    account.Username));
 
             // Update stored tokens with fresh values
             account.AccessToken = accessToken;

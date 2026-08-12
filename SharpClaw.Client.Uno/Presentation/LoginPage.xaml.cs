@@ -2,6 +2,7 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml.Media;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
 
@@ -262,6 +263,12 @@ public sealed partial class LoginPage : Page
 
             if (userId is not { } uid) return;
 
+            await Api.SetAccessTokenAsync(
+                login.AccessToken,
+                authenticatedContext: ClientActionContextSource.ForAuthenticatedUser(
+                    uid,
+                    username));
+
             var store = App.Services!.GetRequiredService<AccountStore>();
             await store.SaveAccountAsync(new AccountStore.SavedAccount
             {
@@ -299,7 +306,11 @@ public sealed partial class LoginPage : Page
 
                 if (login?.AccessToken is not null)
                 {
-                    await Api.SetAccessTokenAsync(login.AccessToken);
+                    await Api.SetAccessTokenAsync(
+                        login.AccessToken,
+                        authenticatedContext: ClientActionContextSource.ForAuthenticatedUser(
+                            account.UserId,
+                            account.Username));
 
                     var store = App.Services!.GetRequiredService<AccountStore>();
                     await store.SaveAccountAsync(new AccountStore.SavedAccount

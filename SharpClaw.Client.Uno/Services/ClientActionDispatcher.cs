@@ -1,4 +1,5 @@
 using System.Collections.Concurrent;
+using System.Net.Http;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
 
@@ -9,39 +10,72 @@ public sealed class ClientActionDispatcher
 {
     private readonly KernelGraph _graph;
     private readonly KernelActionDispatcher _dispatcher;
+    private readonly ClientActionContextSource _contextSource;
+    private readonly IKernelActionRepeatEvidenceAuthority _repeatEvidenceAuthority;
     private readonly SemaphoreSlim _navigationGate = new(1, 1);
     private readonly ConcurrentDictionary<string, SemaphoreSlim> _stateGates = new(StringComparer.Ordinal);
     private readonly ConcurrentDictionary<string, long> _stateVersions = new(StringComparer.Ordinal);
     private long _navigationVersion;
 
     public ClientActionDispatcher()
-        : this([], serviceProvider: null, options: null)
+        : this(new ClientActionContextSource())
     {
     }
+
+    public ClientActionDispatcher(ClientActionContextSource contextSource)
+        : this(
+            ClientActionModuleSet.Create(),
+            serviceProvider: null,
+            ClientActionModuleSet.CreateOptions(),
+            contextSource,
+            repeatEvidenceAuthority: null)
+    {
+    }
+
+    internal static ClientActionDispatcher CreateProduction(
+        ClientActionContextSource contextSource,
+        ClientActionModuleSet.IClientActionContextSink? contextSink = null) =>
+        new(
+            ClientActionModuleSet.Create(contextSink),
+            serviceProvider: null,
+            ClientActionModuleSet.CreateOptions(),
+            contextSource,
+            repeatEvidenceAuthority: null);
 
     internal ClientActionDispatcher(
         IEnumerable<ISharpClawModule> modules,
         IServiceProvider? serviceProvider,
-        KernelGraphCompileOptions? options)
+        KernelGraphCompileOptions? options,
+        ClientActionContextSource? contextSource = null,
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
         ArgumentNullException.ThrowIfNull(modules);
+        _contextSource = contextSource ?? new ClientActionContextSource();
 
         var registry = new KernelModuleRegistry();
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
             registry.Add(module);
 
         _graph = registry.Compile(serviceProvider, options);
+        _repeatEvidenceAuthority = repeatEvidenceAuthority ?? new ClientRepeatEvidenceAuthority();
         _dispatcher = new KernelActionDispatcher(
             _graph,
-            new KernelActionExecutionContext(
-                RequestPrincipal.Anonymous,
-                ExtensionFeatureSet.Empty,
-                Guid.NewGuid(),
-                Guid.NewGuid()),
-            repeatEvidenceAuthority: new ClientRepeatEvidenceAuthority());
+            _contextSource.CreateContext(),
+            resultSnapshotter: new ClientActionResultSnapshotter(),
+            repeatEvidenceAuthority: _repeatEvidenceAuthority);
     }
 
     internal KernelGraph Graph => _graph;
+
+    public async ValueTask<TResult> RunWithContextAsync<TResult>(
+        ClientActionRequestContext requestContext,
+        ClientCommandInvocation invocation,
+        Func<ClientCommandInvocation, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        using var scope = _contextSource.Push(requestContext);
+        return await RunCommandAsync(invocation, terminal, cancellationToken);
+    }
 
     public async ValueTask<TResult> RunCommandAsync<TResult>(
         ClientCommandInvocation invocation,
@@ -51,7 +85,7 @@ public sealed class ClientActionDispatcher
         ArgumentNullException.ThrowIfNull(invocation);
         ArgumentNullException.ThrowIfNull(terminal);
 
-        var context = CreateExecutionContext();
+        var context = CreateExecutionContextFromSource();
         try
         {
             var received = await RunActionAsync(
@@ -66,16 +100,21 @@ public sealed class ClientActionDispatcher
                 received,
                 static (value, _) => ValueTask.FromResult(value),
                 cancellationToken);
+            var dispatched = validated;
             var result = await RunActionAsync(
                 context,
                 ClientActionCatalog.CommandDispatch,
                 validated,
-                terminal,
+                async (value, token) =>
+                {
+                    dispatched = value;
+                    return await terminal(value, token);
+                },
                 cancellationToken);
             await RunActionAsync(
                 context,
                 ClientActionCatalog.CommandComplete,
-                new ClientCommandSignal(invocation.CommandId, invocation.Operation),
+                new ClientCommandSignal(dispatched.CommandId, dispatched.Operation),
                 static (_, _) => ValueTask.FromResult(true),
                 cancellationToken);
             return result;
@@ -135,7 +174,7 @@ public sealed class ClientActionDispatcher
         ArgumentException.ThrowIfNullOrWhiteSpace(route);
         ArgumentNullException.ThrowIfNull(terminal);
 
-        var context = CreateExecutionContext();
+        var context = CreateExecutionContextFromSource();
         var invocation = new ClientNavigationInvocation(
             route,
             qualifier,
@@ -154,8 +193,10 @@ public sealed class ClientActionDispatcher
             try
             {
                 if (invocation.ExpectedVersion != Interlocked.Read(ref _navigationVersion))
+                {
                     throw new ClientActionConflictException(
                         $"Navigation '{prepared.Route}' conflicted with a newer navigation.");
+                }
 
                 var receipt = new ClientCommitReceipt();
                 var terminalSucceeded = 0;
@@ -223,7 +264,7 @@ public sealed class ClientActionDispatcher
         ArgumentException.ThrowIfNullOrWhiteSpace(stateKey);
         ArgumentNullException.ThrowIfNull(terminal);
 
-        var context = CreateExecutionContext();
+        var context = CreateExecutionContextFromSource();
         var invocation = new ClientStateInvocation(stateKey, expectedVersion, Guid.NewGuid());
         try
         {
@@ -239,8 +280,10 @@ public sealed class ClientActionDispatcher
             {
                 var currentVersion = GetStateVersion(invocation.StateKey);
                 if (invocation.ExpectedVersion != currentVersion)
+                {
                     throw new ClientActionConflictException(
                         $"State '{invocation.StateKey}' changed from version {invocation.ExpectedVersion}.");
+                }
 
                 var receipt = new ClientCommitReceipt();
                 var terminalSucceeded = 0;
@@ -344,15 +387,21 @@ public sealed class ClientActionDispatcher
         return typedResult;
     }
 
-    private static KernelActionExecutionContext CreateExecutionContext() =>
-        new(
-            RequestPrincipal.Anonymous,
-            ExtensionFeatureSet.Empty,
-            Guid.NewGuid(),
-            Guid.NewGuid());
+    private KernelActionExecutionContext CreateExecutionContextFromSource() =>
+        _contextSource.CreateContext();
 
     private sealed class ClientCommitReceipt
     {
+    }
+
+    private sealed class ClientActionResultSnapshotter : IKernelActionResultSnapshotter
+    {
+        private readonly JsonKernelActionResultSnapshotter _default = new();
+
+        public TResult Snapshot<TResult>(TResult result) =>
+            result is HttpResponseMessage
+                ? result
+                : _default.Snapshot(result);
     }
 
     private sealed class ClientRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
@@ -362,20 +411,7 @@ public sealed class ClientActionDispatcher
             CancellationToken cancellationToken)
         {
             cancellationToken.ThrowIfCancellationRequested();
-            var issuedAt = DateTimeOffset.UtcNow;
-            return ValueTask.FromResult<KernelActionRepeatEvidence?>(new(
-                Guid.NewGuid().ToString("N"),
-                request.RequiredKind,
-                request.ActionKey,
-                request.ActionVersion,
-                request.IdempotencyScope,
-                request.IdempotencyKey,
-                request.PriorInvocationId,
-                request.PriorAttempt,
-                request.NextInvocationId,
-                request.NextAttempt,
-                issuedAt,
-                issuedAt.AddMinutes(1)));
+            return ValueTask.FromResult<KernelActionRepeatEvidence?>(null);
         }
     }
 }

@@ -1,5 +1,8 @@
 using System.Collections.Concurrent;
+using System.Text.Json;
+using System.Net;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Services;
@@ -59,7 +62,9 @@ public sealed class ClientActionBoundaryTests
     public async Task Repeat_retries_only_the_repeatable_receive_action()
     {
         var probe = new ClientProbe { RepeatAction = ClientActionCatalog.CommandReceive.Value };
-        var dispatcher = CreateDispatcher(probe);
+        var dispatcher = CreateDispatcher(
+            probe,
+            repeatEvidenceAuthority: new TestRepeatEvidenceAuthority());
 
         var result = await dispatcher.RunCommandAsync(
             new ClientCommandInvocation("repeat", "GET", "/repeat", Guid.NewGuid()),
@@ -286,7 +291,9 @@ public sealed class ClientActionBoundaryTests
         {
             RepeatAction = ClientActionCatalog.NavigationCommit.Value,
         };
-        var dispatcher = CreateDispatcher(probe);
+        var dispatcher = CreateDispatcher(
+            probe,
+            repeatEvidenceAuthority: new TestRepeatEvidenceAuthority());
         var terminalCalls = 0;
 
         await dispatcher.NavigateAsync(
@@ -362,7 +369,9 @@ public sealed class ClientActionBoundaryTests
         {
             RepeatAction = ClientActionCatalog.StateCommit.Value,
         };
-        var dispatcher = CreateDispatcher(probe);
+        var dispatcher = CreateDispatcher(
+            probe,
+            repeatEvidenceAuthority: new TestRepeatEvidenceAuthority());
         var terminalCalls = 0;
         var version = dispatcher.GetStateVersion("repeat-state");
 
@@ -407,6 +416,189 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task Repeat_without_host_evidence_fails_before_the_commit_terminal()
+    {
+        var probe = new ClientProbe
+        {
+            RepeatAction = ClientActionCatalog.StateCommit.Value,
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var terminalCalls = 0;
+        var version = dispatcher.GetStateVersion("unauthorized-repeat");
+
+        await FluentActions.Invoking(async () => await dispatcher.CommitStateAsync(
+                "unauthorized-repeat",
+                version,
+                _ =>
+                {
+                    Interlocked.Increment(ref terminalCalls);
+                    return ValueTask.CompletedTask;
+                }))
+            .Should().ThrowAsync<KernelActionFailedException>();
+
+        terminalCalls.Should().Be(0);
+        dispatcher.GetStateVersion("unauthorized-repeat").Should().Be(version);
+    }
+
+    [Test]
+    public async Task Production_dispatcher_composes_the_authoritative_client_module()
+    {
+        var source = new ClientActionContextSource();
+        var dispatcher = ClientActionDispatcher.CreateProduction(source);
+
+        dispatcher.Graph.Modules.Modules.Should().ContainSingle();
+        dispatcher.Graph.Modules.Modules[0].Identity.Id.Should().Be("sharpclaw.client");
+
+        var result = await dispatcher.RunCommandAsync(
+            new ClientCommandInvocation("production", "CLIENT", "production", Guid.NewGuid()),
+            static (_, _) => ValueTask.FromResult("composed"));
+
+        result.Should().Be("composed");
+    }
+
+    [Test]
+    public async Task Production_graph_keeps_callers_and_features_isolated()
+    {
+        var source = new ClientActionContextSource();
+        var sink = new ProductionContextSink();
+        var dispatcher = ClientActionDispatcher.CreateProduction(source, sink);
+        using var featureDocument = JsonDocument.Parse("true");
+        var featureSet = new ExtensionFeatureSet(
+        [
+            new ExtensionFeature(
+                "client.test.feature",
+                1,
+                "k05-client-test",
+                64,
+                featureDocument.RootElement.Clone()),
+        ]);
+
+        await Task.WhenAll(
+            dispatcher.RunWithContextAsync(
+                new ClientActionRequestContext(
+                    new RequestPrincipal("user-a", "A", new HashSet<string>(), true),
+                    featureSet),
+                new ClientCommandInvocation("a", "CLIENT", "a", Guid.NewGuid()),
+                static (_, _) => ValueTask.FromResult(true)).AsTask(),
+            dispatcher.RunWithContextAsync(
+                new ClientActionRequestContext(
+                    new RequestPrincipal("user-b", "B", new HashSet<string>(), true),
+                    ExtensionFeatureSet.Empty),
+                new ClientCommandInvocation("b", "CLIENT", "b", Guid.NewGuid()),
+                static (_, _) => ValueTask.FromResult(true)).AsTask());
+
+        sink.Observations
+            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Select(static observation => observation.CallerSubjectId)
+            .Should().BeEquivalentTo(["user-a", "user-b"]);
+        sink.Observations
+            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Should().ContainSingle(item => item.CallerSubjectId == "user-a" &&
+                item.FeatureNames.Contains("client.test.feature"));
+        sink.Observations
+            .Where(static observation => observation.Action == ClientActionCatalog.CommandReceive.Value)
+            .Should().ContainSingle(item => item.CallerSubjectId == "user-b" &&
+                item.FeatureNames.Count == 0);
+    }
+
+    [Test]
+    public async Task Api_client_sends_the_accepted_effective_method_and_path()
+    {
+        var probe = new ClientProbe
+        {
+            ReplaceInputAction = ClientActionCatalog.CommandValidate.Value,
+            Replacement = new ClientCommandInvocation(
+                "http.send",
+                "PUT",
+                "/accepted",
+                Guid.NewGuid(),
+                "/accepted"),
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            new ClientActionContextSource(),
+            "test-api-key");
+
+        using var response = await api.GetAsync("/original");
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        handler.Request.Should().NotBeNull();
+        handler.Request!.Method.Method.Should().Be("PUT");
+        handler.Request.RequestUri!.PathAndQuery.Should().Be("/accepted");
+    }
+
+    [Test]
+    public async Task Stream_command_stays_open_until_consumption_cancellation()
+    {
+        var probe = new ClientProbe();
+        var dispatcher = CreateDispatcher(probe);
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = _ => new HttpResponseMessage(HttpStatusCode.OK)
+            {
+                Content = new StreamContent(new BlockingReadStream()),
+            },
+        };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            new ClientActionContextSource(),
+            "test-api-key");
+        using var cancellation = new CancellationTokenSource();
+
+        var operation = api.ConsumeStreamAsync(
+            "GET",
+            "/stream",
+            null,
+            async (response, token) =>
+            {
+                await using var stream = await response.Content.ReadAsStreamAsync(token);
+                await stream.ReadExactlyAsync(new byte[1], token);
+            },
+            cancellation.Token);
+
+        await Task.Delay(50);
+        cancellation.Cancel();
+
+        await FluentActions.Invoking(async () => await operation)
+            .Should().ThrowAsync<OperationCanceledException>();
+        probe.Actions().Should().Contain("client.command.cancel");
+        probe.Actions().Should().NotContain("client.command.complete");
+    }
+
+    [Test]
+    public async Task Stream_command_failure_is_inside_the_command_boundary()
+    {
+        var probe = new ClientProbe();
+        var dispatcher = CreateDispatcher(probe);
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            new ClientActionContextSource(),
+            "test-api-key");
+
+        await FluentActions.Invoking(async () => await api.ConsumeStreamAsync(
+                "GET",
+                "/stream",
+                null,
+                static (_, _) => throw new InvalidOperationException("stream failure")))
+            .Should().ThrowAsync<KernelActionFailedException>();
+
+        probe.Actions().Should().Contain("client.command.fail");
+        probe.Actions().Should().NotContain("client.command.complete");
+    }
+
+    [Test]
     public void Api_stream_and_http_methods_share_the_client_command_boundary()
     {
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
@@ -414,8 +606,8 @@ public sealed class ClientActionBoundaryTests
         var source = File.ReadAllText(Path.Combine(
             root, "SharpClaw.Client.Uno", "Services", "SharpClawApiClient.cs"));
 
-        source.Should().Contain("PostStreamAsync");
-        source.Should().Contain("GetStreamAsync");
+        source.Should().Contain("ConsumeStreamAsync");
+        source.Should().Contain("ResponseHeadersRead");
         source.Should().Contain("SendClientCommandAsync(\"POST\", path");
         source.Should().Contain("SendClientCommandAsync(\"GET\", path");
         source.Should().Contain("_clientActions.RunCommandAsync");
@@ -466,13 +658,22 @@ public sealed class ClientActionBoundaryTests
         var clientRoot = Path.Combine(root, "SharpClaw.Client.Uno");
         var requiredSource = new Dictionary<string, string[]>(StringComparer.Ordinal)
         {
+            ["App.xaml.cs"] = [
+                "ClientActionDispatcher.CreateProduction",
+                "client.app.close",
+            ],
+            [Path.Combine("Presentation", "BootModel.cs")] = [
+                "client.backend.start",
+                "client.gateway.start",
+                "_gateway.ApiKey = _api.CachedApiKey",
+            ],
             [Path.Combine("Presentation", "MainModel.cs")] = [
                 "NavigateViewModelAsync",
                 "RunCommandAsync",
             ],
             [Path.Combine("Presentation", "MainPage.Chat.cs")] = [
-                "GetStreamAsync",
-                "PostStreamAsync",
+                "ConsumeStreamAsync",
+                "CommitStateAsync",
             ],
             [Path.Combine("Presentation", "LoginModel.cs")] = [
                 "Actions.RunCommandAsync",
@@ -496,12 +697,47 @@ public sealed class ClientActionBoundaryTests
             [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
                 "Actions.RunCommandAsync",
                 "client.gateway.restart",
+                "client.gateway.logs.clear",
+                "client.process.persistence",
                 "client.autostart.update",
+            ],
+            [Path.Combine("Presentation", "EnvEditorPage.xaml.cs")] = [
+                "client.environment.save",
+                "client.environment.apply",
+                "Environment.SetEnvironmentVariable",
+            ],
+            [Path.Combine("Presentation", "FirstSetupPage.xaml.cs")] = [
+                "client.provider.ollama.probe",
+                "RunCommandAsync",
+            ],
+            [Path.Combine("Services", "AccountStore.cs")] = [
+                "CommitStateAsync",
+                "client.accounts",
+            ],
+            [Path.Combine("Services", "ClientSettings.cs")] = [
+                "CommitStateAsync",
+                "client.settings",
+            ],
+            [Path.Combine("Services", "FirstSetupMarker.cs")] = [
+                "CommitStateAsync",
+                "client.setup",
             ],
             [Path.Combine("Services", "SharpClawApiClient.cs")] = [
                 "_clientActions.RunCommandAsync",
-                "GetStreamAsync",
-                "PostStreamAsync",
+                "ConsumeStreamAsync",
+            ],
+            [Path.Combine("Services", "ClientNavigationService.cs")] = [
+                "actions.NavigateAsync",
+                "navigator.NavigateRouteAsync",
+                "navigator.NavigateViewModelAsync",
+            ],
+            [Path.Combine("Services", "ModuleStateCache.cs")] = [
+                "CommitStateAsync",
+                "client.modules",
+            ],
+            [Path.Combine("Services", "ModuleFrontendContributionRegistry.cs")] = [
+                "CommitStateAsync",
+                "client.frontend.contributions",
             ],
         };
 
@@ -511,9 +747,22 @@ public sealed class ClientActionBoundaryTests
             foreach (var marker in requirement.Value)
                 source.Should().Contain(marker, requirement.Key);
         }
+
+        var allClientSource = Directory.EnumerateFiles(clientRoot, "*.cs", SearchOption.AllDirectories)
+            .Where(path => !path.Contains("\\bin\\", StringComparison.OrdinalIgnoreCase))
+            .Where(path => !path.Contains("\\obj\\", StringComparison.OrdinalIgnoreCase))
+            .Select(File.ReadAllText)
+            .ToArray();
+        string combinedSource = string.Join(Environment.NewLine, allClientSource);
+        combinedSource.Should().NotContain("PostStreamAsync");
+        combinedSource.Should().NotContain("GetStreamAsync");
+        combinedSource.Should().NotContain("new ClientActionDispatcher([]");
     }
 
-    private static ClientActionDispatcher CreateDispatcher(ClientProbe probe)
+    private static ClientActionDispatcher CreateDispatcher(
+        ClientProbe probe,
+        ClientActionContextSource? contextSource = null,
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
     {
         const string moduleId = "k05-client-test";
         var grants = ClientActionCatalog.All.ToDictionary(
@@ -532,7 +781,9 @@ public sealed class ClientActionBoundaryTests
                 {
                     [moduleId] = grants,
                 },
-            });
+            },
+            contextSource,
+            repeatEvidenceAuthority);
     }
 
     private static string FindSourceRoot()
@@ -579,7 +830,9 @@ public sealed class ClientActionBoundaryTests
                 context.ActionKey.Value,
                 context.TraceId,
                 context.IdempotencyKey,
-                context.Attempt));
+                context.Attempt,
+                context.Caller.SubjectId,
+                context.Features.Items.Select(static item => item.ContractName).ToArray()));
 
         public void ShouldHaveOneContext()
         {
@@ -592,7 +845,92 @@ public sealed class ClientActionBoundaryTests
         string Action,
         Guid TraceId,
         Guid IdempotencyKey,
-        int Attempt);
+        int Attempt,
+        string CallerSubjectId,
+        IReadOnlyList<string> FeatureNames);
+
+    private sealed class ProductionContextSink : ClientActionModuleSet.IClientActionContextSink
+    {
+        public ConcurrentQueue<ClientObservation> Observations { get; } = new();
+
+        public void Observe(ActionContext<KernelActionEnvelope> context) =>
+            Observations.Enqueue(new ClientObservation(
+                context.ActionKey.Value,
+                context.TraceId,
+                context.IdempotencyKey,
+                context.Attempt,
+                context.Caller.SubjectId,
+                context.Features.Items.Select(static item => item.ContractName).ToArray()));
+    }
+
+    private sealed class TestRepeatEvidenceAuthority : IKernelActionRepeatEvidenceAuthority
+    {
+        public ValueTask<KernelActionRepeatEvidence?> AuthorizeAsync(
+            KernelActionRepeatEvidenceRequest request,
+            CancellationToken cancellationToken)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            var issuedAt = DateTimeOffset.UtcNow;
+            return ValueTask.FromResult<KernelActionRepeatEvidence?>(new(
+                "K05_TEST_EVIDENCE",
+                request.RequiredKind,
+                request.ActionKey,
+                request.ActionVersion,
+                request.IdempotencyScope,
+                request.IdempotencyKey,
+                request.PriorInvocationId,
+                request.PriorAttempt,
+                request.NextInvocationId,
+                request.NextAttempt,
+                issuedAt,
+                issuedAt.AddMinutes(1)));
+        }
+    }
+
+    private sealed class CapturingHandler : HttpMessageHandler
+    {
+        public HttpRequestMessage? Request { get; private set; }
+
+        public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
+
+        protected override Task<HttpResponseMessage> SendAsync(
+            HttpRequestMessage request,
+            CancellationToken cancellationToken)
+        {
+            Request = request;
+            return Task.FromResult(
+                ResponseFactory?.Invoke(request) ??
+                new HttpResponseMessage(HttpStatusCode.OK)
+                {
+                    Content = new StringContent("ok"),
+                });
+        }
+    }
+
+    private sealed class BlockingReadStream : Stream
+    {
+        public override bool CanRead => true;
+        public override bool CanSeek => false;
+        public override bool CanWrite => false;
+        public override long Length => 0;
+        public override long Position { get => 0; set => throw new NotSupportedException(); }
+        public override void Flush() => throw new NotSupportedException();
+        public override int Read(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override long Seek(long offset, SeekOrigin origin) =>
+            throw new NotSupportedException();
+        public override void SetLength(long value) =>
+            throw new NotSupportedException();
+        public override void Write(byte[] buffer, int offset, int count) =>
+            throw new NotSupportedException();
+        public override async ValueTask<int> ReadAsync(
+            Memory<byte> buffer,
+            CancellationToken cancellationToken = default)
+        {
+            await Task.Delay(Timeout.InfiniteTimeSpan, cancellationToken);
+            return 0;
+        }
+    }
 
     private sealed class ClientInterceptor(ClientProbe probe)
         : IActionInterceptor<KernelActionEnvelope, object>

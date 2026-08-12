@@ -59,12 +59,12 @@ public sealed class BootModel
             var url = customUrl.Trim();
             await _actions.RunCommandAsync(
                 "client.boot.url",
-                _ =>
+                async token =>
                 {
                     _backend.UpdateApiUrl(url);
                     _gateway.UpdateBackendBaseUrl(url);
-                    _api.UpdateBaseUrl(url);
-                    return ValueTask.FromResult(true);
+                    await _api.UpdateBaseUrlAsync(url, token);
+                    return true;
                 },
                 cancellationToken);
         }
@@ -168,7 +168,7 @@ public sealed class BootModel
             apiKeyLine = new("API Key", "file present", false);
         }
 
-        _api.InvalidateApiKey();
+        await _api.InvalidateApiKeyAsync(ct);
         try
         {
             await _api.WaitForReadyAsync(
@@ -203,13 +203,14 @@ public sealed class BootModel
 
         try
         {
-            // Forward the verified API key so the gateway can authenticate
-            // with the core API without relying on file I/O (MSIX VFS safe).
-            _gateway.ApiKey = _api.CachedApiKey;
-
             await _actions.RunCommandAsync(
                 "client.gateway.start",
-                token => new ValueTask(_gateway.EnsureStartedAsync(token)),
+                token =>
+                {
+                    // Forward the verified API key inside the gateway action.
+                    _gateway.ApiKey = _api.CachedApiKey;
+                    return new ValueTask(_gateway.EnsureStartedAsync(token));
+                },
                 ct);
 
             var mode = _gateway.IsExternal ? "external" : "bundled";

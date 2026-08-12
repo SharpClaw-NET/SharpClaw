@@ -176,14 +176,18 @@ public partial class App : Application
                         return manager;
                     });
 
-                    services.AddSingleton<ClientActionDispatcher>();
+                    services.AddSingleton<ClientActionContextSource>();
+                    services.AddSingleton<ClientActionDispatcher>(sp =>
+                        ClientActionDispatcher.CreateProduction(
+                            sp.GetRequiredService<ClientActionContextSource>()));
                     services.AddSingleton<ClientNavigationService>();
                     services.AddSingleton<SharpClawApiClient>(sp =>
                         new SharpClawApiClient(
                             apiUrl,
                             sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
                             frontendInstance,
-                            sp.GetRequiredService<ClientActionDispatcher>()));
+                            sp.GetRequiredService<ClientActionDispatcher>(),
+                            sp.GetRequiredService<ClientActionContextSource>()));
                     services.AddSingleton(sp => new FirstSetupMarker(
                         frontendInstance,
                         sp.GetRequiredService<ClientActionDispatcher>()));
@@ -193,11 +197,17 @@ public partial class App : Application
                     services.AddSingleton(sp => new AccountStore(
                         frontendInstance,
                         sp.GetRequiredService<ClientActionDispatcher>()));
-                    var moduleStateCache = new ModuleStateCache();
-                    var contributionRegistry = new ModuleFrontendContributionRegistry(moduleStateCache);
-                    services.AddSingleton(moduleStateCache);
-                    services.AddSingleton(contributionRegistry);
-                    services.AddSingleton(new ModuleFrontendStateService(moduleStateCache, contributionRegistry));
+                    services.AddSingleton<ModuleStateCache>(sp =>
+                        new ModuleStateCache(
+                            sp.GetRequiredService<ClientActionDispatcher>()));
+                    services.AddSingleton<ModuleFrontendContributionRegistry>(sp =>
+                        new ModuleFrontendContributionRegistry(
+                            sp.GetRequiredService<ModuleStateCache>(),
+                            sp.GetRequiredService<ClientActionDispatcher>()));
+                    services.AddSingleton<ModuleFrontendStateService>(sp =>
+                        new ModuleFrontendStateService(
+                            sp.GetRequiredService<ModuleStateCache>(),
+                            sp.GetRequiredService<ModuleFrontendContributionRegistry>()));
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
@@ -225,20 +235,31 @@ public partial class App : Application
         // Persistent mode → Detach (keep running); otherwise → Stop + Kill.
         if (MainWindow is not null)
         {
-            MainWindow.Closed += (_, _) =>
+            MainWindow.Closed += async (_, _) =>
             {
-                var gw = Host?.Services.GetService<GatewayProcessManager>();
-                var be = Host?.Services.GetService<BackendProcessManager>();
+                var services = Host?.Services;
+                var actions = services?.GetService<ClientActionDispatcher>();
+                if (services is null || actions is null)
+                    return;
 
-                // Refresh auto-start scripts so paths stay current
-                // (handles MSIX version-path changes on update).
-                WindowsStartupManager.RefreshIfNeeded(
-                    be?.ExecutablePath, be?.ApiUrl,
-                    gw?.ExecutablePath, gw?.GatewayUrl);
+                await actions.RunCommandAsync(
+                    "client.app.close",
+                    async _ =>
+                    {
+                        var gw = services.GetService<GatewayProcessManager>();
+                        var be = services.GetService<BackendProcessManager>();
+                        var api = services.GetService<SharpClawApiClient>();
 
-                gw?.Dispose();
-                be?.Dispose();
-                _logging?.Dispose();
+                        WindowsStartupManager.RefreshIfNeeded(
+                            be?.ExecutablePath, be?.ApiUrl,
+                            gw?.ExecutablePath, gw?.GatewayUrl);
+
+                        gw?.Dispose();
+                        be?.Dispose();
+                        if (api is not null)
+                            await api.DisposeAsync();
+                        _logging?.Dispose();
+                    });
             };
         }
     }

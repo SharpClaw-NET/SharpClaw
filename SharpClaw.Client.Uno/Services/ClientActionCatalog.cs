@@ -59,11 +59,19 @@ public sealed partial record ClientActionCoverageEntry(
     string Boundary,
     SharpClawActionKey ActionKey);
 
+public sealed record ClientActionRequestContext(
+    RequestPrincipal Caller,
+    ExtensionFeatureSet Features);
+
 public sealed record ClientCommandInvocation(
     string Operation,
     string Method,
     string Path,
-    Guid CommandId);
+    Guid CommandId,
+    string? RequestTarget = null)
+{
+    public string EffectiveRequestTarget => RequestTarget ?? Path;
+}
 
 public sealed record ClientCommandSignal(
     Guid CommandId,

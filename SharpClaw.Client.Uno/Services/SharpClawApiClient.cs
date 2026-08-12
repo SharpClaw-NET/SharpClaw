@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
 using Microsoft.Extensions.Logging;
+using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Services;
 
@@ -14,17 +15,24 @@ public sealed class SharpClawApiClient : IDisposable
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
     private readonly ClientActionDispatcher _clientActions;
+    private readonly ClientActionContextSource _contextSource;
+    private readonly bool _ownsHttp;
+    private readonly string? _fixedApiKey;
     private string? _cachedApiKey;
+    private int _disposed;
 
     public SharpClawApiClient(
         string baseUrl,
         ILogger<SharpClawApiClient> logger,
         FrontendInstanceService? frontendInstance,
-        ClientActionDispatcher clientActions)
+        ClientActionDispatcher clientActions,
+        ClientActionContextSource? contextSource = null)
     {
         _frontendInstance = frontendInstance;
         _logger = logger;
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _contextSource = contextSource ?? new ClientActionContextSource();
+        _ownsHttp = true;
         _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
             BaseAddress = new Uri(baseUrl),
@@ -33,20 +41,46 @@ public sealed class SharpClawApiClient : IDisposable
 
     }
 
+    internal SharpClawApiClient(
+        HttpClient http,
+        ILogger<SharpClawApiClient> logger,
+        ClientActionDispatcher clientActions,
+        ClientActionContextSource contextSource,
+        string? fixedApiKey = null)
+    {
+        _http = http ?? throw new ArgumentNullException(nameof(http));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _contextSource = contextSource ?? throw new ArgumentNullException(nameof(contextSource));
+        _ownsHttp = false;
+        _fixedApiKey = fixedApiKey;
+    }
+
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>
     public string BaseUrl => _http.BaseAddress!.ToString();
 
     /// <summary>
     /// Changes the target API base URL and clears the cached API key.
     /// </summary>
-    public void UpdateBaseUrl(string baseUrl)
+    public async ValueTask UpdateBaseUrlAsync(
+        string baseUrl,
+        CancellationToken cancellationToken = default)
     {
-        _http.BaseAddress = new Uri(baseUrl);
-        _cachedApiKey = null;
-        _frontendInstance?.RememberBackendBinding(
-            backendInstanceId: null,
-            baseUrl,
-            bindingKind: "configured");
+        var expectedVersion = _clientActions.GetStateVersion("client.api.target");
+        await _clientActions.CommitStateAsync(
+            "client.api.target",
+            expectedVersion,
+            _ =>
+            {
+                _http.BaseAddress = new Uri(baseUrl);
+                _cachedApiKey = null;
+                _frontendInstance?.RememberBackendBinding(
+                    backendInstanceId: null,
+                    baseUrl,
+                    bindingKind: "configured");
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
 
     public async Task<HttpResponseMessage> GetAsync(
@@ -57,13 +91,42 @@ public sealed class SharpClawApiClient : IDisposable
         string path, HttpContent? content, CancellationToken ct = default)
         => await SendClientCommandAsync("POST", path, content, responseHeadersRead: false, ct);
 
-    public async Task<HttpResponseMessage> PostStreamAsync(
-        string path, HttpContent? content, CancellationToken ct = default)
-        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: true, ct);
+    public Task ConsumeStreamAsync(
+        string method,
+        string path,
+        HttpContent? content,
+        Func<HttpResponseMessage, CancellationToken, Task> consume,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(consume);
 
-    public async Task<HttpResponseMessage> GetStreamAsync(
-        string path, CancellationToken ct = default)
-        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: true, ct);
+        return _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.stream",
+                method,
+                SafePath(new Uri(path, UriKind.RelativeOrAbsolute)),
+                Guid.NewGuid(),
+                path),
+            async (invocation, actionToken) =>
+            {
+                using var request = new HttpRequestMessage(
+                    new HttpMethod(invocation.Method),
+                    invocation.EffectiveRequestTarget)
+                {
+                    Content = content,
+                };
+                AttachApiKey(request);
+                using var response = await _http.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    actionToken);
+                await consume(response, actionToken);
+                return true;
+            },
+            cancellationToken).AsTask();
+    }
 
     public async Task<HttpResponseMessage> PutAsync(
         string path, HttpContent? content, CancellationToken ct = default)
@@ -100,9 +163,14 @@ public sealed class SharpClawApiClient : IDisposable
                 "http.send",
                 request.Method.Method,
                 SafePath(request.RequestUri),
-                Guid.NewGuid()),
-            async (_, actionToken) =>
+                Guid.NewGuid(),
+                request.RequestUri?.ToString()),
+            async (invocation, actionToken) =>
             {
+                request.Method = new HttpMethod(invocation.Method);
+                request.RequestUri = new Uri(
+                    invocation.EffectiveRequestTarget,
+                    UriKind.RelativeOrAbsolute);
                 AttachApiKey(request);
                 return await _http.SendAsync(request, actionToken);
             },
@@ -121,12 +189,13 @@ public sealed class SharpClawApiClient : IDisposable
                 "http.send",
                 method,
                 SafePath(new Uri(path, UriKind.RelativeOrAbsolute)),
-                Guid.NewGuid()),
+                Guid.NewGuid(),
+                path),
             async (invocation, actionToken) =>
             {
                 using var request = new HttpRequestMessage(
                     new HttpMethod(invocation.Method),
-                    path)
+                    invocation.EffectiveRequestTarget)
                 {
                     Content = content,
                 };
@@ -163,10 +232,10 @@ public sealed class SharpClawApiClient : IDisposable
                 // and written a new key to disk.  Clear the cache so the
                 // next attempt re-reads the file.
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                    InvalidateApiKey();
+                    await InvalidateApiKeyAsync(cts.Token);
             }
             catch (HttpRequestException) { }
-            catch (InvalidOperationException) { InvalidateApiKey(); }
+            catch (InvalidOperationException) { await InvalidateApiKeyAsync(cts.Token); }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(250, cts.Token);
@@ -194,7 +263,8 @@ public sealed class SharpClawApiClient : IDisposable
     /// </summary>
     public async ValueTask SetAccessTokenAsync(
         string? token,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        ClientActionRequestContext? authenticatedContext = null)
     {
         var expectedVersion = _clientActions.GetStateVersion("client.auth");
         await _clientActions.CommitStateAsync(
@@ -203,6 +273,12 @@ public sealed class SharpClawApiClient : IDisposable
             _ =>
             {
                 _accessToken = token;
+                if (token is null)
+                    _contextSource.ClearSession();
+                else if (authenticatedContext is not null)
+                    _contextSource.SetSession(authenticatedContext);
+                else
+                    _contextSource.ClearSession();
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
@@ -213,6 +289,9 @@ public sealed class SharpClawApiClient : IDisposable
 
     private string ResolveApiKey()
     {
+        if (_fixedApiKey is not null)
+            return _fixedApiKey;
+
         if (_cachedApiKey is not null)
             return _cachedApiKey;
 
@@ -238,9 +317,38 @@ public sealed class SharpClawApiClient : IDisposable
     /// Clears the cached API key so the next request re-reads from disk.
     /// Call this after restarting the API process.
     /// </summary>
-    public void InvalidateApiKey() => _cachedApiKey = null;
+    public async ValueTask InvalidateApiKeyAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var expectedVersion = _clientActions.GetStateVersion("client.api.key");
+        await _clientActions.CommitStateAsync(
+            "client.api.key",
+            expectedVersion,
+            _ =>
+            {
+                _cachedApiKey = null;
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+    }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose() =>
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        await _clientActions.RunCommandAsync(
+            "client.api.dispose",
+            _ =>
+            {
+                if (_ownsHttp)
+                    _http.Dispose();
+                return ValueTask.CompletedTask;
+            });
+    }
 
     /// <summary>
     /// Emits bounded request metadata through the process logger. Bodies and

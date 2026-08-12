@@ -347,7 +347,7 @@ public sealed partial class EnvEditorPage : Page
                 async token =>
                 {
                     backend.Stop();
-                    apiClient.InvalidateApiKey();
+                    await apiClient.InvalidateApiKeyAsync(token);
                     await Task.Delay(500, token);
                     await backend.EnsureStartedAsync(token);
                 });

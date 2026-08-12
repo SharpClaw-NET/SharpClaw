@@ -42,73 +42,88 @@ public sealed partial class MainPage
     private async Task RunThreadWatchAsync(Guid channelId, Guid threadId, CancellationToken ct)
     {
         var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+        var stateKey = $"client.stream.thread.{channelId:N}.{threadId:N}";
         try
         {
-            using var resp = await api.GetStreamAsync(
-                $"/channels/{channelId}/chat/threads/{threadId}/watch", ct);
-            if (!resp.IsSuccessStatusCode)
-            {
-                return;
-            }
-
-            using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var reader = new StreamReader(stream);
-
-            ReadOnlyMemory<char> eventTypeMem = default;
-
-            while (!ct.IsCancellationRequested)
-            {
-                var line = await reader.ReadLineAsync(ct);
-                if (line is null) { break; }
-                if (line.Length == 0) continue;
-
-
-                if (line.StartsWith("event: "))
+            await api.ConsumeStreamAsync(
+                "GET",
+                $"/channels/{channelId}/chat/threads/{threadId}/watch",
+                null,
+                async (response, streamToken) =>
                 {
-                    eventTypeMem = line.AsMemory(7);
-                }
-                else if (line.StartsWith("data: ") && eventTypeMem.Length > 0)
-                {
-                    var evtSpan = eventTypeMem.Span;
+                    if (!response.IsSuccessStatusCode)
+                        return;
 
-                    if (evtSpan.SequenceEqual("Processing"))
+                    await using var stream = await response.Content.ReadAsStreamAsync(streamToken);
+                    using var reader = new StreamReader(stream);
+                    ReadOnlyMemory<char> eventTypeMem = default;
+
+                    while (!streamToken.IsCancellationRequested)
                     {
-                        DispatcherQueue.TryEnqueue(() =>
+                        var line = await reader.ReadLineAsync(streamToken);
+                        if (line is null) break;
+                        if (line.Length == 0) continue;
+
+                        if (line.StartsWith("event: "))
                         {
-                            ApplyThreadWatchDecision(UnoClientState.ApplyThreadWatchEvent(
-                                CurrentChatInteractionState(),
-                                "Processing"));
-                        });
-                    }
-                    else if (evtSpan.SequenceEqual("NewMessages"))
-                    {
-                        DispatcherQueue.TryEnqueue(async () =>
+                            eventTypeMem = line.AsMemory(7);
+                        }
+                        else if (line.StartsWith("data: ") && eventTypeMem.Length > 0)
                         {
-                            var decision = UnoClientState.ApplyThreadWatchEvent(
-                                CurrentChatInteractionState(),
-                                "NewMessages");
-                            ApplyThreadWatchDecision(decision);
-
-                            if (!decision.LoadHistoryNow)
+                            var eventType = eventTypeMem.ToString();
+                            await EnqueueOnUiAsync(async () =>
                             {
-                                return;
-                            }
+                                await CommitStreamStateAsync(
+                                    stateKey,
+                                    async _ =>
+                                    {
+                                        var decision = UnoClientState.ApplyThreadWatchEvent(
+                                            CurrentChatInteractionState(),
+                                            eventType);
+                                        ApplyThreadWatchDecision(decision);
 
-                            if (_selectedChannelId is { } chId)
-                            {
-                                await LoadHistoryAsync(chId);
-                                await LoadCostAsync(chId);
-                                ScrollToBottom();
-                            }
-                        });
+                                        if (decision.LoadHistoryNow &&
+                                            _selectedChannelId is { } selectedChannelId)
+                                        {
+                                            await LoadHistoryAsync(selectedChannelId);
+                                            await LoadCostAsync(selectedChannelId);
+                                            ScrollToBottom();
+                                        }
+                                    },
+                                    streamToken);
+                            });
+                            eventTypeMem = default;
+                        }
                     }
-
-                    eventTypeMem = default;
-                }
-            }
+                },
+                ct);
         }
         catch (OperationCanceledException) { }
         catch (Exception) { }
+    }
+
+    private Task EnqueueOnUiAsync(Func<Task> action)
+    {
+        var completion = new TaskCompletionSource<bool>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        if (!DispatcherQueue.TryEnqueue(async () =>
+        {
+            try
+            {
+                await action();
+                completion.TrySetResult(true);
+            }
+            catch (Exception ex)
+            {
+                completion.TrySetException(ex);
+            }
+        }))
+        {
+            completion.TrySetException(new InvalidOperationException(
+                "The client UI dispatcher rejected a stream update."));
+        }
+
+        return completion.Task;
     }
 
     private UnoChatInteractionState CurrentChatInteractionState()
@@ -583,60 +598,95 @@ public sealed partial class MainPage
         var body = JsonSerializer.Serialize(request.Body, Json);
         var content = new StringContent(body, Encoding.UTF8, "application/json");
 
-        var sw = Stopwatch.StartNew();
-        HttpResponseMessage? resp = null;
         try
         {
-            resp = await api.PostStreamAsync(request.Path, content, ct);
+            await api.ConsumeStreamAsync(
+                "POST",
+                request.Path,
+                content,
+                async (response, streamToken) =>
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        await CommitStreamStateAsync(
+                            $"client.stream.chat.{channelId:N}",
+                            _ =>
+                            {
+                                bubble.Content.Text =
+                                    $"Stream failed: {(int)response.StatusCode} {response.ReasonPhrase}";
+                                bubble.Content.Foreground = Brush(0xFF4444);
+                                return ValueTask.CompletedTask;
+                            },
+                            streamToken);
+                        return;
+                    }
 
-            if (!resp.IsSuccessStatusCode)
-            {
-                bubble.Content.Text = $"✗ {(int)resp.StatusCode} {resp.ReasonPhrase}";
-                bubble.Content.Foreground = Brush(0xFF4444);
-                return;
-            }
+                    var contentType = response.Content.Headers.ContentType?.MediaType ?? "";
+                    if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var fallback = await response.Content.ReadAsStringAsync(streamToken);
+                        await CommitStreamStateAsync(
+                            $"client.stream.chat.{channelId:N}",
+                            _ =>
+                            {
+                                bubble.Content.Text =
+                                    $"Unexpected response: {TerminalUI.Truncate(fallback, 200)}";
+                                bubble.Content.Foreground = Brush(0xFF4444);
+                                return ValueTask.CompletedTask;
+                            },
+                            streamToken);
+                        return;
+                    }
 
-            var contentType = resp.Content.Headers.ContentType?.MediaType ?? "";
-            if (!contentType.Contains("event-stream", StringComparison.OrdinalIgnoreCase))
-            {
-                var fallback = await resp.Content.ReadAsStringAsync(ct);
-                bubble.Content.Text = $"✗ Unexpected response: {TerminalUI.Truncate(fallback, 200)}";
-                bubble.Content.Foreground = Brush(0xFF4444);
-                return;
-            }
+                    await using var stream =
+                        await response.Content.ReadAsStreamAsync(streamToken);
+                    await ReadSseStreamAsync(stream, bubble, channelId, streamToken);
+                },
+                ct);
 
-            await using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            await ReadSseStreamAsync(stream, bubble, channelId, ct);
         }
         catch (OperationCanceledException)
         {
-            if (_pooledStreamBuilder.Length == 0)
-                bubble.Content.Text = "(cancelled)";
-            else
-                bubble.Content.Text = _pooledStreamBuilder.ToString();
+            await CommitStreamStateAsync(
+                $"client.stream.chat.{channelId:N}",
+                _ =>
+                {
+                    bubble.Content.Text = _pooledStreamBuilder.Length == 0
+                        ? "(cancelled)"
+                        : _pooledStreamBuilder.ToString();
+                    return ValueTask.CompletedTask;
+                },
+                CancellationToken.None);
         }
         catch (Exception ex)
         {
-            bubble.Content.Text = _pooledStreamBuilder.Length > 0
-                ? _pooledStreamBuilder.ToString() + $"\n✗ {ex.Message}"
-                : $"✗ {ex.Message}";
-            bubble.Content.Foreground = Brush(0xFF4444);
+            await CommitStreamStateAsync(
+                $"client.stream.chat.{channelId:N}",
+                _ =>
+                {
+                    bubble.Content.Text = _pooledStreamBuilder.Length > 0
+                        ? _pooledStreamBuilder.ToString() + $"\nStream error: {ex.Message}"
+                        : $"Stream error: {ex.Message}";
+                    bubble.Content.Foreground = Brush(0xFF4444);
+                    return ValueTask.CompletedTask;
+                },
+                CancellationToken.None);
         }
         finally
         {
-            sw.Stop();
-            resp?.Dispose();
             if (_streamCts == cts)
                 _streamCts = null;
-            cts.Dispose();
         }
     }
 
     private async Task ReadSseStreamAsync(Stream stream, ChatBubbleRow bubble, Guid channelId, CancellationToken ct)
     {
+        var streamStateKey = $"client.stream.chat.{channelId:N}";
         // Parsed SSE event produced by the background reader.
         var events = System.Threading.Channels.Channel.CreateUnbounded<(string EventType, string DataJson)>(
             new System.Threading.Channels.UnboundedChannelOptions { SingleReader = true, SingleWriter = true });
+        using var readerCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
+        var readerToken = readerCts.Token;
 
         // Background task: read bytes from the network stream, decode UTF-8, extract SSE
         // lines, and push parsed (eventType, dataJson) pairs into the channel.
@@ -652,9 +702,9 @@ public sealed partial class MainPage
 
             try
             {
-                while (!ct.IsCancellationRequested)
+                while (!readerToken.IsCancellationRequested)
                 {
-                    var bytesRead = await stream.ReadAsync(buffer, ct).ConfigureAwait(false);
+                    var bytesRead = await stream.ReadAsync(buffer, readerToken).ConfigureAwait(false);
                     if (bytesRead == 0)
                     {
                         break;
@@ -689,7 +739,7 @@ public sealed partial class MainPage
             {
                 events.Writer.Complete();
             }
-        }, ct);
+        }, CancellationToken.None);
 
         // UI consumer: read parsed events from the channel and update the UI.
         var eventCount = 0;
@@ -698,43 +748,86 @@ public sealed partial class MainPage
         var uiUpdateClock = Stopwatch.StartNew();
         long lastUiUpdateMs = -StreamUiUpdateIntervalMs;
 
-        await foreach (var (eventType, dataJson) in events.Reader.ReadAllAsync(ct))
+        try
         {
-            eventCount++;
-
-            if (ProcessSseEvent(eventType, dataJson, bubble, channelId))
+            await foreach (var (eventType, dataJson) in events.Reader.ReadAllAsync(ct))
             {
-                doneReceived = true;
-                break;
-            }
+                eventCount++;
 
-            var elapsedMs = uiUpdateClock.ElapsedMilliseconds;
-            if (_pooledStreamBuilder.Length != lastRenderedLength &&
-                elapsedMs - lastUiUpdateMs >= StreamUiUpdateIntervalMs)
-            {
-                bubble.Content.Text = _pooledStreamBuilder.ToString() + "▍";
-                lastRenderedLength = _pooledStreamBuilder.Length;
-                lastUiUpdateMs = elapsedMs;
-                ScrollToBottom(forceLayout: false);
+                var eventCompleted = false;
+                await CommitStreamStateAsync(
+                    streamStateKey,
+                    _ =>
+                    {
+                        eventCompleted = ProcessSseEvent(eventType, dataJson, bubble, channelId);
+                        return ValueTask.CompletedTask;
+                    },
+                    ct);
+
+                if (eventCompleted)
+                {
+                    doneReceived = true;
+                    readerCts.Cancel();
+                    break;
+                }
+
+                var elapsedMs = uiUpdateClock.ElapsedMilliseconds;
+                if (_pooledStreamBuilder.Length != lastRenderedLength &&
+                    elapsedMs - lastUiUpdateMs >= StreamUiUpdateIntervalMs)
+                {
+                    await CommitStreamStateAsync(
+                        streamStateKey,
+                        _ =>
+                        {
+                            bubble.Content.Text = _pooledStreamBuilder.ToString() + "▍";
+                            ScrollToBottom(forceLayout: false);
+                            return ValueTask.CompletedTask;
+                        },
+                        ct);
+                    lastRenderedLength = _pooledStreamBuilder.Length;
+                    lastUiUpdateMs = elapsedMs;
+                }
             }
         }
-
-        // Wait for the background reader to finish cleanly.
-        try { await readerTask.ConfigureAwait(false); }
-        catch (OperationCanceledException) { /* expected on cancel */ }
+        finally
+        {
+            readerCts.Cancel();
+            try { await readerTask.ConfigureAwait(false); }
+            catch (OperationCanceledException) { /* expected on cancel */ }
+        }
 
         // Final text (no cursor)
-        if (_pooledStreamBuilder.Length > 0)
-            bubble.Content.Text = _pooledStreamBuilder.ToString();
-        else if (!doneReceived)
-            bubble.Content.Text = "(no response)";
+        await CommitStreamStateAsync(
+            streamStateKey,
+            _ =>
+            {
+                if (_pooledStreamBuilder.Length > 0)
+                    bubble.Content.Text = _pooledStreamBuilder.ToString();
+                else if (!doneReceived)
+                    bubble.Content.Text = "(no response)";
 
-        ScrollToBottom(forceLayout: true);
+                ScrollToBottom(forceLayout: true);
+                return ValueTask.CompletedTask;
+            },
+            ct);
 
         if (!doneReceived)
         {
             await LoadCostAsync(channelId);
         }
+    }
+
+    private async ValueTask CommitStreamStateAsync(
+        string stateKey,
+        Func<CancellationToken, ValueTask> mutation,
+        CancellationToken cancellationToken)
+    {
+        var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
+        await actions.CommitStateAsync(
+            stateKey,
+            actions.GetStateVersion(stateKey),
+            mutation,
+            cancellationToken);
     }
 
     /// <summary>

@@ -839,9 +839,15 @@ public sealed partial class SettingsPage : Page
         RefreshLogConsole();
         StartGatewayLogTimer(RefreshLogConsole);
 
-        clearBtn.Click += (_, _) =>
+        clearBtn.Click += async (_, _) =>
         {
-            gw.ClearOutput();
+            await Actions.RunCommandAsync(
+                "client.gateway.logs.clear",
+                _ =>
+                {
+                    gw.ClearOutput();
+                    return ValueTask.CompletedTask;
+                });
             _gatewayLogSnapshot = 0;
             logBlock.Text = "(no output)";
             logCountBadge.Text = "0 lines";
@@ -1048,11 +1054,17 @@ public sealed partial class SettingsPage : Page
             ? "Backend and gateway will remain running as background processes when you close the app."
             : "Backend and gateway will be stopped when you close the app.";
 
-        persistentToggle.Toggled += (_, _) =>
+        persistentToggle.Toggled += async (_, _) =>
         {
             var on = persistentToggle.IsOn;
-            if (backend is not null) backend.Persistent = on;
-            if (gw is not null) gw.Persistent = on;
+            await Actions.RunCommandAsync(
+                "client.process.persistence",
+                _ =>
+                {
+                    if (backend is not null) backend.Persistent = on;
+                    if (gw is not null) gw.Persistent = on;
+                    return ValueTask.CompletedTask;
+                });
 
             persistentStatus.Text = on
                 ? "Backend and gateway will remain running as background processes when you close the app."
@@ -1819,7 +1831,12 @@ public sealed partial class SettingsPage : Page
 
         // 5. Invalidate the client's cached API key so the next request
         //    re-reads from disk (handles both external and bundled restarts).
-        try { App.Services?.GetService<SharpClawApiClient>()?.InvalidateApiKey(); }
+        try
+        {
+            var api = App.Services?.GetService<SharpClawApiClient>();
+            if (api is not null)
+                await api.InvalidateApiKeyAsync();
+        }
         catch { /* best-effort */ }
 
         // Show result

@@ -9,9 +9,20 @@ namespace SharpClaw.Services;
 /// modules. Uno talks directly to the internal API for this data; gateway
 /// proxying is deliberately not part of this path.
 /// </summary>
-internal sealed class ModuleFrontendContributionRegistry(ModuleStateCache modules)
+internal sealed class ModuleFrontendContributionRegistry
 {
+    private const string StateKey = "client.frontend.contributions";
+    private readonly ModuleStateCache _modules;
+    private readonly ClientActionDispatcher _actions;
     private IReadOnlyList<ModuleFrontendContribution> _items = [];
+
+    public ModuleFrontendContributionRegistry(
+        ModuleStateCache modules,
+        ClientActionDispatcher actions)
+    {
+        _modules = modules ?? throw new ArgumentNullException(nameof(modules));
+        _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+    }
 
     public IReadOnlyList<ModuleFrontendContribution> GetAll()
         => _items;
@@ -34,7 +45,16 @@ internal sealed class ModuleFrontendContributionRegistry(ModuleStateCache module
             var response = await JsonSerializer.DeserializeAsync<ModuleFrontendContributionResponse>(stream, TerminalUI.Json, ct);
             if (response is null) return;
 
-            _items = response.Items;
+            var expectedVersion = _actions.GetStateVersion(StateKey);
+            await _actions.CommitStateAsync(
+                StateKey,
+                expectedVersion,
+                _ =>
+                {
+                    _items = response.Items;
+                    return ValueTask.CompletedTask;
+                },
+                ct);
         }
         catch
         {
@@ -49,6 +69,6 @@ internal sealed class ModuleFrontendContributionRegistry(ModuleStateCache module
             : item.RequiredModuleId;
 
         return string.IsNullOrWhiteSpace(requiredModuleId)
-            || modules.IsEnabled(requiredModuleId);
+            || _modules.IsEnabled(requiredModuleId);
     }
 }
