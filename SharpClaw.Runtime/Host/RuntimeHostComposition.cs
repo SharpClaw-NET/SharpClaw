@@ -54,6 +54,9 @@ internal static class RuntimeHostComposition
             services.AddSingleton<ISharpClawModule>(module);
 
         services.AddSingleton<RuntimeKernelAdapter>();
+        services.AddSingleton<IRuntimePersistenceActionBoundary>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
+        services.AddScoped<RuntimePersistenceActionRunner>();
         services.AddSingleton<DirectChatKernel>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().Kernel);
     }

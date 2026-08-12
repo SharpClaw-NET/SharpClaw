@@ -64,7 +64,7 @@ public sealed class HostConversationSteering(
         };
 
         db.ChatMessages.Add(message);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         if (prepared.ThreadId is { } threadId)
             threadActivity.Publish(threadId, new ThreadActivityEvent(
@@ -182,7 +182,7 @@ public sealed class HostAgentManager(
             ?? throw new InvalidOperationException($"Agent {agentId} not found.");
 
         agent.CustomChatHeader = string.IsNullOrEmpty(header) ? null : header;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
     }
 
     public async Task SetChannelHeaderAsync(Guid channelId, string? header, CancellationToken ct = default)
@@ -191,7 +191,7 @@ public sealed class HostAgentManager(
             ?? throw new InvalidOperationException($"Channel {channelId} not found.");
 
         channel.CustomChatHeader = string.IsNullOrEmpty(header) ? null : header;
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
     }
 }
 
@@ -319,7 +319,7 @@ public sealed class HostModelRegistrar(IServiceScopeFactory scopeFactory) : IMod
             ProviderKey = providerKey,
         };
         db.Providers.Add(provider);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return provider.Id;
     }
 
@@ -341,7 +341,7 @@ public sealed class HostModelRegistrar(IServiceScopeFactory scopeFactory) : IMod
             CapabilityTagsRaw = capabilityTags.Count == 0 ? null : string.Join(',', capabilityTags),
         };
         db.Models.Add(model);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return model.Id;
     }
 
@@ -373,7 +373,7 @@ public sealed class HostModelRegistrar(IServiceScopeFactory scopeFactory) : IMod
         var model = await db.Models.FirstOrDefaultAsync(m => m.Id == modelId, ct);
         if (model is null) return false;
         db.Models.Remove(model);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return true;
     }
 }
@@ -531,7 +531,7 @@ public sealed class HostContainerProvisioner(SharpClawDbContext db) : IContainer
         };
 
         db.Roles.Add(role);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         if (userId is not { } id)
             return;
@@ -543,7 +543,7 @@ public sealed class HostContainerProvisioner(SharpClawDbContext db) : IContainer
         if (user is not null && userRoleId is null)
         {
             db.Entry(user).Property<Guid?>("RoleId").CurrentValue = role.Id;
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesThroughKernelAsync(ct);
         }
     }
 }

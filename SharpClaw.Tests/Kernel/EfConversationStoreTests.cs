@@ -17,6 +17,9 @@ public sealed class EfConversationStoreTests
         var services = new ServiceCollection();
         services.AddDbContext<SharpClawDbContext>(options =>
             options.UseInMemoryDatabase(databaseName));
+        services.AddSingleton<IRuntimePersistenceActionBoundary, DirectPersistenceActionBoundary>();
+        services.AddScoped<IRuntimePersistenceActionRunnerAccessor, RuntimePersistenceActionRunnerAccessor>();
+        services.AddScoped<RuntimePersistenceActionRunner>();
         services.AddSingleton<EfConversationStore>();
         using var provider = services.BuildServiceProvider();
         var store = provider.GetRequiredService<EfConversationStore>();
@@ -56,5 +59,17 @@ public sealed class EfConversationStoreTests
         history[1].Role.Should().Be("assistant");
         history[1].Content.Should().Be("reply");
         history[1].ProviderMetadataJson.Should().Be("{\"provider\":\"test\"}");
+    }
+
+    private sealed class DirectPersistenceActionBoundary : IRuntimePersistenceActionBoundary
+    {
+        public async ValueTask RunPersistenceActionAsync(
+            RuntimePersistenceActionInvocation invocation,
+            Func<CancellationToken, ValueTask<int>> terminal,
+            CancellationToken cancellationToken = default)
+        {
+            invocation.ActionKey.Value.Should().Be("storage.upsert.commit");
+            _ = await terminal(cancellationToken);
+        }
     }
 }

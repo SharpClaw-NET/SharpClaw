@@ -2819,7 +2819,7 @@ public static class CliDispatcher
         if (user is null) return Results.NotFound();
 
         user.Bio = bio;
-        await db.SaveChangesAsync();
+        await db.SaveChangesThroughKernelAsync();
 
         Console.WriteLine(bio is not null ? $"Bio updated." : "Bio cleared.");
         return Results.Ok();

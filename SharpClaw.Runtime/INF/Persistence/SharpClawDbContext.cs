@@ -16,8 +16,13 @@ using SharpClaw.Contracts.Persistence;
 namespace SharpClaw.Runtime.INF.Persistence;
 
 public class SharpClawDbContext(
-    DbContextOptions<SharpClawDbContext> options) : DbContext(options), ISharpClawDataContext
+    DbContextOptions<SharpClawDbContext> options,
+    IRuntimePersistenceActionRunnerAccessor? persistenceActionRunnerAccessor = null)
+    : DbContext(options), ISharpClawDataContext
 {
+    private readonly IRuntimePersistenceActionRunnerAccessor? _persistenceActionRunnerAccessor =
+        persistenceActionRunnerAccessor;
+
     IQueryable<ProviderDB> ISharpClawDataContext.Providers => Providers;
     IQueryable<ModelDB> ISharpClawDataContext.Models => Models;
     IQueryable<UserDB> ISharpClawDataContext.Users => Users;
@@ -59,6 +64,17 @@ public class SharpClawDbContext(
     public DbSet<ModuleStorageRecordDB> ModuleStorageRecords => Set<ModuleStorageRecordDB>();
     public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
     public DbSet<RemoteRuntimePairingDB> RemoteRuntimePairings => Set<RemoteRuntimePairingDB>();
+
+    internal Task<int> SaveChangesThroughKernelAsync(
+        CancellationToken cancellationToken = default) =>
+        _persistenceActionRunnerAccessor is { } accessor
+            ? accessor.GetRequiredRunner().SaveChangesAsync(this, cancellationToken).AsTask()
+            : throw new InvalidOperationException(
+                "The Runtime persistence action runner is not configured.");
+
+    internal Task<int> SaveChangesTerminalAsync(
+        CancellationToken cancellationToken) =>
+        SaveChangesCoreAsync(cancellationToken);
 
     // ── Module runtime state ──────────────────────────────────────
 
@@ -444,6 +460,14 @@ public class SharpClawDbContext(
     }
 
     public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    {
+        if (_persistenceActionRunnerAccessor is not null)
+            return await SaveChangesThroughKernelAsync(cancellationToken);
+
+        return await SaveChangesCoreAsync(cancellationToken);
+    }
+
+    private async Task<int> SaveChangesCoreAsync(CancellationToken cancellationToken)
     {
         // Wildcard resource grants are immutable — reject any attempt to delete them
         // or modify their data-carrying properties at runtime.

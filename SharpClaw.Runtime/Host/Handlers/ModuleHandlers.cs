@@ -315,7 +315,7 @@ public static class ModuleHandlers
             });
         }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return Results.Ok(new { key, body.Value });
     }
 
@@ -331,7 +331,7 @@ public static class ModuleHandlers
             return Results.NotFound(new { error = $"Config key '{key}' not found for module '{moduleId}'." });
 
         db.ModuleConfigEntries.Remove(entry);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return Results.NoContent();
     }
 

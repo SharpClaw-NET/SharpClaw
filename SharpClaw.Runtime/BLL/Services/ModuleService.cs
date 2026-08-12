@@ -229,7 +229,7 @@ public sealed class ModuleService(
             module = activeModule;
         }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         InvalidateModuleRuntimeState();
         eventDispatcher.InvalidateSinkCache();
@@ -327,7 +327,7 @@ public sealed class ModuleService(
         {
             state.Enabled = false;
         }
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         InvalidateModuleRuntimeState();
         eventDispatcher.InvalidateSinkCache();
@@ -1213,7 +1213,7 @@ public sealed class ModuleService(
                 enabledSet.Add(module.Id);
         }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return enabledSet;
     }
 
@@ -1303,7 +1303,7 @@ public sealed class ModuleService(
         logger.LogInformation(
             "Reconciled permissions for module '{ModuleId}' — backfilled grants into {Count} permission set(s).",
             module.Id, permissionSets.Count);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
     }
 
     // ═══════════════════════════════════════════════════════════════

@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
+    <InternalsVisibleTo Include="SharpClaw.Runtime.BLL" />
+    <InternalsVisibleTo Include="SharpClaw.Runtime.Host" />
   </ItemGroup>
 
   <ItemGroup>

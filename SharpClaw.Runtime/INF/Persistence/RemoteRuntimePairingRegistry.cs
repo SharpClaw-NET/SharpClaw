@@ -81,7 +81,7 @@ public sealed class RemoteRuntimePairingRegistry(
                 };
 
                 db.RemoteRuntimePairings.Add(entity);
-                await db.SaveChangesAsync(cancellationToken);
+                await db.SaveChangesThroughKernelAsync(cancellationToken);
 
                 return new RemoteRuntimePairingInvitation(
                     pairId,
@@ -196,7 +196,7 @@ public sealed class RemoteRuntimePairingRegistry(
             entity.InvitationConsumedAtUtc = now;
             entity.StatusReason = null;
             Touch(entity, now);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally
@@ -251,7 +251,7 @@ public sealed class RemoteRuntimePairingRegistry(
             entity.ApprovedAtUtc = now;
             entity.StatusReason = null;
             Touch(entity, now);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally
@@ -322,7 +322,7 @@ public sealed class RemoteRuntimePairingRegistry(
             }
             entity.StatusReason = null;
             Touch(entity, now);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally
@@ -345,7 +345,7 @@ public sealed class RemoteRuntimePairingRegistry(
             entity.DisplayName = NormalizeOptional(displayName);
             entity.Description = NormalizeOptional(description);
             Touch(entity, DateTimeOffset.UtcNow);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally
@@ -362,7 +362,7 @@ public sealed class RemoteRuntimePairingRegistry(
         {
             var entity = await RequireEntityAsync(pairId, cancellationToken);
             db.RemoteRuntimePairings.Remove(entity);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
         }
         finally
         {
@@ -413,7 +413,7 @@ public sealed class RemoteRuntimePairingRegistry(
             var entity = await RequireEntityAsync(pairId, cancellationToken);
             entity.LastSeenAtUtc = DateTimeOffset.UtcNow;
             Touch(entity, entity.LastSeenAtUtc.Value);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally
@@ -437,7 +437,7 @@ public sealed class RemoteRuntimePairingRegistry(
             var entity = await RequireEntityAsync(pairId, cancellationToken);
             entity.EncryptedCertificateAuthorityPfx = EncryptSecret(Convert.ToBase64String(certificateAuthorityPfx.Span));
             Touch(entity, DateTimeOffset.UtcNow);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
         }
         finally
         {
@@ -566,7 +566,7 @@ public sealed class RemoteRuntimePairingRegistry(
                         entity.ClientCertificateExpiresAtUtc = expiresAt;
                         entity.EncryptedClientCertificateDer = EncryptSecret(Convert.ToBase64String(certificateDer));
                         Touch(entity, DateTimeOffset.UtcNow);
-                        await db.SaveChangesAsync(cancellationToken);
+                        await db.SaveChangesThroughKernelAsync(cancellationToken);
                         return new RemoteRuntimeClientCertificate(
                             certificateDer,
                             issuedPublicKeyHash,
@@ -618,7 +618,7 @@ public sealed class RemoteRuntimePairingRegistry(
             RequireStatus(entity, requiredStatus, DateTimeOffset.UtcNow);
             transition(entity);
             Touch(entity, DateTimeOffset.UtcNow);
-            await db.SaveChangesAsync(cancellationToken);
+            await db.SaveChangesThroughKernelAsync(cancellationToken);
             return ToEntry(entity);
         }
         finally

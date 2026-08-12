@@ -96,11 +96,11 @@ public sealed class DurableExecutionPersistence(
         TrackJobAudit(job, decision.DecisionId);
         if (isTerminal)
             await diagnostics.SealJobAsync(job.Id, cancellationToken);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesThroughKernelAsync(cancellationToken);
     }
 
     public Task SaveJobStateAsync(CancellationToken cancellationToken) =>
-        db.SaveChangesAsync(cancellationToken);
+        db.SaveChangesThroughKernelAsync(cancellationToken);
 
     public async Task AppendJobLogAsync(
         Guid jobId,
@@ -128,7 +128,7 @@ public sealed class DurableExecutionPersistence(
             job,
             ExecutionMetadataColumns.DiagnosticCompleteness,
             DiagnosticCompleteness.Complete);
-        await db.SaveChangesAsync(cancellationToken);
+        await db.SaveChangesThroughKernelAsync(cancellationToken);
     }
 
     public AgentJobDetailResponse ToJobDetail(

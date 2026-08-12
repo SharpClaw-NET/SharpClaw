@@ -85,7 +85,7 @@ public sealed class EfConversationStore(IServiceScopeFactory scopeFactory) : ICo
                 });
             }
 
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesThroughKernelAsync(ct);
         }
         finally
         {

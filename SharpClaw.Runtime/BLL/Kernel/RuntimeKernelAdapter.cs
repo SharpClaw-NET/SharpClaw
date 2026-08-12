@@ -6,12 +6,13 @@ using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Kernel;
+using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Runtime.BLL.Kernel;
 
 /// <summary>Composes one Runtime-owned adapter over the Core kernel.</summary>
-public sealed class RuntimeKernelAdapter
+public sealed class RuntimeKernelAdapter : IRuntimePersistenceActionBoundary
 {
     private readonly KernelModuleRegistry _moduleRegistry;
     private readonly KernelActionDispatcher _actionDispatcher;
@@ -41,6 +42,7 @@ public sealed class RuntimeKernelAdapter
         Graph = _moduleRegistry.Compile(hostServices, graphCompileOptions);
         RuntimeProviderActionManifest.Validate(Graph);
         RuntimeToolActionManifest.Validate(Graph);
+        RuntimePersistenceActionManifest.Validate(Graph);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
@@ -182,6 +184,47 @@ public sealed class RuntimeKernelAdapter
         }
 
         return typedResult;
+    }
+
+    async ValueTask IRuntimePersistenceActionBoundary.RunPersistenceActionAsync(
+        RuntimePersistenceActionInvocation invocation,
+        Func<CancellationToken, ValueTask<int>> terminal,
+        CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimePersistenceActionManifest.Contains(invocation.ActionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{invocation.ActionKey.Value}' is not a published Runtime persistence action.",
+                nameof(invocation));
+        }
+
+        var terminalCompleted = false;
+        await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            CreateHostExecutionContext(),
+            Graph.GetStandardAction(invocation.ActionKey),
+            new KernelActionEnvelope(invocation.ActionKey, invocation),
+            async (envelope, actionCancellationToken) =>
+            {
+                if (envelope.Payload is not RuntimePersistenceActionInvocation)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Persistence action '{invocation.ActionKey.Value}' returned an invalid invocation payload.");
+                }
+
+                var result = await terminal(actionCancellationToken);
+                terminalCompleted = true;
+                return result;
+            },
+            Graph.ActionSnapshot,
+            cancellationToken);
+
+        if (!terminalCompleted)
+        {
+            throw new KernelActionExecutionException(
+                $"Persistence action '{invocation.ActionKey.Value}' completed without running its save terminal.");
+        }
     }
 
     internal async IAsyncEnumerable<TResult> RunRequestStreamAsync<TRequest, TResult>(
@@ -580,4 +623,5 @@ public sealed class RuntimeKernelAdapter
                 $"Configured provider '{providerKey}' is not registered by an enabled in-process module.");
         }
     }
+
 }

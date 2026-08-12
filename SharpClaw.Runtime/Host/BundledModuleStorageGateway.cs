@@ -142,7 +142,7 @@ public sealed class BundledModuleStorageGateway(
     {
         var write = ReadWrite(contract, parameters);
         await UpsertRecordAsync(contract, write, ct);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return JsonSerializer.SerializeToElement(new { saved = true }, JsonOptions);
     }
 
@@ -156,7 +156,7 @@ public sealed class BundledModuleStorageGateway(
             await UpsertRecordAsync(contract, write, ct);
 
         if (writes.Count > 0)
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesThroughKernelAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { saved = writes.Count }, JsonOptions);
     }
@@ -204,7 +204,7 @@ public sealed class BundledModuleStorageGateway(
 
         var removedIndexes = await DeleteIndexesAsync(contract, key, ct);
         if (deleted || removedIndexes)
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesThroughKernelAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { deleted }, JsonOptions);
     }
@@ -227,7 +227,7 @@ public sealed class BundledModuleStorageGateway(
 
         db.ModuleStorageRecords.RemoveRange(records);
         db.ModuleStorageIndexEntries.RemoveRange(indexes);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         return JsonSerializer.SerializeToElement(new { deleted = records.Count }, JsonOptions);
     }
@@ -286,7 +286,7 @@ public sealed class BundledModuleStorageGateway(
             claim.IndexUpdates,
             ct);
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         if (transaction is not null)
             await transaction.CommitAsync(ct);
 

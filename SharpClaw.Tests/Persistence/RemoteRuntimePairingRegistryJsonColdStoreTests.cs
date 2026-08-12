@@ -375,10 +375,13 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         {
             Root = root;
             EncryptionOptions = encryptionOptions;
+            PersistenceActionRunner = new RuntimePersistenceActionRunner(
+                new DirectPersistenceActionBoundary());
         }
 
         public string Root { get; }
         public EncryptionOptions EncryptionOptions { get; }
+        private RuntimePersistenceActionRunner PersistenceActionRunner { get; }
 
         public static Workspace Create()
         {
@@ -409,7 +412,9 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
                     Root,
                     store => JsonColdStoreRegistration.ConfigureStore(store, storageOptions, null))
                 .Options;
-            return new SharpClawDbContext(options);
+            return new SharpClawDbContext(
+                options,
+                new FixedPersistenceActionRunnerAccessor(PersistenceActionRunner));
         }
 
         public RemoteRuntimePairingRegistry CreateRegistry(SharpClawDbContext db)
@@ -426,6 +431,23 @@ public sealed class RemoteRuntimePairingRegistryJsonColdStoreTests
         {
             if (Directory.Exists(Root))
                 Directory.Delete(Root, recursive: true);
+        }
+
+        private sealed class DirectPersistenceActionBoundary : IRuntimePersistenceActionBoundary
+        {
+            public async ValueTask RunPersistenceActionAsync(
+                RuntimePersistenceActionInvocation invocation,
+                Func<CancellationToken, ValueTask<int>> terminal,
+                CancellationToken cancellationToken = default)
+            {
+                _ = await terminal(cancellationToken);
+            }
+        }
+
+        private sealed class FixedPersistenceActionRunnerAccessor(
+            RuntimePersistenceActionRunner runner) : IRuntimePersistenceActionRunnerAccessor
+        {
+            public RuntimePersistenceActionRunner GetRequiredRunner() => runner;
         }
     }
 

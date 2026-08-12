@@ -107,7 +107,7 @@ internal sealed class CoreStateSession(SharpClawDbContext db)
     public async Task<int> SaveChangesAsync(CancellationToken ct)
     {
         ApplyAll();
-        var saved = await db.SaveChangesAsync(ct);
+        var saved = await db.SaveChangesThroughKernelAsync(ct);
         RefreshAll();
         return saved;
     }

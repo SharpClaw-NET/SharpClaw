@@ -44,7 +44,7 @@ public sealed class AuthService(
                 UserId = user.Id
             });
 
-            await db.SaveChangesAsync(ct);
+            await db.SaveChangesThroughKernelAsync(ct);
         }
 
         return new LoginResponse(accessToken, accessExpiresAt, refreshToken, refreshExpiresAt);
@@ -72,7 +72,7 @@ public sealed class AuthService(
             UserId = stored.UserId
         });
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
 
         var accessToken = tokenService.GenerateAccessToken(stored.UserId, stored.User.Username);
         var accessExpiresAt = DateTimeOffset.UtcNow.Add(jwtOptions.AccessTokenLifetime);
@@ -136,7 +136,7 @@ public sealed class AuthService(
         };
 
         db.Users.Add(user);
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         return user;
     }
 
@@ -270,7 +270,7 @@ public sealed class AuthService(
             db.Entry(user).Property<Guid?>("RoleId").CurrentValue = role.Id;
         }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
         chatCache.Remove(ChatCache.KeyHeaderUser(targetUserId));
 
         var assignedRoleId = role?.Id;

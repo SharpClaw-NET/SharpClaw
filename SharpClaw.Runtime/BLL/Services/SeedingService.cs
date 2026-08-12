@@ -302,7 +302,7 @@ public sealed class SeedingService(
         {
             try
             {
-                await db.SaveChangesAsync(ct);
+                await db.SaveChangesThroughKernelAsync(ct);
                 return;
             }
             catch (InvalidOperationException ex)

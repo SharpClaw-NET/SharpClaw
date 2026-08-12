@@ -57,7 +57,7 @@ public sealed class ModuleConfigStore(SharpClawDbContext db, string moduleId) : 
             });
         }
 
-        await db.SaveChangesAsync(ct);
+        await db.SaveChangesThroughKernelAsync(ct);
     }
 
     public async Task<IReadOnlyDictionary<string, string>> GetAllAsync(CancellationToken ct)
