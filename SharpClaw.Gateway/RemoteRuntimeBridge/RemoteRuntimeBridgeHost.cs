@@ -11,7 +11,9 @@ using Microsoft.AspNetCore.Server.Kestrel.Https;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Gateway.Configuration;
+using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.RemoteRuntimeBridge;
 using Yarp.ReverseProxy.Forwarder;
@@ -41,7 +43,8 @@ internal sealed record RemoteRuntimeBridgeCredentialMetadata(
 
 internal static class RemoteRuntimeBridgeHost
 {
-    private static readonly object ActivePairItemKey = new();
+    internal static readonly object ActivePairItemKey = new();
+    internal static readonly object BridgeAppItemKey = new();
 
     public static void RegisterServices(
         IServiceCollection services,
@@ -69,16 +72,32 @@ internal static class RemoteRuntimeBridgeHost
             "The Runtime bridge cannot bind from configuration alone. An active approved pairing and selected Runtime are required.");
     }
 
+    internal static Task<WebApplication> BuildAsync(
+        string[] args,
+        RemoteRuntimeBridgeOptions options,
+        IRemoteRuntimePairingRegistryClient registryClient,
+        RemoteRuntimeBridgeTarget target,
+        CancellationToken cancellationToken = default) =>
+        BuildAsync(
+            args,
+            options,
+            registryClient,
+            target,
+            new GatewayBackgroundActionBoundary(),
+            cancellationToken);
+
     internal static async Task<WebApplication> BuildAsync(
         string[] args,
         RemoteRuntimeBridgeOptions options,
         IRemoteRuntimePairingRegistryClient registryClient,
         RemoteRuntimeBridgeTarget target,
+        GatewayBackgroundActionBoundary actionBoundary,
         CancellationToken cancellationToken = default)
     {
         ArgumentNullException.ThrowIfNull(options);
         ArgumentNullException.ThrowIfNull(registryClient);
         ArgumentNullException.ThrowIfNull(target);
+        ArgumentNullException.ThrowIfNull(actionBoundary);
 
         if (!options.Enabled)
             throw new InvalidOperationException("The Runtime bridge is disabled.");
@@ -104,6 +123,7 @@ internal static class RemoteRuntimeBridgeHost
             TimeSpan.FromSeconds(options.LastSeenUpdateIntervalSeconds));
         var listenAddress = ResolveListenAddress(listenUri);
         var builder = WebApplication.CreateSlimBuilder(args);
+        builder.Services.AddSingleton(actionBoundary);
         builder.WebHost.ConfigureKestrel(serverOptions =>
         {
             serverOptions.Listen(
@@ -122,6 +142,11 @@ internal static class RemoteRuntimeBridgeHost
 
         var bridgeApp = builder.Build();
         bridgeApp.UseWebSockets();
+        bridgeApp.Use((context, next) =>
+        {
+            context.Items[BridgeAppItemKey] = true;
+            return next(context);
+        });
         bridgeApp.Use(async (context, next) =>
         {
             var unauthenticatedControl = IsUnauthenticatedControlPath(context.Request.Path);
@@ -147,13 +172,40 @@ internal static class RemoteRuntimeBridgeHost
                             "PairNotAuthorized",
                             "The client certificate is not authorized for bridge access.");
 
-                    activePair = await registryClient.RequireActiveCertificateAsync(
-                        certificate,
-                        target.GatewayInstanceId,
-                        target.AuthoritativeRuntimeInstanceId,
-                        context.Request.Headers[RemoteRuntimeBridgePaths.ProxyIdentityHeader].ToString(),
-                        context.RequestAborted,
-                        target.AuthoritativeRuntimeInstallFingerprint);
+                    BridgeCertificateValidationResult? baseValidation = null;
+                    var validation = await actionBoundary.RunActionAsync<
+                        GatewayActionInvocation,
+                        BridgeCertificateValidationResult>(
+                        new SharpClawActionKey("gateway.bridge.session.validate"),
+                        new GatewayActionInvocation(
+                            context.Request.Method,
+                            context.Request.Path.Value ?? "/",
+                            "bridge.session.validate",
+                            IsStreamRequest(context)),
+                        async (_, ct) =>
+                        {
+                            baseValidation = await BridgeCertificateValidationResult.From(
+                                () => registryClient.RequireActiveCertificateAsync(
+                                    certificate,
+                                    target.GatewayInstanceId,
+                                    target.AuthoritativeRuntimeInstanceId,
+                                    context.Request.Headers[RemoteRuntimeBridgePaths.ProxyIdentityHeader].ToString(),
+                                    ct,
+                                    target.AuthoritativeRuntimeInstallFingerprint));
+                            return baseValidation;
+                        },
+                        context.RequestAborted);
+                    if (baseValidation?.Pair is null
+                        || validation.Pair is null
+                        || validation.Pair.PairId != baseValidation.Pair.PairId)
+                    {
+                        throw new RemoteRuntimePairingException(
+                            baseValidation?.Code ?? "PairNotAuthorized",
+                            baseValidation?.Message
+                                ?? "The pairing certificate is not active for this Runtime target.");
+                    }
+
+                    activePair = baseValidation.Pair;
                     context.Items[ActivePairItemKey] = activePair;
                 }
                 catch (RemoteRuntimePairingException)
@@ -242,6 +294,8 @@ internal static class RemoteRuntimeBridgeHost
                         statusCode: StatusCodes.Status400BadRequest);
                 }
             });
+
+        bridgeApp.UseMiddleware<GatewayActionMiddleware>();
 
         bridgeApp.MapPost(
             RemoteRuntimeBridgePaths.PairingRenew,
@@ -680,6 +734,25 @@ internal static class RemoteRuntimeBridgeHost
                 .Any(usage => usage.Value == "1.3.6.1.5.5.7.3.2");
     }
 
+    private sealed record BridgeCertificateValidationResult(
+        RemoteRuntimePairingRegistrySnapshot? Pair,
+        string? Code,
+        string? Message)
+    {
+        public static async ValueTask<BridgeCertificateValidationResult> From(
+            Func<Task<RemoteRuntimePairingRegistrySnapshot>> validation)
+        {
+            try
+            {
+                return new BridgeCertificateValidationResult(await validation(), null, null);
+            }
+            catch (RemoteRuntimePairingException exception)
+            {
+                return new BridgeCertificateValidationResult(null, exception.Code, exception.Message);
+            }
+        }
+    }
+
     private static bool IsUnauthenticatedControlPath(PathString path)
         => path.Equals(RemoteRuntimeBridgePaths.PairingClaim, StringComparison.Ordinal)
             || path.Equals(RemoteRuntimeBridgePaths.PairingCertificate, StringComparison.Ordinal)
@@ -725,6 +798,11 @@ internal static class RemoteRuntimeBridgeHost
             ? RemoteRuntimeBridgeWorkKind.Stream
             : RemoteRuntimeBridgeWorkKind.Request;
     }
+
+    private static bool IsStreamRequest(HttpContext context) =>
+        context.Request.Path.Value?.Contains("/stream", StringComparison.OrdinalIgnoreCase) == true
+        || context.Request.Headers.Accept.Any(value =>
+            value?.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) == true);
 
     private static Task WriteTransportErrorAsync(
         HttpContext context,
@@ -886,7 +964,8 @@ internal static class RemoteRuntimeBridgeHost
 internal sealed class RemoteRuntimeBridgeHostedService(
     RemoteRuntimeBridgeOptions options,
     SharpClawInstancePaths gatewayPaths,
-    ILogger<RemoteRuntimeBridgeHostedService> logger) : IHostedService, IAsyncDisposable
+    ILogger<RemoteRuntimeBridgeHostedService> logger,
+    GatewayBackgroundActionBoundary actionBoundary) : IHostedService, IAsyncDisposable
 {
     private WebApplication? _bridgeApp;
     private IRemoteRuntimePairingRegistryClient? _registryClient;
@@ -902,6 +981,7 @@ internal sealed class RemoteRuntimeBridgeHostedService(
                 options,
                 registryClient,
                 target,
+                actionBoundary,
                 cancellationToken);
             await _bridgeApp.StartAsync(cancellationToken);
             _registryClient = registryClient;

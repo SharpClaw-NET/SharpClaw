@@ -4,31 +4,55 @@ using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
-internal static class GatewayBackgroundActionManifest
+internal static class GatewayActionManifest
 {
     public static IReadOnlyList<SharpClawActionKey> Required { get; } =
+        SharpClawActionCatalog.Kernel
+            .Where(static key => key.Value.StartsWith(
+                "gateway.",
+                StringComparison.Ordinal))
+            .ToArray();
+
+    public static IReadOnlyList<SharpClawActionKey> BackgroundRequired { get; } =
         SharpClawActionCatalog.Kernel
             .Where(static key => key.Value.StartsWith(
                 "background.",
                 StringComparison.Ordinal))
             .ToArray();
 
+    public static IReadOnlyList<SharpClawActionKey> Published { get; } =
+        Required.Concat(BackgroundRequired).ToArray();
+
     public static void Validate(KernelGraph graph)
     {
         ArgumentNullException.ThrowIfNull(graph);
 
-        var missing = Required
+        var missing = Published
             .Where(key => !graph.ContainsAction(key))
             .Select(static key => key.Value)
             .ToArray();
         if (missing.Length > 0)
         {
             throw new InvalidOperationException(
-                "The Gateway background action graph is incomplete. Missing actions: " +
+                "The Gateway action graph is incomplete. Missing actions: " +
                 string.Join(", ", missing));
         }
     }
 }
+
+internal static class GatewayBackgroundActionManifest
+{
+    public static IReadOnlyList<SharpClawActionKey> Required =>
+        GatewayActionManifest.BackgroundRequired;
+}
+
+public sealed record GatewayActionInvocation(
+    string Method,
+    string Path,
+    string Operation,
+    bool IsStream = false,
+    int ByteCount = 0,
+    Guid? PairId = null);
 
 internal sealed record GatewayBackgroundServiceInvocation(string ServiceId);
 
@@ -50,7 +74,7 @@ public sealed class GatewayBackgroundActionBoundary
     internal GatewayBackgroundActionBoundary(KernelGraph graph)
     {
         _graph = graph ?? throw new ArgumentNullException(nameof(graph));
-        GatewayBackgroundActionManifest.Validate(graph);
+        GatewayActionManifest.Validate(graph);
         _dispatcher = new KernelActionDispatcher(
             graph,
             new KernelActionExecutionContext(
@@ -66,10 +90,72 @@ public sealed class GatewayBackgroundActionBoundary
     {
         _graph = graph ?? throw new ArgumentNullException(nameof(graph));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
-        GatewayBackgroundActionManifest.Validate(graph);
+        GatewayActionManifest.Validate(graph);
     }
 
     internal KernelGraph Graph => _graph;
+
+    internal async ValueTask<TResult> RunActionAsync<TPayload, TResult>(
+        SharpClawActionKey actionKey,
+        TPayload payload,
+        Func<TPayload, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken,
+        KernelActionExecutionContext? executionContext = null)
+    {
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!GatewayActionManifest.Published.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a published Gateway action.",
+                nameof(actionKey));
+        }
+
+        var terminalState = 0;
+        var terminalResult = new TaskCompletionSource<TResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        var result = await _dispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+            executionContext ?? CreateHostExecutionContext(),
+            _graph.GetStandardAction(actionKey),
+            new KernelActionEnvelope(actionKey, payload),
+            async (envelope, actionCancellationToken) =>
+            {
+                if (envelope.Key != actionKey || envelope.Payload is not TPayload effectivePayload)
+                {
+                    throw new KernelActionExecutionException(
+                        $"Gateway action '{actionKey.Value}' returned an invalid payload.");
+                }
+
+                if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
+                {
+                    var repeated = await terminalResult.Task.WaitAsync(actionCancellationToken);
+                    return repeated!;
+                }
+
+                try
+                {
+                    var value = await terminal(effectivePayload, actionCancellationToken);
+                    terminalResult.TrySetResult(value);
+                    return value!;
+                }
+                catch (Exception exception)
+                {
+                    terminalResult.TrySetException(exception);
+                    throw;
+                }
+            },
+            _graph.ActionSnapshot,
+            cancellationToken);
+
+        if (Volatile.Read(ref terminalState) == 0)
+        {
+            throw new KernelActionExecutionException(
+                $"Gateway action '{actionKey.Value}' completed without running its terminal.");
+        }
+
+        return result is TResult typedResult
+            ? typedResult
+            : await terminalResult.Task;
+    }
 
     internal async ValueTask StartAsync(
         GatewayBackgroundServiceInvocation invocation,
@@ -175,35 +261,23 @@ public sealed class GatewayBackgroundActionBoundary
         Func<object?, CancellationToken, ValueTask> terminal,
         CancellationToken cancellationToken)
     {
-        var terminalCompleted = 0;
-        var executionContext = new KernelActionExecutionContext(
+        await RunActionAsync<object, bool>(
+            actionKey,
+            payload,
+            async (_, ct) =>
+            {
+                await terminal(payload, ct);
+                return true;
+            },
+            cancellationToken);
+    }
+
+    private KernelActionExecutionContext CreateHostExecutionContext() =>
+        new(
             RequestPrincipal.Anonymous,
             ExtensionFeatureSet.Empty,
             Guid.NewGuid(),
             Guid.NewGuid());
-
-        await _dispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
-            executionContext,
-            _graph.GetStandardAction(actionKey),
-            new KernelActionEnvelope(actionKey, payload),
-            async (envelope, ct) =>
-            {
-                if (Interlocked.CompareExchange(ref terminalCompleted, 1, 0) != 0)
-                    throw new KernelActionExecutionException(
-                        $"Background action '{actionKey.Value}' ran its terminal more than once.");
-
-                await terminal(envelope.Payload, ct);
-                return true;
-            },
-            _graph.ActionSnapshot,
-            cancellationToken);
-
-        if (Volatile.Read(ref terminalCompleted) == 0)
-        {
-            throw new KernelActionExecutionException(
-                $"Background action '{actionKey.Value}' completed without running its terminal.");
-        }
-    }
 
     private static KernelGraph CreateGraph() =>
         new KernelGraphBuilder().Compile();

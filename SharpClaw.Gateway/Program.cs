@@ -339,6 +339,8 @@ app.UseRateLimiter();
 
 app.UseAuthorization();
 
+app.UseMiddleware<GatewayActionMiddleware>();
+
 app.MapDirectChatGatewayEndpoints();
 
 // ── Module-contributed endpoint groups (Phase 3) ────────────────
