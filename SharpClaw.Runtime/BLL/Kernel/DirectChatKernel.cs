@@ -77,8 +77,11 @@ internal static class DirectChatKernelFactory
     }
 }
 
-/// <summary>Adapts one canonical provider client to the Core kernel transport.</summary>
-public sealed class ProviderKernelTransport(IProviderApiClient client) : IKernelProviderTransport
+/// <summary>
+/// Adapts one canonical provider client to the Core kernel transport.
+/// Core invokes this adapter only from its published provider terminal actions.
+/// </summary>
+internal sealed class ProviderKernelTransport(IProviderApiClient client) : IKernelProviderTransport
 {
     private readonly IProviderApiClient _client =
         client ?? throw new ArgumentNullException(nameof(client));

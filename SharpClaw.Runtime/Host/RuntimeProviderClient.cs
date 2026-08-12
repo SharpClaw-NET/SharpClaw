@@ -1,4 +1,3 @@
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
@@ -10,16 +9,7 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
 {
     public IProviderApiClient Create(
         IConfiguration configuration,
-        IReadOnlyList<IProviderPlugin> plugins) =>
-        new RuntimeProviderClient(configuration, plugins);
-}
-
-/// <summary>Resolves the configured provider from host-owned provider plugins.</summary>
-public sealed class RuntimeProviderClient(
-    IConfiguration configuration,
-    IEnumerable<IProviderPlugin> plugins) : IProviderApiClient
-{
-    private readonly Lazy<IProviderApiClient> _client = new(() =>
+        IReadOnlyList<IProviderPlugin> plugins)
     {
         var providerKey = configuration["Provider:Key"]
             ?? configuration["Providers:Default"]
@@ -38,69 +28,5 @@ public sealed class RuntimeProviderClient(
             plugin,
             new ProviderClientOptions(endpoint),
             credential);
-    });
-
-    public string ProviderKey => configuration["Provider:Key"]
-        ?? configuration["Providers:Default"]
-        ?? "unconfigured";
-
-    public bool SupportsNativeToolCalling => _client.Value.SupportsNativeToolCalling;
-
-    public Task<IReadOnlyList<string>> ListModelIdsAsync(CancellationToken ct = default) =>
-        _client.Value.ListModelIdsAsync(ct);
-
-    public Task<ChatCompletionResult> ChatCompletionAsync(
-        string model,
-        string? systemPrompt,
-        IReadOnlyList<ChatCompletionMessage> messages,
-        int? maxCompletionTokens = null,
-        Dictionary<string, JsonElement>? providerParameters = null,
-        CompletionParameters? completionParameters = null,
-        CancellationToken ct = default) =>
-        _client.Value.ChatCompletionAsync(
-            model,
-            systemPrompt,
-            messages,
-            maxCompletionTokens,
-            providerParameters,
-            completionParameters,
-            ct);
-
-    public Task<ChatCompletionResult> ChatCompletionWithToolsAsync(
-        string model,
-        string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages,
-        IReadOnlyList<ChatToolDefinition> tools,
-        int? maxCompletionTokens = null,
-        Dictionary<string, JsonElement>? providerParameters = null,
-        CompletionParameters? completionParameters = null,
-        CancellationToken ct = default) =>
-        _client.Value.ChatCompletionWithToolsAsync(
-            model,
-            systemPrompt,
-            messages,
-            tools,
-            maxCompletionTokens,
-            providerParameters,
-            completionParameters,
-            ct);
-
-    public IAsyncEnumerable<ChatStreamChunk> StreamChatCompletionWithToolsAsync(
-        string model,
-        string? systemPrompt,
-        IReadOnlyList<ToolAwareMessage> messages,
-        IReadOnlyList<ChatToolDefinition> tools,
-        int? maxCompletionTokens = null,
-        Dictionary<string, JsonElement>? providerParameters = null,
-        CompletionParameters? completionParameters = null,
-        CancellationToken ct = default) =>
-        _client.Value.StreamChatCompletionWithToolsAsync(
-            model,
-            systemPrompt,
-            messages,
-            tools,
-            maxCompletionTokens,
-            providerParameters,
-            completionParameters,
-            ct);
+    }
 }
