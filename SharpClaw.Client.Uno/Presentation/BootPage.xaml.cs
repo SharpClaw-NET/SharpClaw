@@ -42,11 +42,6 @@ public sealed partial class BootPage : Page
     private CancellationTokenSource? _retryCts;
     private ImmutableArray<DiagnosticLine> _lastDiag;
 
-    private static readonly JsonSerializerOptions _autoLoginJson = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -434,43 +429,32 @@ public sealed partial class BootPage : Page
 
         try
         {
-            var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-            var body = JsonSerializer.Serialize(
-                new { refreshToken = account.RefreshToken }, _autoLoginJson);
-            using var resp = await api.PostAsync("/auth/refresh",
-                new StringContent(body, Encoding.UTF8, "application/json"), ct);
-
-            if (!resp.IsSuccessStatusCode)
+            var session = App.Services!.GetRequiredService<ClientSessionService>();
+            var result = await session.RefreshAsync(account.RefreshToken, ct);
+            if (result is null)
                 return false;
 
-            using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            var root = doc.RootElement;
-
-            var accessToken = root.TryGetProperty("accessToken", out var atProp)
-                ? atProp.GetString() : null;
-            if (accessToken is null) return false;
-
-            await api.SetAccessTokenAsync(
-                accessToken,
-                ct,
-                ClientActionContextSource.ForAuthenticatedUser(
-                    account.UserId,
-                    account.Username));
+            var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+            var identity = result.Identity;
+            var refreshedAccount = new AccountStore.SavedAccount
+            {
+                UserId = identity.UserId,
+                Username = identity.Username,
+                AccessToken = result.AccessToken,
+                AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                RefreshToken = result.RefreshToken ?? account.RefreshToken,
+                RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                RememberMe = true,
+            };
 
             // Update stored tokens with fresh values
-            account.AccessToken = accessToken;
-            if (root.TryGetProperty("accessTokenExpiresAt", out var atExp))
-                account.AccessTokenExpiresAt = atExp.GetDateTimeOffset();
-            if (root.TryGetProperty("refreshToken", out var rt) && rt.ValueKind == JsonValueKind.String)
-                account.RefreshToken = rt.GetString();
-            if (root.TryGetProperty("refreshTokenExpiresAt", out var rtExp) && rtExp.ValueKind != JsonValueKind.Null)
-                account.RefreshTokenExpiresAt = rtExp.GetDateTimeOffset();
-            await store!.SaveAccountAsync(account, ct);
+            await store!.SaveAccountAsync(refreshedAccount, ct);
+            if (account.UserId != identity.UserId)
+                await store.RemoveAccountAsync(account.UserId, ct);
 
             // Switch per-user settings
             await App.Services!.GetRequiredService<ClientSettings>()
-                .SwitchUserAsync(account.UserId, ct);
+                .SwitchUserAsync(identity.UserId, ct);
 
             // Pre-populate module caches for the session
             await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);

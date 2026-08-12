@@ -37,7 +37,6 @@
       MVUX;
       Configuration;
       Localization;
-      Authentication;
       Navigation;
       ThemeService;
       SkiaRenderer;

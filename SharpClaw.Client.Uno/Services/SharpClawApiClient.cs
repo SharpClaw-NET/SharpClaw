@@ -261,7 +261,7 @@ public sealed class SharpClawApiClient : IDisposable
     /// Stores the JWT access token returned by <c>/auth/login</c>.
     /// Subsequent requests include it as a Bearer token.
     /// </summary>
-    public async ValueTask SetAccessTokenAsync(
+    internal async ValueTask SetAccessTokenAsync(
         string? token,
         CancellationToken cancellationToken = default,
         ClientActionRequestContext? authenticatedContext = null)

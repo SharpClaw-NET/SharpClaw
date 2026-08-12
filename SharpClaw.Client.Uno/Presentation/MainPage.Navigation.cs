@@ -41,8 +41,7 @@ public sealed partial class MainPage
     private async void OnLogoutClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        var api = services.GetRequiredService<SharpClawApiClient>();
-        await api.SetAccessTokenAsync(null);
+        await services.GetRequiredService<ClientSessionService>().ClearAsync();
         await services.GetRequiredService<ClientNavigationService>()
             .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
     }

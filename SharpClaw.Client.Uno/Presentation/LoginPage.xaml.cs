@@ -2,7 +2,6 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using Microsoft.UI.Xaml.Media;
-using SharpClaw.Contracts.Modules;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
 
@@ -36,6 +35,9 @@ public sealed partial class LoginPage : Page
     }
 
     private SharpClawApiClient Api => App.Services!.GetRequiredService<SharpClawApiClient>();
+
+    private ClientSessionService Session =>
+        App.Services!.GetRequiredService<ClientSessionService>();
 
     private void OnCredentialChanged(object sender, RoutedEventArgs e) => UpdateCursor();
 
@@ -89,29 +91,18 @@ public sealed partial class LoginPage : Page
         try
         {
             var rememberMe = RememberMeCheck.IsChecked == true;
-            var body = JsonSerializer.Serialize(
-                new { username, password, rememberMe }, JsonOptions);
-            var content = new StringContent(body, Encoding.UTF8, "application/json");
+            var result = await Session.LoginAsync(username, password, rememberMe);
 
-            var response = await Api.PostAsync("/auth/login", content);
-
-            if (response.IsSuccessStatusCode)
+            if (result is not null)
             {
-                var json = await response.Content.ReadAsStringAsync();
-                var login = JsonSerializer.Deserialize<LoginResponseDto>(json, JsonOptions);
+                await PersistLoginAsync(result, rememberMe);
+                ShowStatus("✓ Authenticated.", error: false, success: true);
+                await Task.Delay(400);
 
-                if (login?.AccessToken is not null)
-                {
-                    await Api.SetAccessTokenAsync(login.AccessToken);
-                    await PersistLoginAsync(username, login, rememberMe);
-                    ShowStatus("✓ Authenticated.", error: false, success: true);
-                    await Task.Delay(400);
-
-                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                    await App.Services!.GetRequiredService<ClientNavigationService>()
-                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
-                    return;
-                }
+                var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                return;
             }
 
             ShowStatus("✗ Invalid credentials.", error: true);
@@ -245,45 +236,26 @@ public sealed partial class LoginPage : Page
         }
     }
 
-    private async Task PersistLoginAsync(string username, LoginResponseDto login, bool rememberMe)
+    private async Task PersistLoginAsync(ClientSessionResult result, bool rememberMe)
     {
         try
         {
-            Guid? userId = null;
-            using (var meResp = await Api.GetAsync("/auth/me"))
-            {
-                if (meResp.IsSuccessStatusCode)
-                {
-                    using var stream = await meResp.Content.ReadAsStreamAsync();
-                    using var doc = await JsonDocument.ParseAsync(stream);
-                    if (doc.RootElement.TryGetProperty("id", out var idProp))
-                        userId = idProp.GetGuid();
-                }
-            }
-
-            if (userId is not { } uid) return;
-
-            await Api.SetAccessTokenAsync(
-                login.AccessToken,
-                authenticatedContext: ClientActionContextSource.ForAuthenticatedUser(
-                    uid,
-                    username));
-
             var store = App.Services!.GetRequiredService<AccountStore>();
             await store.SaveAccountAsync(new AccountStore.SavedAccount
             {
-                UserId = uid,
-                Username = username,
-                AccessToken = login.AccessToken,
-                AccessTokenExpiresAt = login.AccessTokenExpiresAt,
-                RefreshToken = rememberMe ? login.RefreshToken : null,
-                RefreshTokenExpiresAt = rememberMe ? login.RefreshTokenExpiresAt : null,
+                UserId = result.Identity.UserId,
+                Username = result.Identity.Username,
+                AccessToken = result.AccessToken,
+                AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                RefreshToken = rememberMe ? result.RefreshToken : null,
+                RefreshTokenExpiresAt = rememberMe ? result.RefreshTokenExpiresAt : null,
                 RememberMe = rememberMe,
             });
 
-            await App.Services!.GetRequiredService<ClientSettings>().SwitchUserAsync(uid);
+            await App.Services!.GetRequiredService<ClientSettings>()
+                .SwitchUserAsync(result.Identity.UserId);
         }
-        catch { /* best-effort — login still succeeds */ }
+        catch { /* best-effort - login still succeeds */ }
     }
 
     private async Task AutoLoginWithRefreshAsync(AccountStore.SavedAccount account)
@@ -294,51 +266,38 @@ public sealed partial class LoginPage : Page
 
         try
         {
-            var body = JsonSerializer.Serialize(
-                new { refreshToken = account.RefreshToken }, JsonOptions);
-            var content = new StringContent(body, Encoding.UTF8, "application/json");
-            var response = await Api.PostAsync("/auth/refresh", content);
+            var result = await Session.RefreshAsync(account.RefreshToken!);
 
-            if (response.IsSuccessStatusCode)
+            if (result is not null)
             {
-                var json = await response.Content.ReadAsStringAsync();
-                var login = JsonSerializer.Deserialize<LoginResponseDto>(json, JsonOptions);
-
-                if (login?.AccessToken is not null)
+                var store = App.Services!.GetRequiredService<AccountStore>();
+                await store.SaveAccountAsync(new AccountStore.SavedAccount
                 {
-                    await Api.SetAccessTokenAsync(
-                        login.AccessToken,
-                        authenticatedContext: ClientActionContextSource.ForAuthenticatedUser(
-                            account.UserId,
-                            account.Username));
-
-                    var store = App.Services!.GetRequiredService<AccountStore>();
-                    await store.SaveAccountAsync(new AccountStore.SavedAccount
-                    {
-                        UserId = account.UserId,
-                        Username = account.Username,
-                        AccessToken = login.AccessToken,
-                        AccessTokenExpiresAt = login.AccessTokenExpiresAt,
-                        RefreshToken = login.RefreshToken ?? account.RefreshToken,
-                        RefreshTokenExpiresAt = login.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
-                        RememberMe = true,
-                    });
+                    UserId = result.Identity.UserId,
+                    Username = result.Identity.Username,
+                    AccessToken = result.AccessToken,
+                    AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                    RefreshToken = result.RefreshToken ?? account.RefreshToken,
+                    RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                    RememberMe = true,
+                });
+                if (account.UserId != result.Identity.UserId)
+                    await store.RemoveAccountAsync(account.UserId);
 
                     await App.Services!.GetRequiredService<ClientSettings>()
-                        .SwitchUserAsync(account.UserId);
+                        .SwitchUserAsync(result.Identity.UserId);
 
-                    // Pre-populate module caches for the session
-                    var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
-                    await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api2);
+                // Pre-populate module caches for the session
+                var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
+                await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api2);
 
-                    ShowStatus("✓ Authenticated.", error: false, success: true);
-                    await Task.Delay(400);
+                ShowStatus("✓ Authenticated.", error: false, success: true);
+                await Task.Delay(400);
 
-                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                    await App.Services!.GetRequiredService<ClientNavigationService>()
-                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
-                    return;
-                }
+                var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                return;
             }
 
             // Refresh failed — remove the stale account entirely.
@@ -398,12 +357,6 @@ public sealed partial class LoginPage : Page
             error ? 0xFF4444 : success ? 0x32CD32 : 0x808080);
         StatusBlock.Visibility = Visibility.Visible;
     }
-
-    private sealed record LoginResponseDto(
-        string? AccessToken,
-        DateTimeOffset? AccessTokenExpiresAt,
-        string? RefreshToken,
-        DateTimeOffset? RefreshTokenExpiresAt);
 
     private void OnEnvClick(object sender, RoutedEventArgs e)
     {
