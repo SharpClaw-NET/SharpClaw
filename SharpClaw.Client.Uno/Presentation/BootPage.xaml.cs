@@ -4,9 +4,9 @@ using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Services;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace SharpClaw.Presentation;
 
@@ -427,46 +427,53 @@ public sealed partial class BootPage : Page
             || account.RefreshTokenExpiresAt <= DateTimeOffset.UtcNow)
             return false;
 
+        var session = App.Services!.GetRequiredService<ClientSessionService>();
         try
         {
-            var session = App.Services!.GetRequiredService<ClientSessionService>();
             var result = await session.RefreshAsync(account.RefreshToken, ct);
             if (result is null)
                 return false;
 
-            var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-            var identity = result.Identity;
-            var refreshedAccount = new AccountStore.SavedAccount
+            await session.RunAuthenticatedContinuationAsync(async () =>
             {
-                UserId = identity.UserId,
-                Username = identity.Username,
-                AccessToken = result.AccessToken,
-                AccessTokenExpiresAt = result.AccessTokenExpiresAt,
-                RefreshToken = result.RefreshToken ?? account.RefreshToken,
-                RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
-                RememberMe = true,
-            };
+                var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+                var identity = result.Identity;
+                var refreshedAccount = new AccountStore.SavedAccount
+                {
+                    UserId = identity.UserId,
+                    Username = identity.Username,
+                    AccessToken = result.AccessToken,
+                    AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                    RefreshToken = result.RefreshToken ?? account.RefreshToken,
+                    RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                    RememberMe = true,
+                };
 
-            // Update stored tokens with fresh values
-            await store!.SaveAccountAsync(refreshedAccount, ct);
-            if (account.UserId != identity.UserId)
-                await store.RemoveAccountAsync(account.UserId, ct);
+                // Update stored tokens with fresh values.
+                await store!.SaveAccountAsync(refreshedAccount, ct);
+                if (account.UserId != identity.UserId)
+                    await store.RemoveAccountAsync(account.UserId, ct);
 
-            // Switch per-user settings
-            await App.Services!.GetRequiredService<ClientSettings>()
-                .SwitchUserAsync(identity.UserId, ct);
+                // Switch per-user settings.
+                await App.Services!.GetRequiredService<ClientSettings>()
+                    .SwitchUserAsync(identity.UserId, ct);
 
-            // Pre-populate module caches for the session
-            await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
+                // Pre-populate module caches for the session.
+                await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
 
-            await Task.Delay(1000, CancellationToken.None);
-            var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
-            var needsSetup = !setupMarker.IsCompleted;
-            var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
-            var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
-            await App.Services!.GetRequiredService<ClientNavigationService>()
-                .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                await Task.Delay(1000, CancellationToken.None);
+                var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
+                var needsSetup = !setupMarker.IsCompleted;
+                var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
+                var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+            });
             return true;
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
         catch
         {

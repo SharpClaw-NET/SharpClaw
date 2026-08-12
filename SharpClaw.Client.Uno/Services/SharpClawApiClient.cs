@@ -284,6 +284,14 @@ public sealed class SharpClawApiClient : IDisposable
             cancellationToken);
     }
 
+    // The normal path uses client.auth. This local reset is only for a failed
+    // cleanup action, so an authority failure cannot leave a usable token.
+    internal void ForceClearSessionAfterActionFailure()
+    {
+        _accessToken = null;
+        _contextSource.ClearSession();
+    }
+
     /// <summary>Current access token, if any.</summary>
     public string? AccessToken => _accessToken;
 

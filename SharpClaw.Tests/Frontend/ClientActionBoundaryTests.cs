@@ -1,7 +1,7 @@
 using System.Collections.Concurrent;
+using System.Net;
 using System.Text;
 using System.Text.Json;
-using System.Net;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using SharpClaw.Contracts.Modules;
@@ -572,6 +572,130 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task Refresh_transport_failure_clears_preexisting_session()
+    {
+        var source = new ClientActionContextSource();
+        var dispatcher = ClientActionDispatcher.CreateProduction(source);
+        var handler = new CapturingHandler
+        {
+            AsyncResponseFactory = (_, _) =>
+                Task.FromException<HttpResponseMessage>(new HttpRequestException("transport failure")),
+        };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            source,
+            "test-api-key");
+        var session = new ClientSessionService(api);
+        var existingUserId = Guid.NewGuid();
+        await api.SetAccessTokenAsync(
+            "existing-access-token",
+            CancellationToken.None,
+            ClientActionContextSource.ForAuthenticatedUser(existingUserId, "existing-user"));
+
+        var result = await session.RefreshAsync("refresh-token");
+
+        result.Should().BeNull();
+        api.AccessToken.Should().BeNull();
+        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
+        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+    }
+
+    [Test]
+    public async Task Refresh_cancellation_clears_preexisting_session()
+    {
+        var source = new ClientActionContextSource();
+        var dispatcher = ClientActionDispatcher.CreateProduction(source);
+        using var http = new HttpClient(new CapturingHandler())
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            source,
+            "test-api-key");
+        var session = new ClientSessionService(api);
+        await api.SetAccessTokenAsync(
+            "existing-access-token",
+            CancellationToken.None,
+            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+
+        var action = () => session.RefreshAsync("refresh-token", cancellation.Token);
+
+        await action.Should().ThrowAsync<OperationCanceledException>();
+        api.AccessToken.Should().BeNull();
+        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
+        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+    }
+
+    [Test]
+    public async Task Page_post_establishment_failure_clears_preexisting_session()
+    {
+        var source = new ClientActionContextSource();
+        var dispatcher = ClientActionDispatcher.CreateProduction(source);
+        using var http = new HttpClient(new CapturingHandler())
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            source,
+            "test-api-key");
+        var session = new ClientSessionService(api);
+        await api.SetAccessTokenAsync(
+            "existing-access-token",
+            CancellationToken.None,
+            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
+
+        var action = () => session.RunAuthenticatedContinuationAsync(
+            static () => Task.FromException(new InvalidOperationException("page state failure")));
+
+        await action.Should().ThrowAsync<InvalidOperationException>();
+        api.AccessToken.Should().BeNull();
+        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
+        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+    }
+
+    [Test]
+    public async Task Cleanup_failure_rethrows_after_forcing_anonymous_session()
+    {
+        var source = new ClientActionContextSource();
+        var probe = new ClientProbe();
+        var dispatcher = CreateDispatcher(probe, source);
+        using var http = new HttpClient(new CapturingHandler())
+        {
+            BaseAddress = new Uri("http://localhost"),
+        };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            source,
+            "test-api-key");
+        var session = new ClientSessionService(api);
+        await api.SetAccessTokenAsync(
+            "existing-access-token",
+            CancellationToken.None,
+            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
+        probe.FailureAction = ClientActionCatalog.StateCommit.Value;
+
+        var action = () => session.ClearAsync().AsTask();
+
+        await action.Should().ThrowAsync<ClientSessionCleanupException>();
+        api.AccessToken.Should().BeNull();
+        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
+        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
+    }
+
+    [Test]
     public async Task Api_client_sends_the_accepted_effective_method_and_path()
     {
         var probe = new ClientProbe
@@ -748,8 +872,13 @@ public sealed class ClientActionBoundaryTests
             [Path.Combine("Presentation", "LoginPage.xaml.cs")] = [
                 "Session.LoginAsync",
                 "Session.RefreshAsync",
+                "RunAuthenticatedContinuationAsync",
                 "SaveAccountAsync",
                 "RemoveAccountAsync",
+            ],
+            [Path.Combine("Presentation", "BootPage.xaml.cs")] = [
+                "session.RefreshAsync",
+                "RunAuthenticatedContinuationAsync",
             ],
             [Path.Combine("Presentation", "MainPage.Navigation.cs")] = [
                 "ClientSessionService",
@@ -998,11 +1127,18 @@ public sealed class ClientActionBoundaryTests
 
         public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
 
+        public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>?
+            AsyncResponseFactory
+        { get; init; }
+
         protected override Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request,
             CancellationToken cancellationToken)
         {
             Request = request;
+            if (AsyncResponseFactory is not null)
+                return AsyncResponseFactory(request, cancellationToken);
+
             return Task.FromResult(
                 ResponseFactory?.Invoke(request) ??
                 new HttpResponseMessage(HttpStatusCode.OK)

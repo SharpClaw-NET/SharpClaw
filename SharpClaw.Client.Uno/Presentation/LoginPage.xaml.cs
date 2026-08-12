@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
@@ -95,17 +96,24 @@ public sealed partial class LoginPage : Page
 
             if (result is not null)
             {
-                await PersistLoginAsync(result, rememberMe);
-                ShowStatus("✓ Authenticated.", error: false, success: true);
-                await Task.Delay(400);
+                await Session.RunAuthenticatedContinuationAsync(async () =>
+                {
+                    await PersistLoginAsync(result, rememberMe);
+                    ShowStatus("✓ Authenticated.", error: false, success: true);
+                    await Task.Delay(400);
 
-                var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
+                    await App.Services!.GetRequiredService<ClientNavigationService>()
+                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                });
                 return;
             }
 
             ShowStatus("✗ Invalid credentials.", error: true);
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
@@ -117,6 +125,7 @@ public sealed partial class LoginPage : Page
         }
     }
 
+    [RequiresUnreferencedCode("Calls System.Text.Json.JsonSerializer.Serialize<TValue>(TValue, JsonSerializerOptions)")]
     private async Task RegisterAsync(string username, string password)
     {
         _isBusy = true;
@@ -206,17 +215,23 @@ public sealed partial class LoginPage : Page
             var sp = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
             sp.Children.Add(new TextBlock
             {
-                Text = "›", FontFamily = Mono, FontSize = 12,
+                Text = "›",
+                FontFamily = Mono,
+                FontSize = 12,
                 Foreground = TerminalUI.Brush(0x32CD32),
             });
             sp.Children.Add(new TextBlock
             {
-                Text = acct.Username, FontFamily = Mono, FontSize = 12,
+                Text = acct.Username,
+                FontFamily = Mono,
+                FontSize = 12,
                 Foreground = TerminalUI.Brush(0x32CD32),
             });
             sp.Children.Add(new TextBlock
             {
-                Text = "\u2192 click to login", FontFamily = Mono, FontSize = 10,
+                Text = "\u2192 click to login",
+                FontFamily = Mono,
+                FontSize = 10,
                 Foreground = TerminalUI.Brush(0x808080),
                 VerticalAlignment = VerticalAlignment.Center,
             });
@@ -238,24 +253,20 @@ public sealed partial class LoginPage : Page
 
     private async Task PersistLoginAsync(ClientSessionResult result, bool rememberMe)
     {
-        try
+        var store = App.Services!.GetRequiredService<AccountStore>();
+        await store.SaveAccountAsync(new AccountStore.SavedAccount
         {
-            var store = App.Services!.GetRequiredService<AccountStore>();
-            await store.SaveAccountAsync(new AccountStore.SavedAccount
-            {
-                UserId = result.Identity.UserId,
-                Username = result.Identity.Username,
-                AccessToken = result.AccessToken,
-                AccessTokenExpiresAt = result.AccessTokenExpiresAt,
-                RefreshToken = rememberMe ? result.RefreshToken : null,
-                RefreshTokenExpiresAt = rememberMe ? result.RefreshTokenExpiresAt : null,
-                RememberMe = rememberMe,
-            });
+            UserId = result.Identity.UserId,
+            Username = result.Identity.Username,
+            AccessToken = result.AccessToken,
+            AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+            RefreshToken = rememberMe ? result.RefreshToken : null,
+            RefreshTokenExpiresAt = rememberMe ? result.RefreshTokenExpiresAt : null,
+            RememberMe = rememberMe,
+        });
 
-            await App.Services!.GetRequiredService<ClientSettings>()
-                .SwitchUserAsync(result.Identity.UserId);
-        }
-        catch { /* best-effort - login still succeeds */ }
+        await App.Services!.GetRequiredService<ClientSettings>()
+            .SwitchUserAsync(result.Identity.UserId);
     }
 
     private async Task AutoLoginWithRefreshAsync(AccountStore.SavedAccount account)
@@ -270,33 +281,36 @@ public sealed partial class LoginPage : Page
 
             if (result is not null)
             {
-                var store = App.Services!.GetRequiredService<AccountStore>();
-                await store.SaveAccountAsync(new AccountStore.SavedAccount
+                await Session.RunAuthenticatedContinuationAsync(async () =>
                 {
-                    UserId = result.Identity.UserId,
-                    Username = result.Identity.Username,
-                    AccessToken = result.AccessToken,
-                    AccessTokenExpiresAt = result.AccessTokenExpiresAt,
-                    RefreshToken = result.RefreshToken ?? account.RefreshToken,
-                    RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
-                    RememberMe = true,
-                });
-                if (account.UserId != result.Identity.UserId)
-                    await store.RemoveAccountAsync(account.UserId);
+                    var store = App.Services!.GetRequiredService<AccountStore>();
+                    await store.SaveAccountAsync(new AccountStore.SavedAccount
+                    {
+                        UserId = result.Identity.UserId,
+                        Username = result.Identity.Username,
+                        AccessToken = result.AccessToken,
+                        AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                        RefreshToken = result.RefreshToken ?? account.RefreshToken,
+                        RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                        RememberMe = true,
+                    });
+                    if (account.UserId != result.Identity.UserId)
+                        await store.RemoveAccountAsync(account.UserId);
 
                     await App.Services!.GetRequiredService<ClientSettings>()
                         .SwitchUserAsync(result.Identity.UserId);
 
-                // Pre-populate module caches for the session
-                var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
-                await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api2);
+                    // Pre-populate module caches for the session
+                    var api2 = App.Services!.GetRequiredService<SharpClawApiClient>();
+                    await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api2);
 
-                ShowStatus("✓ Authenticated.", error: false, success: true);
-                await Task.Delay(400);
+                    ShowStatus("✓ Authenticated.", error: false, success: true);
+                    await Task.Delay(400);
 
-                var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
-                await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                    var target = _needsFirstSetup || _needsUpgradeSetup ? "FirstSetup" : "Main";
+                    await App.Services!.GetRequiredService<ClientNavigationService>()
+                        .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+                });
                 return;
             }
 
@@ -308,6 +322,10 @@ public sealed partial class LoginPage : Page
 
             ShowStatus($"Session for {account.Username} is no longer valid. Please log in.", error: true);
             PopulateSavedAccounts();
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
         catch (Exception ex)
         {
