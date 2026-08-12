@@ -37,8 +37,10 @@ public sealed class RuntimeKernelAdapterTests
             instancePaths,
             providerFactory);
 
-        adapter.Graph.Modules.Modules.Should().ContainSingle()
-            .Which.Identity.Id.Should().Be("test-module");
+        adapter.Graph.Modules.Modules.Should().HaveCount(2);
+        adapter.Graph.Modules.Modules.Select(module => module.Identity.Id)
+            .Should()
+            .BeEquivalentTo(["sharpclaw.runtime.events", "test-module"]);
         adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>))
             .Should().NotBeNull();
         providerFactory.Plugins.Should().ContainSingle()

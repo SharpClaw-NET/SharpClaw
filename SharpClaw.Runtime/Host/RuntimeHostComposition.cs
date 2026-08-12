@@ -2,6 +2,7 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
+using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.Host.Api;
@@ -60,6 +61,15 @@ internal static class RuntimeHostComposition
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddSingleton<IRuntimeModuleActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
+        services.AddSingleton<IRuntimeEventActionBoundary>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
+        services.AddSingleton<IRuntimeEventPublisher>(serviceProvider =>
+            serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
+        services.AddSingleton<IRuntimeEventActionBoundaryAccessor,
+            RuntimeEventActionBoundaryAccessor>();
+        services.AddSingleton<IKernelEventDeliverySink, RuntimeEventDeliverySink>();
+        services.AddScoped<IRuntimeEventOutboxStore, RuntimeModuleStorageEventOutboxStore>();
+        services.AddScoped<IRuntimeEventOutboxService, RuntimeEventOutboxService>();
         services.AddScoped<RuntimePersistenceActionRunner>();
         services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
             RuntimeTransactionActionRunnerAccessor>();

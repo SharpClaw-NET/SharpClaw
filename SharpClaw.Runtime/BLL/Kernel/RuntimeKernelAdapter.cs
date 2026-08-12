@@ -1,6 +1,7 @@
 using System.Runtime.ExceptionServices;
 using System.Runtime.CompilerServices;
 using System.Threading.Channels;
+using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
@@ -15,11 +16,20 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 public sealed class RuntimeKernelAdapter :
     IRuntimePersistenceActionBoundary,
     IRuntimeTransactionActionBoundary,
-    IRuntimeModuleActionBoundary
+    IRuntimeModuleActionBoundary,
+    IRuntimeEventActionBoundary,
+    IRuntimeEventPublisher
 {
     private readonly KernelModuleRegistry _moduleRegistry;
     private readonly KernelActionDispatcher _actionDispatcher;
+    private readonly KernelEventDispatcher _eventDispatcher;
+    private readonly IKernelEventDeliverySink _eventDeliverySink;
     private bool _started;
+    private static readonly JsonSerializerOptions EventActionJsonOptions =
+        new(JsonSerializerDefaults.General)
+        {
+            PropertyNameCaseInsensitive = true,
+        };
 
     public RuntimeKernelAdapter(
         IConfiguration configuration,
@@ -29,7 +39,8 @@ public sealed class RuntimeKernelAdapter :
         SharpClawInstancePaths instancePaths,
         IRuntimeProviderClientFactory providerClientFactory,
         KernelGraphCompileOptions? graphCompileOptions = null,
-        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null,
+        IKernelEventDeliverySink? eventDeliverySink = null)
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hostServices);
@@ -39,15 +50,21 @@ public sealed class RuntimeKernelAdapter :
         ArgumentNullException.ThrowIfNull(providerClientFactory);
 
         _moduleRegistry = new KernelModuleRegistry();
+        _moduleRegistry.Add(new RuntimeEventModule());
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
             _moduleRegistry.Add(module);
 
-        Graph = _moduleRegistry.Compile(hostServices, graphCompileOptions);
+        Graph = _moduleRegistry.Compile(
+            hostServices,
+            AddRuntimeEventGrant(graphCompileOptions));
         RuntimeProviderActionManifest.Validate(Graph);
         RuntimeToolActionManifest.Validate(Graph);
         RuntimePersistenceActionManifest.Validate(Graph);
         RuntimeTransactionActionManifest.Validate(Graph);
         RuntimeModuleActionManifest.Validate(Graph);
+        RuntimeEventActionManifest.Validate(Graph);
+        _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
+        _eventDispatcher = new KernelEventDispatcher(Graph, _eventDeliverySink);
         _actionDispatcher = new KernelActionDispatcher(
             Graph,
             new KernelActionExecutionContext(
@@ -55,6 +72,8 @@ public sealed class RuntimeKernelAdapter :
                 ExtensionFeatureSet.Empty,
                 Guid.NewGuid(),
                 Guid.NewGuid()),
+            eventWriter: _eventDispatcher,
+            resultSnapshotter: new RuntimeEventActionResultSnapshotter(),
             repeatEvidenceAuthority: repeatEvidenceAuthority);
         DispatchModuleCompositionActions();
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
@@ -81,6 +100,313 @@ public sealed class RuntimeKernelAdapter :
     public DirectChatKernel Kernel { get; }
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
+
+    public async ValueTask<RuntimeEventPublishResult> PublishAsync(
+        RuntimeEventPayload payload,
+        EventDelivery delivery = EventDelivery.Inline,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(payload);
+        payload.Validate();
+        var eventId = Guid.NewGuid();
+        var invocation = new RuntimeEventActionInvocation(
+            RuntimeEventDefinitions.CommittedKey,
+            eventId,
+            delivery,
+            "define",
+            payload);
+
+        var defined = await RunEventActionAsync(
+            new SharpClawActionKey("event.define"),
+            invocation,
+            static (effective, _) =>
+            {
+                ValidateEventInvocation(effective, "define");
+                return ValueTask.FromResult(effective);
+            },
+            cancellationToken);
+
+        var preview = await RunEventActionAsync(
+            new SharpClawActionKey("event.publish.preview"),
+            defined with { Phase = "preview" },
+            static (effective, _) =>
+            {
+                if (effective.Payload is not RuntimeEventPayload effectivePayload)
+                {
+                    throw new KernelActionExecutionException(
+                        "The event preview action returned an invalid payload.");
+                }
+
+                return ValueTask.FromResult(effectivePayload.Validate());
+            },
+            cancellationToken);
+
+        var committedInvocation = defined with
+        {
+            Phase = "commit",
+            Payload = preview,
+        };
+        var committed = await RunEventActionAsync(
+            new SharpClawActionKey("event.publish.commit"),
+            committedInvocation,
+            async (effective, ct) =>
+            {
+                return await RunEventActionAsync(
+                    new SharpClawActionKey("event.deliver"),
+                    effective with { Phase = "deliver" },
+                    async (deliveryInvocation, deliveryCt) =>
+                    {
+                        if (deliveryInvocation.Payload is not RuntimeEventPayload eventPayload)
+                        {
+                            throw new KernelActionExecutionException(
+                                "The event delivery action returned an invalid payload.");
+                        }
+
+                        await _eventDispatcher.PublishAsync(
+                            RuntimeEventDefinitions.Committed,
+                            eventPayload.Validate(),
+                            deliveryCt);
+                        if (deliveryInvocation.Delivery != EventDelivery.Inline)
+                        {
+                            await _eventDeliverySink.EnqueueAsync(
+                                RuntimeEventDefinitions.CommittedKey,
+                                new EventEnvelope<RuntimeEventPayload>(
+                                    deliveryInvocation.EventId,
+                                    null,
+                                    Guid.NewGuid(),
+                                    DateTimeOffset.UtcNow,
+                                    RuntimeEventDefinitions.ModuleId,
+                                    eventPayload),
+                                deliveryInvocation.Delivery,
+                                deliveryCt,
+                                "runtime-event-outbox");
+                        }
+
+                        return deliveryInvocation;
+                    },
+                    ct);
+            },
+            cancellationToken);
+
+        ValidateEventInvocation(committed, "commit");
+        if (committed.Payload is not RuntimeEventPayload committedPayload)
+        {
+            throw new KernelActionExecutionException(
+                "The event commit action returned an invalid payload.");
+        }
+
+        return new RuntimeEventPublishResult(
+            committed.EventId,
+            committedPayload.Validate(),
+            committed.Delivery);
+    }
+
+    private static void ValidateEventInvocation(
+        RuntimeEventActionInvocation invocation,
+        string phase)
+    {
+        if (invocation.EventId == Guid.Empty ||
+            invocation.EventKey != RuntimeEventDefinitions.CommittedKey ||
+            invocation.Payload is not RuntimeEventPayload payload)
+        {
+            throw new KernelActionExecutionException(
+                $"The event {phase} action returned an invalid invocation.");
+        }
+
+        payload.Validate();
+    }
+
+    public async ValueTask<TResult> RunEventActionAsync<TResult>(
+        SharpClawActionKey actionKey,
+        RuntimeEventActionInvocation invocation,
+        Func<RuntimeEventActionInvocation, CancellationToken, ValueTask<TResult>> terminal,
+        CancellationToken cancellationToken = default)
+    {
+        ArgumentNullException.ThrowIfNull(invocation);
+        ArgumentNullException.ThrowIfNull(terminal);
+        if (!RuntimeEventActionManifest.Contains(actionKey))
+        {
+            throw new ArgumentException(
+                $"Action '{actionKey.Value}' is not a published Runtime event action.",
+                nameof(actionKey));
+        }
+
+        var terminalState = 0;
+        var terminalResult = new TaskCompletionSource<TResult>(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+        try
+        {
+            var result = await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                CreateHostExecutionContext(),
+                Graph.GetStandardAction(actionKey),
+                new KernelActionEnvelope(actionKey, invocation),
+                async (envelope, ct) =>
+                {
+                    var effective = NormalizeEventInvocation(envelope.Payload, actionKey);
+
+                    if (Interlocked.CompareExchange(ref terminalState, 1, 0) != 0)
+                    {
+                        var repeated = await terminalResult.Task.WaitAsync(ct);
+                        return (object?)repeated ?? throw new KernelActionExecutionException(
+                            $"Event action '{actionKey.Value}' returned a null repeated result.");
+                    }
+
+                    try
+                    {
+                        var value = await terminal(effective, ct);
+                        terminalResult.TrySetResult(value);
+                        return (object?)value ?? throw new KernelActionExecutionException(
+                            $"Event action '{actionKey.Value}' returned a null result.");
+                    }
+                    catch (Exception exception)
+                    {
+                        terminalResult.TrySetException(exception);
+                        throw;
+                    }
+                },
+                Graph.ActionSnapshot,
+                cancellationToken);
+
+            if (Volatile.Read(ref terminalState) == 0)
+            {
+                throw new KernelActionExecutionException(
+                    $"Event action '{actionKey.Value}' completed without running its terminal.");
+            }
+
+            return NormalizeEventActionResult<TResult>(result, actionKey);
+        }
+        catch (KernelActionCancelledException exception)
+        {
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+        catch (OperationCanceledException exception)
+        {
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: true);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+        catch (Exception exception)
+        {
+            await DispatchEventFailureAsync(actionKey, invocation, exception, isCancellation: false);
+            ExceptionDispatchInfo.Capture(exception).Throw();
+            throw;
+        }
+    }
+
+    private static RuntimeEventActionInvocation NormalizeEventInvocation(
+        object? value,
+        SharpClawActionKey actionKey)
+    {
+        var invocation = value switch
+        {
+            RuntimeEventActionInvocation typed => typed,
+            JsonElement json => json.Deserialize<RuntimeEventActionInvocation>(EventActionJsonOptions),
+            _ => null,
+        };
+        if (invocation is null)
+        {
+            throw new KernelActionExecutionException(
+                $"Event action '{actionKey.Value}' returned an invalid invocation payload.");
+        }
+
+        return invocation with { Payload = NormalizeEventPayload(invocation.Payload) };
+    }
+
+    private static object? NormalizeEventPayload(object? value)
+    {
+        if (value is not JsonElement json)
+            return value;
+
+        if (json.ValueKind == JsonValueKind.Object &&
+            json.TryGetProperty("Name", out _) &&
+            json.TryGetProperty("SourceId", out _) &&
+            json.TryGetProperty("Summary", out _))
+        {
+            return json.Deserialize<RuntimeEventPayload>(EventActionJsonOptions)
+                ?? throw new KernelActionExecutionException(
+                    "The event action payload could not be deserialized.");
+        }
+
+        if (json.ValueKind == JsonValueKind.Object &&
+            json.TryGetProperty("RecordKey", out _) &&
+            json.TryGetProperty("IsCancellation", out _))
+        {
+            return json.Deserialize<RuntimeEventOutboxTransition>(EventActionJsonOptions)
+                ?? throw new KernelActionExecutionException(
+                    "The event outbox transition could not be deserialized.");
+        }
+
+        return json.Clone();
+    }
+
+    private static TResult NormalizeEventActionResult<TResult>(
+        object? value,
+        SharpClawActionKey actionKey)
+    {
+        if (value is TResult typed)
+            return typed;
+
+        if (value is JsonElement json)
+        {
+            object? converted;
+            if (typeof(TResult) == typeof(RuntimeEventActionInvocation))
+            {
+                converted = NormalizeEventInvocation(json, actionKey);
+            }
+            else if (typeof(TResult) == typeof(RuntimeEventPayload))
+            {
+                converted = json.Deserialize<RuntimeEventPayload>(EventActionJsonOptions);
+            }
+            else
+            {
+                converted = json.Deserialize<TResult>(EventActionJsonOptions);
+            }
+
+            if (converted is TResult result)
+                return result;
+        }
+
+        throw new KernelActionExecutionException(
+            $"Event action '{actionKey.Value}' returned an invalid result type.");
+    }
+
+    private async ValueTask DispatchEventFailureAsync(
+        SharpClawActionKey failedAction,
+        RuntimeEventActionInvocation invocation,
+        Exception exception,
+        bool isCancellation)
+    {
+        if (failedAction == new SharpClawActionKey("event.delivery.fail"))
+            return;
+
+        try
+        {
+            await _actionDispatcher.RunRequiredWithContextAsync<KernelActionEnvelope, object>(
+                CreateHostExecutionContext(),
+                Graph.GetStandardAction(new SharpClawActionKey("event.delivery.fail")),
+                new KernelActionEnvelope(
+                    new SharpClawActionKey("event.delivery.fail"),
+                    invocation with
+                    {
+                        Phase = "failure",
+                        Payload = new RuntimeEventFailure(
+                            failedAction.Value,
+                            exception is OperationCanceledException
+                                ? "EVENT_CANCELLED"
+                                : "EVENT_DELIVERY_FAILED",
+                            isCancellation),
+                    }),
+                static (_, _) => ValueTask.FromResult<object>(true),
+                Graph.ActionSnapshot,
+                CancellationToken.None);
+        }
+        catch (Exception outcomeException)
+        {
+            throw new AggregateException(exception, outcomeException);
+        }
+    }
 
     internal KernelActionExecutionContext CreateCliExecutionContext(
         RequestPrincipal? caller = null,
@@ -819,6 +1145,50 @@ public sealed class RuntimeKernelAdapter :
             features ?? ExtensionFeatureSet.Empty,
             Guid.NewGuid(),
             Guid.NewGuid());
+
+    private static KernelGraphCompileOptions AddRuntimeEventGrant(
+        KernelGraphCompileOptions? options)
+    {
+        var eventModuleGrants = options?.EventModuleCapabilityGrants is { } existing
+            ? existing.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyDictionary<string, EventInterceptionCapabilities>)
+                    new Dictionary<string, EventInterceptionCapabilities>(
+                        pair.Value,
+                        StringComparer.Ordinal),
+                StringComparer.Ordinal)
+            : new Dictionary<
+                string,
+                IReadOnlyDictionary<string, EventInterceptionCapabilities>>(
+                StringComparer.Ordinal);
+        var runtimeEventGrant = eventModuleGrants.TryGetValue(
+            RuntimeEventDefinitions.ModuleId,
+            out var configuredGrant)
+            ? new Dictionary<string, EventInterceptionCapabilities>(
+                configuredGrant,
+                StringComparer.Ordinal)
+            : new Dictionary<string, EventInterceptionCapabilities>(
+                StringComparer.Ordinal);
+        runtimeEventGrant[RuntimeEventDefinitions.CommittedKey.Value] =
+            RuntimeEventDefinitions.Committed.Capabilities;
+        eventModuleGrants[RuntimeEventDefinitions.ModuleId] = runtimeEventGrant;
+
+        return new KernelGraphCompileOptions
+        {
+            SupportedActionCapabilities = options?.SupportedActionCapabilities
+                ?? new KernelGraphCompileOptions().SupportedActionCapabilities,
+            SupportedEventCapabilities = options?.SupportedEventCapabilities
+                ?? new KernelGraphCompileOptions().SupportedEventCapabilities,
+            ActionCapabilityGrants = options?.ActionCapabilityGrants,
+            ActionModuleCapabilityGrants = options?.ActionModuleCapabilityGrants,
+            EventCapabilityGrants = options?.EventCapabilityGrants,
+            EventModuleCapabilityGrants = eventModuleGrants,
+            SensitiveActionApprovals = options?.SensitiveActionApprovals ?? [],
+            SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
+            MaximumActionDepth = options?.MaximumActionDepth
+                ?? new KernelGraphCompileOptions().MaximumActionDepth,
+        };
+    }
 
     private static IConversationResolver ResolveConversationResolver(
         KernelGraph graph,
