@@ -104,12 +104,22 @@ public sealed class RuntimeModuleBoundaryTests
 
         declared.ResetWildcardObservation();
 
-        await RunRoadmapCoverageOwnersAsync(
+        var observedCoverageKeys = await RunRoadmapCoverageOwnersAsync(
             adapter,
+            declared,
             clientProbe,
             gatewayProbe);
 
+        var jobsBefore = declared.WildcardKeys.Count;
         await RunAllJobsFamiliesAsync(adapter);
+        var jobsObserved = declared.WildcardKeys
+            .Skip(jobsBefore)
+            .ToHashSet(StringComparer.Ordinal);
+        foreach (var key in RuntimeJobsActionManifest.Required)
+        {
+            jobsObserved.Should().Contain(key.Value);
+            observedCoverageKeys.Add(key.Value);
+        }
 
         var declaredDescriptor = adapter.Graph.GetStandardAction(DeclaredContractModule.ActionKey);
         await adapter.ActionDispatcher.RunRequiredAsync(
@@ -118,31 +128,17 @@ public sealed class RuntimeModuleBoundaryTests
             static (action, _) => ValueTask.FromResult(action.Payload ?? new object()),
             adapter.Graph.ActionSnapshot,
             CancellationToken.None);
+        declared.WildcardKeys.Should().Contain(DeclaredContractModule.ActionKey.Value);
+        observedCoverageKeys.Add(DeclaredContractModule.ActionKey.Value);
 
         var expectedActionKeys = KernelActionCatalog.Coverage
             .Select(static entry => entry.ActionKey.Value)
             .Concat(RuntimeJobsActionManifest.Required.Select(static key => key.Value))
             .Append(DeclaredContractModule.ActionKey.Value)
             .ToHashSet(StringComparer.Ordinal);
-        var observedActionKeys = declared.WildcardKeys
-            .Concat(clientProbe.ActionKeys)
-            .Concat(gatewayProbe.ActionKeys)
-            .Where(expectedActionKeys.Contains)
-            .ToHashSet(StringComparer.Ordinal);
-        var allObservedActionKeys = declared.WildcardKeys
-            .Concat(clientProbe.ActionKeys)
-            .Concat(gatewayProbe.ActionKeys)
-            .ToHashSet(StringComparer.Ordinal);
 
-        observedActionKeys.Should().BeEquivalentTo(expectedActionKeys);
-        allObservedActionKeys.Should().Contain(expectedActionKeys);
+        observedCoverageKeys.Should().BeEquivalentTo(expectedActionKeys);
         declared.WildcardCalls.Should().BeGreaterThan(1);
-        declared.WildcardKeys.Should().Contain(
-            RuntimeJobsActionManifest.Required.Select(static key => key.Value));
-        declared.WildcardKeys.Should().Contain(DeclaredContractModule.ActionKey.Value);
-        clientProbe.ActionKeys.Should().Contain("client.command.dispatch");
-        gatewayProbe.ActionKeys.Should().Contain("gateway.request.receive");
-        gatewayProbe.ActionKeys.Should().Contain("background.tick.execute");
         adapter.ModuleContracts
             .Single(value => value.ModuleId == declared.Identity.Id)
             .Events
@@ -150,107 +146,157 @@ public sealed class RuntimeModuleBoundaryTests
             .ContainSingle(value => value.Key == DeclaredContractModule.EventKey);
     }
 
-    private static async Task RunRoadmapCoverageOwnersAsync(
+    private static async Task<HashSet<string>> RunRoadmapCoverageOwnersAsync(
         RuntimeKernelAdapter adapter,
+        DeclaredContractModule declared,
         ClientCoverageProbe clientProbe,
         GatewayCoverageProbe gatewayProbe)
     {
-        await adapter.RunRuntimeLifecycleActionAsync(
-            new SharpClawActionKey("runtime.start.prepare"),
-            "roadmap-test",
-            static _ => ValueTask.CompletedTask);
+        var observed = new HashSet<string>(StringComparer.Ordinal);
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "runtime.start.prepare",
+            () => adapter.RunRuntimeLifecycleActionAsync(
+                new SharpClawActionKey("runtime.start.prepare"),
+                "roadmap-test",
+                static _ => ValueTask.CompletedTask).AsTask(),
+            observed);
 
-        await adapter.RunRequestAsync<object, bool>(
-            CreateRoadmapExecutionContext(),
-            new object(),
-            static (_, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(true);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "runtime.request.receive",
+            () => adapter.RunRequestAsync<object, bool>(
+                CreateRoadmapExecutionContext(),
+                new object(),
+                static (_, cancellationToken) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(true);
+                }).AsTask(),
+            observed);
 
-        await adapter.RunSecurityDecisionAsync(
-            CreateRoadmapExecutionContext(),
-            new SharpClawActionKey("security.session.validate"),
-            new RuntimeSecurityActionInvocation("validate", "session"),
-            static (_, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(true);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "security.session.validate",
+            () => adapter.RunSecurityDecisionAsync(
+                CreateRoadmapExecutionContext(),
+                new SharpClawActionKey("security.session.validate"),
+                new RuntimeSecurityActionInvocation("validate", "session"),
+                static (_, cancellationToken) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(true);
+                }).AsTask(),
+            observed);
 
-        await adapter.RunCliActionAsync(
-            adapter.CreateCliExecutionContext(),
-            new SharpClawActionKey("runtime.cli.parse"),
-            new RuntimeCliActionInvocation("parse", "help", 0),
-            static _ => ValueTask.FromResult(true));
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "runtime.cli.parse",
+            () => adapter.RunCliActionAsync(
+                adapter.CreateCliExecutionContext(),
+                new SharpClawActionKey("runtime.cli.parse"),
+                new RuntimeCliActionInvocation("parse", "help", 0),
+                static _ => ValueTask.FromResult(true)).AsTask(),
+            observed);
 
         var clientContext = new ClientActionContextSource();
         var clientDispatcher = ClientActionDispatcher.CreateProduction(
             clientContext,
             clientProbe);
-        await clientDispatcher.RunCommandAsync(
-            "roadmap.coverage",
-            static _ => ValueTask.FromResult(true));
+        await ObserveClientOwnerAsync(
+            clientProbe,
+            "client.command.dispatch",
+            () => clientDispatcher.RunCommandAsync(
+                "roadmap.coverage",
+                static _ => ValueTask.FromResult(true)).AsTask(),
+            observed);
 
-        await adapter.Kernel.RunAsync(new ChatTurnInput("roadmap coverage"));
+        await ObserveRuntimeOwnersAsync(
+            declared,
+            [
+                "chat.turn.start",
+                "chat.provider_round.start",
+                "tool.call.propose",
+            ],
+            () => adapter.Kernel.RunAsync(new ChatTurnInput("roadmap coverage")).AsTask(),
+            observed);
 
         var persistenceBoundary = (IRuntimePersistenceActionBoundary)adapter;
-        await persistenceBoundary.RunPersistenceActionAsync(
-            new RuntimePersistenceActionInvocation(
-                new SharpClawActionKey("storage.get"),
-                0,
-                0,
-                0),
-            static cancellationToken =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(0);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "storage.get",
+            () => persistenceBoundary.RunPersistenceActionAsync(
+                new RuntimePersistenceActionInvocation(
+                    new SharpClawActionKey("storage.get"),
+                    0,
+                    0,
+                    0),
+                static cancellationToken =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(0);
+                }).AsTask(),
+            observed);
 
         var transactionBoundary = (IRuntimeTransactionActionBoundary)adapter;
-        await transactionBoundary.RunTransactionActionAsync(
-            new RuntimeTransactionActionInvocation(
-                new SharpClawActionKey("storage.transaction.commit"),
-                null,
-                true),
-            static cancellationToken =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(RuntimeTransactionActionResult.Completed);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "storage.transaction.commit",
+            () => transactionBoundary.RunTransactionActionAsync(
+                new RuntimeTransactionActionInvocation(
+                    new SharpClawActionKey("storage.transaction.commit"),
+                    null,
+                    true),
+                static cancellationToken =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(RuntimeTransactionActionResult.Completed);
+                }).AsTask(),
+            observed);
 
-        await adapter.RunModuleActionAsync(
-            new SharpClawActionKey("module.start"),
-            new RuntimeModuleActionInvocation("roadmap", "start"),
-            static (_, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(true);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "module.start",
+            () => adapter.RunModuleActionAsync(
+                new SharpClawActionKey("module.start"),
+                new RuntimeModuleActionInvocation("roadmap", "start"),
+                static (_, cancellationToken) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(true);
+                }).AsTask(),
+            observed);
 
-        await adapter.RunEventActionAsync(
-            new SharpClawActionKey("event.deliver"),
-            new RuntimeEventActionInvocation(
-                new SharpClawEventKey("runtime.event"),
-                Guid.NewGuid(),
-                EventDelivery.Inline,
-                "deliver",
-                new RuntimeEventPayload("roadmap.coverage", "test", "Roadmap coverage.")),
-            static (invocation, cancellationToken) =>
-            {
-                cancellationToken.ThrowIfCancellationRequested();
-                return ValueTask.FromResult(invocation);
-            });
+        await ObserveRuntimeOwnerAsync(
+            declared,
+            "event.deliver",
+            () => adapter.RunEventActionAsync(
+                new SharpClawActionKey("event.deliver"),
+                new RuntimeEventActionInvocation(
+                    new SharpClawEventKey("runtime.event"),
+                    Guid.NewGuid(),
+                    EventDelivery.Inline,
+                    "deliver",
+                    new RuntimeEventPayload("roadmap.coverage", "test", "Roadmap coverage.")),
+                static (invocation, cancellationToken) =>
+                {
+                    cancellationToken.ThrowIfCancellationRequested();
+                    return ValueTask.FromResult(invocation);
+                }).AsTask(),
+            observed);
 
         var gatewayBoundary = CreateGatewayCoverageBoundary(gatewayProbe);
-        await gatewayBoundary.ExecuteTickAsync(
-            new GatewayBackgroundTickInvocation(
-                "roadmap-coverage",
-                "execute",
-                Guid.NewGuid()),
-            static _ => ValueTask.CompletedTask,
-            CancellationToken.None);
+        await ObserveGatewayOwnerAsync(
+            gatewayProbe,
+            "background.tick.execute",
+            () => gatewayBoundary.ExecuteTickAsync(
+                new GatewayBackgroundTickInvocation(
+                    "roadmap-coverage",
+                    "execute",
+                    Guid.NewGuid()),
+                static _ => ValueTask.CompletedTask,
+                CancellationToken.None).AsTask(),
+            observed);
 
         var gateway = new GatewayActionMiddleware(
             context =>
@@ -266,7 +312,66 @@ public sealed class RuntimeModuleBoundaryTests
         httpContext.User = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.NameIdentifier, "roadmap-user")],
             "test"));
-        await gateway.InvokeAsync(httpContext);
+        await ObserveGatewayOwnerAsync(
+            gatewayProbe,
+            "gateway.request.receive",
+            () => gateway.InvokeAsync(httpContext),
+            observed);
+
+        return observed;
+    }
+
+    private static async Task ObserveRuntimeOwnerAsync(
+        DeclaredContractModule declared,
+        string expectedAction,
+        Func<Task> owner,
+        ISet<string> observed)
+    {
+        var before = declared.WildcardKeys.Count;
+        await owner();
+        var ownerKeys = declared.WildcardKeys.Skip(before).ToHashSet(StringComparer.Ordinal);
+        ownerKeys.Should().Contain(expectedAction);
+        observed.Add(expectedAction);
+    }
+
+    private static async Task ObserveRuntimeOwnersAsync(
+        DeclaredContractModule declared,
+        IReadOnlyList<string> expectedActions,
+        Func<Task> owner,
+        ISet<string> observed)
+    {
+        var before = declared.WildcardKeys.Count;
+        await owner();
+        var ownerKeys = declared.WildcardKeys.Skip(before).ToHashSet(StringComparer.Ordinal);
+        foreach (var expectedAction in expectedActions)
+        {
+            ownerKeys.Should().Contain(expectedAction);
+            observed.Add(expectedAction);
+        }
+    }
+
+    private static async Task ObserveClientOwnerAsync(
+        ClientCoverageProbe probe,
+        string expectedAction,
+        Func<Task> owner,
+        ISet<string> observed)
+    {
+        var before = probe.ActionKeys.Count;
+        await owner();
+        probe.ActionKeys.Skip(before).Should().Contain(expectedAction);
+        observed.Add(expectedAction);
+    }
+
+    private static async Task ObserveGatewayOwnerAsync(
+        GatewayCoverageProbe probe,
+        string expectedAction,
+        Func<Task> owner,
+        ISet<string> observed)
+    {
+        var before = probe.ActionKeys.Count;
+        await owner();
+        probe.ActionKeys.Skip(before).Should().Contain(expectedAction);
+        observed.Add(expectedAction);
     }
 
     private static KernelActionExecutionContext CreateRoadmapExecutionContext() =>
