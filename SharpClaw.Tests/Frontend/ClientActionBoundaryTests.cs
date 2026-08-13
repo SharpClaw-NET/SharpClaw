@@ -965,15 +965,6 @@ public sealed class ClientActionBoundaryTests
                 "ClientSessionService",
                 "ClearAsync",
             ],
-            [Path.Combine("Presentation", "ChatActionContributionBuilders.cs")] = [
-                "context.Api.GetAsync",
-                "context.Api.PostAsync",
-            ],
-            [Path.Combine("Presentation", "SettingsContributionBuilders.cs")] = [
-                "context.Api.GetAsync",
-                "context.Api.PostAsync",
-                "context.Api.DeleteAsync",
-            ],
             [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
                 "Actions.RunCommandAsync",
                 "client.gateway.restart",
@@ -1021,10 +1012,6 @@ public sealed class ClientActionBoundaryTests
                 "CommitStateAsync",
                 "client.modules",
             ],
-            [Path.Combine("Services", "ModuleFrontendContributionRegistry.cs")] = [
-                "CommitStateAsync",
-                "client.frontend.contributions",
-            ],
         };
 
         foreach (var requirement in requiredSource)
@@ -1047,6 +1034,16 @@ public sealed class ClientActionBoundaryTests
         combinedSource.Should().NotContain("UseAuthentication");
 
         File.Exists(Path.Combine(clientRoot, "Presentation", "LoginModel.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Contributions.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "ChatActionContributionBuilders.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "SettingsPage.Contributions.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "SettingsContributionBuilders.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Services", "ModuleFrontendContributionRegistry.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "MainModel.cs"))
             .Should().BeFalse();

@@ -125,7 +125,6 @@ public sealed partial class MainPage : Page
         await LoadRolesAsync();
         var channels = await LoadSidebarAsync();
         await LoadAgentsAsync(null, null);
-        RebuildChatActionContributions();
 
         // Auto-select the most recently created channel
         if (_selectedChannelId is null && channels.Count > 0)

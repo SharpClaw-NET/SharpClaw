@@ -293,8 +293,6 @@
         <Grid Grid.Row="0">
           <Grid.ColumnDefinitions>
             <ColumnDefinition />
-            <ColumnDefinition Width="Auto" />
-            <ColumnDefinition Width="Auto" />
           </Grid.ColumnDefinitions>
           <TextBox x:Name="MessageInput"
                    Style="{StaticResource TerminalInput}"
@@ -306,12 +304,7 @@
                    AcceptsReturn="False"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
                    HorizontalAlignment="Stretch" />
-          <StackPanel Grid.Column="1"
-                      x:Name="ChatActionsPanel"
-                      Orientation="Horizontal"
-                      Spacing="4"
-                      Margin="4,0,0,0" />
-          <Button Grid.Column="2"
+          <Button Grid.Column="1"
                   Style="{StaticResource TerminalButton}"
                   Click="OnSendClick"
                   Margin="4,0,0,0"

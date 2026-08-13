@@ -73,7 +73,6 @@ public sealed partial class SettingsPage : Page
 
     private void BuildTabs()
     {
-        _moduleContributionTabs.Clear();
         TabPanel.Children.Clear();
         AddTabSection("Models");
         AddTabButton("Providers", "sharpclaw provider list");
@@ -81,7 +80,6 @@ public sealed partial class SettingsPage : Page
         AddTabSection("Agents");
         AddTabButton("Agents", "sharpclaw agent list");
         AddTabButton("Roles", "sharpclaw role list");
-        AddContributionTabs();
         AddTabSection("Gateway");
         AddTabButton("Gateway", "sharpclaw gateway status");
         AddTabSection("Modules");
@@ -134,12 +132,6 @@ public sealed partial class SettingsPage : Page
         StopModuleLogTimer();
         HighlightTabs();
         ContentPanel.Children.Clear();
-
-        if (_moduleContributionTabs.TryGetValue(tab, out var contribution))
-        {
-            _ = LoadContributionSettingsAsync(contribution);
-            return;
-        }
 
         _ = tab switch
         {

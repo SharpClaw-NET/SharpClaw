@@ -161,14 +161,9 @@ public partial class App : Application
                     services.AddSingleton<ModuleStateCache>(sp =>
                         new ModuleStateCache(
                             sp.GetRequiredService<ClientActionDispatcher>()));
-                    services.AddSingleton<ModuleFrontendContributionRegistry>(sp =>
-                        new ModuleFrontendContributionRegistry(
-                            sp.GetRequiredService<ModuleStateCache>(),
-                            sp.GetRequiredService<ClientActionDispatcher>()));
                     services.AddSingleton<ModuleFrontendStateService>(sp =>
                         new ModuleFrontendStateService(
-                            sp.GetRequiredService<ModuleStateCache>(),
-                            sp.GetRequiredService<ModuleFrontendContributionRegistry>()));
+                            sp.GetRequiredService<ModuleStateCache>()));
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
