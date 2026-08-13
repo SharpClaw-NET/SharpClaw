@@ -47,14 +47,8 @@
         <local:TerminalMenuButton TagKey="Models"        Label="Models"         Description="LLM model registry"          MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
         <local:TerminalMenuButton TagKey="LocalModels"   Label="Local Models"   Description="on-device inference"          MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
 
-        <local:TerminalSectionHeader Title="Agents" Margin="0,16,0,6" />
-        <local:TerminalMenuButton TagKey="Agents"        Label="Agents"         Description="agent profiles &amp; configuration" MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
-        <local:TerminalMenuButton TagKey="Roles"         Label="Roles"          Description="permission sets &amp; clearance"    MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
+        <local:TerminalSectionHeader Title="Jobs" Margin="0,16,0,6" />
         <local:TerminalMenuButton TagKey="Jobs"          Label="Jobs"           Description="async agent work"            MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
-
-        <local:TerminalSectionHeader Title="Chat" Margin="0,16,0,6" />
-        <local:TerminalMenuButton TagKey="Channels"      Label="Channels"       Description="chat channels &amp; threads"       MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
-        <local:TerminalMenuButton TagKey="Contexts"      Label="Contexts"       Description="channel context presets"      MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
 
         <local:TerminalSectionHeader Title="Resources" Margin="0,16,0,6" />
         <local:TerminalMenuButton TagKey="Resources"     Label="Resources"      Description="shells, containers, devices"  MenuClick="OnMenuItemClick" MenuPointerEntered="OnMenuItemHover" MenuPointerExited="OnMenuItemLeave" />
