@@ -270,7 +270,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         ForwardHostScoped<IAgentManager>(services);
         ForwardHostScoped<IContainerProvisioner>(services);
         ForwardHostScoped<IConversationSteering>(services);
-        ForwardHostScoped<IModelInfoProvider>(services);
         ForwardHostScoped<IInProcessModuleSecretReader>(services);
         ForwardHostScoped<IModelRegistrar>(services);
         ForwardHostScoped<IModuleInfoProvider>(services);
@@ -294,7 +293,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         services.RemoveAll<IAgentManager>();
         services.RemoveAll<IContainerProvisioner>();
         services.RemoveAll<IConversationSteering>();
-        services.RemoveAll<IModelInfoProvider>();
         services.RemoveAll<IInProcessModuleSecretReader>();
         services.RemoveAll<IModelRegistrar>();
         services.RemoveAll<IModuleInfoProvider>();

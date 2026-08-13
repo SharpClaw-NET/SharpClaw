@@ -218,34 +218,6 @@ public sealed class HostAgentJobReader(AgentJobService jobs) : IAgentJobReader
         jobs.JobExistsWithActionPrefixAsync(jobId, actionKeyPrefix, ct);
 }
 
-public sealed class HostModelInfoProvider(
-    IServiceScopeFactory scopeFactory,
-    ProviderApiClientFactory clientFactory) : IModelInfoProvider
-{
-    public async Task<ModelProviderInfo?> GetModelProviderInfoAsync(Guid modelId, CancellationToken ct = default)
-    {
-        await using var scope = scopeFactory.CreateAsyncScope();
-        var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-
-        var model = await db.Models
-            .Include(m => m.Provider)
-            .FirstOrDefaultAsync(m => m.Id == modelId, ct);
-
-        if (model is null)
-            return null;
-
-        var plugin = clientFactory.GetPlugin(model.Provider.ProviderKey);
-        var requiresApiKey = plugin?.RequiresApiKey ?? true;
-        var hasApiKey = !string.IsNullOrEmpty(model.Provider.EncryptedApiKey);
-
-        return new ModelProviderInfo(
-            model.Name,
-            model.Provider.ProviderKey,
-            requiresApiKey,
-            hasApiKey);
-    }
-}
-
 public sealed class HostInProcessModuleSecretReader(
     IServiceScopeFactory scopeFactory,
     Contracts.Persistence.EncryptionOptions encryptionOptions) : IInProcessModuleSecretReader
