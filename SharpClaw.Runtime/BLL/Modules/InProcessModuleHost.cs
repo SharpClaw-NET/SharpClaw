@@ -276,7 +276,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         ForwardHostScoped<IModuleInfoProvider>(services);
         ForwardHostScoped<IModuleLifecycleManager>(services);
         ForwardHostScoped<IForeignModuleProtocolContractResolver>(services);
-        ForwardHostScoped<IThreadResolver>(services);
         ForwardHostScoped<IGlobalFlagEvaluator>(services);
         ForwardHostScoped<ICliIdResolver>(services);
         ForwardHostScoped<ISharpClawEventSinkRegistry>(services);
@@ -301,7 +300,6 @@ public sealed class InProcessModuleHost : IModuleRuntimeHost
         services.RemoveAll<IModuleInfoProvider>();
         services.RemoveAll<IModuleLifecycleManager>();
         services.RemoveAll<IForeignModuleProtocolContractResolver>();
-        services.RemoveAll<IThreadResolver>();
         services.RemoveAll<IGlobalFlagEvaluator>();
         services.RemoveAll<ICliIdResolver>();
         services.RemoveAll<ISharpClawEventSinkRegistry>();

@@ -378,23 +378,6 @@ public sealed class HostModelRegistrar(IServiceScopeFactory scopeFactory) : IMod
     }
 }
 
-public sealed class HostThreadResolver(ThreadService threads) : IThreadResolver
-{
-    public async Task<Guid> ResolveOrCreateAsync(Guid channelId, CancellationToken ct = default)
-    {
-        var existing = await threads.ListAsync(channelId, ct);
-        if (existing.Count > 0)
-            return existing[0].Id;
-
-        var created = await threads.CreateAsync(
-            channelId,
-            new CreateThreadRequest("Default"),
-            ct);
-
-        return created.Id;
-    }
-}
-
 public sealed class HostContextDataReader(SharpClawDbContext db) : IHostContextDataReader
 {
     public async Task<IReadOnlyList<ThreadSummary>> GetAccessibleThreadsAsync(
