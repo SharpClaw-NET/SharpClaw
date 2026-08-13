@@ -921,8 +921,13 @@ public sealed class ClientActionBoundaryTests
         environmentSource.Should().Contain("client.environment.save");
         environmentSource.Should().Contain("client.environment.apply");
         environmentSource.Should().Contain("client.backend.restart");
-        File.ReadAllText(Path.Combine(clientRoot, "Presentation", "SettingsPage.xaml.cs"))
-            .Should().Contain("client.gateway.restart");
+        var settingsSource = File.ReadAllText(
+            Path.Combine(clientRoot, "Presentation", "SettingsPage.xaml.cs"));
+        settingsSource.Should().Contain("client.gateway.restart");
+        settingsSource.Should().NotContain("/agents");
+        settingsSource.Should().NotContain("/roles");
+        settingsSource.Should().NotContain("PermissionEditorBuilder");
+        settingsSource.Should().NotContain("Assign Role");
     }
 
     [Test]
