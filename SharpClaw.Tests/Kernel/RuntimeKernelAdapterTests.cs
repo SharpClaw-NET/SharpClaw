@@ -37,10 +37,10 @@ public sealed class RuntimeKernelAdapterTests
             instancePaths,
             providerFactory);
 
-        adapter.Graph.Modules.Modules.Should().HaveCount(2);
+        adapter.Graph.Modules.Modules.Should().HaveCount(3);
         adapter.Graph.Modules.Modules.Select(module => module.Identity.Id)
             .Should()
-            .BeEquivalentTo(["sharpclaw.runtime.events", "test-module"]);
+            .BeEquivalentTo(["sharpclaw.runtime.events", "sharpclaw.runtime.jobs", "test-module"]);
         adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>))
             .Should().NotBeNull();
         providerFactory.Plugins.Should().ContainSingle()
@@ -94,6 +94,93 @@ public sealed class RuntimeKernelAdapterTests
             static (payload, _) => ValueTask.FromResult(payload.Length));
 
         result.Should().Be("request-payload".Length);
+    }
+
+    [Test]
+    public async Task Adapter_compiles_and_runs_the_complete_published_jobs_catalog()
+    {
+        var provider = new RecordingProviderClient();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "test",
+                ["Provider:Model"] = "test-model",
+            })
+            .Build();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = new RuntimeKernelAdapter(
+            configuration,
+            new ServiceCollection().BuildServiceProvider(),
+            new InMemoryConversationStore(),
+            [new ProviderModule(provider)],
+            workspace.CreateInstancePaths(),
+            new RecordingProviderClientFactory(provider));
+
+        SharpClawActionCatalog.Jobs.Should().HaveCount(138);
+        adapter.Graph.ActionSnapshot.ActionGrants.Should().HaveCount(310);
+        SharpClawActionCatalog.Jobs.Should().OnlyContain(key => adapter.Graph.ContainsAction(key));
+
+        var terminalCalls = 0;
+        var context = new KernelActionExecutionContext(
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty,
+            Guid.NewGuid(),
+            Guid.NewGuid());
+        var result = await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
+            context,
+            new SharpClawActionKey("jobs.read"),
+            new { JobId = Guid.NewGuid() },
+            (_, _) =>
+            {
+                terminalCalls++;
+                return ValueTask.FromResult<object?>("read");
+            });
+
+        result.Should().Be("read");
+        terminalCalls.Should().Be(1);
+    }
+
+    [Test]
+    public async Task Jobs_boundary_rejects_cancellation_before_the_terminal()
+    {
+        var provider = new RecordingProviderClient();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "test",
+                ["Provider:Model"] = "test-model",
+            })
+            .Build();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = new RuntimeKernelAdapter(
+            configuration,
+            new ServiceCollection().BuildServiceProvider(),
+            new InMemoryConversationStore(),
+            [new ProviderModule(provider)],
+            workspace.CreateInstancePaths(),
+            new RecordingProviderClientFactory(provider));
+        using var cancellation = new CancellationTokenSource();
+        cancellation.Cancel();
+        var terminalCalls = 0;
+
+        Func<Task> run = async () =>
+            await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
+                new KernelActionExecutionContext(
+                    RequestPrincipal.Anonymous,
+                    ExtensionFeatureSet.Empty,
+                    Guid.NewGuid(),
+                    Guid.NewGuid()),
+                new SharpClawActionKey("jobs.read"),
+                null,
+                (_, _) =>
+                {
+                    terminalCalls++;
+                    return ValueTask.FromResult<object?>(true);
+                },
+                cancellation.Token);
+
+        await run.Should().ThrowAsync<OperationCanceledException>();
+        terminalCalls.Should().Be(0);
     }
 
     [Test]

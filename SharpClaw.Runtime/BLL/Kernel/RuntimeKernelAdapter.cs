@@ -24,6 +24,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly KernelActionDispatcher _actionDispatcher;
     private readonly KernelEventDispatcher _eventDispatcher;
     private readonly IKernelEventDeliverySink _eventDeliverySink;
+    private readonly RuntimeJobsActionBoundary _jobsActionBoundary;
     private bool _started;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -50,19 +51,22 @@ public sealed class RuntimeKernelAdapter :
         ArgumentNullException.ThrowIfNull(providerClientFactory);
 
         _moduleRegistry = new KernelModuleRegistry();
+        var jobsModule = new RuntimeJobsActionModule();
+        _moduleRegistry.Add(jobsModule);
         _moduleRegistry.Add(new RuntimeEventModule());
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
             _moduleRegistry.Add(module);
 
         Graph = _moduleRegistry.Compile(
             hostServices,
-            AddRuntimeEventGrant(graphCompileOptions));
+            AddRuntimeEventGrant(graphCompileOptions, jobsModule));
         RuntimeProviderActionManifest.Validate(Graph);
         RuntimeToolActionManifest.Validate(Graph);
         RuntimePersistenceActionManifest.Validate(Graph);
         RuntimeTransactionActionManifest.Validate(Graph);
         RuntimeModuleActionManifest.Validate(Graph);
         RuntimeEventActionManifest.Validate(Graph);
+        RuntimeJobsActionManifest.Validate(Graph);
         _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
         _eventDispatcher = new KernelEventDispatcher(Graph, _eventDeliverySink);
         _actionDispatcher = new KernelActionDispatcher(
@@ -75,6 +79,10 @@ public sealed class RuntimeKernelAdapter :
             eventWriter: _eventDispatcher,
             resultSnapshotter: new RuntimeEventActionResultSnapshotter(),
             repeatEvidenceAuthority: repeatEvidenceAuthority);
+        _jobsActionBoundary = new RuntimeJobsActionBoundary(
+            Graph,
+            _actionDispatcher,
+            () => CreateHostExecutionContext());
         DispatchModuleCompositionActions();
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
@@ -100,6 +108,8 @@ public sealed class RuntimeKernelAdapter :
     public DirectChatKernel Kernel { get; }
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
+
+    internal RuntimeJobsActionBoundary JobsActionBoundary => _jobsActionBoundary;
 
     public async ValueTask<RuntimeEventPublishResult> PublishAsync(
         RuntimeEventPayload payload,
@@ -1147,8 +1157,23 @@ public sealed class RuntimeKernelAdapter :
             Guid.NewGuid());
 
     private static KernelGraphCompileOptions AddRuntimeEventGrant(
-        KernelGraphCompileOptions? options)
+        KernelGraphCompileOptions? options,
+        RuntimeJobsActionModule jobsModule)
     {
+        var actionModuleGrants = options?.ActionModuleCapabilityGrants is { } existingActionGrants
+            ? existingActionGrants.ToDictionary(
+                pair => pair.Key,
+                pair => (IReadOnlyDictionary<string, ActionInterceptionCapabilities>)
+                    new Dictionary<string, ActionInterceptionCapabilities>(
+                        pair.Value,
+                        StringComparer.Ordinal),
+                StringComparer.Ordinal)
+            : new Dictionary<
+                string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
+                StringComparer.Ordinal);
+        actionModuleGrants[jobsModule.Identity.Id] = jobsModule.Grants;
+
         var eventModuleGrants = options?.EventModuleCapabilityGrants is { } existing
             ? existing.ToDictionary(
                 pair => pair.Key,
@@ -1180,10 +1205,12 @@ public sealed class RuntimeKernelAdapter :
             SupportedEventCapabilities = options?.SupportedEventCapabilities
                 ?? new KernelGraphCompileOptions().SupportedEventCapabilities,
             ActionCapabilityGrants = options?.ActionCapabilityGrants,
-            ActionModuleCapabilityGrants = options?.ActionModuleCapabilityGrants,
+            ActionModuleCapabilityGrants = actionModuleGrants,
             EventCapabilityGrants = options?.EventCapabilityGrants,
             EventModuleCapabilityGrants = eventModuleGrants,
-            SensitiveActionApprovals = options?.SensitiveActionApprovals ?? [],
+            SensitiveActionApprovals = (options?.SensitiveActionApprovals ?? [])
+                .Concat(jobsModule.Approvals)
+                .ToArray(),
             SensitiveEventApprovals = options?.SensitiveEventApprovals ?? [],
             MaximumActionDepth = options?.MaximumActionDepth
                 ?? new KernelGraphCompileOptions().MaximumActionDepth,
