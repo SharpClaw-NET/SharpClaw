@@ -27,6 +27,135 @@ public sealed class RuntimeModuleBoundaryTests
     }
 
     [Test]
+    public void Production_composition_captures_declared_module_actions_and_events()
+    {
+        var probe = new ModuleProbe();
+        var declared = new DeclaredContractModule();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(
+            probe,
+            workspace,
+            additionalModules: [declared]);
+
+        var contract = adapter.ModuleContracts
+            .Single(value => value.ModuleId == declared.Identity.Id);
+
+        contract.Actions.Should().ContainSingle(value =>
+            value.Key == DeclaredContractModule.ActionKey &&
+            value.Version == 1 &&
+            value.ActionType == typeof(KernelActionEnvelope) &&
+            value.ResultType == typeof(object));
+        contract.Events.Should().ContainSingle(value =>
+            value.Key == DeclaredContractModule.EventKey &&
+            value.Version == 1 &&
+            value.EventType == typeof(DeclaredContractEvent));
+        adapter.Graph.ContainsAction(DeclaredContractModule.ActionKey).Should().BeTrue();
+        adapter.Graph.ContainsEvent(DeclaredContractModule.EventKey).Should().BeTrue();
+        adapter.ModuleContracts
+            .Select(value => value.ModuleId)
+            .Should()
+            .Contain(RuntimeJobsActionModule.ModuleId)
+            .And.Contain(RuntimeEventDefinitions.ModuleId);
+    }
+
+    [Test]
+    public async Task Declared_module_action_uses_the_compiled_wildcard_hook()
+    {
+        var probe = new ModuleProbe();
+        var declared = new DeclaredContractModule();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(
+            probe,
+            workspace,
+            additionalModules: [declared]);
+        var descriptor = adapter.Graph.GetStandardAction(DeclaredContractModule.ActionKey);
+
+        var result = await adapter.ActionDispatcher.RunRequiredAsync(
+            descriptor,
+            new KernelActionEnvelope(DeclaredContractModule.ActionKey, "payload"),
+            static (action, _) => ValueTask.FromResult(action.Payload!),
+            adapter.Graph.ActionSnapshot,
+            CancellationToken.None);
+
+        result.Should().Be("payload");
+        declared.WildcardCalls.Should().BeGreaterThan(1);
+        declared.WildcardKeys.Should().Contain(DeclaredContractModule.ActionKey.Value);
+    }
+
+    [Test]
+    public void Contract_manifest_rejects_a_declared_action_missing_from_the_graph()
+    {
+        var probe = new ModuleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(probe, workspace);
+        var capture = new RuntimeModuleContractCapture("invalid-module");
+        capture.Actions.Add(new RuntimeModuleActionDeclaration(
+            capture.ModuleId,
+            new SharpClawActionKey("module.missing.declared"),
+            1,
+            typeof(KernelActionEnvelope),
+            typeof(object),
+            false));
+
+        Action action = () => RuntimeModuleContractManifest.Validate(
+            adapter.Graph,
+            [capture]);
+
+        action.Should().Throw<KernelGraphCompilationException>()
+            .WithMessage("*module.missing.declared*");
+    }
+
+    [Test]
+    public void Contract_manifest_rejects_duplicate_declared_action_and_event_keys()
+    {
+        var probe = new ModuleProbe();
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(probe, workspace);
+        var first = new RuntimeModuleContractCapture("first-module");
+        var second = new RuntimeModuleContractCapture("second-module");
+        first.Actions.Add(new RuntimeModuleActionDeclaration(
+            first.ModuleId,
+            DeclaredContractModule.ActionKey,
+            1,
+            typeof(KernelActionEnvelope),
+            typeof(object),
+            false));
+        second.Actions.Add(new RuntimeModuleActionDeclaration(
+            second.ModuleId,
+            DeclaredContractModule.ActionKey,
+            1,
+            typeof(KernelActionEnvelope),
+            typeof(object),
+            false));
+        first.Events.Add(new RuntimeModuleEventDeclaration(
+            first.ModuleId,
+            DeclaredContractModule.EventKey,
+            1,
+            typeof(DeclaredContractEvent),
+            false));
+        second.Events.Add(new RuntimeModuleEventDeclaration(
+            second.ModuleId,
+            DeclaredContractModule.EventKey,
+            1,
+            typeof(DeclaredContractEvent),
+            false));
+
+        Action duplicateActions = () => RuntimeModuleContractManifest.Validate(
+            adapter.Graph,
+            [first, second]);
+        duplicateActions.Should().Throw<KernelGraphCompilationException>()
+            .WithMessage("*duplicate declared keys*module.declared.action*");
+
+        first.Actions.Clear();
+        second.Actions.Clear();
+        Action duplicateEvents = () => RuntimeModuleContractManifest.Validate(
+            adapter.Graph,
+            [first, second]);
+        duplicateEvents.Should().Throw<KernelGraphCompilationException>()
+            .WithMessage("*duplicate declared keys*module.declared.event*");
+    }
+
+    [Test]
     public async Task Module_start_and_stop_use_the_singleton_dispatcher()
     {
         var probe = new ModuleProbe();
@@ -151,10 +280,14 @@ public sealed class RuntimeModuleBoundaryTests
     private static RuntimeKernelAdapter CreateAdapter(
         ModuleProbe probe,
         TemporaryWorkspace workspace,
-        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null)
+        IKernelActionRepeatEvidenceAuthority? repeatEvidenceAuthority = null,
+        IReadOnlyList<ISharpClawModule>? additionalModules = null)
     {
         var provider = new ModuleProvider();
         var module = new ModuleActionModule(provider, probe);
+        var modules = new List<ISharpClawModule> { module };
+        if (additionalModules is not null)
+            modules.AddRange(additionalModules);
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
             {
@@ -174,24 +307,170 @@ public sealed class RuntimeModuleBoundaryTests
             action => action,
             action => KernelActionCatalog.DescriptorFor(new SharpClawActionKey(action)).Capabilities,
             StringComparer.Ordinal);
+        var moduleGrants = new Dictionary<
+            string,
+            IReadOnlyDictionary<string, ActionInterceptionCapabilities>>(
+            StringComparer.Ordinal)
+        {
+            [module.Identity.Id] = grants,
+        };
+        var declaredModules = additionalModules?.OfType<DeclaredContractModule>().ToArray()
+            ?? Array.Empty<DeclaredContractModule>();
+        foreach (var declaredModule in declaredModules)
+        {
+            var declaredGrants = SharpClawActionCatalog.All
+                .ToDictionary(
+                    key => key.Value,
+                    key => KernelActionCatalog.DescriptorFor(key).Capabilities,
+                    StringComparer.Ordinal);
+            declaredGrants[DeclaredContractModule.ActionKey.Value] =
+                ActionInterceptionCapabilities.Inspect |
+                ActionInterceptionCapabilities.Wrap |
+                ActionInterceptionCapabilities.Observe;
+            moduleGrants[declaredModule.Identity.Id] = declaredGrants;
+        }
+        var eventModuleGrants = declaredModules
+            .ToDictionary(
+                declaredModule => declaredModule.Identity.Id,
+                declaredModule => (IReadOnlyDictionary<string, EventInterceptionCapabilities>)
+                    new Dictionary<string, EventInterceptionCapabilities>(StringComparer.Ordinal)
+                    {
+                        [DeclaredContractModule.EventKey.Value] =
+                            EventInterceptionCapabilities.Inspect |
+                            EventInterceptionCapabilities.Observe,
+                    },
+                StringComparer.Ordinal);
+        var sensitiveApprovals = declaredModules
+            .SelectMany(declaredModule => SharpClawActionCatalog.Kernel
+                .Select(key => (declaredModule, key)))
+            .Where(value => KernelActionCatalog.DescriptorFor(value.key).ContainsSensitiveData)
+            .Select(value =>
+            {
+                var descriptor = KernelActionCatalog.DescriptorFor(value.key).ToDescriptor();
+                var types = KernelSchemaIdentity.ActionTypes(
+                    descriptor,
+                    typeof(KernelActionEnvelope),
+                    typeof(object));
+                return new KernelSensitiveActionApproval(
+                    value.declaredModule.Identity.Id,
+                    value.key,
+                    descriptor.Version,
+                    types.ActionType.AssemblyQualifiedName!,
+                    types.ResultType.AssemblyQualifiedName!,
+                    KernelSchemaIdentity.Action(
+                        descriptor,
+                        typeof(KernelActionEnvelope),
+                        typeof(object)));
+            })
+            .Concat(declaredModules
+                .SelectMany(declaredModule => CreateJobsApprovals(declaredModule.Identity.Id))
+            )
+            .ToArray();
 
         return new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
             new InMemoryConversationStore(),
-            [module],
+            modules,
             workspace.CreateInstancePaths(),
             new ModuleProviderClientFactory(provider),
             new KernelGraphCompileOptions
             {
-                ActionModuleCapabilityGrants = new Dictionary<
-                    string,
-                    IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
-                {
-                    [module.Identity.Id] = grants,
-                },
+                ActionModuleCapabilityGrants = moduleGrants,
+                EventModuleCapabilityGrants = eventModuleGrants,
+                SensitiveActionApprovals = sensitiveApprovals,
             },
             repeatEvidenceAuthority);
+    }
+
+    private static IReadOnlyList<KernelSensitiveActionApproval> CreateJobsApprovals(
+        string moduleId)
+    {
+        var jobsModule = new RuntimeJobsActionModule();
+        var graphBuilder = new KernelGraphBuilder(includeStandardDefinitions: false);
+        var moduleBuilder = new KernelModuleBuilder(graphBuilder, jobsModule.Identity);
+        jobsModule.Configure(moduleBuilder);
+        return jobsModule.Approvals
+            .Select(approval => approval with { ModuleId = moduleId })
+            .ToArray();
+    }
+
+    private sealed record DeclaredContractEvent(string Value);
+
+    private sealed class DeclaredContractModule : ISharpClawModule
+    {
+        public static readonly SharpClawActionKey ActionKey =
+            new("module.declared.action");
+
+        public static readonly SharpClawEventKey EventKey =
+            new("module.declared.event");
+
+        public ModuleIdentity Identity { get; } =
+            new("declared-contract-test", "Declared contract test", "declared-contract");
+
+        public int WildcardCalls { get; private set; }
+
+        public ConcurrentQueue<string> WildcardKeys { get; } = new();
+
+        public void Configure(ISharpClawModuleBuilder module)
+        {
+            module.Actions.Add(new ActionDescriptor<KernelActionEnvelope, object>(
+                ActionKey,
+                1,
+                "module.declared",
+                ActionInterceptionCapabilities.Inspect |
+                ActionInterceptionCapabilities.Wrap |
+                ActionInterceptionCapabilities.Observe,
+                false,
+                false,
+                new ActionRepeatPolicy(
+                    ActionRepeatKind.None,
+                    1,
+                    TimeSpan.Zero,
+                    "module.declared.action"),
+                null,
+                TimeSpan.FromSeconds(5)));
+            module.Events.Add(new EventDescriptor<DeclaredContractEvent>(
+                EventKey,
+                1,
+                "module.declared",
+                EventInterceptionCapabilities.Inspect |
+                EventInterceptionCapabilities.Observe,
+                false,
+                false));
+            module.Services.AddSingleton(this);
+            module.Services.AddSingleton<DeclaredWildcardInterceptor>();
+            module.Hooks
+                .AnyAction()
+                .UseAny<DeclaredWildcardInterceptor>(new HookOrdering(
+                    "declared-contract-wildcard",
+                    HookPriority.Normal,
+                    [],
+                    [],
+                    TimeSpan.FromSeconds(5),
+                    HookFailurePolicy.FailAction));
+        }
+
+        public ValueTask StartAsync(
+            ModuleStartContext context,
+            CancellationToken cancellationToken) => ValueTask.CompletedTask;
+
+        public ValueTask StopAsync(CancellationToken cancellationToken) =>
+            ValueTask.CompletedTask;
+
+        private sealed class DeclaredWildcardInterceptor(
+            DeclaredContractModule owner) : IAnyActionInterceptor
+        {
+            public async ValueTask<IUntypedActionOutcome> InvokeAsync(
+                UntypedActionContext context,
+                IUntypedActionControl control,
+                CancellationToken cancellationToken)
+            {
+                owner.WildcardCalls++;
+                owner.WildcardKeys.Enqueue(context.Descriptor.Key.Value);
+                return await control.ProceedAsync(cancellationToken);
+            }
+        }
     }
 
     private static string FindSourceRoot()

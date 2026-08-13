@@ -25,6 +25,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly KernelEventDispatcher _eventDispatcher;
     private readonly IKernelEventDeliverySink _eventDeliverySink;
     private readonly RuntimeJobsActionBoundary _jobsActionBoundary;
+    private readonly IReadOnlyList<RuntimeModuleContractCapture> _moduleContracts;
     private bool _started;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -51,11 +52,13 @@ public sealed class RuntimeKernelAdapter :
         ArgumentNullException.ThrowIfNull(providerClientFactory);
 
         _moduleRegistry = new KernelModuleRegistry();
+        var moduleContracts = new List<RuntimeModuleContractCapture>();
         var jobsModule = new RuntimeJobsActionModule();
-        _moduleRegistry.Add(jobsModule);
-        _moduleRegistry.Add(new RuntimeEventModule());
+        AddCapturedModule(jobsModule, moduleContracts);
+        AddCapturedModule(new RuntimeEventModule(), moduleContracts);
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
-            _moduleRegistry.Add(module);
+            AddCapturedModule(module, moduleContracts);
+        _moduleContracts = moduleContracts.AsReadOnly();
 
         Graph = _moduleRegistry.Compile(
             hostServices,
@@ -65,6 +68,7 @@ public sealed class RuntimeKernelAdapter :
         RuntimePersistenceActionManifest.Validate(Graph);
         RuntimeTransactionActionManifest.Validate(Graph);
         RuntimeModuleActionManifest.Validate(Graph);
+        RuntimeModuleContractManifest.Validate(Graph, _moduleContracts);
         RuntimeEventActionManifest.Validate(Graph);
         RuntimeJobsActionManifest.Validate(Graph);
         _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
@@ -110,6 +114,8 @@ public sealed class RuntimeKernelAdapter :
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
     internal RuntimeJobsActionBoundary JobsActionBoundary => _jobsActionBoundary;
+
+    internal IReadOnlyList<RuntimeModuleContractCapture> ModuleContracts => _moduleContracts;
 
     public async ValueTask<RuntimeEventPublishResult> PublishAsync(
         RuntimeEventPayload payload,
@@ -1215,6 +1221,15 @@ public sealed class RuntimeKernelAdapter :
             MaximumActionDepth = options?.MaximumActionDepth
                 ?? new KernelGraphCompileOptions().MaximumActionDepth,
         };
+    }
+
+    private void AddCapturedModule(
+        ISharpClawModule module,
+        ICollection<RuntimeModuleContractCapture> captures)
+    {
+        var capture = new RuntimeModuleContractCapture(module.Identity.Id);
+        captures.Add(capture);
+        _moduleRegistry.Add(new RuntimeModuleContractModule(module, capture));
     }
 
     private static IConversationResolver ResolveConversationResolver(
