@@ -414,7 +414,7 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_RestartPreservesPackagedProviderConversation()
+    public async Task NormalHostPayload_RestartHasNoHistoryWithoutContextModule()
     {
         await using var providerServer = await FakeOpenAiServer.CreateAsync();
         using var workspace = new TemporaryWorkspace();
@@ -473,7 +473,7 @@ public sealed class RuntimeHostCompositionTests
             });
 
         history.Should().NotBeNull();
-        history!.Should().ContainInOrder("packaged restart", "normal packaged provider response");
+        history!.Should().BeEmpty();
     }
 
     [Test]
@@ -524,7 +524,7 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task ProductionJsonColdStore_RestartPreservesDirectChatHistory()
+    public async Task ProductionJsonColdStore_RestartHasNoHistoryWithoutContextModule()
     {
         using var workspace = new TemporaryWorkspace();
         var configuration = new ConfigurationBuilder()
@@ -585,7 +585,7 @@ public sealed class RuntimeHostCompositionTests
             });
 
         history.Should().NotBeNull();
-        history!.Should().ContainInOrder("restart me", "test harness response");
+        history!.Should().BeEmpty();
     }
 
     [Test]

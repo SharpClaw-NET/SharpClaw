@@ -270,7 +270,7 @@ public sealed class RuntimeKernelAdapterTests
     }
 
     [Test]
-    public async Task Adapter_uses_the_instance_manifest_for_restart_stable_direct_chat_history()
+    public async Task Adapter_uses_stateless_chat_without_context_module()
     {
         var configuration = new ConfigurationBuilder()
             .AddInMemoryCollection(new Dictionary<string, string?>
@@ -312,9 +312,11 @@ public sealed class RuntimeKernelAdapterTests
         var secondResult = await secondAdapter.Kernel.RunAsync(new ChatTurnInput("second"));
         await secondAdapter.StopAsync();
 
-        secondResult.ConversationId.Should().Be(firstResult.ConversationId);
+        secondResult.ConversationId.Should().NotBe(firstResult.ConversationId);
+        (await firstStore.LoadHistoryAsync(firstResult.ConversationId, CancellationToken.None))
+            .Should().BeEmpty();
         (await firstStore.LoadHistoryAsync(secondResult.ConversationId, CancellationToken.None))
-            .Should().HaveCount(4);
+            .Should().BeEmpty();
     }
 
     private sealed class TemporaryWorkspace : IDisposable

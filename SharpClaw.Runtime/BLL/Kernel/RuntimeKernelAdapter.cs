@@ -95,7 +95,8 @@ public sealed class RuntimeKernelAdapter :
         var plugins = graphPlugins.Concat(hostPlugins).ToArray();
         ValidateConfiguredProviders(configuration, plugins);
         var providerClient = providerClientFactory.Create(configuration, plugins);
-        var conversationResolver = ResolveConversationResolver(Graph, instancePaths);
+        var conversationResolver = ResolveConversationResolver(Graph);
+        var effectiveConversationStore = ResolveConversationStore(Graph);
         var profileResolver = ResolveProfileResolver(Graph, configuration);
 
         Kernel = DirectChatKernelFactory.CreateFromGraph(
@@ -104,7 +105,7 @@ public sealed class RuntimeKernelAdapter :
             new ProviderKernelTransport(providerClient),
             conversationResolver,
             profileResolver,
-            conversationStore);
+            effectiveConversationStore);
     }
 
     public KernelGraph Graph { get; }
@@ -1232,25 +1233,30 @@ public sealed class RuntimeKernelAdapter :
         _moduleRegistry.Add(new RuntimeModuleContractModule(module, capture));
     }
 
-    private static IConversationResolver ResolveConversationResolver(
-        KernelGraph graph,
-        SharpClawInstancePaths instancePaths) =>
+    private static IConversationResolver ResolveConversationResolver(KernelGraph graph) =>
         graph.Modules.ConversationResolver is { } resolverType
             ? (IConversationResolver)(graph.GetService(resolverType)
                 ?? throw new KernelGraphCompilationException(
                     $"Conversation resolver '{resolverType.FullName}' is not registered."))
-            : new SingleConversationResolver(ResolveDefaultConversationId(instancePaths));
+            : new StatelessConversationResolver();
 
-    private static Guid ResolveDefaultConversationId(SharpClawInstancePaths instancePaths)
+    private static IConversationStore ResolveConversationStore(KernelGraph graph)
     {
-        if (!Guid.TryParse(instancePaths.Manifest.InstanceId, out var conversationId)
-            || conversationId == Guid.Empty)
+        if (graph.Modules.ConversationResolver is null)
+            return new StatelessConversationStore();
+
+        var moduleOwnsStore = graph.Modules.Modules
+            .SelectMany(module => module.ServiceTypes)
+            .Contains(typeof(IConversationStore));
+        if (!moduleOwnsStore)
         {
-            throw new InvalidOperationException(
-                $"The Runtime instance manifest '{instancePaths.ManifestPath}' has no valid instance identifier.");
+            throw new KernelGraphCompilationException(
+                "The Context module must register its IConversationStore in the compiled module graph.");
         }
 
-        return conversationId;
+        return graph.GetService(typeof(IConversationStore)) as IConversationStore
+            ?? throw new KernelGraphCompilationException(
+                "The Context module IConversationStore could not be resolved from the compiled graph.");
     }
 
     private static IChatProfileResolver ResolveProfileResolver(

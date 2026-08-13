@@ -192,6 +192,38 @@ public sealed class FixedChatProfileResolver(ChatProfile profile) : IChatProfile
     }
 }
 
+/// <summary>Resolves one independent conversation for each stateless turn.</summary>
+internal sealed class StatelessConversationResolver : IConversationResolver
+{
+    public ValueTask<ConversationSelection> ResolveAsync(
+        ChatTurnInput input,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(input);
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(new ConversationSelection(Guid.NewGuid(), Created: true));
+    }
+}
+
+/// <summary>Discards conversation state when the Context module is absent.</summary>
+internal sealed class StatelessConversationStore : IConversationStore
+{
+    public ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadHistoryAsync(
+        Guid conversationId,
+        CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.FromResult<IReadOnlyList<ChatCompletionMessage>>([]);
+    }
+
+    public ValueTask CommitExchangeAsync(ChatExchange exchange, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(exchange);
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.CompletedTask;
+    }
+}
+
 /// <summary>Stores direct-chat exchanges in a bounded process-local history.</summary>
 public sealed class InMemoryConversationStore : IConversationStore
 {
