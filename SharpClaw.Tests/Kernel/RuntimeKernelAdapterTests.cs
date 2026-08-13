@@ -32,7 +32,6 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = new RuntimeKernelAdapter(
             configuration,
             hostServices,
-            new InMemoryConversationStore(),
             [module],
             instancePaths,
             providerFactory);
@@ -72,7 +71,6 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            new InMemoryConversationStore(),
             [module],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
@@ -111,7 +109,6 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            new InMemoryConversationStore(),
             [new ProviderModule(provider)],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
@@ -155,7 +152,6 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            new InMemoryConversationStore(),
             [new ProviderModule(provider)],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider));
@@ -206,7 +202,6 @@ public sealed class RuntimeKernelAdapterTests
         var adapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            conversationStore,
             [module],
             workspace.CreateInstancePaths(),
             new RecordingProviderClientFactory(provider),
@@ -286,7 +281,6 @@ public sealed class RuntimeKernelAdapterTests
         var firstAdapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            firstStore,
             [firstModule],
             instancePaths,
             new RecordingProviderClientFactory(firstModule.Provider));
@@ -299,7 +293,6 @@ public sealed class RuntimeKernelAdapterTests
         var secondAdapter = new RuntimeKernelAdapter(
             configuration,
             new ServiceCollection().BuildServiceProvider(),
-            firstStore,
             [secondModule],
             new SharpClawInstancePaths(
                 SharpClawInstanceKind.Backend,

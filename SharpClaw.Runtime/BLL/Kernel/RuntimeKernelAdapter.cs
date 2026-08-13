@@ -36,7 +36,6 @@ public sealed class RuntimeKernelAdapter :
     public RuntimeKernelAdapter(
         IConfiguration configuration,
         IServiceProvider hostServices,
-        IConversationStore conversationStore,
         IEnumerable<ISharpClawModule> modules,
         SharpClawInstancePaths instancePaths,
         IRuntimeProviderClientFactory providerClientFactory,
@@ -46,7 +45,6 @@ public sealed class RuntimeKernelAdapter :
     {
         ArgumentNullException.ThrowIfNull(configuration);
         ArgumentNullException.ThrowIfNull(hostServices);
-        ArgumentNullException.ThrowIfNull(conversationStore);
         ArgumentNullException.ThrowIfNull(modules);
         ArgumentNullException.ThrowIfNull(instancePaths);
         ArgumentNullException.ThrowIfNull(providerClientFactory);

@@ -1091,6 +1091,11 @@ public sealed class ClientActionBoundaryTests
 
     private static string FindSourceRoot()
     {
+        var configuredRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot) &&
+            Directory.Exists(Path.Combine(configuredRoot, "SharpClaw.Client.Uno")))
+            return configuredRoot;
+
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
              directory is not null;
              directory = directory.Parent)

@@ -82,8 +82,7 @@ public sealed class RuntimeHostCompositionTests
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         readiness.IsReady.Should().BeFalse();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-        app.Services.GetRequiredService<IConversationStore>()
-            .Should().BeOfType<StatelessConversationStore>();
+        app.Services.GetService<IConversationStore>().Should().BeNull();
         app.Services.GetRequiredService<IActionDispatcher>()
             .Should().BeSameAs(adapter.ActionDispatcher);
         adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))

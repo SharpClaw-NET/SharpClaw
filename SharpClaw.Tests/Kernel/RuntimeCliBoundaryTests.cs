@@ -428,9 +428,8 @@ public sealed class RuntimeCliBoundaryTests
                     ["Provider:Key"] = "k04-test",
                     ["Provider:Model"] = "k04-model",
                 })
-                .Build(),
+            .Build(),
             hostServices,
-            new InMemoryConversationStore(),
             [new CliModule(provider, probe)],
             workspace.CreateInstancePaths(),
             new CliProviderFactory(provider),
@@ -447,6 +446,11 @@ public sealed class RuntimeCliBoundaryTests
 
     private static string FindSourceRoot()
     {
+        var configuredRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot) &&
+            Directory.Exists(Path.Combine(configuredRoot, "SharpClaw.Runtime")))
+            return configuredRoot;
+
         for (var directory = new DirectoryInfo(AppContext.BaseDirectory);
              directory is not null;
              directory = directory.Parent)
