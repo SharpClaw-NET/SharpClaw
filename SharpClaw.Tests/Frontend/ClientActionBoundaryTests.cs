@@ -902,8 +902,20 @@ public sealed class ClientActionBoundaryTests
 
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "BootModel.cs"))
             .Should().Contain("RunCommandAsync");
-        File.ReadAllText(Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml.cs"))
-            .Should().Contain("client.provider.ollama.probe");
+        var firstSetupSource = File.ReadAllText(
+            Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml.cs"));
+        firstSetupSource.Should().Contain("client.provider.ollama.probe");
+        firstSetupSource.Should().NotContain("/agents");
+        firstSetupSource.Should().NotContain("/channel-contexts");
+        firstSetupSource.Should().NotContain("/channels");
+        firstSetupSource.Should().NotContain("/roles");
+        firstSetupSource.Should().NotContain("PermissionEditorBuilder");
+
+        var firstSetupXaml = File.ReadAllText(
+            Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml"));
+        firstSetupXaml.Should().NotContain("AgentSelectorPanel");
+        firstSetupXaml.Should().NotContain("RolePermissionsPanel");
+        firstSetupXaml.Should().NotContain("ModulePermissionsContainer");
         var environmentSource = File.ReadAllText(
             Path.Combine(clientRoot, "Presentation", "EnvEditorPage.xaml.cs"));
         environmentSource.Should().Contain("client.environment.save");
