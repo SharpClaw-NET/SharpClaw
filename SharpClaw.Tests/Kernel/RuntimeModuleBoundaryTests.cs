@@ -83,6 +83,184 @@ public sealed class RuntimeModuleBoundaryTests
     }
 
     [Test]
+    public async Task Integrated_wildcard_executes_every_roadmap_action_with_exact_set_equality()
+    {
+        var probe = new ModuleProbe();
+        var declared = new DeclaredContractModule(actionWildcardEnabled: false);
+        using var workspace = new TemporaryWorkspace();
+        var adapter = CreateAdapter(
+            probe,
+            workspace,
+            additionalModules: [declared]);
+
+        declared.ResetWildcardObservation();
+
+        foreach (var actionKey in SharpClawActionCatalog.Kernel)
+        {
+            var descriptor = adapter.Graph.GetStandardAction(actionKey);
+            await adapter.ActionDispatcher.RunRequiredAsync(
+                descriptor,
+                new KernelActionEnvelope(actionKey, "roadmap-test"),
+                static (action, _) => ValueTask.FromResult(action.Payload ?? new object()),
+                adapter.Graph.ActionSnapshot,
+                CancellationToken.None);
+        }
+
+        await RunAllJobsFamiliesAsync(adapter);
+
+        var declaredDescriptor = adapter.Graph.GetStandardAction(DeclaredContractModule.ActionKey);
+        await adapter.ActionDispatcher.RunRequiredAsync(
+            declaredDescriptor,
+            new KernelActionEnvelope(DeclaredContractModule.ActionKey, "m01-test"),
+            static (action, _) => ValueTask.FromResult(action.Payload ?? new object()),
+            adapter.Graph.ActionSnapshot,
+            CancellationToken.None);
+
+        var expectedActionKeys = SharpClawActionCatalog.Kernel
+            .Concat(RuntimeJobsActionManifest.Required)
+            .Append(DeclaredContractModule.ActionKey)
+            .Select(static key => key.Value)
+            .ToHashSet(StringComparer.Ordinal);
+        var observedActionKeys = declared.WildcardKeys
+            .ToHashSet(StringComparer.Ordinal);
+
+        observedActionKeys.Should().BeEquivalentTo(expectedActionKeys);
+        declared.WildcardCalls.Should().Be(expectedActionKeys.Count);
+        declared.WildcardKeys.Should().Contain(
+            KernelActionCatalog.Coverage.Select(static entry => entry.ActionKey.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeJobsActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeChatScenarioManifest.RequiredActions.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeCliActionCatalog.All.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeEventActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeProviderActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeToolActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimePersistenceActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeTransactionActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeModuleActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(
+            RuntimeSecurityActionManifest.Required.Select(static key => key.Value));
+        declared.WildcardKeys.Should().Contain(DeclaredContractModule.ActionKey.Value);
+        adapter.ModuleContracts
+            .Single(value => value.ModuleId == declared.Identity.Id)
+            .Events
+            .Should()
+            .ContainSingle(value => value.Key == DeclaredContractModule.EventKey);
+    }
+
+    private static async Task RunAllJobsFamiliesAsync(RuntimeKernelAdapter adapter)
+    {
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.SubmitFamily>(
+            new SharpClawActionKey("jobs.submit"), "jobs.submit", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ValidateFamily>(
+            new SharpClawActionKey("jobs.validate"), "jobs.validate", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.IdentityCreateFamily>(
+            new SharpClawActionKey("jobs.identity.create"), "jobs.identity.create", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.QueuePersistFamily>(
+            new SharpClawActionKey("jobs.queue.persist"), "jobs.queue.persist", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HoldEvaluateFamily>(
+            new SharpClawActionKey("jobs.hold.evaluate"), "jobs.hold.evaluate", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HoldResolveFamily>(
+            new SharpClawActionKey("jobs.hold.resolve"), "jobs.hold.resolve", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.DispatchFamily>(
+            new SharpClawActionKey("jobs.dispatch"), "jobs.dispatch", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StartFamily>(
+            new SharpClawActionKey("jobs.start"), "jobs.start", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HandlerInvokeFamily>(
+            new SharpClawActionKey("jobs.handler.invoke"), "jobs.handler.invoke", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ProgressFamily>(
+            new SharpClawActionKey("jobs.progress.report"), "jobs.progress.report", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ArtifactSealFamily>(
+            new SharpClawActionKey("jobs.artifact.seal"), "jobs.artifact.seal", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CompleteFamily>(
+            new SharpClawActionKey("jobs.complete"), "jobs.complete", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.FailFamily>(
+            new SharpClawActionKey("jobs.fail"), "jobs.fail", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelFamily>(
+            new SharpClawActionKey("jobs.cancel"), "jobs.cancel", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelRequestFamily>(
+            new SharpClawActionKey("jobs.cancel.request"), "jobs.cancel.request", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelApplyFamily>(
+            new SharpClawActionKey("jobs.cancel.apply"), "jobs.cancel.apply", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PauseFamily>(
+            new SharpClawActionKey("jobs.pause"), "jobs.pause", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StopFamily>(
+            new SharpClawActionKey("jobs.stop"), "jobs.stop", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryFamily>(
+            new SharpClawActionKey("jobs.recovery"), "jobs.recovery", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryScanFamily>(
+            new SharpClawActionKey("jobs.recovery.scan"), "jobs.recovery.scan", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryClassifyFamily>(
+            new SharpClawActionKey("jobs.recovery.classify"), "jobs.recovery.classify", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryFamily>(
+            new SharpClawActionKey("jobs.retry"), "jobs.retry", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryEvaluateFamily>(
+            new SharpClawActionKey("jobs.retry.evaluate"), "jobs.retry.evaluate", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryScheduleFamily>(
+            new SharpClawActionKey("jobs.retry.schedule"), "jobs.retry.schedule", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ResumeFamily>(
+            new SharpClawActionKey("jobs.resume"), "jobs.resume", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.DeleteFamily>(
+            new SharpClawActionKey("jobs.delete"), "jobs.delete", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
+            new SharpClawActionKey("jobs.read"), "jobs.read", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ListFamily>(
+            new SharpClawActionKey("jobs.list"), "jobs.list", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.LogsReadFamily>(
+            new SharpClawActionKey("jobs.logs.read"), "jobs.logs.read", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.AuditReadFamily>(
+            new SharpClawActionKey("jobs.audit.read"), "jobs.audit.read", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ArtifactReadFamily>(
+            new SharpClawActionKey("jobs.artifact.read"), "jobs.artifact.read", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.EventDeliverFamily>(
+            new SharpClawActionKey("jobs.event.deliver"), "jobs.event.deliver", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionFamily>(
+            new SharpClawActionKey("jobs.state.transition"), "jobs.state.transition", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionPrepareFamily>(
+            new SharpClawActionKey("jobs.state.transition.prepare"), "jobs.state.transition.prepare", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionCommitFamily>(
+            new SharpClawActionKey("jobs.state.transition.commit"), "jobs.state.transition.commit", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionRollbackFamily>(
+            new SharpClawActionKey("jobs.state.transition.rollback"), "jobs.state.transition.rollback", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceFamily>(
+            new SharpClawActionKey("jobs.persistence"), "jobs.persistence", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistencePrepareFamily>(
+            new SharpClawActionKey("jobs.persistence.prepare"), "jobs.persistence.prepare", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceCommitFamily>(
+            new SharpClawActionKey("jobs.persistence.commit"), "jobs.persistence.commit", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceRollbackFamily>(
+            new SharpClawActionKey("jobs.persistence.rollback"), "jobs.persistence.rollback", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.InterruptionCheckFamily>(
+            new SharpClawActionKey("jobs.interruption.check"), "jobs.interruption.check", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalCallFamily>(
+            new SharpClawActionKey("jobs.external_call"), "jobs.external_call", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.IrreversibleEffectFamily>(
+            new SharpClawActionKey("jobs.irreversible_effect"), "jobs.irreversible_effect", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectPrepareFamily>(
+            new SharpClawActionKey("jobs.external_effect.prepare"), "jobs.external_effect.prepare", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectReceiptFamily>(
+            new SharpClawActionKey("jobs.external_effect.receipt"), "jobs.external_effect.receipt", CompleteJobsTerminal);
+        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectUncertainFamily>(
+            new SharpClawActionKey("jobs.external_effect.uncertain"), "jobs.external_effect.uncertain", CompleteJobsTerminal);
+    }
+
+    private static ValueTask<object?> CompleteJobsTerminal(
+        object? value,
+        CancellationToken cancellationToken)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(value);
+    }
+
+    [Test]
     public void Contract_manifest_rejects_a_declared_action_missing_from_the_graph()
     {
         var probe = new ModuleProbe();
@@ -327,18 +505,29 @@ public sealed class RuntimeModuleBoundaryTests
                 ActionInterceptionCapabilities.Inspect |
                 ActionInterceptionCapabilities.Wrap |
                 ActionInterceptionCapabilities.Observe;
+            foreach (var grant in CreateJobsGrants())
+                declaredGrants[grant.Key] = grant.Value;
             moduleGrants[declaredModule.Identity.Id] = declaredGrants;
         }
         var eventModuleGrants = declaredModules
             .ToDictionary(
                 declaredModule => declaredModule.Identity.Id,
-                declaredModule => (IReadOnlyDictionary<string, EventInterceptionCapabilities>)
-                    new Dictionary<string, EventInterceptionCapabilities>(StringComparer.Ordinal)
-                    {
-                        [DeclaredContractModule.EventKey.Value] =
-                            EventInterceptionCapabilities.Inspect |
-                            EventInterceptionCapabilities.Observe,
-                    },
+                declaredModule =>
+                {
+                    var grants = new Dictionary<string, EventInterceptionCapabilities>(
+                        StringComparer.Ordinal);
+                    foreach (var descriptor in KernelActionLifecycleEvents.Descriptors)
+                        grants[descriptor.Key.Value] = descriptor.Capabilities;
+                    grants["runtime.event"] =
+                        EventInterceptionCapabilities.Inspect |
+                        EventInterceptionCapabilities.Replace |
+                        EventInterceptionCapabilities.Cancel |
+                        EventInterceptionCapabilities.Observe;
+                    grants[DeclaredContractModule.EventKey.Value] =
+                        EventInterceptionCapabilities.Inspect |
+                        EventInterceptionCapabilities.Observe;
+                    return (IReadOnlyDictionary<string, EventInterceptionCapabilities>)grants;
+                },
                 StringComparer.Ordinal);
         var sensitiveApprovals = declaredModules
             .SelectMany(declaredModule => SharpClawActionCatalog.Kernel
@@ -395,9 +584,18 @@ public sealed class RuntimeModuleBoundaryTests
             .ToArray();
     }
 
+    private static IReadOnlyDictionary<string, ActionInterceptionCapabilities> CreateJobsGrants()
+    {
+        var jobsModule = new RuntimeJobsActionModule();
+        var graphBuilder = new KernelGraphBuilder(includeStandardDefinitions: false);
+        var moduleBuilder = new KernelModuleBuilder(graphBuilder, jobsModule.Identity);
+        jobsModule.Configure(moduleBuilder);
+        return jobsModule.Grants;
+    }
+
     private sealed record DeclaredContractEvent(string Value);
 
-    private sealed class DeclaredContractModule : ISharpClawModule
+    private sealed class DeclaredContractModule(bool actionWildcardEnabled = true) : ISharpClawModule
     {
         public static readonly SharpClawActionKey ActionKey =
             new("module.declared.action");
@@ -408,9 +606,19 @@ public sealed class RuntimeModuleBoundaryTests
         public ModuleIdentity Identity { get; } =
             new("declared-contract-test", "Declared contract test", "declared-contract");
 
-        public int WildcardCalls { get; private set; }
+        private int _wildcardCalls;
+        public int WildcardCalls => Volatile.Read(ref _wildcardCalls);
 
         public ConcurrentQueue<string> WildcardKeys { get; } = new();
+
+        public void ResetWildcardObservation()
+        {
+            while (WildcardKeys.TryDequeue(out _))
+            {
+            }
+
+            Interlocked.Exchange(ref _wildcardCalls, 0);
+        }
 
         public void Configure(ISharpClawModuleBuilder module)
         {
@@ -440,15 +648,30 @@ public sealed class RuntimeModuleBoundaryTests
                 false));
             module.Services.AddSingleton(this);
             module.Services.AddSingleton<DeclaredWildcardInterceptor>();
-            module.Hooks
-                .AnyAction()
-                .UseAny<DeclaredWildcardInterceptor>(new HookOrdering(
-                    "declared-contract-wildcard",
-                    HookPriority.Normal,
-                    [],
-                    [],
-                    TimeSpan.FromSeconds(5),
-                    HookFailurePolicy.FailAction));
+            module.Services.AddSingleton<DeclaredLifecycleInterceptor>();
+            if (actionWildcardEnabled)
+            {
+                module.Hooks
+                    .AnyAction()
+                    .UseAny<DeclaredWildcardInterceptor>(new HookOrdering(
+                        "declared-contract-wildcard",
+                        HookPriority.Normal,
+                        [],
+                        [],
+                        TimeSpan.FromSeconds(5),
+                        HookFailurePolicy.FailAction));
+            }
+
+            module.Events
+                .AnyEvent()
+                .InterceptAny<DeclaredLifecycleInterceptor>(
+                    new HookOrdering(
+                        "declared-lifecycle-wildcard",
+                        HookPriority.Normal,
+                        [],
+                        [],
+                        TimeSpan.FromSeconds(5),
+                        HookFailurePolicy.FailAction));
         }
 
         public ValueTask StartAsync(
@@ -466,9 +689,36 @@ public sealed class RuntimeModuleBoundaryTests
                 IUntypedActionControl control,
                 CancellationToken cancellationToken)
             {
-                owner.WildcardCalls++;
+                Interlocked.Increment(ref owner._wildcardCalls);
                 owner.WildcardKeys.Enqueue(context.Descriptor.Key.Value);
                 return await control.ProceedAsync(cancellationToken);
+            }
+        }
+
+        private sealed class DeclaredLifecycleInterceptor(
+            DeclaredContractModule owner) : IAnyEventInterceptor
+        {
+            public ValueTask<IUntypedEventInterception> InterceptAsync(
+                UntypedEventContext context,
+                IUntypedEventControl control,
+                CancellationToken cancellationToken)
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                if (context.Descriptor.Key == SharpClawEvents.ActionStarting)
+                {
+                    var action = context.Envelope.Payload
+                        .GetProperty(nameof(KernelActionLifecycleEvent.ActionKey))
+                        .GetProperty(nameof(SharpClawActionKey.Value))
+                        .GetString();
+                    if (string.IsNullOrWhiteSpace(action))
+                        throw new AssertionException(
+                            "The action lifecycle event has no action key.");
+
+                    owner.WildcardKeys.Enqueue(action);
+                    Interlocked.Increment(ref owner._wildcardCalls);
+                }
+
+                return ValueTask.FromResult(control.Continue());
             }
         }
     }
