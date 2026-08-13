@@ -502,12 +502,10 @@ public sealed partial class MainPage
     {
         if (_jobsMode || _selectedChannelId is null) return;
         _jobsMode = true;
-        _settingsMode = false;
         UpdateTabHighlight();
 
         MessagesScroller.Visibility = Visibility.Collapsed;
         ChatInputArea.Visibility = Visibility.Collapsed;
-        SettingsScroller.Visibility = Visibility.Collapsed;
         AgentSelectorPanel.Visibility = Visibility.Collapsed;
         ThreadSelectorPanel.Visibility = Visibility.Collapsed;
         OneOffWarning.Visibility = Visibility.Collapsed;

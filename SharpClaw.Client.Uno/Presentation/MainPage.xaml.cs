@@ -24,7 +24,6 @@ public sealed partial class MainPage : Page
     private Guid? _selectedAgentId;
     private Guid? _selectedJobId;
     private bool _pendingNewThread;
-    private bool _settingsMode;
     private bool _jobsMode;
     private bool _isSending;
     private bool _isThreadBusy;
@@ -38,10 +37,8 @@ public sealed partial class MainPage : Page
     private readonly Dictionary<Guid, Guid> _channelAgentOverrides = [];
     private List<AgentDto> _allAgents = [];
     private List<JobDto> _channelJobs = [];
-    private List<RoleDto> _allRoles = [];
     private string _currentUsername = "user";
     private Guid _currentUserId;
-    private Guid? _currentUserRoleId;
     private static readonly string _clientType = DetectClientType();
 
     // ── Cached UI resources (avoids per-rebuild native allocations) ──
@@ -86,10 +83,6 @@ public sealed partial class MainPage : Page
     private readonly HashSet<Guid> _sidebarContextChannelIds = [];
     private readonly List<string> _jobTimestampParts = new(3);
 
-    // ── Resource lookup cache (populated per settings load) ──
-    private readonly Dictionary<string, List<ResourceItemDto>> _resourceLookupCache = new(13);
-
-
     private static SolidColorBrush Brush(int rgb) => TerminalUI.Brush(rgb);
     private static string Truncate(string s, int max) => TerminalUI.Truncate(s, max);
 
@@ -122,7 +115,6 @@ public sealed partial class MainPage : Page
     {
         if (App.Services is null) return;
         await LoadUserInfoAsync();
-        await LoadRolesAsync();
         var channels = await LoadSidebarAsync();
         await LoadAgentsAsync(null, null);
 
@@ -151,28 +143,9 @@ public sealed partial class MainPage : Page
                 _currentUsername = doc.RootElement.GetProperty("username").GetString() ?? "user";
                 if (doc.RootElement.TryGetProperty("id", out var idProp) && idProp.ValueKind == JsonValueKind.String)
                     _currentUserId = idProp.GetGuid();
-                if (doc.RootElement.TryGetProperty("roleId", out var rp) && rp.ValueKind == JsonValueKind.String)
-                    _currentUserRoleId = rp.GetGuid();
-                else
-                    _currentUserRoleId = null;
             }
         }
         catch { /* API not reachable */ }
-    }
-
-    private async Task LoadRolesAsync()
-    {
-        var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-        try
-        {
-            using var resp = await api.GetAsync("/roles");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var stream = await resp.Content.ReadAsStreamAsync();
-                _allRoles = await JsonSerializer.DeserializeAsync<List<RoleDto>>(stream, Json) ?? [];
-            }
-        }
-        catch { _allRoles = []; }
     }
 
     // ── Sidebar ──────────────────────────────────────────────────
@@ -513,9 +486,7 @@ public sealed partial class MainPage : Page
                     _pendingNewThread = false;
                     ChatTitleBlock.Text = "> Select or create a channel";
                     ChannelTabBar.Visibility = Visibility.Collapsed;
-                    _settingsMode = false;
                     _jobsMode = false;
-                    SettingsScroller.Visibility = Visibility.Collapsed;
                     JobViewPanel.Visibility = Visibility.Collapsed;
                     DeallocateJobView();
                     ThreadSelectorPanel.Visibility = Visibility.Collapsed;
@@ -575,9 +546,8 @@ public sealed partial class MainPage : Page
         _pendingNewThread = false;
         ChatTitleBlock.Text = $"# {title}";
         ChannelTabBar.Visibility = Visibility.Visible;
-        if (_settingsMode || _jobsMode)
+        if (_jobsMode)
         {
-            _settingsMode = false;
             _jobsMode = false;
             UpdateTabHighlight();
         }
@@ -866,14 +836,13 @@ public sealed partial class MainPage : Page
         DispatcherQueue.TryEnqueue(() => MessageInput.Focus(FocusState.Programmatic));
     }
 
-    // -- Cost bars, messages, jobs, settings, navigation --
+    // -- Cost bars, messages, jobs, and navigation --
     // Split into partial-class files: MainPage.Chat.cs, MainPage.Jobs.cs,
-    // MainPage.ChannelSettings.cs, MainPage.Navigation.cs
+    // MainPage.Navigation.cs
 
     private void ShowChatView()
     {
         JobViewPanel.Visibility = Visibility.Collapsed;
-        SettingsScroller.Visibility = Visibility.Collapsed;
         AgentSelectorPanel.Visibility = Visibility.Visible;
         ThreadSelectorPanel.Visibility = _selectedChannelId is not null ? Visibility.Visible : Visibility.Collapsed;
         MessagesScroller.Visibility = Visibility.Visible;
@@ -882,10 +851,8 @@ public sealed partial class MainPage : Page
 
     private void OnTabChatClick(object sender, RoutedEventArgs e)
     {
-        _settingsMode = false;
         _jobsMode = false;
         UpdateTabHighlight();
-        SettingsScroller.Visibility = Visibility.Collapsed;
         JobViewPanel.Visibility = Visibility.Collapsed;
         DeallocateJobView();
         AgentSelectorPanel.Visibility = Visibility.Visible;
@@ -900,10 +867,9 @@ public sealed partial class MainPage : Page
 
     private void UpdateTabHighlight()
     {
-        var chatActive = !_settingsMode && !_jobsMode;
+        var chatActive = !_jobsMode;
         if (TabChatButton.Content is TextBlock c) c.Foreground = Brush(chatActive ? 0x00FF00 : 0x666666);
         if (TabJobsButton.Content is TextBlock j) j.Foreground = Brush(_jobsMode ? 0x00FF00 : 0x666666);
-        if (TabSettingsButton.Content is TextBlock s) s.Foreground = Brush(_settingsMode ? 0x00FF00 : 0x666666);
     }
 
     // ── DTOs for JSON deserialization ────────────────────────────
@@ -924,9 +890,7 @@ public sealed partial class MainPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ThreadDto(Guid Id, string Name, Guid ChannelId, int? MaxMessages, int? MaxCharacters, DateTimeOffset CreatedAt, DateTimeOffset UpdatedAt);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record AgentDto(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record RoleDto(Guid Id, string Name, Guid? PermissionSetId = null);
+    private sealed partial record AgentDto(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record JobDto(Guid Id, Guid ChannelId, string? ActionKey, string Status, DateTimeOffset CreatedAt);
     private sealed record JobPageDto(IReadOnlyList<JobDto> Records, string? NextCursor, bool HasMore);

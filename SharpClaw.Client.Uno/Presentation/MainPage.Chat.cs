@@ -392,7 +392,6 @@ public sealed partial class MainPage
         row.Content.Text = content;
         row.Content.Foreground = Brush(isSystem ? 0x999999 : 0xCCCCCC);
 
-        row.Root.ContextFlyout = isSystem ? null : BuildRoleMenuFlyout(isUser, agentId);
 
         MessagesPanel.Children.Add(row.Root);
     }
@@ -546,7 +545,6 @@ public sealed partial class MainPage
         streamBubble.Time.Visibility = Visibility.Visible;
         streamBubble.Content.Text = "▍";
         streamBubble.Content.Foreground = Brush(0xCCCCCC);
-        streamBubble.Root.ContextFlyout = BuildRoleMenuFlyout(isUser: false, _selectedAgentId);
         MessagesPanel.Children.Add(streamBubble.Root);
         ScrollToBottom();
 

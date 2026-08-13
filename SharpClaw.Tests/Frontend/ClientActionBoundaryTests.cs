@@ -1074,6 +1074,16 @@ public sealed class ClientActionBoundaryTests
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml.cs"))
             .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.ChannelSettings.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Helpers", "PermissionEditorBuilder.cs"))
+            .Should().BeFalse();
+        File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.Navigation.cs"))
+            .Should().NotContain("AssignRole");
+        File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.Chat.cs"))
+            .Should().NotContain("ContextFlyout");
+        File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.xaml.cs"))
+            .Should().NotContain("TabSettingsButton");
     }
 
     private static HttpResponseMessage JsonResponse(object value) =>
