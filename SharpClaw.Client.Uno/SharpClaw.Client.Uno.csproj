@@ -138,9 +138,6 @@
     <Page Update="Presentation\TerminalSectionHeader.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Update="Presentation\DashboardPage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Update="Presentation\FirstSetupPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>

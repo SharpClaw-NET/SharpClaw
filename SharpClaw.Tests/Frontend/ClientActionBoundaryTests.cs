@@ -1061,19 +1061,14 @@ public sealed class ClientActionBoundaryTests
             pageSource.Should().NotContain("SetAccessTokenAsync");
         }
 
-        var dashboardMarkup = File.ReadAllText(Path.Combine(
-            clientRoot,
-            "Presentation",
-            "DashboardPage.xaml"));
-        var dashboardCode = File.ReadAllText(Path.Combine(
-            clientRoot,
-            "Presentation",
-            "DashboardPage.xaml.cs"));
-        foreach (var removedTag in new[] { "Agents", "Roles", "Channels", "Contexts" })
-        {
-            dashboardMarkup.Should().NotContain($"TagKey=\"{removedTag}\"");
-            dashboardCode.Should().NotContain($"[\"{removedTag}\"]");
-        }
+        File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml.cs"))
+            .Should().BeFalse();
     }
 
     private static HttpResponseMessage JsonResponse(object value) =>
