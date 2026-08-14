@@ -1,821 +1,87 @@
-# SharpClaw Core CLI Reference
-
-The SharpClaw CLI is an interactive REPL that runs alongside the API server
-inside the same process. You interact with it on the terminal where you
-launched the backend. It dispatches directly to the same handler methods
-that back the REST API — there is no HTTP round-trip.
-
----
-
-## Table of Contents
-
-- [Starting the CLI](#starting-the-cli)
-- [Session model](#session-model)
-- [ID system](#id-system)
-- [Argument parsing](#argument-parsing)
-- [Auth](#auth)
-- [Provider](#provider)
-- [Model](#model)
-- [Agent](#agent)
-- [Context](#context)
-- [Channel](#channel)
-- [Thread](#thread)
-- [Chat](#chat)
-- [Job](#job)
-- [Role](#role)
-- [User](#user)
-- [Bio](#bio)
-- [Tool awareness sets](#tool-awareness-sets)
-- [Resource](#resource)
-- [Module](#module)
-- [Env](#env)
-- [DB](#db)
-- [Health](#health)
-- [Module-provided CLI commands](#module-provided-cli-commands)
-
----
-
-## Starting the CLI
-
-When you run the SharpClaw backend directly (not in headless mode), the REPL
-starts automatically after the API server is ready:
+# SharpClaw Runtime CLI Reference
 
-```
-Type 'help' for available commands, 'exit' to quit.
-Log in with: login <username> <password>
-```
-
-If stdin is redirected — for example when the backend is launched detached
-by a client or run as a service — the REPL is skipped automatically. The
-server runs normally and waits for Ctrl+C or host shutdown.
-
-Type `help` at any time for a compact command reference. Type `exit` or
-`quit` to shut down the backend.
-
----
-
-## Session model
-
-Four pieces of state persist across commands within a single run:
-
-| State | Set by | Cleared by | Used implicitly by |
-|---|---|---|---|
-| Current user / user ID | `login`, `register` | `logout` | All non-public commands |
-| Current channel | `channel add`, `channel select` | `channel delete` (if active), `logout` | `chat`, `thread list/add`, `job list` |
-| Current thread | `thread select` | `thread deselect`, `thread delete` (if active), `channel select` | `chat` |
-| Chat mode | `chat toggle` | `!exit`, `!chat toggle` | All input |
-
-Every command runs in a fresh DI scope. The session user ID is injected into
-`SessionService` at the start of each command so the same authorisation rules
-that apply to API requests apply here.
-
----
-
-## ID system
-
-Entities are referenced by either a **short ID** or a **full GUID**.
-
-Short IDs (`#1`, `#2`, …) are assigned the first time a GUID appears in
-any output during a session. They are ephemeral — they reset when the
-process restarts. The `#` prefix is optional:
-
-```
-provider get #3
-provider get 3
-provider get 550e8400-e29b-41d4-a716-446655440000
-```
-
-All three forms are accepted wherever an entity ID is expected.
-
-If you reference a short ID that has not been assigned yet (because you
-have not listed or displayed the entity), you will get:
-
-```
-Unknown short ID #7. Use 'list' to see available IDs.
-```
-
-Every piece of JSON output printed to the terminal includes a `"#"` field
-before each `"Id"` GUID, so you can always read off the short ID immediately
-after a `list` or `get`.
-
----
-
-## Argument parsing
-
-Arguments are space-separated. Use double quotes to include spaces inside a
-single argument:
-
-```
-agent add "My Agent" #3 "You are a helpful assistant" --max-tokens 1024
-```
-
-Quoted strings are stripped of their outer quotes and treated as one token.
-
----
-
-## Auth
-
-```
-register <username> <password>
-```
-Registers a new user and immediately logs in as that user.
-
-```
-login <username> <password> [--remember]
-```
-Logs in. `--remember` issues a refresh token. On success the prompt changes
-to `sharpclaw (<username>)>`.
-
-```
-logout
-```
-Clears the current session. Returns the prompt to `sharpclaw>`.
-
-```
-me
-```
-Displays the current user's profile and role.
-
-All commands other than `register`, `login`, `help`, and their aliases
-require a logged-in session.
-
----
-
-## Provider
-
-```
-provider add <name> <type> [endpoint]
-```
-Creates a provider. `type` is a provider key discovered from enabled
-provider modules, and matching is case-insensitive. `endpoint` is required
-only for provider keys that declare a required endpoint.
-
-Run `provider types` to list the keys available in the current runtime.
-Built-in examples include `openai`, `eden-ai`, `anthropic`,
-`google-gemini-openai`, `custom`, `llamasharp`, and `ollama`.
-
-```
-provider get <id>
-provider list
-provider types
-provider update <id> <name> [endpoint]
-provider delete <id>
-```
-
-```
-provider set-key <id> <apiKey>
-```
-Encrypts and stores the API key for this provider.
-
-```
-provider login <id>
-```
-Starts an OAuth device-code flow. The CLI prints a URL and user code, then
-waits for authorisation in your browser.
-
-```
-provider sync-models <id>
-```
-Fetches the provider's model list and imports any that are not yet
-registered. Also refreshes model capability flags.
-
-```
-provider refresh-caps <id>
-```
-Re-infers capability flags for all models belonging to this provider without
-fetching the model list again.
-
-```
-provider cost <id> [--days <n>]
-```
-Shows token usage and cost for this provider. Default window: 30 days.
-
-```
-provider cost-total [--days <n>] [--simple] [--all]
-```
-Shows a total cost summary across all providers. `--simple` prints a one-line
-summary. `--all` includes providers with zero cost.
-
----
-
-## Model
-
-```
-model add <name> <providerId> [--cap <capabilities>]
-```
-Registers a model. `<name>` must be the **exact provider model ID** (e.g.
-`gpt-4o`, `claude-sonnet-4-20250514`, `gemini-2.5-flash`). Use
-`provider sync-models` to auto-import instead of adding manually.
-
-Capability flags (comma-separated, case-insensitive):
-`chat`, `vision`, `image-generation`, and `embedding`.
-Default: `chat`.
-
-```
-model get <id>
-model list [--provider <id>]
-model update <id> <name> [--cap <capabilities>]
-model delete <id>
-```
-
-### Local models
-
-```
-localmodel download <url> [--name <alias>] [--quant <Q4_K_M>]
-                    [--gpu-layers <n>]
-```
-Downloads a GGUF model file and registers it with the built-in
-`llamasharp` provider key.
-
-```
-localmodel download list <url>
-```
-Lists available GGUF files at the given URL without downloading.
-
-```
-localmodel load <id> [--gpu-layers <n>] [--ctx <size>] [--mmproj <path>]
-```
-Pins a model in memory so it stays loaded between requests. Models
-auto-load on first use and auto-unload when idle; use `load` to keep a
-frequently-used model resident.
-
-```
-localmodel unload <id>
-```
-Unpins the model. Stops immediately if there are no active requests.
-
-```
-localmodel mmproj <id> <path|none>
-```
-Sets or clears the CLIP / mmproj file path for a LlamaSharp vision model.
-Pass `none` to clear.
-
-```
-localmodel list
-```
-Lists all downloaded local model files with their status.
-
----
-
-## Agent
-
-```
-agent add <name> <modelId> [system prompt] [flags...]
-```
-Creates an agent. The system prompt is any positional text after the model
-ID that is not a recognised flag. If the model ID resolves to a local model
-file rather than a model, the CLI auto-resolves it to the parent model.
-
-```
-agent get <id>
-agent list
-agent update <id> <name> [modelId] [system prompt] [flags...]
-agent delete <id>
-```
-
-For `update`, an optional positional after the name is tested as a model ID;
-if it resolves, it is used as the new model. Any remaining positional text
-becomes the new system prompt.
-
-```
-agent role <id> <roleId>
-agent role <id> none
-```
-Assigns or removes the agent's role.
-
-```
-agent sync-with-models
-```
-Creates a `default-<model>` agent for every chat-capable model that does not
-already have a default agent.
-
-### Inference flags (add / update)
-
-| Flag | Type | Effect |
-|---|---|---|
-| `--max-tokens <n>` | integer | Cap on tokens generated per response |
-| `--temperature <f>` / `--temp <f>` | float | Sampling temperature |
-| `--top-p <f>` | float | Nucleus sampling |
-| `--top-k <n>` | integer | Top-k sampling |
-| `--frequency-penalty <f>` | float | Frequency penalty |
-| `--presence-penalty <f>` | float | Presence penalty |
-| `--stop <s1,s2>` | comma-separated | Stop sequences |
-| `--seed <n>` | integer | Deterministic seed |
-| `--response-format <json>` | JSON string | Structured output format |
-| `--reasoning-effort <s>` | string | Reasoning effort hint (e.g. `low`, `high`) |
-| `--params <json>` | JSON object | Raw provider-specific parameter overrides |
-| `--header <template>` | string | Custom chat header template |
-| `--tools <setId>` | ID | Tool awareness set to assign |
-| `--no-tools` | flag | Disable all tool schemas for this agent |
-
----
-
-## Context
-
-Contexts group channels under a shared default agent and permission policy.
-`context` and `ctx` are interchangeable.
-
-```
-context add <agentId> [name]
-context get <id>
-context list [agentId]
-context update <id> <name>
-context delete <id>
-```
-
-```
-context agents <id>
-context agents <id> add <agentId>
-context agents <id> remove <agentId>
-```
-Lists, adds, or removes an allowed agent for this context.
-
-```
-context defaults <id>
-context defaults <id> set <key> <resourceId>
-context defaults <id> clear <key>
-```
-Views or modifies default resources. Use `all` as the resource ID to set a
-wildcard grant. Valid keys:
-
-`safeshell`, `dangshell` / `dangerousshell`, `container`, `website`,
-`search` / `searchengine`, `internaldb`, `externaldb`,
-`displaydevice` / `display`, `agent`, `skill`,
-`editorsession` / `editor`.
-
----
-
-## Channel
-
-Channels are conversations. They inherit their default agent, permission
-policy, allowed agents, and default resources from their context when not
-set directly. `channel` and `chan` are interchangeable.
+## Scope
 
-```
-channel add [--agent <id>] [--context <id>] [--header <template>]
-            [--tools <setId>] [--no-tools] [title]
-```
-Either `--agent` or `--context` is required. The newly created channel is
-automatically selected as the active channel.
-
-```
-channel get <id>
-channel list [agentId]
-channel update <id> [--title <title>] [--agent <agentId>]
-                    [--context <contextId|none>]
-                    [--permission <permissionSetId|none>]
-                    [--header <template|none>] [--custom-id <id|none>]
-                    [--tools <setId|none>] [--no-tools] [--enable-tools]
-channel delete <id>
-```
-
-Updates channel-level settings after creation. Use `none`, `null`, or `clear`
-for nullable fields that support clearing. `--agent` changes the channel's
-default agent. `--context none` detaches from a context; this is equivalent to
-`channel detach <id>`. `--header none` clears a custom chat header.
-`--tools none` clears the channel tool-awareness override. `--no-tools` disables
-tool schemas for the channel, and `--enable-tools` re-enables them.
-
-```
-channel select <id>
-```
-Sets the active channel for `chat`, `thread`, and `job` commands.
-Deselects any active thread.
-
-```
-channel cost <id>
-```
-Shows token usage and cost broken down by agent for this channel.
-
-```
-channel attach <id> <contextId>
-channel detach <id>
-```
-Attaches or detaches the channel from a context. Run `channel list` for the
-channel ID and `context list` for the context ID, or pass full GUIDs directly.
-
-```
-channel agents <id>
-channel agents <id> add <agentId>
-channel agents <id> remove <agentId>
-```
-Run `channel list` for the channel ID and `agent list` for the agent ID, or
-pass full GUIDs directly.
-
-```
-channel defaults <id>
-channel defaults <id> set <key> <resourceId>
-channel defaults <id> clear <key>
-```
-Same keys as `context defaults`. Channel defaults override context defaults
-for this channel only. Other channels in the same context are unaffected. Run
-the relevant `resource <type> list` command for the resource ID required by the
-selected key, or pass a full GUID directly.
-
----
-
-## Thread
-
-Threads provide persistent conversation history within a channel. Messages
-sent inside a thread include prior history up to the thread's limits. Messages
-sent to a channel without a thread are one-shot (no history).
-
-```
-thread add [channelId] [name] [--max-messages <n>] [--max-chars <n>]
-```
-Uses the active channel if `channelId` is omitted. System defaults:
-50 messages, 100 000 characters. Oldest messages are trimmed first when
-limits are reached.
-
-```
-thread get <id>
-thread list [channelId]
-thread cost <id>
-thread update <id> [--name <name>] [--max-messages <n>] [--max-chars <n>]
-thread delete <id>
-```
-Set `--max-messages` or `--max-chars` to `0` to reset to the system default.
-
-```
-thread select <id>
-```
-Sets the active thread. All subsequent `chat` commands will include this
-thread's history automatically.
-
-```
-thread deselect
-```
-Removes the active thread selection. Chat reverts to one-shot mode.
-
----
-
-## Chat
-
-```
-chat [--agent <id>] [--thread <id>] <message>
-```
-Sends a message in the active channel. `--agent` overrides the channel's
-default agent for this message only. `--thread` routes the message through a
-thread with history.
-
-If no channel is selected, the most recently active channel is auto-selected
-with a notice.
-
-**Thread inference:** If the first positional argument looks like a short ID
-or GUID, the CLI checks whether it resolves to a thread (in which case the
-channel is inferred from it) or to a channel (in which case that channel
-becomes active). This lets you write:
-
-```
-chat #5 What is the server status?
-```
-
-without `--thread`.
-
-### Streaming output
-
-Responses stream to the terminal as they arrive:
-
-```
-[tool] #N actionKey → Executing
-[result] #N → Completed
-[approval] Job #N (actionKey) requires approval. Approve? (y/n):
-[approval] → Approved
-[error] description
-```
-
-Text deltas are written character by character. A newline is emitted after
-the final delta.
-
-### Chat mode
-
-```
-chat toggle
-```
-Toggles **chat mode**. In chat mode, every line of input is sent as a chat
-message — you do not type `chat` before each one. The prompt changes to
-`sharpclaw (<user>) 💬>`.
-
-Escape from chat mode:
-```
-!exit
-!chat toggle
-```
-
----
-
-## Job
-
-Jobs are single tool-call executions submitted to a channel's agent.
-
-```
-job submit <channelId> <actionKey> [resourceId]
-           [--agent <id>] [--params <json>]
-```
-`actionKey` is a module-contributed tool name. Valid action keys are dynamic —
-see `module list`, `GET /modules`, or the owning module's documentation.
-
-When `resourceId` is omitted, default resources are resolved from the
-channel's `DefaultResourceSet` → context's → permission-set defaults.
-
-`--params` passes module-specific JSON to the action owner.
-
-```
-job list [channelId]
-```
-Uses the active channel if `channelId` is omitted.
-
-```
-job status <jobId>
-job approve <jobId>
-job cancel <jobId>
-job pause <jobId>
-job resume <jobId>
-job stop <jobId>
-```
-`stop` gracefully completes a running job (also accepts `Paused` jobs).
-`cancel` aborts immediately.
-
-```
-job listen <jobId>
-```
-Live job listening is module-owned. Use the owning module's streaming endpoint
-or CLI command when one exists.
-
----
-
-## Role
-
-```
-role list
-role get <id>
-role permissions <id>
-role permissions <id> set [flags...]
-```
-
-The `set` command does a **full replacement** of the role's permissions.
-All flags are additive within a single `set` invocation.
-
-### Global capability flags
-
-| Flag | Grants |
-|---|---|
-| `--create-sub-agents` | CanCreateSubAgents |
-| `--create-containers` | CanCreateContainers |
-| `--register-databases` | CanRegisterDatabases |
-| `--localhost-browser` | CanAccessLocalhostInBrowser |
-| `--localhost-cli` | CanAccessLocalhostCli |
-| `--click-desktop` | CanClickDesktop |
-| `--type-on-desktop` | CanTypeOnDesktop |
-| `--read-cross-thread-history` | CanReadCrossThreadHistory |
-| `--edit-agent-header` | CanEditAgentHeader |
-| `--edit-channel-header` | CanEditChannelHeader |
-| `--create-document-sessions` | CanCreateDocumentSessions |
-| `--enumerate-windows` | CanEnumerateWindows |
-| `--focus-window` | CanFocusWindow |
-| `--close-window` | CanCloseWindow |
-| `--resize-window` | CanResizeWindow |
-| `--send-hotkey` | CanSendHotkey |
-| `--read-clipboard` | CanReadClipboard |
-| `--write-clipboard` | CanWriteClipboard |
-
-By default all global flags default to `Independent` clearance. Append
-`:<clearance>` to specify a different level.
-
-For arbitrary flag names use:
-```
---flag <FlagKey>[:<clearance>]
-```
-
-### Resource grant flags
-
-Each flag accepts `<id>[:<clearance>]`. Use `all` as the ID for a wildcard
-grant (all resources of that type).
-
-`--dangerous-shell`, `--safe-shell`, `--container`, `--website`,
-`--search-engine`, `--internal-db`, `--external-db`, `--input-audio`,
-`--agent`, `--skill`
-
-Clearance values (ascending): `Unset`, `ApprovedBySameLevelUser`,
-`ApprovedByWhitelistedUser`, `ApprovedByPermittedAgent`,
-`ApprovedByWhitelistedAgent`, `Independent`.
-
-**Example:**
-```
-role permissions #2 set --create-sub-agents --safe-shell all:Independent
-```
-
----
-
-## User
-
-These commands require admin privileges.
-
-```
-user list
-```
-Lists all registered users.
-
-```
-user role <userId> <roleId>
-user role <userId> none
-```
-Assigns or removes a user's role.
+The Runtime CLI is a process mode for one local command. It uses the same compiled kernel graph as direct Runtime chat.
 
----
-
-## Bio
-
-```
-bio get
-bio set <text>
-bio clear
-```
-Reads, sets, or clears the current user's bio. The bio is included in the
-chat header so agents know something about the person they are talking to.
+The current base CLI provides `help` and `chat`. It does not provide user, agent, channel, thread, role, database migration, or environment editing commands.
 
----
+Optional modules own their command surfaces. The base Runtime CLI does not create a second command path for module domains.
 
-## Tool awareness sets
+## Start The CLI
 
-Tool awareness sets control which tool-call schemas are sent to the model in
-each API request. Excluding unused tools reduces prompt-token overhead.
+Pass `--cli` and one command to the Runtime Host executable:
 
+```text
+SharpClaw.Runtime.Host.exe --cli help
+SharpClaw.Runtime.Host.exe --cli chat "Return one short status message."
 ```
-tools add <name> [json]
-```
-Creates a set. The optional `json` argument is a JSON object mapping tool
-names to `true` or `false`. Omitted tools default to enabled.
 
-```
-tools list
-tools get <id>
-tools update <id> [--name <name>] [json]
-tools delete <id>
-```
+The command name is case-insensitive. Arguments after the command become the command argument list.
 
-Assign a set to an agent or channel via `--tools <setId>` on `add` or
-`update`. Override chain: channel → agent → null (all tools enabled).
+The Runtime loads configuration and modules, validates database readiness, and starts the kernel before it runs the CLI command.
 
-Tool names are dynamic — they depend on which modules are enabled. Use
-`module list` to see all registered tool names.
+CLI mode does not start the HTTP listener. It does not publish a Runtime discovery entry.
 
----
+## Help
 
-## Resource
+Run `--cli help` to print the current command names:
 
-```
-resource <type> <command> [args...]
+```text
+SharpClaw Runtime CLI
+  --cli help
+  --cli chat <message>
 ```
-All resource types are module-provided. The set of valid types depends on
-which modules are currently enabled. See `module list` or `help` for the
-full list at runtime.
 
-Commands supported by all types: `add`, `get`, `list`, `update`, `delete`,
-`sync` (where supported).
+The help output is a Runtime result. It does not list routes or feature-module commands.
 
-The `sync` sub-command imports resources from the system or an external
-registry when the resource type supports discovery.
+## Direct Chat
 
----
+Run `--cli chat` with one or more message arguments:
 
-## Module
-
-```
-module list
-module get <id>
-module enable <id>
-module disable <id>
-module scan
-module reload <id>
-module unload <id>
+```text
+SharpClaw.Runtime.Host.exe --cli chat "Write a release status in one sentence."
 ```
 
-Module IDs are string identifiers (e.g. `sharpclaw_metrics`), not
-GUIDs. Short IDs do not apply here.
-
-`scan` discovers and loads external module assemblies from the modules
-directory without restarting. `reload` unloads and re-loads a single
-external module. `disable` is rejected (409) if another enabled module
-depends on a contract this module exports.
-
-For tutorial-style walkthroughs, see
-`docs/guides/Module-User-Guide.md` and `docs/guides/Module-Agent-Skill.md`.
-
----
-
-## Env
-
-Manages the deployed Runtime Host assembly's `Environment/.env`. This
-canonical dotenv file controls encryption keys, JWT secrets, database
-connection strings, and other server-side configuration. Changes require a
-backend restart.
-Chat-path runtime switches live under the `Chat` section. Set
-`Chat__DisableDefaultHeaders="true"` to remove the generated metadata
-header while keeping explicit agent or channel custom headers available.
-Set `Chat__DisableDefaultSystemPrompt="true"` to remove the core-generated
-native-tool instruction suffix without erasing an agent's own configured
-system prompt. Set `Chat__DisableHeaderTagExpansion="true"` when explicit
-custom headers should be sent as literal text with no built-in tag, resource
-tag, or module-owned tag resolution. Set
-`Chat__DisableModuleHeaderTags="true"`
-to prevent module-owned custom-header tags from executing. Set
-`Chat__CacheMaxMegabytes` to set the unified chat cache memory budget. That
-cache keeps header user or agent state and recently-used channel/thread/agent
-token totals hot until the budget is full, then evicts the oldest cached
-objects first. Set it to `0` when every chat turn must force fresh persistence
-and permission reads.
-Set `AgentOrchestration__DisableAccessibleThreadsHeader="true"` when the
-Agent Orchestration module should make the `{{accessible-threads}}`
-custom-header tag empty while leaving its explicit cross-thread tools
-available.
+The CLI joins the message arguments with one space and submits one `ChatTurnInput` to `DirectChatKernel`.
 
-```
-env get
-```
-Reads and prints the raw canonical dotenv content of the core `.env` file.
+The kernel selects the configured provider and model through enabled provider modules. The default installation does not load or save conversation history.
 
-```
-env set
-```
-Writes the core `.env` file. Paste canonical dotenv content into stdin; enter
-a blank line to finish.
+The CLI writes the completion content to standard output. A missing message returns a failure result and writes the error to standard error.
 
-```
-env auth
-```
-Checks whether the current user is authorised to edit the core `.env`.
-Returns `authorised: true/false`. The real enforcement is server-side;
-this is a pre-flight check only.
+## Action Flow
 
-```
-env status
-```
-Reports whether the `.env` file is encrypted (AES-GCM) or plaintext on disk.
+Every CLI command uses the singleton Runtime action dispatcher. The flow is `parse`, `command-select`, `execute`, `output-write`, and `complete`.
 
-```
-env unlock
-```
-Unprotects the `.env` file through the package protection manager. The file
-is plaintext only for the intentional editing window and is protected again
-by the normal startup protection path. Use this when you need to inspect or
-hand-edit the canonical dotenv document outside the CLI.
+A command failure uses `fail` before it writes the stable failure message. An action cancellation uses `cancel` before it writes the cancellation message.
 
----
+The execute terminal receives the dispatcher cancellation token. The CLI does not continue chat work after the action boundary cancels.
 
-## DB
+## Exit Codes
 
-Available only when a relational EF Core provider is configured (Postgres,
-SQL Server, or SQLite). Not available for the default JSON file provider.
+Exit code `0` means that the command completed. Exit code `1` means that parsing, execution, output, or another command operation failed.
 
-```
-db status
-```
-Shows the migration gate state (`Idle`, `Draining`, or `Migrating`) and
-lists applied and pending migration names.
+Exit code `130` means that the action or process was cancelled. The process cancellation token comes from console cancellation or host unload.
 
-```
-db migrate
-```
-Drains in-flight requests and applies all pending EF Core migrations. All
-new requests are held while the migration runs. Migrations are **never**
-applied automatically — you must trigger this explicitly.
+General exception details are not printed as command output. The CLI writes `The Runtime CLI command failed.` for an execution failure.
 
----
+## Configuration
 
-## Health
+The CLI uses the same deployed Runtime `Environment/.env` file as the local host. Use canonical dotenv keys with `__` separators.
 
+```dotenv
+Encryption__EncryptDatabase=true
+Encryption__EncryptProviderKeys=true
+Database__Provider=JsonFile
+Modules__sharpclaw_providers_openai_compat=true
 ```
-health
-```
-Checks whether the configured EF provider is reachable and prints the
-database health response:
-
-| Icon | Status |
-|---|---|
-| ✓ | Healthy |
-| ⚠ | Degraded |
-| ✗ | Unhealthy |
-
-For `JsonFile`, this reaches the external JSONColdStore EF provider through
-the same DbContext path used by the application. SharpClaw no longer owns a
-local JSON flush queue, transaction journal, sentinel, or snapshot health
-engine.
-
----
 
-## Module-provided CLI commands
+The Runtime protects the active environment document through the Supprocom.Secrets installation-key boundary. `SHARPCLAW_ENCRYPTION_KEY` is an installation-key source when it is configured and valid.
 
-Modules may register CLI commands in two scopes:
+Database readiness runs before command execution. The CLI does not apply migrations or switch to another provider when readiness fails.
 
-- **Top-level:** A new root command name, dispatched by `TryHandleAsync`
-  after the built-in switch fails.
-- **Resource type:** A new sub-command under `resource <type>`, dispatched
-  by `resource`.
+## Boundaries
 
-The `help` command lists all currently registered module commands at the
-bottom of its output, with their scope prefix, description, aliases, and
-originating module ID.
+The base CLI has no HTTP API-key exchange because it runs inside the local Runtime process. It also has no user session or administrator authorization flow.
 
-See the individual module documentation in `docs/modules/` for the CLI
-commands each module provides.
+Use the owning module contract for optional feature behavior. Do not infer a removed feature command from an older guide.
