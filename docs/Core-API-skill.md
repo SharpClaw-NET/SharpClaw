@@ -1,612 +1,139 @@
-SharpClaw Core API — Agent Skill Reference
+# SharpClaw Core API Skill
 
-Base: http://127.0.0.1:48923
-Auth: X-Api-Key header for the current runtime instance, plus Bearer JWT on
-non-exempt user endpoints. Gateway service calls may use X-Gateway-Token.
-All bodies JSON. Enums serialised as strings. Timestamps ISO 8601.
+## Purpose
 
-────────────────────────────────────────
-HEALTH
-────────────────────────────────────────
-GET /echo              → 200 (no auth needed)
-GET /ping              → 200 (auth check)
+Use this guide when you call the local SharpClaw Runtime Host. The base host provides stateless chat, streaming, health, and canonical Jobs.
 
-────────────────────────────────────────
-AUTH
-────────────────────────────────────────
-POST /auth/register                { username, password }  → { id, username }
-POST /auth/login                   { username, password, rememberMe }  → { accessToken, accessTokenExpiresAt, refreshToken?, refreshTokenExpiresAt? }
-POST /auth/refresh                 { refreshToken }  → same shape as login
-POST /auth/invalidate-access-tokens   { userIds: [guid] }  → 204
-POST /auth/invalidate-refresh-tokens  { userIds: [guid] }  → 204
+Optional modules provide feature domains through the compiled module graph. Do not assume that a module route exists in every installation.
 
-────────────────────────────────────────
-PROVIDERS
-────────────────────────────────────────
-POST   /providers                  { name, providerKey, apiEndpoint?, apiKey? }
-GET    /providers
-GET    /providers/types            -> provider module type metadata
-GET    /providers/{id}
-PUT    /providers/{id}             { name?, apiEndpoint? }
-DELETE /providers/{id}
-POST   /providers/{id}/set-key     { apiKey }  → 204
-POST   /providers/{id}/sync-models → synced model list
-POST   /providers/{id}/auth/device-code  → { userCode, verificationUri, expiresInSeconds }
+## Connect To Runtime
 
-Provider keys are discovered from enabled provider modules. Use
-GET /providers/types or CLI `provider types` for the authoritative list
-in the current process. apiEndpoint is required only when the selected
-provider key says requiresEndpoint=true. sync-models is the preferred
-way to add models.
+Read the Runtime discovery entry before you call the host. Use its address and the instance API-key file for the same Runtime instance.
 
-────────────────────────────────────────
-MODELS
-────────────────────────────────────────
-POST   /models                     { name, providerId, capabilities? }
-GET    /models
-GET    /models/{id}
-PUT    /models/{id}                { name?, capabilities? }
-DELETE /models/{id}
+The default local address is `http://127.0.0.1:48923`. The `ASPNETCORE_URLS` environment setting can change this address.
 
-name must be the exact provider identifier (e.g. gpt-4o).
-capabilityTags: string tags such as chat, vision, image-generation, and embedding. Default chat.
+Send the API key in the `X-Api-Key` header. The key proves local process access. It does not identify a user.
 
-────────────────────────────────────────
-LOCAL MODELS
-────────────────────────────────────────
-POST   /models/local/download      { url, name?, quantization?, gpuLayers? }
-GET    /models/local/download/list?url={url}
-GET    /models/local
-POST   /models/local/{id}/load     { gpuLayers?, contextSize? }
-POST   /models/local/{id}/unload
-DELETE /models/local/{id}
+Use `Auth__DisableApiKeyCheck=true` only in controlled local tests. A missing or invalid key returns HTTP `423`.
 
-LocalModelStatus: Pending, Downloading, Ready, Failed.
+## Check Runtime State
 
-────────────────────────────────────────
-AGENTS
-────────────────────────────────────────
-POST   /agents                     { name, modelId, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
-GET    /agents
-GET    /agents/{id}
-PUT    /agents/{id}                { name?, modelId?, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
-DELETE /agents/{id}
-PUT    /agents/{id}/role           { roleId }
+Use these routes:
 
-maxCompletionTokens (integer|null): caps the number of tokens the model may generate per response. Sent as max_tokens, max_completion_tokens, or max_output_tokens depending on the provider/API version. null (default) = no limit (provider default). Useful for controlling response size and latency — smaller limits yield faster responses.
+```text
+GET /echo       liveness without the API key
+GET /health     process health
+GET /healthz    alternate process health route
+GET /readyz     database and Runtime readiness
+GET /ping       authenticated API-key check
+```
 
-customChatHeader (string|null): template that replaces the default chat header for this agent. Uses {{tag}} placeholders expanded at send time. See CUSTOM CHAT HEADER section.
+`/readyz` returns HTTP `503` until database readiness and Runtime startup complete. Do not send chat or Jobs requests before readiness.
 
-toolAwarenessSetId (guid|null): links a tool awareness set that controls which tool-call schemas are sent in API requests. See TOOL AWARENESS SETS section. Channel's set overrides the agent's; null = all tools enabled. On PUT, pass Guid.Empty to clear.
+## Send Direct Chat
 
-AgentResponse includes: id, name, systemPrompt, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens, customChatHeader, toolAwarenessSetId.
+Call `POST /chat` with one message:
 
-AgentSummary (embedded in channel/context responses): id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens, toolAwarenessSetId. Same as AgentResponse minus systemPrompt.
+```json
+{
+  "message": "Return one short answer.",
+  "conversationId": null
+}
+```
 
-────────────────────────────────────────
-ROLES & PERMISSIONS
-────────────────────────────────────────
-GET    /roles
-GET    /roles/{id}
-GET    /roles/{id}/permissions
-PUT    /roles/{id}/permissions     (full replacement)
+The `message` value must contain non-whitespace text. The default installation does not load or save conversation history.
 
-SetRolePermissionsRequest fields:
-  Global flags:
-  (PermissionClearance enum, default Unset = denied, no approval path)
-  Per-resource arrays (each entry is { resourceId, clearance }):
-    dangerousShellAccesses, safeShellAccesses, containerAccesses, websiteAccesses, localInfoStores, externalInfoStores, agentAccesses, skillAccesses, agentHeaderAccesses, channelHeaderAccesses, documentSessionAccesses, nativeApplicationAccesses
+The Runtime selects the provider and model through enabled provider modules. A missing or duplicate provider prevents readiness.
 
-Wildcard resourceId: ffffffff-ffff-ffff-ffff-ffffffffffff (all resources of that type).
+The response is a serialized `ChatTurnResult`. Keep provider metadata as returned by the current provider contract.
 
-PermissionClearance: Unset=0, ApprovedBySameLevelUser=1, ApprovedByWhitelistedUser=2, ApprovedByPermittedAgent=3, ApprovedByWhitelistedAgent=4, Independent=5.
+## Read Streaming Chat
 
-Caller can only grant permissions they themselves hold.
+Call `POST /chat/stream` with the same request body as `/chat`. Read each server-sent event from the `data:` field.
 
-────────────────────────────────────────
-CHANNEL CONTEXTS
-────────────────────────────────────────
-POST   /channel-contexts           { agentId, name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-GET    /channel-contexts?agentId={guid}
-GET    /channel-contexts/{id}
-PUT    /channel-contexts/{id}      { name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-DELETE /channel-contexts/{id}
+The final `ChatStreamChunk` marks completion. Pass request cancellation through the HTTP client so the Runtime can stop the kernel stream.
 
-Allowed agents (granular):
-  GET    /channel-contexts/{id}/agents
-  POST   /channel-contexts/{id}/agents         { agentId }
-  DELETE /channel-contexts/{id}/agents/{agentId}
+Buffered and streaming chat use one compiled graph, one action path, one provider transport, and one tool path.
 
-Default resources (bulk):
-  GET    /channel-contexts/{id}/defaults
-  PUT    /channel-contexts/{id}/defaults        (SetDefaultResourcesRequest)
+## Inspect Runtime Configuration
 
-Default resources (per-key):
-  PUT    /channel-contexts/{id}/defaults/{key}  { resourceId }
-  DELETE /channel-contexts/{id}/defaults/{key}
+Call `GET /env/core` only through a protected local administration flow. The route returns non-null configuration entries loaded by the Runtime.
 
-ContextResponse returns: id, name, agent (AgentSummary), permissionSetId, disableChatHeader, allowedAgents (AgentSummary[]), createdAt, updatedAt.
-ContextAllowedAgentsResponse returns: contextId, defaultAgent (AgentSummary), allowedAgents (AgentSummary[]).
+Configuration sources can contain operational or secret values. Do not expose this response to an untrusted caller.
 
-────────────────────────────────────────
-CHANNELS
-────────────────────────────────────────
-POST   /channels                   { agentId?, title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader?, toolAwarenessSetId? }
-GET    /channels?agentId={guid}
-GET    /channels/{id}
-PUT    /channels/{id}              { title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader?, toolAwarenessSetId? }
-DELETE /channels/{id}
+The route checks the `security.secret.read` action before it returns data. A denied decision returns HTTP `403`.
 
-Set default agent:
-  PUT    /channels/{id}/agent                   { agentId }
+## Use Canonical Jobs
 
-Allowed agents (granular):
-  GET    /channels/{id}/agents
-  POST   /channels/{id}/agents                  { agentId }
-  DELETE /channels/{id}/agents/{agentId}
+Submit a Job with `POST /jobs`:
 
-Default resources (bulk):
-  GET    /channels/{id}/defaults
-  PUT    /channels/{id}/defaults                (SetDefaultResourcesRequest)
+```json
+{
+  "actionKey": "provider.action",
+  "input": {
+    "kind": "payload"
+  },
+  "conversationId": null,
+  "holds": null
+}
+```
 
-Default resources (per-key):
-  PUT    /channels/{id}/defaults/{key}          { resourceId }
-  DELETE /channels/{id}/defaults/{key}
+The action owner defines the valid input payload. Use an action key and payload codec from the enabled module graph.
 
-Valid default resource keys: dangshell, safeshell, container, website, search, localinfo, externalinfo, displaydevice, agent, skill, editor, document, nativeapp.
+Use these canonical Jobs routes:
 
-Either agentId or contextId (with agent) required on create.
-allowedAgentIds on PUT replaces the set. permissionSetId=00000000-... removes the override; null leaves unchanged.
-
-toolAwarenessSetId (guid|null): links a tool awareness set. Overrides the agent's set. See TOOL AWARENESS SETS section. On PUT, pass Guid.Empty to clear; null leaves unchanged.
-
-ChannelResponse returns: id, title, agent (AgentSummary?), contextId, contextName, permissionSetId, effectivePermissionSetId, allowedAgents (AgentSummary[]), disableChatHeader, customChatHeader, toolAwarenessSetId, createdAt, updatedAt.
-ChannelAllowedAgentsResponse returns: channelId, defaultAgent (AgentSummary?), allowedAgents (AgentSummary[]).
-
-All responses embed full AgentSummary objects (id, name, modelId, modelName, providerName, roleId, roleName, maxCompletionTokens) instead of bare GUIDs — no follow-up requests needed to resolve agent details.
-
-────────────────────────────────────────
-DEFAULT RESOURCES
-────────────────────────────────────────
-SetDefaultResourcesRequest fields (all Guid?):
-  dangerousShellResourceId, safeShellResourceId, containerResourceId, websiteResourceId, searchEngineResourceId, localInfoStoreResourceId, externalInfoStoreResourceId, displayDeviceResourceId, agentResourceId, skillResourceId, editorSessionResourceId, documentSessionResourceId, nativeApplicationResourceId
-
-Resolution order for jobs: channel DefaultResourceSet → context DefaultResourceSet → channel/context/role PermissionSet defaults.
-
-────────────────────────────────────────
-THREADS
-────────────────────────────────────────
-POST   /channels/{channelId}/threads           { name?, maxMessages?, maxCharacters? }
-GET    /channels/{channelId}/threads
-GET    /channels/{channelId}/threads/{id}
-PUT    /channels/{channelId}/threads/{id}      { name?, maxMessages?, maxCharacters? }
-DELETE /channels/{channelId}/threads/{id}
-
-Defaults: maxMessages=50, maxCharacters=100000. Set to 0 in update to reset to null (system default).
-Messages within a thread include history. Messages without a thread are one-shot (no history).
-
-────────────────────────────────────────
-CHAT
-────────────────────────────────────────
-POST   /channels/{id}/chat                     { message, agentId?, clientType?, editorContext? }
-GET    /channels/{id}/chat                     → message history
-
-Thread chat:
-  POST   /channels/{id}/chat/threads/{threadId}
-  GET    /channels/{id}/chat/threads/{threadId}/history
-
-ChatClientType: CLI, API, Telegram, Discord, WhatsApp, VisualStudio, VisualStudioCode, UnoWindows, UnoAndroid, UnoMacOS, UnoLinux, UnoBrowser, Other.
-
-editorContext: { editorType, editorVersion?, workspacePath?, activeFilePath?, activeFileLanguage?, selectionStartLine?, selectionEndLine?, selectedText? }
-
-Without thread: one-shot (no history sent to model).
-With thread: history included, trimmed by thread's maxMessages and maxCharacters.
-
-────────────────────────────────────────
-CHAT STREAMING (SSE)
-────────────────────────────────────────
-POST   /channels/{id}/chat/stream              Same body as POST /channels/{id}/chat
-POST   /channels/{id}/chat/stream/approve/{jobId}  { approved: true|false }
-
-Thread streaming:
-  POST   /channels/{id}/chat/threads/{threadId}/stream
-  POST   /channels/{id}/chat/threads/{threadId}/stream/approve/{jobId}
-
-SSE event types: TextDelta (delta field), ToolCallStart (job), ToolCallResult (result), ApprovalRequired (pendingJob), ApprovalResult (approvalOutcome), Error (error), Done (finalResponse).
-
-────────────────────────────────────────
-JOBS
-────────────────────────────────────────
-POST   /jobs                              { actionKey, input, conversationId?, holds? }
+```text
 GET    /jobs
 GET    /jobs/{jobId}
 POST   /jobs/{jobId}/dispatch
-POST   /jobs/{jobId}/cancel | /pause | /stop | /resume | /recover
-POST   /jobs/{jobId}/resolve-hold | /retry
+POST   /jobs/{jobId}/cancel
+POST   /jobs/{jobId}/pause
+POST   /jobs/{jobId}/stop
+POST   /jobs/{jobId}/resume
+POST   /jobs/{jobId}/recover
+POST   /jobs/{jobId}/resolve-hold
+POST   /jobs/{jobId}/retry
 DELETE /jobs/{jobId}
-GET    /jobs/{jobId}/progress | /attempts | /artifact
-
-JobPayloadEnvelope request:
-  actionKey (string, required): identifies the action to execute. The set of valid
-    action keys is dynamic — query GET /modules for the authoritative list.
-  resourceId?: target resource for per-resource actions.
-  agentId?: override the channel's default agent (must be in allowed set).
-  callerAgentId?: the agent that triggered the job (for sub-agent chains).
-  Module-specific fields may also be present on the DTO. These are consumed by
-  the module that owns the action key. See individual module documentation for
-  details.
-
-Job status and transitions come from the canonical Core Jobs contract.
-
-When resourceId is omitted for a per-resource action, default resources are resolved
-automatically from the channel's DefaultResourceSet → context's DefaultResourceSet →
-permission set defaults.
-
-Job streaming endpoints (WebSocket, SSE) are module-provided. See individual
-module documentation for available transports in the current bundled module
-set.
-
-────────────────────────────────────────
-────────────────────────────────────────
-RESOURCES
-────────────────────────────────────────
-Modules may register resource types at startup. All resource types follow the
-same CRUD pattern under /resources/{type}:
-
-  POST (create), GET (list), GET /{id}, PUT /{id}, DELETE /{id}.
-  Some types also expose POST /sync for external-source reconciliation.
-
-The set of available /resources/* endpoints is not fixed — it grows or shrinks
-as modules are enabled or disabled. Query GET /modules for each module's
-registered resource types.
-
-Resource lookup: GET /resources/lookup/{type} → [{id, name}]
-  Returns a lightweight list of IDs and display names for a given access type.
-  Available access types are module-defined; the host guarantees the endpoint
-  but not the set of valid type strings.
-
-────────────────────────────────────────
-MODULE SYSTEM
-────────────────────────────────────────
-"If you wish to make an apple pie from scratch, you must first invent the
-universe." — Carl Sagan (via Dawkins, The Selfish Gene, extended-phenotype
-argument: the interesting thing about a system is not its current list of
-parts but the rules by which parts can be added, removed, and swapped.)
-
-The host application is deliberately agnostic about which modules ship or
-what they do. This section describes only the framework; individual module
-capabilities live in their own documentation.
-
-Concepts:
-  Module: a self-contained unit of tools, CLI commands, REST endpoints,
-    resource types, and optional DI service exports, loaded at startup
-    from a manifest and an entry assembly.
-  Tool: a single callable operation exposed to the LLM. Dispatched via
-    ActionKey (string) — the sole routing mechanism for job execution.
-  Tool prefix: a short string (e.g. "cu_", "oa_") prepended to all of a
-    module's tool names to avoid collisions.
-  Contract: a named DI service a module exports for others to consume.
-    Modules may declare required contracts; the dependency graph is
-    resolved via topological sort at startup.
-
-Lifecycle:
-  Startup: manifests loaded from modules/{dir}/module.json → topological
-    sort by requires/exports → InitializeAsync per module → tools and
-    endpoints registered in ModuleRegistry.
-  Runtime enable:  Register + CacheManifest + check unsatisfied deps +
-    InitializeAsync (rollback on failure).
-  Runtime disable: safety check (reject if other modules depend on
-    exports) + ShutdownAsync + Unregister. Disabling a module that
-    exports a required contract is rejected (409 Conflict).
-  State persisted in DB + .modules.env.
-
-Tool resolution: module tools are resolved by prefix lookup via
-  ModuleRegistry. Inline tools (executed in the chat loop without a job
-  record) are also module-registered.
-
-ModuleManifest fields: id, displayName, version, toolPrefix, entryAssembly,
-  minHostVersion?, author?, description?, license?, platforms[], enabled,
-  defaultEnabled, executionTimeoutSeconds?,
-  exports[{contractName, serviceType}], requires[string].
+GET    /jobs/{jobId}/progress
+GET    /jobs/{jobId}/attempts
+GET    /jobs/{jobId}/artifact
+```
 
-REST:
-  GET  /modules                          List all modules with tools and status
-  GET  /modules/{moduleId}               Single module detail
-  POST /modules/{moduleId}/enable        Enable a disabled module at runtime
-  POST /modules/{moduleId}/disable       Disable an enabled module at runtime
+Jobs do not require an Agent, Context, Thread, Channel, or Permission module. Every Jobs operation uses the universal action dispatcher and one module storage gateway.
 
-CLI:
-  module list | module get <id> | module enable <id> | module disable <id>
+## Understand Module Routes
 
-────────────────────────────────────────
-PERMISSION RESOLUTION
-────────────────────────────────────────
-Stage 1 — Agent capability: role's PermissionSetDB checked. Independent → approved. No grant → denied. Otherwise → Stage 2.
-Stage 2 — Channel/context pre-auth: channel PS checked first; if it addresses the action, that result is final (context not consulted). If channel doesn't address it, context PS checked. Independent → pre-approved. Otherwise → AwaitingApproval.
+The Runtime loads enabled manifests from the `modules` directory beside the host executable. The graph validates manifests before it publishes readiness.
 
-Channel PS checked → context PS → fallback AwaitingApproval.
+Provider modules register provider plugins. Tool modules register model-visible tools. Module-owned route groups are dynamic and belong to their owning package.
 
-Cross-thread history access (double-gate):
-  Agent role PS must have CanReadCrossThreadHistory=true AND target channel effective PS must also have CanReadCrossThreadHistory=true (opt-in).
-  Channels without opt-in are private even if the agent holds the permission.
-  Independent clearance on the agent overrides the channel opt-in requirement.
-  Agent must be primary or in AllowedAgents on the target channel.
-  Accessible threads are available through {{accessible-threads}} and via list_accessible_threads / read_thread_history inline tools.
+An enabled module that fails validation blocks activation. The host does not remove the module silently or execute a local substitute.
 
-────────────────────────────────────────────────────────────────────
-ADVANCED EXAMPLE: Multi-Agent Channel with Context
-────────────────────────────────────────────────────────────────────
+## Configure The Base Host
 
-Goal: A context with a primary agent and a secondary specialist agent,
-where channels inherit the context's defaults. Agents can be switched per-message.
+Use canonical dotenv syntax in the Runtime `Environment/.env` file. Use `__` between configuration sections and keys.
 
-Step 1 — Assume MAIN_AGENT_ID and SPECIALIST_AGENT_ID already exist with appropriate roles.
+```dotenv
+ASPNETCORE_URLS=http://127.0.0.1:48923
+Auth__DisableApiKeyCheck=false
+Encryption__EncryptDatabase=true
+Encryption__EncryptProviderKeys=true
+Database__Provider=JsonFile
+Modules__sharpclaw_providers_openai_compat=true
+```
 
-Step 2 — Create a context.
+`Encryption__EncryptDatabase` controls database record encryption. It does not control active environment document protection.
 
-    POST /channel-contexts
-    {
-      "agentId": "MAIN_AGENT_ID",
-      "name": "Multi-Agent Context"
-    }
+The active environment document uses the Supprocom.Secrets installation-key boundary. `SHARPCLAW_ENCRYPTION_KEY` is an installation-key source when it is configured and valid.
 
-  → CONTEXT_ID
+`Database__Provider` selects the database provider. The Runtime validates the selected database before it publishes discovery.
 
-Step 3 — Add the specialist agent as an allowed agent.
+`Modules__<module-id>` selects a manifest identity. Invalid or incomplete enabled modules fail closed.
 
-    POST /channel-contexts/CONTEXT_ID/agents
-    { "agentId": "SPECIALIST_AGENT_ID" }
+## Handle Errors
 
-Step 4 — Set context-level defaults (inherited by all channels in it).
+The Runtime returns stable public error responses. It does not return general exception messages to API callers.
 
-  Default resources are configured per module. For example, if a shell module
-  is enabled:
+Request cancellation returns HTTP `499` before response headers start. A failure after response start is rethrown to prevent a false successful response.
 
-    PUT /channel-contexts/CONTEXT_ID/defaults/safeshell
-    { "resourceId": "CONTAINER_ID" }
-
-Step 5 — Create a channel inside the context.
-
-    POST /channels
-    {
-      "contextId": "CONTEXT_ID",
-      "title": "Ops Channel"
-    }
-
-  → CHANNEL_ID
-  Agent, allowed agents, and defaults all cascade from the context.
-
-Step 6 — Chat with the default agent.
-
-    POST /channels/CHANNEL_ID/chat
-    { "message": "What's the server status?" }
-
-Step 7 — Override to the specialist agent for a specific message.
-
-    POST /channels/CHANNEL_ID/chat
-    {
-      "message": "Analyse this code for security issues",
-      "agentId": "SPECIALIST_AGENT_ID"
-    }
-
-  Agent override is allowed because SPECIALIST_AGENT_ID is in the context's allowed agents.
-
-Step 8 — Channel-level override. Set different defaults just for this channel.
-
-  Per-key endpoint overrides the context's default for this channel only:
-
-    PUT /channels/CHANNEL_ID/defaults/safeshell
-    { "resourceId": "DIFFERENT_CONTAINER_ID" }
-
-  Other channels in the same context still use the context defaults.
-
-────────────────────────────────────────────────────────────────────
-ADVANCED EXAMPLE: Threaded Conversation with History
-────────────────────────────────────────────────────────────────────
-
-Goal: Multi-turn conversation within a channel where the model sees history.
-
-Step 1 — Create a thread on an existing channel.
-
-    POST /channels/CHANNEL_ID/threads
-    { "name": "Debug Session", "maxMessages": 20, "maxCharacters": 50000 }
-
-  → THREAD_ID
-
-Step 2 — Chat within the thread. Each message includes the previous history (up to limits).
-
-    POST /channels/CHANNEL_ID/chat/threads/THREAD_ID
-    { "message": "I'm seeing a null reference in UserService.cs" }
-
-    POST /channels/CHANNEL_ID/chat/threads/THREAD_ID
-    { "message": "Can you check line 42?" }
-
-  The second message sees the first exchange as context.
-
-Step 3 — Stream within the thread.
-
-    POST /channels/CHANNEL_ID/chat/threads/THREAD_ID/stream
-
-Step 4 — Chat without a thread on the same channel is one-shot (no history).
-
-    POST /channels/CHANNEL_ID/chat
-    { "message": "Unrelated question" }
-
-  This sees no prior messages.
-
-────────────────────────────────────────
-DATABASE ADMINISTRATION
-────────────────────────────────────────
-Multi-provider EF Core support. Provider selected via Database:Provider in Core .env.
-Supported: JsonFile (default, JSONColdStore EF provider), Postgres, SqlServer, SQLite.
-Stubbed (blocked on EFC 10 packages): MySql, Oracle.
-Provider behavior settings live under Database:JsonFile, Database:Relational,
-Database:Postgres, Database:SqlServer, and Database:SQLite. Systemd/process
-environment variables use double underscores, such as
-Database__JsonFile__Compression.
-See docs/Database-Configuration.md for full setup.
-
-Admin endpoints (require authenticated user admin):
-
-  GET  /admin/db/status   → { state, applied[], pending[] }
-    state: Idle | Draining | Migrating
-
-  POST /admin/db/migrate  → { applied (int), migrations[], message }
-    409 if already in progress. Drains in-flight requests first.
-    ⚠️ All requests are held during migration.
-
-CLI equivalent: db migrate
-
-Migrations are NEVER automatic. App starts normally with pending migrations
-(warns at startup). User must explicitly trigger via API or CLI.
-
-────────────────────────────────────────
-ENCRYPTION & KEY MANAGEMENT
-────────────────────────────────────────
-Provider API keys are encrypted at rest with the application encryption key.
-Key resolution: the in-document `Encryption__Key` value is the explicit
-application/provider override. The installation key for protected env files
-and durable process-log/segment encryption comes from the validated
-`SHARPCLAW_ENCRYPTION_KEY` override or the instance secret file through
-Supprocom.Secrets.
-Startup validation: invalid Base64 or wrong key length → backend crashes with clear error message.
-⚠️ Changing/losing the key makes previously encrypted provider API keys permanently unreadable.
-
-────────────────────────────────────────
-ENV FILE MANAGEMENT
-────────────────────────────────────────
-The Runtime, Client.Uno, and Gateway hosts use canonical dotenv files loaded
-into IConfiguration by Supprocom.Secrets. Each deployed host uses its own
-assembly-local `Environment` directory.
-Each contains `.env` and `.env.template`, with `.dev.env` and
-`.dev.env.template` for development overlays. File keys use `__`; the
-configuration API exposes the same keys with `:` separators.
-
-All /env/core/* endpoints require JWT auth. Caller must be admin OR
-`EnvEditor__AllowNonAdmin="true"` in the Core `.env`.
-
-GET  /env/core/auth  → { authorised: bool }  (pre-check — is caller allowed to edit Core .env?)
-GET  /env/core       → { content: "raw dotenv string" }  (403 if not authorised; a missing active file is restored from the template, while a missing or invalid template is a server error)
-PUT  /env/core       { content }  → { saved: true }  (403 if not authorised)
-
-Core `.env` keys include `Encryption__Key`, `Encryption__EncryptDatabase`,
-`Encryption__EncryptProviderKeys`, `Jwt__Secret`, `Jwt__Issuer`, `Jwt__Audience`,
-`Jwt__AccessTokenLifetime`, `Jwt__RefreshTokenLifetime`,
-`Auth__DisableApiKeyCheck`, `Auth__DisableAccessTokenCheck`, database and
-logging settings, `Admin`, local model settings, `EnvEditor`, `UniqueNames`,
-`ExternalModules`, and `Modules`. `Jwt__Secret` and `Encryption__Key` are
-generated per instance when omitted. `SHARPCLAW_ENCRYPTION_KEY` remains the
-installation-key override used by Supprocom.Secrets protected environment
-files and by durable process-log and segment encryption. It is distinct from
-the in-document `Encryption__Key` application/provider encryption override,
-which has higher precedence after the environment document is loaded.
-
-Chat-path switches live under Chat. DisableDefaultHeaders removes the generated
-metadata header but still lets explicit agent/channel custom headers run.
-DisableDefaultSystemPrompt removes the core-generated native-tool instruction
-suffix but preserves the agent's configured prompt. DisableHeaderTagExpansion
-treats explicit custom headers as literal text without resolving built-in,
-resource, or module-owned tags. DisableModuleHeaderTags prevents module-owned
-header tag resolvers from running in custom headers. CacheMaxMegabytes sets the
-unified chat cache memory budget. It keeps header user or agent state and
-recently-used channel, thread, and agent token totals hot until the budget is
-full; oldest objects are evicted first. 0 disables chat caching.
-
-AgentOrchestration__DisableAccessibleThreadsHeader keeps Agent Orchestration
-{{accessible-threads}} output empty without disabling the module's explicit
-cross-thread tools.
-
-Interface .env keys include `Api__Url`, `Backend__Enabled`, `Gateway__Enabled`,
-`Gateway__Url`, process-startup flags, and logging settings. Gateway .env keys
-include `InternalApi__BaseUrl`, timeout, API-key and gateway-token overrides,
-`Gateway__RequestQueue`, `Gateway__Endpoints`, and `Gateway__Modules`.
-
-Changes to Core .env require a backend restart to take effect.
-
-────────────────────────────────────────
-CUSTOM CHAT HEADER
-────────────────────────────────────────
-Agents and channels have an optional customChatHeader field (string|null) that replaces the default metadata header prepended to each user message.
-
-Override chain: channel.customChatHeader > agent.customChatHeader > built-in default. disableChatHeader=true suppresses all headers.
-
-Template syntax: {{tagName}} placeholders, case-insensitive.
-
-Context tags (single value):
-  {{time}}               → 2025-07-14 09:30:00 UTC
-  {{user}}               → marko
-  {{via}}                → CLI | API | Telegram | Discord | WhatsApp | VisualStudio | VisualStudioCode | Uno* | Other
-  {{role}}               → Admin (CreateSubAgents, SafeShell)
-  {{bio}}                → Backend developer, likes Rust
-  {{agent-name}}         → CodeReview Agent
-  {{agent-role}}         → DevOps clearance=Independent (SafeShell[guid,...], ManageAgent[guid,...])
-  {{clearance}}          → Independent
-  {{grants}}             → CreateSubAgents, SafeShell, ManageAgent  (user grants, name-only)
-  {{editor}}             → VisualStudio2026 18.4 file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"
-  {{accessible-threads}} → Debug Session [Ops Channel] (guid), Planning [Strategy] (guid)
-
-Wildcard grants (ffffffff-...) resolve to all concrete resource IDs of that type.
-
-Resource tags (enumerate entities):
-  {{Agents}}             → comma-separated GUIDs (no template)
-  {{Agents:{Name} ({Id})}}  → per-item formatted: CodeReview Agent (3fa8...), DevOps Agent (7c9e...)
-
-Supported resource tag names: Agents, Models, Providers, Channels, Threads, Roles, Users, Containers, Websites, SearchEngines, DisplayDevices, EditorSessions, Skills, SystemUsers, LocalInfoStores, ExternalInfoStores.
-
-Note: Some entity types (Containers, Websites, SearchEngines, DisplayDevices, EditorSessions, SystemUsers, LocalInfoStores, ExternalInfoStores) are module-registered resources. They return results only when their owning module is enabled.
-
-Fields with [HeaderSensitive] (PasswordHash, PasswordSalt, EncryptedApiKey) → [redacted]. Unknown fields → [FieldName?].
-
-Permissions: canEditAgentHeader / canEditChannelHeader (global flags) + agentHeaderAccesses / channelHeaderAccesses (per-resource arrays in role permissions).
-
-Examples:
-
-  Template: [{{time}} | {{user}} via {{via}}]
-  Output:   [2025-07-14 09:30:00 UTC | marko via CLI]
-
-  Template: [time: {{time}} | user: {{user}} | agent: {{agent-name}} | role: {{agent-role}}]
-  Output:   [time: 2025-07-14 09:30:00 UTC | user: marko | agent: CodeReview Agent | role: DevOps clearance=Independent (SafeShell[3fa85f64-...], ManageAgent[7c9e6679-...])]
-
-  Template: Agents: {{Agents:{Name} (model={ModelName})}}
-  Output:   Agents: CodeReview Agent (model=gpt-4o), DevOps Agent (model=claude-sonnet-4-20250514)
-
-  Template: Users: {{Users:{Username} hash={PasswordHash}}}
-  Output:   Users: marko hash=[redacted], admin hash=[redacted]
-
-  Template: [{{time}} | {{editor}}]
-  Output:   [2025-07-14 09:30:00 UTC | VisualStudio2026 18.4.2 workspace=D:\Source\SharpClaw-NET\SharpClaw file=Program.cs lang=csharp sel=10-25 selection="public async Task RunAsync()"]
-
-────────────────────────────────────────
-TOOL AWARENESS SETS
-────────────────────────────────────────
-A reusable named configuration controlling which tool-call schemas are sent in API requests. Reduces prompt-token overhead by excluding tools the agent will never use.
-
-POST   /tool-awareness-sets                   { name, tools? }
-GET    /tool-awareness-sets
-GET    /tool-awareness-sets/{id}
-PUT    /tool-awareness-sets/{id}               { name?, tools? }
-DELETE /tool-awareness-sets/{id}
-
-tools: Dictionary<string, bool>. Keys are tool names (module-defined, e.g. query GET /modules for valid names). Tools whose key is true or absent are included; only tools explicitly set to false are excluded. Empty dict {} = all tools enabled.
-
-Override chain: channel.toolAwarenessSetId > agent.toolAwarenessSetId > null (all tools). Assign via toolAwarenessSetId field on POST/PUT agents and channels.
-
-On DELETE, agents/channels referencing the set have their toolAwarenessSetId set to null (SetNull cascade).
-
-ToolAwarenessSetResponse: id, name, tools (Dictionary<string,bool>), createdAt, updatedAt.
-
-CLI:
-  tools add <name> [json]            Create a tool awareness set
-  tools list                         List all sets
-  tools get <id>                     Show set details
-  tools update <id> [--name <n>] [json]  Update a set
-  tools delete <id>                  Delete a set
-  agent add <name> <modelId> --tools <setId>    Assign on creation
-  agent update <id> <name> --tools <setId>      Assign on update
-  channel add --agent <id> --tools <setId>      Assign on creation
-
-Available tool names are dynamic — they depend on which modules are enabled.
-Query GET /modules for the authoritative list; each module entry includes a
-Tools array with the exact names to use as dictionary keys.
-
-────────────────────────────────────────
+The base host does not define user, role, agent, channel, thread, context, permission, history, skill, or memory routes. Use the owning module contract when that behavior is enabled.
