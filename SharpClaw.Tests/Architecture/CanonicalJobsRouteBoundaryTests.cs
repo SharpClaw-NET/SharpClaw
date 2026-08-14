@@ -45,6 +45,38 @@ public sealed class CanonicalJobsRouteBoundaryTests
         includes.Should().NotContain("Handlers\\AgentJobHandlers.cs");
     }
 
+    [Test]
+    public void Excluded_legacy_orchestration_sources_are_absent()
+    {
+        var root = FindSolutionRoot();
+        var bll = Path.Combine(root, "SharpClaw.Runtime", "BLL");
+        var host = Path.Combine(root, "SharpClaw.Runtime", "Host");
+
+        GetSourceFiles(bll, "Services").Should().BeEmpty();
+        GetSourceFiles(host, "Cli").Should().BeEmpty();
+
+        var moduleSources = Directory.Exists(Path.Combine(bll, "Modules"))
+            ? Directory.GetFiles(
+                    Path.Combine(bll, "Modules"),
+                    "*.cs",
+                    SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(bll, path))
+                .ToArray()
+            : [];
+
+        moduleSources.Should().Equal("Modules\\SecureJsonOptions.cs");
+    }
+
+    private static IReadOnlyList<string> GetSourceFiles(string root, string relativeDirectory)
+    {
+        var directory = Path.Combine(root, relativeDirectory);
+        return Directory.Exists(directory)
+            ? Directory.GetFiles(directory, "*.cs", SearchOption.AllDirectories)
+                .Select(path => Path.GetRelativePath(root, path))
+                .ToArray()
+            : [];
+    }
+
     private static string FindSolutionRoot()
     {
         var starts = new[]

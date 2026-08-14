@@ -643,24 +643,22 @@ public sealed class RuntimeModuleBoundaryTests
     }
 
     [Test]
-    public void Production_module_lifecycle_owners_use_the_module_boundary()
+    public void Production_module_lifecycle_is_owned_by_the_kernel_adapter()
     {
         var root = Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT")
             ?? FindSourceRoot();
         var adapter = File.ReadAllText(Path.Combine(
             root!, "SharpClaw.Runtime", "BLL", "Kernel", "RuntimeKernelAdapter.cs"));
-        var service = File.ReadAllText(Path.Combine(
-            root!, "SharpClaw.Runtime", "BLL", "Services", "ModuleService.cs"));
-        var health = File.ReadAllText(Path.Combine(
-            root!, "SharpClaw.Runtime", "BLL", "Modules", "ModuleHealthCheckService.cs"));
+        var servicePath = Path.Combine(
+            root!, "SharpClaw.Runtime", "BLL", "Services", "ModuleService.cs");
+        var healthPath = Path.Combine(
+            root!, "SharpClaw.Runtime", "BLL", "Modules", "ModuleHealthCheckService.cs");
 
         adapter.Should().Contain("DispatchModuleCompositionActions");
         adapter.Should().Contain("StartModulesThroughActionsAsync");
         adapter.Should().Contain("StopModulesThroughActionsAsync");
-        service.Should().Contain("RunModulePreparationAsync");
-        service.Should().Contain("RunModuleActionAsync");
-        health.Should().Contain("module.health.check");
-        health.Should().Contain("RunHealthActionAsync");
+        File.Exists(servicePath).Should().BeFalse();
+        File.Exists(healthPath).Should().BeFalse();
     }
 
     private static RuntimeKernelAdapter CreateAdapter(
