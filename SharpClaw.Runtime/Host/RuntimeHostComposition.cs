@@ -49,6 +49,7 @@ internal static class RuntimeHostComposition
         services.AddSingleton<IModuleStorageContractProvider>(
             new RuntimeModuleStorageContractProvider(moduleArray));
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+        services.AddScoped<KernelJobsStore>();
 
         foreach (var module in moduleArray)
             services.AddSingleton<ISharpClawModule>(module);

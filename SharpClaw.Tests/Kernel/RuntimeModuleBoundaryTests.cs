@@ -60,7 +60,7 @@ public sealed class RuntimeModuleBoundaryTests
         adapter.ModuleContracts
             .Select(value => value.ModuleId)
             .Should()
-            .Contain(RuntimeJobsActionModule.ModuleId)
+            .Contain(KernelJobsActionModule.ModuleId)
             .And.Contain(RuntimeEventDefinitions.ModuleId);
     }
 
@@ -115,7 +115,7 @@ public sealed class RuntimeModuleBoundaryTests
         var jobsObserved = declared.WildcardKeys
             .Skip(jobsBefore)
             .ToHashSet(StringComparer.Ordinal);
-        foreach (var key in RuntimeJobsActionManifest.Required)
+        foreach (var key in SharpClawActionCatalog.Jobs)
         {
             jobsObserved.Should().Contain(key.Value);
             observedCoverageKeys.Add(key.Value);
@@ -133,7 +133,7 @@ public sealed class RuntimeModuleBoundaryTests
 
         var expectedActionKeys = KernelActionCatalog.Coverage
             .Select(static entry => entry.ActionKey.Value)
-            .Concat(RuntimeJobsActionManifest.Required.Select(static key => key.Value))
+            .Concat(SharpClawActionCatalog.Jobs.Select(static key => key.Value))
             .Append(DeclaredContractModule.ActionKey.Value)
             .ToHashSet(StringComparer.Ordinal);
 
@@ -387,107 +387,86 @@ public sealed class RuntimeModuleBoundaryTests
 
     private static async Task RunAllJobsFamiliesAsync(RuntimeKernelAdapter adapter)
     {
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.SubmitFamily>(
-            new SharpClawActionKey("jobs.submit"), "jobs.submit", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ValidateFamily>(
-            new SharpClawActionKey("jobs.validate"), "jobs.validate", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.IdentityCreateFamily>(
-            new SharpClawActionKey("jobs.identity.create"), "jobs.identity.create", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.QueuePersistFamily>(
-            new SharpClawActionKey("jobs.queue.persist"), "jobs.queue.persist", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HoldEvaluateFamily>(
-            new SharpClawActionKey("jobs.hold.evaluate"), "jobs.hold.evaluate", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HoldResolveFamily>(
-            new SharpClawActionKey("jobs.hold.resolve"), "jobs.hold.resolve", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.DispatchFamily>(
-            new SharpClawActionKey("jobs.dispatch"), "jobs.dispatch", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StartFamily>(
-            new SharpClawActionKey("jobs.start"), "jobs.start", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.HandlerInvokeFamily>(
-            new SharpClawActionKey("jobs.handler.invoke"), "jobs.handler.invoke", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ProgressFamily>(
-            new SharpClawActionKey("jobs.progress.report"), "jobs.progress.report", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ArtifactSealFamily>(
-            new SharpClawActionKey("jobs.artifact.seal"), "jobs.artifact.seal", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CompleteFamily>(
-            new SharpClawActionKey("jobs.complete"), "jobs.complete", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.FailFamily>(
-            new SharpClawActionKey("jobs.fail"), "jobs.fail", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelFamily>(
-            new SharpClawActionKey("jobs.cancel"), "jobs.cancel", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelRequestFamily>(
-            new SharpClawActionKey("jobs.cancel.request"), "jobs.cancel.request", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.CancelApplyFamily>(
-            new SharpClawActionKey("jobs.cancel.apply"), "jobs.cancel.apply", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PauseFamily>(
-            new SharpClawActionKey("jobs.pause"), "jobs.pause", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StopFamily>(
-            new SharpClawActionKey("jobs.stop"), "jobs.stop", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryFamily>(
-            new SharpClawActionKey("jobs.recovery"), "jobs.recovery", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryScanFamily>(
-            new SharpClawActionKey("jobs.recovery.scan"), "jobs.recovery.scan", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RecoveryClassifyFamily>(
-            new SharpClawActionKey("jobs.recovery.classify"), "jobs.recovery.classify", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryFamily>(
-            new SharpClawActionKey("jobs.retry"), "jobs.retry", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryEvaluateFamily>(
-            new SharpClawActionKey("jobs.retry.evaluate"), "jobs.retry.evaluate", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.RetryScheduleFamily>(
-            new SharpClawActionKey("jobs.retry.schedule"), "jobs.retry.schedule", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ResumeFamily>(
-            new SharpClawActionKey("jobs.resume"), "jobs.resume", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.DeleteFamily>(
-            new SharpClawActionKey("jobs.delete"), "jobs.delete", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
-            new SharpClawActionKey("jobs.read"), "jobs.read", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ListFamily>(
-            new SharpClawActionKey("jobs.list"), "jobs.list", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.LogsReadFamily>(
-            new SharpClawActionKey("jobs.logs.read"), "jobs.logs.read", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.AuditReadFamily>(
-            new SharpClawActionKey("jobs.audit.read"), "jobs.audit.read", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ArtifactReadFamily>(
-            new SharpClawActionKey("jobs.artifact.read"), "jobs.artifact.read", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.EventDeliverFamily>(
-            new SharpClawActionKey("jobs.event.deliver"), "jobs.event.deliver", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionFamily>(
-            new SharpClawActionKey("jobs.state.transition"), "jobs.state.transition", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionPrepareFamily>(
-            new SharpClawActionKey("jobs.state.transition.prepare"), "jobs.state.transition.prepare", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionCommitFamily>(
-            new SharpClawActionKey("jobs.state.transition.commit"), "jobs.state.transition.commit", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.StateTransitionRollbackFamily>(
-            new SharpClawActionKey("jobs.state.transition.rollback"), "jobs.state.transition.rollback", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceFamily>(
-            new SharpClawActionKey("jobs.persistence"), "jobs.persistence", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistencePrepareFamily>(
-            new SharpClawActionKey("jobs.persistence.prepare"), "jobs.persistence.prepare", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceCommitFamily>(
-            new SharpClawActionKey("jobs.persistence.commit"), "jobs.persistence.commit", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.PersistenceRollbackFamily>(
-            new SharpClawActionKey("jobs.persistence.rollback"), "jobs.persistence.rollback", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.InterruptionCheckFamily>(
-            new SharpClawActionKey("jobs.interruption.check"), "jobs.interruption.check", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalCallFamily>(
-            new SharpClawActionKey("jobs.external_call"), "jobs.external_call", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.IrreversibleEffectFamily>(
-            new SharpClawActionKey("jobs.irreversible_effect"), "jobs.irreversible_effect", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectPrepareFamily>(
-            new SharpClawActionKey("jobs.external_effect.prepare"), "jobs.external_effect.prepare", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectReceiptFamily>(
-            new SharpClawActionKey("jobs.external_effect.receipt"), "jobs.external_effect.receipt", CompleteJobsTerminal);
-        await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ExternalEffectUncertainFamily>(
-            new SharpClawActionKey("jobs.external_effect.uncertain"), "jobs.external_effect.uncertain", CompleteJobsTerminal);
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Submit>(adapter, "jobs.submit");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Validate>(adapter, "jobs.validate");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.IdentityCreate>(adapter, "jobs.identity.create");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.QueuePersist>(adapter, "jobs.queue.persist");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.HoldEvaluate>(adapter, "jobs.hold.evaluate");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.HoldResolve>(adapter, "jobs.hold.resolve");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Dispatch>(adapter, "jobs.dispatch");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Start>(adapter, "jobs.start");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.HandlerInvoke>(adapter, "jobs.handler.invoke");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ProgressReport>(adapter, "jobs.progress.report");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ArtifactSeal>(adapter, "jobs.artifact.seal");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Complete>(adapter, "jobs.complete");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Fail>(adapter, "jobs.fail");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Cancel>(adapter, "jobs.cancel");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.CancelRequest>(adapter, "jobs.cancel.request");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.CancelApply>(adapter, "jobs.cancel.apply");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Pause>(adapter, "jobs.pause");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Stop>(adapter, "jobs.stop");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Recovery>(adapter, "jobs.recovery");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.RecoveryScan>(adapter, "jobs.recovery.scan");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.RecoveryClassify>(adapter, "jobs.recovery.classify");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Retry>(adapter, "jobs.retry");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.RetryEvaluate>(adapter, "jobs.retry.evaluate");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.RetrySchedule>(adapter, "jobs.retry.schedule");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Resume>(adapter, "jobs.resume");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Delete>(adapter, "jobs.delete");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Read>(adapter, "jobs.read");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.List>(adapter, "jobs.list");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.LogsRead>(adapter, "jobs.logs.read");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.AuditRead>(adapter, "jobs.audit.read");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ArtifactRead>(adapter, "jobs.artifact.read");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.EventDeliver>(adapter, "jobs.event.deliver");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.StateTransition>(adapter, "jobs.state.transition");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.StateTransitionPrepare>(adapter, "jobs.state.transition.prepare");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.StateTransitionCommit>(adapter, "jobs.state.transition.commit");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.StateTransitionRollback>(adapter, "jobs.state.transition.rollback");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.Persistence>(adapter, "jobs.persistence");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.PersistencePrepare>(adapter, "jobs.persistence.prepare");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.PersistenceCommit>(adapter, "jobs.persistence.commit");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.PersistenceRollback>(adapter, "jobs.persistence.rollback");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.InterruptionCheck>(adapter, "jobs.interruption.check");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ExternalCall>(adapter, "jobs.external_call");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.IrreversibleEffect>(adapter, "jobs.irreversible_effect");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ExternalEffectPrepare>(adapter, "jobs.external_effect.prepare");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ExternalEffectReceipt>(adapter, "jobs.external_effect.receipt");
+        await RunJobsFamilyAsync<KernelJobsOperationFamilies.ExternalEffectUncertain>(adapter, "jobs.external_effect.uncertain");
     }
 
-    private static ValueTask<object?> CompleteJobsTerminal(
-        object? value,
-        CancellationToken cancellationToken)
+    private static async Task RunJobsFamilyAsync<TFamily>(
+        RuntimeKernelAdapter adapter,
+        string action)
     {
-        cancellationToken.ThrowIfCancellationRequested();
-        return ValueTask.FromResult(value);
+        await adapter.JobsActionRunner.RunAsync<TFamily>(
+            new SharpClawActionKey(action),
+            CreateJob(action),
+            static (job, cancellationToken) =>
+            {
+                cancellationToken.ThrowIfCancellationRequested();
+                return ValueTask.FromResult(job);
+            },
+            CreateRoadmapExecutionContext());
     }
+
+    private static JobDocument CreateJob(string action) =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            new SharpClawActionKey(action),
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty,
+            JobStatus.Pending,
+            [],
+            DateTimeOffset.UtcNow,
+            null,
+            null,
+            null,
+            ActionOutcomeCertainty.Certain,
+            new JobPayloadEnvelope("test", 1, "{}"));
 
     [Test]
     public void Contract_manifest_rejects_a_declared_action_missing_from_the_graph()
@@ -804,7 +783,7 @@ public sealed class RuntimeModuleBoundaryTests
     private static IReadOnlyList<KernelSensitiveActionApproval> CreateJobsApprovals(
         string moduleId)
     {
-        var jobsModule = new RuntimeJobsActionModule();
+        var jobsModule = new KernelJobsActionModule();
         var graphBuilder = new KernelGraphBuilder(includeStandardDefinitions: false);
         var moduleBuilder = new KernelModuleBuilder(graphBuilder, jobsModule.Identity);
         jobsModule.Configure(moduleBuilder);
@@ -815,7 +794,7 @@ public sealed class RuntimeModuleBoundaryTests
 
     private static IReadOnlyDictionary<string, ActionInterceptionCapabilities> CreateJobsGrants()
     {
-        var jobsModule = new RuntimeJobsActionModule();
+        var jobsModule = new KernelJobsActionModule();
         var graphBuilder = new KernelGraphBuilder(includeStandardDefinitions: false);
         var moduleBuilder = new KernelModuleBuilder(graphBuilder, jobsModule.Identity);
         jobsModule.Configure(moduleBuilder);

@@ -24,7 +24,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly KernelActionDispatcher _actionDispatcher;
     private readonly KernelEventDispatcher _eventDispatcher;
     private readonly IKernelEventDeliverySink _eventDeliverySink;
-    private readonly RuntimeJobsActionBoundary _jobsActionBoundary;
+    private readonly KernelJobsActionRunner _jobsActionRunner;
     private readonly IReadOnlyList<RuntimeModuleContractCapture> _moduleContracts;
     private bool _started;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
@@ -51,7 +51,7 @@ public sealed class RuntimeKernelAdapter :
 
         _moduleRegistry = new KernelModuleRegistry();
         var moduleContracts = new List<RuntimeModuleContractCapture>();
-        var jobsModule = new RuntimeJobsActionModule();
+        var jobsModule = new KernelJobsActionModule();
         AddCapturedModule(jobsModule, moduleContracts);
         AddCapturedModule(new RuntimeEventModule(), moduleContracts);
         foreach (var module in modules.OrderBy(value => value.Identity.Id, StringComparer.Ordinal))
@@ -68,7 +68,6 @@ public sealed class RuntimeKernelAdapter :
         RuntimeModuleActionManifest.Validate(Graph);
         RuntimeModuleContractManifest.Validate(Graph, _moduleContracts);
         RuntimeEventActionManifest.Validate(Graph);
-        RuntimeJobsActionManifest.Validate(Graph);
         _eventDeliverySink = eventDeliverySink ?? new InMemoryEventDeliverySink(supportsDurable: true);
         _eventDispatcher = new KernelEventDispatcher(Graph, _eventDeliverySink);
         _actionDispatcher = new KernelActionDispatcher(
@@ -81,10 +80,7 @@ public sealed class RuntimeKernelAdapter :
             eventWriter: _eventDispatcher,
             resultSnapshotter: new RuntimeEventActionResultSnapshotter(),
             repeatEvidenceAuthority: repeatEvidenceAuthority);
-        _jobsActionBoundary = new RuntimeJobsActionBoundary(
-            Graph,
-            _actionDispatcher,
-            () => CreateHostExecutionContext());
+        _jobsActionRunner = new KernelJobsActionRunner(Graph, _actionDispatcher);
         DispatchModuleCompositionActions();
         var graphPlugins = (Graph.GetService(typeof(IEnumerable<IProviderPlugin>)) as IEnumerable<IProviderPlugin>)
             ?.ToArray()
@@ -112,7 +108,7 @@ public sealed class RuntimeKernelAdapter :
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
-    internal RuntimeJobsActionBoundary JobsActionBoundary => _jobsActionBoundary;
+    internal KernelJobsActionRunner JobsActionRunner => _jobsActionRunner;
 
     internal IReadOnlyList<RuntimeModuleContractCapture> ModuleContracts => _moduleContracts;
 
@@ -1163,7 +1159,7 @@ public sealed class RuntimeKernelAdapter :
 
     private static KernelGraphCompileOptions AddRuntimeEventGrant(
         KernelGraphCompileOptions? options,
-        RuntimeJobsActionModule jobsModule)
+        KernelJobsActionModule jobsModule)
     {
         var actionModuleGrants = options?.ActionModuleCapabilityGrants is { } existingActionGrants
             ? existingActionGrants.ToDictionary(

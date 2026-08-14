@@ -39,7 +39,7 @@ public sealed class RuntimeKernelAdapterTests
         adapter.Graph.Modules.Modules.Should().HaveCount(3);
         adapter.Graph.Modules.Modules.Select(module => module.Identity.Id)
             .Should()
-            .BeEquivalentTo(["sharpclaw.runtime.events", "sharpclaw.runtime.jobs", "test-module"]);
+            .BeEquivalentTo(["sharpclaw.runtime.events", "sharpclaw.core.jobs", "test-module"]);
         adapter.Graph.GetService(typeof(IEnumerable<IProviderPlugin>))
             .Should().NotBeNull();
         providerFactory.Plugins.Should().ContainSingle()
@@ -123,17 +123,20 @@ public sealed class RuntimeKernelAdapterTests
             ExtensionFeatureSet.Empty,
             Guid.NewGuid(),
             Guid.NewGuid());
-        var result = await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
-            context,
+        var result = await adapter.JobsActionRunner.RunAsync<KernelJobsOperationFamilies.Read>(
             new SharpClawActionKey("jobs.read"),
-            new { JobId = Guid.NewGuid() },
-            (_, _) =>
+            CreateJob("jobs.read"),
+            (job, _) =>
             {
                 terminalCalls++;
-                return ValueTask.FromResult<object?>("read");
-            });
+                return ValueTask.FromResult(job with
+                {
+                    Result = new JobResultReference("test", 1, "read"),
+                });
+            },
+            context);
 
-        result.Should().Be("read");
+        result.Result!.ArtifactKey.Should().Be("read");
         terminalCalls.Should().Be(1);
     }
 
@@ -160,24 +163,39 @@ public sealed class RuntimeKernelAdapterTests
         var terminalCalls = 0;
 
         Func<Task> run = async () =>
-            await adapter.JobsActionBoundary.RunAsync<RuntimeJobsActionModule.ReadFamily>(
+            await adapter.JobsActionRunner.RunAsync<KernelJobsOperationFamilies.Read>(
+                new SharpClawActionKey("jobs.read"),
+                CreateJob("jobs.read"),
+                static (job, _) => ValueTask.FromResult(job),
                 new KernelActionExecutionContext(
                     RequestPrincipal.Anonymous,
                     ExtensionFeatureSet.Empty,
                     Guid.NewGuid(),
                     Guid.NewGuid()),
-                new SharpClawActionKey("jobs.read"),
-                null,
-                (_, _) =>
-                {
-                    terminalCalls++;
-                    return ValueTask.FromResult<object?>(true);
-                },
+                0,
                 cancellation.Token);
 
         await run.Should().ThrowAsync<OperationCanceledException>();
         terminalCalls.Should().Be(0);
     }
+
+    private static JobDocument CreateJob(string action) =>
+        new(
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            null,
+            new SharpClawActionKey(action),
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty,
+            JobStatus.Pending,
+            [],
+            DateTimeOffset.UtcNow,
+            null,
+            null,
+            null,
+            ActionOutcomeCertainty.Certain,
+            new JobPayloadEnvelope("test", 1, "{}"));
 
     [Test]
     public async Task Request_stream_replace_result_without_terminal_fails_closed()

@@ -1,3 +1,4 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Runtime.ExceptionServices;
 using System.Text;
@@ -20,41 +21,328 @@ public sealed class BundledModuleStorageGateway(
     {
         PropertyNameCaseInsensitive = true,
     };
+    private static readonly ConcurrentDictionary<string, ModuleStorageMutationAndOutboxResult> CommitResults = new(StringComparer.Ordinal);
+    private static readonly ConcurrentDictionary<string, ModuleStorageClaimAuthority> Claims = new(StringComparer.Ordinal);
 
     public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() =>
         contracts.GetStorageContracts();
 
-    public Task<ModuleStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
+    public async Task<ModuleStorageMutationAndOutboxResult> CommitMutationAndOutboxAsync(
         string moduleId,
         string storageName,
         ModuleStorageMutationAndOutboxRequest request,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException(
-            "Atomic module storage commits with outbox delivery are not available because the current host schema has no outbox store.");
+        CancellationToken ct = default)
+    {
+        moduleId = RequireIdentifier(moduleId, nameof(moduleId), 128);
+        storageName = RequireIdentifier(storageName, nameof(storageName), 128);
+        ArgumentNullException.ThrowIfNull(request);
+        var contract = RequireContract(moduleId, storageName);
+        RequireOperation(contract, ModuleStorageOperations.MutateAndOutbox);
+        if (request.Outbox.Count != 0)
+        {
+            throw new NotSupportedException(
+                "The current host storage schema has no durable module outbox.");
+        }
 
-    public Task<ModuleStorageClaimResult<T>> ClaimAsync<T>(
+        var commitKey = CommitKey(moduleId, storageName, request.Commit.IdempotencyKey);
+        if (CommitResults.TryGetValue(commitKey, out var previous))
+            return previous with { AlreadyCommitted = true };
+
+        if (request.Mutations.Count == 0 || request.Mutations.Count > contract.MaxBatchSize)
+            throw new ArgumentException("The atomic module storage commit has an invalid mutation count.", nameof(request));
+
+        var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
+        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        try
+        {
+            var pending = new List<PendingMutation>(request.Mutations.Count);
+            foreach (var mutation in request.Mutations)
+            {
+                var key = RequireIdentifier(mutation.Key, nameof(mutation.Key), 256);
+                if (mutation.Operation is not (ModuleStorageOperations.Upsert or ModuleStorageOperations.Delete))
+                    throw new NotSupportedException($"Atomic module storage operation '{mutation.Operation}' is not supported.");
+
+                var record = await Records(contract)
+                    .SingleOrDefaultAsync(candidate => candidate.RecordKey == key, ct);
+                var actualRevision = record is null ? 0 : Revision(record);
+                if (mutation.ExpectedRevision is { } expected && expected != actualRevision)
+                    throw RevisionConflict(key, expected, actualRevision);
+                ValidateAuthority(moduleId, storageName, key, mutation.Authority, actualRevision);
+
+                IReadOnlyList<ModuleStorageIndexEntryDB> indexes = [];
+                string? valueJson = null;
+                if (mutation.Operation == ModuleStorageOperations.Upsert)
+                {
+                    if (mutation.Value is not { } value || value.ValueKind is JsonValueKind.Null or JsonValueKind.Undefined)
+                        throw new ArgumentException("Atomic module storage upsert requires a value.", nameof(request));
+                    ValidateDocumentSize(contract, value);
+                    indexes = mutation.Indexes is null
+                        ? []
+                        : ReadIndexes(
+                            contract,
+                            key,
+                            mutation.Indexes is JsonElement element
+                                ? element
+                                : JsonSerializer.SerializeToElement(mutation.Indexes, JsonOptions));
+                    valueJson = value.GetRawText();
+                }
+
+                pending.Add(new PendingMutation(
+                    mutation,
+                    key,
+                    record,
+                    actualRevision,
+                    valueJson,
+                    indexes));
+            }
+
+            var writtenRecords = new Dictionary<string, ModuleStorageRecordDB>(StringComparer.Ordinal);
+            foreach (var item in pending)
+            {
+                if (item.Mutation.Operation == ModuleStorageOperations.Delete)
+                {
+                    if (item.Record is not null)
+                        db.ModuleStorageRecords.Remove(item.Record);
+                    await DeleteIndexesAsync(contract, item.Key, ct);
+                    continue;
+                }
+
+                var record = item.Record ?? new ModuleStorageRecordDB
+                {
+                    Id = Guid.NewGuid(),
+                    ModuleId = contract.ModuleId,
+                    StorageName = contract.StorageName,
+                    RecordKey = item.Key,
+                    ValueJson = item.ValueJson!,
+                };
+                if (item.Record is null)
+                    db.ModuleStorageRecords.Add(record);
+                else
+                    record.ValueJson = item.ValueJson!;
+                writtenRecords[item.Key] = record;
+
+                await DeleteIndexesAsync(contract, item.Key, ct);
+                db.ModuleStorageIndexEntries.AddRange(item.Indexes);
+            }
+
+            await db.SaveChangesThroughKernelAsync(ct);
+            var revisions = pending
+                .Select(item => new ModuleStorageRevision(
+                    item.Key,
+                    item.Mutation.Operation == ModuleStorageOperations.Delete
+                        ? item.ActualRevision + 1
+                        : Revision(writtenRecords[item.Key])))
+                .ToArray();
+
+            if (transaction is not null)
+                await transactionRunner.CommitAsync(transaction, ct);
+
+            var result = new ModuleStorageMutationAndOutboxResult(
+                request.Commit,
+                revisions,
+                [],
+                revisions.Max(revision => revision.Revision));
+            CommitResults.TryAdd(commitKey, result);
+            foreach (var item in pending)
+                AdvanceClaim(moduleId, storageName, item.Key, item.Mutation.Authority, revisions.First(value => value.Key == item.Key).Revision);
+            return result;
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                try
+                {
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                }
+                catch
+                {
+                }
+            }
+
+            throw;
+        }
+    }
+
+    public async Task<ModuleStorageClaimResult<T>> ClaimAsync<T>(
         string moduleId,
         string storageName,
         ModuleStorageClaimRequest request,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException(
-            "Typed module storage claims are not available through the current host storage implementation.");
+        CancellationToken ct = default)
+    {
+        moduleId = RequireIdentifier(moduleId, nameof(moduleId), 128);
+        storageName = RequireIdentifier(storageName, nameof(storageName), 128);
+        ArgumentNullException.ThrowIfNull(request);
+        if (!string.Equals(request.OwnerId, moduleId, StringComparison.Ordinal))
+            throw ModuleStorageFailure(ModuleStorageErrors.ClaimOwnerMismatch, "The claim owner does not match the storage owner.");
 
-    public Task<ModuleStorageClaimRenewalResult> RenewClaimAsync(
+        var contract = RequireContract(moduleId, storageName);
+        RequireOperation(contract, ModuleStorageOperations.Claim);
+        using var parameters = JsonDocument.Parse(JsonSerializer.Serialize(new
+        {
+            filters = request.Filters,
+            orderBy = request.OrderBy,
+            limit = request.Limit,
+            patch = request.Patch,
+            indexes = request.Indexes,
+        }, JsonOptions));
+        var claim = ReadClaim(contract, parameters.RootElement);
+        var transactionRunner = transactionRunnerAccessor.GetRequiredRunner();
+        await using var transaction = await transactionRunner.BeginSerializableAsync(ct);
+        try
+        {
+            var records = await LoadQueryRecordsAsync(contract, claim.Query, tracking: true, ct);
+            if (records.Count == 0)
+            {
+                if (transaction is not null)
+                    await transactionRunner.CommitAsync(transaction, ct);
+                return new ModuleStorageClaimResult<T>(
+                    [],
+                    NewClaimAuthority(moduleId, storageName, null, 0, request.Authority));
+            }
+
+            var now = DateTimeOffset.UtcNow;
+            var generation = 1L;
+            foreach (var record in records)
+            {
+                var claimKey = ClaimKey(moduleId, storageName, record.RecordKey);
+                if (Claims.TryGetValue(claimKey, out var existing))
+                {
+                    if (request.Authority is null || !existing.Matches(request.Authority) || !existing.IsValidAt(now))
+                        throw ModuleStorageFailure(ModuleStorageErrors.StaleClaim, "The storage record already has a live claim.", record.RecordKey);
+                    generation = Math.Max(generation, existing.Generation + 1);
+                }
+
+                var actualRevision = Revision(record);
+                if (request.ExpectedRevision is { } expected && expected != actualRevision)
+                    throw RevisionConflict(record.RecordKey, expected, actualRevision);
+                Claims.TryGetValue(claimKey, out var authorityClaim);
+                if (request.Authority is not null &&
+                    (authorityClaim is null || !authorityClaim.Matches(request.Authority)))
+                    throw ModuleStorageFailure(ModuleStorageErrors.ClaimAuthorityMismatch, "The requested claim authority is not active.", record.RecordKey);
+            }
+
+            ValidateClaimPatchIndexedFields(contract, claim.Patch, claim.IndexUpdates);
+            foreach (var record in records)
+                record.ValueJson = ApplyPatch(record.ValueJson, claim.Patch);
+            await ReplaceClaimIndexesAsync(
+                contract,
+                records.Select(record => record.RecordKey).ToArray(),
+                claim.IndexUpdates,
+                ct);
+            await db.SaveChangesThroughKernelAsync(ct);
+
+            var authority = NewClaimAuthority(
+                moduleId,
+                storageName,
+                records,
+                generation,
+                request.Authority);
+            var resultRecordsList = new List<ModuleStorageClaimRecord<T>>(records.Count);
+            foreach (var record in records)
+            {
+                var value = JsonSerializer.Deserialize<T>(record.ValueJson, JsonOptions)
+                    ?? throw new InvalidOperationException("A claimed module storage value could not be decoded.");
+                var indexes = await Indexes(contract)
+                    .Where(index => index.RecordKey == record.RecordKey)
+                    .ToListAsync(ct);
+                resultRecordsList.Add(new ModuleStorageClaimRecord<T>(
+                    record.RecordKey,
+                    value,
+                    Revision(record),
+                    authority,
+                    IndexesResponse(indexes)));
+            }
+            var resultRecords = resultRecordsList.ToArray();
+            authority = authority with
+            {
+                Revision = resultRecords.Max(record => record.Revision),
+            };
+            foreach (var record in resultRecords)
+                Claims[ClaimKey(moduleId, storageName, record.Key)] = authority;
+
+            if (transaction is not null)
+                await transactionRunner.CommitAsync(transaction, ct);
+            return new ModuleStorageClaimResult<T>(resultRecords, authority);
+        }
+        catch
+        {
+            if (transaction is not null)
+            {
+                try
+                {
+                    await transactionRunner.RollbackAsync(transaction, CancellationToken.None);
+                }
+                catch
+                {
+                }
+            }
+
+            throw;
+        }
+    }
+
+    public async Task<ModuleStorageClaimRenewalResult> RenewClaimAsync(
         string moduleId,
         string storageName,
         ModuleStorageClaimRenewalRequest request,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException(
-            "Module storage claim renewal is not available through the current host storage implementation.");
+        CancellationToken ct = default)
+    {
+        moduleId = RequireIdentifier(moduleId, nameof(moduleId), 128);
+        storageName = RequireIdentifier(storageName, nameof(storageName), 128);
+        ArgumentNullException.ThrowIfNull(request);
+        var prefix = ClaimPrefix(moduleId, storageName);
+        foreach (var pair in Claims.Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+            var current = pair.Value;
+            if (!string.Equals(current.OwnerId, request.OwnerId, StringComparison.Ordinal) ||
+                current.HostToken != request.HostToken ||
+                current.Generation != request.Generation ||
+                !current.IsValidAt(DateTimeOffset.UtcNow))
+                continue;
+
+            var key = pair.Key[prefix.Length..];
+            var contract = RequireContract(moduleId, storageName);
+            var record = await Records(contract).SingleOrDefaultAsync(item => item.RecordKey == key, ct);
+            if (record is null)
+                break;
+            var renewed = current with
+            {
+                LeaseExpiresAt = request.RequestedLeaseExpiresAt,
+                Revision = Revision(record),
+            };
+            Claims[pair.Key] = renewed;
+            return new ModuleStorageClaimRenewalResult(true, renewed);
+        }
+
+        return new ModuleStorageClaimRenewalResult(false, null, ModuleStorageErrors.StaleClaim);
+    }
 
     public Task<ModuleStorageClaimRecoveryResult> RecoverClaimAsync(
         string moduleId,
         string storageName,
         ModuleStorageClaimRecoveryRequest request,
-        CancellationToken ct = default) =>
-        throw new NotSupportedException(
-            "Module storage claim recovery is not available through the current host storage implementation.");
+        CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        moduleId = RequireIdentifier(moduleId, nameof(moduleId), 128);
+        storageName = RequireIdentifier(storageName, nameof(storageName), 128);
+        ArgumentNullException.ThrowIfNull(request);
+        var prefix = ClaimPrefix(moduleId, storageName);
+        foreach (var pair in Claims.Where(pair => pair.Key.StartsWith(prefix, StringComparison.Ordinal)))
+        {
+            var current = pair.Value;
+            if (string.Equals(current.OwnerId, request.OwnerId, StringComparison.Ordinal) &&
+                current.HostToken == request.HostToken &&
+                current.Generation == request.Generation)
+            {
+                Claims.TryRemove(pair.Key, out _);
+                return Task.FromResult(new ModuleStorageClaimRecoveryResult(true, current));
+            }
+        }
+
+        return Task.FromResult(new ModuleStorageClaimRecoveryResult(false, null, ModuleStorageErrors.StaleClaim));
+    }
 
     public async Task<JsonElement> InvokeAsync(
         string moduleId,
@@ -907,6 +1195,98 @@ public sealed class BundledModuleStorageGateway(
         }
     }
 
+    private static string CommitKey(
+        string moduleId,
+        string storageName,
+        string idempotencyKey) =>
+        $"{moduleId}\u001f{storageName}\u001f{idempotencyKey}";
+
+    private static string ClaimPrefix(string moduleId, string storageName) =>
+        $"{moduleId}\u001f{storageName}\u001f";
+
+    private static string ClaimKey(string moduleId, string storageName, string recordKey) =>
+        ClaimPrefix(moduleId, storageName) + recordKey;
+
+    private static ModuleStorageContractException ModuleStorageFailure(
+        string code,
+        string message,
+        string? key = null,
+        long? expectedRevision = null,
+        long? actualRevision = null) =>
+        new(new ModuleStorageContractFailure(code, message, key, expectedRevision, actualRevision));
+
+    private static ModuleStorageContractException RevisionConflict(
+        string key,
+        long? expectedRevision,
+        long actualRevision) =>
+        ModuleStorageFailure(
+            ModuleStorageErrors.RevisionConflict,
+            "The module storage record revision is stale.",
+            key,
+            expectedRevision,
+            actualRevision);
+
+    private static void ValidateAuthority(
+        string moduleId,
+        string storageName,
+        string recordKey,
+        ModuleStorageClaimAuthority? authority,
+        long actualRevision)
+    {
+        if (authority is null)
+            return;
+
+        var claimKey = ClaimKey(moduleId, storageName, recordKey);
+        if (!Claims.TryGetValue(claimKey, out var active) ||
+            !active.IsValidAt(DateTimeOffset.UtcNow) ||
+            !active.Matches(authority) ||
+            authority.Revision != actualRevision)
+        {
+            throw ModuleStorageFailure(
+                ModuleStorageErrors.FencingRejected,
+                "The module storage claim fence is stale.",
+                recordKey,
+                actualRevision,
+                actualRevision);
+        }
+    }
+
+    private static void AdvanceClaim(
+        string moduleId,
+        string storageName,
+        string recordKey,
+        ModuleStorageClaimAuthority? authority,
+        long revision)
+    {
+        if (authority is null)
+            return;
+
+        var claimKey = ClaimKey(moduleId, storageName, recordKey);
+        if (Claims.TryGetValue(claimKey, out var active) && active.Matches(authority))
+            Claims[claimKey] = active with { Revision = revision };
+    }
+
+    private static ModuleStorageClaimAuthority NewClaimAuthority(
+        string moduleId,
+        string storageName,
+        IReadOnlyList<ModuleStorageRecordDB>? records,
+        long generation,
+        ModuleStorageClaimAuthority? requested)
+    {
+        var revision = records is null || records.Count == 0
+            ? requested?.Revision ?? 0
+            : records.Max(Revision);
+        if (requested is not null)
+            return requested with { Revision = revision };
+
+        return new ModuleStorageClaimAuthority(
+            moduleId,
+            Guid.NewGuid(),
+            DateTimeOffset.UtcNow.AddMinutes(5),
+            generation,
+            revision);
+    }
+
     private async Task<JsonElement> ReadIndexesAsync(
         ModuleStorageContractDescriptor contract,
         string key,
@@ -1051,6 +1431,14 @@ public sealed class BundledModuleStorageGateway(
     private sealed record StorageWrite(
         string Key,
         string ValueJson,
+        IReadOnlyList<ModuleStorageIndexEntryDB> Indexes);
+
+    private sealed record PendingMutation(
+        ModuleStorageMutation Mutation,
+        string Key,
+        ModuleStorageRecordDB? Record,
+        long ActualRevision,
+        string? ValueJson,
         IReadOnlyList<ModuleStorageIndexEntryDB> Indexes);
 
     private sealed record StorageQuery(

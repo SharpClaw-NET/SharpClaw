@@ -1,5 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Kernel;
 
 namespace SharpClaw.Runtime.Host;
 
@@ -17,6 +18,7 @@ internal sealed class RuntimeModuleStorageContractProvider : IModuleStorageContr
             module.Configure(collector);
 
         _contracts = collector.StorageContracts
+            .Concat(KernelJobsStorage.Contracts)
             .GroupBy(contract => (contract.ModuleId, contract.StorageName))
             .Select(group => group.Count() == 1
                 ? group.Single()
