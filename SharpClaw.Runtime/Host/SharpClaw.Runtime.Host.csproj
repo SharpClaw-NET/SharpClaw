@@ -19,6 +19,7 @@
     <Compile Remove="Handlers\**\*.cs" />
     <Compile Remove="HostPersistenceGlobalUsings.cs" />
     <Compile Remove="Routing\**\*.cs" />
+    <Compile Include="Handlers\KernelJobsHandlers.cs" />
     <Compile Include="Handlers\RemoteRuntimePairingHandlers.cs" />
     <Compile Include="Routing\EndpointMapper.cs" />
     <Compile Include="Routing\MapAttributes.cs" />

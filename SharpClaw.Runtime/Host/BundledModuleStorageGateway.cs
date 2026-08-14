@@ -4,6 +4,7 @@ using System.Runtime.ExceptionServices;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Nodes;
+using System.Text.Json.Serialization;
 using Microsoft.EntityFrameworkCore;
 using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
@@ -17,10 +18,7 @@ public sealed class BundledModuleStorageGateway(
     IRuntimeTransactionActionRunnerAccessor transactionRunnerAccessor,
     IModuleStorageTelemetry? telemetry = null) : IModuleStorageGateway
 {
-    private static readonly JsonSerializerOptions JsonOptions = new(JsonSerializerDefaults.Web)
-    {
-        PropertyNameCaseInsensitive = true,
-    };
+    private static readonly JsonSerializerOptions JsonOptions = CreateJsonOptions();
     private static readonly ConcurrentDictionary<string, ModuleStorageMutationAndOutboxResult> CommitResults = new(StringComparer.Ordinal);
     private static readonly ConcurrentDictionary<string, ModuleStorageClaimAuthority> Claims = new(StringComparer.Ordinal);
 
@@ -1466,4 +1464,44 @@ public sealed class BundledModuleStorageGateway(
         double? NumberValue,
         DateTimeOffset? DateTimeValue,
         bool? BoolValue);
+
+    private static JsonSerializerOptions CreateJsonOptions()
+    {
+        var options = new JsonSerializerOptions(JsonSerializerDefaults.Web)
+        {
+            PropertyNameCaseInsensitive = true,
+        };
+        options.Converters.Add(new ReadOnlySetJsonConverterFactory());
+        return options;
+    }
+
+    private sealed class ReadOnlySetJsonConverterFactory : JsonConverterFactory
+    {
+        public override bool CanConvert(Type typeToConvert) =>
+            typeToConvert.IsGenericType &&
+            typeToConvert.GetGenericTypeDefinition() == typeof(IReadOnlySet<>);
+
+        public override JsonConverter CreateConverter(
+            Type typeToConvert,
+            JsonSerializerOptions options) =>
+            (JsonConverter)Activator.CreateInstance(
+                typeof(ReadOnlySetJsonConverter<>).MakeGenericType(
+                    typeToConvert.GetGenericArguments()[0]))!;
+    }
+
+    private sealed class ReadOnlySetJsonConverter<T> : JsonConverter<IReadOnlySet<T>>
+        where T : notnull
+    {
+        public override IReadOnlySet<T> Read(
+            ref Utf8JsonReader reader,
+            Type typeToConvert,
+            JsonSerializerOptions options) =>
+            new HashSet<T>(JsonSerializer.Deserialize<T[]>(ref reader, options) ?? []);
+
+        public override void Write(
+            Utf8JsonWriter writer,
+            IReadOnlySet<T> value,
+            JsonSerializerOptions options) =>
+            JsonSerializer.Serialize(writer, value.ToArray(), options);
+    }
 }

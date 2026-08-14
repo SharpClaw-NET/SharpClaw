@@ -15,6 +15,8 @@ using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
+using SharpClaw.Runtime.Host.Handlers;
+using SharpClaw.Runtime.Host.Routing;
 using SharpClaw.Runtime.INF.Persistence;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Shared.Security;
@@ -136,6 +138,202 @@ public sealed class RuntimeHostCompositionTests
             streamBody.Split("data: ", StringSplitOptions.RemoveEmptyEntries)
                 .Should().HaveCountGreaterThan(1);
             readiness.IsReady.Should().BeTrue();
+        }
+        finally
+        {
+            readiness.MarkNotReady();
+            await adapter.StopAsync();
+            await app.StopAsync();
+        }
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task CanonicalJobsHttpPath_SubmitsAndDispatchesThroughProductionGraph()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "sharpclaw-test",
+                ["Provider:Model"] = "test-harness-model",
+                ["Modules:sharpclaw_providers_anthropic"] = "false",
+                ["Modules:sharpclaw_providers_google"] = "false",
+                ["Modules:sharpclaw_providers_llamasharp"] = "false",
+                ["Modules:sharpclaw_providers_ollama"] = "false",
+                ["Modules:sharpclaw_providers_openai_compat"] = "false",
+            })
+            .Build();
+        using var moduleSet = PackagedDotNetModuleSet.Load(
+            [
+                Path.Combine(AppContext.BaseDirectory, "modules"),
+                Path.Combine(AppContext.BaseDirectory, "test-modules"),
+            ],
+            configuration);
+        var jobHandler = new JobProbeHandler();
+        var jobModule = new JobProbeModule(jobHandler);
+        var modules = moduleSet.Modules
+            .Append(jobModule)
+            .ToArray();
+        var databaseOptions = new DatabaseProviderOptions
+        {
+            Provider = StorageMode.JsonFile,
+        };
+        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
+        databaseOptions.JsonFile.EncryptAtRest = false;
+
+        var builder = WebApplication.CreateBuilder(new WebApplicationOptions
+        {
+            ApplicationName = typeof(KernelHostEndpoints).Assembly.GetName().Name,
+        });
+        builder.Configuration.Sources.Clear();
+        builder.Configuration.AddConfiguration(configuration);
+        builder.WebHost.UseUrls("http://127.0.0.1:0");
+        RuntimeHostComposition.RegisterServices(
+            builder.Services,
+            configuration,
+            workspace.InstancePaths,
+            new EncryptionOptions { Key = new byte[32] },
+            databaseOptions,
+            modules);
+        builder.Services.AddSingleton(new KernelGraphCompileOptions
+        {
+            ActionModuleCapabilityGrants = new Dictionary<
+                string,
+                IReadOnlyDictionary<string, ActionInterceptionCapabilities>>
+            {
+                [jobModule.Identity.Id] = new Dictionary<
+                    string,
+                    ActionInterceptionCapabilities>(StringComparer.Ordinal)
+                {
+                    [JobProbeHandler.Action.Value] =
+                        ActionInterceptionCapabilities.Inspect |
+                        ActionInterceptionCapabilities.Wrap |
+                        ActionInterceptionCapabilities.Observe,
+                },
+            },
+        });
+
+        await using var app = builder.Build();
+        var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
+        using (var jobsScope = app.Services.CreateScope())
+        {
+            jobsScope.ServiceProvider
+                .GetRequiredService<KernelJobsCoordinator>()
+                .Should().NotBeNull();
+        }
+        var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
+        await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
+        await adapter.StartAsync("jobs-http-test");
+        readiness.MarkReady();
+        KernelHostEndpoints.Map(app);
+        app.MapHandlers(typeof(KernelJobsHandlers).Assembly);
+
+        try
+        {
+            await app.StartAsync();
+            using var client = new HttpClient
+            {
+                BaseAddress = new Uri(app.Urls.Single()),
+            };
+            using var submitResponse = await client.PostAsJsonAsync(
+                "/jobs",
+                new
+                {
+                    actionKey = JobProbeHandler.Action.Value,
+                    input = new
+                    {
+                        contractName = JobProbeHandler.ContractName,
+                        schemaVersion = 1,
+                        value = JsonSerializer.Serialize(new
+                        {
+                            value = "queued-value",
+                        }),
+                    },
+                });
+            var submitBody = await submitResponse.Content.ReadAsStringAsync();
+
+            submitResponse.StatusCode.Should().Be(HttpStatusCode.OK, submitBody);
+            using var submitted = JsonDocument.Parse(submitBody);
+            var jobId = submitted.RootElement.GetProperty("id").GetGuid();
+            submitted.RootElement.GetProperty("status").GetInt32()
+                .Should().Be((int)JobStatus.Queued);
+
+            using var dispatchResponse = await client.PostAsync(
+                $"/jobs/{jobId:D}/dispatch",
+                content: null);
+            var dispatchBody = await dispatchResponse.Content.ReadAsStringAsync();
+
+            dispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK, dispatchBody);
+            using var dispatched = JsonDocument.Parse(dispatchBody);
+            dispatched.RootElement.GetProperty("outcome").GetInt32()
+                .Should().Be((int)ActionOutcomeKind.Completed);
+            var resultValue = dispatched.RootElement
+                .GetProperty("result")
+                .GetProperty("value")
+                .GetString();
+            resultValue.Should().NotBeNull();
+            using var resultPayload = JsonDocument.Parse(resultValue!);
+            resultPayload.RootElement.GetProperty("value").GetString()
+                .Should().Be("queued-value-executed");
+            jobHandler.ExecutionCount.Should().Be(1);
+
+            using var progressResponse = await client.GetAsync(
+                $"/jobs/{jobId:D}/progress");
+            progressResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var progress = JsonDocument.Parse(
+                await progressResponse.Content.ReadAsStringAsync()))
+            {
+                progress.RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+            }
+
+            using var attemptsResponse = await client.GetAsync(
+                $"/jobs/{jobId:D}/attempts");
+            attemptsResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var attempts = JsonDocument.Parse(
+                await attemptsResponse.Content.ReadAsStringAsync()))
+            {
+                attempts.RootElement.GetArrayLength().Should().Be(1);
+            }
+
+            using var artifactResponse = await client.GetAsync(
+                $"/jobs/{jobId:D}/artifact");
+            artifactResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            var artifact = await artifactResponse.Content
+                .ReadFromJsonAsync<JobPayloadEnvelope>();
+            artifact.Should().NotBeNull();
+            artifact!.Value.Should().Contain("queued-value-executed");
+
+            using var recoveryResponse = await client.PostAsync(
+                $"/jobs/{jobId:D}/recover",
+                content: null);
+            recoveryResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var recovered = JsonDocument.Parse(
+                await recoveryResponse.Content.ReadAsStringAsync()))
+            {
+                recovered.RootElement.GetProperty("status").GetInt32()
+                    .Should().Be((int)JobStatus.Completed);
+            }
+
+            using var replayResponse = await client.PostAsync(
+                $"/jobs/{jobId:D}/dispatch",
+                content: null);
+            replayResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using (var replay = JsonDocument.Parse(
+                await replayResponse.Content.ReadAsStringAsync()))
+            {
+                replay.RootElement.GetProperty("outcome").GetInt32()
+                    .Should().Be((int)ActionOutcomeKind.Completed);
+            }
+            jobHandler.ExecutionCount.Should().Be(1);
+
+            using var deleteResponse = await client.DeleteAsync(
+                $"/jobs/{jobId:D}");
+            deleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
+
+            using var deletedResponse = await client.GetAsync(
+                $"/jobs/{jobId:D}");
+            deletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
         }
         finally
         {
@@ -998,6 +1196,68 @@ public sealed class RuntimeHostCompositionTests
                         HookFailurePolicy.FailAction));
         }
     }
+
+    private sealed class JobProbeModule(JobProbeHandler handler) : ISharpClawModule
+    {
+        public ModuleIdentity Identity { get; } = new(
+            "jobs-http-probe",
+            "Jobs HTTP probe",
+            "jobs-http");
+
+        public void Configure(ISharpClawModuleBuilder module)
+        {
+            module.Actions.Add(new ActionDescriptor<KernelActionEnvelope, object>(
+                JobProbeHandler.Action,
+                1,
+                "jobs-http-probe",
+                ActionInterceptionCapabilities.Inspect |
+                ActionInterceptionCapabilities.Wrap |
+                ActionInterceptionCapabilities.Observe,
+                false,
+                false,
+                new ActionRepeatPolicy(
+                    ActionRepeatKind.None,
+                    1,
+                    TimeSpan.Zero,
+                    "jobs-http-probe"),
+                null,
+                TimeSpan.FromSeconds(5)));
+            module.Services.AddSingleton<IJobHandler>(handler);
+        }
+    }
+
+    private sealed class JobProbeHandler : IJobHandler<ProbePayload, ProbePayload>
+    {
+        private int _executionCount;
+
+        public const string ContractName = "jobs-http-probe";
+
+        public static SharpClawActionKey Action { get; } =
+            new("probe.jobs.http");
+
+        public SharpClawActionKey ActionKey => Action;
+
+        public JobExecutionSafety Safety => JobExecutionSafety.Idempotent;
+
+        public IJobPayloadCodec<ProbePayload> InputCodec { get; } =
+            new JsonJobPayloadCodec<ProbePayload>(ContractName);
+
+        public IJobPayloadCodec<ProbePayload> ResultCodec { get; } =
+            new JsonJobPayloadCodec<ProbePayload>(ContractName);
+
+        public int ExecutionCount => Volatile.Read(ref _executionCount);
+
+        public ValueTask<ProbePayload> ExecuteAsync(
+            JobExecutionContext context,
+            ProbePayload input,
+            CancellationToken cancellationToken)
+        {
+            Interlocked.Increment(ref _executionCount);
+            return ValueTask.FromResult(new ProbePayload(input.Value + "-executed"));
+        }
+    }
+
+    private sealed record ProbePayload(string Value);
 
     private sealed class RequestContextProvider : IProviderPlugin, IProviderApiClient
     {
