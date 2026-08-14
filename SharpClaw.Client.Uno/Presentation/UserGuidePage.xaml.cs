@@ -11,18 +11,12 @@ public sealed partial class UserGuidePage : Page
     
     private string _activeTopic = "welcome";
 
-    // Guide topics with their file names (without .md extension)
+    // Guide topics for the current host boundary.
     private static readonly (string Id, string Title)[] Topics =
     [
         ("welcome", "Welcome"),
         ("getting-started", "Getting Started"),
-        ("channels-threads", "Channels & Threads"),
-        ("agents-models", "Agents & Models"),
-        ("chat-features", "Chat Features"),
-        ("permissions", "Permissions & Roles"),
-        ("bot-integrations", "Bot Integrations"),
         ("gateway", "Gateway"),
-        ("advanced", "Advanced Topics"),
         ("troubleshooting", "Troubleshooting"),
     ];
 
