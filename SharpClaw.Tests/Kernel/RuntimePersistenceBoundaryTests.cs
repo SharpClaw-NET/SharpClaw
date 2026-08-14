@@ -1,5 +1,6 @@
 using System.Runtime.ExceptionServices;
 using Microsoft.EntityFrameworkCore;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
@@ -25,6 +26,26 @@ public sealed class RuntimePersistenceBoundaryTests
             .Select(static key => key.Value)
             .Should()
             .Equal(expected);
+    }
+
+    [Test]
+    public void SharpClaw_model_contains_only_the_approved_base_entities()
+    {
+        var setup = CreateDatabase(new TestPersistenceBoundary(runTerminal: true));
+        using var db = setup.Db;
+
+        db.Model.GetEntityTypes()
+            .Select(static entity => entity.ClrType)
+            .Should()
+            .BeEquivalentTo(
+                [
+                    typeof(ProviderDB),
+                    typeof(ModelDB),
+                    typeof(ModuleStateDB),
+                    typeof(ModuleConfigEntryDB),
+                    typeof(ModuleStorageRecordDB),
+                    typeof(ModuleStorageIndexEntryDB),
+                ]);
     }
 
     [Test]
