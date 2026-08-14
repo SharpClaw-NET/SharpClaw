@@ -630,7 +630,7 @@ public sealed class RuntimeHostCompositionTests
 
     [Test]
     [NonParallelizable]
-    public async Task NormalHostPayload_RestartHasNoHistoryWithoutContextModule()
+    public async Task NormalHostPayload_RestartRemainsStatelessWithoutContextModule()
     {
         await using var providerServer = await FakeOpenAiServer.CreateAsync();
         using var workspace = new TemporaryWorkspace();
@@ -669,27 +669,15 @@ public sealed class RuntimeHostCompositionTests
                 body.Should().Contain("normal packaged provider response");
             });
 
-        var conversationId = Guid.Parse(workspace.InstancePaths.Manifest.InstanceId);
-        IReadOnlyList<string>? history = null;
         await RunNormalProductionHostAsync(
             workspace,
             configuration,
             databaseOptions,
             async app =>
             {
-                await using var scope = app.Services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-                history = await db.ChatMessages
-                    .AsNoTracking()
-                    .Where(message => message.ChannelId == conversationId)
-                    .OrderBy(message => message.CreatedAt)
-                    .ThenBy(message => message.Id)
-                    .Select(message => message.Content)
-                    .ToListAsync();
+                await Task.CompletedTask;
+                app.Services.GetService<IConversationStore>().Should().BeNull();
             });
-
-        history.Should().NotBeNull();
-        history!.Should().BeEmpty();
     }
 
     [Test]
@@ -781,27 +769,15 @@ public sealed class RuntimeHostCompositionTests
                 body.Should().Contain("test harness response");
             });
 
-        var conversationId = Guid.Parse(workspace.InstancePaths.Manifest.InstanceId);
-        IReadOnlyList<string>? history = null;
         await RunProductionHostAsync(
             workspace,
             configuration,
             databaseOptions,
             async app =>
             {
-                await using var scope = app.Services.CreateAsyncScope();
-                var db = scope.ServiceProvider.GetRequiredService<SharpClawDbContext>();
-                history = await db.ChatMessages
-                    .AsNoTracking()
-                    .Where(message => message.ChannelId == conversationId)
-                    .OrderBy(message => message.CreatedAt)
-                    .ThenBy(message => message.Id)
-                    .Select(message => message.Content)
-                    .ToListAsync();
+                await Task.CompletedTask;
+                app.Services.GetService<IConversationStore>().Should().BeNull();
             });
-
-        history.Should().NotBeNull();
-        history!.Should().BeEmpty();
     }
 
     [Test]

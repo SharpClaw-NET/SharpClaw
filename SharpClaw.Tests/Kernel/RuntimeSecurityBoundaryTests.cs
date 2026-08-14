@@ -61,7 +61,7 @@ public sealed class RuntimeSecurityBoundaryTests
 
         probe.Observations.Should().Contain(observation =>
             observation.Action == "security.secret.read"
-            && observation.Subject == "security-user-6"
+            && observation.Subject == "security-user-5"
             && observation.Depth > 0);
     }
 

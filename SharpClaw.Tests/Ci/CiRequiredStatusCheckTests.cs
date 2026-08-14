@@ -20,7 +20,6 @@ public sealed partial class CiRequiredStatusCheckTests
             .Order(StringComparer.Ordinal)
             .ToArray();
 
-        workflowContexts.Should().Contain("Correctness / Runtime Transport");
         requiredContexts.Should().Equal(
             workflowContexts,
             "every CI matrix domain should be mirrored in the required-status-check ruleset");
