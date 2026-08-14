@@ -51,7 +51,7 @@ Shutdown stops intake, cancels periodic flush intake, drains the channel, flushe
 
 ## Execution diagnostics
 
-Job logs and artifacts remain explicit `ExecutionDiagnosticStore` semantics. They are not sent through Serilog and are not mirrored into operational process or module streams. The operational dispatcher may flush independently and cannot weaken that transaction.
+Canonical Jobs own their result, error, progress, attempt, and artifact state. Operational logging does not create a second job store or mirror job payloads into process or module streams.
 
 ## Retrieval and retention
 

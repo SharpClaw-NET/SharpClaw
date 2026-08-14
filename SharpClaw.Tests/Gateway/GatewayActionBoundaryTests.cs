@@ -195,11 +195,6 @@ public sealed class GatewayActionBoundaryTests
                 "..",
                 ".."));
         var program = File.ReadAllText(Path.Combine(sourceRoot, "SharpClaw.Gateway", "Program.cs"));
-        var bridge = File.ReadAllText(Path.Combine(
-            sourceRoot,
-            "SharpClaw.Gateway",
-            "RemoteRuntimeBridge",
-            "RemoteRuntimeBridgeHost.cs"));
         var moduleMapping = File.ReadAllText(Path.Combine(
             sourceRoot,
             "SharpClaw.Gateway",
@@ -208,8 +203,6 @@ public sealed class GatewayActionBoundaryTests
 
         program.Should().Contain("UseMiddleware<GatewayActionMiddleware>()");
         program.Should().Contain("MapGatewayModuleEndpoints()");
-        bridge.Should().Contain("UseMiddleware<GatewayActionMiddleware>()");
-        bridge.Should().Contain("gateway.bridge.session.validate");
         moduleMapping.Should().Contain("MapGatewayModuleEndpoints");
     }
 

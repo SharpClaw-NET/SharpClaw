@@ -20,8 +20,6 @@ internal sealed class RuntimeDatabaseReadiness(
 
         if (databaseOptions.Provider == StorageMode.JsonFile)
         {
-            ExecutionStorageSchemaPreflight.ValidateJsonStoreBeforeInitialization(
-                databaseOptions.JsonFile.DataDirectory);
             await db.Database.EnsureCreatedAsync(cancellationToken);
         }
 
@@ -33,16 +31,7 @@ internal sealed class RuntimeDatabaseReadiness(
 
         if (databaseOptions.Provider == StorageMode.JsonFile)
         {
-            ExecutionStorageSchemaPreflight.MarkJsonStoreInitialized(
-                databaseOptions.JsonFile.DataDirectory);
             return;
-        }
-
-        if (db.Database.IsRelational())
-        {
-            await ExecutionStorageSchemaPreflight.ValidateRelationalStoreAsync(
-                db,
-                cancellationToken);
         }
     }
 }

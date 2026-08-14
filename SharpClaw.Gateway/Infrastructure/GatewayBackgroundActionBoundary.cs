@@ -51,8 +51,7 @@ public sealed record GatewayActionInvocation(
     string Path,
     string Operation,
     bool IsStream = false,
-    int ByteCount = 0,
-    Guid? PairId = null);
+    int ByteCount = 0);
 
 internal sealed record GatewayBackgroundServiceInvocation(string ServiceId);
 

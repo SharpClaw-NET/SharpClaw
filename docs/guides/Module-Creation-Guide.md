@@ -243,7 +243,7 @@ module enablement assignment under `Modules`.
 
 ### Job-pipeline tools
 
-Job-pipeline tools go through the full `AgentJobService` lifecycle â€” they create a
+Job-pipeline tools go through the canonical Jobs coordinator lifecycle â€” they create a
 job record, support approval flows, and appear in job history. Use these for
 anything with side effects, latency, or that the user might want to audit.
 
@@ -303,14 +303,14 @@ Core automatically records the normal chat provider usage that it performs
 itself, but modules often run their own model calls. An OCR module might call a
 vision model for every page, a media module might call a model for every chunk,
 and a workflow module might call a private model behind its own client. Those
-calls still belong to the `AgentJobDB` row that started the module work, so the
+calls still belong to the canonical Job record that started the module work, so the
 module should report them through `IAgentJobCostTracker` instead of trying to
 update core tables directly.
 
 Resolve `IAgentJobCostTracker` from the `scopedServices` argument passed to
 `ExecuteToolAsync` and call `RecordTokensAsync` with the current
 `AgentJobContext.JobId`. The method is additive, so a long media-processing
-loop can report usage after each chunk and the final `AgentJobResponse.jobCost`
+loop can report usage after each chunk and the final canonical Job result
 will show the accumulated prompt, completion, and total tokens. External modules get the
 same contract forwarded into their isolated module container, and bundled modules
 can resolve it from the same restricted service scope as other host bridges.

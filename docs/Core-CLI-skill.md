@@ -208,8 +208,7 @@ job resume <id>
 job listen <id>                        Module-owned live output notice.
                                        Ctrl+C stops listening (not the job).
 
-AgentJobStatus: Queued, Executing, AwaitingApproval, Completed, Failed,
-                Denied, Cancelled, Paused.
+Job status and transitions come from the canonical Core Jobs contract.
 
 ────────────────────────────────────────
 ROLE

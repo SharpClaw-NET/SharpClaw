@@ -4,8 +4,6 @@ using System.Security.Cryptography;
 using System.Text;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
-using SharpClaw.Gateway.RemoteRuntimeBridge;
-using SharpClaw.Shared.RemoteRuntimeBridge;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -223,15 +221,6 @@ public sealed class GatewayActionMiddleware(
 
     private static SharpClawActionKey ResolveForwardAction(HttpContext context)
     {
-        if (context.Items.ContainsKey(RemoteRuntimeBridgeHost.BridgeAppItemKey))
-            return new SharpClawActionKey("gateway.bridge.forward");
-
-        if (context.GetEndpoint()?.Metadata.GetMetadata<RemoteRuntimeBridgeCredentialMetadata>()
-            is not null)
-        {
-            return new SharpClawActionKey("gateway.bridge.forward");
-        }
-
         if (context.Request.Path.StartsWithSegments("/api/modules"))
             return new SharpClawActionKey("gateway.module.endpoint.dispatch");
 
@@ -259,12 +248,7 @@ public sealed class GatewayActionMiddleware(
             context.Request.Method,
             context.Request.Path.Value ?? "/",
             operation,
-            IsStreamRequest(context),
-            PairId: context.Items.TryGetValue(
-                RemoteRuntimeBridgeHost.ActivePairItemKey,
-                out var pair) && pair is RemoteRuntimePairingRegistrySnapshot snapshot
-                ? snapshot.PairId
-                : null);
+            IsStreamRequest(context));
 
     private static bool IsStreamRequest(HttpContext context) =>
         context.Request.Path.Value?.Contains("/stream", StringComparison.OrdinalIgnoreCase) == true

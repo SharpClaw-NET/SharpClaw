@@ -3,7 +3,6 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Serilog.Extensions.Logging;
 using SharpClaw.Runtime.INF.DurableStorage;
-using SharpClaw.Runtime.INF.Logging;
 using SharpClaw.Shared.DurableStorage;
 using SharpClaw.Shared.Logging;
 
@@ -522,66 +521,6 @@ public sealed class UnifiedLoggingTests
         tail.Clear();
         tail.Count.Should().Be(0);
         tail.EncodedBytes.Should().Be(0);
-    }
-
-    [Test]
-    public async Task LogReaderReadsASecondRetainedProcessBootThroughTheCursorFacade()
-    {
-        var root = CreateRoot();
-        try
-        {
-            var encryptionKey = Enumerable.Repeat((byte)0x52, 32).ToArray();
-            await using var store = new DurableSegmentStore(new DurableStorageOptions
-            {
-                RootDirectory = root,
-                EncryptionKey = encryptionKey,
-                SegmentMaxBytes = 64 * 1024,
-                SegmentMaxAge = TimeSpan.FromHours(1),
-                MaxRecordBytes = 16 * 1024,
-                AcquireWriterLease = false,
-            });
-            var retainedBootId = Guid.NewGuid();
-            await store.AppendAsync(
-                DurableStreamKey.Process("core", retainedBootId),
-                new DurableRecordWrite(
-                    Guid.NewGuid(),
-                    DateTimeOffset.UtcNow,
-                    "Information",
-                    "retained.boot",
-                    "retained process event"));
-            await store.SealAsync(DurableStreamKey.Process("core", retainedBootId));
-
-            var currentBootId = Guid.NewGuid();
-            await using var runtime = SharpClawLogRuntime.Create(
-                "core",
-                store,
-                new SharpClawLoggingOptions { ConsoleEnabled = false },
-                currentBootId);
-            var artifacts = new ExecutionArtifactStore(
-                Path.Combine(root, "reader-artifacts"),
-                encryptionKey);
-            var diagnostics = new ExecutionDiagnosticStore(
-                store,
-                new DurableCursorCodec(
-                    encryptionKey,
-                    new DurableStreamPathEncoder(root)),
-                artifacts);
-            var reader = new SharpClawLogReader(diagnostics, runtime);
-
-            var page = await reader.ReadProcessLogsAsync(
-                "core",
-                retainedBootId,
-                cursor: null,
-                query: new DurableLogQuery(MaxScanBytes: 1024 * 1024));
-
-            page.Records.Should().ContainSingle(record =>
-                record.Message.Contains("retained process event", StringComparison.Ordinal));
-            page.Records.Single().EventName.Should().Be("retained.boot");
-        }
-        finally
-        {
-            DeleteRoot(root);
-        }
     }
 
     [Test]

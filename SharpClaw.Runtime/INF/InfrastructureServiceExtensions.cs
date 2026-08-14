@@ -31,7 +31,6 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<ModulePersistenceRegistrationFactory>();
         services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
         services.AddScoped<IRuntimePersistenceActionRunnerAccessor, RuntimePersistenceActionRunnerAccessor>();
-        services.AddScoped<RemoteRuntimePairingRegistry>();
 
         switch (databaseOptions.Provider)
         {

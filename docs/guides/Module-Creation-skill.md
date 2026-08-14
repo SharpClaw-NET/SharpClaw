@@ -74,9 +74,9 @@ Job cost tracking:
   argument passed to ExecuteToolAsync and call RecordTokensAsync(job.JobId,
   promptTokens, completionTokens, ct). Calls are additive, so OCR, media, or
   private model pipelines can report usage after every chunk and the
-  host will expose the accumulated total through AgentJobResponse.jobCost.
+  host will expose the accumulated total through the current Job result.
   External modules receive this contract through the host bridge, so they do
-  not need to reference Core or update AgentJobDB directly.
+  not update host database tables directly.
 
 ────────────────────────────────────────
 CONTRACTS

@@ -383,8 +383,6 @@ public sealed class RuntimeCliBoundaryTests
         listenerStart.Should().BeGreaterThan(cliBranch);
         hostSource.Should().Contain("RuntimeCliSession.RunAsync");
         launcherSource.Should().Contain("RuntimeLaunchPlan.From");
-        launcherSource.Should().Contain("case RuntimeLaunchMode.RemoteProxy");
-        launcherSource.Should().Contain("case RuntimeLaunchMode.PairingClient");
         launcherSource.Should().NotContain("RuntimeCliSession");
         launcherSource.Should().NotContain("RuntimeCliActionCatalog");
         hostProject.Should().Contain("Compile Remove=\"Cli\\**\\*.cs\"");

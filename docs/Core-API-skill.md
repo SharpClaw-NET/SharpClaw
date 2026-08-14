@@ -215,19 +215,18 @@ Thread streaming:
 SSE event types: TextDelta (delta field), ToolCallStart (job), ToolCallResult (result), ApprovalRequired (pendingJob), ApprovalResult (approvalOutcome), Error (error), Done (finalResponse).
 
 ────────────────────────────────────────
-AGENT JOBS
+JOBS
 ────────────────────────────────────────
-POST   /channels/{channelId}/jobs              (SubmitAgentJobRequest)
-GET    /channels/{channelId}/jobs
-GET    /channels/{channelId}/jobs/summaries    (lightweight: id, channelId, agentId, actionKey, resourceId, status, createdAt, startedAt, completedAt — no resultData/errorLog/logs)
-GET    /channels/{channelId}/jobs/{jobId}
-POST   /channels/{channelId}/jobs/{jobId}/approve   { approverAgentId? }
-POST   /channels/{channelId}/jobs/{jobId}/stop      (graceful stop; also accepts Paused jobs)
-POST   /channels/{channelId}/jobs/{jobId}/cancel    (also accepts Paused jobs)
-PUT    /channels/{channelId}/jobs/{jobId}/pause     (pause an Executing job)
-PUT    /channels/{channelId}/jobs/{jobId}/resume    (resume a Paused job)
+POST   /jobs                              { actionKey, input, conversationId?, holds? }
+GET    /jobs
+GET    /jobs/{jobId}
+POST   /jobs/{jobId}/dispatch
+POST   /jobs/{jobId}/cancel | /pause | /stop | /resume | /recover
+POST   /jobs/{jobId}/resolve-hold | /retry
+DELETE /jobs/{jobId}
+GET    /jobs/{jobId}/progress | /attempts | /artifact
 
-SubmitAgentJobRequest:
+JobPayloadEnvelope request:
   actionKey (string, required): identifies the action to execute. The set of valid
     action keys is dynamic — query GET /modules for the authoritative list.
   resourceId?: target resource for per-resource actions.
@@ -237,7 +236,7 @@ SubmitAgentJobRequest:
   the module that owns the action key. See individual module documentation for
   details.
 
-AgentJobStatus: Queued=0, Executing=1, AwaitingApproval=2, Completed=3, Failed=4, Denied=5, Cancelled=6, Paused=7.
+Job status and transitions come from the canonical Core Jobs contract.
 
 When resourceId is omitted for a per-resource action, default resources are resolved
 automatically from the channel's DefaultResourceSet → context's DefaultResourceSet →

@@ -208,47 +208,18 @@ public sealed class RuntimeSecurityBoundaryTests
     }
 
     [Test]
-    public async Task Repeatable_pairing_decision_does_not_repeat_the_mutation_terminal()
-    {
-        using var workspace = new TemporaryWorkspace();
-        var probe = new SecurityProbe { RepeatAction = "security.remote_pairing.validate" };
-        var adapter = CreateAdapter(
-            workspace,
-            probe,
-            repeatEvidenceAuthority: new MatchingRepeatEvidenceAuthority());
-        var baseDecisionCalls = 0;
-        var mutationCalls = 0;
-
-        var allowed = await adapter.RunSecurityDecisionAsync(
-            ExecutionContext("pairing-admin"),
-            Action("security.remote_pairing.validate"),
-            new RuntimeSecurityActionInvocation("approve", "/approve"),
-            (_, _) =>
-            {
-                Interlocked.Increment(ref baseDecisionCalls);
-                return ValueTask.FromResult(true);
-            });
-        if (allowed)
-            Interlocked.Increment(ref mutationCalls);
-
-        allowed.Should().BeTrue();
-        baseDecisionCalls.Should().Be(1);
-        mutationCalls.Should().Be(1);
-    }
-
-    [Test]
     public async Task Security_result_replacement_can_restrict_but_cannot_grant_the_base_decision()
     {
         using var workspace = new TemporaryWorkspace();
         var restrictingProbe = new SecurityProbe
         {
-            ReplaceResultAction = "security.remote_pairing.validate",
+            ReplaceResultAction = "security.secret.delete",
             ReplaceResultValue = false,
         };
         var restrictingAdapter = CreateAdapter(workspace, restrictingProbe);
         var restricted = await restrictingAdapter.RunSecurityDecisionAsync(
-            ExecutionContext("pairing-admin"),
-            Action("security.remote_pairing.validate"),
+            ExecutionContext("security-admin"),
+            Action("security.secret.delete"),
             new RuntimeSecurityActionInvocation("revoke", "/revoke"),
             static (_, _) => ValueTask.FromResult(true));
         restricted.Should().BeFalse();
@@ -256,20 +227,20 @@ public sealed class RuntimeSecurityBoundaryTests
         using var secondWorkspace = new TemporaryWorkspace();
         var grantingProbe = new SecurityProbe
         {
-            ReplaceResultAction = "security.remote_pairing.validate",
+            ReplaceResultAction = "security.secret.delete",
             ReplaceResultValue = true,
         };
         var grantingAdapter = CreateAdapter(secondWorkspace, grantingProbe);
         var granted = await grantingAdapter.RunSecurityDecisionAsync(
-            ExecutionContext("pairing-admin"),
-            Action("security.remote_pairing.validate"),
+            ExecutionContext("security-admin"),
+            Action("security.secret.delete"),
             new RuntimeSecurityActionInvocation("revoke", "/revoke"),
             static (_, _) => ValueTask.FromResult(false));
         granted.Should().BeFalse();
     }
 
     [Test]
-    public async Task Session_administrator_secret_and_pairing_actions_fail_closed()
+    public async Task Session_administrator_and_secret_actions_fail_closed()
     {
         using var workspace = new TemporaryWorkspace();
         var actionKeys = new[]
@@ -279,7 +250,6 @@ public sealed class RuntimeSecurityBoundaryTests
             "security.secret.read",
             "security.secret.write",
             "security.secret.delete",
-            "security.remote_pairing.validate",
         };
 
         foreach (var actionName in actionKeys)
@@ -317,8 +287,8 @@ public sealed class RuntimeSecurityBoundaryTests
 
         Func<Task> action = async () => await adapter.RunSecurityDecisionAsync(
             ExecutionContext("cancelled-user"),
-            Action("security.remote_pairing.validate"),
-            new RuntimeSecurityActionInvocation("validate", "/pairings"),
+            Action("security.secret.delete"),
+            new RuntimeSecurityActionInvocation("delete", "/env/core"),
             (_, _) =>
             {
                 terminalCalled = true;
@@ -366,18 +336,12 @@ public sealed class RuntimeSecurityBoundaryTests
             root!, "SharpClaw.Runtime", "Host", "Api", "ApiKeyMiddleware.cs"));
         var endpointSource = File.ReadAllText(Path.Combine(
             root!, "SharpClaw.Runtime", "Host", "KernelHostEndpoints.cs"));
-        var pairingSource = File.ReadAllText(Path.Combine(
-            root!, "SharpClaw.Runtime", "Host", "Handlers", "RemoteRuntimePairingHandlers.cs"));
 
         apiKeySource.Should().Contain("RunSecurityDecisionAsync");
         apiKeySource.Should().Contain("await next(context)");
         endpointSource.Should().Contain("security.secret.read");
-        pairingSource.Should().Contain("RunSecurityDecisionAsync");
-        pairingSource.Should().NotContain("RunSecurityActionAsync");
-        pairingSource.Should().NotContain("return Task.FromResult<IResult>(");
         hostProject.Should().Contain("Compile Remove=\"Api\\JwtSessionMiddleware.cs\"");
         hostProject.Should().Contain("Compile Remove=\"Handlers\\**\\*.cs\"");
-        hostProject.Should().Contain("Compile Include=\"Handlers\\RemoteRuntimePairingHandlers.cs\"");
         hostProject.Should().Contain("Compile Remove=\"Cli\\**\\*.cs\"");
         bllProject.Should().Contain("Compile Remove=\"**\\*.cs\"");
         bllProject.Should().Contain("Compile Include=\"Kernel\\**\\*.cs\"");
@@ -573,7 +537,7 @@ public sealed class RuntimeSecurityBoundaryTests
                 context.Caller.SubjectId,
                 context.Depth));
 
-            if (context.ActionKey.Value == "security.remote_pairing.validate"
+            if (context.ActionKey.Value == "security.secret.delete"
                 && Interlocked.Exchange(ref probe.NestedDispatches, 1) == 0
                 && probe.Dispatcher is { } dispatcher
                 && probe.Snapshot is { } snapshot)

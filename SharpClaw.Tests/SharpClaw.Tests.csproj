@@ -46,10 +46,8 @@
     <Compile Remove="**\*.cs" />
     <Compile Include="GlobalUsings.cs" />
     <Compile Include="Architecture\**\*.cs" />
-    <Compile Remove="Architecture\RemoteRuntimeCliSessionTests.cs" />
     <Compile Include="Gateway\**\*.cs" />
     <Compile Remove="Gateway\GatewayEndpointToggleTests.cs" />
-    <Compile Remove="Gateway\GatewayRouteParityTests.cs" />
     <Compile Include="Persistence\**\*.cs" />
     <Compile Remove="Persistence\EnvFileServiceTests.cs" />
     <Compile Include="Providers\**\*.cs" />
@@ -59,11 +57,6 @@
     <Compile Include="Kernel\**\*.cs" />
     <Compile Include="Frontend\**\*.cs" />
     <Compile Include="ClientUno\**\*.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
-    <None Include="Persistence\Fixtures\PreCutoverJsonColdStore\**\*"
-          CopyToOutputDirectory="PreserveNewest" />
   </ItemGroup>
 
   <ItemGroup>

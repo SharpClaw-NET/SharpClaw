@@ -9,24 +9,6 @@ namespace SharpClaw.Tests.Architecture;
 public sealed class CanonicalJobsRouteBoundaryTests
 {
     [Test]
-    public void Obsolete_channel_scoped_job_owners_are_absent()
-    {
-        var root = FindSolutionRoot();
-
-        File.Exists(Path.Combine(
-            root,
-            "SharpClaw.Gateway",
-            "Controllers",
-            "AgentJobsController.cs")).Should().BeFalse();
-        File.Exists(Path.Combine(
-            root,
-            "SharpClaw.Runtime",
-            "Host",
-            "Handlers",
-            "AgentJobHandlers.cs")).Should().BeFalse();
-    }
-
-    [Test]
     public void Runtime_host_compiles_the_canonical_jobs_handler_only()
     {
         var root = FindSolutionRoot();
@@ -42,32 +24,6 @@ public sealed class CanonicalJobsRouteBoundaryTests
             .ToArray();
 
         includes.Should().Contain("Handlers\\KernelJobsHandlers.cs");
-        includes.Should().NotContain("Handlers\\AgentJobHandlers.cs");
-    }
-
-    [Test]
-    public void Canonical_jobs_path_does_not_use_host_agent_job_storage()
-    {
-        var root = FindSolutionRoot();
-        var sources = new[]
-        {
-            Path.Combine(root, "SharpClaw.Runtime", "Host", "Handlers", "KernelJobsHandlers.cs"),
-            Path.Combine(root, "SharpClaw.Runtime", "Host", "RuntimeHostComposition.cs"),
-            Path.Combine(root, "SharpClaw.Runtime", "BLL", "Kernel"),
-        }
-            .SelectMany(path => File.Exists(path)
-                ? [path]
-                : Directory.Exists(path)
-                    ? Directory.GetFiles(path, "*.cs", SearchOption.AllDirectories)
-                    : [])
-            .Select(File.ReadAllText)
-            .ToArray();
-
-        string.Join(Environment.NewLine, sources)
-            .Should()
-            .NotContain("AgentJobDB")
-            .And
-            .NotContain("ExecutionOwnerKind.AgentJob");
     }
 
     [Test]

@@ -141,21 +141,20 @@ SSE event types: TextDelta, ToolCallStart, ToolCallResult, ApprovalRequired, App
 Registered via minimal API (MapChatStreamProxy), not MVC controllers.
 
 ────────────────────────────────────────
-AGENT JOBS
+JOBS
 ────────────────────────────────────────
-POST /api/channels/{channelId}/jobs                    (SubmitAgentJobRequest)
-GET  /api/channels/{channelId}/jobs                    → AgentJobResponse[]
-GET  /api/channels/{channelId}/jobs/summaries          → AgentJobSummaryResponse[] (lightweight)
-GET  /api/channels/{channelId}/jobs/{jobId}            → AgentJobResponse
-POST /api/channels/{channelId}/jobs/{jobId}/approve    { approverAgentId? }
-POST /api/channels/{channelId}/jobs/{jobId}/stop       (graceful stop; also accepts Paused)
-POST /api/channels/{channelId}/jobs/{jobId}/cancel     (force cancel; also accepts Paused)
-PUT  /api/channels/{channelId}/jobs/{jobId}/pause      (stops capture/inference while paused)
-PUT  /api/channels/{channelId}/jobs/{jobId}/resume     (restarts paused job)
+POST /api/jobs                              { actionKey, input, conversationId?, holds? }
+GET  /api/jobs
+GET  /api/jobs/{jobId}
+POST /api/jobs/{jobId}/dispatch
+POST /api/jobs/{jobId}/cancel | /pause | /stop | /resume | /recover
+POST /api/jobs/{jobId}/resolve-hold | /retry
+DELETE /api/jobs/{jobId}
+GET  /api/jobs/{jobId}/progress | /attempts | /artifact
 
-SubmitAgentJobRequest: actionType (required), resourceId?, agentId?, safeShellType?, scriptJson?
+JobPayloadEnvelope request: actionKey, input, conversationId?, holds?
 
-AgentJobStatus: Queued, Executing, AwaitingApproval, Completed, Failed, Denied, Cancelled, Paused.
+Job status and transitions come from the canonical Core Jobs contract.
 
 ────────────────────────────────────────
 MODELS

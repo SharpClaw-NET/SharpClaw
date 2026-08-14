@@ -21,9 +21,6 @@
           { "context": "Correctness / Architecture Core Dependencies" },
           { "context": "Correctness / Architecture Module Dependencies" },
           { "context": "Correctness / Runtime Composition" },
-          { "context": "Correctness / Runtime Pairing" },
-          { "context": "Correctness / Runtime Transport" },
-          { "context": "Correctness / Runtime Multi Process" },
           { "context": "Correctness / Gateway Boundaries" },
           { "context": "Correctness / Persistence Provider" },
           { "context": "Correctness / Persistence Environment" },
@@ -33,9 +30,7 @@
           { "context": "Correctness / Durable Storage" },
           { "context": "Correctness / Direct Chat Kernel" },
           { "context": "Correctness / Publishing" },
-          { "context": "Correctness / CI Guardrails" },
-          { "context": "Correctness / Remote Runtime Session" },
-          { "context": "Performance / Remote Runtime Streamed Payload" }
+          { "context": "Correctness / CI Guardrails" }
         ]
       }
     },

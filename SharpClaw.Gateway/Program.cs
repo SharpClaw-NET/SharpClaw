@@ -10,7 +10,6 @@ using Serilog;
 using Serilog.Events;
 using SharpClaw.Gateway.Modules.Routing;
 using SharpClaw.Gateway.Modules.Hosting;
-using SharpClaw.Gateway.RemoteRuntimeBridge;
 
 var builder = WebApplication.CreateBuilder(args);
 
@@ -24,10 +23,6 @@ using var gatewayInstanceLock = new SharpClawInstanceLock(gatewayPaths);
 
 builder.Configuration.AddGatewayEnvironment(
     isDevelopment: builder.Environment.IsDevelopment());
-
-var remoteRuntimeBridgeOptions = RemoteRuntimeBridgeOptions.FromConfiguration(builder.Configuration);
-builder.Services.AddSingleton(remoteRuntimeBridgeOptions);
-RemoteRuntimeBridgeHost.RegisterServices(builder.Services, remoteRuntimeBridgeOptions, gatewayPaths);
 
 var gatewayManifest = gatewayPaths.Manifest;
 var configuredGatewayUrl = builder.Configuration["ASPNETCORE_URLS"]

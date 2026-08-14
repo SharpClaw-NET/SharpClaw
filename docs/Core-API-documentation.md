@@ -52,7 +52,7 @@ fastest way to make that happen.
 - [Threads](#threads)
 - [Chat (per-channel)](#chat-per-channel)
 - [Chat streaming (SSE)](#chat-streaming-sse)
-- [Agent Jobs](#agent-jobs)
+- [Jobs](#jobs)
 - [Resources](#resources)
 - [Roles](#roles)
 - [Default resources](#default-resources)
@@ -132,18 +132,12 @@ Permission checks, job submission (`POST /channels/{id}/jobs`), and the CLI
 | `Independent` | 5 | Agent can act without any external approval |
 | `Restricted` | 6 | Hard deny — action is blocked at this layer regardless of other layers. No approval path exists. |
 
-### AgentJobStatus
+### Job status
 
 | Value | Int | Description |
 |-------|-----|-------------|
-| `Queued` | 0 | Created, permission check in progress |
-| `Executing` | 1 | Permission granted, action running |
-| `AwaitingApproval` | 2 | Requires approval before execution |
-| `Completed` | 3 | Finished successfully |
-| `Failed` | 4 | Action threw an error |
-| `Denied` | 5 | Agent lacks the required permission |
-| `Cancelled` | 6 | Cancelled by a user or agent |
-| `Paused` | 7 | Temporarily paused; can be resumed |
+Job status values come from the canonical Core Jobs contract. The Runtime
+Host does not define an AgentJob status type or a feature-specific status table.
 
 ### Model Capability Tags
 
@@ -1653,7 +1647,7 @@ Response `200`:
 {
   "userMessage": { "role": "user", "content": "string", "timestamp": "datetime" },
   "assistantMessage": { "role": "assistant", "content": "string", "timestamp": "datetime" },
-  "jobResults": [ /* AgentJobResponse[], if any */ ],
+  "jobResults": [ /* canonical job documents, if any */ ],
   "channelCost": { /* ChannelCostResponse — see Token cost tracking */ },
   "threadCost": null,
   "agentCost": { /* AgentCostResponse — see Token cost tracking */ }
@@ -1694,16 +1688,16 @@ event: TextDelta
 data: {"type":"TextDelta","delta":"Hello"}
 
 event: ToolCallStart
-data: {"type":"ToolCallStart","job":{...AgentJobResponse...}}
+data: {"type":"ToolCallStart","job":{...canonical job document...}}
 
 event: ToolCallResult
-data: {"type":"ToolCallResult","result":{...AgentJobResponse...}}
+data: {"type":"ToolCallResult","result":{...canonical job document...}}
 
 event: ApprovalRequired
-data: {"type":"ApprovalRequired","pendingJob":{...AgentJobResponse...}}
+data: {"type":"ApprovalRequired","pendingJob":{...canonical job document...}}
 
 event: ApprovalResult
-data: {"type":"ApprovalResult","approvalOutcome":{...AgentJobResponse...}}
+data: {"type":"ApprovalResult","approvalOutcome":{...canonical job document...}}
 
 event: Error
 data: {"type":"Error","error":"message"}
@@ -1747,7 +1741,7 @@ Same approval companion endpoint, scoped to a thread stream.
 
 ---
 
-## Agent Jobs
+## Jobs
 
 Jobs represent permission-gated agent actions. When a job is submitted,
 the permission system evaluates it immediately:
@@ -1789,7 +1783,7 @@ sets. Global action types ignore it.
 > ignored by the core and passed through to the module. See individual
 > module documentation for details.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 
 ---
 
@@ -1797,7 +1791,7 @@ sets. Global action types ignore it.
 
 List all jobs for a channel.
 
-**Response `200`:** `AgentJobResponse[]`
+**Response `200`:** canonical job documents
 
 ---
 
@@ -1808,7 +1802,7 @@ fields needed for list views / dropdowns — no `resultData`, `errorLog`,
 or `logs`. Use this endpoint when you only need to enumerate
 jobs without their heavy payloads.
 
-**Response `200`:** `AgentJobSummaryResponse[]`
+**Response `200`:** canonical job summaries
 
 ```json
 [
@@ -1830,7 +1824,7 @@ jobs without their heavy payloads.
 
 ### GET /channels/{channelId}/jobs/{jobId}
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 **Response `404`:** Not found.
 
 ---
@@ -1850,7 +1844,7 @@ Approve a job that is `AwaitingApproval`.
 The approver's identity is re-evaluated against the clearance
 requirement.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 
 ---
 
@@ -1859,7 +1853,7 @@ requirement.
 Gracefully stop a long-running job (completes it normally).
 Also accepts `Paused` jobs.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 **Response `404`:** Not found.
 
 ---
@@ -1868,7 +1862,7 @@ Also accepts `Paused` jobs.
 
 Cancel a job that has not yet completed. Also accepts `Paused` jobs.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 **Response `404`:** Not found.
 
 ---
@@ -1881,7 +1875,7 @@ processing). The job can be resumed later.
 
 Only jobs with status `Executing` can be paused.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 **Response `404`:** Not found.
 
 ---
@@ -1893,12 +1887,12 @@ loop using the original job parameters.
 
 Only jobs with status `Paused` can be resumed.
 
-**Response `200`:** `AgentJobResponse`
+**Response `200`:** canonical `JobDocument`
 **Response `404`:** Not found.
 
 ---
 
-### AgentJobResponse
+### Job document
 
 ```json
 {
@@ -2343,7 +2337,7 @@ responses so callers rarely need the dedicated cost endpoints.
 | Response type | Field(s) | When populated |
 |---------------|----------|----------------|
 | `ChatResponse` | `channelCost`, `threadCost`, `agentCost` | Always (every chat turn) |
-| `AgentJobResponse` | `channelCost`, `jobCost` | `channelCost` on detail / mutation endpoints (`GET`, `POST approve/stop/cancel`, `PUT pause/resume`); `jobCost` when core or a module has recorded token usage for that job |
+| `JobDocument` | package-owned job fields | The canonical Jobs contract defines the document fields and transitions |
 | SSE `Done` event | Inside the `ChatResponse` payload | Always |
 
 ### ChannelCostResponse

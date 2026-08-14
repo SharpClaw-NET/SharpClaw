@@ -40,13 +40,7 @@ jobs:
           - domain: Architecture Module Dependencies
             filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.ModuleDependencyGuardrailTests'
           - domain: Runtime Composition
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeCompositionBoundaryTests'
-          - domain: Runtime Pairing
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimePairingClientTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimePairingRegistryClientTests|FullyQualifiedName~SharpClaw.Tests.Persistence.RemoteRuntimePairingRegistryJsonColdStoreTests'
-          - domain: Runtime Transport
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeOptionsTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeRouteTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeTransportTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeConcurrencyLimiterTests'
-          - domain: Runtime Multi Process
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeMultiProcessTests'
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CanonicalJobsRouteBoundaryTests'
           - domain: Gateway Boundaries
             filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
           - domain: Persistence Provider
@@ -67,8 +61,6 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing.PublishScriptDeploymentTests'
           - domain: CI Guardrails
             filter: 'FullyQualifiedName~SharpClaw.Tests.Ci.CiRequiredStatusCheckTests'
-          - domain: Remote Runtime Session
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeProxySessionTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeProxySessionSecretsTests|FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgeRevocationTests'
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -90,37 +82,3 @@ jobs:
           --no-restore
           --logger GitHubActions
           --filter "TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})"
-
-  performance:
-    name: Performance / ${{ matrix.domain }}
-    runs-on: windows-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - domain: Remote Runtime Streamed Payload
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.RemoteRuntimeBridgePerformanceTests'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore
-        shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT
-
-      # Require this check in GitHub branch protection. It is the blocking
-      # performance signal; diagnostic tiers remain local opt-in tests.
-      - name: Run performance domain
-        shell: pwsh
-        run: >
-          dotnet test $env:TEST_PROJECT
-          --configuration Release
-          --no-restore
-          --logger GitHubActions
-          --filter "TestCategory=PerformanceGate&(${{ matrix.filter }})"

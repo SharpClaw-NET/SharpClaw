@@ -20,7 +20,6 @@
     <Compile Remove="HostPersistenceGlobalUsings.cs" />
     <Compile Remove="Routing\**\*.cs" />
     <Compile Include="Handlers\KernelJobsHandlers.cs" />
-    <Compile Include="Handlers\RemoteRuntimePairingHandlers.cs" />
     <Compile Include="Routing\EndpointMapper.cs" />
     <Compile Include="Routing\MapAttributes.cs" />
   </ItemGroup>
@@ -41,7 +40,6 @@
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
-    <PackageReference Include="Yarp.ReverseProxy" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 

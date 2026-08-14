@@ -674,94 +674,97 @@ Approve or deny a pending job during a thread streaming session.
 
 ---
 
-## Agent jobs
+## Jobs
 
-**Route prefix:** `/api/channels/{channelId}/jobs`
+**Route prefix:** `/api/jobs`
 **Rate limit policy:** `global`
 
-### POST /api/channels/{channelId}/jobs
+### POST /api/jobs
 
-Submit a new agent job.
+Submit one canonical job.
 
 ```json
 {
-  "actionType": "ExecuteAsSafeShell",
-  "resourceId?": "guid",
-  "agentId?": "guid",
-  "safeShellType?": "string",
-  "scriptJson?": "string"
+  "actionKey": "module.action",
+  "input": {
+    "contractName": "module.payload",
+    "version": 1,
+    "json": "{}"
+  },
+  "conversationId": null,
+  "holds": []
 }
 ```
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **400** → `{ error: "Invalid job request." }`
 
 ---
 
-### GET /api/channels/{channelId}/jobs
+### GET /api/jobs
 
-**200** → `AgentJobResponse[]`
-
----
-
-### GET /api/channels/{channelId}/jobs/summaries
-
-Lightweight list (no `resultData`/`errorLog`/`logs`).
-
-**200** → `AgentJobSummaryResponse[]`
+**200** → canonical job documents
 
 ---
 
-### GET /api/channels/{channelId}/jobs/{jobId}
+### GET /api/jobs/{jobId}
 
-**200** → `AgentJobResponse`
+Read one canonical job by identifier.
+
+**200** → canonical `JobDocument`
+
+---
+
+### POST /api/jobs/{jobId}/dispatch
+
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
 
-### POST /api/channels/{channelId}/jobs/{jobId}/approve
+### POST /api/jobs/{jobId}/stop
 
 ```json
 { "approverAgentId?": "guid" }
 ```
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
 
-### POST /api/channels/{channelId}/jobs/{jobId}/stop
+### POST /api/jobs/{jobId}/cancel
 
 Graceful stop for a long-running job; also accepts Paused jobs.
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
 
-### POST /api/channels/{channelId}/jobs/{jobId}/cancel
+### POST /api/jobs/{jobId}/pause
 
 Force cancel (also accepts Paused jobs).
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
 
-### PUT /api/channels/{channelId}/jobs/{jobId}/pause
+### POST /api/jobs/{jobId}/resume
 
 Pause an executing job (stops capture/inference).
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
 
-### PUT /api/channels/{channelId}/jobs/{jobId}/resume
+### POST /api/jobs/{jobId}/recover
 
 Resume a paused job.
 
-**200** → `AgentJobResponse`
+**200** → canonical `JobDocument`
 **404** → `{ error: "Job not found." }`
 
 ---
