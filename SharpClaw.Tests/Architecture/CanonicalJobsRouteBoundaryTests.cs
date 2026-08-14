@@ -46,6 +46,31 @@ public sealed class CanonicalJobsRouteBoundaryTests
     }
 
     [Test]
+    public void Canonical_jobs_path_does_not_use_host_agent_job_storage()
+    {
+        var root = FindSolutionRoot();
+        var sources = new[]
+        {
+            Path.Combine(root, "SharpClaw.Runtime", "Host", "Handlers", "KernelJobsHandlers.cs"),
+            Path.Combine(root, "SharpClaw.Runtime", "Host", "RuntimeHostComposition.cs"),
+            Path.Combine(root, "SharpClaw.Runtime", "BLL", "Kernel"),
+        }
+            .SelectMany(path => File.Exists(path)
+                ? [path]
+                : Directory.Exists(path)
+                    ? Directory.GetFiles(path, "*.cs", SearchOption.AllDirectories)
+                    : [])
+            .Select(File.ReadAllText)
+            .ToArray();
+
+        string.Join(Environment.NewLine, sources)
+            .Should()
+            .NotContain("AgentJobDB")
+            .And
+            .NotContain("ExecutionOwnerKind.AgentJob");
+    }
+
+    [Test]
     public void Excluded_legacy_orchestration_sources_are_absent()
     {
         var root = FindSolutionRoot();
