@@ -385,7 +385,7 @@ public sealed class RuntimeCliBoundaryTests
         launcherSource.Should().Contain("RuntimeLaunchPlan.From");
         launcherSource.Should().NotContain("RuntimeCliSession");
         launcherSource.Should().NotContain("RuntimeCliActionCatalog");
-        hostProject.Should().Contain("Compile Remove=\"Cli\\**\\*.cs\"");
+        hostProject.Should().NotContain("Compile Remove=\"Cli\\**\\*.cs\"");
         adapterSource.Should().Contain("private readonly KernelActionDispatcher _actionDispatcher");
         var cliActionStart = adapterSource.IndexOf(
             "internal async ValueTask<TResult> RunCliActionAsync",

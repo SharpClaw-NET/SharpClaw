@@ -11,20 +11,6 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <Compile Remove="Api\DatabaseInitializationGateMiddleware.cs" />
-    <Compile Remove="Api\JwtSessionMiddleware.cs" />
-    <Compile Remove="Api\MigrationGateMiddleware.cs" />
-    <Compile Remove="Cli\**\*.cs" />
-    <Compile Remove="DatabaseInitializationGate.cs" />
-    <Compile Remove="Handlers\**\*.cs" />
-    <Compile Remove="HostPersistenceGlobalUsings.cs" />
-    <Compile Remove="Routing\**\*.cs" />
-    <Compile Include="Handlers\KernelJobsHandlers.cs" />
-    <Compile Include="Routing\EndpointMapper.cs" />
-    <Compile Include="Routing\MapAttributes.cs" />
-  </ItemGroup>
-
-  <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
   </ItemGroup>
 

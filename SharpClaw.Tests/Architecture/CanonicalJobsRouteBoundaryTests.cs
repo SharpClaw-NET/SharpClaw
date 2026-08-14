@@ -9,7 +9,7 @@ namespace SharpClaw.Tests.Architecture;
 public sealed class CanonicalJobsRouteBoundaryTests
 {
     [Test]
-    public void Runtime_host_compiles_the_canonical_jobs_handler_only()
+    public void Runtime_host_compiles_the_canonical_jobs_handler_with_default_source_items()
     {
         var root = FindSolutionRoot();
         var project = XDocument.Load(Path.Combine(
@@ -17,13 +17,13 @@ public sealed class CanonicalJobsRouteBoundaryTests
             "SharpClaw.Runtime",
             "Host",
             "SharpClaw.Runtime.Host.csproj"));
-        var includes = project.Descendants("Compile")
-            .Select(element => (string?)element.Attribute("Include"))
-            .Where(include => include is not null)
-            .Select(include => include!)
-            .ToArray();
-
-        includes.Should().Contain("Handlers\\KernelJobsHandlers.cs");
+        project.Descendants("Compile").Should().BeEmpty();
+        File.Exists(Path.Combine(
+            root,
+            "SharpClaw.Runtime",
+            "Host",
+            "Handlers",
+            "KernelJobsHandlers.cs")).Should().BeTrue();
     }
 
     [Test]

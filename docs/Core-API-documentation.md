@@ -189,15 +189,9 @@ is a local-process trust check, not a user identity check, so clients
 should resolve the key from backend discovery metadata or from an explicit
 runtime file path rather than assuming a machine-global location.
 
-The second layer is the user JWT in `Authorization: Bearer <token>`.
-After the API key middleware accepts a request, `JwtSessionMiddleware`
-validates the token and populates `SessionService.UserId`. Endpoints that
-are not anonymous and are not exempt return `401` for a missing or invalid
-token, and return `419` with `access_token_expired` when the token was
-validly signed but has expired or was invalidated server-side. The exempt
-paths are `/echo`, `/ping`, `/auth/login`, `/auth/register`, and
-`/auth/refresh`; anonymous endpoints declared with ASP.NET Core metadata
-also bypass JWT enforcement.
+The default Runtime Host does not register a user JWT session middleware.
+The API-key boundary authenticates local Runtime callers. Optional modules
+own any additional user identity and session behavior.
 
 The gateway has a service credential in addition to caller JWTs. A gateway
 request still carries the internal `X-Api-Key`, but it may also send
@@ -278,8 +272,8 @@ module. `DisableAccessibleThreadsHeader` makes that module's
 `{{accessible-threads}}` custom-header tag resolve to an empty string without
 disabling the module's explicit cross-thread tools or permission checks.
 
-When `DisableAccessTokenCheck` is `true`, the `JwtSessionMiddleware`
-skips enforcement — no 401 is returned for missing/expired tokens on
+When `DisableAccessTokenCheck` is `true`, an optional session module
+skips enforcement — no 401 is returned for missing or expired tokens on
 non-exempt paths.  JWT parsing still runs, so if a valid Bearer token
 is present, `SessionService.UserId` is populated normally.  Endpoints
 that rely on `SessionService.UserId` (e.g. `GET /auth/me`) still work

@@ -340,9 +340,10 @@ public sealed class RuntimeSecurityBoundaryTests
         apiKeySource.Should().Contain("RunSecurityDecisionAsync");
         apiKeySource.Should().Contain("await next(context)");
         endpointSource.Should().Contain("security.secret.read");
-        hostProject.Should().Contain("Compile Remove=\"Api\\JwtSessionMiddleware.cs\"");
-        hostProject.Should().Contain("Compile Remove=\"Handlers\\**\\*.cs\"");
-        hostProject.Should().Contain("Compile Remove=\"Cli\\**\\*.cs\"");
+        hostProject.Should().NotContain("Compile Remove=");
+        hostProject.Should().NotContain("Compile Include=");
+        File.Exists(Path.Combine(root!, "SharpClaw.Runtime", "Host", "Api", "JwtSessionMiddleware.cs"))
+            .Should().BeFalse();
         bllProject.Should().Contain("Compile Remove=\"**\\*.cs\"");
         bllProject.Should().Contain("Compile Include=\"Kernel\\**\\*.cs\"");
     }

@@ -264,15 +264,15 @@ that provides the design-time connection string.
 
 ### Migration gate
 
-The `MigrationGate` is an async-safe pause mechanism that prevents data
-corruption during migrations:
+The `MigrationGate` is an async-safe pause mechanism for explicit migration
+operations:
 
 - **Normal operation:** Requests pass through the gate with zero overhead
   (the gate is already completed).
 - **During migration:** The gate closes, all in-flight requests drain,
   migrations run, then the gate reopens.
-- **Middleware:** `MigrationGateMiddleware` wraps every request in the
-  gate automatically.
+The Runtime Host does not install a migration middleware. The migration
+service enters this gate only for an explicit migration operation.
 
 The gate uses `SemaphoreSlim` + `TaskCompletionSource` (not
 `ReaderWriterLockSlim`) to avoid threadpool starvation in async
