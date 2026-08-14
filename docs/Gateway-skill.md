@@ -1,263 +1,58 @@
-﻿SharpClaw Gateway API — Agent Skill Reference
+# Gateway Integration Skill
 
-Base: https://your-domain.example.com (user-configured)
-Auth: same JWT flow as internal API. POST /api/auth/login → Bearer token.
-Gateway auto-attaches X-Api-Key when forwarding to internal API (localhost:48923).
-All bodies JSON. Enums serialised as strings. Timestamps ISO 8601.
+## Scope
 
-The gateway is a thin reverse proxy — it never interprets business logic.
-It adds endpoint toggles, rate limiting, IP banning, anti-spam checks,
-queued mutation forwarding, and optional module-owned endpoint hosting.
-Depends only on SharpClaw.Contracts for shared DTOs and enums.
+Use this skill when you configure, test, or operate the optional SharpClaw Gateway. The Gateway is a separate public process. It forwards requests to the local Runtime Host.
 
-────────────────────────────────────────
-SECURITY
-────────────────────────────────────────
-Middleware pipeline (order matters):
-  1. EndpointGateMiddleware — per-group enable/disable → 503
-  2. IpBanMiddleware — banned IPs → 403
-  3. AntiSpamMiddleware — body >64KB → 413, missing Content-Type on POST/PUT → 415
-  4. RateLimiter — per-IP sliding/fixed windows → 429
+The skill does not create application state. The Runtime owns provider and model selection, canonical Jobs, module storage, and kernel execution. The Gateway owns transport controls, forwarding, process state, and module endpoint-group hosting.
 
-IP banning: 10 violations in 5 minutes → 1-hour ban. In-memory, resets on restart.
+## Route Contract
 
-Rate limit policies:
-  global   60 req/min  sliding window (6 segments)   most endpoints
-  auth      5 req/min  fixed window                   /api/auth/*
-  chat     20 req/min  sliding window (4 segments)    chat send, stream, cost, thread chat
+The current base route contract is:
 
-────────────────────────────────────────
-ENDPOINT TOGGLES
-────────────────────────────────────────
-Configured in the Gateway:Endpoints section of .env. The master switch is
-Enabled; when it is false, public proxy routes return 503. The committed
-template keeps every built-in endpoint group disabled by default, while the
-development template enables the built-in groups for local testing.
+```text
+GET  /api/health
+GET  /api/gateway/status
+ANY  /api/chat
+```
 
-Built-in groups are Auth, Agents, Channels, ChannelContexts, Chat,
-ChatStream, Threads, ThreadChat, ThreadWatch, Jobs, Models, LocalModels,
-Providers, Roles, Users, Cost, ToolAwarenessSets, and
-Resources. Module-owned routes under /api/modules/* are resolved through the
-gateway module endpoint catalog and use `Gateway:Modules:Modules:{moduleId}`
-plus `Gateway:Modules:Groups:{moduleId}/{groupId}`.
+The Gateway forwards `/api/chat` to `/chat`. It keeps the request method, query string, body, response status, content type, and response body. The Gateway does not cache a model response and does not run a local request after a forwarding failure.
 
-ResolveGroup priority (first match wins):
-  /api/auth*                       → Auth
-  */chat/stream*, */chat/sse*      → ChatStream
-  */chat/cost*, */cost*            → Cost
-  */threads/*/watch*               → ThreadWatch
-  */threads/*/chat*                → ThreadChat
-  */chat*                          → Chat
-  */threads*                       → Threads
-  */jobs*                          → Jobs
-  /api/agents*                     → Agents
-  /api/channels*                   → Channels
-  /api/channelcontexts*, /api/channel-contexts*  → ChannelContexts
-  /api/models/local*               → LocalModels
-  /api/models*                     → Models
-  /api/providers*                  → Providers
-  /api/roles*                      → Roles
-  /api/users*                      → Users
-  /api/toolawarenesssets*          → ToolAwarenessSets
-  /api/tool-awareness-sets*        → ToolAwarenessSets
-  /api/resources*                  → Resources
-  /api/modules/{module}/{group}/*  → module-owned group
+Gateway module extensions can register endpoint groups below `/api/modules/`. The catalog requires a known module and group identity. The endpoint gate requires the group to be enabled. Unknown and disabled groups fail before module execution.
 
-────────────────────────────────────────
-AUTH
-────────────────────────────────────────
-POST /api/auth/register            { username, password }  → { id, username }
-POST /api/auth/login               { username, password, rememberMe }  → { accessToken, accessTokenExpiresAt, refreshToken?, refreshTokenExpiresAt? }
-POST /api/auth/refresh             { refreshToken }  → same shape as login
-GET  /api/auth/me                  → { id, username, bio, roleId, roleName, isUserAdmin }
-GET  /api/auth/me/role             → RolePermissionsResponse
+## Configuration Contract
 
-────────────────────────────────────────
-AGENTS
-────────────────────────────────────────
-POST /api/agents                    { name, modelId, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
-GET  /api/agents                   → AgentResponse[]
-GET  /api/agents/{id}              → AgentResponse
-GET  /api/agents/{id}/cost         → AgentCostResponse
-PUT  /api/agents/{id}              { name?, modelId?, systemPrompt?, maxCompletionTokens?, customChatHeader?, toolAwarenessSetId? }
-DELETE /api/agents/{id}
-PUT  /api/agents/{id}/role         { roleId }
-POST /api/agents/sync-with-models  → AgentResponse[]
+Use the assembly-local `Environment/.env` file. Use double underscores for nested dotenv keys.
 
-────────────────────────────────────────
-CHANNELS
-────────────────────────────────────────
-POST   /api/channels               { agentId?, title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader? }
-GET    /api/channels?agentId={guid}
-GET    /api/channels/{id}
-PUT    /api/channels/{id}          { title?, contextId?, permissionSetId?, allowedAgentIds?, disableChatHeader?, customChatHeader? }
-DELETE /api/channels/{id}
+```text
+InternalApi__BaseUrl="http://127.0.0.1:48923"
+InternalApi__TimeoutSeconds="300"
+InternalApi__ApiKey=""
+Gateway__Endpoints__Enabled="true"
+Gateway__RequestQueue__Enabled="true"
+Gateway__RequestQueue__MaxConcurrency="1"
+Gateway__RequestQueue__TimeoutSeconds="30"
+Gateway__RequestQueue__MaxRetries="2"
+Gateway__RequestQueue__RetryDelayMs="500"
+Gateway__RequestQueue__MaxQueueSize="500"
+Gateway__Modules__HotReloadEnabled="false"
+Gateway__Modules__DrainTimeoutSeconds="30"
+```
 
-────────────────────────────────────────
-CHANNEL CONTEXTS
-────────────────────────────────────────
-POST   /api/channel-contexts        { agentId, name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-GET    /api/channel-contexts?agentId={guid}
-GET    /api/channel-contexts/{id}
-PUT    /api/channel-contexts/{id}   { name?, permissionSetId?, disableChatHeader?, allowedAgentIds? }
-DELETE /api/channel-contexts/{id}
+Use `Gateway:Endpoints:Enabled` only as the normalized IConfiguration key. Use `Gateway__Endpoints__Enabled=true` in the dotenv file. Do not use JSON or JSONC application configuration files.
 
-────────────────────────────────────────
-THREADS
-────────────────────────────────────────
-POST   /api/channels/{channelId}/threads           { name?, maxMessages?, maxCharacters? }
-GET    /api/channels/{channelId}/threads
-GET    /api/channels/{channelId}/threads/{threadId}
-PUT    /api/channels/{channelId}/threads/{threadId} { name?, maxMessages?, maxCharacters? }
-DELETE /api/channels/{channelId}/threads/{threadId}
+## Security Boundary
 
-Defaults: maxMessages=50, maxCharacters=100000.
+The Gateway service credential is used only for the local Gateway-to-Runtime request. The Gateway does not place that credential in a forwarded request to a remote proxy. The request body cannot choose a credential mode or a forwarding target.
 
-────────────────────────────────────────
-CHAT (per-channel)
-────────────────────────────────────────
-POST /api/channels/{channelId}/chat                { message, agentId?, clientType?, editorContext? }
-GET  /api/channels/{channelId}/chat/history         → ChatMessageResponse[]
+The transport pipeline applies the master gate, module group gate, IP ban check, body validation, rate limiting, and action handling before forwarding. A disabled or invalid target fails closed. A forwarding failure cannot start local execution.
 
-Without a thread: one-shot (no history sent to model).
+## Validation Flow
 
-────────────────────────────────────────
-THREAD CHAT
-────────────────────────────────────────
-POST /api/channels/{channelId}/chat/threads/{threadId}           { message, agentId?, clientType?, editorContext? }
-GET  /api/channels/{channelId}/chat/threads/{threadId}           → ChatMessageResponse[] (history)
+First verify `/api/health`. Next verify `/api/gateway/status`. Then send a bounded request to `/api/chat` with a configured provider and model. Finally verify the response status, content type, body, and request cancellation behavior.
 
-With a thread: history included, trimmed by thread's maxMessages and maxCharacters.
+For a module endpoint, verify discovery, group identity, enabled state, authorization, response status, and shutdown. Verify that an unknown group returns 404 and a disabled group returns 503. Verify that module failure does not create a Runtime or storage fallback.
 
-────────────────────────────────────────
-CHAT STREAMING (SSE)
-────────────────────────────────────────
-GET  /api/channels/{channelId}/chat/stream                                      → text/event-stream
-GET  /api/channels/{channelId}/chat/threads/{threadId}/stream                   → text/event-stream
-POST /api/channels/{channelId}/chat/stream/approve/{jobId}                      { approved }
-POST /api/channels/{channelId}/chat/threads/{threadId}/stream/approve/{jobId}   { approved }
+## Diagnostics
 
-SSE event types: TextDelta, ToolCallStart, ToolCallResult, ApprovalRequired, ApprovalResult, Error, Done.
-Registered via minimal API (MapChatStreamProxy), not MVC controllers.
-
-────────────────────────────────────────
-JOBS
-────────────────────────────────────────
-POST /api/jobs                              { actionKey, input, conversationId?, holds? }
-GET  /api/jobs
-GET  /api/jobs/{jobId}
-POST /api/jobs/{jobId}/dispatch
-POST /api/jobs/{jobId}/cancel | /pause | /stop | /resume | /recover
-POST /api/jobs/{jobId}/resolve-hold | /retry
-DELETE /api/jobs/{jobId}
-GET  /api/jobs/{jobId}/progress | /attempts | /artifact
-
-JobPayloadEnvelope request: actionKey, input, conversationId?, holds?
-
-Job status and transitions come from the canonical Core Jobs contract.
-
-────────────────────────────────────────
-MODELS
-────────────────────────────────────────
-POST /api/models                    { name, providerId, capabilities? }
-GET /api/models?providerId={guid}   → ModelResponse[]
-GET /api/models/{id}                → ModelResponse
-PUT /api/models/{id}                { name?, capabilities? }
-DELETE /api/models/{id}
-
-────────────────────────────────────────
-PROVIDERS
-────────────────────────────────────────
-POST /api/providers                  { name, providerKey, apiEndpoint?, apiKey? }
-GET /api/providers                  → ProviderResponse[]
-GET /api/providers/types            → ProviderTypeResponse[]
-GET /api/providers/{id}             → ProviderResponse
-PUT /api/providers/{id}             { name?, apiEndpoint? }
-DELETE /api/providers/{id}
-POST /api/providers/{id}/sync-models
-POST /api/providers/{id}/set-key     { apiKey }
-POST /api/providers/{id}/auth/device-code
-POST /api/providers/{id}/auth/device-code/poll
-
-────────────────────────────────────────
-COST TRACKING
-────────────────────────────────────────
-Toggled by the Cost endpoint group (separate from Chat/Providers).
-
-GET /api/channels/{channelId}/chat/cost                          → ChannelCostResponse
-GET /api/channels/{channelId}/chat/threads/{threadId}/cost       → ThreadCostResponse
-GET /api/providers/{id}/cost?days=30&startDate=...&endDate=...   → ProviderCostResponse
-GET /api/providers/cost/total?days=30&startDate=...&endDate=...&all=true&simple=true
-    → ProviderCostTotalResponse (default) or ProviderCostSimpleResponse (?simple=true)
-
-────────────────────────────────────────
-ROLES
-────────────────────────────────────────
-POST /api/roles                      { name }
-GET /api/roles                      → RoleResponse[]
-GET /api/roles/{id}                 → RoleResponse
-GET /api/roles/{id}/permissions     → RolePermissionsResponse
-PUT /api/roles/{id}/name             { name }
-PUT /api/roles/{id}/permissions      (SetRolePermissionsRequest)
-DELETE /api/roles/{id}
-
-────────────────────────────────────────
-USERS
-────────────────────────────────────────
-GET /api/users                      → UserEntry[] (admin-only)
-PUT /api/users/{id}/role            { roleId }
-
-────────────────────────────────────────
-MODULE-OWNED SURFACES
-────────────────────────────────────────
-The current gateway project exposes the routes listed in this skill. Extra gateway routes must be supplied by module-owned gateway extensions under /api/modules/* and enabled through Gateway:Modules.
-
-────────────────────────────────────────
-CONFIGURATION (.env)
-────────────────────────────────────────
-File: the deployed Gateway assembly's `Environment/.env` in canonical dotenv format.
-`GatewayEnvironment.AddGatewayEnvironment()` loads it through
-Supprocom.Secrets and applies the optional `.dev.env` overlay. The package
-owns first-run creation, protection, and recovery.
-
-InternalApi settings point the gateway at the core API. BaseUrl defaults to
-http://127.0.0.1:48923 and TimeoutSeconds defaults to 300. ApiKey,
-ApiKeyFilePath, GatewayToken, and GatewayTokenFilePath are optional overrides;
-when they are empty, selected-backend discovery supplies the current runtime
-.api-key and .gateway-token files.
-
-Gateway:RequestQueue controls queued mutation forwarding. Gateway:Endpoints
-contains the master switch, the built-in endpoint group switches, and the
-module group map. Gateway:Modules controls external gateway module hosts,
-their group flags, hot reload, and drain timeout.
-
-────────────────────────────────────────
-ERROR RESPONSES
-────────────────────────────────────────
-All errors: { "error": "description" }
-
-200  Success with body
-204  Success, no body (DELETE)
-400  Bad request
-401  Unauthorized
-403  Forbidden (admin-only, IP ban)
-404  Not found
-413  Payload too large (>64KB)
-415  Missing Content-Type on POST/PUT
-429  Rate limited (Retry-After header)
-502  Bad gateway (internal API unreachable)
-503  Service unavailable (endpoint group disabled)
-
-────────────────────────────────────────
-SCOPE
-────────────────────────────────────────
-The gateway is a public proxy in front of the core API. The current controllers
-proxy both reads and mutations for the surfaces listed above, and queued
-mutation forwarding can serialize POST, PUT, and DELETE traffic before it
-reaches the core API. Endpoint group toggles decide which public surfaces are
-exposed in a deployment.
-
-Env file management, the editor bridge WebSocket, and module-contributed
-controllers, tool-awareness-set controllers, resource lookup controllers, and
-module-owned surfaces exist here only when a concrete gateway controller or
-gateway module maps them. A toggle by itself does not create a route.
+Check Gateway process output for listener, queue, rate-limit, and forwarding errors. Check Runtime process output for provider, model, module, and kernel errors. Keep request bodies, authorization values, API keys, cookies, and query values out of logs.
