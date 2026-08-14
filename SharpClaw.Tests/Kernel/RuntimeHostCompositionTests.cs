@@ -87,6 +87,23 @@ public sealed class RuntimeHostCompositionTests
             .Should().BeSameAs(adapter.ActionDispatcher);
         adapter.Graph.ContainsAction(new SharpClawActionKey("runtime.request.receive"))
             .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.submit"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.dispatch"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("jobs.cancel"))
+            .Should().BeTrue();
+        adapter.Graph.ContainsAction(new SharpClawActionKey("storage.query"))
+            .Should().BeTrue();
+        await using (var jobsScope = app.Services.CreateAsyncScope())
+        {
+            jobsScope.ServiceProvider
+                .GetRequiredService<KernelJobsStore>()
+                .Should().NotBeNull();
+            jobsScope.ServiceProvider
+                .GetRequiredService<KernelJobsCoordinator>()
+                .Should().NotBeNull();
+        }
         await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
         await adapter.StartAsync("test-host");
         readiness.MarkReady();

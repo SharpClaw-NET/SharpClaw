@@ -108,6 +108,8 @@ public sealed class RuntimeKernelAdapter :
 
     public IActionDispatcher ActionDispatcher => _actionDispatcher;
 
+    internal KernelActionDispatcher CoreActionDispatcher => _actionDispatcher;
+
     internal KernelJobsActionRunner JobsActionRunner => _jobsActionRunner;
 
     internal IReadOnlyList<RuntimeModuleContractCapture> ModuleContracts => _moduleContracts;

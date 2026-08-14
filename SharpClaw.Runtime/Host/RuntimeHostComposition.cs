@@ -55,6 +55,18 @@ internal static class RuntimeHostComposition
             services.AddSingleton<ISharpClawModule>(module);
 
         services.AddSingleton<RuntimeKernelAdapter>();
+        services.AddScoped<KernelJobsCoordinator>(serviceProvider =>
+        {
+            var adapter = serviceProvider.GetRequiredService<RuntimeKernelAdapter>();
+            var handlers = adapter.Graph.GetService(typeof(IEnumerable<IJobHandler>))
+                as IEnumerable<IJobHandler>
+                ?? [];
+            return new KernelJobsCoordinator(
+                adapter.Graph,
+                adapter.CoreActionDispatcher,
+                serviceProvider.GetRequiredService<KernelJobsStore>(),
+                handlers);
+        });
         services.AddSingleton<IRuntimePersistenceActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());
         services.AddSingleton<IRuntimeTransactionActionBoundary>(serviceProvider =>
