@@ -90,10 +90,10 @@
         <ModuleId>sharpclaw_test_harness_out_of_process</ModuleId>
       </_BundledModuleManifest>
       <_InProcessHarnessPayload Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\SharpClaw.DefaultModules.TestHarness.InProcess.dll"
-                                Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
+                                Condition="'$(ArtifactsPath)' != ''" />
       <_InProcessHarnessPayload Include="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\*.dll"
                                 Exclude="$(ArtifactsPath)\bin\SharpClaw.DefaultModules.TestHarness.InProcess\$(Configuration.ToLower())\SharpClaw.*.dll"
-                                Condition="'$(Configuration)' == 'Debug' and '$(ArtifactsPath)' != ''" />
+                                Condition="'$(ArtifactsPath)' != ''" />
       <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\SharpClaw.DefaultModules.TestHarness.InProcess.dll"
                                 Condition="'$(ArtifactsPath)' == ''" />
       <_InProcessHarnessPayload Include="$(MSBuildProjectDirectory)\..\SharpClaw.DefaultModules\TestHarness.InProcess\bin\$(Configuration)\$(TargetFramework)\*.dll"
