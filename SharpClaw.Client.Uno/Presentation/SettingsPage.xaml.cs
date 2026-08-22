@@ -1009,9 +1009,6 @@ public sealed partial class SettingsPage : Page
         return (form, list);
     }
 
-    private static ComboBox ClearanceCombo(string selected, bool includeUnset)
-        => TerminalUI.MakeClearanceCombo(selected, includeUnset);
-
     private void H(string text) => ContentPanel.Children.Add(new TextBlock
     {
         Text = text, FontFamily = Mono, FontSize = 14,
@@ -1104,8 +1101,6 @@ public sealed partial class SettingsPage : Page
     }
 
     private Task<List<T>?> FetchListAsync<T>(string path) => Api.FetchListAsync<T>(path, Json);
-
-    private static string FormatFlagName(string camelCase) => TerminalUI.FormatFlagName(camelCase);
 
     private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
 
