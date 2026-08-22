@@ -4,12 +4,10 @@ using System.Text.Json.Serialization;
 namespace SharpClaw.Services;
 
 /// <summary>
-/// Persists Uno-specific frontend-only preferences to the frontend
-/// instance root.
+/// Persists Uno-specific frontend-only preferences to the frontend instance root.
 /// <para>
-/// sent to or read by the API backend. Modules may declare setting keys in
-/// frontend contribution metadata when they need client-local preferences.
-/// per-channel UI preferences.
+/// These values stay on the client. Modules may declare keys for client-local
+/// preferences through frontend contribution metadata.
 /// </para>
 /// <para>
 /// <b>Why not <c>ApplicationData.Current.LocalSettings</c>?</b><br/>

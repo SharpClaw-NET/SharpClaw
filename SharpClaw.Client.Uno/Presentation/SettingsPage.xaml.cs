@@ -26,9 +26,6 @@ public sealed partial class SettingsPage : Page
     private List<ProviderTypeEntry>? _cachedProviderTypes;
     private List<ModelEntry>? _cachedModels;
 
-    // Current user info for admin tab
-    private bool _isUserAdmin;
-
     // Gateway log console state
     private DispatcherTimer? _gatewayLogTimer;
     private TextBlock? _gatewayLogBlock;
@@ -54,7 +51,6 @@ public sealed partial class SettingsPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Cursor.SetCommand("sharpclaw settings ");
-        await FetchCurrentUserInfoAsync();
         await RefreshModuleFrontendStateAsync();
         BuildTabs();
         SelectTab("Providers");
@@ -79,12 +75,8 @@ public sealed partial class SettingsPage : Page
             foreach (var m in _cachedModuleStates)
                 if (m.Enabled)
                     AddTabButton(m.DisplayName, $"sharpclaw module get {m.ModuleId}");
-        if (_isUserAdmin)
-        {
-            AddTabSection("Admin");
-            AddTabButton("Users", "sharpclaw user list");
-            AddTabButton("Danger Zone", "sharpclaw reset");
-        }
+        AddTabSection("Application");
+        AddTabButton("Danger Zone", "sharpclaw reset");
     }
 
 
@@ -129,7 +121,6 @@ public sealed partial class SettingsPage : Page
             "Providers" => LoadProvidersAsync(),
             "Models" => LoadModelsAsync(),
             "Gateway" => LoadGatewayAsync(),
-            "Users" => LoadUsersAsync(),
             "Danger Zone" => LoadDangerZoneAsync(),
             "Manage Modules" => LoadManageModulesAsync(),
             _ => DispatchModuleTabAsync(tab),
@@ -1119,83 +1110,6 @@ public sealed partial class SettingsPage : Page
             .NavigateRouteAsync(this, "EnvMenu");
     }
 
-    // ═══════════════════════════════════════════════════════════════
-    // Current user info
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task FetchCurrentUserInfoAsync()
-    {
-        try
-        {
-            using var resp = await Api.GetAsync("/auth/me");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(s);
-                _isUserAdmin = doc.RootElement.TryGetProperty("isUserAdmin", out var adminProp)
-                    && adminProp.GetBoolean();
-            }
-        }
-        catch { /* swallow */ }
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // USERS (admin only)
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task LoadUsersAsync()
-    {
-        ContentPanel.Children.Clear();
-        H("Users");
-        Lbl("Manage registered users. Requires admin.", 0x808080);
-
-        List<UserListEntry>? users = null;
-        try
-        {
-            using var resp = await Api.GetAsync("/users");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                users = await JsonSerializer.DeserializeAsync<List<UserListEntry>>(s, Json);
-            }
-            else if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
-            {
-                Lbl("✗ You do not have admin privileges.", 0xFF4444);
-                return;
-            }
-        }
-        catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); return; }
-
-        if (users is not { Count: > 0 })
-        {
-            Lbl("No users found.", 0x808080);
-            return;
-        }
-
-        Sub("Registered Users");
-        var list = new StackPanel { Spacing = 8 };
-        foreach (var u in users)
-        {
-            var userRow = new StackPanel { Spacing = 4, Margin = new Thickness(0, 0, 0, 4) };
-
-            var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            headerRow.Children.Add(new TextBlock { Text = "›", FontFamily = Mono, FontSize = 12, Foreground = B(0x00FF00) });
-            headerRow.Children.Add(new TextBlock { Text = u.Username, FontFamily = Mono, FontSize = 12,
-                Foreground = B(0xE0E0E0), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            if (u.IsUserAdmin)
-                headerRow.Children.Add(new TextBlock { Text = "admin", FontFamily = Mono, FontSize = 10,
-                    Foreground = B(0xFFCC00), VerticalAlignment = VerticalAlignment.Center });
-            userRow.Children.Add(headerRow);
-
-            // Show user ID in muted text
-            userRow.Children.Add(new TextBlock { Text = $"id: {u.Id}", FontFamily = Mono, FontSize = 9,
-                Foreground = B(0x444444), Margin = new Thickness(16, 0, 0, 0) });
-
-            list.Children.Add(userRow);
-        }
-        ContentPanel.Children.Add(list);
-    }
-
     // ── DTOs ────────────────────────────────────────────────────
 
     [ImplicitKeys(IsEnabled = false)]
@@ -1212,8 +1126,6 @@ public sealed partial class SettingsPage : Page
     private sealed record ModelEntry(Guid Id, string Name, Guid ProviderId, string ProviderName, string Capabilities);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ResolvedFile(string DownloadUrl, string Filename, string? Quantization);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed record UserListEntry(Guid Id, string Username, string? Bio, bool IsUserAdmin);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModuleStateEntry(
         string ModuleId, string DisplayName, string ToolPrefix,

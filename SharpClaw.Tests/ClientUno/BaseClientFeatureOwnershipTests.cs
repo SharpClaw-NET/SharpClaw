@@ -23,6 +23,23 @@ public sealed class BaseClientFeatureOwnershipTests
         source.Should().NotContain("ModulePermissionMetadata");
     }
 
+    [Test]
+    public void Base_settings_do_not_publish_user_administration_surface()
+    {
+        var sourceRoot = FindSourceRoot();
+        var settings = File.ReadAllText(Path.Combine(
+            sourceRoot,
+            "SharpClaw.Client.Uno",
+            "Presentation",
+            "SettingsPage.xaml.cs"));
+
+        settings.Should().NotContain("LoadUsersAsync");
+        settings.Should().NotContain("UserListEntry");
+        settings.Should().NotContain("/users");
+        settings.Should().NotContain("isUserAdmin");
+        settings.Should().Contain("AddTabButton(\"Danger Zone\"");
+    }
+
     private static string FindSourceRoot()
     {
         var starts = new[]
