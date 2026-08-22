@@ -954,6 +954,11 @@ public sealed class ClientActionBoundaryTests
             [Path.Combine("Presentation", "MainPage.Chat.cs")] = [
                 "ConsumeStreamAsync",
                 "CommitStateAsync",
+                "\"/chat/stream\"",
+            ],
+            [Path.Combine("Presentation", "MainPage.xaml.cs")] = [
+                "CommitStateAsync",
+                "client.chat.ui",
             ],
             [Path.Combine("Presentation", "LoginPage.xaml.cs")] = [
                 "Session.LoginAsync",
@@ -1038,6 +1043,25 @@ public sealed class ClientActionBoundaryTests
         combinedSource.Should().NotContain("IAuthenticationService");
         combinedSource.Should().NotContain("UseAuthentication");
 
+        foreach (var path in new[]
+        {
+            Path.Combine(clientRoot, "Presentation", "MainPage.xaml"),
+            Path.Combine(clientRoot, "Presentation", "MainPage.xaml.cs"),
+            Path.Combine(clientRoot, "Presentation", "MainPage.Chat.cs"),
+            Path.Combine(clientRoot, "Presentation", "MainPage.Navigation.cs"),
+            Path.Combine(clientRoot, "Presentation", "UnoClientState.cs"),
+        })
+        {
+            var source = File.ReadAllText(path);
+            source.Should().NotContain("/channels", path);
+            source.Should().NotContain("/channel-contexts", path);
+            source.Should().NotContain("AgentSelector", path);
+            source.Should().NotContain("ThreadSelector", path);
+            source.Should().NotContain("JobViewPanel", path);
+            source.Should().NotContain("ChannelCost", path);
+            source.Should().NotContain("ChatMessageDto", path);
+        }
+
         File.Exists(Path.Combine(clientRoot, "Presentation", "LoginModel.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Contributions.cs"))
@@ -1075,6 +1099,8 @@ public sealed class ClientActionBoundaryTests
         File.Exists(Path.Combine(clientRoot, "Presentation", "SecondPage.xaml.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.ChannelSettings.cs"))
+            .Should().BeFalse();
+        File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Jobs.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Helpers", "PermissionEditorBuilder.cs"))
             .Should().BeFalse();
