@@ -73,6 +73,11 @@ public sealed class RuntimeToolBoundaryTests
 
         result.Completion.Content.Should().Be("tool completed");
         probe.HandlerCalls.Should().Be(1);
+        var hostContext = probe.HostContexts.Should().ContainSingle().Which;
+        hostContext.IsWellFormed(DateTimeOffset.UtcNow).Should().BeTrue();
+        hostContext.Ingress.Should().Be(HostActionEntryIngress.Tool);
+        hostContext.Contribution.Should().NotBeNull();
+        hostContext.Contribution!.IngressBinding.PrimaryIdentity.Should().Be("tool-boundary");
         probe.Observations
             .Select(static value => value.Action)
             .Should()
@@ -171,6 +176,11 @@ public sealed class RuntimeToolBoundaryTests
             value.Action == "tool.handler.invoke" && value.Subject == "tool-user-a");
         probe.Observations.Should().Contain(value =>
             value.Action == "tool.handler.invoke" && value.Subject == "tool-user-b");
+        probe.HostContexts
+            .Select(static value => value.Caller.SubjectId)
+            .Should()
+            .Contain("tool-user-a")
+            .And.Contain("tool-user-b");
     }
 
     private static RuntimeKernelAdapter CreateAdapter(
@@ -411,6 +421,7 @@ public sealed class RuntimeToolBoundaryTests
         {
             cancellationToken.ThrowIfCancellationRequested();
             Interlocked.Increment(ref probe.HandlerCalls);
+            probe.HostContexts.Enqueue(invocation.HostActionContext);
             using var document = JsonDocument.Parse(invocation.Arguments.GetRawText());
             probe.LastValue = document.RootElement.TryGetProperty("value", out var value)
                 ? value.GetInt32()
@@ -422,6 +433,7 @@ public sealed class RuntimeToolBoundaryTests
     private sealed class ToolProbe
     {
         public ConcurrentQueue<ToolObservation> Observations { get; } = new();
+        public ConcurrentQueue<HostActionEntryRequestContext> HostContexts { get; } = new();
         public string? Mode { get; init; }
         public int HandlerCalls;
         public int? LastValue;
