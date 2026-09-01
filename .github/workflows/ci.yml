@@ -27,10 +27,41 @@ permissions:
   contents: read
 
 jobs:
+  frozen-bom:
+    name: Frozen package graph
+    runs-on: windows-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Build frozen package graph
+        shell: pwsh
+        run: >
+          ./build/BuildFrozenBom.ps1
+          -Root "${{ runner.temp }}\sharpclaw-frozen-bom"
+
+      - name: Upload frozen package graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharpclaw-frozen-bom
+          path: |
+            ${{ runner.temp }}\sharpclaw-frozen-bom\feed\*.nupkg
+            ${{ runner.temp }}\sharpclaw-frozen-bom\bom-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
   correctness:
     name: Correctness / ${{ matrix.domain }}
+    needs: frozen-bom
     runs-on: windows-latest
-    timeout-minutes: 45
+    timeout-minutes: 60
     strategy:
       fail-fast: false
       matrix:
@@ -57,6 +88,8 @@ jobs:
             filter: 'FullyQualifiedName~SharpClaw.Tests.DurableStorage'
           - domain: Direct Chat Kernel
             filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DirectChatKernelTests'
+          - domain: Production Module Graph
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.AgentOrchestrationHostGateTests'
           - domain: Publishing
             filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing.PublishScriptDeploymentTests'
           - domain: CI Guardrails
@@ -70,9 +103,40 @@ jobs:
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Download frozen package graph
+        uses: actions/download-artifact@v4
+        with:
+          name: sharpclaw-frozen-bom
+          path: ${{ runner.temp }}\sharpclaw-frozen-bom
+
+      - name: Configure frozen package graph
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\feed"
+          $config = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\NuGet.config"
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="sharpclaw-local" value="$feed" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="sharpclaw-local">
+                <package pattern="SharpClaw.*" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          "@ | Set-Content -LiteralPath $config -Encoding utf8
+          "SHARPCLAW_NUGET_CONFIG=$config" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Restore
         shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT
+        run: dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG
 
       - name: Run correctness domain
         shell: pwsh

@@ -29,6 +29,7 @@
           { "context": "Correctness / LlamaSharp" },
           { "context": "Correctness / Durable Storage" },
           { "context": "Correctness / Direct Chat Kernel" },
+          { "context": "Correctness / Production Module Graph" },
           { "context": "Correctness / Publishing" },
           { "context": "Correctness / CI Guardrails" }
         ]
