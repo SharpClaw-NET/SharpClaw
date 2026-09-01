@@ -39,6 +39,9 @@ public sealed partial class CiRequiredStatusCheckTests
             if (jobMatch.Success)
             {
                 var name = jobMatch.Groups["name"].Value.Trim();
+                if (name.StartsWith("Dependency graph / ", StringComparison.Ordinal))
+                    contexts.Add(name);
+
                 currentJobTemplate = name.Contains("${{ matrix.domain }}", StringComparison.Ordinal)
                     ? name
                     : null;
