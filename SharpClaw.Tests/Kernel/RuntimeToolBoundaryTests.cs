@@ -54,11 +54,27 @@ public sealed class RuntimeToolBoundaryTests
                 && entry.Text.Contains(
                     "where THandler : IToolHandler",
                     StringComparison.Ordinal)))
+            .Where(entry => !(
+                string.Equals(
+                    Path.GetFileName(entry.Path),
+                    "RuntimeModuleContractManifest.cs",
+                    StringComparison.Ordinal)
+                && entry.Text.Contains(
+                    "IToolHandler handler",
+                    StringComparison.Ordinal)))
             .Select(entry => $"{entry.Path}:{entry.Line}")
             .ToArray();
 
         offenders.Should().BeEmpty(
             "Core UnifiedToolPipeline owns handler resolution and invocation");
+
+        File.ReadAllText(Path.Combine(
+                sourceRoot,
+                "SharpClaw.Runtime",
+                "BLL",
+                "Kernel",
+                "RuntimeModuleContractManifest.cs"))
+            .Should().Contain("Bound.AddTool(descriptor, handler, handlerId)");
     }
 
     [Test]

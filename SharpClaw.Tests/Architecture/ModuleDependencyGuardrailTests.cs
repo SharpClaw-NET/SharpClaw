@@ -259,9 +259,6 @@ public class ModuleDependencyGuardrailTests
     private static string FindAssetsPath(string projectPath)
     {
         var normalPath = Path.Combine(Path.GetDirectoryName(projectPath)!, "obj", "project.assets.json");
-        if (File.Exists(normalPath))
-            return normalPath;
-
         var projectName = Path.GetFileNameWithoutExtension(projectPath);
         var directory = new DirectoryInfo(AppContext.BaseDirectory);
         while (directory is not null)
@@ -281,6 +278,9 @@ public class ModuleDependencyGuardrailTests
 
             directory = directory.Parent;
         }
+
+        if (File.Exists(normalPath))
+            return normalPath;
 
         return normalPath;
     }

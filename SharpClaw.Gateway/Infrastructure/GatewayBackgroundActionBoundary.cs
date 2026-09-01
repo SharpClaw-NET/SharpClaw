@@ -118,7 +118,7 @@ public sealed class GatewayBackgroundActionBoundary
             new KernelActionEnvelope(actionKey, payload),
             async (envelope, actionCancellationToken) =>
             {
-                if (envelope.Key != actionKey || envelope.Payload is not TPayload effectivePayload)
+                if (envelope.Action.Key != actionKey || envelope.Action.Payload is not TPayload effectivePayload)
                 {
                     throw new KernelActionExecutionException(
                         $"Gateway action '{actionKey.Value}' returned an invalid payload.");

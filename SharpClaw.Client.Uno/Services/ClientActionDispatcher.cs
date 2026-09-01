@@ -370,7 +370,7 @@ public sealed class ClientActionDispatcher
             new KernelActionEnvelope(actionKey, payload),
             async (envelope, actionToken) =>
             {
-                if (envelope.Payload is not TPayload effectivePayload)
+                if (envelope.Action.Payload is not TPayload effectivePayload)
                     throw new KernelActionExecutionException(
                         $"Client action '{actionKey.Value}' returned an invalid payload type.");
 

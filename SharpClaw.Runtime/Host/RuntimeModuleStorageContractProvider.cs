@@ -9,7 +9,9 @@ internal sealed class RuntimeModuleStorageContractProvider : IModuleStorageContr
 {
     private readonly IReadOnlyList<ModuleStorageContractDescriptor> _contracts;
 
-    public RuntimeModuleStorageContractProvider(IEnumerable<ISharpClawModule> modules)
+    public RuntimeModuleStorageContractProvider(
+        IEnumerable<ISharpClawModule> modules,
+        IEnumerable<ModuleStorageContractDescriptor>? additionalContracts = null)
     {
         ArgumentNullException.ThrowIfNull(modules);
 
@@ -18,6 +20,7 @@ internal sealed class RuntimeModuleStorageContractProvider : IModuleStorageContr
             module.Configure(collector);
 
         _contracts = collector.StorageContracts
+            .Concat(additionalContracts ?? [])
             .Concat(KernelJobsStorage.Contracts)
             .GroupBy(contract => (contract.ModuleId, contract.StorageName))
             .Select(group => group.Count() == 1

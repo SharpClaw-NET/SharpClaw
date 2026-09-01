@@ -279,6 +279,7 @@ public sealed class RuntimeKernelAdapterTests
         provider.Messages.Should().BeEmpty();
         (await conversationStore.LoadHistoryAsync(
             conversationId,
+            TestOperationContext(),
             CancellationToken.None)).Should().BeEmpty();
     }
 
@@ -324,11 +325,29 @@ public sealed class RuntimeKernelAdapterTests
         await secondAdapter.StopAsync();
 
         secondResult.ConversationId.Should().NotBe(firstResult.ConversationId);
-        (await firstStore.LoadHistoryAsync(firstResult.ConversationId, CancellationToken.None))
+        (await firstStore.LoadHistoryAsync(
+            firstResult.ConversationId,
+            TestOperationContext(),
+            CancellationToken.None))
             .Should().BeEmpty();
-        (await firstStore.LoadHistoryAsync(secondResult.ConversationId, CancellationToken.None))
+        (await firstStore.LoadHistoryAsync(
+            secondResult.ConversationId,
+            TestOperationContext(),
+            CancellationToken.None))
             .Should().BeEmpty();
     }
+
+    private static ChatOperationContext TestOperationContext() =>
+        new(
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            0,
+            1,
+            DateTimeOffset.UtcNow.AddMinutes(1),
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty);
 
     private sealed class TemporaryWorkspace : IDisposable
     {

@@ -47,7 +47,9 @@ internal sealed class RuntimeModuleContractModule(
         inner.StopAsync(cancellationToken);
 }
 
-internal sealed class RuntimeModuleContractBuilder : ISharpClawModuleBuilder
+internal sealed class RuntimeModuleContractBuilder :
+    ISharpClawModuleBuilder,
+    IBoundModuleContributionBuilder
 {
     private readonly ISharpClawModuleBuilder inner;
 
@@ -81,6 +83,49 @@ internal sealed class RuntimeModuleContractBuilder : ISharpClawModuleBuilder
     public IToolContributionBuilder Tools { get; }
 
     public IChatLifecycleBuilder Chat { get; }
+
+    public void AddActionHook(
+        SidecarActionSubscription subscription,
+        IAnyActionInterceptor interceptor,
+        string handlerId) => Bound.AddActionHook(subscription, interceptor, handlerId);
+
+    public void AddEventInterceptor(
+        SidecarEventSubscription subscription,
+        IAnyEventInterceptor interceptor,
+        string handlerId) => Bound.AddEventInterceptor(subscription, interceptor, handlerId);
+
+    public void AddEventListener(
+        SidecarEventSubscription subscription,
+        IAnyEventListener listener,
+        string handlerId) => Bound.AddEventListener(subscription, listener, handlerId);
+
+    public void AddTool(
+        ToolDescriptor descriptor,
+        IToolHandler handler,
+        string handlerId) => Bound.AddTool(descriptor, handler, handlerId);
+
+    public void UseConversationResolver(
+        IConversationResolver resolver,
+        ExclusiveRegistration registration,
+        string handlerId) => Bound.UseConversationResolver(resolver, registration, handlerId);
+
+    public void UseChatProfileResolver(
+        IChatProfileResolver resolver,
+        ExclusiveRegistration registration,
+        string handlerId) => Bound.UseChatProfileResolver(resolver, registration, handlerId);
+
+    public void UseConversationStore(
+        IConversationStore store,
+        string handlerId) => Bound.UseConversationStore(store, handlerId);
+
+    public void AddContextContributor(
+        IChatContextContributor contributor,
+        string handlerId) => Bound.AddContextContributor(contributor, handlerId);
+
+    private IBoundModuleContributionBuilder Bound =>
+        inner as IBoundModuleContributionBuilder
+        ?? throw new KernelGraphCompilationException(
+            "The kernel module builder does not support bound external contributions.");
 }
 
 internal sealed class RuntimeModuleActionDefinitionBuilder(

@@ -33,7 +33,9 @@
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Context" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.TwoTierPermission" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Agents" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
@@ -57,6 +59,14 @@
       <_BundledModuleDll Include="@(_PackagedModuleDll)" />
     </ItemGroup>
     <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedSidecarModuleDll)"
+          DestinationFiles="@(_PackagedSidecarModuleDll->'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarModuleDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedSidecarDependencyDll)"
+          DestinationFiles="@(_PackagedSidecarDependencyDll->'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarDependencyDll)' != ''" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">

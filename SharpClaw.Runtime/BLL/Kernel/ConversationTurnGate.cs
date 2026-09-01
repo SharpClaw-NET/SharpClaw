@@ -121,6 +121,7 @@ internal sealed class RunScopedConversationResolver(
 
     public async ValueTask<ConversationSelection> ResolveAsync(
         ChatTurnInput input,
+        ChatOperationContext context,
         CancellationToken ct)
     {
         var scope = _scope.Value
@@ -128,7 +129,7 @@ internal sealed class RunScopedConversationResolver(
         if (scope.Lease is not null)
             throw new InvalidOperationException("A direct-chat run resolved more than one conversation.");
 
-        var selection = await inner.ResolveAsync(input, ct);
+        var selection = await inner.ResolveAsync(input, context, ct);
         scope.Lease = await gate.EnterAsync(selection.ConversationId, ct);
         return selection;
     }

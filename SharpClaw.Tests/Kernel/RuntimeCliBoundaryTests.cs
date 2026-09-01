@@ -56,6 +56,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -89,6 +90,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "unknown"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -128,6 +130,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -166,6 +169,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 cancellation.Token);
@@ -203,6 +207,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "help"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None);
@@ -247,6 +252,7 @@ public sealed class RuntimeCliBoundaryTests
                 ["--cli", "chat", "cancel me"],
                 adapter,
                 adapter.Kernel,
+                PackagedModuleApplicationRegistry.Empty,
                 output,
                 error,
                 CancellationToken.None).AsTask();
@@ -294,6 +300,7 @@ public sealed class RuntimeCliBoundaryTests
                     ["--cli", "help"],
                     runtimeKernel,
                     runtimeKernel.Kernel,
+                    PackagedModuleApplicationRegistry.Empty,
                     output,
                     error,
                     CancellationToken.None);
@@ -401,8 +408,16 @@ public sealed class RuntimeCliBoundaryTests
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Fail");
         sessionSource.Should().Contain("RuntimeCliActionCatalog.Cancel");
         sessionSource.Should().Contain("catch (KernelActionCancelledException)");
-        sessionSource.Should().Contain(
-            "cancellation => ExecuteAsync(command, kernel, cancellation)");
+        var executeTerminal = sessionSource.IndexOf(
+            "cancellation => ExecuteAsync(",
+            StringComparison.Ordinal);
+        executeTerminal.Should().BeGreaterThanOrEqualTo(0);
+        var executeTerminalSource = sessionSource[executeTerminal..];
+        executeTerminalSource.Should().Contain("runtimeKernel,");
+        executeTerminalSource.Should().Contain("kernel,");
+        executeTerminalSource.Should().Contain("applications,");
+        executeTerminalSource.Should().Contain("context,");
+        executeTerminalSource.Should().Contain("cancellation)");
         hostSource.Should().Contain("CancellationToken cancellationToken = default");
         programSource.Should().Contain("Console.CancelKeyPress");
         programSource.Should().Contain("processCancellation.Token");

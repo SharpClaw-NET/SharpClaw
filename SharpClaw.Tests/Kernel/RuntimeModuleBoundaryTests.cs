@@ -79,7 +79,7 @@ public sealed class RuntimeModuleBoundaryTests
         var result = await adapter.ActionDispatcher.RunRequiredAsync(
             descriptor,
             new KernelActionEnvelope(DeclaredContractModule.ActionKey, "payload"),
-            static (action, _) => ValueTask.FromResult(action.Payload!),
+            static (action, _) => ValueTask.FromResult(action.Action.Payload!),
             adapter.Graph.ActionSnapshot,
             CancellationToken.None);
 
@@ -125,7 +125,7 @@ public sealed class RuntimeModuleBoundaryTests
         await adapter.ActionDispatcher.RunRequiredAsync(
             declaredDescriptor,
             new KernelActionEnvelope(DeclaredContractModule.ActionKey, "m01-test"),
-            static (action, _) => ValueTask.FromResult(action.Payload ?? new object()),
+            static (action, _) => ValueTask.FromResult(action.Action.Payload ?? new object()),
             adapter.Graph.ActionSnapshot,
             CancellationToken.None);
         declared.WildcardKeys.Should().Contain(DeclaredContractModule.ActionKey.Value);

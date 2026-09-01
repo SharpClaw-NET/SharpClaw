@@ -88,7 +88,10 @@ public sealed class DirectChatKernelTests
             explicitConversation));
 
         result.ConversationId.Should().Be(explicitConversation);
-        var history = await store.LoadHistoryAsync(explicitConversation, CancellationToken.None);
+        var history = await store.LoadHistoryAsync(
+            explicitConversation,
+            TestOperationContext(),
+            CancellationToken.None);
         history.Should().HaveCount(2);
         history[0].Role.Should().Be("user");
         history[1].Role.Should().Be("assistant");
@@ -119,7 +122,10 @@ public sealed class DirectChatKernelTests
         chunks[1].IsFinished.Should().BeTrue();
         chunks[1].Finished!.Content.Should().Be("reply");
 
-        var history = await store.LoadHistoryAsync(conversationId, CancellationToken.None);
+        var history = await store.LoadHistoryAsync(
+            conversationId,
+            TestOperationContext(),
+            CancellationToken.None);
         history.Select(message => $"{message.Role}:{message.Content}")
             .Should()
             .Equal("user:stream hello", "assistant:reply");
@@ -148,7 +154,10 @@ public sealed class DirectChatKernelTests
         cancellation.Cancel();
 
         Assert.ThrowsAsync<OperationCanceledException>(async () => await consume);
-        (await store.LoadHistoryAsync(conversationId, CancellationToken.None)).Should().BeEmpty();
+        (await store.LoadHistoryAsync(
+            conversationId,
+            TestOperationContext(),
+            CancellationToken.None)).Should().BeEmpty();
     }
 
     [Test]
@@ -315,6 +324,7 @@ public sealed class DirectChatKernelTests
 
         public ValueTask<ConversationSelection> ResolveAsync(
             ChatTurnInput input,
+            ChatOperationContext context,
             CancellationToken ct)
         {
             ct.ThrowIfCancellationRequested();
@@ -326,4 +336,16 @@ public sealed class DirectChatKernelTests
                 input.ConversationId is null));
         }
     }
+
+    private static ChatOperationContext TestOperationContext() =>
+        new(
+            Guid.NewGuid(),
+            null,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            0,
+            1,
+            DateTimeOffset.UtcNow.AddMinutes(1),
+            RequestPrincipal.Anonymous,
+            ExtensionFeatureSet.Empty);
 }

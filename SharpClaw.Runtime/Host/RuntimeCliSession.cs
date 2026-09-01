@@ -10,6 +10,7 @@ internal static class RuntimeCliSession
         IReadOnlyList<string> rawArguments,
         RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
+        PackagedModuleApplicationRegistry applications,
         TextWriter output,
         TextWriter error,
         CancellationToken cancellationToken)
@@ -17,6 +18,7 @@ internal static class RuntimeCliSession
         ArgumentNullException.ThrowIfNull(rawArguments);
         ArgumentNullException.ThrowIfNull(runtimeKernel);
         ArgumentNullException.ThrowIfNull(kernel);
+        ArgumentNullException.ThrowIfNull(applications);
         ArgumentNullException.ThrowIfNull(output);
         ArgumentNullException.ThrowIfNull(error);
 
@@ -63,7 +65,13 @@ internal static class RuntimeCliSession
                 context,
                 RuntimeCliActionCatalog.Execute,
                 new RuntimeCliActionInvocation("execute", command.Name, command.Arguments.Count),
-                cancellation => ExecuteAsync(command, kernel, cancellation),
+                cancellation => ExecuteAsync(
+                    command,
+                    runtimeKernel,
+                    kernel,
+                    applications,
+                    context,
+                    cancellation),
                 cancellationToken);
 
             if (!result.Succeeded)
@@ -134,22 +142,52 @@ internal static class RuntimeCliSession
         }
     }
 
-    private static ValueTask<RuntimeCliResult> ExecuteAsync(
+    private static async ValueTask<RuntimeCliResult> ExecuteAsync(
         RuntimeCliCommand command,
+        RuntimeKernelAdapter runtimeKernel,
         DirectChatKernel kernel,
+        PackagedModuleApplicationRegistry applications,
+        KernelActionExecutionContext executionContext,
         CancellationToken cancellationToken)
     {
         cancellationToken.ThrowIfCancellationRequested();
-        return command.Name switch
+        if (command.Name is "help" or "--help" or "-h")
         {
-            "help" or "--help" or "-h" => ValueTask.FromResult(
-                RuntimeCliResult.Success(
-                    "SharpClaw Runtime CLI\n  --cli help\n  --cli chat <message>\n")),
-            "chat" => ExecuteChatAsync(command, kernel, cancellationToken),
-            _ => ValueTask.FromResult(
-                RuntimeCliResult.Failure(
-                    $"Unknown Runtime CLI command '{command.Name}'. Use '--cli help'.")),
-        };
+            return RuntimeCliResult.Success(
+                "SharpClaw Runtime CLI\n  --cli help\n  --cli chat <message>\n");
+        }
+        if (command.Name == "chat")
+            return await ExecuteChatAsync(command, kernel, cancellationToken);
+
+        var moduleResult = await applications.TryInvokeCliAsync(
+            command.Name,
+            command.Arguments,
+            runtimeKernel,
+            executionContext,
+            cancellationToken);
+        return moduleResult is null
+            ? RuntimeCliResult.Failure(
+                $"Unknown Runtime CLI command '{command.Name}'. Use '--cli help'.")
+            : FromModuleResult(moduleResult);
+    }
+
+    private static RuntimeCliResult FromModuleResult(ModuleCliResult result)
+    {
+        ArgumentNullException.ThrowIfNull(result);
+        var output = string.Concat(result.Output
+            .Where(item => !string.Equals(item.Stream, "stderr", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Text));
+        var errors = result.Output
+            .Where(item => string.Equals(item.Stream, "stderr", StringComparison.OrdinalIgnoreCase))
+            .Select(item => item.Text)
+            .ToList();
+        if (result.Error is not null)
+            errors.Add(result.Error.Message);
+        return new RuntimeCliResult(
+            result.Succeeded,
+            output,
+            errors.Count == 0 ? null : string.Concat(errors),
+            result.Succeeded ? 0 : 1);
     }
 
     private static async ValueTask<RuntimeCliResult> ExecuteChatAsync(

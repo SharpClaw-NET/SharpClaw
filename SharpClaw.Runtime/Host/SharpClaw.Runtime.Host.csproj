@@ -35,10 +35,12 @@
     <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Context" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.TwoTierPermission" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.Modules.Agents" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" ExcludeAssets="compile;runtime" PrivateAssets="all" />
+    <PackageReference Include="SharpClaw.ModuleHost.OutOfProcess" GeneratePathProperty="true" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
@@ -109,6 +111,14 @@
           DestinationFiles="@(_PackagedInProcessModuleDll-&gt;'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
           Condition="'@(_PackagedInProcessModuleDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedSidecarModuleDll)"
+          DestinationFiles="@(_PackagedSidecarModuleDll-&gt;'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarModuleDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedSidecarDependencyDll)"
+          DestinationFiles="@(_PackagedSidecarDependencyDll-&gt;'$(OutputPath)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarDependencyDll)' != ''" />
     <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
           DestinationFiles="@(_PackagedModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(OutputPath)modules\%(ModuleId)\module.json')"
           SkipUnchangedFiles="true"
@@ -124,6 +134,14 @@
           DestinationFiles="@(_PackagedInProcessModuleDll-&gt;'$(PublishDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
           Condition="'@(_PackagedInProcessModuleDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedSidecarModuleDll)"
+          DestinationFiles="@(_PackagedSidecarModuleDll-&gt;'$(PublishDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarModuleDll)' != ''" />
+    <Copy SourceFiles="@(_PackagedSidecarDependencyDll)"
+          DestinationFiles="@(_PackagedSidecarDependencyDll-&gt;'$(PublishDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedSidecarDependencyDll)' != ''" />
     <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
           DestinationFiles="@(_PackagedModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(PublishDir)modules\%(ModuleId)\module.json')"
           SkipUnchangedFiles="true"

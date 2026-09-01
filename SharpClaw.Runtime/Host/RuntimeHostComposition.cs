@@ -22,7 +22,8 @@ internal static class RuntimeHostComposition
         SharpClawInstancePaths instancePaths,
         EncryptionOptions encryptionOptions,
         DatabaseProviderOptions databaseOptions,
-        IEnumerable<ISharpClawModule> modules)
+        IEnumerable<ISharpClawModule> modules,
+        IEnumerable<ModuleStorageContractDescriptor>? additionalStorageContracts = null)
     {
         ArgumentNullException.ThrowIfNull(services);
         ArgumentNullException.ThrowIfNull(configuration);
@@ -41,13 +42,14 @@ internal static class RuntimeHostComposition
         services.AddSingleton<ApiKeyProvider>();
         services.AddSingleton<RuntimeReadinessState>();
         services.AddSingleton<RuntimeDatabaseReadiness>();
+        services.AddSingleton<KernelExternalAuthoritySessionRegistry>();
         services.AddSingleton<IRuntimeProviderClientFactory, RuntimeProviderClientFactory>();
         services.AddSingleton<IActionDispatcher>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().ActionDispatcher);
         services.AddScoped<IModelRegistrar, RuntimeModelRegistrar>();
 
         services.AddSingleton<IModuleStorageContractProvider>(
-            new RuntimeModuleStorageContractProvider(moduleArray));
+            new RuntimeModuleStorageContractProvider(moduleArray, additionalStorageContracts));
         services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
         services.AddScoped<KernelJobsStore>();
 

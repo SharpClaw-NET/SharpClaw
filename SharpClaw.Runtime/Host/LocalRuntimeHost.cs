@@ -36,9 +36,10 @@ public static class LocalRuntimeHost
             .AddEnvironmentVariables()
             .AddLocalEnvironment(isDevelopment: false, instancePaths)
             .Build();
-        using var moduleSet = PackagedDotNetModuleSet.Load(
+        await using var moduleSet = await PackagedDotNetModuleSet.LoadProductionAsync(
             Path.Combine(AppContext.BaseDirectory, "modules"),
-            earlyConfiguration);
+            earlyConfiguration,
+            cancellationToken);
 
         var builder = WebApplication.CreateBuilder(args);
         builder.Configuration.Sources.Clear();
@@ -93,6 +94,7 @@ public static class LocalRuntimeHost
                 null,
                 cancellationToken => new ValueTask(
                     databaseReadiness.ValidateAsync(cancellationToken)));
+            await moduleSet.ConnectCapabilitiesAsync(app.Services, cancellationToken);
             await kernel.StartAsync("0.1.0-beta");
             runtimeStarted = true;
 
@@ -102,6 +104,7 @@ public static class LocalRuntimeHost
                     args,
                     kernel,
                     kernel.Kernel,
+                    moduleSet.Application,
                     Console.Out,
                     Console.Error,
                     cancellationToken);
@@ -109,7 +112,9 @@ public static class LocalRuntimeHost
             }
 
             app.UseMiddleware<ApiKeyMiddleware>();
+            app.UseWebSockets();
             KernelHostEndpoints.Map(app);
+            moduleSet.Application.MapEndpoints(app, kernel);
             app.MapHandlers();
 
             await kernel.RunRuntimeLifecycleActionAsync(

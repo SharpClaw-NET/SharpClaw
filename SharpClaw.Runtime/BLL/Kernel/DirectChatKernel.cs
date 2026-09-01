@@ -140,7 +140,8 @@ internal sealed class RuntimeKernelToolContextIssuer : IKernelToolContextIssuer
             Contribution = new HostActionEntryContribution(
                 new HostActionEntryIngressBinding(
                     HostActionEntryIngress.Tool,
-                    request.ToolName),
+                    request.ToolName,
+                    request.ConversationId?.ToString("D")),
                 new HostActionEntryLineage(
                     SharpClawActions.Tools.Invoke,
                     descriptor.Version,
@@ -253,6 +254,7 @@ public sealed class SingleConversationResolver(Guid conversationId) : IConversat
 
     public ValueTask<ConversationSelection> ResolveAsync(
         ChatTurnInput input,
+        ChatOperationContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -267,7 +269,10 @@ public sealed class FixedChatProfileResolver(ChatProfile profile) : IChatProfile
 {
     private readonly ChatProfile _profile = profile ?? throw new ArgumentNullException(nameof(profile));
 
-    public ValueTask<ChatProfile> ResolveAsync(ChatTurnContext turn, CancellationToken ct)
+    public ValueTask<ChatProfile> ResolveAsync(
+        ChatTurnContext turn,
+        ChatOperationContext context,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         return ValueTask.FromResult(_profile);
@@ -279,6 +284,7 @@ internal sealed class StatelessConversationResolver : IConversationResolver
 {
     public ValueTask<ConversationSelection> ResolveAsync(
         ChatTurnInput input,
+        ChatOperationContext context,
         CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(input);
@@ -292,13 +298,17 @@ internal sealed class StatelessConversationStore : IConversationStore
 {
     public ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadHistoryAsync(
         Guid conversationId,
+        ChatOperationContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         return ValueTask.FromResult<IReadOnlyList<ChatCompletionMessage>>([]);
     }
 
-    public ValueTask CommitExchangeAsync(ChatExchange exchange, CancellationToken ct)
+    public ValueTask CommitExchangeAsync(
+        ChatExchange exchange,
+        ChatOperationContext context,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(exchange);
         ct.ThrowIfCancellationRequested();
@@ -314,6 +324,7 @@ public sealed class InMemoryConversationStore : IConversationStore
 
     public ValueTask<IReadOnlyList<ChatCompletionMessage>> LoadHistoryAsync(
         Guid conversationId,
+        ChatOperationContext context,
         CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
@@ -326,7 +337,10 @@ public sealed class InMemoryConversationStore : IConversationStore
         }
     }
 
-    public ValueTask CommitExchangeAsync(ChatExchange exchange, CancellationToken ct)
+    public ValueTask CommitExchangeAsync(
+        ChatExchange exchange,
+        ChatOperationContext context,
+        CancellationToken ct)
     {
         ct.ThrowIfCancellationRequested();
         lock (_sync)
