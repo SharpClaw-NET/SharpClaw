@@ -10,6 +10,7 @@ $rootPath = [System.IO.Path]::GetFullPath($Root)
 $sourcesPath = Join-Path $rootPath "sources"
 $feedPath = Join-Path $rootPath "feed"
 $packagesPath = Join-Path $rootPath "packages"
+$bundlePath = Join-Path $rootPath "bundle"
 $artifactsPath = Join-Path $rootPath "artifacts"
 $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
@@ -118,52 +119,52 @@ $repositories = @(
     [pscustomobject]@{
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "c3cdb8c2184ee805ae4a7c856e90c3710d1442bd"
+        Commit = "900cd0ab8fb2d23a86f481444b26f9d4f5ee5e8c"
     },
     [pscustomobject]@{
         Name = "gateway-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "69f06b01e62df39bd23930e9321e87c4a05f5ac9"
+        Commit = "900cd0ab8fb2d23a86f481444b26f9d4f5ee5e8c"
     },
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "c8335d89451c287cc7ac5d1e96a8d1029cbe496c"
+        Commit = "4f8ef92e3f4d237c5b22cca853dedc39f276cca4"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "ee2fb29d45ff3af6d912954dc0bb5eeab9e2dd15"
+        Commit = "f4e13cfa479236405f81bb716aa405a3c041d6ec"
     },
     [pscustomobject]@{
         Name = "agent-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "1d0a9bd04afb15670a03ce4bbd2403c40c983173"
+        Commit = "812b5cc0ed7e9d4a8c3406c8efeb87e9cc3e7ec6"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "545563a3dd2d9e2141866dd0c40bdc00d5d97458"
+        Commit = "812b5cc0ed7e9d4a8c3406c8efeb87e9cc3e7ec6"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "3e2f2b62a4ec940c3e926f4ff0c695ce7bd738bb"
+        Commit = "f258bcf34f9bc2d685e48b48fc8b2a0a52350bf6"
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "dc31f91cf3cc3cd3aee57323f055929bffde85ba"
+        Commit = "7c744c968a2ec65d6088e3a2fbadc674e186b6d6"
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "92dcc01fddc7a6fc009123b6c1ed6ec1d5b4a6a8"
+        Commit = "cec98f78c7bb2a331d39e3430aa71a4592317682"
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "32adab6d46f34f67aac622645b0043993620c23b"
+        Commit = "4d4e2cec1a62275d205efedfe15729cf36d06f55"
     }
 )
 
@@ -322,30 +323,30 @@ Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -Artif
 Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
 
 $expectedPackages = @(
-    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.15.nupkg",
-    "SharpClaw.Contracts.0.5.0-beta.37.nupkg",
-    "SharpClaw.Core.0.5.0-beta.32.nupkg",
+    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.16.nupkg",
+    "SharpClaw.Contracts.0.5.0-beta.38.nupkg",
+    "SharpClaw.Core.0.5.0-beta.33.nupkg",
     "SharpClaw.Gateway.Contracts.0.1.1.nupkg",
-    "SharpClaw.ModuleHost.InProcess.0.5.0-beta.19.nupkg",
-    "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.28.nupkg",
-    "SharpClaw.ModuleSDK.0.5.0-beta.18.nupkg",
-    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.6.nupkg",
-    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.13.nupkg",
-    "SharpClaw.Modules.Agents.0.5.0-beta.17.nupkg",
-    "SharpClaw.Modules.Context.0.5.0-beta.16.nupkg",
-    "SharpClaw.Modules.EditorCommon.0.1.9-alpha.nupkg",
-    "SharpClaw.Modules.Metrics.0.1.1-beta.10.nupkg",
-    "SharpClaw.Modules.ModuleDev.0.1.1-beta.14.nupkg",
-    "SharpClaw.Modules.Providers.Anthropic.0.1.12-beta.nupkg",
-    "SharpClaw.Modules.Providers.Google.0.1.12-beta.nupkg",
-    "SharpClaw.Modules.Providers.LlamaSharp.0.1.12-beta.nupkg",
-    "SharpClaw.Modules.Providers.Ollama.0.1.12-beta.nupkg",
-    "SharpClaw.Modules.Providers.OpenAICompatible.0.1.12-beta.nupkg",
-    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.17.nupkg",
-    "SharpClaw.Modules.VS2026Editor.0.1.9-alpha.nupkg",
-    "SharpClaw.Modules.VSCodeEditor.0.1.9-alpha.nupkg",
-    "SharpClaw.Providers.Common.0.1.12-beta.nupkg",
-    "SharpClaw.Providers.LocalCommon.0.1.12-beta.nupkg"
+    "SharpClaw.ModuleHost.InProcess.0.5.0-beta.20.nupkg",
+    "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.29.nupkg",
+    "SharpClaw.ModuleSDK.0.5.0-beta.19.nupkg",
+    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.7.nupkg",
+    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.14.nupkg",
+    "SharpClaw.Modules.Agents.0.5.0-beta.18.nupkg",
+    "SharpClaw.Modules.Context.0.5.0-beta.17.nupkg",
+    "SharpClaw.Modules.EditorCommon.0.1.10-alpha.nupkg",
+    "SharpClaw.Modules.Metrics.0.1.1-beta.11.nupkg",
+    "SharpClaw.Modules.ModuleDev.0.1.1-beta.15.nupkg",
+    "SharpClaw.Modules.Providers.Anthropic.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.Providers.Google.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.Providers.LlamaSharp.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.Providers.Ollama.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.Providers.OpenAICompatible.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.18.nupkg",
+    "SharpClaw.Modules.VS2026Editor.0.1.10-alpha.nupkg",
+    "SharpClaw.Modules.VSCodeEditor.0.1.10-alpha.nupkg",
+    "SharpClaw.Providers.Common.0.1.14-beta.nupkg",
+    "SharpClaw.Providers.LocalCommon.0.1.14-beta.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
@@ -360,8 +361,68 @@ if ($missingPackages.Count -ne 0 -or $unexpectedPackages.Count -ne 0)
     throw "The frozen feed package set is not exact. Missing: $($missingPackages -join ', '). Unexpected: $($unexpectedPackages -join ', ')."
 }
 
+Add-Type -AssemblyName System.IO.Compression.FileSystem
+foreach ($package in $actualPackages)
+{
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
+    try
+    {
+        $nuspecEntries = @(
+            $zip.Entries |
+                Where-Object { $_.FullName.EndsWith(".nuspec", [System.StringComparison]::OrdinalIgnoreCase) }
+        )
+        if ($nuspecEntries.Count -ne 1)
+        {
+            throw "Package '$($package.Name)' must contain one nuspec."
+        }
+
+        $reader = [System.IO.StreamReader]::new($nuspecEntries[0].Open())
+        try
+        {
+            [xml] $nuspec = $reader.ReadToEnd()
+        }
+        finally
+        {
+            $reader.Dispose()
+        }
+
+        foreach ($dependency in $nuspec.SelectNodes("//*[local-name()='dependency']"))
+        {
+            $id = [string] $dependency.id
+            $version = [string] $dependency.version
+            if ($id.StartsWith("SharpClaw.", [System.StringComparison]::Ordinal) -and
+                $version -notmatch '^\[[^,\[\]]+\]$')
+            {
+                throw "Package '$($package.Name)' has non-exact dependency '$id' version '$version'."
+            }
+        }
+    }
+    finally
+    {
+        $zip.Dispose()
+    }
+}
+
+Invoke-BoundedProcess `
+    -Label "materialize-module-bundle" `
+    -FilePath "pwsh" `
+    -Arguments @(
+        "-NoLogo",
+        "-NoProfile",
+        "-File",
+        (Join-Path $PSScriptRoot "MaterializeModuleBundle.ps1"),
+        "-Feed",
+        $feedPath,
+        "-Output",
+        $bundlePath
+    ) `
+    -WorkingDirectory $PSScriptRoot `
+    -TimeoutSeconds 300 | Out-Null
+
 $manifest = [pscustomobject]@{
     Repositories = $repositories
+    ModuleBundleManifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
+        Join-Path $bundlePath "module-bundle-manifest.json")).Hash
     Packages = @($actualPackages | ForEach-Object {
         [pscustomobject]@{
             Name = $_.Name

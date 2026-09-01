@@ -1,6 +1,6 @@
 using System.Reflection;
 using System.Security.Cryptography;
-using Microsoft.Extensions.Logging;
+using System.Text.Json;
 using Serilog;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.ModuleHost.InProcess;
@@ -49,67 +49,67 @@ public sealed class GatewayModuleLoader
     }
 
     /// <summary>
-    /// Scan the application base directory for <c>SharpClaw.Modules.*.dll</c>
-    /// assemblies, load them through <see cref="PathGuard.EnsureContainedIn"/>,
-    /// and instantiate every concrete <see cref="IGatewayModuleExtension"/>
-    /// found. The probe runs in the default <c>AssemblyLoadContext</c>
-    /// (assemblies that ship a gateway extension stay loaded in the default
-    /// context for the lifetime of the gateway), but the DLL path is also
-    /// recorded so the host manager can spin up a fresh collectible
-    /// <see cref="ModuleLoadContext"/> per enable when hot-reload is on.
-    /// Duplicate <c>ModuleId</c>s are logged and both contributions are
-    /// dropped.
+    /// Reads module manifests before it loads module code. Disabled modules
+    /// remain inert metadata entries. Enabled modules load into collectible
+    /// contexts that the module host owns.
     /// </summary>
-    public static GatewayModuleLoader DiscoverBundled(Serilog.ILogger logger)
+    public static GatewayModuleLoader DiscoverBundled(
+        Serilog.ILogger logger,
+        GatewayModuleOptions options,
+        string? modulesRoot = null)
     {
         ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(options);
 
-        var baseDir = AppContext.BaseDirectory;
-        // Map each loaded assembly back to the DLL path that produced it so
-        // we can stash that path in the entry alongside the discovered
-        // extension instance.
-        var dllByAssembly = new Dictionary<Assembly, string>();
-        foreach (var dll in Directory.GetFiles(baseDir, "SharpClaw.Modules.*.dll"))
+        var baseDir = Path.GetFullPath(modulesRoot
+            ?? Path.Combine(AppContext.BaseDirectory, "modules"));
+        if (!Directory.Exists(baseDir))
+            return new GatewayModuleLoader([]);
+
+        var discovered = new List<ModuleEntry>();
+        foreach (var manifestPath in Directory.EnumerateFiles(
+                     baseDir,
+                     "module.json",
+                     SearchOption.AllDirectories)
+                 .OrderBy(path => path, StringComparer.OrdinalIgnoreCase))
         {
             try
             {
-                var safeDll = PathGuard.EnsureContainedIn(dll, baseDir);
-                var asm = Assembly.LoadFrom(safeDll);
-                dllByAssembly[asm] = safeDll;
+                var safeManifest = PathGuard.EnsureContainedIn(manifestPath, baseDir);
+                using var document = JsonDocument.Parse(File.ReadAllText(safeManifest));
+                var root = document.RootElement;
+                var moduleId = RequiredString(root, "id", safeManifest);
+                var entryAssembly = RequiredString(root, "entryAssembly", safeManifest);
+                if (!string.Equals(entryAssembly, Path.GetFileName(entryAssembly), StringComparison.Ordinal))
+                {
+                    throw new InvalidDataException(
+                        $"Module manifest '{safeManifest}' has an invalid entryAssembly value.");
+                }
+
+                var moduleDirectory = Path.GetDirectoryName(safeManifest)!;
+                var dllPath = PathGuard.EnsureContainedIn(
+                    Path.Combine(moduleDirectory, entryAssembly),
+                    moduleDirectory);
+                if (!File.Exists(dllPath))
+                {
+                    throw new FileNotFoundException(
+                        $"Module entry assembly '{entryAssembly}' does not exist.",
+                        dllPath);
+                }
+
+                discovered.Add(new ModuleEntry(moduleId, dllPath));
             }
             catch (Exception ex)
             {
-                logger.Warning(ex, "Skipping module assembly {Dll}", PathGuard.SanitizeForLog(dll));
+                logger.Warning(
+                    ex,
+                    "Skipping module manifest {Manifest}",
+                    PathGuard.SanitizeForLog(manifestPath));
             }
         }
 
-        var extensionType = typeof(IGatewayModuleExtension);
-        var entries = new List<ModuleEntry>();
-        foreach (var (asm, dllPath) in dllByAssembly)
-        {
-            foreach (var t in SafeGetTypes(asm))
-            {
-                if (t is not { IsClass: true, IsAbstract: false, IsPublic: true }
-                    || !extensionType.IsAssignableFrom(t)
-                    || t.GetConstructor(Type.EmptyTypes) is null)
-                {
-                    continue;
-                }
-
-                try
-                {
-                    var instance = (IGatewayModuleExtension)Activator.CreateInstance(t)!;
-                    entries.Add(new ModuleEntry(instance.ModuleId, dllPath, instance));
-                }
-                catch (Exception ex)
-                {
-                    logger.Warning(ex, "Failed to instantiate gateway extension {Type}", t.FullName);
-                }
-            }
-        }
-
-        var keep = new List<ModuleEntry>(entries.Count);
-        foreach (var group in entries.GroupBy(e => e.ModuleId, StringComparer.Ordinal))
+        var keep = new List<ModuleEntry>(discovered.Count);
+        foreach (var group in discovered.GroupBy(entry => entry.ModuleId, StringComparer.Ordinal))
         {
             if (group.Count() > 1)
             {
@@ -119,7 +119,33 @@ public sealed class GatewayModuleLoader
                     group.Count());
                 continue;
             }
-            keep.Add(group.Single());
+
+            var entry = group.Single();
+            if (options.IsModuleEnabled(entry.ModuleId))
+            {
+                try
+                {
+                    var loaded = LoadFromDisk(entry.DllPath!, baseDir);
+                    if (!string.Equals(loaded.Extension.ModuleId, entry.ModuleId, StringComparison.Ordinal))
+                    {
+                        loaded.Context.Unload();
+                        throw new InvalidDataException(
+                            $"Module '{entry.ModuleId}' loaded extension '{loaded.Extension.ModuleId}'.");
+                    }
+
+                    entry.SetLoaded(loaded.Context, loaded.Extension);
+                }
+                catch (Exception ex)
+                {
+                    logger.Warning(
+                        ex,
+                        "Failed to load enabled gateway module {ModuleId}",
+                        PathGuard.SanitizeForLog(entry.ModuleId));
+                    continue;
+                }
+            }
+
+            keep.Add(entry);
         }
 
         return new GatewayModuleLoader(keep);
@@ -167,12 +193,15 @@ public sealed class GatewayModuleLoader
     /// unloading it.
     /// </summary>
     public static (ModuleLoadContext Context, IGatewayModuleExtension Extension)
-        LoadFromDisk(string dllPath, Microsoft.Extensions.Logging.ILogger logger)
+        LoadFromDisk(
+            string dllPath,
+            string? allowedRoot = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(dllPath);
-        ArgumentNullException.ThrowIfNull(logger);
 
-        var safe = PathGuard.EnsureContainedIn(dllPath, AppContext.BaseDirectory);
+        var safe = PathGuard.EnsureContainedIn(
+            dllPath,
+            allowedRoot ?? AppContext.BaseDirectory);
         var context = new ModuleLoadContext(safe);
         var assembly = context.LoadFromAssemblyPath(Path.GetFullPath(safe));
 
@@ -211,18 +240,65 @@ public sealed class GatewayModuleLoader
         }
     }
 
-    /// <summary>
-    /// One entry in the loader's table. Either an in-memory extension
-    /// (test path) or a DLL path (production path). Disk entries do not
-    /// carry an extension instance — the host manager loads it lazily
-    /// through <see cref="LoadFromDisk"/>.
-    /// </summary>
-    public sealed record ModuleEntry(
-        string ModuleId,
-        string? DllPath,
-        IGatewayModuleExtension? Extension)
+    private static string RequiredString(
+        JsonElement root,
+        string propertyName,
+        string manifestPath)
     {
+        if (!root.TryGetProperty(propertyName, out var property)
+            || property.ValueKind != JsonValueKind.String
+            || string.IsNullOrWhiteSpace(property.GetString()))
+        {
+            throw new InvalidDataException(
+                $"Module manifest '{manifestPath}' requires string property '{propertyName}'.");
+        }
+
+        return property.GetString()!;
+    }
+
+    /// <summary>
+    /// One entry in the loader table. An enabled disk entry can transfer its
+    /// prepared collectible context to the host manager. A disabled disk
+    /// entry keeps metadata only until the manager enables it.
+    /// </summary>
+    public sealed class ModuleEntry
+    {
+        private ModuleLoadContext? _context;
+
+        public ModuleEntry(string moduleId, string? dllPath, IGatewayModuleExtension? extension = null)
+        {
+            ModuleId = moduleId;
+            DllPath = dllPath;
+            Extension = extension;
+        }
+
+        public string ModuleId { get; }
+
+        public string? DllPath { get; }
+
+        public IGatewayModuleExtension? Extension { get; private set; }
+
         internal static ModuleEntry FromExtension(IGatewayModuleExtension ext)
-            => new(ext.ModuleId, DllPath: null, Extension: ext);
+            => new(ext.ModuleId, dllPath: null, extension: ext);
+
+        internal void SetLoaded(ModuleLoadContext context, IGatewayModuleExtension extension)
+        {
+            _context = context;
+            Extension = extension;
+        }
+
+        internal bool TryTakeLoaded(
+            out ModuleLoadContext? context,
+            out IGatewayModuleExtension? extension)
+        {
+            context = _context;
+            extension = Extension;
+            if (context is null || extension is null)
+                return false;
+
+            _context = null;
+            Extension = null;
+            return true;
+        }
     }
 }

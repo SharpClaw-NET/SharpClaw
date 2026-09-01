@@ -1,6 +1,5 @@
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Contracts.Providers;
-using SharpClaw.Providers.Common;
 using SharpClaw.Runtime.BLL.Kernel;
 
 namespace SharpClaw.Runtime.Host;
@@ -24,9 +23,22 @@ public sealed class RuntimeProviderClientFactory : IRuntimeProviderClientFactory
         var credential = configuration[$"Providers:{providerKey}:ApiKey"]
             ?? configuration["Provider:ApiKey"]
             ?? string.Empty;
-        return ProviderCredentialBinding.CreateClient(
-            plugin,
-            new ProviderClientOptions(endpoint),
-            credential);
+        var options = new ProviderClientOptions(endpoint);
+        if (!plugin.RequiresApiKey)
+            return plugin.CreateClient(options);
+
+        if (string.IsNullOrWhiteSpace(credential))
+        {
+            throw new InvalidOperationException(
+                $"Provider '{plugin.ProviderKey}' requires credentials, but no credentials are configured.");
+        }
+
+        if (plugin is not IProviderCredentialBoundPlugin credentialBound)
+        {
+            throw new InvalidOperationException(
+                $"Provider '{plugin.ProviderKey}' requires credentials, but its plugin does not support host-side credential binding.");
+        }
+
+        return credentialBound.CreateClient(options, credential);
     }
 }

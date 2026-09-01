@@ -117,7 +117,12 @@ builder.Services.Configure<GatewayEndpointOptions>(
 builder.Services.Configure<GatewayModuleOptions>(
     builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
 
-var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(startupLogger);
+var gatewayModuleOptionsSnapshot = builder.Configuration
+    .GetSection(GatewayModuleOptions.SectionName)
+    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
+var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(
+    startupLogger,
+    gatewayModuleOptionsSnapshot);
 foreach (var ext in gatewayModuleLoader.All)
 {
     startupLogger.Information(
@@ -134,9 +139,6 @@ builder.Services.AddSingleton<GatewayModuleHostManager>();
 // ── Gateway-side module service registration (Phase 3) ─────────
 // Run ConfigureGatewayServices only for modules explicitly enabled in
 // configuration so a disabled module's services don't leak into DI.
-var gatewayModuleOptionsSnapshot = builder.Configuration
-    .GetSection(GatewayModuleOptions.SectionName)
-    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
 foreach (var ext in gatewayModuleLoader.All)
 {
     if (!gatewayModuleOptionsSnapshot.IsModuleEnabled(ext.ModuleId))

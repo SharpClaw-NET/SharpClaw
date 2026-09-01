@@ -117,21 +117,17 @@
           DestinationFiles="$(OutDir)test-modules\sharpclaw_test_harness_in_process\module.json"
           SkipUnchangedFiles="true"
           Condition="'@(_InProcessHarnessManifest)' != ''" />
-    <Copy SourceFiles="@(_PackagedModulePayloadDll)"
+    <Copy SourceFiles="@(_PackagedSidecarHostFile)"
           DestinationFolder="$(OutDir)"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedModulePayloadDll)' != ''" />
-    <Copy SourceFiles="@(_PackagedSidecarModuleDll)"
-          DestinationFiles="@(_PackagedSidecarModuleDll->'$(OutDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          Condition="'@(_PackagedSidecarHostFile)' != ''" />
+    <Copy SourceFiles="@(_PackagedModulePayloadFile)"
+          DestinationFiles="@(_PackagedModulePayloadFile->'$(OutDir)modules\%(RecursiveDir)%(Filename)%(Extension)')"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedSidecarModuleDll)' != ''" />
-    <Copy SourceFiles="@(_PackagedSidecarDependencyDll)"
-          DestinationFiles="@(_PackagedSidecarDependencyDll->'$(OutDir)modules\%(ModuleId)\%(Filename)%(Extension)')"
+          Condition="'@(_PackagedModulePayloadFile)' != ''" />
+    <Copy SourceFiles="@(_BundledModuleManifest)"
+          DestinationFiles="@(_BundledModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json')"
           SkipUnchangedFiles="true"
-          Condition="'@(_PackagedSidecarDependencyDll)' != ''" />
-    <Copy SourceFiles="@(_PackagedModuleManifest);@(_BundledModuleManifest)"
-          DestinationFiles="@(_PackagedModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json');@(_BundledModuleManifest->'$(OutDir)modules\%(ModuleId)\module.json')"
-          SkipUnchangedFiles="true"
-          Condition="'@(_PackagedModuleManifest);@(_BundledModuleManifest)' != ''" />
+          Condition="'@(_BundledModuleManifest)' != ''" />
   </Target>
 </Project>

@@ -33,7 +33,6 @@
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.Providers.Common" />
     <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
 

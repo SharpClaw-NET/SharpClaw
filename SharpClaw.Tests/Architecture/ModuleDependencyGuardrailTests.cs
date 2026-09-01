@@ -100,6 +100,13 @@ public class ModuleDependencyGuardrailTests
             })
             .ToList();
 
+        if (!string.Equals(projectLocation.Directory, "SharpClaw.Tests", StringComparison.Ordinal))
+        {
+            packageReferences.Should().BeEmpty(
+                "production Host and Gateway projects receive optional module payloads through the external bundle boundary");
+            return;
+        }
+
         packageReferences.Should().NotBeEmpty();
 
         foreach (var reference in packageReferences)

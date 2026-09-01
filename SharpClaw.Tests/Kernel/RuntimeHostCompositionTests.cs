@@ -1063,19 +1063,14 @@ public sealed class RuntimeHostCompositionTests
     private static async Task InvokeLlamaPlaceholderAsync(object store, Guid modelId)
     {
         var storeType = store.GetType();
-        var resolvedFileType = storeType.Assembly.GetType(
-            "SharpClaw.Providers.LocalCommon.ResolvedModelFile")
-            ?? AppDomain.CurrentDomain.GetAssemblies()
-                .Select(assembly => assembly.GetType("SharpClaw.Providers.LocalCommon.ResolvedModelFile"))
-                .FirstOrDefault(type => type is not null)
-            ?? throw new InvalidOperationException("The LlamaSharp model file contract was not loaded.");
+        var method = storeType.GetMethod("CreateOrReuseDownloadPlaceholderAsync")
+            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore write method was not loaded.");
+        var resolvedFileType = method.GetParameters()[1].ParameterType;
         var resolvedFile = Activator.CreateInstance(
             resolvedFileType,
             "https://example.invalid/model.gguf",
             "model.gguf",
             "Q4_K_M")!;
-        var method = storeType.GetMethod("CreateOrReuseDownloadPlaceholderAsync")
-            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore write method was not loaded.");
         var task = (Task)method.Invoke(
             store,
             [modelId, resolvedFile, "https://example.invalid/model.gguf", "model.gguf", CancellationToken.None])!;
