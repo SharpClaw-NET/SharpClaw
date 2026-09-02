@@ -86,7 +86,6 @@
     <File Path="LICENSE.md" />
     <File Path=".github/README.md" />
     <File Path=".github/SECURITY.md" />
-    <File Path="docs/legal/DISCLAIMER.md" />
   </Folder>
   <Folder Name="/Solution Items/Scripts/">
     <File Path="publish-msix.ps1" />

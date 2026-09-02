@@ -78,9 +78,9 @@ Extension to be installed in Visual Studio 2026. See [Extension Setup](#extensio
 ### Installation
 
 1. **Download VSIX Package**:
-   - From GitHub releases: https://github.com/mkn8rn/SharpClaw/releases
+   - From GitHub releases: https://github.com/SharpClaw-NET/SharpClaw/releases
    - Or build from the SharpClaw editor integrations repository:
-     https://github.com/mkn8rn/SharpClaw.EditorIntegrations
+     https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations
 
 2. **Install Extension**:
    ```powershell
@@ -117,7 +117,7 @@ Api__ListenUrl="http://localhost:5163"
 
 The extension is owned by the SharpClaw editor integrations repository and is
 excluded from regular SharpClaw solution builds. To build it from source, clone
-or open https://github.com/mkn8rn/SharpClaw.EditorIntegrations and use that
+or open https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations and use that
 repository's VS 2026 extension build instructions. The SharpClaw application
 repository no longer contains or builds the extension source.
 

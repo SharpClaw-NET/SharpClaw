@@ -26,7 +26,7 @@ public sealed partial class MainPage
 
     private async void OnReportIssueClick(object sender, RoutedEventArgs e)
         => await Windows.System.Launcher.LaunchUriAsync(
-            new Uri("https://github.com/mkn8rn/SharpClaw/issues"));
+            new Uri("https://github.com/SharpClaw-NET/SharpClaw/issues"));
 
     private async void OnOfficialWebsiteClick(object sender, RoutedEventArgs e)
         => await Windows.System.Launcher.LaunchUriAsync(
