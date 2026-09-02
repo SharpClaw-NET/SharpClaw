@@ -119,7 +119,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "cb675a9173aa6921c5b4491e3ef99d58260faf28"
+        Commit = "900cd0ab8fb2d23a86f481444b26f9d4f5ee5e8c"
     },
     [pscustomobject]@{
         Name = "gateway-contracts"
