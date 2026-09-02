@@ -124,7 +124,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "gateway-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "cb675a9173aa6921c5b4491e3ef99d58260faf28"
+        Commit = "bfad19087d824813cb9539837e628f6debf1df12"
     },
     [pscustomobject]@{
         Name = "core"
@@ -326,7 +326,7 @@ $expectedPackages = @(
     "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.17.nupkg",
     "SharpClaw.Contracts.0.5.0-beta.38.nupkg",
     "SharpClaw.Core.0.5.0-beta.34.nupkg",
-    "SharpClaw.Gateway.Contracts.0.5.0-beta.1.nupkg",
+    "SharpClaw.Gateway.Contracts.0.5.0-beta.2.nupkg",
     "SharpClaw.ModuleHost.InProcess.0.5.0-beta.21.nupkg",
     "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.30.nupkg",
     "SharpClaw.ModuleSDK.0.5.0-beta.20.nupkg",
