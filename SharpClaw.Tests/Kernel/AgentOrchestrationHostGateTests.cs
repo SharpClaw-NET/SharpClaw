@@ -34,6 +34,7 @@ public sealed class AgentOrchestrationHostGateTests
     private const string ContextActionKey = "context.api.dispatch";
     private const string PermissionActionKey = "permission.api.dispatch";
     private const string AgentsActionKey = "agents.api.dispatch";
+    private const string PrincipalHeaderName = "X-SharpClaw-Test-Principal";
     private static readonly JsonElement EmptyPayload = JsonSerializer.SerializeToElement(new { });
     private static readonly JsonSerializerOptions WebJson = new(JsonSerializerDefaults.Web);
     private static readonly JsonSerializerOptions HashJson = new(JsonSerializerDefaults.General);
@@ -93,10 +94,19 @@ public sealed class AgentOrchestrationHostGateTests
             readiness.MarkReady();
 
             var administrator = Administrator(Guid.NewGuid().ToString("D"));
-            var currentHttpPrincipal = administrator;
+            var httpPrincipals = new ConcurrentDictionary<string, RequestPrincipal>();
+            var administratorToken = RegisterHttpPrincipal(httpPrincipals, administrator);
             app.Use(async (context, next) =>
             {
-                context.User = ToClaimsPrincipal(currentHttpPrincipal);
+                if (!context.Request.Headers.TryGetValue(PrincipalHeaderName, out var token)
+                    || token.Count != 1
+                    || !httpPrincipals.TryGetValue(token[0]!, out var principal))
+                {
+                    context.Response.StatusCode = StatusCodes.Status401Unauthorized;
+                    return;
+                }
+
+                context.User = ToClaimsPrincipal(principal);
                 await next();
             });
             app.UseMiddleware<ApiKeyMiddleware>();
@@ -127,7 +137,10 @@ public sealed class AgentOrchestrationHostGateTests
                     adapter,
                     administrator);
 
-                using var client = CreateHostClient(app, app.Services.GetRequiredService<ApiKeyProvider>().ApiKey);
+                using var client = CreateHostClient(
+                    app,
+                    app.Services.GetRequiredService<ApiKeyProvider>().ApiKey,
+                    administratorToken);
                 await AssertEndpointAsync(client, "/sharpclaw/context/channels");
                 await AssertEndpointAsync(client, "/sharpclaw/permission/policies");
                 await AssertEndpointAsync(client, "/sharpclaw/agents/list");
@@ -265,9 +278,13 @@ public sealed class AgentOrchestrationHostGateTests
                 agentPolicy.Kind.Should().Be(
                     ActionOutcomeKind.Completed,
                     FormatFailure(agentPolicy, telemetry));
-                currentHttpPrincipal = agentPrincipal;
 
-                using var chat = await client.PostAsJsonAsync("/chat", new { message = "pipeline gate" });
+                var agentToken = RegisterHttpPrincipal(httpPrincipals, agentPrincipal);
+                using var agentClient = CreateHostClient(
+                    app,
+                    app.Services.GetRequiredService<ApiKeyProvider>().ApiKey,
+                    agentToken);
+                using var chat = await agentClient.PostAsJsonAsync("/chat", new { message = "pipeline gate" });
                 var chatBody = await chat.Content.ReadAsStringAsync();
                 chat.StatusCode.Should().Be(HttpStatusCode.OK, chatBody);
                 chatBody.Should().Contain("frozen package graph response");
@@ -335,7 +352,16 @@ public sealed class AgentOrchestrationHostGateTests
             result.Error?.Message ?? string.Join(" | ", result.Output.Select(item => item.Text)));
     }
 
-    private static HttpClient CreateHostClient(WebApplication app, string apiKey)
+    private static string RegisterHttpPrincipal(
+        ConcurrentDictionary<string, RequestPrincipal> principals,
+        RequestPrincipal principal)
+    {
+        var token = Guid.NewGuid().ToString("N");
+        principals.TryAdd(token, principal).Should().BeTrue();
+        return token;
+    }
+
+    private static HttpClient CreateHostClient(WebApplication app, string apiKey, string principalToken)
     {
         var client = new HttpClient
         {
@@ -343,6 +369,7 @@ public sealed class AgentOrchestrationHostGateTests
             Timeout = TimeSpan.FromSeconds(30),
         };
         client.DefaultRequestHeaders.Add("X-Api-Key", apiKey);
+        client.DefaultRequestHeaders.Add(PrincipalHeaderName, principalToken);
         return client;
     }
 
