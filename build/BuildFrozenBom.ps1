@@ -159,7 +159,7 @@ $repositories = @(
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "cec98f78c7bb2a331d39e3430aa71a4592317682"
+        Commit = "4347f815acf05792f4c9e643c369989740f4dbc1"
     },
     [pscustomobject]@{
         Name = "module-dev"
@@ -337,16 +337,16 @@ $expectedPackages = @(
     "SharpClaw.Modules.EditorCommon.0.1.10-alpha.nupkg",
     "SharpClaw.Modules.Metrics.0.1.1-beta.11.nupkg",
     "SharpClaw.Modules.ModuleDev.0.1.1-beta.15.nupkg",
-    "SharpClaw.Modules.Providers.Anthropic.0.1.14-beta.nupkg",
-    "SharpClaw.Modules.Providers.Google.0.1.14-beta.nupkg",
-    "SharpClaw.Modules.Providers.LlamaSharp.0.1.14-beta.nupkg",
-    "SharpClaw.Modules.Providers.Ollama.0.1.14-beta.nupkg",
-    "SharpClaw.Modules.Providers.OpenAICompatible.0.1.14-beta.nupkg",
+    "SharpClaw.Modules.Providers.Anthropic.0.1.16-beta.nupkg",
+    "SharpClaw.Modules.Providers.Google.0.1.16-beta.nupkg",
+    "SharpClaw.Modules.Providers.LlamaSharp.0.1.16-beta.nupkg",
+    "SharpClaw.Modules.Providers.Ollama.0.1.16-beta.nupkg",
+    "SharpClaw.Modules.Providers.OpenAICompatible.0.1.16-beta.nupkg",
     "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.18.nupkg",
     "SharpClaw.Modules.VS2026Editor.0.1.10-alpha.nupkg",
     "SharpClaw.Modules.VSCodeEditor.0.1.10-alpha.nupkg",
-    "SharpClaw.Providers.Common.0.1.14-beta.nupkg",
-    "SharpClaw.Providers.LocalCommon.0.1.14-beta.nupkg"
+    "SharpClaw.Providers.Common.0.1.16-beta.nupkg",
+    "SharpClaw.Providers.LocalCommon.0.1.16-beta.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
@@ -359,6 +359,13 @@ $unexpectedPackages = @($actualNames | Where-Object { $_ -notin $expectedPackage
 if ($missingPackages.Count -ne 0 -or $unexpectedPackages.Count -ne 0)
 {
     throw "The frozen feed package set is not exact. Missing: $($missingPackages -join ', '). Unexpected: $($unexpectedPackages -join ', ')."
+}
+
+$maximumPackageLength = 250MB
+$oversizedPackages = @($actualPackages | Where-Object { $_.Length -ge $maximumPackageLength })
+if ($oversizedPackages.Count -ne 0)
+{
+    throw "The frozen feed contains packages at or above 250 MB: $($oversizedPackages.Name -join ', ')."
 }
 
 Add-Type -AssemblyName System.IO.Compression.FileSystem

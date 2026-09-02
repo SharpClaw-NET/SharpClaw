@@ -27,13 +27,13 @@
     <PackageVersion Include="SharpClaw.Modules.Agents" Version="[0.5.0-beta.18]" />
     <PackageVersion Include="SharpClaw.Modules.Metrics" Version="[0.1.1-beta.11]" />
     <PackageVersion Include="SharpClaw.Modules.ModuleDev" Version="[0.1.1-beta.15]" />
-    <PackageVersion Include="SharpClaw.Providers.Common" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Modules.Providers.Google" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Modules.Providers.LlamaSharp" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Modules.Providers.Ollama" Version="[0.1.14-beta]" />
-    <PackageVersion Include="SharpClaw.Modules.Providers.OpenAICompatible" Version="[0.1.14-beta]" />
+    <PackageVersion Include="SharpClaw.Providers.Common" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Providers.LocalCommon" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Anthropic" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Google" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.LlamaSharp" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.Ollama" Version="[0.1.16-beta]" />
+    <PackageVersion Include="SharpClaw.Modules.Providers.OpenAICompatible" Version="[0.1.16-beta]" />
     <PackageVersion Include="SharpClaw.ModuleSDK" Version="[0.5.0-beta.19]" />
     <PackageVersion Include="SharpClaw.ModuleHost.InProcess" Version="[0.5.0-beta.20]" />
     <PackageVersion Include="SharpClaw.ModuleHost.OutOfProcess" Version="[0.5.0-beta.29]" />
