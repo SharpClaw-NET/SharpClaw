@@ -129,42 +129,42 @@ $repositories = @(
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "4f8ef92e3f4d237c5b22cca853dedc39f276cca4"
+        Commit = "4bb1d2f978628fef78dedb009c8cc819216d597f"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "f4e13cfa479236405f81bb716aa405a3c041d6ec"
+        Commit = "4859e332175abec593504f571a4446cc5f5980ab"
     },
     [pscustomobject]@{
         Name = "agent-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "812b5cc0ed7e9d4a8c3406c8efeb87e9cc3e7ec6"
+        Commit = "910d6adc96d77e074a63db422b1e8b05333ff936"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "812b5cc0ed7e9d4a8c3406c8efeb87e9cc3e7ec6"
+        Commit = "910d6adc96d77e074a63db422b1e8b05333ff936"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "f0b1ba9ea9265d3f0bac8d44457256f282513625"
+        Commit = "cd64c32cde94129e7344d7b05eb9480bb560f845"
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "90ae085c41cbbfecb2589fea7fa698b370e98cc2"
+        Commit = "1e915dff9377a95c79170b74d2dc4f568a8798e5"
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "af2a8c31f62d201a9aed196aa582f10e9e4e4388"
+        Commit = "76ab80bd83409e2b08f5d2aaa80f1ae5610e85f9"
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "8d7f5d93f92ca9e3bb3601514b0aa9946d512325"
+        Commit = "d229e626644aa269646c097c06f6ccfe6e243278"
     }
 )
 
@@ -323,30 +323,30 @@ Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -Artif
 Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
 
 $expectedPackages = @(
-    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.16.nupkg",
+    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.17.nupkg",
     "SharpClaw.Contracts.0.5.0-beta.38.nupkg",
-    "SharpClaw.Core.0.5.0-beta.33.nupkg",
+    "SharpClaw.Core.0.5.0-beta.34.nupkg",
     "SharpClaw.Gateway.Contracts.0.5.0-beta.1.nupkg",
-    "SharpClaw.ModuleHost.InProcess.0.5.0-beta.20.nupkg",
-    "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.29.nupkg",
-    "SharpClaw.ModuleSDK.0.5.0-beta.19.nupkg",
-    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.7.nupkg",
-    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.14.nupkg",
-    "SharpClaw.Modules.Agents.0.5.0-beta.18.nupkg",
-    "SharpClaw.Modules.Context.0.5.0-beta.17.nupkg",
-    "SharpClaw.Modules.EditorCommon.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Metrics.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.ModuleDev.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Providers.Anthropic.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Providers.Google.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Providers.LlamaSharp.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Providers.Ollama.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.Providers.OpenAICompatible.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.18.nupkg",
-    "SharpClaw.Modules.VS2026Editor.0.5.0-beta.1.nupkg",
-    "SharpClaw.Modules.VSCodeEditor.0.5.0-beta.1.nupkg",
-    "SharpClaw.Providers.Common.0.5.0-beta.1.nupkg",
-    "SharpClaw.Providers.LocalCommon.0.5.0-beta.1.nupkg"
+    "SharpClaw.ModuleHost.InProcess.0.5.0-beta.21.nupkg",
+    "SharpClaw.ModuleHost.OutOfProcess.0.5.0-beta.30.nupkg",
+    "SharpClaw.ModuleSDK.0.5.0-beta.20.nupkg",
+    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.8.nupkg",
+    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.15.nupkg",
+    "SharpClaw.Modules.Agents.0.5.0-beta.19.nupkg",
+    "SharpClaw.Modules.Context.0.5.0-beta.18.nupkg",
+    "SharpClaw.Modules.EditorCommon.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Metrics.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.ModuleDev.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Providers.Anthropic.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Providers.Google.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Providers.LlamaSharp.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Providers.Ollama.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.Providers.OpenAICompatible.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.19.nupkg",
+    "SharpClaw.Modules.VS2026Editor.0.5.0-beta.2.nupkg",
+    "SharpClaw.Modules.VSCodeEditor.0.5.0-beta.2.nupkg",
+    "SharpClaw.Providers.Common.0.5.0-beta.2.nupkg",
+    "SharpClaw.Providers.LocalCommon.0.5.0-beta.2.nupkg"
 )
 
 $actualPackages = Get-ChildItem -LiteralPath $feedPath -Filter "*.nupkg" -File |
