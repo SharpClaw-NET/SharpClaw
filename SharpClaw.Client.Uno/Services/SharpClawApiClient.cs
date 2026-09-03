@@ -12,12 +12,15 @@ namespace SharpClaw.Services;
 public sealed class SharpClawApiClient : IDisposable
 {
     private readonly HttpClient _http;
+    private readonly object _targetLock = new();
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
     private readonly ClientActionDispatcher _clientActions;
     private readonly bool _ownsHttp;
     private readonly string? _fixedApiKey;
+    private Uri _targetBaseUri;
     private string? _cachedApiKey;
+    private Uri? _cachedApiKeyTarget;
     private int _disposed;
 
     public SharpClawApiClient(
@@ -30,9 +33,9 @@ public sealed class SharpClawApiClient : IDisposable
         _logger = logger;
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
         _ownsHttp = true;
+        _targetBaseUri = CreateTargetUri(baseUrl);
         _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
-            BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromMinutes(10)
         };
 
@@ -49,10 +52,21 @@ public sealed class SharpClawApiClient : IDisposable
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
         _ownsHttp = false;
         _fixedApiKey = fixedApiKey;
+        _targetBaseUri = http.BaseAddress
+            ?? throw new ArgumentException(
+                "The supplied HTTP client must have a base address.",
+                nameof(http));
     }
 
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>
-    public string BaseUrl => _http.BaseAddress!.ToString();
+    public string BaseUrl
+    {
+        get
+        {
+            lock (_targetLock)
+                return _targetBaseUri.ToString();
+        }
+    }
 
     /// <summary>
     /// Changes the target API base URL and clears the cached API key.
@@ -61,18 +75,23 @@ public sealed class SharpClawApiClient : IDisposable
         string baseUrl,
         CancellationToken cancellationToken = default)
     {
+        var targetBaseUri = CreateTargetUri(baseUrl);
         var expectedVersion = _clientActions.GetStateVersion("client.api.target");
         await _clientActions.CommitStateAsync(
             "client.api.target",
             expectedVersion,
             _ =>
             {
-                _http.BaseAddress = new Uri(baseUrl);
-                _cachedApiKey = null;
-                _frontendInstance?.RememberBackendBinding(
-                    backendInstanceId: null,
-                    baseUrl,
-                    bindingKind: "configured");
+                lock (_targetLock)
+                {
+                    _frontendInstance?.RememberBackendBinding(
+                        backendInstanceId: null,
+                        baseUrl,
+                        bindingKind: "configured");
+                    _targetBaseUri = targetBaseUri;
+                    _cachedApiKey = null;
+                    _cachedApiKeyTarget = null;
+                }
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
@@ -96,6 +115,7 @@ public sealed class SharpClawApiClient : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(method);
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
         ArgumentNullException.ThrowIfNull(consume);
+        var targetBaseUri = GetTargetSnapshot();
 
         return _clientActions.RunCommandAsync(
             new ClientCommandInvocation(
@@ -108,11 +128,11 @@ public sealed class SharpClawApiClient : IDisposable
             {
                 using var request = new HttpRequestMessage(
                     new HttpMethod(invocation.Method),
-                    invocation.EffectiveRequestTarget)
+                    ResolveRequestUri(targetBaseUri, invocation.EffectiveRequestTarget))
                 {
                     Content = content,
                 };
-                AttachApiKey(request);
+                AttachApiKey(request, targetBaseUri);
                 using var response = await _http.SendAsync(
                     request,
                     HttpCompletionOption.ResponseHeadersRead,
@@ -153,6 +173,7 @@ public sealed class SharpClawApiClient : IDisposable
         HttpRequestMessage request, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
+        var targetBaseUri = GetTargetSnapshot();
         return await _clientActions.RunCommandAsync(
             new ClientCommandInvocation(
                 "http.send",
@@ -163,10 +184,10 @@ public sealed class SharpClawApiClient : IDisposable
             async (invocation, actionToken) =>
             {
                 request.Method = new HttpMethod(invocation.Method);
-                request.RequestUri = new Uri(
-                    invocation.EffectiveRequestTarget,
-                    UriKind.RelativeOrAbsolute);
-                AttachApiKey(request);
+                request.RequestUri = ResolveRequestUri(
+                    targetBaseUri,
+                    invocation.EffectiveRequestTarget);
+                AttachApiKey(request, targetBaseUri);
                 return await _http.SendAsync(request, actionToken);
             },
             ct);
@@ -179,6 +200,7 @@ public sealed class SharpClawApiClient : IDisposable
         bool responseHeadersRead,
         CancellationToken cancellationToken)
     {
+        var targetBaseUri = GetTargetSnapshot();
         return _clientActions.RunCommandAsync(
             new ClientCommandInvocation(
                 "http.send",
@@ -190,11 +212,11 @@ public sealed class SharpClawApiClient : IDisposable
             {
                 using var request = new HttpRequestMessage(
                     new HttpMethod(invocation.Method),
-                    invocation.EffectiveRequestTarget)
+                    ResolveRequestUri(targetBaseUri, invocation.EffectiveRequestTarget))
                 {
                     Content = content,
                 };
-                AttachApiKey(request);
+                AttachApiKey(request, targetBaseUri);
                 return await _http.SendAsync(
                     request,
                     responseHeadersRead
@@ -240,29 +262,38 @@ public sealed class SharpClawApiClient : IDisposable
             $"SharpClaw API did not become reachable at {BaseUrl} within {timeout}.");
     }
 
-    private void AttachApiKey(HttpRequestMessage request)
+    private void AttachApiKey(HttpRequestMessage request, Uri targetBaseUri)
     {
-        var key = ResolveApiKey();
+        var key = ResolveApiKey(targetBaseUri);
         request.Headers.Add("X-Api-Key", key);
     }
 
-    private string ResolveApiKey()
+    private string ResolveApiKey(Uri targetBaseUri)
     {
         if (_fixedApiKey is not null)
             return _fixedApiKey;
 
-        if (_cachedApiKey is not null)
-            return _cachedApiKey;
+        lock (_targetLock)
+        {
+            if (_cachedApiKey is not null && _cachedApiKeyTarget == targetBaseUri)
+                return _cachedApiKey;
+        }
 
-        var keyFilePath = _frontendInstance?.ResolveBackendApiKeyPath(BaseUrl);
+        var targetBaseUrl = targetBaseUri.ToString();
+        var keyFilePath = _frontendInstance?.ResolveBackendApiKeyPath(targetBaseUrl);
 
         if (string.IsNullOrWhiteSpace(keyFilePath) || !File.Exists(keyFilePath))
             throw new InvalidOperationException(
-                $"API key file could not be resolved for backend '{BaseUrl}'. " +
+                $"API key file could not be resolved for backend '{targetBaseUrl}'. " +
                 "Ensure the selected SharpClaw backend is running and has published discovery metadata.");
 
-        _cachedApiKey = File.ReadAllText(keyFilePath).Trim();
-        return _cachedApiKey;
+        var apiKey = File.ReadAllText(keyFilePath).Trim();
+        lock (_targetLock)
+        {
+            _cachedApiKey = apiKey;
+            _cachedApiKeyTarget = targetBaseUri;
+        }
+        return apiKey;
     }
 
     /// <summary>
@@ -285,7 +316,11 @@ public sealed class SharpClawApiClient : IDisposable
             expectedVersion,
             _ =>
             {
-                _cachedApiKey = null;
+                lock (_targetLock)
+                {
+                    _cachedApiKey = null;
+                    _cachedApiKeyTarget = null;
+                }
                 return ValueTask.CompletedTask;
             },
             cancellationToken);
@@ -367,5 +402,26 @@ public sealed class SharpClawApiClient : IDisposable
         if (uri is null)
             return string.Empty;
         return uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
+    }
+
+    private Uri GetTargetSnapshot()
+    {
+        lock (_targetLock)
+            return _targetBaseUri;
+    }
+
+    private static Uri CreateTargetUri(string baseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(baseUrl);
+        return new Uri(baseUrl, UriKind.Absolute);
+    }
+
+    private static Uri ResolveRequestUri(Uri targetBaseUri, string requestTarget)
+    {
+        var requestUri = new Uri(requestTarget, UriKind.RelativeOrAbsolute);
+        var relativeTarget = requestUri.IsAbsoluteUri
+            ? requestUri.PathAndQuery
+            : requestUri.OriginalString;
+        return new Uri(targetBaseUri, relativeTarget);
     }
 }

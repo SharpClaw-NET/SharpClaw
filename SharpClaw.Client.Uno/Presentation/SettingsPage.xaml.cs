@@ -174,17 +174,13 @@ public sealed partial class SettingsPage : Page
             try
             {
                 var target = RequireHttpEndpoint(endpoint.Text);
-                await Api.UpdateBaseUrlAsync(target);
-                await Actions.RunCommandAsync(
-                    "client.runtime.target",
-                    _ =>
-                    {
-                        App.Services?.GetService<BackendProcessManager>()
-                            ?.UpdateApiUrl(target);
-                        Gateway?.UpdateBackendBaseUrl(target);
-                        return ValueTask.CompletedTask;
-                    });
-                await Api.WaitForReadyAsync(TimeSpan.FromSeconds(5));
+                await ApplyRuntimeTargetAsync(
+                    Api,
+                    Actions,
+                    App.Services?.GetService<BackendProcessManager>(),
+                    Gateway,
+                    target,
+                    TimeSpan.FromSeconds(5));
                 endpoint.Text = Api.BaseUrl.TrimEnd('/');
                 await RefreshAsync();
             }
@@ -201,6 +197,28 @@ public sealed partial class SettingsPage : Page
         refresh.Click += async (_, _) => await RefreshAsync();
 
         await RefreshAsync();
+    }
+
+    internal static async Task ApplyRuntimeTargetAsync(
+        SharpClawApiClient api,
+        ClientActionDispatcher actions,
+        BackendProcessManager? backend,
+        GatewayProcessManager? gateway,
+        string target,
+        TimeSpan readinessTimeout,
+        CancellationToken cancellationToken = default)
+    {
+        await api.UpdateBaseUrlAsync(target, cancellationToken);
+        await actions.RunCommandAsync(
+            "client.runtime.target",
+            _ =>
+            {
+                backend?.UpdateApiUrl(target);
+                gateway?.UpdateBackendBaseUrl(target);
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+        await api.WaitForReadyAsync(readinessTimeout, cancellationToken);
     }
 
     private async Task LoadGatewayAsync()

@@ -533,6 +533,97 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
+    public async Task Runtime_apply_retargets_after_readiness_with_one_state_transition()
+    {
+        const string targetA = "http://runtime-a.test:48923/";
+        const string targetB = "http://runtime-b.test:48923/";
+        var dispatcher = new ClientActionDispatcher();
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            "test-api-key");
+        using var backend = new BackendProcessManager(
+            targetA,
+            NullLogger<BackendProcessManager>.Instance);
+        using var gateway = new GatewayProcessManager(
+            "http://gateway.test:48924/",
+            targetA,
+            NullLogger<GatewayProcessManager>.Instance);
+
+        using var initialResponse = await api.GetAsync("/readyz");
+        await SettingsPage.ApplyRuntimeTargetAsync(
+            api,
+            dispatcher,
+            backend,
+            gateway,
+            targetB,
+            TimeSpan.FromSeconds(1));
+        using var retargetedResponse = await api.GetAsync("/readyz");
+
+        handler.Requests.Select(static request => request.Uri).Should().Equal(
+            "http://runtime-a.test:48923/readyz",
+            "http://runtime-b.test:48923/ping",
+            "http://runtime-b.test:48923/readyz");
+        dispatcher.GetStateVersion("client.api.target").Should().Be(1);
+        http.BaseAddress.Should().Be(targetA);
+        api.BaseUrl.Should().Be(targetB);
+        backend.ApiUrl.Should().Be(targetB);
+        gateway.BackendBaseUrl.Should().Be(targetB);
+    }
+
+    [Test]
+    public async Task Boot_retry_retargets_after_a_failed_probe()
+    {
+        const string targetA = "http://runtime-a.test:48923/";
+        const string targetB = "http://runtime-b.test:48923/";
+        var dispatcher = new ClientActionDispatcher();
+        var handler = new CapturingHandler
+        {
+            ResponseFactory = request => new HttpResponseMessage(
+                request.RequestUri!.Host == "runtime-a.test"
+                    ? HttpStatusCode.ServiceUnavailable
+                    : HttpStatusCode.OK),
+        };
+        using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            "test-api-key");
+        using var backend = new BackendProcessManager(
+            targetA,
+            NullLogger<BackendProcessManager>.Instance,
+            frontendInstance: null,
+            executablePath: Path.Combine(Path.GetTempPath(), "unused-runtime-host"),
+            processOnPortProbe: () => false,
+            apiReachabilityProbe: _ => Task.FromResult(true),
+            processStartObserver: null);
+        using var gateway = new GatewayProcessManager(
+            "http://gateway.test:48924/",
+            targetA,
+            NullLogger<GatewayProcessManager>.Instance);
+        var boot = new BootModel(backend, gateway, api, null, dispatcher);
+
+        (await boot.RunBackendStepAsync(CancellationToken.None)).Ok.Should().BeTrue();
+        using var failedResponse = await api.GetAsync("/echo");
+        failedResponse.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+
+        await boot.ApplyCustomUrlAsync(targetB);
+        var retry = await boot.RunEchoStepAsync(CancellationToken.None);
+
+        retry.Ok.Should().BeTrue();
+        handler.Requests.Select(static request => request.Uri).Should().Equal(
+            "http://runtime-a.test:48923/echo",
+            "http://runtime-b.test:48923/echo");
+        api.BaseUrl.Should().Be(targetB);
+        backend.ApiUrl.Should().Be(targetB);
+        gateway.BackendBaseUrl.Should().Be(targetB);
+    }
+
+    [Test]
     public async Task Stream_command_stays_open_until_consumption_cancellation()
     {
         var probe = new ClientProbe();
@@ -930,6 +1021,8 @@ public sealed class ClientActionBoundaryTests
     {
         public HttpRequestMessage? Request { get; private set; }
 
+        public ConcurrentQueue<(string Method, string Uri)> Requests { get; } = new();
+
         public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
 
         public Func<HttpRequestMessage, CancellationToken, Task<HttpResponseMessage>>?
@@ -941,6 +1034,7 @@ public sealed class ClientActionBoundaryTests
             CancellationToken cancellationToken)
         {
             Request = request;
+            Requests.Enqueue((request.Method.Method, request.RequestUri!.AbsoluteUri));
             if (AsyncResponseFactory is not null)
                 return AsyncResponseFactory(request, cancellationToken);
 
