@@ -1,22 +1,22 @@
 <![CDATA[# Getting Started
 
-This guide describes the default stateless SharpClaw installation.
+This guide describes the default SharpClaw installation.
 
-## Select A Provider
+## Configure The Runtime
 
-Open the provider settings and select an enabled provider. Enter the provider secret through the environment editor or the provider settings that the installed provider module supplies.
+Enable one provider module in the Runtime environment. Set its provider key, endpoint, and credential there.
 
 ## Select A Model
 
-Open the model settings and select a model exposed by the selected provider. The Runtime uses that provider and model for the next message.
+Set a model exposed by the selected provider in the Runtime environment. Open Settings to confirm the Runtime endpoint and readiness.
 
 ## Send A Message
 
-Open the chat view, enter one message, and send it. The Runtime returns one reply. The default installation does not load prior messages or save conversation history.
+Open Chat, enter a message, and send it. The Runtime returns the model response.
 
 ## Use Jobs
 
-A tool or a direct request can submit a Job when work continues after the current request. The kernel stores Job state and exposes progress, completion, failure, cancellation, and recovery through one path.
+A tool or an API request can submit a Job when work continues after the current request. The kernel stores Job state through one lifecycle.
 
 ## Use The Gateway
 

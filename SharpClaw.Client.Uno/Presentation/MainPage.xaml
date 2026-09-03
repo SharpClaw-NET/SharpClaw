@@ -27,16 +27,7 @@
                    FontSize="16"
                    FontWeight="Bold"
                    Foreground="#00FF00" />
-        <TextBlock Text="direct chat"
-                   Style="{StaticResource TerminalText}"
-                   FontSize="11"
-                   Foreground="#888888" />
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,8" />
-        <TextBlock Text="Each message is independent. The base client keeps no conversation history."
-                   Style="{StaticResource TerminalText}"
-                   FontSize="10"
-                   Foreground="#666666"
-                   TextWrapping="Wrap" />
       </StackPanel>
 
       <StackPanel Grid.Row="1" Margin="16,0,16,12" Spacing="6">
@@ -46,13 +37,6 @@
                 HorizontalContentAlignment="Left"
                 Click="OnSettingsClick">
           <TextBlock Text="[settings]" Style="{StaticResource TerminalText}"
-                     FontSize="12" Foreground="#808080" />
-        </Button>
-        <Button Background="Transparent" BorderThickness="0" Padding="0"
-                HorizontalAlignment="Stretch"
-                HorizontalContentAlignment="Left"
-                Click="OnLogoutClick">
-          <TextBlock Text="[logout]" Style="{StaticResource TerminalText}"
                      FontSize="12" Foreground="#808080" />
         </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
@@ -114,9 +98,6 @@
                    Text="&gt; direct chat"
                    Style="{StaticResource TerminalText}"
                    FontSize="14" Foreground="#00FF00" />
-        <TextBlock Text="stateless request"
-                   Style="{StaticResource TerminalText}"
-                   FontSize="10" Foreground="#666666" />
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
       </StackPanel>
 

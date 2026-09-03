@@ -145,14 +145,8 @@ public sealed partial class BootPage : Page
                 if (gatewayResult is not null)
                     diag.Add(gatewayResult.Line);
 
-                // Try auto-login from saved account before showing Login page
-                if (await TryAutoLoginAsync(ct))
-                    return;
-
-                // No auto-login — navigate to login page
-                await Task.Delay(1000, CancellationToken.None);
                 await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
+                    .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
                 return;
             }
 
@@ -415,77 +409,4 @@ public sealed partial class BootPage : Page
             this.Focus(FocusState.Programmatic);
     }
 
-    // ---------------------------------------------------------------
-    // Auto-login from saved account
-    // ---------------------------------------------------------------
-    private async Task<bool> TryAutoLoginAsync(CancellationToken ct)
-    {
-        var store = App.Services?.GetService<AccountStore>();
-        var account = store?.GetActiveAccount();
-        if (account is null || !account.RememberMe
-            || account.RefreshToken is null
-            || account.RefreshTokenExpiresAt <= DateTimeOffset.UtcNow)
-            return false;
-
-        var session = App.Services!.GetRequiredService<ClientSessionService>();
-        try
-        {
-            var result = await session.RefreshAsync(account.RefreshToken, ct);
-            if (result is null)
-                return false;
-
-            await session.RunAuthenticatedContinuationAsync(async () =>
-            {
-                var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-                var identity = result.Identity;
-                var refreshedAccount = new AccountStore.SavedAccount
-                {
-                    UserId = identity.UserId,
-                    Username = identity.Username,
-                    AccessToken = result.AccessToken,
-                    AccessTokenExpiresAt = result.AccessTokenExpiresAt,
-                    RefreshToken = result.RefreshToken ?? account.RefreshToken,
-                    RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
-                    RememberMe = true,
-                };
-
-                // Update stored tokens with fresh values.
-                await store!.SaveAccountAsync(refreshedAccount, ct);
-                if (account.UserId != identity.UserId)
-                    await store.RemoveAccountAsync(account.UserId, ct);
-
-                // Switch per-user settings.
-                await App.Services!.GetRequiredService<ClientSettings>()
-                    .SwitchUserAsync(identity.UserId, ct);
-
-                // Pre-populate module caches for the session.
-                await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
-
-                await Task.Delay(1000, CancellationToken.None);
-                var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
-                var needsSetup = !setupMarker.IsCompleted;
-                var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
-                var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
-                await App.Services!.GetRequiredService<ClientNavigationService>()
-                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
-            });
-            return true;
-        }
-        catch (ClientSessionCleanupException)
-        {
-            throw;
-        }
-        catch
-        {
-            return false;
-        }
-    }
-
-    private void OnEnvClick(object sender, RoutedEventArgs e)
-    {
-        if (App.Services is not { } services) return;
-        EnvMenuPage.PendingOrigin = "Boot";
-        _ = services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "EnvMenu");
-    }
 }

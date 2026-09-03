@@ -15,7 +15,6 @@ public sealed class SharpClawApiClient : IDisposable
     private readonly FrontendInstanceService? _frontendInstance;
     private readonly ILogger<SharpClawApiClient> _logger;
     private readonly ClientActionDispatcher _clientActions;
-    private readonly ClientActionContextSource _contextSource;
     private readonly bool _ownsHttp;
     private readonly string? _fixedApiKey;
     private string? _cachedApiKey;
@@ -25,13 +24,11 @@ public sealed class SharpClawApiClient : IDisposable
         string baseUrl,
         ILogger<SharpClawApiClient> logger,
         FrontendInstanceService? frontendInstance,
-        ClientActionDispatcher clientActions,
-        ClientActionContextSource? contextSource = null)
+        ClientActionDispatcher clientActions)
     {
         _frontendInstance = frontendInstance;
         _logger = logger;
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
-        _contextSource = contextSource ?? new ClientActionContextSource();
         _ownsHttp = true;
         _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
@@ -45,13 +42,11 @@ public sealed class SharpClawApiClient : IDisposable
         HttpClient http,
         ILogger<SharpClawApiClient> logger,
         ClientActionDispatcher clientActions,
-        ClientActionContextSource contextSource,
         string? fixedApiKey = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
-        _contextSource = contextSource ?? throw new ArgumentNullException(nameof(contextSource));
         _ownsHttp = false;
         _fixedApiKey = fixedApiKey;
     }
@@ -249,51 +244,7 @@ public sealed class SharpClawApiClient : IDisposable
     {
         var key = ResolveApiKey();
         request.Headers.Add("X-Api-Key", key);
-
-        if (_accessToken is not null)
-            request.Headers.Authorization =
-                new System.Net.Http.Headers.AuthenticationHeaderValue("Bearer", _accessToken);
     }
-
-    private string? _accessToken;
-
-    /// <summary>
-    /// Stores the JWT access token returned by <c>/auth/login</c>.
-    /// Subsequent requests include it as a Bearer token.
-    /// </summary>
-    internal async ValueTask SetAccessTokenAsync(
-        string? token,
-        CancellationToken cancellationToken = default,
-        ClientActionRequestContext? authenticatedContext = null)
-    {
-        var expectedVersion = _clientActions.GetStateVersion("client.auth");
-        await _clientActions.CommitStateAsync(
-            "client.auth",
-            expectedVersion,
-            _ =>
-            {
-                _accessToken = token;
-                if (token is null)
-                    _contextSource.ClearSession();
-                else if (authenticatedContext is not null)
-                    _contextSource.SetSession(authenticatedContext);
-                else
-                    _contextSource.ClearSession();
-                return ValueTask.CompletedTask;
-            },
-            cancellationToken);
-    }
-
-    // The normal path uses client.auth. This local reset is only for a failed
-    // cleanup action, so an authority failure cannot leave a usable token.
-    internal void ForceClearSessionAfterActionFailure()
-    {
-        _accessToken = null;
-        _contextSource.ClearSession();
-    }
-
-    /// <summary>Current access token, if any.</summary>
-    public string? AccessToken => _accessToken;
 
     private string ResolveApiKey()
     {

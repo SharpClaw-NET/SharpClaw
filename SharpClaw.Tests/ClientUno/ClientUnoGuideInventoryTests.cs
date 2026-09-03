@@ -33,7 +33,16 @@ public sealed class ClientUnoGuideInventoryTests
         ids.Should().Equal("welcome", "getting-started", "gateway", "troubleshooting");
 
         foreach (var id in ids)
-            File.Exists(Path.Combine(guideDirectory, id + ".md")).Should().BeTrue();
+        {
+            var path = Path.Combine(guideDirectory, id + ".md");
+            File.Exists(path).Should().BeTrue();
+            var guide = File.ReadAllText(path);
+            guide.Should().NotContain("first-time setup", id);
+            guide.Should().NotContain("environment editor", id);
+            guide.Should().NotContain("Job view", id);
+            guide.Should().NotContain("stateless", id);
+            guide.Should().NotContain("Each message is independent", id);
+        }
 
         new[] { "advanced", "agents-models", "bot-integrations", "channels-threads", "chat-features", "permissions" }
             .Select(id => Path.Combine(guideDirectory, id + ".md"))

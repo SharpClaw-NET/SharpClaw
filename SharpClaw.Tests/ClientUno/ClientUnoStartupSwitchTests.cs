@@ -142,7 +142,7 @@ public sealed class ClientUnoStartupSwitchTests
             NullLogger<SharpClawApiClient>.Instance,
             frontendInstance: null,
             clientActions: new ClientActionDispatcher());
-var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
+        var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
 
         var result = await boot.RunGatewayStepAsync(CancellationToken.None);
 

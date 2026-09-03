@@ -14,16 +14,6 @@ public sealed partial class MainPage
             .NavigateRouteAsync(this, "Settings");
     }
 
-    private async void OnLogoutClick(object sender, RoutedEventArgs e)
-    {
-        if (App.Services is not { } services)
-            return;
-
-        await services.GetRequiredService<ClientSessionService>().ClearAsync();
-        await services.GetRequiredService<ClientNavigationService>()
-            .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
-    }
-
     private async void OnReportIssueClick(object sender, RoutedEventArgs e)
         => await Windows.System.Launcher.LaunchUriAsync(
             new Uri("https://github.com/SharpClaw-NET/SharpClaw/issues"));

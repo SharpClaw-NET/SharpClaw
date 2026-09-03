@@ -140,30 +140,13 @@ public partial class App : Application
                     services.AddSingleton<ClientActionDispatcher>(sp =>
                         ClientActionDispatcher.CreateProduction(
                             sp.GetRequiredService<ClientActionContextSource>()));
-                    services.AddSingleton<ClientNavigationService>();
+                    services.AddTransient<ClientNavigationService>();
                     services.AddSingleton<SharpClawApiClient>(sp =>
                         new SharpClawApiClient(
                             apiUrl,
                             sp.GetRequiredService<ILogger<SharpClawApiClient>>(),
                             frontendInstance,
-                            sp.GetRequiredService<ClientActionDispatcher>(),
-                            sp.GetRequiredService<ClientActionContextSource>()));
-                    services.AddSingleton<ClientSessionService>();
-                    services.AddSingleton(sp => new FirstSetupMarker(
-                        frontendInstance,
-                        sp.GetRequiredService<ClientActionDispatcher>()));
-                    services.AddSingleton(sp => new ClientSettings(
-                        frontendInstance,
-                        sp.GetRequiredService<ClientActionDispatcher>()));
-                    services.AddSingleton(sp => new AccountStore(
-                        frontendInstance,
-                        sp.GetRequiredService<ClientActionDispatcher>()));
-                    services.AddSingleton<ModuleStateCache>(sp =>
-                        new ModuleStateCache(
                             sp.GetRequiredService<ClientActionDispatcher>()));
-                    services.AddSingleton<ModuleFrontendStateService>(sp =>
-                        new ModuleFrontendStateService(
-                            sp.GetRequiredService<ModuleStateCache>()));
                 })
                 .UseNavigation(ReactiveViewModelMappings.ViewModelMappings, RegisterRoutes)
             );
@@ -181,8 +164,7 @@ public partial class App : Application
                 // assigned at this point, but BootPage needs services.
                 Services = services;
 
-                // Show the terminal-style boot screen which handles
-                // connection, retry, and then navigates to Login/Main.
+                // Verify the Runtime connection before opening direct chat.
                 await services.GetRequiredService<ClientNavigationService>()
                     .NavigateRouteAsync(this, "Boot", Qualifiers.Nested);
             });
@@ -243,14 +225,10 @@ public partial class App : Application
         views.Register(
             new ViewMap(ViewModel: typeof(ShellModel)),
             new ViewMap<BootPage>(),
-            new ViewMap<LoginPage>(),
-            new ViewMap<FirstSetupPage>(),
             new ViewMap<MainPage>(),
             new ViewMap<SettingsPage>(),
             new ViewMap<LegalNoticesPage>(),
-            new ViewMap<UserGuidePage>(),
-            new ViewMap<EnvMenuPage>(),
-            new ViewMap<EnvEditorPage>()
+            new ViewMap<UserGuidePage>()
         );
 
         routes.Register(
@@ -258,14 +236,10 @@ public partial class App : Application
                 Nested:
                 [
                     new ("Boot", View: views.FindByView<BootPage>()),
-                    new ("Login", View: views.FindByView<LoginPage>()),
-                    new ("FirstSetup", View: views.FindByView<FirstSetupPage>()),
                     new ("Main", View: views.FindByView<MainPage>(), IsDefault:true),
                     new ("Settings", View: views.FindByView<SettingsPage>()),
                     new ("LegalNotices", View: views.FindByView<LegalNoticesPage>()),
-                    new ("UserGuide", View: views.FindByView<UserGuidePage>()),
-                    new ("EnvMenu", View: views.FindByView<EnvMenuPage>()),
-                    new ("EnvEditor", View: views.FindByView<EnvEditorPage>())
+                    new ("UserGuide", View: views.FindByView<UserGuidePage>())
                 ]
             )
         );
@@ -284,12 +258,12 @@ public partial class App : Application
             else
             {
                 // Fall back to Resizetizer-generated icon
-                window.SetWindowIcon();
+                SharpClaw.Client.Uno.WindowExtensions.SetWindowIcon(window);
             }
         }
         catch
         {
-            window.SetWindowIcon();
+            SharpClaw.Client.Uno.WindowExtensions.SetWindowIcon(window);
         }
     }
 }

@@ -40,14 +40,6 @@ public sealed class FrontendInstanceService
 
     public SharpClawInstancePaths Paths { get; }
 
-    public string AccountsPath => Path.Combine(Paths.ConfigDirectory, "accounts.json");
-
-    public string ClientSettingsPath => Path.Combine(Paths.ConfigDirectory, "client-settings.json");
-
-    public string UsersSettingsDirectory => Path.Combine(Paths.ConfigDirectory, "users");
-
-    public string SetupMarkerPath => Path.Combine(Paths.ConfigDirectory, ".setup-complete");
-
     public string BundledBackendInstanceRoot => Path.Combine(Paths.InstanceRoot, "stack", "backend");
 
     public string ResolvePreferredBackendBaseUrl(string configuredBaseUrl)
@@ -125,9 +117,6 @@ public sealed class FrontendInstanceService
         if (changed)
             Paths.SaveManifest(manifest);
     }
-
-    public string GetUserSettingsPath(Guid userId)
-        => Path.Combine(UsersSettingsDirectory, userId.ToString("N"), "settings.json");
 
     private SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry(string? requestedBaseUrl)
     {

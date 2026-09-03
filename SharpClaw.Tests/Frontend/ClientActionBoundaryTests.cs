@@ -1,6 +1,5 @@
 using System.Collections.Concurrent;
 using System.Net;
-using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -504,267 +503,6 @@ public sealed class ClientActionBoundaryTests
     }
 
     [Test]
-    public async Task Refresh_session_uses_backend_subject_not_saved_account_identity()
-    {
-        var storedAccountUserId = Guid.NewGuid();
-        var backendUserId = Guid.NewGuid();
-        var source = new ClientActionContextSource();
-        var dispatcher = ClientActionDispatcher.CreateProduction(source);
-        var handler = new CapturingHandler
-        {
-            ResponseFactory = request => request.RequestUri!.AbsolutePath switch
-            {
-                "/auth/refresh" => JsonResponse(new
-                {
-                    accessToken = "access-owned-by-backend-user",
-                    refreshToken = "next-refresh-token",
-                }),
-                "/auth/me" => JsonResponse(new { id = backendUserId, username = "backend-owner" }),
-                _ => new HttpResponseMessage(HttpStatusCode.OK),
-            },
-        };
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-
-        var result = await session.RefreshAsync("stored-refresh-token");
-
-        result.Should().NotBeNull();
-        result!.Identity.UserId.Should().Be(backendUserId);
-        result.Identity.UserId.Should().NotBe(storedAccountUserId);
-        result.Identity.Username.Should().Be("backend-owner");
-        handler.Request!.Headers.Authorization!.Parameter.Should()
-            .Be("access-owned-by-backend-user");
-        source.CreateContext().Caller.SubjectId.Should().Be(backendUserId.ToString("N"));
-        source.CreateContext().Caller.IsAuthenticated.Should().BeTrue();
-    }
-
-    [Test]
-    public async Task Invalid_backend_identity_clears_token_and_client_authority()
-    {
-        var source = new ClientActionContextSource();
-        var dispatcher = ClientActionDispatcher.CreateProduction(source);
-        var handler = new CapturingHandler
-        {
-            ResponseFactory = request => request.RequestUri!.AbsolutePath == "/auth/me"
-                ? JsonResponse(new { username = "missing-id" })
-                : new HttpResponseMessage(HttpStatusCode.OK),
-        };
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-
-        var result = await session.EstablishAsync("access-without-identity");
-
-        result.Should().BeNull();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-    }
-
-    [Test]
-    public async Task Refresh_transport_failure_clears_preexisting_session()
-    {
-        var source = new ClientActionContextSource();
-        var dispatcher = ClientActionDispatcher.CreateProduction(source);
-        var handler = new CapturingHandler
-        {
-            AsyncResponseFactory = (_, _) =>
-                Task.FromException<HttpResponseMessage>(new HttpRequestException("transport failure")),
-        };
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-        var existingUserId = Guid.NewGuid();
-        await api.SetAccessTokenAsync(
-            "existing-access-token",
-            CancellationToken.None,
-            ClientActionContextSource.ForAuthenticatedUser(existingUserId, "existing-user"));
-
-        var result = await session.RefreshAsync("refresh-token");
-
-        result.Should().BeNull();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-    }
-
-    [Test]
-    public async Task Refresh_cancellation_clears_preexisting_session()
-    {
-        var source = new ClientActionContextSource();
-        var dispatcher = ClientActionDispatcher.CreateProduction(source);
-        using var http = new HttpClient(new CapturingHandler())
-        {
-            BaseAddress = new Uri("http://localhost"),
-        };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-        await api.SetAccessTokenAsync(
-            "existing-access-token",
-            CancellationToken.None,
-            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
-        using var cancellation = new CancellationTokenSource();
-        cancellation.Cancel();
-
-        var action = () => session.RefreshAsync("refresh-token", cancellation.Token);
-
-        await action.Should().ThrowAsync<OperationCanceledException>();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-    }
-
-    [Test]
-    public async Task Page_post_establishment_failure_clears_preexisting_session()
-    {
-        var source = new ClientActionContextSource();
-        var dispatcher = ClientActionDispatcher.CreateProduction(source);
-        using var http = new HttpClient(new CapturingHandler())
-        {
-            BaseAddress = new Uri("http://localhost"),
-        };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-        await api.SetAccessTokenAsync(
-            "existing-access-token",
-            CancellationToken.None,
-            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
-
-        var action = () => session.RunAuthenticatedContinuationAsync(
-            static () => Task.FromException(new InvalidOperationException("page state failure")));
-
-        await action.Should().ThrowAsync<InvalidOperationException>();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-    }
-
-    [Test]
-    public async Task Cleanup_failure_rethrows_after_forcing_anonymous_session()
-    {
-        var source = new ClientActionContextSource();
-        var probe = new ClientProbe();
-        var dispatcher = CreateDispatcher(probe, source);
-        using var http = new HttpClient(new CapturingHandler())
-        {
-            BaseAddress = new Uri("http://localhost"),
-        };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-        await api.SetAccessTokenAsync(
-            "existing-access-token",
-            CancellationToken.None,
-            ClientActionContextSource.ForAuthenticatedUser(Guid.NewGuid(), "existing-user"));
-        probe.FailureAction = ClientActionCatalog.StateCommit.Value;
-
-        var action = () => session.ClearAsync().AsTask();
-
-        await action.Should().ThrowAsync<ClientSessionCleanupException>();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-    }
-
-    [Test]
-    public async Task Registration_cleanup_failure_rethrows_and_leaves_anonymous_authority()
-    {
-        var userId = Guid.NewGuid();
-        var source = new ClientActionContextSource();
-        var probe = new ClientProbe();
-        var dispatcher = CreateDispatcher(probe, source);
-        var handler = new CapturingHandler
-        {
-            ResponseFactory = request => request.RequestUri!.AbsolutePath switch
-            {
-                "/auth/login" => JsonResponse(new
-                {
-                    accessToken = "registration-login-token",
-                    refreshToken = "registration-refresh-token",
-                }),
-                "/auth/me" => JsonResponse(new
-                {
-                    id = userId,
-                    username = "registered-user",
-                }),
-                "/auth/register" => new HttpResponseMessage(HttpStatusCode.Created),
-                _ => new HttpResponseMessage(HttpStatusCode.OK),
-            },
-        };
-        using var http = new HttpClient(handler) { BaseAddress = new Uri("http://localhost") };
-        using var api = new SharpClawApiClient(
-            http,
-            NullLogger<SharpClawApiClient>.Instance,
-            dispatcher,
-            source,
-            "test-api-key");
-        var session = new ClientSessionService(api);
-        var statusMessages = new List<string>();
-
-        var action = () => LoginPage.RegisterAsync(
-            async () =>
-            {
-                using var content = new StringContent(
-                    "{\"username\":\"registered-user\",\"password\":\"password\"}",
-                    Encoding.UTF8,
-                    "application/json");
-                return await api.PostAsync("/auth/register", content);
-            },
-            async () =>
-            {
-                var result = await session.LoginAsync(
-                    "registered-user",
-                    "password",
-                    rememberMe: true);
-                result.Should().NotBeNull();
-                probe.FailureAction = ClientActionCatalog.StateCommit.Value;
-                await session.RunAuthenticatedContinuationAsync(
-                    static () => Task.FromException(
-                        new InvalidOperationException("registration continuation failed")));
-            },
-            (message, _, _) => statusMessages.Add(message));
-
-        await action.Should().ThrowAsync<ClientSessionCleanupException>();
-        api.AccessToken.Should().BeNull();
-        source.CreateContext().Caller.IsAuthenticated.Should().BeFalse();
-        source.CreateContext().Caller.SubjectId.Should().Be(RequestPrincipal.Anonymous.SubjectId);
-        statusMessages.Should().ContainSingle(message =>
-            message.Contains("Account created", StringComparison.Ordinal));
-        statusMessages.Should().NotContain(message =>
-            message.Contains("cleanup failed", StringComparison.OrdinalIgnoreCase));
-    }
-
-    [Test]
     public async Task Api_client_sends_the_accepted_effective_method_and_path()
     {
         var probe = new ClientProbe
@@ -784,7 +522,6 @@ public sealed class ClientActionBoundaryTests
             http,
             NullLogger<SharpClawApiClient>.Instance,
             dispatcher,
-            new ClientActionContextSource(),
             "test-api-key");
 
         using var response = await api.GetAsync("/original");
@@ -812,7 +549,6 @@ public sealed class ClientActionBoundaryTests
             http,
             NullLogger<SharpClawApiClient>.Instance,
             dispatcher,
-            new ClientActionContextSource(),
             "test-api-key");
         using var cancellation = new CancellationTokenSource();
 
@@ -847,7 +583,6 @@ public sealed class ClientActionBoundaryTests
             http,
             NullLogger<SharpClawApiClient>.Instance,
             dispatcher,
-            new ClientActionContextSource(),
             "test-api-key");
 
         await FluentActions.Invoking(async () => await api.ConsumeStreamAsync(
@@ -894,36 +629,12 @@ public sealed class ClientActionBoundaryTests
             source.Should().NotContain("navigator.NavigateViewModelAsync<", sourceFile);
         }
 
-        foreach (var serviceName in new[] { "ClientSettings.cs", "AccountStore.cs", "FirstSetupMarker.cs" })
-        {
-            var source = File.ReadAllText(Path.Combine(clientRoot, "Services", serviceName));
-            source.Should().Contain("CommitStateAsync", serviceName);
-        }
-
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "BootModel.cs"))
             .Should().Contain("RunCommandAsync");
-        var firstSetupSource = File.ReadAllText(
-            Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml.cs"));
-        firstSetupSource.Should().Contain("client.provider.ollama.probe");
-        firstSetupSource.Should().NotContain("/agents");
-        firstSetupSource.Should().NotContain("/channel-contexts");
-        firstSetupSource.Should().NotContain("/channels");
-        firstSetupSource.Should().NotContain("/roles");
-        firstSetupSource.Should().NotContain("PermissionEditorBuilder");
-
-        var firstSetupXaml = File.ReadAllText(
-            Path.Combine(clientRoot, "Presentation", "FirstSetupPage.xaml"));
-        firstSetupXaml.Should().NotContain("AgentSelectorPanel");
-        firstSetupXaml.Should().NotContain("RolePermissionsPanel");
-        firstSetupXaml.Should().NotContain("ModulePermissionsContainer");
-        var environmentSource = File.ReadAllText(
-            Path.Combine(clientRoot, "Presentation", "EnvEditorPage.xaml.cs"));
-        environmentSource.Should().Contain("client.environment.save");
-        environmentSource.Should().Contain("client.environment.apply");
-        environmentSource.Should().Contain("client.backend.restart");
         var settingsSource = File.ReadAllText(
             Path.Combine(clientRoot, "Presentation", "SettingsPage.xaml.cs"));
         settingsSource.Should().Contain("client.gateway.restart");
+        settingsSource.Should().Contain("client.runtime.target");
         settingsSource.Should().NotContain("/agents");
         settingsSource.Should().NotContain("/roles");
         settingsSource.Should().NotContain("PermissionEditorBuilder");
@@ -960,67 +671,24 @@ public sealed class ClientActionBoundaryTests
                 "CommitStateAsync",
                 "client.chat.ui",
             ],
-            [Path.Combine("Presentation", "LoginPage.xaml.cs")] = [
-                "Session.LoginAsync",
-                "Session.RefreshAsync",
-                "RunAuthenticatedContinuationAsync",
-                "SaveAccountAsync",
-                "RemoveAccountAsync",
-            ],
             [Path.Combine("Presentation", "BootPage.xaml.cs")] = [
-                "session.RefreshAsync",
-                "RunAuthenticatedContinuationAsync",
-            ],
-            [Path.Combine("Presentation", "MainPage.Navigation.cs")] = [
-                "ClientSessionService",
-                "ClearAsync",
+                "NavigateRouteAsync(this, \"Main\"",
             ],
             [Path.Combine("Presentation", "SettingsPage.xaml.cs")] = [
                 "Actions.RunCommandAsync",
                 "client.gateway.restart",
                 "client.gateway.logs.clear",
                 "client.process.persistence",
-                "client.autostart.update",
-            ],
-            [Path.Combine("Presentation", "EnvEditorPage.xaml.cs")] = [
-                "client.environment.save",
-                "client.environment.apply",
-                "Environment.SetEnvironmentVariable",
-            ],
-            [Path.Combine("Presentation", "FirstSetupPage.xaml.cs")] = [
-                "client.provider.ollama.probe",
-                "RunCommandAsync",
-            ],
-            [Path.Combine("Services", "AccountStore.cs")] = [
-                "CommitStateAsync",
-                "client.accounts",
-            ],
-            [Path.Combine("Services", "ClientSettings.cs")] = [
-                "CommitStateAsync",
-                "client.settings",
-            ],
-            [Path.Combine("Services", "FirstSetupMarker.cs")] = [
-                "CommitStateAsync",
-                "client.setup",
+                "client.runtime.target",
             ],
             [Path.Combine("Services", "SharpClawApiClient.cs")] = [
                 "_clientActions.RunCommandAsync",
                 "ConsumeStreamAsync",
             ],
-            [Path.Combine("Services", "ClientSessionService.cs")] = [
-                "RefreshAsync",
-                "EstablishAsync",
-                "\"/auth/me\"",
-                "ForAuthenticatedUser",
-            ],
             [Path.Combine("Services", "ClientNavigationService.cs")] = [
                 "actions.NavigateAsync",
                 "navigator.NavigateRouteAsync",
                 "navigator.NavigateViewModelAsync",
-            ],
-            [Path.Combine("Services", "ModuleStateCache.cs")] = [
-                "CommitStateAsync",
-                "client.modules",
             ],
         };
 
@@ -1042,6 +710,12 @@ public sealed class ClientActionBoundaryTests
         combinedSource.Should().NotContain("new ClientActionDispatcher([]");
         combinedSource.Should().NotContain("IAuthenticationService");
         combinedSource.Should().NotContain("UseAuthentication");
+        combinedSource.Should().NotContain("/auth/login");
+        combinedSource.Should().NotContain("/auth/register");
+        combinedSource.Should().NotContain("/auth/refresh");
+        combinedSource.Should().NotContain("/auth/me");
+        combinedSource.Should().NotContain("SetAccessTokenAsync");
+        combinedSource.Should().NotContain("ForAuthenticatedUser");
 
         foreach (var path in new[]
         {
@@ -1062,8 +736,27 @@ public sealed class ClientActionBoundaryTests
             source.Should().NotContain("ChatMessageDto", path);
         }
 
-        File.Exists(Path.Combine(clientRoot, "Presentation", "LoginModel.cs"))
-            .Should().BeFalse();
+        foreach (var path in new[]
+        {
+            Path.Combine("Presentation", "LoginModel.cs"),
+            Path.Combine("Presentation", "LoginPage.xaml"),
+            Path.Combine("Presentation", "LoginPage.xaml.cs"),
+            Path.Combine("Presentation", "FirstSetupPage.xaml"),
+            Path.Combine("Presentation", "FirstSetupPage.xaml.cs"),
+            Path.Combine("Presentation", "EnvMenuPage.xaml"),
+            Path.Combine("Presentation", "EnvMenuPage.xaml.cs"),
+            Path.Combine("Presentation", "EnvEditorPage.xaml"),
+            Path.Combine("Presentation", "EnvEditorPage.xaml.cs"),
+            Path.Combine("Services", "AccountStore.cs"),
+            Path.Combine("Services", "ClientSessionService.cs"),
+            Path.Combine("Services", "FirstSetupMarker.cs"),
+            Path.Combine("Services", "CoreEnvGuard.cs"),
+            Path.Combine("Services", "ModuleStateCache.cs"),
+            Path.Combine("Services", "ModuleFrontendStateService.cs"),
+        })
+        {
+            File.Exists(Path.Combine(clientRoot, path)).Should().BeFalse(path);
+        }
         File.Exists(Path.Combine(clientRoot, "Presentation", "MainPage.Contributions.cs"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "ChatActionContributionBuilders.cs"))
@@ -1078,18 +771,6 @@ public sealed class ClientActionBoundaryTests
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "SecondModel.cs"))
             .Should().BeFalse();
-        foreach (var path in new[]
-        {
-            Path.Combine(clientRoot, "Presentation", "BootPage.xaml.cs"),
-            Path.Combine(clientRoot, "Presentation", "LoginPage.xaml.cs"),
-            Path.Combine(clientRoot, "Presentation", "MainPage.Navigation.cs"),
-        })
-        {
-            var pageSource = File.ReadAllText(path);
-            pageSource.Should().NotContain("ForAuthenticatedUser");
-            pageSource.Should().NotContain("SetAccessTokenAsync");
-        }
-
         File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml"))
             .Should().BeFalse();
         File.Exists(Path.Combine(clientRoot, "Presentation", "DashboardPage.xaml.cs"))
@@ -1111,15 +792,6 @@ public sealed class ClientActionBoundaryTests
         File.ReadAllText(Path.Combine(clientRoot, "Presentation", "MainPage.xaml.cs"))
             .Should().NotContain("TabSettingsButton");
     }
-
-    private static HttpResponseMessage JsonResponse(object value) =>
-        new(HttpStatusCode.OK)
-        {
-            Content = new StringContent(
-                JsonSerializer.Serialize(value),
-                Encoding.UTF8,
-                "application/json"),
-        };
 
     private static ClientActionDispatcher CreateDispatcher(
         ClientProbe probe,

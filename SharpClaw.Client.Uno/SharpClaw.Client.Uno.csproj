@@ -138,9 +138,6 @@
     <Page Update="Presentation\TerminalSectionHeader.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
-    <Page Update="Presentation\FirstSetupPage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
     <Page Update="Presentation\SettingsPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
@@ -171,18 +168,6 @@
 
   <ItemGroup>
     <Page Update="Presentation\LegalNoticesPage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Page Update="Presentation\EnvMenuPage.xaml">
-      <Generator>MSBuild:Compile</Generator>
-    </Page>
-  </ItemGroup>
-
-  <ItemGroup>
-    <Page Update="Presentation\EnvEditorPage.xaml">
       <Generator>MSBuild:Compile</Generator>
     </Page>
   </ItemGroup>

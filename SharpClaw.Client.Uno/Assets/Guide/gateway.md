@@ -16,11 +16,9 @@ When Gateway launch is disabled, the client does not start a Gateway process. Lo
 
 When the client stops a Gateway process that it owns, the process stops. An external Gateway remains under its own process owner.
 
-## Gateway Environment
+## Gateway Configuration
 
-Edit the client environment through the canonical dotenv editor. Use `__` for nested keys in the file, such as `Gateway__Enabled=true`.
-
-The Gateway and Runtime use their own assembly-local `Environment/.env` files. Do not replace an application dotenv file with JSON or JSONC text.
+Use Settings for normal Gateway process controls. Deployment operators can use the documented Runtime and Gateway configuration files for advanced settings.
 
 ## Troubleshooting
 

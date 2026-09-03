@@ -74,8 +74,11 @@ public sealed partial class MainPage : Page
     private void OnMessageTextChanged(object sender, TextChangedEventArgs e)
         => UpdateCursor();
 
-    private void UpdateCursor(string? command = null)
-        => Cursor.SetCommand(command ?? "sharpclaw chat ");
+    private void UpdateCursor()
+        => Cursor.SetCommand(FormatChatCommand(MessageInput.Text));
+
+    internal static string FormatChatCommand(string? message)
+        => $"sharpclaw chat {message ?? string.Empty}";
 
     private ChatBubbleRow AcquireChatBubble()
     {
