@@ -68,21 +68,27 @@ public sealed class FrontendInstanceService
 
     public string? ResolveBackendApiKeyPath(string? requestedBaseUrl = null)
     {
-        var entry = ResolveSelectedBackendDiscoveryEntry(requestedBaseUrl);
+        var entry = string.IsNullOrWhiteSpace(requestedBaseUrl)
+            ? ResolveSelectedBackendDiscoveryEntry()
+            : ResolveBackendDiscoveryEntryForTarget(requestedBaseUrl);
         if (entry is null)
             return null;
 
-        RememberBackendBinding(entry.InstanceId, entry.BaseUrl, "discovered");
+        if (string.IsNullOrWhiteSpace(requestedBaseUrl))
+            RememberBackendBinding(entry.InstanceId, entry.BaseUrl, "discovered");
         return entry.ApiKeyFilePath;
     }
 
     public string? ResolveBackendGatewayTokenPath(string? requestedBaseUrl = null)
     {
-        var entry = ResolveSelectedBackendDiscoveryEntry(requestedBaseUrl);
+        var entry = string.IsNullOrWhiteSpace(requestedBaseUrl)
+            ? ResolveSelectedBackendDiscoveryEntry()
+            : ResolveBackendDiscoveryEntryForTarget(requestedBaseUrl);
         if (entry is null)
             return null;
 
-        RememberBackendBinding(entry.InstanceId, entry.BaseUrl, "discovered");
+        if (string.IsNullOrWhiteSpace(requestedBaseUrl))
+            RememberBackendBinding(entry.InstanceId, entry.BaseUrl, "discovered");
         return entry.GatewayTokenFilePath;
     }
 
@@ -118,7 +124,7 @@ public sealed class FrontendInstanceService
             Paths.SaveManifest(manifest);
     }
 
-    private SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry(string? requestedBaseUrl)
+    private SharpClawDiscoveryEntry? ResolveSelectedBackendDiscoveryEntry()
     {
         var manifest = Paths.Manifest;
         var entries = EnumerateBackendDiscoveryEntries().ToList();
@@ -137,11 +143,32 @@ public sealed class FrontendInstanceService
                 return byManifestUrl;
         }
 
-        if (!string.IsNullOrWhiteSpace(requestedBaseUrl))
-            return entries.FirstOrDefault(e => string.Equals(e.BaseUrl, requestedBaseUrl, StringComparison.OrdinalIgnoreCase));
-
         return entries.Count == 1 ? entries[0] : null;
     }
+
+    private SharpClawDiscoveryEntry? ResolveBackendDiscoveryEntryForTarget(string requestedBaseUrl)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestedBaseUrl);
+        if (!Uri.TryCreate(requestedBaseUrl, UriKind.Absolute, out var requestedUri))
+            return null;
+
+        return EnumerateBackendDiscoveryEntries().FirstOrDefault(entry =>
+            Uri.TryCreate(entry.BaseUrl, UriKind.Absolute, out var entryUri) &&
+            BaseUrisMatch(requestedUri, entryUri));
+    }
+
+    private static bool BaseUrisMatch(Uri requested, Uri discovered) =>
+        string.Equals(requested.Scheme, discovered.Scheme, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(requested.IdnHost, discovered.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+        requested.Port == discovered.Port &&
+        string.Equals(requested.UserInfo, discovered.UserInfo, StringComparison.Ordinal) &&
+        string.Equals(NormalizeBasePath(requested), NormalizeBasePath(discovered), StringComparison.Ordinal) &&
+        string.Equals(requested.Query, discovered.Query, StringComparison.Ordinal);
+
+    private static string NormalizeBasePath(Uri uri) =>
+        uri.AbsolutePath.Length > 1
+            ? uri.AbsolutePath.TrimEnd('/')
+            : uri.AbsolutePath;
 
     private IEnumerable<SharpClawDiscoveryEntry> EnumerateBackendDiscoveryEntries()
     {

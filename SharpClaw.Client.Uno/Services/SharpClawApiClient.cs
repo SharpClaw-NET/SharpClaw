@@ -45,11 +45,13 @@ public sealed class SharpClawApiClient : IDisposable
         HttpClient http,
         ILogger<SharpClawApiClient> logger,
         ClientActionDispatcher clientActions,
-        string? fixedApiKey = null)
+        string? fixedApiKey = null,
+        FrontendInstanceService? frontendInstance = null)
     {
         _http = http ?? throw new ArgumentNullException(nameof(http));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _frontendInstance = frontendInstance;
         _ownsHttp = false;
         _fixedApiKey = fixedApiKey;
         _targetBaseUri = http.BaseAddress
@@ -290,8 +292,11 @@ public sealed class SharpClawApiClient : IDisposable
         var apiKey = File.ReadAllText(keyFilePath).Trim();
         lock (_targetLock)
         {
-            _cachedApiKey = apiKey;
-            _cachedApiKeyTarget = targetBaseUri;
+            if (_targetBaseUri == targetBaseUri)
+            {
+                _cachedApiKey = apiKey;
+                _cachedApiKeyTarget = targetBaseUri;
+            }
         }
         return apiKey;
     }
@@ -301,7 +306,18 @@ public sealed class SharpClawApiClient : IDisposable
     /// Used to forward the verified key to child processes (e.g. gateway)
     /// without file I/O that may break under MSIX VFS virtualisation.
     /// </summary>
-    public string? CachedApiKey => _cachedApiKey;
+    public string? CachedApiKey
+    {
+        get
+        {
+            lock (_targetLock)
+            {
+                return _cachedApiKeyTarget == _targetBaseUri
+                    ? _cachedApiKey
+                    : null;
+            }
+        }
+    }
 
     /// <summary>
     /// Clears the cached API key so the next request re-reads from disk.
@@ -418,10 +434,37 @@ public sealed class SharpClawApiClient : IDisposable
 
     private static Uri ResolveRequestUri(Uri targetBaseUri, string requestTarget)
     {
-        var requestUri = new Uri(requestTarget, UriKind.RelativeOrAbsolute);
-        var relativeTarget = requestUri.IsAbsoluteUri
-            ? requestUri.PathAndQuery
-            : requestUri.OriginalString;
-        return new Uri(targetBaseUri, relativeTarget);
+        ArgumentException.ThrowIfNullOrWhiteSpace(requestTarget);
+
+        if (Uri.TryCreate(requestTarget, UriKind.Absolute, out _) ||
+            !Uri.TryCreate(requestTarget, UriKind.Relative, out var relativeTarget) ||
+            HasAuthorityPrefix(requestTarget) ||
+            requestTarget.Contains('#'))
+        {
+            throw new InvalidOperationException(
+                "The effective HTTP request target must contain only a local path and query.");
+        }
+
+        var resolved = new Uri(targetBaseUri, relativeTarget);
+        if (!HasSameAuthority(targetBaseUri, resolved))
+        {
+            throw new InvalidOperationException(
+                "The effective HTTP request target must preserve the selected Runtime authority.");
+        }
+
+        return resolved;
     }
+
+    private static bool HasAuthorityPrefix(string requestTarget) =>
+        requestTarget.Length >= 2 &&
+        IsPathSeparator(requestTarget[0]) &&
+        IsPathSeparator(requestTarget[1]);
+
+    private static bool IsPathSeparator(char value) => value is '/' or '\\';
+
+    private static bool HasSameAuthority(Uri expected, Uri actual) =>
+        string.Equals(expected.Scheme, actual.Scheme, StringComparison.OrdinalIgnoreCase) &&
+        string.Equals(expected.IdnHost, actual.IdnHost, StringComparison.OrdinalIgnoreCase) &&
+        expected.Port == actual.Port &&
+        string.Equals(expected.UserInfo, actual.UserInfo, StringComparison.Ordinal);
 }

@@ -7,6 +7,7 @@ using SharpClaw.Contracts.Modules;
 using SharpClaw.Core.Kernel;
 using SharpClaw.Presentation;
 using SharpClaw.Services;
+using SharpClaw.Shared.Instances;
 
 namespace SharpClaw.Tests.Frontend;
 
@@ -532,6 +533,138 @@ public sealed class ClientActionBoundaryTests
         handler.Request.RequestUri!.PathAndQuery.Should().Be("/accepted");
     }
 
+    [TestCase("normal", false)]
+    [TestCase("normal", true)]
+    [TestCase("supplied", false)]
+    [TestCase("supplied", true)]
+    [TestCase("stream", false)]
+    [TestCase("stream", true)]
+    public async Task Authority_bearing_request_target_is_rejected_before_transport(
+        string sendKind,
+        bool replaceInput)
+    {
+        const string hostileTarget = "//attacker.example/steal";
+        var probe = new ClientProbe
+        {
+            ReplaceInputAction = replaceInput
+                ? ClientActionCatalog.CommandValidate.Value
+                : null,
+            Replacement = replaceInput
+                ? new ClientCommandInvocation(
+                    "http.send",
+                    "GET",
+                    hostileTarget,
+                    Guid.NewGuid(),
+                    hostileTarget)
+                : null,
+        };
+        var dispatcher = CreateDispatcher(probe);
+        var handler = new CapturingHandler();
+        using var http = new HttpClient(handler)
+        {
+            BaseAddress = new Uri("http://runtime-a.test:48923/"),
+        };
+        using var api = new SharpClawApiClient(
+            http,
+            NullLogger<SharpClawApiClient>.Instance,
+            dispatcher,
+            "runtime-a-key");
+        var requestTarget = replaceInput ? "/safe" : hostileTarget;
+        using var suppliedRequest = new HttpRequestMessage(
+            HttpMethod.Get,
+            new Uri(requestTarget, UriKind.Relative));
+
+        Func<Task> send = sendKind switch
+        {
+            "normal" => async () =>
+            {
+                using var response = await api.GetAsync(requestTarget);
+            },
+            "supplied" => async () =>
+            {
+                using var response = await api.SendAsync(suppliedRequest);
+            },
+            "stream" => () => api.ConsumeStreamAsync(
+                "GET",
+                requestTarget,
+                null,
+                static (_, _) => Task.CompletedTask),
+            _ => throw new AssertionException($"Unknown send kind '{sendKind}'."),
+        };
+
+        await FluentActions.Invoking(send)
+            .Should().ThrowAsync<KernelActionFailedException>();
+
+        handler.Requests.Should().BeEmpty();
+        handler.Request.Should().BeNull();
+    }
+
+    [Test]
+    public async Task Concurrent_retarget_keeps_each_request_key_bound_to_its_target()
+    {
+        const string targetA = "http://runtime-a.test:48923/";
+        const string targetB = "http://runtime-b.test:48923/";
+        const string keyA = "runtime-a-key";
+        const string keyB = "runtime-b-key";
+        var instanceRoot = CreateTempDirectory();
+        var sharedRoot = CreateTempDirectory();
+
+        try
+        {
+            var frontend = new FrontendInstanceService(
+                explicitInstanceRoot: instanceRoot,
+                sharedRootOverride: sharedRoot);
+            PublishBackendDiscovery(sharedRoot, "backend-a", targetA, keyA);
+            PublishBackendDiscovery(sharedRoot, "backend-b", targetB, keyB);
+            frontend.RememberBackendBinding("backend-a", targetA, "discovered");
+
+            var probe = new ClientProbe
+            {
+                PauseAction = ClientActionCatalog.CommandReceive.Value,
+            };
+            var dispatcher = CreateDispatcher(probe);
+            var handler = new CapturingHandler();
+            using var http = new HttpClient(handler) { BaseAddress = new Uri(targetA) };
+            using var api = new SharpClawApiClient(
+                http,
+                NullLogger<SharpClawApiClient>.Instance,
+                dispatcher,
+                fixedApiKey: null,
+                frontendInstance: frontend);
+
+            var requestA = api.GetAsync("/turn-a");
+            await probe.PauseReached.Task.WaitAsync(TimeSpan.FromSeconds(5));
+            try
+            {
+                await api.UpdateBaseUrlAsync(targetB);
+            }
+            finally
+            {
+                probe.ReleasePause.TrySetResult(true);
+            }
+
+            using var responseA = await requestA;
+            api.CachedApiKey.Should().BeNull();
+            ReadManifest(frontend.Paths.ManifestPath).SelectedBackendBaseUrl.Should().Be(targetB);
+
+            using var responseB = await api.GetAsync("/turn-b");
+
+            handler.Requests.Should().HaveCount(2);
+            handler.Requests.ElementAt(0).Should().Be(("GET", $"{targetA}turn-a", keyA));
+            handler.Requests.ElementAt(1).Should().Be(("GET", $"{targetB}turn-b", keyB));
+            api.CachedApiKey.Should().Be(keyB);
+            api.BaseUrl.Should().Be(targetB);
+            var manifest = ReadManifest(frontend.Paths.ManifestPath);
+            manifest.SelectedBackendBaseUrl.Should().Be(targetB);
+            manifest.SelectedBackendBindingKind.Should().Be("configured");
+        }
+        finally
+        {
+            DeleteDirectoryIfExists(instanceRoot);
+            DeleteDirectoryIfExists(sharedRoot);
+        }
+    }
+
     [Test]
     public async Task Runtime_apply_retargets_after_readiness_with_one_state_transition()
     {
@@ -947,13 +1080,27 @@ public sealed class ClientActionBoundaryTests
 
         public string? FailureAction { get; set; }
 
+        public string? PauseAction { get; init; }
+
+        public TaskCompletionSource<bool> PauseReached { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
+        public TaskCompletionSource<bool> ReleasePause { get; } = new(
+            TaskCreationOptions.RunContinuationsAsynchronously);
+
         public int TerminalCalls;
+
+        private int _pauseClaimed;
 
         public IReadOnlyList<string> Actions() =>
             Observations.Select(static item => item.Action).ToArray();
 
         public int Attempts(string action) =>
             Observations.Count(item => item.Action == action);
+
+        public bool TryClaimPause(string action) =>
+            PauseAction == action &&
+            Interlocked.CompareExchange(ref _pauseClaimed, 1, 0) == 0;
 
         public void Record(ActionContext<KernelActionEnvelope> context) =>
             Observations.Enqueue(new ClientObservation(
@@ -1021,7 +1168,7 @@ public sealed class ClientActionBoundaryTests
     {
         public HttpRequestMessage? Request { get; private set; }
 
-        public ConcurrentQueue<(string Method, string Uri)> Requests { get; } = new();
+        public ConcurrentQueue<(string Method, string Uri, string? ApiKey)> Requests { get; } = new();
 
         public Func<HttpRequestMessage, HttpResponseMessage>? ResponseFactory { get; init; }
 
@@ -1034,7 +1181,10 @@ public sealed class ClientActionBoundaryTests
             CancellationToken cancellationToken)
         {
             Request = request;
-            Requests.Enqueue((request.Method.Method, request.RequestUri!.AbsoluteUri));
+            var apiKey = request.Headers.TryGetValues("X-Api-Key", out var values)
+                ? values.SingleOrDefault()
+                : null;
+            Requests.Enqueue((request.Method.Method, request.RequestUri!.AbsoluteUri, apiKey));
             if (AsyncResponseFactory is not null)
                 return AsyncResponseFactory(request, cancellationToken);
 
@@ -1081,6 +1231,12 @@ public sealed class ClientActionBoundaryTests
             CancellationToken cancellationToken)
         {
             probe.Record(context);
+
+            if (probe.TryClaimPause(context.ActionKey.Value))
+            {
+                probe.PauseReached.TrySetResult(true);
+                await probe.ReleasePause.Task.WaitAsync(cancellationToken);
+            }
 
             if (probe.CancelAction == context.ActionKey.Value)
                 return control.Cancel("K05_TEST_CANCELLED", "The client action was cancelled.");
@@ -1137,4 +1293,72 @@ public sealed class ClientActionBoundaryTests
         public ValueTask StopAsync(CancellationToken cancellationToken) =>
             ValueTask.CompletedTask;
     }
+
+    private static string CreateTempDirectory()
+    {
+        var path = Path.Combine(
+            Path.GetTempPath(),
+            "SharpClaw.Tests",
+            Guid.NewGuid().ToString("N"));
+        Directory.CreateDirectory(path);
+        return path;
+    }
+
+    private static void DeleteDirectoryIfExists(string path)
+    {
+        if (!Directory.Exists(path))
+            return;
+
+        try
+        {
+            Directory.Delete(path, recursive: true);
+        }
+        catch
+        {
+        }
+    }
+
+    private static void PublishBackendDiscovery(
+        string sharedRoot,
+        string instanceId,
+        string baseUrl,
+        string apiKey)
+    {
+        var discoveryDirectory = Path.Combine(sharedRoot, "discovery", "instances");
+        var runtimeDirectory = Path.Combine(sharedRoot, "runtime", instanceId);
+        Directory.CreateDirectory(discoveryDirectory);
+        Directory.CreateDirectory(runtimeDirectory);
+        var apiKeyPath = Path.Combine(runtimeDirectory, ".api-key");
+        File.WriteAllText(apiKeyPath, apiKey);
+
+        var entry = new SharpClawDiscoveryEntry
+        {
+            InstanceKind = SharpClawInstanceKind.Backend,
+            InstanceId = instanceId,
+            InstallFingerprint = "test-fingerprint",
+            InstanceRoot = Path.Combine(sharedRoot, "instances", instanceId),
+            BaseUrl = baseUrl,
+            ApiKeyFilePath = apiKeyPath,
+            RuntimeDirectory = runtimeDirectory,
+            ProcessId = 12345,
+            StartedAtUtc = DateTimeOffset.UtcNow,
+            LastSeenUtc = DateTimeOffset.UtcNow,
+        };
+        File.WriteAllText(
+            Path.Combine(discoveryDirectory, $"backend-{instanceId}.json"),
+            JsonSerializer.Serialize(entry, new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                WriteIndented = true,
+            }));
+    }
+
+    private static SharpClawInstanceManifest ReadManifest(string manifestPath) =>
+        JsonSerializer.Deserialize<SharpClawInstanceManifest>(
+            File.ReadAllText(manifestPath),
+            new JsonSerializerOptions
+            {
+                PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+                PropertyNameCaseInsensitive = true,
+            })!;
 }
