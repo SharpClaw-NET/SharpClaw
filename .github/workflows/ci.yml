@@ -200,7 +200,7 @@ jobs:
 
       - name: Restore
         shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG
+        run: dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG -p:Configuration=Release
 
       - name: Run correctness domain
         shell: pwsh

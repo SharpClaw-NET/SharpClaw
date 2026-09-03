@@ -25,6 +25,16 @@ public sealed partial class CiRequiredStatusCheckTests
             "every CI matrix domain should be mirrored in the required-status-check ruleset");
     }
 
+    [Test]
+    public void CorrectnessRestoreUsesTheReleaseDependencyGraph()
+    {
+        var root = ResolveRepoRoot();
+        var workflow = File.ReadAllText(Path.Combine(root, ".github", "workflows", "ci.yml"));
+
+        workflow.Should().Contain(
+            "dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG -p:Configuration=Release");
+    }
+
     private static IReadOnlyList<string> ExtractWorkflowContexts(string workflowPath)
     {
         File.Exists(workflowPath).Should().BeTrue();
