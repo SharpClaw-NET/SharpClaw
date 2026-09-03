@@ -21,186 +21,186 @@ env:
   DOTNET_NOLOGO: "true"
   DOTNET_VERSION: 10.0.x
   TEST_PROJECT: ".\\SharpClaw.Tests\\SharpClaw.Tests.csproj"
+  SHARPCLAW_SOURCE_ROOT: ${{ github.workspace }}
 
 permissions:
   contents: read
 
 jobs:
-  correctness:
-    name: Correctness / ${{ matrix.domain }}
+  frozen-bom:
+    name: Frozen package graph
     runs-on: windows-latest
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - domain: API Key Provider
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Api'
-          - domain: Architecture Core Dependencies
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CoreDependencyGuardrailTests'
-          - domain: Architecture Module Dependencies
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.ModuleDependencyGuardrailTests'
-          - domain: Clients Finish Reasons
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Clients'
-          - domain: Core Header Tags
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.HeaderTagProcessorTests'
-          - domain: Core Chat Cache
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.ChatCacheTests'
-          - domain: CLI Channel Commands
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.ChannelCliCommandTests'
-          - domain: CLI REPL
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Cli.CliReplSmokeTests'
-          - domain: Gateway Abstraction Boundaries
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayAbstractionsIsolationTests'
-          - domain: Gateway Internal API Client
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests'
-          - domain: Gateway Synthetic Modules
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
-          - domain: Gateway Endpoint Catalog
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests'
-          - domain: Gateway Endpoint Toggles
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointToggleTests'
-          - domain: Gateway Route Parity
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayRouteParityTests'
-          - domain: Gateway Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests'
-          - domain: Gateway Hot Reload
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.HotReload.HotReloadHostManagerTests'
-          - domain: Gateway Chat Surface
-            filter: 'FullyQualifiedName~SameSpoofResponseTextMatchesCoreApiSseAndGatewaySurfaces|FullyQualifiedName~GatewaySseProxy_ForwardsRealHttpSsePath'
-          - domain: Gateway Chat Errors And Cancellation
-            filter: 'FullyQualifiedName~GatewayErrorEnvelopeShapeIsStable|FullyQualifiedName~MidStreamFailureErrorEnvelopeIsStableInSse|FullyQualifiedName~DeterministicTimeoutCancellationDoesNotLeaveExecutingJobsStuck'
-          - domain: API Job Contracts
-            filter: 'FullyQualifiedName~ApiJob'
-          - domain: Gateway Job Contracts
-            filter: 'FullyQualifiedName~GatewayJob'
-          - domain: Frontend Instances
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.FrontendInstanceServiceTests'
-          - domain: Frontend Gateway Process
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.GatewayProcessManagerTests'
-          - domain: Frontend Uno Client State
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Frontend.UnoClientStateTests'
-          - domain: Persistence Provider Configuration
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
-          - domain: JSONColdStore Provider Paths
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Services.AuthServiceJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleStorageGatewayTests|FullyQualifiedName~SharpClaw.Tests.Modules.InProcessModuleJsonColdStoreTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskExecutionLifecycleTests.ScheduledJobWorker'
-          - domain: Persistence Instances
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
-          - domain: Providers Capabilities
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests'
-          - domain: LlamaSharp Schema Conversion
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpRegexToGrammarTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpStringFormatGrammarsTests'
-          - domain: LlamaSharp Tool Calling
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolGrammarShapeTests|FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp.LlamaSharpToolPromptBuilderTests'
-          - domain: Tasks Scripts Compiler Parser
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptCompilerTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptParserTests'
-          - domain: Tasks Scripts Semantics Validator
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptSemanticsTests|FullyQualifiedName~SharpClaw.Tests.Tasks.TaskScriptValidatorTests'
-          - domain: Tasks Step Keys
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskStepKeyAssignmentTests'
-          - domain: Tasks Execution Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskExecutionLifecycleTests'
-          - domain: Tasks Shared Data
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskSharedDataStoreTests'
-          - domain: Tasks Triggers
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Tasks.TaskTriggerAttributeParserTests'
-          - domain: Chat Prompt Surface
-            filter: 'FullyQualifiedName~AllDynamicChatFeaturesDisabled|FullyQualifiedName~HeaderExpansionSwitches|FullyQualifiedName~ModuleHeaderTagContext'
-          - domain: Chat Tool Permissions
-            filter: 'FullyQualifiedName~PermissionDeniedInlineTool|FullyQualifiedName~PermissionGrantedInlineTool|FullyQualifiedName~PermissionDeniedJobTool|FullyQualifiedName~PermissionGrantedJobTool'
-          - domain: Chat Costs And Budgets
-            filter: 'FullyQualifiedName~CachedCostHotPath|FullyQualifiedName~NonStreamingChatMeetsHardProviderPlusOverheadBudget|FullyQualifiedName~StreamingChatAndSseForwardingMeetHardProviderPlusOverheadBudget|FullyQualifiedName~BudgetHelperFailsAtOneMillisecondOverBudget'
-          - domain: Chat Thread History
-            filter: 'FullyQualifiedName~ThreadedChatSendsNewestHistory|FullyQualifiedName~ThreadedChatDefaultHistoryLimit|FullyQualifiedName~ThreadedChatCharacterLimit'
-          - domain: Chat Thread Concurrency
-            filter: 'FullyQualifiedName~SameThreadConcurrentSends|FullyQualifiedName~DifferentThreadConcurrentSends|FullyQualifiedName~CancelledThreadedSend'
-          - domain: Chat Agent Selection
-            filter: 'FullyQualifiedName~RequestedAllowedAgent|FullyQualifiedName~RequestedDisallowedAgent'
-          - domain: Chat Prompt Assembly
-            filter: 'FullyQualifiedName~TestHarnessPromptAssemblyExpandedTests'
-          - domain: Chat Streaming
-            filter: 'FullyQualifiedName~TestHarnessStreamingCorrectnessTests'
-          - domain: Jobs Direct
-            filter: 'FullyQualifiedName~DirectJobSubmissionCompletes|FullyQualifiedName~DirectJobDetailAndLifecycleActionsReuseCachedLogs|FullyQualifiedName~DirectJobDeniedStops|FullyQualifiedName~DirectJobAwaitingApproval|FullyQualifiedName~DirectJobApprovalDenies|FullyQualifiedName~DirectJobFailure'
-          - domain: Jobs Lifecycle
-            filter: 'FullyQualifiedName~LongRunningDirectJobPauseResumeStopAndCompletedCancelAreStable'
-          - domain: Jobs Streaming
-            filter: 'FullyQualifiedName~DirectStreamingJobToolConcatenatesChunksIntoResult'
-          - domain: Tools Inline Permissions
-            filter: 'FullyQualifiedName~AllowedInlineModuleTool|FullyQualifiedName~DeniedInlineModuleTool|FullyQualifiedName~ToolPermissionDoesNotStayCached|FullyQualifiedName~JobToolAliasUsesCanonicalPermissionDescriptor'
-          - domain: Tools Arguments Output And Latency
-            filter: 'FullyQualifiedName~MalformedToolArgumentsProduceStableError|FullyQualifiedName~LargeToolOutputIsBounded|FullyQualifiedName~ToolLatencyIsMeasuredSeparately'
-          - domain: Tools Provider Stream Bulk
-            filter: 'FullyQualifiedName~ProviderStream_100ToolCalls_CorrectnessVariants|FullyQualifiedName~ProviderStream_100MixedToolCalls|FullyQualifiedName~ProviderStream_100ToolCalls_MalformedArguments'
-          - domain: Tools Provider Stream Cache
-            filter: 'FullyQualifiedName~ProviderStream_RepeatedToolCalls_RolePermissionRemovalInvalidatesWarmPath|FullyQualifiedName~ProviderStream_RepeatedToolCalls_RolePermissionGrantInvalidatesWarmPath'
-          - domain: Tools Provider Stream Lifecycle
-            filter: 'FullyQualifiedName~ProviderStream_ModuleLifecycle|FullyQualifiedName~ProviderStream_TextBeforeToolsAndTextAfterTools|FullyQualifiedName~ProviderStream_CancelAfterToolCalls|FullyQualifiedName~ProviderStream_ToolNameVariants'
-          - domain: Costs Job Accounting
-            filter: 'FullyQualifiedName~JobCostIsNonNull|FullyQualifiedName~FailedJobCostBehavior|FullyQualifiedName~SharpClaw.Tests.Services.AgentJobTokenAccountingTests.WhenCurrentExecutionRecordsTokens'
-          - domain: Costs Streaming
-            filter: 'FullyQualifiedName~StreamingCostReportedOnlyAtEnd'
-          - domain: Costs Multi Agent
-            filter: 'FullyQualifiedName~MultipleAgentsInOneChannelDoNotCrossContaminateCosts'
-          - domain: Costs Module Hooks
-            filter: 'FullyQualifiedName~CustomModuleCostHookAddsUsage|FullyQualifiedName~SharpClaw.Tests.Services.AgentJobTokenAccountingTests.WhenModuleCostTrackerRecordsTokens'
-          - domain: Cache Header Invalidations
-            filter: 'FullyQualifiedName~ChannelMutationInvalidates|FullyQualifiedName~AgentMutationInvalidates|FullyQualifiedName~ThreadLimitUpdateInvalidates|FullyQualifiedName~DefaultResourceMutationInvalidates'
-          - domain: Cache Tool Settings
-            filter: 'FullyQualifiedName~EffectiveToolDefinitionsStayWarmUntilAgentToolSettingsChange'
-          - domain: Agent Orchestration Access
-            filter: 'FullyQualifiedName~ListAccessibleThreadsScales|FullyQualifiedName~AdminIndependentCanList|FullyQualifiedName~NonAdminDoubleGate|FullyQualifiedName~PrimaryAgentAndAllowedAgents|FullyQualifiedName~DisabledAccessibleThreadsHeader'
-          - domain: Agent Orchestration History
-            filter: 'FullyQualifiedName~ReadThreadHistoryHandles'
-          - domain: Defaults Mutations
-            filter: 'FullyQualifiedName~ChannelDefaultsClear|FullyQualifiedName~ContextDefaultsClear|FullyQualifiedName~ClearingCoreAgentDefault|FullyQualifiedName~SetClearSetSameDefaultKey|FullyQualifiedName~UnknownDefaultKeyClear|FullyQualifiedName~ModuleDefinedDefaultResourceKeyCannotShadow'
-          - domain: Defaults Resource Resolution
-            filter: 'FullyQualifiedName~PerResourceJob'
-          - domain: Module API Host Startup
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ApiHostStartupTests|FullyQualifiedName~SharpClaw.Tests.Logging.SessionLogWriterTests'
-          - domain: Module Bundled Outputs
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledModuleOutputTests'
-          - domain: Module External Lifecycle
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.SyntheticExternalModuleLifecycleTests'
-          - domain: Module Foreign Runtime
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.ForeignModule|FullyQualifiedName~SharpClaw.Tests.Modules.JavaScriptModuleSdkTests|FullyQualifiedName~SharpClaw.Tests.Modules.PythonModuleSdkTests'
-          - domain: Module Sidecar Parity
-            filter: 'FullyQualifiedName~SharpClaw.Tests.Modules.BundledDotNetSidecarDefaultTests|FullyQualifiedName~SharpClaw.Tests.Modules.BundledTestHarnessSidecarConformanceTests|FullyQualifiedName~SharpClaw.Tests.Modules.OutOfProcessModuleHostTests|FullyQualifiedName~SharpClaw.Tests.Modules.SidecarReadinessInventoryTests'
-          - domain: Module Harness Integration
-            filter: 'FullyQualifiedName~ModuleRegistersDynamicProvidersToolsHeaderTagsAndCostFeed|FullyQualifiedName~ProviderCaptureRedactsSecretsButKeepsAssertablePromptShape'
-          - domain: Module Harness Cost And Matrix
-            filter: 'FullyQualifiedName~CostFeedUsesHarnessBehaviorAndRecordsTiming|FullyQualifiedName~ProviderMatrixScalesPastOneThousandDeterministicCases'
-          - domain: Module Contracts Architecture
-            filter: 'FullyQualifiedName~TestHarnessArchitectureTests'
-          - domain: Provider Registration
-            filter: 'FullyQualifiedName~TestHarnessProviderRegistrationTests'
+    timeout-minutes: 90
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Checkout ModuleSDK test fixture
-        if: matrix.domain == 'Module Foreign Runtime'
-        uses: actions/checkout@v4
-        with:
-          repository: SharpClaw-NET/SharpClaw.ModuleSDK
-          path: SharpClaw.ModuleSDK
-          ref: main
-
-      - name: Set ModuleSDK test fixture root
-        if: matrix.domain == 'Module Foreign Runtime'
-        shell: pwsh
-        run: |
-          "SHARPCLAW_MODULESDK_ROOT=$env:GITHUB_WORKSPACE\SharpClaw.ModuleSDK" |
-            Out-File -FilePath $env:GITHUB_ENV -Encoding utf8 -Append
 
       - name: Setup .NET
         uses: actions/setup-dotnet@v4
         with:
           dotnet-version: ${{ env.DOTNET_VERSION }}
 
+      - name: Build frozen package graph
+        shell: pwsh
+        run: >
+          ./build/BuildFrozenBom.ps1
+          -Root "${{ runner.temp }}\sharpclaw-frozen-bom"
+
+      - name: Upload frozen package graph
+        uses: actions/upload-artifact@v4
+        with:
+          name: sharpclaw-frozen-bom
+          path: |
+            ${{ runner.temp }}\sharpclaw-frozen-bom\feed\*.nupkg
+            ${{ runner.temp }}\sharpclaw-frozen-bom\bundle\**\*
+            ${{ runner.temp }}\sharpclaw-frozen-bom\bom-manifest.json
+          if-no-files-found: error
+          retention-days: 1
+          compression-level: 0
+
+  dependency-submission:
+    name: Dependency graph / NuGet
+    needs: frozen-bom
+    runs-on: windows-latest
+    timeout-minutes: 60
+    permissions:
+      contents: write
+      id-token: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download frozen package graph
+        uses: actions/download-artifact@v4
+        with:
+          name: sharpclaw-frozen-bom
+          path: ${{ runner.temp }}\sharpclaw-frozen-bom
+
+      - name: Configure frozen package graph
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\feed"
+          $config = Join-Path $env:GITHUB_WORKSPACE "NuGet.config"
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="sharpclaw-local" value="$feed" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="sharpclaw-local">
+                <package pattern="SharpClaw.*" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          "@ | Set-Content -LiteralPath $config -Encoding utf8
+          $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
+          "SharpClawModulePayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+
+      - name: Restore dependency graph
+        shell: pwsh
+        run: dotnet restore .\SharpClaw.slnx --configfile .\NuGet.config
+
+      - name: Submit dependency graph
+        if: github.event_name != 'pull_request'
+        uses: advanced-security/component-detection-dependency-submission-action@v0.1.1
+        with:
+          filePath: .
+          detectorsCategories: NuGet
+          correlator: sharpclaw-frozen-bom
+
+  correctness:
+    name: Correctness / ${{ matrix.domain }}
+    needs: frozen-bom
+    runs-on: windows-latest
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - domain: Architecture Core Dependencies
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CoreDependencyGuardrailTests'
+          - domain: Architecture Module Dependencies
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.ModuleDependencyGuardrailTests|FullyQualifiedName~SharpClaw.Tests.Architecture.ProductionModuleNeutralityTests'
+          - domain: Runtime Composition
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Architecture.CanonicalJobsRouteBoundaryTests'
+          - domain: Gateway Boundaries
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayContractsIsolationTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayEndpointGroupCatalogTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Gateway.GatewayModuleLoaderTests|FullyQualifiedName~SharpClaw.Tests.Gateway.InternalApiClientResolutionTests|FullyQualifiedName~SharpClaw.Tests.Gateway.SyntheticGatewayModuleTests'
+          - domain: Persistence Provider
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.ApiKeyEncryptorBytesTests|FullyQualifiedName~SharpClaw.Tests.Persistence.DatabaseProviderOptionsTests'
+          - domain: Persistence Environment
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.EnvironmentTemplateTests|FullyQualifiedName~SharpClaw.Tests.Persistence.InstallationKeyCompatibilityTests'
+          - domain: Persistence Instances
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstanceLifecycleTests|FullyQualifiedName~SharpClaw.Tests.Persistence.SharpClawInstancePathsTests'
+          - domain: Providers
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.CapabilityResolverTests|FullyQualifiedName~SharpClaw.Tests.Providers.ProviderCredentialBindingTests'
+          - domain: LlamaSharp
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Providers.LlamaSharp'
+          - domain: Durable Storage
+            filter: 'FullyQualifiedName~SharpClaw.Tests.DurableStorage'
+          - domain: Direct Chat Kernel
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.DirectChatKernelTests'
+          - domain: Production Module Graph
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Kernel.AgentOrchestrationHostGateTests'
+          - domain: Publishing
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Publishing.PublishScriptDeploymentTests'
+          - domain: CI Guardrails
+            filter: 'FullyQualifiedName~SharpClaw.Tests.Ci.CiRequiredStatusCheckTests'
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: ${{ env.DOTNET_VERSION }}
+
+      - name: Download frozen package graph
+        uses: actions/download-artifact@v4
+        with:
+          name: sharpclaw-frozen-bom
+          path: ${{ runner.temp }}\sharpclaw-frozen-bom
+
+      - name: Configure frozen package graph
+        shell: pwsh
+        run: |
+          $feed = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\feed"
+          $config = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\NuGet.config"
+          @"
+          <?xml version="1.0" encoding="utf-8"?>
+          <configuration>
+            <packageSources>
+              <clear />
+              <add key="sharpclaw-local" value="$feed" />
+              <add key="nuget.org" value="https://api.nuget.org/v3/index.json" protocolVersion="3" />
+            </packageSources>
+            <packageSourceMapping>
+              <packageSource key="sharpclaw-local">
+                <package pattern="SharpClaw.*" />
+              </packageSource>
+              <packageSource key="nuget.org">
+                <package pattern="*" />
+              </packageSource>
+            </packageSourceMapping>
+          </configuration>
+          "@ | Set-Content -LiteralPath $config -Encoding utf8
+          "SHARPCLAW_NUGET_CONFIG=$config" | Out-File -FilePath $env:GITHUB_ENV -Append
+          $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
+          "SharpClawModulePayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+
       - name: Restore
         shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT
+        run: dotnet restore $env:TEST_PROJECT --configfile $env:SHARPCLAW_NUGET_CONFIG
 
       - name: Run correctness domain
         shell: pwsh
@@ -210,71 +210,3 @@ jobs:
           --no-restore
           --logger GitHubActions
           --filter "TestCategory!=PerformanceDiagnostic&TestCategory!=PerformanceGate&(${{ matrix.filter }})"
-
-  performance:
-    name: Performance / ${{ matrix.domain }}
-    runs-on: windows-latest
-    timeout-minutes: 30
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - domain: Streaming End To End
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_1000ms_AllSurfaces'
-          - domain: Streaming API
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_100ms_ApiStream|FullyQualifiedName~PerformanceGate_StreamingOverhead_Large1000ChunkStream|FullyQualifiedName~PerformanceGate_StreamingOverhead_ApiSse1000TinyChunks'
-          - domain: Streaming Gateway
-            filter: 'FullyQualifiedName~PerformanceGate_StreamingOverhead_GatewaySseProxy1000TinyChunks'
-          - domain: Streaming Concurrency
-            filter: 'FullyQualifiedName~PerformanceGate_TenConcurrentStreams'
-          - domain: Chat Non Streaming
-            filter: 'FullyQualifiedName~PerformanceGate_NonStreamingOverhead'
-          - domain: Chat Concurrent Throughput
-            filter: 'FullyQualifiedName~PerformanceGate_FiftyConcurrentShortChats'
-          - domain: Chat Sequential Warm Cache
-            filter: 'FullyQualifiedName~PerformanceGate_OneHundredSequentialWarmCacheChats'
-          - domain: Jobs Direct Actions
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJobAllowedWarmNoOp|FullyQualifiedName~PerformanceGate_DirectJobDeniedWarmNoOp'
-          - domain: Jobs Summaries
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJobSummaries|FullyQualifiedName~PerformanceGate_DirectJobDetailHotLogs'
-          - domain: Jobs Parallel
-            filter: 'FullyQualifiedName~PerformanceGate_DirectJob_TwentyParallelAllowedNoOpJobs'
-          - domain: Tools Permission Checks
-            filter: 'FullyQualifiedName~PerformanceGate_InlineToolPermissionCheck'
-          - domain: Tools Provider Stream Serial
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_100AllowedNoOpToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_100DeniedToolCalls'
-          - domain: Tools Provider Stream Parallel
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100AllowedToolCalls|FullyQualifiedName~PerformanceGate_ProviderStream_10ParallelChatsEachWith100DeniedToolCalls'
-          - domain: Accessible Threads
-            filter: 'FullyQualifiedName~PerformanceGate_AccessibleThreads'
-          - domain: Prompt Assembly
-            filter: 'FullyQualifiedName~PerformanceGate_PromptAssembly'
-          - domain: Cost Lookup
-            filter: 'FullyQualifiedName~PerformanceGate_CostLookup'
-          - domain: Provider Resolution
-            filter: 'FullyQualifiedName~PerformanceGate_ProviderResolution'
-          - domain: Cold Chat Cache
-            filter: 'FullyQualifiedName~PerformanceGate_ColdChatAfterCacheClear'
-    steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-
-      - name: Setup .NET
-        uses: actions/setup-dotnet@v4
-        with:
-          dotnet-version: ${{ env.DOTNET_VERSION }}
-
-      - name: Restore
-        shell: pwsh
-        run: dotnet restore $env:TEST_PROJECT
-
-      # Require this check in GitHub branch protection. It is the blocking
-      # performance signal; diagnostic tiers remain local opt-in tests.
-      - name: Run performance domain
-        shell: pwsh
-        run: >
-          dotnet test $env:TEST_PROJECT
-          --configuration Release
-          --no-restore
-          --logger GitHubActions
-          --filter "TestCategory=PerformanceGate&(${{ matrix.filter }})"

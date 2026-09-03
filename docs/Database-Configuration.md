@@ -1,342 +1,110 @@
 # Database Configuration Guide
 
-> **Applies to:** SharpClaw Core API and CLI
->
-> **Default provider:** `JsonFile` (EF Core through JSONColdStore)
+## Scope
 
-SharpClaw supports multiple EF Core database providers. The provider is
-selected via a single `.env` key â€” no code changes required.
+The Runtime Host selects one database provider before startup. The default provider is `JsonFile`, which uses the JSONColdStore EF Core provider.
 
----
+The base model contains only ProviderDB, ModelDB, ModuleStateDB, ModuleConfigEntryDB, ModuleStorageRecordDB, and ModuleStorageIndexEntryDB.
 
-## Table of Contents
+Agents, Skills, Memory, Context, Threads, Channels, history, and Permission data belong to their owning modules. The base model does not keep inactive tables for those domains.
 
-- [Supported providers](#supported-providers)
-- [Quick start](#quick-start)
-- [Provider configuration](#provider-configuration)
-  - [JsonFile (default)](#jsonfile-default)
-  - [PostgreSQL](#postgresql)
-  - [SQL Server](#sql-server)
-  - [SQLite](#sqlite)
-  - [MySQL / Oracle (stubbed)](#mysql--oracle-stubbed)
-- [Migrations](#migrations)
-  - [Checking status](#checking-status)
-  - [Applying migrations](#applying-migrations)
-  - [Creating new migrations](#creating-new-migrations)
-  - [Migration gate](#migration-gate)
-- [Encrypted .env](#encrypted-env)
-- [Provider-specific notes](#provider-specific-notes)
+## Provider Selection
 
----
+Set `Database__Provider` in the deployed Runtime `Environment/.env` file. The supported values are `JsonFile`, `Postgres`, `SqlServer`, and `SQLite`.
 
-## Supported providers
+Use `JsonFile` for the default local installation. It does not need a connection string.
 
-| Provider | `Database:Provider` value | Connection string key | Status |
-|----------|--------------------------|----------------------|--------|
-| JSONColdStore | `JsonFile` | *(none)* | Default |
-| PostgreSQL | `Postgres` | `ConnectionStrings:Postgres` | âœ… Supported |
-| SQL Server | `SqlServer` | `ConnectionStrings:SqlServer` | âœ… Supported |
-| SQLite | `SQLite` | `ConnectionStrings:SQLite` | âœ… Supported |
-| MySQL / MariaDB | `MySql` | `ConnectionStrings:MySql` | â³ Stub â€” blocked on Pomelo EFC 10 |
-| Oracle | `Oracle` | `ConnectionStrings:Oracle` | â³ Stub â€” blocked on Oracle EFC 10 |
+Use `Postgres`, `SqlServer`, or `SQLite` with the matching `ConnectionStrings__<Provider>` key. The selected relational database must already contain its required schema.
 
----
+The Runtime does not run a migration endpoint during normal startup. This repository does not generate or apply a migration as part of this configuration process.
 
-## Quick start
+## Quick Start
 
-1. Open the Core `.env` file (`Infrastructure/Environment/.env`).
-2. Set `Database:Provider` to your chosen provider.
-3. Add the matching connection string under `ConnectionStrings`.
-4. Start the API. Check logs for any pending migration warnings.
-5. Apply migrations: `POST /admin/db/migrate` or CLI `db migrate`.
+Use the deployed Runtime `Environment/.env` file.
 
----
+Set `Database__Provider=JsonFile` for the default provider.
 
-## Provider configuration
+Start the Runtime and wait for `GET /readyz` to return HTTP `200`.
 
-All configuration lives in the Core `.env` file, which uses
-JSON-with-comments format. The same settings can also be supplied as process
-environment variables by replacing `:` with double underscores. For example,
-`Database:JsonFile:Compression` in JSON becomes
-`Database__JsonFile__Compression` in a systemd environment file.
+The Runtime creates the default JSONColdStore database during readiness validation. It checks relational connectivity without changing the relational schema.
 
-Provider behavior belongs in this section, but process placement does not.
-The `JsonFile` data directory is resolved from `SHARPCLAW_DATA_DIR` or the
-SharpClaw instance root, and API binding remains controlled by
-`ASPNETCORE_URLS`. Migration assemblies are also not env knobs: they are
-part of the application package layout and stay fixed as
-`SharpClaw.Migrations.Postgres`, `SharpClaw.Migrations.SqlServer`, and
-`SharpClaw.Migrations.SQLite`.
+## Common Configuration
 
-### EF Core logging and diagnostics
+Use canonical dotenv syntax. Use `__` between configuration sections and keys.
 
-The Core API routes EF Core logs through the standard application logging
-pipeline, which now means Serilog when Serilog is enabled for the Core
-process.
-
-The following `.env` keys control EF Core diagnostics:
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `Database:EnableDetailedErrors` | `true` | Enables EF Core detailed error messages. This is generally safe and useful even outside development. |
-| `Database:EnableSensitiveDataLogging` | `false` | Includes parameter values and entity data in EF Core logs. This can expose secrets or personal data in logs, so it should remain off unless you are doing local debugging. |
-| `Logging:Serilog:EntityFrameworkCoreMinimumLevel` | `Warning` | Controls how noisy EF Core logging is once it reaches Serilog. Lower it to `Information` or `Debug` when investigating query and change-tracking behavior. |
-
-`Database:Relational:CommandTimeoutSeconds` sets a shared relational command
-timeout for PostgreSQL, SQL Server, and SQLite. Provider-specific
-`Database:Postgres:CommandTimeoutSeconds`,
-`Database:SqlServer:CommandTimeoutSeconds`, and
-`Database:SQLite:CommandTimeoutSeconds` override that shared value. PostgreSQL
-and SQL Server also expose provider-level retry through
-`EnableRetryOnFailure`, `MaxRetryCount`, and `MaxRetryDelaySeconds` under
-their provider section. SQLite does not expose provider retry because the EF
-SQLite provider has no matching retry strategy option in this registration
-path.
-
-Example:
-
-```jsonc
-{
-  "Database": {
-    "Provider": "Postgres",
-    "EnableDetailedErrors": "true",
-    "EnableSensitiveDataLogging": "false"
-  },
-  "Logging": {
-    "Serilog": {
-      "Enabled": "true",
-      "EntityFrameworkCoreMinimumLevel": "Information"
-    }
-  },
-  "ConnectionStrings": {
-    "Postgres": "Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
-  }
-}
+```dotenv
+Database__Provider=JsonFile
+Database__EnableDetailedErrors=true
+Database__EnableSensitiveDataLogging=false
+Database__JsonFile__Compression=Brotli
+Database__JsonFile__StartupMode=MetadataOnly
+Database__JsonFile__FullScanPolicy=AllowSilentScans
+Database__JsonFile__FsyncOnWrite=true
+Encryption__EncryptDatabase=true
 ```
 
-### JsonFile (default)
+The normalized `IConfiguration` names use colons. For example, `Database:Provider` identifies the same key inside application code.
 
-No connection string is needed. Data is stored through the external
-`JSONColdStore` EF Core provider, so SharpClaw code uses the same DbContext
-and LINQ flow as the relational providers. Legacy file-format handling, if
-needed, belongs in the provider package rather than in SharpClaw.
+Keep `Database__EnableSensitiveDataLogging=false` outside controlled local diagnostics. Sensitive logging can expose entity values in process output.
 
-```jsonc
-{
-  "Database": {
-    "Provider": "JsonFile",
-    "JsonFile": {
-      "Compression": "Brotli",
-      "StartupMode": "MetadataOnly",
-      "FullScanPolicy": "AllowSilentScans",
-      "FsyncOnWrite": "true",
-      "FlushRetryMaxRetries": "3",
-      "FlushRetryBaseDelayMilliseconds": "200",
-      "TransactionReplayMaxRetries": "3",
-      "ReadRetryMaxRetries": "3",
-      "ReadRetryBaseDelayMilliseconds": "25",
-      "IndexRescanIntervalMinutes": "60",
-      "QuarantineMaxAgeDays": "30",
-      "EnableChecksums": "true",
-      "VerifyChecksumsOnRead": "false",
-      "EnableEventLog": "false",
-      "EventLogRetentionDays": "7",
-      "EnableSnapshots": "false",
-      "SnapshotIntervalHours": "24",
-      "SnapshotRetentionCount": "3"
-    }
-  }
-}
-```
+## JSONColdStore
 
-`Compression` accepts `None`, `Auto`, or `Brotli`. `StartupMode` accepts
-`MetadataOnly` or `FullHydration`. `FullScanPolicy` accepts
-`FailUnlessExplicit`, `AllowExplicitScans`, or `AllowSilentScans`. The old
-`Database:AsyncFlush` key is no longer present because the provider publishes
-saves synchronously in the current package version.
+`JsonFile` stores the base model through JSONColdStore. The Runtime uses `SharpClawDbContext` and the provider's normal EF Core path.
 
-### PostgreSQL
+JSONColdStore settings use the `Database__JsonFile__` prefix. The current options include compression, startup mode, full-scan policy, checksums, event logging, snapshots, flush retries, transaction replay retries, and read retries.
 
-```jsonc
-{
-  "Database": {
-    "Provider": "Postgres",
-    "Postgres": {
-      "CommandTimeoutSeconds": "30",
-      "EnableRetryOnFailure": "false",
-      "MaxRetryCount": "6",
-      "MaxRetryDelaySeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "Postgres": "Host=localhost;Database=sharpclaw;Username=sharpclaw;Password=YOUR_PASSWORD"
-  }
-}
-```
+Use `MetadataOnly` startup when the provider must validate its catalog without loading every record. Use the provider's documented scan policy when an operation needs a full scan.
 
-**Package:** `Npgsql.EntityFrameworkCore.PostgreSQL` (10.0.1)
+The Runtime passes the instance data directory to the JSONColdStore provider. Do not add a second file store or direct JSON persistence path in the application.
 
-### SQL Server
+`Encryption__EncryptDatabase=true` enables database record encryption through the selected JSONColdStore options. It does not control active environment document protection.
 
-```jsonc
-{
-  "Database": {
-    "Provider": "SqlServer",
-    "SqlServer": {
-      "CommandTimeoutSeconds": "30",
-      "EnableRetryOnFailure": "false",
-      "MaxRetryCount": "6",
-      "MaxRetryDelaySeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "SqlServer": "Server=.;Database=SharpClaw;Trusted_Connection=True;TrustServerCertificate=True"
-  }
-}
-```
+## Relational Providers
 
-**Package:** `Microsoft.EntityFrameworkCore.SqlServer` (10.0.5)
+Set `Database__Provider=Postgres` and `ConnectionStrings__Postgres` for PostgreSQL.
 
-### SQLite
+Set `Database__Provider=SqlServer` and `ConnectionStrings__SqlServer` for SQL Server.
 
-```jsonc
-{
-  "Database": {
-    "Provider": "SQLite",
-    "SQLite": {
-      "CommandTimeoutSeconds": "30"
-    }
-  },
-  "ConnectionStrings": {
-    "SQLite": "Data Source=sharpclaw.db"
-  }
-}
-```
+Set `Database__Provider=SQLite` and `ConnectionStrings__SQLite` for SQLite.
 
-**Package:** `Microsoft.EntityFrameworkCore.Sqlite` (10.0.5)
+Relational command timeouts use `Database__Relational__CommandTimeoutSeconds` or the provider-specific command timeout key. PostgreSQL and SQL Server also support their configured retry settings.
 
-> **Note:** SQLite does not natively support `DateTimeOffset`. SharpClaw
-> automatically applies a value converter that stores all `DateTimeOffset`
-> properties as Unix milliseconds (`long`). This is transparent to the
-> application but means raw database values are epoch-based integers.
+The Runtime checks `CanConnectAsync` before it publishes readiness. A connection failure stops startup and does not switch to JSONColdStore.
 
-### MySQL / Oracle (stubbed)
+The base Runtime model remains the six generic entity types named in this guide. Module-owned EF models use `IModuleDbContextFactory` and remain in their owning packages.
 
-These providers are defined in the `StorageMode` enum but throw
-`NotSupportedException` at startup. They are blocked on their respective
-EF Core 10 packages:
+## Module Storage
 
-- **MySQL/MariaDB:** Waiting on
-  [Pomelo.EntityFrameworkCore.MySql](https://github.com/PomeloFoundation/Pomelo.EntityFrameworkCore.MySql)
-  10.x release.
-- **Oracle:** Waiting on
-  [Oracle.EntityFrameworkCore](https://www.nuget.org/packages/Oracle.EntityFrameworkCore)
-  10.x release.
+Modules declare storage through `ISharpClawModuleBuilder.Storage` and `IModuleStorageBuilder`.
 
----
+The host validates `ModuleStorageContractDescriptor` declarations and exposes them through `IModuleStorageGateway`.
 
-## Migrations
+Module records use the module identifier, storage name, record key, and declared indexes. A module cannot access another module's storage without an explicit contract.
 
-Migrations are **never automatic**. SharpClaw starts and serves requests
-even when migrations are pending â€” it logs a warning at startup. You
-must explicitly trigger migrations when ready.
+Do not access `SharpClawDbContext` from a module. Do not add a module entity to the base context when the module storage contract can provide the required boundary.
 
-### Checking status
+## Active Environment Protection
 
-**API:**
+The active Runtime `Environment/.env` document is protected by the Supprocom.Secrets installation-key boundary. The package owns encryption, recovery, locking, permissions, and canonical dotenv serialization.
 
-```
-GET /admin/db/status
-```
+The installation key comes from the valid `SHARPCLAW_ENCRYPTION_KEY` override or the Runtime instance key file. An invalid configured override fails startup.
 
-Returns `state` (`Idle` / `Draining` / `Migrating`), `applied` (list),
-and `pending` (list).
+The `.env.template` and `.dev.env.template` files remain plaintext templates. They are not active protected documents.
 
-**CLI:**
+`Encryption__EncryptProviderKeys` controls provider API-key protection. The in-document `Encryption__Key` value is an application or provider encryption override and can differ from the installation key.
 
-```
-db status
-```
+## Readiness And Recovery
 
-### Applying migrations
+The Runtime validates database readiness before it publishes its discovery entry. A failed validation keeps the Runtime unavailable.
 
-**API:**
+For JSONColdStore, the Runtime requests first-run creation through the provider. For relational providers, the Runtime checks connectivity and expects an authorized schema.
 
-```
-POST /admin/db/migrate
-```
+The Runtime does not hide provider errors by selecting another provider. Correct the selected provider or its configuration before restart.
 
-**CLI:**
+## Data Ownership
 
-```
-db migrate
-```
+SharpClaw.Core owns canonical Jobs and Events contracts. The Runtime composes those contracts with the selected provider and module storage gateway.
 
-Both require admin privileges. The migration gate will:
+ProviderDB and ModelDB store generic provider and model selection data. The four module tables store module state, configuration, records, and index entries.
 
-1. Close the gate â€” new requests are held.
-2. Drain all in-flight requests to completion.
-3. Apply all pending migrations.
-4. Reopen the gate â€” requests resume.
-
-Returns `409 Conflict` if a migration is already in progress.
-
-### Creating new migrations
-
-Each relational provider has a dedicated migration assembly:
-
-```
-SharpClaw.Migrations/Postgres/
-SharpClaw.Migrations/SqlServer/
-SharpClaw.Migrations/SQLite/
-```
-
-To add a new migration (example for PostgreSQL):
-
-```bash
-dotnet ef migrations add MyMigrationName \
-  --project SharpClaw.Migrations/Postgres/SharpClaw.Migrations.Postgres.csproj \
-  --startup-project SharpClaw.Runtime/Host/SharpClaw.Runtime.Host.csproj
-```
-
-Each assembly contains a `IDesignTimeDbContextFactory<SharpClawDbContext>`
-that provides the design-time connection string.
-
-### Migration gate
-
-The `MigrationGate` is an async-safe pause mechanism that prevents data
-corruption during migrations:
-
-- **Normal operation:** Requests pass through the gate with zero overhead
-  (the gate `Task` is already completed).
-- **During migration:** The gate closes, all in-flight requests drain,
-  migrations run, then the gate reopens.
-- **Middleware:** `MigrationGateMiddleware` wraps every request in the
-  gate automatically.
-
-The gate uses `SemaphoreSlim` + `TaskCompletionSource` (not
-`ReaderWriterLockSlim`) to avoid threadpool starvation in async
-middleware.
-
----
-
-## Encrypted .env
-
-The Core `.env` supports AES-GCM encryption at rest via
-`Encryption:EncryptDatabase`. Connection strings containing credentials
-are protected by the same encryption key used for provider API keys.
-
-See [Encryption & key management](Core-API-documentation.md#encryption--key-management)
-for key resolution and validation details.
-
----
-
-## Provider-specific notes
-
-| Provider | Issue | Mitigation |
-|----------|-------|------------|
-| SQLite | No native `DateTimeOffset` support | Auto-applied `ValueConverter`: stored as Unix milliseconds |
-| MySQL/MariaDB | InnoDB 767-byte key length limit | Will limit indexed string columns to `MaxLength(255)` â€” deferred |
-| Oracle | 30-char identifier limit (pre-21c) | Will use short table names or require 21c+ â€” deferred |
-| JSONColdStore | Provider-backed JSON storage | SharpClaw uses provider configuration only; query and persistence behavior belongs in the provider |
-| Postgres / SQL Server | Full relational support | No special handling needed |
+Feature modules own their domain data and persistence rules. The base application does not retain feature-specific repositories, tables, inactive mappings, compatibility readers, or alternate stores.

@@ -12,6 +12,10 @@ public static class SharpClawAppDataPaths
     /// </summary>
     public static string GetSharpClawRootDirectory()
     {
+        var configuredRoot = Environment.GetEnvironmentVariable("SHARPCLAW_SHARED_ROOT");
+        if (!string.IsNullOrWhiteSpace(configuredRoot))
+            return Path.GetFullPath(configuredRoot);
+
         var localAppData = Environment.GetFolderPath(
             Environment.SpecialFolder.LocalApplicationData);
 

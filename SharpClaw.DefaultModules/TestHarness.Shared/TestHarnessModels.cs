@@ -158,9 +158,13 @@ public sealed record CapturedToolCall(
 
 public sealed record CapturedHeaderTagCall(
     int Sequence,
-    ModuleHeaderTagContext Context,
+    TestHarnessHeaderTagContext Context,
     long ElapsedMs,
     bool Failed);
+
+public sealed record TestHarnessHeaderTagContext(
+    Guid? ConversationId,
+    string? Key);
 
 public sealed record CapturedCostCall(
     int Sequence,

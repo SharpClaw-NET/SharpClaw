@@ -52,25 +52,6 @@ public sealed class ChatDefaultHeaderEngineTests
     }
 
     [Test]
-    public void BuildTaskHeader_WhenSharedDataExists_FormatsTaskFactsAndSuffix()
-    {
-        var engine = CreateEngine();
-        var header = engine.BuildTaskHeader(
-            new ChatTaskHeaderFacts(
-                "Nightly Sync",
-                "sync state",
-                [new ChatTaskBigDataReference("memo", "Long plan")]),
-            " | agent-role: Worker]" + Environment.NewLine,
-            new DateTimeOffset(2026, 1, 2, 3, 4, 5, TimeSpan.Zero));
-
-        header.Should().Be(
-            "[time: 2026-01-02 03:04:05 UTC | source: automated task " +
-            "| task: Nightly Sync | shared-data: sync state " +
-            "| big-data-ids: [memo:\"Long plan\"] | agent-role: Worker]" +
-            Environment.NewLine);
-    }
-
-    [Test]
     public void BuildAuthenticatedUserHeader_WhenRoleAndBioExist_FormatsUserFacts()
     {
         var engine = CreateEngine();

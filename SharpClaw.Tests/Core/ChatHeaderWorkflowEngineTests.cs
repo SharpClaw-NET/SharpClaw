@@ -1,9 +1,7 @@
 using Microsoft.Extensions.Configuration;
-using SharpClaw.Contracts.DTOs.Tasks;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Core.Chat;
 using SharpClaw.Core.Clients;
-using SharpClaw.Core.Tasks.Runtime;
 
 namespace SharpClaw.Tests.Core;
 
@@ -38,43 +36,6 @@ public sealed class ChatHeaderWorkflowEngineTests
     }
 
     [Test]
-    public async Task BuildHeaderAsync_WhenTaskContextExists_UsesTaskSharedDataAndAgentSuffix()
-    {
-        var engine = CreateEngine();
-        var instanceId = Guid.NewGuid();
-        var store = TaskSharedData.GetOrCreate(instanceId);
-        store.TrySetLight("sync state").Should().BeTrue();
-        store.TryWriteBig("memo", "Long plan", "body", out _).Should().BeTrue();
-
-        try
-        {
-            var host = new HeaderHost
-            {
-                AgentSuffixFacts = new ChatAgentHeaderSuffixFacts(
-                    "Worker",
-                    ["ReadLogs"])
-            };
-
-            var header = await engine.BuildHeaderAsync(
-                CreateRequest(
-                    taskContext: new TaskChatContext(instanceId, "Nightly Sync")),
-                host);
-
-            header.Should().Contain("source: automated task");
-            header.Should().Contain("task: Nightly Sync");
-            header.Should().Contain("shared-data: sync state");
-            header.Should().Contain("memo:\"Long plan\"");
-            header.Should().Contain("agent-role: Worker (ReadLogs)");
-            host.UserStateLoadCount.Should().Be(0);
-            host.AgentSuffixLoadCount.Should().Be(1);
-        }
-        finally
-        {
-            TaskSharedData.Remove(instanceId);
-        }
-    }
-
-    [Test]
     public async Task BuildHeaderAsync_WhenAuthenticatedUser_ReusesCachedUserStateAndAgentSuffix()
     {
         var engine = CreateEngine();
@@ -89,7 +50,7 @@ public sealed class ChatHeaderWorkflowEngineTests
                 "supervises agents"),
             AgentSuffixFacts = new ChatAgentHeaderSuffixFacts(
                 "Worker",
-                ["RunTasks"])
+                ["RunActions"])
         };
         var request = CreateRequest();
 
@@ -100,7 +61,7 @@ public sealed class ChatHeaderWorkflowEngineTests
         first.Should().Contain("user: marko");
         first.Should().Contain("role: Operator (ReadLogs)");
         first.Should().Contain("bio: supervises agents");
-        first.Should().Contain("agent-role: Worker (RunTasks)");
+        first.Should().Contain("agent-role: Worker (RunActions)");
         host.UserStateLoadCount.Should().Be(1);
         host.AgentSuffixLoadCount.Should().Be(1);
     }
@@ -191,7 +152,6 @@ public sealed class ChatHeaderWorkflowEngineTests
         AgentState? agent = null,
         string clientType = "api",
         bool disableDefaultHeaders = false,
-        TaskChatContext? taskContext = null,
         string? externalUsername = null,
         string? externalDisplayName = null,
         CompletionParameters? completionParameters = null,
@@ -209,7 +169,6 @@ public sealed class ChatHeaderWorkflowEngineTests
             },
             clientType,
             disableDefaultHeaders,
-            taskContext,
             externalUsername,
             externalDisplayName,
             completionParameters,

@@ -1,16 +1,13 @@
-using System.Security.Cryptography;
-using System.Text;
-using System.Text.Json;
 using Microsoft.Extensions.Configuration;
 using SharpClaw.Shared.Security;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Gateway.Configuration;
 
 /// <summary>
-/// Loads gateway configuration from assembly-local active environment files.
-/// Active files live beside their portable plaintext templates in
-/// <c>Environment</c>: <c>.env</c> falls back to <c>.env.template</c>, and
-/// development <c>.dev.env</c> falls back to <c>.dev.env.template</c>.
+/// Adds the Gateway's assembly-local dotenv files through Supprocom.Secrets.
+/// SharpClaw supplies only the Gateway directory and its existing shared
+/// installation-key location; the package owns all file behavior.
 /// </summary>
 public static class GatewayEnvironment
 {
@@ -22,180 +19,46 @@ public static class GatewayEnvironment
             Path.GetDirectoryName(typeof(GatewayEnvironment).Assembly.Location)!,
             "Environment");
 
-        return builder.AddGatewayEnvironmentFrom(envDir, isDevelopment);
+        return builder.AddSupprocomSecrets(
+            CreateSecretsOptions(envDir, isDevelopment));
     }
 
     internal static IConfigurationBuilder AddGatewayEnvironmentFrom(
         this IConfigurationBuilder builder,
         string envDir,
-        bool isDevelopment)
-    {
-        EnsureEnvironmentTemplate(envDir, ".env.template");
-        EnsureActiveEnvironmentFile(envDir, ".env", ".env.template");
-        AddEnvFile(
-            builder,
-            envDir: envDir,
-            activeFileName: ".env",
-            templateFileName: ".env.template");
+        bool isDevelopment,
+        string? installationKeyPath = null) =>
+        builder.AddSupprocomSecrets(
+            CreateSecretsOptions(envDir, isDevelopment, installationKeyPath));
 
-        if (isDevelopment)
-        {
-            EnsureEnvironmentTemplate(envDir, ".dev.env.template");
-            EnsureActiveEnvironmentFile(envDir, ".dev.env", ".dev.env.template");
-            AddEnvFile(
-                builder,
-                envDir: envDir,
-                activeFileName: ".dev.env",
-                templateFileName: ".dev.env.template");
-        }
-
-        return builder;
-    }
-
-    private static void AddEnvFile(
-        IConfigurationBuilder builder,
+    internal static SupprocomSecretsOptions CreateSecretsOptions(
         string envDir,
-        string activeFileName,
-        string templateFileName)
-    {
-        var activePath = Path.Combine(envDir, activeFileName);
-        if (!File.Exists(activePath))
-            return;
-
-        if (EncryptedEnvFile.IsEncryptedOnDisk(activePath))
+        bool isDevelopment,
+        string? installationKeyPath = null) =>
+        new()
         {
-            var key = EncryptionKeyResolver.ResolveKey();
-            try
+            EnvironmentName = isDevelopment ? "Development" : "Production",
+            FileOverridesProcessEnvironment = true,
+            File =
             {
-                var json = EncryptedEnvFile.ReadAsync(
-                        activePath,
-                        key,
-                        CancellationToken.None)
-                    .GetAwaiter().GetResult();
-                AddJson(builder, json);
-                return;
+                Directory = envDir,
+                ActiveName = ".env",
+                DevelopmentName = ".dev.env",
+                TemplateName = ".env.template",
+                DevelopmentTemplateName = ".dev.env.template",
+                Import = SecretFileImport.JsonWithCommentsOnce,
+                DevelopmentComposition = SecretFileComposition.Overlay,
+                Recovery = SecretFileRecovery.QuarantineAndRestoreTemplate,
+                Protection = SecretFileProtection.InstallationBoundAesGcm,
+                InstallationKeyPath = installationKeyPath ?? ResolveInstallationKeyPath(),
+                InstallationKeyStore = new SharpClawInstallationKeyStore(
+                    installationKeyPath ?? ResolveInstallationKeyPath())
             }
-            catch (Exception ex) when (IsUnreadableActiveFile(ex))
-            {
-                QuarantineUnreadableActiveFile(activePath);
-                CopyTemplateToActive(envDir, activeFileName, templateFileName);
-                AddPlaintextEnvFile(builder, activePath);
-                return;
-            }
-        }
-
-        try
-        {
-            AddPlaintextEnvFile(builder, activePath);
-        }
-        catch (Exception ex) when (IsUnreadableActiveFile(ex))
-        {
-            QuarantineUnreadableActiveFile(activePath);
-            CopyTemplateToActive(envDir, activeFileName, templateFileName);
-            AddPlaintextEnvFile(builder, activePath);
-        }
-    }
-
-    private static void AddPlaintextEnvFile(
-        IConfigurationBuilder builder,
-        string activePath)
-    {
-        var json = File.ReadAllText(activePath);
-        AddJson(builder, json);
-
-        var key = EncryptionKeyResolver.ResolveKey();
-        if (key is not null)
-        {
-            EncryptedEnvFile.WriteAsync(
-                    activePath,
-                    json,
-                    key,
-                    encrypt: true,
-                    CancellationToken.None)
-                .GetAwaiter().GetResult();
-        }
-    }
-
-    private static void AddJson(IConfigurationBuilder builder, string json)
-    {
-        var options = new JsonDocumentOptions
-        {
-            CommentHandling = JsonCommentHandling.Skip,
-            AllowTrailingCommas = true
         };
-        using (JsonDocument.Parse(json, options))
-        {
-        }
 
-        builder.AddJsonStream(new MemoryStream(Encoding.UTF8.GetBytes(json)));
-    }
-
-    private static void EnsureEnvironmentTemplate(
-        string envDir,
-        string templateFileName)
-    {
-        var templatePath = Path.Combine(envDir, templateFileName);
-        if (File.Exists(templatePath) && new FileInfo(templatePath).Length > 0)
-        {
-            if (EncryptedEnvFile.IsEncryptedOnDisk(templatePath))
-            {
-                throw new InvalidOperationException(
-                    $"Environment template '{templatePath}' is encrypted. Published templates must be plaintext and portable.");
-            }
-
-            return;
-        }
-
-        throw new InvalidOperationException(
-            $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
-    }
-
-    private static void EnsureActiveEnvironmentFile(
-        string envDir,
-        string activeFileName,
-        string templateFileName)
-    {
-        var activePath = Path.Combine(envDir, activeFileName);
-        if (File.Exists(activePath) && new FileInfo(activePath).Length > 0)
-            return;
-
-        CopyTemplateToActive(envDir, activeFileName, templateFileName);
-    }
-
-    private static void CopyTemplateToActive(
-        string envDir,
-        string activeFileName,
-        string templateFileName)
-    {
-        var templatePath = Path.Combine(envDir, templateFileName);
-        if (!File.Exists(templatePath) || new FileInfo(templatePath).Length == 0)
-        {
-            throw new InvalidOperationException(
-                $"Environment template '{templatePath}' is missing or empty. Published templates must be plaintext and portable.");
-        }
-
-        if (EncryptedEnvFile.IsEncryptedOnDisk(templatePath))
-        {
-            throw new InvalidOperationException(
-                $"Environment template '{templatePath}' is encrypted. Published templates must be plaintext and portable.");
-        }
-
-        Directory.CreateDirectory(envDir);
-        File.Copy(templatePath, Path.Combine(envDir, activeFileName), overwrite: true);
-    }
-
-    private static void QuarantineUnreadableActiveFile(string activePath)
-    {
-        var quarantinePath = activePath
-            + $".unreadable-{DateTimeOffset.UtcNow:yyyyMMddHHmmssfff}";
-        File.Move(activePath, quarantinePath, overwrite: true);
-    }
-
-    private static bool IsUnreadableActiveFile(Exception ex) =>
-        ex is JsonException
-        || ex is CryptographicException
-        || ex is InvalidDataException
-        || ex is FormatException
-        || ex is ArgumentException
-        || ex.InnerException is not null && IsUnreadableActiveFile(ex.InnerException);
+    private static string ResolveInstallationKeyPath() =>
+        Path.Combine(
+            Environment.GetFolderPath(Environment.SpecialFolder.LocalApplicationData),
+            "SharpClaw",
+            ".encryption-key");
 }

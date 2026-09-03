@@ -1,6 +1,6 @@
 using SharpClaw.Gateway.Contracts;
+using SharpClaw.Gateway;
 using SharpClaw.Gateway.Configuration;
-using SharpClaw.Gateway.Controllers;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Gateway.Modules;
 using SharpClaw.Gateway.Security;
@@ -20,6 +20,9 @@ var gatewayPaths = new SharpClawInstancePaths(
 gatewayPaths.EnsureDirectories();
 gatewayPaths.CleanupStaleDiscoveryEntries(TimeSpan.FromMinutes(2));
 using var gatewayInstanceLock = new SharpClawInstanceLock(gatewayPaths);
+
+builder.Configuration.AddGatewayEnvironment(
+    isDevelopment: builder.Environment.IsDevelopment());
 
 var gatewayManifest = gatewayPaths.Manifest;
 var configuredGatewayUrl = builder.Configuration["ASPNETCORE_URLS"]
@@ -57,8 +60,12 @@ if (!string.Equals(gatewayManifest.SelectedBackendBindingKind, selectedBackendBi
 if (gatewayManifestChanged)
     gatewayPaths.SaveManifest(gatewayManifest);
 
-await using var processLogs = new DurableProcessLogWriter("gateway", gatewayPaths);
-using var processLogCapture = DurableProcessLogCapture.Install(processLogs);
+var loggingOptions = SharpClawLoggingOptions.FromConfiguration(builder.Configuration);
+await using var logging = SharpClawLogRuntime.Create(
+    "gateway",
+    gatewayPaths,
+    loggingOptions);
+var startupLogger = logging.SerilogLogger;
 
 var publishedGatewayUrl = !string.IsNullOrWhiteSpace(configuredGatewayUrl)
     ? configuredGatewayUrl
@@ -72,58 +79,22 @@ gatewayDiscoveryLease.PublishNow();
 AppDomain.CurrentDomain.UnhandledException += (_, eventArgs) =>
 {
     if (eventArgs.ExceptionObject is Exception exception)
-        processLogs.AppendException(exception, "Unhandled AppDomain exception in gateway.");
+        startupLogger.Error(exception, "Unhandled AppDomain exception in gateway.");
     else
-        processLogs.AppendException($"Unhandled AppDomain exception payload: {eventArgs.ExceptionObject}");
+        startupLogger.Error(
+            "Unhandled AppDomain exception payload: {ExceptionObject}",
+            eventArgs.ExceptionObject);
 };
 
 TaskScheduler.UnobservedTaskException += (_, eventArgs) =>
 {
-    processLogs.AppendException(eventArgs.Exception, "Unobserved task exception in gateway.");
+    startupLogger.Error(eventArgs.Exception, "Unobserved task exception in gateway.");
 };
 
 builder.Logging.ClearProviders();
-builder.Host.UseSerilog();
-builder.Services.AddSingleton(processLogs);
-builder.Logging.AddProvider(new DurableProcessLogLoggerProvider(processLogs));
+builder.Host.UseSerilog(logging.SerilogLogger, dispose: false);
+builder.Services.AddSingleton(logging);
 
-// ── Gateway .env (same pattern as Core / Interface) ──────────────
-builder.Configuration.AddGatewayEnvironment(
-    isDevelopment: builder.Environment.IsDevelopment());
-
-var serilogOptions = SerilogEnvironmentOptions.FromConfiguration(builder.Configuration);
-
-if (serilogOptions.Enabled)
-{
-    var loggerConfiguration = new LoggerConfiguration()
-        .MinimumLevel.Is(SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.MinimumLevel,
-            LogEventLevel.Information))
-        .MinimumLevel.Override("Microsoft", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.MicrosoftMinimumLevel,
-            LogEventLevel.Warning))
-        .MinimumLevel.Override("Microsoft.AspNetCore", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.AspNetCoreMinimumLevel,
-            LogEventLevel.Warning))
-        .MinimumLevel.Override("Microsoft.EntityFrameworkCore", SerilogEnvironmentOptions.ParseEnum(
-            serilogOptions.EntityFrameworkCoreMinimumLevel,
-            LogEventLevel.Warning))
-        .Enrich.FromLogContext()
-        .WriteTo.Sink(new DurableProcessLogSerilogSink(processLogs));
-
-    if (serilogOptions.ConsoleEnabled)
-        loggerConfiguration = loggerConfiguration.WriteTo.Console();
-
-    Log.Logger = loggerConfiguration.CreateLogger();
-}
-else
-{
-    Log.Logger = new LoggerConfiguration()
-        .MinimumLevel.Fatal()
-        .CreateLogger();
-}
-
-// ── Internal API client ──────────────────────────────────────────
 builder.Services.Configure<InternalApiOptions>(
     builder.Configuration.GetSection(InternalApiOptions.SectionName));
 
@@ -146,13 +117,15 @@ builder.Services.Configure<GatewayEndpointOptions>(
 builder.Services.Configure<GatewayModuleOptions>(
     builder.Configuration.GetSection(GatewayModuleOptions.SectionName));
 
-var moduleDiscoveryLogger = LoggerFactory
-    .Create(b => b.AddSerilog(Log.Logger))
-    .CreateLogger("SharpClaw.Gateway.Modules");
-var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(moduleDiscoveryLogger);
+var gatewayModuleOptionsSnapshot = builder.Configuration
+    .GetSection(GatewayModuleOptions.SectionName)
+    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
+var gatewayModuleLoader = GatewayModuleLoader.DiscoverBundled(
+    startupLogger,
+    gatewayModuleOptionsSnapshot);
 foreach (var ext in gatewayModuleLoader.All)
 {
-    Log.Information(
+    startupLogger.Information(
         "Gateway module discovered: {ModuleId} ({DisplayName})",
         ext.ModuleId,
         ext.DisplayName);
@@ -166,9 +139,6 @@ builder.Services.AddSingleton<GatewayModuleHostManager>();
 // ── Gateway-side module service registration (Phase 3) ─────────
 // Run ConfigureGatewayServices only for modules explicitly enabled in
 // configuration so a disabled module's services don't leak into DI.
-var gatewayModuleOptionsSnapshot = builder.Configuration
-    .GetSection(GatewayModuleOptions.SectionName)
-    .Get<GatewayModuleOptions>() ?? new GatewayModuleOptions();
 foreach (var ext in gatewayModuleLoader.All)
 {
     if (!gatewayModuleOptionsSnapshot.IsModuleEnabled(ext.ModuleId))
@@ -177,11 +147,11 @@ foreach (var ext in gatewayModuleLoader.All)
     try
     {
         ext.ConfigureGatewayServices(builder.Services);
-        Log.Information("Gateway module services configured: {ModuleId}", ext.ModuleId);
+        startupLogger.Information("Gateway module services configured: {ModuleId}", ext.ModuleId);
     }
     catch (Exception ex)
     {
-        Log.Error(ex,
+        startupLogger.Error(ex,
             "Gateway module {ModuleId} threw during ConfigureGatewayServices; module will not be mapped.",
             ext.ModuleId);
     }
@@ -193,6 +163,7 @@ builder.Services.Configure<RequestQueueOptions>(
 
 builder.Services.AddSingleton<QueueMetrics>();
 builder.Services.AddSingleton<RequestQueueService>();
+builder.Services.AddSingleton<GatewayBackgroundActionBoundary>();
 builder.Services.AddHostedService<RequestQueueProcessor>();
 builder.Services.AddScoped<GatewayRequestDispatcher>();
 builder.Services.AddHttpContextAccessor();
@@ -225,15 +196,9 @@ builder.Services.AddOpenApi(options =>
 // ── API key diagnostic (visible in Uno process output) ───────────
 var configuredApiKey = builder.Configuration[$"{InternalApiOptions.SectionName}:ApiKey"];
 if (!string.IsNullOrEmpty(configuredApiKey))
-{
-    Console.WriteLine($"[gateway] API key resolved from config: {configuredApiKey.Length} chars, prefix={configuredApiKey[..Math.Min(6, configuredApiKey.Length)]}..");
-    processLogs.AppendDebug($"API key resolved from config: {configuredApiKey.Length} chars.");
-}
+    startupLogger.Debug("Internal API key resolved from configuration.");
 else
-{
-    Console.WriteLine("[gateway] ⚠ No API key found in configuration — will fall back to file read.");
-    processLogs.AppendDebug("No API key found in configuration; will fall back to file read.");
-}
+    startupLogger.Debug("Internal API key was not present in configuration; file resolution remains available.");
 
 var app = builder.Build();
 
@@ -353,7 +318,7 @@ if (app.Environment.IsDevelopment())
 
 app.UseHttpsRedirection();
 
-if (serilogOptions.Enabled && serilogOptions.RequestLoggingEnabled)
+if (loggingOptions.RequestLoggingEnabled)
     app.UseSerilogRequestLogging();
 
 // 1. Endpoint gate — reject requests to disabled endpoint groups
@@ -371,8 +336,9 @@ app.UseRateLimiter();
 
 app.UseAuthorization();
 
-app.MapControllers();
-app.MapChatStreamProxy();
+app.UseMiddleware<GatewayActionMiddleware>();
+
+app.MapDirectChatGatewayEndpoints();
 
 // ── Module-contributed endpoint groups (Phase 3) ────────────────
 // Must run AFTER UseRateLimiter so RequireRateLimiting on the route
@@ -388,4 +354,4 @@ finally
     gatewayPaths.DeleteDiscoveryEntry();
 }
 
-await Log.CloseAndFlushAsync();
+await logging.FlushAndSealAsync();

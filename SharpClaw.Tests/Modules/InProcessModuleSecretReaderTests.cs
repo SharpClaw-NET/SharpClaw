@@ -97,11 +97,14 @@ public sealed class InProcessModuleSecretReaderTests
             InProcessPerformanceFixtureModule.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(
-            "dotnet",
-            Path.GetFileName(assemblyPath),
-            typeof(InProcessPerformanceFixtureModule).FullName,
-            "in-process");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        {
+          "runtime": "dotnet",
+          "hostMode": "in-process",
+          "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
+          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+        }
+        """);
 
         await using var host = InProcessModuleHost.Load(
             moduleDir,
@@ -130,11 +133,14 @@ public sealed class InProcessModuleSecretReaderTests
             InProcessPerformanceFixtureModule.ToolPrefixValue,
             Path.GetFileName(assemblyPath),
             "0.0.0");
-        var runtimeInfo = new ModuleManifestRuntimeInfo(
-            "dotnet",
-            Path.GetFileName(assemblyPath),
-            typeof(InProcessPerformanceFixtureModule).FullName,
-            "in-process");
+        var runtimeInfo = ModuleManifestRuntimeInfo.FromJson($$"""
+        {
+          "runtime": "dotnet",
+          "hostMode": "in-process",
+          "entryAssembly": "{{Path.GetFileName(assemblyPath)}}",
+          "moduleType": "{{typeof(InProcessPerformanceFixtureModule).FullName}}"
+        }
+        """);
 
         await using var host = InProcessModuleHost.Load(
             moduleDir,
@@ -200,7 +206,7 @@ public sealed class InProcessModuleSecretReaderTests
         var assemblyName = typeof(IInProcessModuleSecretReader).Assembly.GetName();
 
         assemblyName.Name.Should().Be("SharpClaw.Contracts");
-        assemblyName.Version.Should().Be(new Version(0, 3, 17, 0));
+        assemblyName.Version.Should().Be(new Version(0, 5, 0, 0));
         assemblyName.GetPublicKeyToken().Should().BeNullOrEmpty();
     }
 

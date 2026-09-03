@@ -10,146 +10,98 @@
 
   <Grid>
     <Grid.ColumnDefinitions>
-      <ColumnDefinition Width="280" />
+      <ColumnDefinition Width="240" />
       <ColumnDefinition Width="1" />
       <ColumnDefinition />
     </Grid.ColumnDefinitions>
 
-    <!-- Left sidebar -->
     <Grid Grid.Column="0" Background="#0D0D0D">
       <Grid.RowDefinitions>
-        <RowDefinition Height="Auto" />
-        <RowDefinition Height="Auto" />
         <RowDefinition />
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
-      <!-- Sidebar header -->
-      <StackPanel Grid.Row="0" Margin="16,16,16,8">
-        <StackPanel Orientation="Horizontal" Spacing="8">
-          <TextBlock Text="SharpClaw"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="16"
-                     FontWeight="Bold"
-                     Foreground="#00FF00"
-                     VerticalAlignment="Center" />
-          <TextBlock Text="alpha test"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10"
-                     Foreground="#00FF00"
-                     VerticalAlignment="Center" />
-        </StackPanel>
-        <TextBlock Style="{StaticResource TerminalText}"
+      <StackPanel Grid.Row="0" Margin="16,18,16,16" Spacing="8">
+        <TextBlock Text="SharpClaw"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="16"
+                   FontWeight="Bold"
+                   Foreground="#00FF00" />
+        <TextBlock Text="direct chat"
+                   Style="{StaticResource TerminalText}"
+                   FontSize="11"
+                   Foreground="#888888" />
+        <Border Height="1" Background="#1A1A1A" Margin="0,8,0,8" />
+        <TextBlock Text="Each message is independent. The base client keeps no conversation history."
+                   Style="{StaticResource TerminalText}"
                    FontSize="10"
                    Foreground="#666666"
-                   TextWrapping="Wrap"
-                   Margin="0,6,0,0"
-                   x:Uid="MainPage.Label.ModuleAlphaNote"
-                   Text="Bundled modules beyond the essentials are included to test advanced feature support and will be phased out before 1.0.0. Create and share your own — agents can even build modules from within SharpClaw." />
+                   TextWrapping="Wrap" />
       </StackPanel>
 
-      <!-- New channel button -->
-      <Button Grid.Row="1"
-              Style="{StaticResource TerminalButton}"
-              Click="OnNewChannelClick"
-              PointerEntered="OnNewChannelPointerEntered"
-              PointerExited="OnNewChannelPointerExited"
-              Margin="16,0,16,8">
-        <TextBlock Text="+ New Channel"
-                   Style="{StaticResource TerminalText}"
-                   FontSize="12"
-                   Foreground="#00FF00"
-                   HorizontalAlignment="Center" />
-      </Button>
-
-      <!-- Channel list grouped by context -->
-      <ScrollViewer Grid.Row="2" Margin="0,0,0,0">
-        <StackPanel x:Name="SidebarPanel" Spacing="0" Margin="8,0,8,8" />
-      </ScrollViewer>
-
-      <!-- Sidebar footer -->
-      <StackPanel Grid.Row="3" Margin="16,0,16,12" Spacing="6">
+      <StackPanel Grid.Row="1" Margin="16,0,16,12" Spacing="6">
         <Border Height="1" Background="#1A1A1A" Margin="0,0,0,4" />
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Left"
                 Click="OnSettingsClick">
-          <TextBlock Text="› Settings"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12"
-                     Foreground="#808080" />
+          <TextBlock Text="[settings]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
         </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Left"
                 Click="OnLogoutClick">
-          <TextBlock Text="› Logout"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12"
-                     Foreground="#808080" />
+          <TextBlock Text="[logout]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
         </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Left"
                 Click="OnLegalNoticesClick">
-          <TextBlock Text="› Legal Notices"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12"
-                     Foreground="#808080" />
+          <TextBlock Text="[legal]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
         </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Left"
                 Click="OnUserGuideClick">
-          <TextBlock Text="› User Guide"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12"
-                     Foreground="#808080" />
+          <TextBlock Text="[guide]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
         </Button>
         <Button Background="Transparent" BorderThickness="0" Padding="0"
                 HorizontalAlignment="Stretch"
                 HorizontalContentAlignment="Left"
                 Click="OnReportIssueClick">
-          <TextBlock Text="› Report Issue"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="12"
-                     Foreground="#808080" />
+          <TextBlock Text="[report]" Style="{StaticResource TerminalText}"
+                     FontSize="12" Foreground="#808080" />
         </Button>
         <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,6,0,0">
           <Button Background="Transparent" BorderThickness="0" Padding="4"
                   Click="OnOfficialWebsiteClick"
-                  ToolTipService.ToolTip="Official Website">
+                  ToolTipService.ToolTip="Official website">
             <TextBlock Text="&#xE774;"
                        FontFamily="{ThemeResource SymbolThemeFontFamily}"
-                       FontSize="14"
-                       Foreground="#00FF00" />
+                       FontSize="14" Foreground="#00FF00" />
           </Button>
           <Button Background="Transparent" BorderThickness="0" Padding="4"
                   Click="OnMatrixCommunityClick"
-                  ToolTipService.ToolTip="Matrix Community">
-            <TextBlock Text="M"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="14"
-                       FontWeight="Bold"
-                       Foreground="#00FF00" />
+                  ToolTipService.ToolTip="Matrix community">
+            <TextBlock Text="M" Style="{StaticResource TerminalText}"
+                       FontSize="14" FontWeight="Bold" Foreground="#00FF00" />
           </Button>
           <Button Background="Transparent" BorderThickness="0" Padding="4"
                   Click="OnCreatorBlogClick"
-                  ToolTipService.ToolTip="Creator's Blog">
-            <TextBlock Text=">_"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="13"
-                       FontWeight="Bold"
-                       Foreground="#00FF00" />
+                  ToolTipService.ToolTip="Creator blog">
+            <TextBlock Text="&gt;_" Style="{StaticResource TerminalText}"
+                       FontSize="13" FontWeight="Bold" Foreground="#00FF00" />
           </Button>
         </StackPanel>
       </StackPanel>
     </Grid>
 
-    <!-- Divider -->
     <Border Grid.Column="1" Background="#1A1A1A" />
 
-    <!-- Right chat area -->
     <Grid Grid.Column="2">
       <Grid.RowDefinitions>
         <RowDefinition Height="Auto" />
@@ -157,144 +109,21 @@
         <RowDefinition Height="Auto" />
       </Grid.RowDefinitions>
 
-      <!-- Chat header -->
       <StackPanel Grid.Row="0" Margin="20,16,20,0" Spacing="4">
         <TextBlock x:Name="ChatTitleBlock"
-                   Text="> Select or create a channel"
+                   Text="&gt; direct chat"
                    Style="{StaticResource TerminalText}"
-                   FontSize="14"
-                   Foreground="#808080" />
-        <StackPanel x:Name="ChannelTabBar"
-                    Orientation="Horizontal"
-                    Spacing="12"
-                    Visibility="Collapsed"
-                    Margin="0,4,0,0">
-          <Button x:Name="TabChatButton"
-                  Background="Transparent"
-                  BorderThickness="0"
-                  Padding="0,2,0,2"
-                  Click="OnTabChatClick">
-            <TextBlock Text="[chat]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#00FF00" />
-          </Button>
-          <Button x:Name="TabTasksButton"
-                  Background="Transparent"
-                  BorderThickness="0"
-                  Padding="0,2,0,2"
-                  Click="OnTabTasksClick">
-            <TextBlock Text="[tasks]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#666666" />
-          </Button>
-          <Button x:Name="TabJobsButton"
-                  Background="Transparent"
-                  BorderThickness="0"
-                  Padding="0,2,0,2"
-                  Click="OnTabJobsClick">
-            <TextBlock Text="[jobs]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#666666" />
-          </Button>
-          <Button x:Name="TabSettingsButton"
-                  Background="Transparent"
-                  BorderThickness="0"
-                  Padding="0,2,0,2"
-                  Click="OnTabSettingsClick">
-            <TextBlock Text="[settings]"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#666666" />
-          </Button>
-        </StackPanel>
-        <StackPanel x:Name="AgentSelectorPanel"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    Margin="0,4,0,0">
-          <TextBlock Text="agent:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="11"
-                     Foreground="#999999"
-                     VerticalAlignment="Center" />
-          <ComboBox x:Name="AgentSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="11"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="220"
-                    Padding="6,4"
-                    SelectionChanged="OnAgentSelectionChanged" />
-        </StackPanel>
-        <StackPanel x:Name="ThreadSelectorPanel"
-                    Orientation="Horizontal"
-                    Spacing="8"
-                    Visibility="Collapsed"
-                    Margin="0,4,0,0">
-          <TextBlock Text="thread:"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="11"
-                     Foreground="#999999"
-                     VerticalAlignment="Center" />
-          <ComboBox x:Name="ThreadSelector"
-                    FontFamily="Consolas, Courier New, monospace"
-                    FontSize="11"
-                    Background="#1A1A1A"
-                    Foreground="#CCCCCC"
-                    BorderBrush="#333333"
-                    BorderThickness="1"
-                    MinWidth="220"
-                    Padding="6,4"
-                    SelectionChanged="OnThreadSelectionChanged" />
-          <Button Background="Transparent" BorderThickness="0" Padding="4,2"
-                  Click="OnAddThreadClick"
-                  ToolTipService.ToolTip="New thread"
-                  VerticalAlignment="Center">
-            <TextBlock Text="+"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="14"
-                       FontWeight="Bold"
-                       Foreground="#00FF00" />
-          </Button>
-        </StackPanel>
-        <TextBlock x:Name="OneOffWarning"
-                   Text="? One-off mode: each message is an isolated prompt with no conversation history. Select a thread to enable history."
+                   FontSize="14" Foreground="#00FF00" />
+        <TextBlock Text="stateless request"
                    Style="{StaticResource TerminalText}"
-                   FontSize="10"
-                   Foreground="#FF4444"
-                   TextWrapping="Wrap"
-                   Visibility="Collapsed"
-                   Margin="0,6,0,0" />
-        <!-- Token cost bars -->
-        <StackPanel x:Name="CostPanel"
-                    Visibility="Collapsed"
-                    Spacing="2"
-                    Margin="0,6,0,0">
-          <TextBlock x:Name="ChannelCostLabel"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10"
-                     Foreground="#888888" />
-          <StackPanel x:Name="ChannelCostBreakdown" Spacing="1" />
-          <TextBlock x:Name="ThreadCostLabel"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10"
-                     Foreground="#888888"
-                     Visibility="Collapsed" />
-          <StackPanel x:Name="ThreadCostBreakdown" Spacing="1" Visibility="Collapsed" />
-        </StackPanel>
+                   FontSize="10" Foreground="#666666" />
         <Border Height="1" Background="#1A1A1A" Margin="0,8,0,0" />
       </StackPanel>
 
-      <!-- Messages (chat view) -->
       <ScrollViewer x:Name="MessagesScroller" Grid.Row="1" Margin="20,8,20,0">
         <StackPanel x:Name="MessagesPanel" Spacing="12" />
       </ScrollViewer>
 
-      <!-- Input area (chat view) -->
       <Grid x:Name="ChatInputArea" Grid.Row="2" Margin="20,8,20,16">
         <Grid.RowDefinitions>
           <RowDefinition Height="Auto" />
@@ -316,423 +145,27 @@
                    AcceptsReturn="False"
                    ScrollViewer.VerticalScrollBarVisibility="Auto"
                    HorizontalAlignment="Stretch" />
-          <StackPanel Grid.Column="1"
-                      x:Name="ChatActionsPanel"
-                      Orientation="Horizontal"
-                      Spacing="4"
-                      Margin="4,0,0,0" />
-          <Button Grid.Column="2"
+          <Button x:Name="SendButton"
+                  Grid.Column="1"
                   Style="{StaticResource TerminalButton}"
                   Click="OnSendClick"
+                  Margin="4,0,0,0">
+            <TextBlock Text="send" Style="{StaticResource TerminalText}"
+                       FontSize="13" Foreground="#00FF00" />
+          </Button>
+          <Button x:Name="CancelButton"
+                  Grid.Column="2"
+                  Style="{StaticResource TerminalButton}"
+                  Click="OnCancelClick"
+                  Visibility="Collapsed"
                   Margin="4,0,0,0"
-                  x:Name="SendButton">
-            <TextBlock Text="Send"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="13"
-                       Foreground="#00FF00" />
+                  ToolTipService.ToolTip="Cancel request">
+            <TextBlock Text="stop" Style="{StaticResource TerminalText}"
+                       FontSize="13" Foreground="#FF4444" />
           </Button>
         </Grid>
         <local:TerminalCursor x:Name="Cursor" Grid.Row="1" Margin="0,8,0,0" />
       </Grid>
-
-      <!-- Channel settings view -->
-      <ScrollViewer x:Name="SettingsScroller" Grid.Row="1" Grid.RowSpan="2"
-                    Visibility="Collapsed" Margin="20,8,20,16">
-        <StackPanel x:Name="SettingsPanel" Spacing="16" Padding="0,0,0,20" />
-      </ScrollViewer>
-
-      <!-- Job view (shown when the [jobs] tab is active) -->
-      <Grid x:Name="JobViewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <!-- Job header: selector + info -->
-        <StackPanel Grid.Row="0" Margin="20,8,20,0" Spacing="4">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="template:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#999999"
-                       VerticalAlignment="Center" />
-            <ComboBox x:Name="JobTemplateSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="11"
-                      Background="#1A1A1A"
-                      Foreground="#666666"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="260"
-                      Padding="6,4"
-                      IsEnabled="False" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="job:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#999999"
-                       VerticalAlignment="Center" />
-            <ComboBox x:Name="JobSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="11"
-                      Background="#1A1A1A"
-                      Foreground="#CCCCCC"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="260"
-                      Padding="6,4"
-                      SelectionChanged="OnJobSelectionChanged" />
-            <Button Background="Transparent" BorderThickness="0" Padding="4,2"
-                    Click="OnRefreshJobsClick"
-                    ToolTipService.ToolTip="Refresh jobs"
-                    VerticalAlignment="Center">
-              <TextBlock Text="?"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="14"
-                         FontWeight="Bold"
-                         Foreground="#00FF00" />
-            </Button>
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBlock x:Name="JobStatusBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#00AAFF" />
-            <TextBlock x:Name="JobActionBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#999999" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock x:Name="JobTimestampBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="10"
-                       Foreground="#666666" />
-          </StackPanel>
-          <Border Height="1" Background="#1A1A1A" Margin="0,6,0,0" />
-        </StackPanel>
-
-        <!-- Job logs -->
-        <ScrollViewer x:Name="JobLogsScroller" Grid.Row="1" Margin="20,8,20,0">
-          <StackPanel x:Name="JobLogsPanel" Spacing="4" />
-        </ScrollViewer>
-
-        <!-- Job controls -->
-        <StackPanel x:Name="JobControlsPanel" Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="20,8,20,16">
-          <Button x:Name="JobApproveButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnJobApproveClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Approve"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#00FF00" />
-          </Button>
-          <Button x:Name="JobCancelButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnJobCancelClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Cancel"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FF4444" />
-          </Button>
-          <Button x:Name="JobStopButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnJobStopClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="¦ Stop"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FFAA00" />
-          </Button>
-          <Button x:Name="JobPauseButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnJobPauseClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Pause"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FFAA00" />
-          </Button>
-          <Button x:Name="JobResumeButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnJobResumeClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Resume"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#00FF00" />
-          </Button>
-
-          <!-- Clipboard copy buttons -->
-          <Border Width="1" Background="#333333" Margin="4,2" />
-          <Button x:Name="CopyLogsButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnCopyJobLogsClick"
-                  Visibility="Collapsed"
-                  ToolTipService.ToolTip="Copy job logs to clipboard">
-            <TextBlock Text="?? Logs"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#808080" />
-          </Button>
-          <Button x:Name="CopyResultButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnCopyResultClick"
-                  Visibility="Collapsed"
-                  ToolTipService.ToolTip="Copy result data to clipboard">
-            <TextBlock Text="?? Result"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#808080" />
-          </Button>
-          <Button x:Name="CopyAllButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnCopyAllClick"
-                  Visibility="Collapsed"
-                  ToolTipService.ToolTip="Copy all job details to clipboard">
-            <TextBlock Text="?? Copy All"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#808080" />
-          </Button>
-        </StackPanel>
-      </Grid>
-
-      <!-- Task view (shown when the [tasks] tab is active) -->
-      <Grid x:Name="TaskViewPanel" Grid.Row="1" Grid.RowSpan="2" Visibility="Collapsed">
-        <Grid.RowDefinitions>
-          <RowDefinition Height="Auto" />
-          <RowDefinition />
-          <RowDefinition Height="Auto" />
-        </Grid.RowDefinitions>
-
-        <!-- Task header: definition selector + controls -->
-        <StackPanel Grid.Row="0" Margin="20,8,20,0" Spacing="6">
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="task:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#999999"
-                       VerticalAlignment="Center" />
-            <ComboBox x:Name="TaskSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="11"
-                      Background="#1A1A1A"
-                      Foreground="#CCCCCC"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="300"
-                      Padding="6,4"
-                      SelectionChanged="OnTaskSelectionChanged" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="8">
-            <TextBlock Text="template:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#999999"
-                       VerticalAlignment="Center" />
-            <ComboBox x:Name="TaskDefinitionSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="11"
-                      Background="#1A1A1A"
-                      Foreground="#CCCCCC"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="260"
-                      Padding="6,4"
-                      SelectionChanged="OnTaskDefinitionSelectionChanged" />
-            <Button Background="Transparent" BorderThickness="0" Padding="4,2"
-                    Click="OnRefreshTasksClick"
-                    ToolTipService.ToolTip="Refresh tasks"
-                    VerticalAlignment="Center">
-              <TextBlock Text="?"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="14"
-                         FontWeight="Bold"
-                         Foreground="#00FF00" />
-            </Button>
-            <Button x:Name="TaskNewButton"
-                    Background="Transparent" BorderThickness="0" Padding="4,2"
-                    Click="OnTaskNewClick"
-                    ToolTipService.ToolTip="New task template"
-                    VerticalAlignment="Center">
-              <TextBlock Text="+"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="14"
-                         FontWeight="Bold"
-                         Foreground="#00FF00" />
-            </Button>
-            <Button x:Name="TaskExecuteButton"
-                    Style="{StaticResource TerminalButton}"
-                    Click="OnTaskExecuteClick"
-                    Visibility="Collapsed">
-              <TextBlock Text="? Execute"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="12"
-                         Foreground="#00FF00" />
-            </Button>
-          </StackPanel>
-          <StackPanel x:Name="TaskInstanceSelectorPanel"
-                      Orientation="Horizontal"
-                      Spacing="8"
-                      Visibility="Collapsed">
-            <TextBlock Text="instance:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       Foreground="#999999"
-                       VerticalAlignment="Center" />
-            <ComboBox x:Name="TaskInstanceSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="11"
-                      Background="#1A1A1A"
-                      Foreground="#CCCCCC"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="300"
-                      Padding="6,4"
-                      SelectionChanged="OnTaskInstanceSelectionChanged" />
-          </StackPanel>
-          <StackPanel Orientation="Horizontal" Spacing="12">
-            <TextBlock x:Name="TaskNameBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#999999" />
-          </StackPanel>
-          <TextBlock x:Name="TaskStatusBlock"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="11"
-                     Foreground="#999999"
-                     TextWrapping="Wrap"
-                     IsTextSelectionEnabled="True"
-                     MaxWidth="600"
-                     HorizontalAlignment="Left" />
-          <TextBlock x:Name="TaskTimestampBlock"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10"
-                     Foreground="#666666" />
-          <Border Height="1" Background="#1A1A1A" Margin="0,6,0,0" />
-        </StackPanel>
-
-        <!-- Task editor (create / edit task template source) -->
-        <Grid x:Name="TaskEditorPanel" Grid.Row="1" Margin="20,8,20,0">
-          <Grid.RowDefinitions>
-            <RowDefinition Height="Auto" />
-            <RowDefinition />
-          </Grid.RowDefinitions>
-          <TextBlock Grid.Row="0"
-                     Text="// Task template source (C# dialect)"
-                     Style="{StaticResource TerminalText}"
-                     FontSize="10"
-                     Foreground="#555555"
-                     Margin="0,0,0,4" />
-          <TextBox x:Name="TaskSourceEditor"
-                   Grid.Row="1"
-                   FontFamily="Consolas, Courier New, monospace"
-                   FontSize="12"
-                   Foreground="#CCCCCC"
-                   Background="#0D0D0D"
-                   BorderBrush="#333333"
-                   BorderThickness="1"
-                   Padding="12,8"
-                   AcceptsReturn="True"
-                   TextWrapping="Wrap"
-                   ScrollViewer.VerticalScrollBarVisibility="Auto"
-                   PlaceholderText="Enter task template source..."
-                   TextChanged="OnTaskSourceTextChanged" />
-        </Grid>
-
-        <!-- Task instance logs (shown when an instance is selected) -->
-        <ScrollViewer x:Name="TaskLogsScroller" Grid.Row="1" Margin="20,8,20,0" Visibility="Collapsed">
-          <StackPanel x:Name="TaskLogsPanel" Spacing="4" />
-        </ScrollViewer>
-
-        <!-- Placeholder when no instance is selected and editor is hidden -->
-        <TextBlock x:Name="TaskNoInstancePlaceholder"
-                   Grid.Row="1"
-                   Text="Start a new or select an existing task instance to view logs."
-                   Style="{StaticResource TerminalText}"
-                   FontSize="12"
-                   Foreground="#666666"
-                   HorizontalAlignment="Center"
-                   VerticalAlignment="Center"
-                   TextWrapping="Wrap"
-                   Visibility="Collapsed" />
-
-        <!-- Task controls -->
-        <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="8" Margin="20,8,20,16">
-          <Button x:Name="TaskSubmitButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnTaskSubmitClick">
-            <TextBlock Text="? Submit Template"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#00FF00" />
-          </Button>
-          <Button x:Name="TaskStopButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnTaskStopClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="¦ Stop"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FFAA00" />
-          </Button>
-          <Button x:Name="TaskPauseButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnTaskPauseClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Pause"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FFAA00" />
-          </Button>
-          <Button x:Name="TaskResumeButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnTaskResumeClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Resume"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#00FF00" />
-          </Button>
-          <Button x:Name="TaskCancelButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnTaskCancelClick"
-                  Visibility="Collapsed">
-            <TextBlock Text="? Cancel"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#FF4444" />
-          </Button>
-          <Border Width="1" Background="#333333" Margin="4,2" />
-          <Button x:Name="TaskCopyLogsButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnCopyTaskLogsClick"
-                  Visibility="Collapsed"
-                  ToolTipService.ToolTip="Copy task logs to clipboard">
-            <TextBlock Text="?? Logs"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#808080" />
-          </Button>
-          <Button x:Name="TaskCopyResultButton"
-                  Style="{StaticResource TerminalButton}"
-                  Click="OnCopyTaskResultClick"
-                  Visibility="Collapsed"
-                  ToolTipService.ToolTip="Copy task results to clipboard">
-            <TextBlock Text="?? Results"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12"
-                       Foreground="#808080" />
-          </Button>
-        </StackPanel>
-      </Grid>
-
-
     </Grid>
   </Grid>
 </Page>

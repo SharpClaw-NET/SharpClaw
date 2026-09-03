@@ -1,16 +1,16 @@
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
-using Serilog;
-using SharpClaw.Core.Clients;
-using SharpClaw.Contracts.Providers;
-using SharpClaw.Shared.Logging;
+using Microsoft.Extensions.Logging;
 
 namespace SharpClaw.Runtime.Host.Api;
 
 public sealed class ExceptionHandlingMiddleware(
     RequestDelegate next,
-    DurableProcessLogWriter processLogs)
+    ILogger<ExceptionHandlingMiddleware> logger)
 {
+    private const int ClientClosedRequestStatusCode = 499;
+    private const string GenericServerError = "An internal server error occurred.";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
@@ -22,72 +22,25 @@ public sealed class ExceptionHandlingMiddleware(
         {
             await next(context);
         }
-        catch (CompletionParameterValidationException ex)
+        catch (OperationCanceledException ex) when (context.RequestAborted.IsCancellationRequested)
         {
-            Log.Warning(ex, "Completion parameter validation failed on {Method} {Path}", context.Request.Method, context.Request.Path);
-            processLogs.AppendException(ex,
-                $"Completion parameter validation failed on {context.Request.Method} {context.Request.Path}");
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new
-                {
-                    error = "Invalid completion parameters",
-                    provider = ex.ProviderKey,
-                    validationErrors = ex.ValidationErrors,
-                }, JsonOptions));
-            }
-        }
-        catch (InvalidOperationException ex)
-        {
-            Log.Warning(ex, "Validation error on {Method} {Path}", context.Request.Method, context.Request.Path);
-            processLogs.AppendException(ex,
-                $"Validation error on {context.Request.Method} {context.Request.Path}");
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
-            }
-        }
-        catch (NotSupportedException ex)
-        {
-            // Unsupported provider feature (e.g. response_mime_type on Google) → 400.
-            Log.Warning(ex, "Unsupported operation on {Method} {Path}", context.Request.Method, context.Request.Path);
-            processLogs.AppendException(ex,
-                $"Unsupported operation on {context.Request.Method} {context.Request.Path}");
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status400BadRequest;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
-            }
-        }
-        catch (HttpRequestException ex)
-        {
-            // Provider / upstream HTTP errors → 502 Bad Gateway.
-            Log.Warning(ex, "Provider error on {Method} {Path}", context.Request.Method, context.Request.Path);
-            processLogs.AppendException(ex,
-                $"Provider error on {context.Request.Method} {context.Request.Path}");
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status502BadGateway;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
-            }
+            logger.LogDebug(ex, "Request cancelled on {Method} {Path}", context.Request.Method, context.Request.Path);
+            if (context.Response.HasStarted)
+                throw;
+
+            context.Response.StatusCode = ClientClosedRequestStatusCode;
         }
         catch (Exception ex)
         {
-            Log.Error(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
-            processLogs.AppendException(ex,
-                $"Unhandled exception on {context.Request.Method} {context.Request.Path}");
-            if (!context.Response.HasStarted)
-            {
-                context.Response.StatusCode = StatusCodes.Status500InternalServerError;
-                context.Response.ContentType = "application/json";
-                await context.Response.WriteAsync(JsonSerializer.Serialize(new { error = ex.Message }, JsonOptions));
-            }
+            logger.LogError(ex, "Unhandled exception on {Method} {Path}", context.Request.Method, context.Request.Path);
+            if (context.Response.HasStarted)
+                throw;
+
+            context.Response.StatusCode = StatusCodes.Status500InternalServerError;
+            context.Response.ContentType = "application/json";
+            await context.Response.WriteAsync(JsonSerializer.Serialize(
+                new { error = GenericServerError },
+                JsonOptions));
         }
     }
 }

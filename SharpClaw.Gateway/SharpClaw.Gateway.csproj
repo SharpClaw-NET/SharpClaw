@@ -9,6 +9,10 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <Compile Remove="Controllers\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
   </ItemGroup>
 
@@ -17,45 +21,30 @@
     <PackageReference Include="Serilog" />
     <PackageReference Include="Serilog.AspNetCore" />
     <PackageReference Include="Swashbuckle.AspNetCore.SwaggerUI" />
+    <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
+    <PackageReference Include="SharpClaw.Core" />
     <PackageReference Include="SharpClaw.Gateway.Contracts" />
     <PackageReference Include="SharpClaw.ModuleHost.InProcess" />
-    <PackageReference Include="SharpClaw.Modules.EditorCommon" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.VS2026Editor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.VSCodeEditor" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.AgentOrchestration" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Metrics" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.ModuleDev" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Providers.Anthropic" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Providers.Google" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Providers.LlamaSharp" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Providers.Ollama" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
-    <PackageReference Include="SharpClaw.Modules.Providers.OpenAICompatible" GeneratePathProperty="true" ExcludeAssets="compile" PrivateAssets="all" />
     <ProjectReference Include="..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
 
-  <!--
-    Copy packaged module DLLs into the gateway output so GatewayModuleLoader
-    can discover them at runtime. Unlike the API's variant, the gateway
-    target copies only each module's primary assembly (SharpClaw.Modules.*.dll);
-    transitive dependencies stay with the API process.
-  -->
   <Target Name="CopyBundledModules"
           AfterTargets="Build"
           DependsOnTargets="_ResolvePackagedModulePayloadFiles">
-    <ItemGroup>
-      <_BundledModuleDll Include="@(_PackagedModuleDll)" />
-    </ItemGroup>
-    <Copy SourceFiles="@(_BundledModuleDll)" DestinationFolder="$(OutputPath)" SkipUnchangedFiles="true" />
+    <Copy SourceFiles="@(_PackagedModulePayloadFile)"
+          DestinationFiles="@(_PackagedModulePayloadFile->'$(OutputPath)modules\%(RecursiveDir)%(Filename)%(Extension)')"
+          SkipUnchangedFiles="true"
+          Condition="'@(_PackagedModulePayloadFile)' != ''" />
   </Target>
 
   <Target Name="CleanBundledModules" AfterTargets="Clean">
     <ItemGroup>
-      <_CopiedBundledModuleDll Include="$(OutputPath)SharpClaw.Modules.*.dll" />
+      <_CopiedBundledModuleDll Include="$(OutputPath)modules\**\*" />
     </ItemGroup>
     <Delete Files="@(_CopiedBundledModuleDll)" Condition="'@(_CopiedBundledModuleDll)' != ''" />
   </Target>

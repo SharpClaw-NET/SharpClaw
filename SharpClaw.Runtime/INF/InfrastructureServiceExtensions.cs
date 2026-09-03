@@ -30,6 +30,7 @@ public static class InfrastructureServiceExtensions
         services.AddSingleton<RuntimeModuleDbContextRegistry>();
         services.AddSingleton<ModulePersistenceRegistrationFactory>();
         services.AddSingleton<IModuleDbContextFactory, ModuleDbContextFactory>();
+        services.AddScoped<IRuntimePersistenceActionRunnerAccessor, RuntimePersistenceActionRunnerAccessor>();
 
         switch (databaseOptions.Provider)
         {
@@ -133,7 +134,6 @@ public static class InfrastructureServiceExtensions
 
         services.AddSingleton<MigrationGate>();
         services.AddSingleton<MigrationService>();
-        services.AddScoped<ICoreEntityIdProvider, CoreEntityIdProvider>();
         services.AddScoped<ISharpClawDataContext>(
             sp => sp.GetRequiredService<SharpClawDbContext>());
 

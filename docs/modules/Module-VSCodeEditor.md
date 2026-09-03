@@ -22,11 +22,11 @@
 This module requires the `editor_bridge` and `editor_session` contracts
 exported by the Editor Common module. Both modules must be enabled.
 
-Add **both** keys to your core `.env` (`Infrastructure/Environment/.env`) Modules section:
+Add **both** assignments to the deployed Runtime Host's `Environment/.env`:
 
-```jsonc
-"sharpclaw_editor_common": "true",
-"sharpclaw_vscode_editor": "true"
+```dotenv
+Modules__sharpclaw_editor_common="true"
+Modules__sharpclaw_vscode_editor="true"
 ```
 
 > ⚠️ If Editor Common is disabled, this module will be **excluded during
@@ -200,7 +200,7 @@ Show a diff view in VS Code for user review (accept/reject).
 
 ### vsc_run_build
 
-Trigger a build task in the connected VS Code instance and return
+Trigger a build operation in the connected VS Code instance and return
 output.
 
 **Parameters:**

@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Configuration;
+using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Runtime.BLL.Modules;
 
@@ -33,6 +34,28 @@ internal static class SecureJsonOptions
 
     /// <summary>Configuration key for overriding <see cref="DefaultMaxEnvelopeSize"/>.</summary>
     public const string MaxEnvelopeSizeConfigKey = "Modules:MaxEnvelopeSizeBytes";
+
+    public static ModuleManifest DeserializeManifest(string json)
+    {
+        using var document = JsonDocument.Parse(
+            json,
+            new JsonDocumentOptions
+            {
+                CommentHandling = JsonCommentHandling.Skip,
+                AllowTrailingCommas = false,
+            });
+
+        if (document.RootElement.ValueKind == JsonValueKind.Object
+            && document.RootElement.EnumerateObject().Any(property =>
+                string.Equals(property.Name, "entrypoint", StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new JsonException(
+                "The module manifest property 'entrypoint' was removed. Use 'entryAssembly' for .NET modules.");
+        }
+
+        return JsonSerializer.Deserialize<ModuleManifest>(json, Manifest)
+            ?? throw new JsonException("Module manifest must contain a JSON object.");
+    }
 
     /// <summary>
     /// Resolve the active envelope size cap from configuration, clamped

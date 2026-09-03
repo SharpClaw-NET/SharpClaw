@@ -8,95 +8,79 @@ using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
-using SharpClaw.Runtime.Host.Routing;
+using SharpClaw.Contracts.DTOs.AgentActions;
+using SharpClaw.Contracts.Modules;
+using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
-using SharpClaw.Contracts.Modules;
-using SharpClaw.Core.Modules;
+using SharpClaw.Runtime.Host.Routing;
 
 namespace SharpClaw.Tests.Modules;
 
 [TestFixture]
 public sealed class ForeignModuleEndpointParityTests
 {
-    private static readonly RuntimeKind[] RuntimeKinds =
-    [
-        RuntimeKind.CSharp,
-        RuntimeKind.Node,
-        RuntimeKind.Python,
-    ];
-
     [Test]
-    public async Task JsonRequestSurfaceMatchesAcrossCSharpNodeAndPythonModules()
+    public async Task JsonRoutesMatchBetweenInProcessAndOutOfProcessDotNetModules()
     {
-        var observed = new Dictionary<RuntimeKind, JsonSurface>();
-        foreach (var runtime in RuntimeKinds)
-        {
-            await using var host = await StartSurfaceAsync(runtime);
-            observed[runtime] = await ReadJsonSurfaceAsync(host.Api.BaseAddress);
-        }
+        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
 
-        observed[RuntimeKind.Node].Should().Be(observed[RuntimeKind.CSharp]);
-        observed[RuntimeKind.Python].Should().Be(observed[RuntimeKind.CSharp]);
+        var expected = await ReadJsonSurfaceAsync(inProcess.Api.BaseAddress);
+        var actual = await ReadJsonSurfaceAsync(outOfProcess.Api.BaseAddress);
+
+        actual.Should().Be(expected);
     }
 
     [Test]
-    public async Task StaticAndStreamRoutesMatchAcrossCSharpNodeAndPythonModules()
+    public async Task StaticAndStreamingRoutesMatchBetweenDotNetHostModes()
     {
-        var observed = new Dictionary<RuntimeKind, AssetSurface>();
-        foreach (var runtime in RuntimeKinds)
-        {
-            await using var host = await StartSurfaceAsync(runtime);
-            observed[runtime] = await ReadAssetSurfaceAsync(host.Api.BaseAddress);
-        }
+        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
 
-        observed[RuntimeKind.Node].Should().Be(observed[RuntimeKind.CSharp]);
-        observed[RuntimeKind.Python].Should().Be(observed[RuntimeKind.CSharp]);
+        var expected = await ReadAssetSurfaceAsync(inProcess.Api.BaseAddress);
+        var actual = await ReadAssetSurfaceAsync(outOfProcess.Api.BaseAddress);
+
+        actual.Should().Be(expected);
     }
 
     [Test]
-    public async Task WebSocketRoutesMatchAcrossCSharpNodeAndPythonModules()
+    public async Task WebSocketRoutesMatchBetweenDotNetHostModes()
     {
-        var observed = new Dictionary<RuntimeKind, string>();
-        foreach (var runtime in RuntimeKinds)
-        {
-            await using var host = await StartSurfaceAsync(runtime);
-            observed[runtime] = await ReadWebSocketSurfaceAsync(host.Api.BaseAddress);
-        }
+        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
 
-        observed[RuntimeKind.Node].Should().Be(observed[RuntimeKind.CSharp]);
-        observed[RuntimeKind.Python].Should().Be(observed[RuntimeKind.CSharp]);
+        var expected = await ReadWebSocketSurfaceAsync(inProcess.Api.BaseAddress);
+        var actual = await ReadWebSocketSurfaceAsync(outOfProcess.Api.BaseAddress);
+
+        actual.Should().Be(expected);
     }
 
     [Test]
-    public async Task DisabledModulesReturnUnavailableAcrossCSharpNodeAndPythonModules()
+    public async Task UnregisterMakesBothDotNetHostModesUnavailable()
     {
-        foreach (var runtime in RuntimeKinds)
+        foreach (var hostKind in Enum.GetValues<ModuleHostKind>())
         {
-            await using var host = await StartSurfaceAsync(runtime);
+            await using var host = await StartAsync(hostKind);
             host.Registry.Unregister(host.Module.Id);
-            using var client = new HttpClient { BaseAddress = host.Api.BaseAddress };
 
+            using var client = new HttpClient { BaseAddress = host.Api.BaseAddress };
             using var response = await client.GetAsync("/modules/sample/ping");
 
-            response.StatusCode.Should().Be(
-                HttpStatusCode.ServiceUnavailable,
-                $"{runtime} endpoints must stop serving after module unregister");
+            response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
         }
     }
 
     [Test]
-    public async Task HealthSurfaceMatchesAcrossCSharpNodeAndPythonModules()
+    public async Task HealthMatchesBetweenDotNetHostModes()
     {
-        var observed = new Dictionary<RuntimeKind, ModuleHealthStatus>();
-        foreach (var runtime in RuntimeKinds)
-        {
-            await using var host = await StartSurfaceAsync(runtime);
-            observed[runtime] = await host.Module.HealthCheckAsync(CancellationToken.None);
-        }
+        await using var inProcess = await StartAsync(ModuleHostKind.InProcess);
+        await using var outOfProcess = await StartAsync(ModuleHostKind.OutOfProcess);
 
-        observed[RuntimeKind.Node].Should().BeEquivalentTo(observed[RuntimeKind.CSharp]);
-        observed[RuntimeKind.Python].Should().BeEquivalentTo(observed[RuntimeKind.CSharp]);
+        var expected = await inProcess.Module.HealthCheckAsync(CancellationToken.None);
+        var actual = await outOfProcess.Module.HealthCheckAsync(CancellationToken.None);
+
+        actual.Should().BeEquivalentTo(expected);
     }
 
     private static async Task<JsonSurface> ReadJsonSurfaceAsync(Uri baseAddress)
@@ -105,6 +89,7 @@ public sealed class ForeignModuleEndpointParityTests
         using var pingRequest = new HttpRequestMessage(HttpMethod.Get, "/modules/sample/ping?value=42");
         pingRequest.Headers.TryAddWithoutValidation("X-Test-Marker", "from-host");
         using var pingResponse = await client.SendAsync(pingRequest);
+
         using var echoContent = new StringContent(
             """{"hello":"world"}""",
             Encoding.UTF8,
@@ -180,35 +165,37 @@ public sealed class ForeignModuleEndpointParityTests
         return document.RootElement.Clone();
     }
 
-    private static async Task<ParitySurfaceHost> StartSurfaceAsync(RuntimeKind runtime)
+    private static async Task<ParityHost> StartAsync(ModuleHostKind hostKind)
     {
         var registry = new ModuleRegistry();
         TestWorkspace? workspace = null;
         IAsyncDisposable? runtimeHost = null;
         ISharpClawRuntimeModule module;
 
-        if (runtime == RuntimeKind.CSharp)
+        if (hostKind == ModuleHostKind.InProcess)
         {
-            module = new NativeParityModule();
+            module = new InProcessParityModule();
             registry.Register(module);
         }
         else
         {
-            workspace = TestWorkspace.Create(runtime.ToString().ToLowerInvariant());
+            workspace = TestWorkspace.Create();
             var foreignHost = await ForeignModuleHost.StartAsync(
-                Manifest(runtime),
-                RuntimeInfo(runtime),
-                CreateLaunchOptions(workspace, runtime));
+                Manifest(),
+                RuntimeInfo(),
+                CreateLaunchOptions(workspace));
             runtimeHost = foreignHost;
             module = foreignHost.Module.Should().BeAssignableTo<ISharpClawRuntimeModule>().Subject;
             registry.Register(module, foreignHost);
         }
 
-        var api = await StartApiAsync(registry);
-        return new ParitySurfaceHost(registry, module, api, runtimeHost, workspace);
+        var api = await StartApiAsync(registry, hostKind == ModuleHostKind.InProcess);
+        return new ParityHost(registry, module, api, runtimeHost, workspace);
     }
 
-    private static async Task<TestApiHost> StartApiAsync(ModuleRegistry registry)
+    private static async Task<TestApiHost> StartApiAsync(
+        ModuleRegistry registry,
+        bool mapInProcessEndpoints)
     {
         var port = GetFreeTcpPort();
         var baseAddress = new Uri($"http://127.0.0.1:{port}");
@@ -217,33 +204,40 @@ public sealed class ForeignModuleEndpointParityTests
         builder.Services.AddSingleton(registry);
         var app = builder.Build();
         app.UseWebSockets();
-        foreach (var module in registry.GetAllModules().OfType<ISharpClawRuntimeModule>())
-            module.MapEndpoints(app);
-        app.MapForeignModuleEndpoints(registry);
+
+        if (mapInProcessEndpoints)
+        {
+            foreach (var module in registry.GetAllModules().OfType<ISharpClawRuntimeModule>())
+                module.MapEndpoints(app);
+        }
+        else
+        {
+            app.MapForeignModuleEndpoints(registry);
+        }
+
         await app.StartAsync();
         return new TestApiHost(app, baseAddress);
     }
 
-    private static ModuleManifest Manifest(RuntimeKind runtime) =>
+    private static ModuleManifest Manifest() =>
         new(
-            runtime == RuntimeKind.Node ? "sample_node_module" : "sample_python_module",
-            runtime == RuntimeKind.Node ? "Sample Node Module" : "Sample Python Module",
+            "sample_dotnet_module",
+            "Sample .NET Module",
             "1.0.0",
-            runtime == RuntimeKind.Node ? "snm" : "spm",
-            runtime == RuntimeKind.Node ? "dist/server.js" : "sharpclaw_module.main:app",
+            "sdm",
+            "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
-    private static ModuleManifestRuntimeInfo RuntimeInfo(RuntimeKind runtime) =>
-        runtime switch
+    private static ModuleManifestRuntimeInfo RuntimeInfo() =>
+        ModuleManifestRuntimeInfo.FromJson("""
         {
-            RuntimeKind.Node => new(ModuleManifestRuntimeInfo.Node, "dist/server.js"),
-            RuntimeKind.Python => new(ModuleManifestRuntimeInfo.Python, "sharpclaw_module.main:app"),
-            _ => throw new ArgumentOutOfRangeException(nameof(runtime), runtime, null),
-        };
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "SharpClaw.TestFixtures.ForeignSidecar.dll"
+        }
+        """);
 
-    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
-        TestWorkspace workspace,
-        RuntimeKind runtime)
+    private static ForeignModuleHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
     {
         var helperPath = ResolveSidecarHelperPath();
         return new ForeignModuleHostLaunchOptions
@@ -254,13 +248,13 @@ public sealed class ForeignModuleEndpointParityTests
             ModuleDirectory = workspace.ModuleDir,
             ModuleDataDirectory = workspace.DataDir,
             ControlAddress = new Uri($"http://127.0.0.1:{GetFreeTcpPort()}"),
-            ControlToken = $"{runtime.ToString().ToLowerInvariant()}-run-token",
+            ControlToken = "run-token",
             StartupTimeout = TimeSpan.FromSeconds(5),
             ShutdownTimeout = TimeSpan.FromSeconds(2),
             HostVersion = "0.1.0-beta",
             Environment = new Dictionary<string, string>
             {
-                ["SHARPCLAW_TEST_TOOL_PREFIX"] = runtime == RuntimeKind.Node ? "snm" : "spm",
+                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "sdm",
             },
         };
     }
@@ -306,11 +300,10 @@ public sealed class ForeignModuleEndpointParityTests
         finally { listener.Stop(); }
     }
 
-    private enum RuntimeKind
+    private enum ModuleHostKind
     {
-        CSharp,
-        Node,
-        Python,
+        InProcess,
+        OutOfProcess,
     }
 
     private sealed record JsonSurface(
@@ -339,7 +332,7 @@ public sealed class ForeignModuleEndpointParityTests
         }
     }
 
-    private sealed class ParitySurfaceHost(
+    private sealed class ParityHost(
         ModuleRegistry registry,
         ISharpClawRuntimeModule module,
         TestApiHost api,
@@ -374,11 +367,10 @@ public sealed class ForeignModuleEndpointParityTests
         public string ModuleDir { get; }
         public string DataDir { get; }
 
-        public static TestWorkspace Create(string runtime) =>
+        public static TestWorkspace Create() =>
             new(Path.Combine(
                 TestContext.CurrentContext.WorkDirectory,
                 "foreign-parity",
-                runtime,
                 Guid.NewGuid().ToString("N")));
 
         public void Dispose()
@@ -394,11 +386,11 @@ public sealed class ForeignModuleEndpointParityTests
         }
     }
 
-    private sealed class NativeParityModule : ISharpClawRuntimeModule
+    private sealed class InProcessParityModule : ISharpClawRuntimeModule
     {
-        public string Id => "sample_csharp_module";
-        public string DisplayName => "Sample C# Module";
-        public string ToolPrefix => "scm";
+        public string Id => "sample_dotnet_module";
+        public string DisplayName => "Sample .NET Module";
+        public string ToolPrefix => "sdm";
 
         public void ConfigureServices(IServiceCollection services)
         {
@@ -425,7 +417,6 @@ public sealed class ForeignModuleEndpointParityTests
                 if (!await EnsureAvailableAsync(context))
                     return;
 
-                context.Response.Headers["X-Sidecar"] = "yes";
                 await context.Response.WriteAsJsonAsync(new
                 {
                     ok = true,
@@ -515,13 +506,13 @@ public sealed class ForeignModuleEndpointParityTests
         private static async Task<bool> EnsureAvailableAsync(HttpContext context)
         {
             var registry = context.RequestServices.GetRequiredService<ModuleRegistry>();
-            if (registry.GetModule("sample_csharp_module") is not null)
+            if (registry.GetModule("sample_dotnet_module") is not null)
                 return true;
 
             context.Response.StatusCode = StatusCodes.Status503ServiceUnavailable;
             await context.Response.WriteAsJsonAsync(new
             {
-                error = "Module 'sample_csharp_module' is not available.",
+                error = "Module 'sample_dotnet_module' is not available.",
             }, context.RequestAborted);
             return false;
         }

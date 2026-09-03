@@ -1,5 +1,6 @@
 using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
+using SharpClaw.Services;
 
 namespace SharpClaw.Presentation;
 
@@ -10,19 +11,12 @@ public sealed partial class UserGuidePage : Page
     
     private string _activeTopic = "welcome";
 
-    // Guide topics with their file names (without .md extension)
+    // Guide topics for the current host boundary.
     private static readonly (string Id, string Title)[] Topics =
     [
         ("welcome", "Welcome"),
         ("getting-started", "Getting Started"),
-        ("channels-threads", "Channels & Threads"),
-        ("agents-models", "Agents & Models"),
-        ("chat-features", "Chat Features"),
-        ("permissions", "Permissions & Roles"),
-        ("jobs-tasks", "Jobs & Tasks"),
-        ("bot-integrations", "Bot Integrations"),
         ("gateway", "Gateway"),
-        ("advanced", "Advanced Topics"),
         ("troubleshooting", "Troubleshooting"),
     ];
 
@@ -176,6 +170,7 @@ public sealed partial class UserGuidePage : Page
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "Main");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main");
     }
 }
