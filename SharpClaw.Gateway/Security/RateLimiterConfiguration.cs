@@ -7,15 +7,13 @@ namespace SharpClaw.Gateway.Security;
 public static class RateLimiterConfiguration
 {
     public const string GlobalPolicy = "global";
-    public const string AuthPolicy = "auth";
     public const string ChatPolicy = "chat";
 
     public static IServiceCollection AddSharpClawRateLimiting(this IServiceCollection services)
     {
         services.AddRateLimiter(options =>
         {
-            // ── Rejection handler ─────────────────────────────────
-            options.OnRejected = async (context, ct) =>
+            options.OnRejected = async (context, _) =>
             {
                 var ip = context.HttpContext.Connection.RemoteIpAddress?.ToString() ?? "unknown";
                 var banService = context.HttpContext.RequestServices.GetRequiredService<IpBanService>();
@@ -37,11 +35,13 @@ public static class RateLimiterConfiguration
                         DateTimeOffset.UtcNow.Add(retryAfter).ToUnixTimeSeconds().ToString();
                 }
 
-                await GatewayErrors.WriteAsync(context.HttpContext, StatusCodes.Status429TooManyRequests,
-                    "Too many requests. Slow down.", GatewayErrors.TooManyRequests);
+                await GatewayErrors.WriteAsync(
+                    context.HttpContext,
+                    StatusCodes.Status429TooManyRequests,
+                    "Too many requests. Slow down.",
+                    GatewayErrors.TooManyRequests);
             };
 
-            // ── Global policy: sliding window ─────────────────────
             options.AddPolicy(GlobalPolicy, context =>
                 RateLimitPartition.GetSlidingWindowLimiter(
                     partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -54,19 +54,6 @@ public static class RateLimiterConfiguration
                         QueueLimit = 0
                     }));
 
-            // ── Auth policy: stricter fixed window ────────────────
-            options.AddPolicy(AuthPolicy, context =>
-                RateLimitPartition.GetFixedWindowLimiter(
-                    partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
-                    factory: _ => new FixedWindowRateLimiterOptions
-                    {
-                        PermitLimit = 5,
-                        Window = TimeSpan.FromMinutes(1),
-                        QueueProcessingOrder = QueueProcessingOrder.OldestFirst,
-                        QueueLimit = 0
-                    }));
-
-            // ── Chat policy: moderate sliding window ──────────────
             options.AddPolicy(ChatPolicy, context =>
                 RateLimitPartition.GetSlidingWindowLimiter(
                     partitionKey: context.Connection.RemoteIpAddress?.ToString() ?? "unknown",
@@ -83,14 +70,9 @@ public static class RateLimiterConfiguration
         return services;
     }
 
-    /// <summary>
-    /// Infers the per-minute rate limit for a given request path so the
-    /// <c>X-RateLimit-Limit</c> header reflects the applicable policy.
-    /// Module-contributed paths are resolved through the
-    /// <see cref="Modules.GatewayEndpointGroupCatalog"/> when supplied so a
-    /// custom policy on a group is reported correctly.
-    /// </summary>
-    public static int ResolveRateLimit(string path, Modules.GatewayEndpointGroupCatalog? catalog = null)
+    public static int ResolveRateLimit(
+        string path,
+        Modules.GatewayEndpointGroupCatalog? catalog = null)
     {
         if (catalog is not null
             && path.StartsWith("/api/modules/", StringComparison.OrdinalIgnoreCase)
@@ -98,15 +80,11 @@ public static class RateLimiterConfiguration
         {
             return match.Group.RateLimitPolicy switch
             {
-                AuthPolicy => 5,
                 ChatPolicy => 20,
                 _ => 60,
             };
         }
 
-        var lower = path.ToLowerInvariant();
-        if (lower.StartsWith("/api/auth")) return 5;
-        if (lower.Contains("/chat")) return 20;
-        return 60;
+        return path.Contains("/chat", StringComparison.OrdinalIgnoreCase) ? 20 : 60;
     }
 }

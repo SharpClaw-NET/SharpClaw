@@ -8,15 +8,19 @@ using SharpClaw.Runtime.Host;
 using SharpClaw.Core.Clients;
 using SharpClaw.Runtime.BLL.Modules;
 using SharpClaw.Runtime.BLL.Modules.Foreign;
+using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Modules;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Runtime.INF.Persistence;
+using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence.Modules;
 using SharpClaw.TestFixtures.ExternalModule;
 using SharpClaw.Tests.TestHarness;
 using SharpClaw.Shared.Instances;
 using SharpClaw.Core.Modules;
+using SharpClaw.Runtime.INF.Configuration;
+using Supprocom.Secrets;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -562,6 +566,11 @@ public sealed class BundledDotNetSidecarDefaultTests
                 SharpClawInstanceKind.Backend,
                 explicitInstanceRoot: instanceRoot);
             instancePaths.EnsureDirectories();
+            var secretStore = new SupprocomSecretFileStore(
+                LocalEnvironment.CreateSecretsOptions(
+                    Path.Combine(instanceRoot, "Environment"),
+                    isDevelopment: false,
+                    instancePaths));
 
             var configurationValues = new Dictionary<string, string?>
             {
@@ -578,6 +587,10 @@ public sealed class BundledDotNetSidecarDefaultTests
             var services = new ServiceCollection();
             services.AddSingleton<IConfiguration>(configuration);
             services.AddSingleton(instancePaths);
+            services.AddSingleton(secretStore);
+            services.AddSingleton<ISecretDocumentStore>(secretStore);
+            services.AddSingleton<ISecretDocumentUpdater>(secretStore);
+            services.AddSingleton<ISecretFileProtectionManager>(secretStore);
             services.AddLogging();
             services.AddHttpClient();
             services.AddDbContext<SharpClawDbContext>(options =>
@@ -613,6 +626,13 @@ public sealed class BundledDotNetSidecarDefaultTests
             services.AddSingleton<ISharpClawEventSinkRegistry>(
                 sp => sp.GetRequiredService<ModuleEventDispatcher>());
             services.AddScoped<IModuleStorageGateway, BundledModuleStorageGateway>();
+            services.AddSingleton<IRuntimeTransactionActionBoundary, TestRuntimeTransactionActionBoundary>();
+            services.AddSingleton<IRuntimeModuleActionBoundary, TestRuntimeModuleActionBoundary>();
+            services.AddScoped<IRuntimeTransactionActionRunnerAccessor,
+                RuntimeTransactionActionRunnerAccessor>();
+            services.AddScoped<IRuntimeTransactionActionRunner, RuntimeTransactionActionRunner>();
+            services.AddScoped<IRuntimeModuleActionBoundaryAccessor,
+                RuntimeModuleActionBoundaryAccessor>();
             services.AddScoped<ModuleService>();
 
             var root = services.BuildServiceProvider();

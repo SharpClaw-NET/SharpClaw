@@ -43,9 +43,9 @@
                 Padding="10,4"
                 Click="OnViewToggleClick"
                 VerticalAlignment="Center"
-                ToolTipService.ToolTip="Switch between options view and JSON view">
+                ToolTipService.ToolTip="Switch between options view and raw dotenv">
           <TextBlock x:Name="ViewToggleLabel"
-                     Text="{}{ } JSON"
+                     Text="Raw dotenv"
                      Style="{StaticResource TerminalText}"
                      FontSize="12"
                      Foreground="#66CCFF" />
@@ -63,9 +63,9 @@
       <StackPanel x:Name="EntriesPanel" Spacing="16" MaxWidth="640" HorizontalAlignment="Left" />
     </ScrollViewer>
 
-    <!-- JSON raw editor (json view, hidden by default) -->
-    <Grid x:Name="JsonPanel" Grid.Row="1" Margin="24,0,24,0" Visibility="Collapsed">
-      <TextBox x:Name="JsonTextBox"
+    <!-- Raw dotenv editor, hidden by default -->
+    <Grid x:Name="RawPanel" Grid.Row="1" Margin="24,0,24,0" Visibility="Collapsed">
+      <TextBox x:Name="RawTextBox"
                AcceptsReturn="True"
                TextWrapping="Wrap"
                IsSpellCheckEnabled="False"
@@ -105,10 +105,10 @@
                      Foreground="#CCCC66" />
         </Button>
 
-        <!-- JSON view actions -->
-        <Button x:Name="CopyJsonButton"
+        <!-- Raw dotenv actions -->
+        <Button x:Name="CopyRawButton"
                 Style="{StaticResource TerminalButton}"
-                Click="OnCopyJsonClick"
+                Click="OnCopyRawClick"
                 Padding="16,8"
                 Visibility="Collapsed">
           <TextBlock Text="[ &#x2398; Copy ]"
@@ -116,9 +116,9 @@
                      FontSize="13"
                      Foreground="#66CCFF" />
         </Button>
-        <Button x:Name="PasteJsonButton"
+        <Button x:Name="PasteRawButton"
                 Style="{StaticResource TerminalButton}"
-                Click="OnPasteJsonClick"
+                Click="OnPasteRawClick"
                 Padding="16,8"
                 Visibility="Collapsed">
           <TextBlock Text="[ &#x21EA; Upload ]"

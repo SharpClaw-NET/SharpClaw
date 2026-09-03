@@ -91,17 +91,23 @@ public sealed class RuntimeClientBoundaryGuardrailTests
 
     private static string FindFileFromTestAssembly(string projectDirectory, string fileName)
     {
-        var directory = new DirectoryInfo(Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location)!);
-
-        while (directory is not null)
+        var starts = new[]
         {
-            var candidate = Path.Combine(directory.FullName, projectDirectory, fileName);
-            if (File.Exists(candidate))
-            {
-                return candidate;
-            }
+            Environment.GetEnvironmentVariable("SHARPCLAW_SOURCE_ROOT"),
+            Directory.GetCurrentDirectory(),
+            Path.GetDirectoryName(Assembly.GetExecutingAssembly().Location),
+        };
 
-            directory = directory.Parent;
+        foreach (var start in starts.Where(path => !string.IsNullOrWhiteSpace(path)))
+        {
+            var directory = new DirectoryInfo(start!);
+            while (directory is not null)
+            {
+                var candidate = Path.Combine(directory.FullName, projectDirectory, fileName);
+                if (File.Exists(candidate))
+                    return candidate;
+                directory = directory.Parent;
+            }
         }
 
         throw new FileNotFoundException($"Could not find {projectDirectory}\\{fileName} from test assembly location.");

@@ -7,6 +7,15 @@ namespace SharpClaw.Presentation;
 // Module management tabs: manage list, per-module detail, log viewer, diagnostics.
 public sealed partial class SettingsPage
 {
+    private async Task RefreshModuleFrontendStateAsync()
+    {
+        var moduleState = App.Services?.GetService<ModuleFrontendStateService>();
+        if (moduleState is not null)
+            await moduleState.RefreshAsync(Api);
+
+        _cachedModuleStates = await FetchListAsync<ModuleStateEntry>("/modules");
+    }
+
     // ═══════════════════════════════════════════════════════════════
     // Module detail DTO (enriched response from GET /modules/{id})
     // ═══════════════════════════════════════════════════════════════

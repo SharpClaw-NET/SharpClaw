@@ -10,7 +10,14 @@ namespace SharpClaw.Services;
 /// </summary>
 internal sealed class ModuleStateCache
 {
+    private const string StateKey = "client.modules";
+    private readonly ClientActionDispatcher _actions;
     private Dictionary<string, ModuleStateCacheEntry> _modules = new(StringComparer.Ordinal);
+
+    public ModuleStateCache(ClientActionDispatcher actions)
+    {
+        _actions = actions ?? throw new ArgumentNullException(nameof(actions));
+    }
 
     /// <summary>Check whether a specific module is currently enabled.</summary>
     public bool IsEnabled(string moduleId)
@@ -39,7 +46,17 @@ internal sealed class ModuleStateCache
             var dict = new Dictionary<string, ModuleStateCacheEntry>(items.Count, StringComparer.Ordinal);
             foreach (var item in items)
                 dict[item.ModuleId] = item;
-            _modules = dict;
+
+            var expectedVersion = _actions.GetStateVersion(StateKey);
+            await _actions.CommitStateAsync(
+                StateKey,
+                expectedVersion,
+                _ =>
+                {
+                    _modules = dict;
+                    return ValueTask.CompletedTask;
+                },
+                ct);
         }
         catch
         {

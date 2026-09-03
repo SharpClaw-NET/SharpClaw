@@ -222,7 +222,7 @@ public sealed class InProcessModulePerformanceTests
                         StringComparison.Ordinal));
 
                 var core = scope.ServiceProvider.GetRequiredService<ISharpClawDataContext>();
-                core.Agents.Take(1).Count().Should().BeGreaterThanOrEqualTo(0);
+                core.Models.Take(1).Count().Should().BeGreaterThanOrEqualTo(0);
                 scope.ServiceProvider.GetRequiredService<IAgentJobController>().Should().NotBeNull();
                 scope.ServiceProvider.GetRequiredService<IAgentJobReader>().Should().NotBeNull();
 

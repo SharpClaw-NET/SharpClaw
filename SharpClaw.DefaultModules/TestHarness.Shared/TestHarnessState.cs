@@ -87,6 +87,16 @@ public sealed partial class TestHarnessState
         CostBehavior = new TestHarnessCostBehavior();
     }
 
+    public void ResetDiagnostics()
+    {
+        Drain(_providerRequests);
+        Drain(_providerTimings);
+        Drain(_toolCalls);
+        Drain(_headerTagCalls);
+        Drain(_costCalls);
+        _sequence = 0;
+    }
+
     public void ConfigureProvider(string providerKey, TestHarnessProviderScenario scenario)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(providerKey);

@@ -10,10 +10,14 @@ namespace SharpClaw.Services;
 internal sealed class FirstSetupMarker
 {
     private readonly FrontendInstanceService _frontendInstance;
+    private readonly ClientActionDispatcher _actions;
 
-    public FirstSetupMarker(FrontendInstanceService frontendInstance)
+    public FirstSetupMarker(
+        FrontendInstanceService frontendInstance,
+        ClientActionDispatcher actions)
     {
         _frontendInstance = frontendInstance;
+        _actions = actions;
     }
 
     /// <summary>True when setup has been completed at least once (any version).</summary>
@@ -58,10 +62,23 @@ internal sealed class FirstSetupMarker
            && (CompletedMajorVersion is null || CompletedMajorVersion < CurrentMajorVersion);
 
     /// <summary>Write the current major version into the marker file.</summary>
-    public void MarkCompleted()
+    public async Task MarkCompletedAsync(CancellationToken cancellationToken = default)
     {
-        var dir = Path.GetDirectoryName(_frontendInstance.SetupMarkerPath)!;
-        Directory.CreateDirectory(dir);
-        File.WriteAllText(_frontendInstance.SetupMarkerPath, CurrentMajorVersion.ToString());
+        var expectedVersion = _actions.GetStateVersion(StateKey);
+        await _actions.CommitStateAsync(
+            StateKey,
+            expectedVersion,
+            _ =>
+            {
+                var dir = Path.GetDirectoryName(_frontendInstance.SetupMarkerPath)!;
+                Directory.CreateDirectory(dir);
+                File.WriteAllText(
+                    _frontendInstance.SetupMarkerPath,
+                    CurrentMajorVersion.ToString());
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
+
+    private const string StateKey = "client.setup";
 }

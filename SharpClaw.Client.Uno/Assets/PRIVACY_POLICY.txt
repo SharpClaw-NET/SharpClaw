@@ -190,7 +190,7 @@ Last updated: 2025-07-12
 
         Marko Kopričanec
         E-mail: mkn8rn@hotmail.com
-        GitHub: https://github.com/mkn8rn/SharpClaw
+        GitHub: https://github.com/SharpClaw-NET/SharpClaw
 
 ---
 © 2025 Marko Kopričanec. All rights reserved.

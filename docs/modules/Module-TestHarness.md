@@ -4,7 +4,7 @@ The Test Harness modules are SharpClaw test-infrastructure modules with the ids
 `sharpclaw_test_harness_out_of_process` and
 `sharpclaw_test_harness_in_process`. They deliberately remain in the main
 SharpClaw repository as top-level fixture projects so host, module, provider,
-gateway, and task tests can exercise deterministic modules without reaching
+gateway, and module tests can exercise deterministic modules without reaching
 into an external module repository. They are not production features and should
 not be enabled in production templates. The production environment template
 keeps both disabled. The development template enables the out-of-process

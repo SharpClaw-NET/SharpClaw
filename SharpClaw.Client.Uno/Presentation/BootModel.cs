@@ -26,17 +26,20 @@ public sealed class BootModel
     private readonly GatewayProcessManager _gateway;
     private readonly SharpClawApiClient _api;
     private readonly FrontendInstanceService? _frontendInstance;
+    private readonly ClientActionDispatcher _actions;
 
     public BootModel(
         BackendProcessManager backend,
         GatewayProcessManager gateway,
         SharpClawApiClient api,
-        FrontendInstanceService? frontendInstance = null)
+        FrontendInstanceService? frontendInstance,
+        ClientActionDispatcher actions)
     {
         _backend = backend;
         _gateway = gateway;
         _api = api;
         _frontendInstance = frontendInstance;
+        _actions = actions;
     }
 
     public bool IsAwaitingInput { get; set; }
@@ -47,14 +50,23 @@ public sealed class BootModel
     internal const int MaxRetries = 3;
     internal static readonly TimeSpan RetryDelay = TimeSpan.FromSeconds(3);
 
-    public void ApplyCustomUrl(string? customUrl)
+    public async ValueTask ApplyCustomUrlAsync(
+        string? customUrl,
+        CancellationToken cancellationToken = default)
     {
         if (!string.IsNullOrWhiteSpace(customUrl))
         {
             var url = customUrl.Trim();
-            _backend.UpdateApiUrl(url);
-            _gateway.UpdateBackendBaseUrl(url);
-            _api.UpdateBaseUrl(url);
+            await _actions.RunCommandAsync(
+                "client.boot.url",
+                async token =>
+                {
+                    _backend.UpdateApiUrl(url);
+                    _gateway.UpdateBackendBaseUrl(url);
+                    await _api.UpdateBaseUrlAsync(url, token);
+                    return true;
+                },
+                cancellationToken);
         }
     }
 
@@ -63,7 +75,10 @@ public sealed class BootModel
     {
         try
         {
-            await _backend.EnsureStartedAsync(ct);
+            await _actions.RunCommandAsync(
+                "client.backend.start",
+                token => new ValueTask(_backend.EnsureStartedAsync(token)),
+                ct);
 
             var mode = _backend.IsExternal ? "external" : "bundled";
             var running = _backend.IsRunning ? "running" : (_backend.IsExternal ? "detected" : "started");
@@ -107,8 +122,7 @@ public sealed class BootModel
 
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(3) };
-                var response = await http.GetAsync($"{_backend.ApiUrl}/echo", ct);
+                using var response = await _api.GetAsync("/echo", ct);
 
                 if (response.IsSuccessStatusCode)
                     return new(true, new("Echo", $"{(int)response.StatusCode} OK", false));
@@ -154,7 +168,7 @@ public sealed class BootModel
             apiKeyLine = new("API Key", "file present", false);
         }
 
-        _api.InvalidateApiKey();
+        await _api.InvalidateApiKeyAsync(ct);
         try
         {
             await _api.WaitForReadyAsync(
@@ -189,11 +203,15 @@ public sealed class BootModel
 
         try
         {
-            // Forward the verified API key so the gateway can authenticate
-            // with the core API without relying on file I/O (MSIX VFS safe).
-            _gateway.ApiKey = _api.CachedApiKey;
-
-            await _gateway.EnsureStartedAsync(ct);
+            await _actions.RunCommandAsync(
+                "client.gateway.start",
+                token =>
+                {
+                    // Forward the verified API key inside the gateway action.
+                    _gateway.ApiKey = _api.CachedApiKey;
+                    return new ValueTask(_gateway.EnsureStartedAsync(token));
+                },
+                ct);
 
             var mode = _gateway.IsExternal ? "external" : "bundled";
             var running = _gateway.IsRunning ? "running" : (_gateway.IsExternal ? "detected" : "started");

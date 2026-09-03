@@ -7,6 +7,7 @@ using Microsoft.Extensions.Logging;
 using SharpClaw.Gateway.Contracts;
 using SharpClaw.Gateway.Security;
 using SharpClaw.ModuleHost.InProcess;
+using SharpClaw.Shared.Logging;
 using SharpClaw.Shared.Security;
 
 namespace SharpClaw.Gateway.Modules.Hosting;
@@ -125,9 +126,24 @@ public sealed class GatewayExternalModuleHost : IAsyncDisposable
             routeGroup.RequireRateLimiting(policy);
             routeGroup.AddEndpointFilter(async (ctx, next) =>
             {
+                var runtime = services.GetService<SharpClawLogRuntime>();
+                IDisposable? ownership = runtime is null
+                    ? null
+                    : SharpClawLogOwnership.Push(new SharpClawModuleLogContext(
+                        extension.ModuleId,
+                        extension.GetType().Assembly.GetName().Version?.ToString(),
+                        SharpClawModuleHostKind.Gateway,
+                        runtime.BootId));
                 counterBox.Increment();
-                try { return await next(ctx); }
-                finally { counterBox.Decrement(); }
+                try
+                {
+                    return await next(ctx);
+                }
+                finally
+                {
+                    ownership?.Dispose();
+                    counterBox.Decrement();
+                }
             });
 
             var builder = new GatewayEndpointGroupBuilder(routeGroup, group.GroupId, prefix);
