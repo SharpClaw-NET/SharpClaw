@@ -1,6 +1,6 @@
 [Unit]
 Description=SharpClaw API
-Documentation=https://github.com/mkn8rn/SharpClaw
+Documentation=https://github.com/SharpClaw-NET/SharpClaw
 After=network-online.target
 Wants=network-online.target
 

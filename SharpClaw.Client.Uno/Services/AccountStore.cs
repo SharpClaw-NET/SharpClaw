@@ -18,12 +18,16 @@ public sealed class AccountStore
     };
 
     private readonly FrontendInstanceService _frontendInstance;
+    private readonly ClientActionDispatcher _actions;
     private readonly object _lock = new();
     private AccountData _data;
 
-    public AccountStore(FrontendInstanceService frontendInstance)
+    public AccountStore(
+        FrontendInstanceService frontendInstance,
+        ClientActionDispatcher actions)
     {
         _frontendInstance = frontendInstance;
+        _actions = actions;
         _data = Load();
     }
 
@@ -61,54 +65,98 @@ public sealed class AccountStore
     /// Saves or updates an account's tokens after a successful login/refresh.
     /// Sets this account as the active account.
     /// </summary>
-    public void SaveAccount(SavedAccount account)
+    public async Task SaveAccountAsync(
+        SavedAccount account,
+        CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            var idx = _data.Accounts.FindIndex(a => a.UserId == account.UserId);
-            if (idx >= 0)
-                _data.Accounts[idx] = account;
-            else
-                _data.Accounts.Add(account);
+        await CommitAsync(
+            () =>
+            {
+                lock (_lock)
+                {
+                    var idx = _data.Accounts.FindIndex(a => a.UserId == account.UserId);
+                    if (idx >= 0)
+                        _data.Accounts[idx] = account;
+                    else
+                        _data.Accounts.Add(account);
 
-            _data.ActiveUserId = account.UserId;
-            Flush();
-        }
+                    _data.ActiveUserId = account.UserId;
+                    Flush();
+                }
+            },
+            cancellationToken);
     }
 
     /// <summary>Sets the active user ID without modifying tokens.</summary>
-    public void SetActiveUser(Guid userId)
+    public async Task SetActiveUserAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            _data.ActiveUserId = userId;
-            Flush();
-        }
+        await CommitAsync(
+            () =>
+            {
+                lock (_lock)
+                {
+                    _data.ActiveUserId = userId;
+                    Flush();
+                }
+            },
+            cancellationToken);
     }
 
     /// <summary>Removes a saved account by user ID.</summary>
-    public void RemoveAccount(Guid userId)
+    public async Task RemoveAccountAsync(
+        Guid userId,
+        CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            _data.Accounts.RemoveAll(a => a.UserId == userId);
-            if (_data.ActiveUserId == userId)
-                _data.ActiveUserId = _data.Accounts.Count > 0
-                    ? _data.Accounts[0].UserId
-                    : null;
-            Flush();
-        }
+        await CommitAsync(
+            () =>
+            {
+                lock (_lock)
+                {
+                    _data.Accounts.RemoveAll(a => a.UserId == userId);
+                    if (_data.ActiveUserId == userId)
+                        _data.ActiveUserId = _data.Accounts.Count > 0
+                            ? _data.Accounts[0].UserId
+                            : null;
+                    Flush();
+                }
+            },
+            cancellationToken);
     }
 
     /// <summary>Deletes all saved accounts and the store file.</summary>
-    public void Reset()
+    public async Task ResetAsync(CancellationToken cancellationToken = default)
     {
-        lock (_lock)
-        {
-            _data = new();
-            try { File.Delete(_frontendInstance.AccountsPath); } catch { /* best-effort */ }
-        }
+        await CommitAsync(
+            () =>
+            {
+                lock (_lock)
+                {
+                    _data = new();
+                    try { File.Delete(_frontendInstance.AccountsPath); } catch { /* best-effort */ }
+                }
+            },
+            cancellationToken);
     }
+
+    private async Task CommitAsync(
+        Action mutation,
+        CancellationToken cancellationToken)
+    {
+        var expectedVersion = _actions.GetStateVersion(StateKey);
+        await _actions.CommitStateAsync(
+            StateKey,
+            expectedVersion,
+            _ =>
+            {
+                mutation();
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+    }
+
+    private const string StateKey = "client.accounts";
 
     // ── Internal ─────────────────────────────────────────────────
 

@@ -20,11 +20,11 @@ public sealed class DefaultResourceEngineTests
 
         var response = DefaultResourceEngine.Merge(
             channelId,
-            Set(("task", channelResource)),
-            Set(("task", contextResource), ("note", Guid.NewGuid())));
+            Set(("document", channelResource)),
+            Set(("document", contextResource), ("note", Guid.NewGuid())));
 
         response.Id.Should().Be(channelId);
-        response.Entries["task"].Should().Be(channelResource);
+        response.Entries["document"].Should().Be(channelResource);
         response.Entries.Should().ContainKey("note");
     }
 
@@ -51,15 +51,15 @@ public sealed class DefaultResourceEngineTests
 
         var result = _engine.ResolveDefaultResource(
             new DefaultResourceResolutionRequest(
-                DefaultResourceKey: "task",
-                ResourceType: "AoTask",
-                ChannelDefaults: Set(("task", channelResource)),
-                ContextDefaults: Set(("task", contextResource)),
+                DefaultResourceKey: "document",
+                ResourceType: "Document",
+                ChannelDefaults: Set(("document", channelResource)),
+                ContextDefaults: Set(("document", contextResource)),
                 OrderedPermissionSets:
                 [
                     PermissionSet(
                         new ResourcePermissionGrant(
-                            "AoTask",
+                            "Document",
                             roleResource,
                             PermissionClearance.Independent,
                             IsDefault: true))
@@ -76,21 +76,21 @@ public sealed class DefaultResourceEngineTests
 
         var result = _engine.ResolveDefaultResource(
             new DefaultResourceResolutionRequest(
-                DefaultResourceKey: "task",
-                ResourceType: "AoTask",
+                DefaultResourceKey: "document",
+                ResourceType: "Document",
                 ChannelDefaults: Set(("other", Guid.NewGuid())),
                 ContextDefaults: null,
                 OrderedPermissionSets:
                 [
                     PermissionSet(
                         new ResourcePermissionGrant(
-                            "AoTask",
+                            "Document",
                             channelPermissionResource,
                             PermissionClearance.Independent,
                             IsDefault: true)),
                     PermissionSet(
                         new ResourcePermissionGrant(
-                            "AoTask",
+                            "Document",
                             contextPermissionResource,
                             PermissionClearance.Independent,
                             IsDefault: true))
@@ -112,7 +112,7 @@ public sealed class DefaultResourceEngineTests
                 [
                     PermissionSet(
                         new ResourcePermissionGrant(
-                            "AoTask",
+                            "Document",
                             Guid.NewGuid(),
                             PermissionClearance.Independent,
                             IsDefault: true))
@@ -124,7 +124,7 @@ public sealed class DefaultResourceEngineTests
     [Test]
     public void NormalizeKey_LowercasesForStorage()
     {
-        DefaultResourceEngine.NormalizeKey("AoTask").Should().Be("aotask");
+        DefaultResourceEngine.NormalizeKey("Document").Should().Be("document");
     }
 
     [Test]
@@ -132,12 +132,12 @@ public sealed class DefaultResourceEngineTests
     {
         var removed = new List<DefaultResourceEntryState>();
         var setId = Guid.NewGuid();
-        var oldTask = Guid.NewGuid();
-        var newTask = Guid.NewGuid();
+        var oldResource = Guid.NewGuid();
+        var newResource = Guid.NewGuid();
         var note = Guid.NewGuid();
         var set = EntitySet(
             setId,
-            ("Task", oldTask),
+            ("Document", oldResource),
             ("old", Guid.NewGuid()));
 
         DefaultResourceEngine.Apply(
@@ -145,7 +145,7 @@ public sealed class DefaultResourceEngineTests
             new SetDefaultResourcesRequest(
                 new Dictionary<string, Guid?>
                 {
-                    ["TASK"] = newTask,
+                    ["DOCUMENT"] = newResource,
                     ["Note"] = note,
                     ["old"] = null
                 }),
@@ -153,7 +153,7 @@ public sealed class DefaultResourceEngineTests
 
         set.Entries.Should().HaveCount(2);
         set.Entries.Should().ContainSingle(e =>
-            e.ResourceKey == "Task" && e.ResourceId == newTask);
+            e.ResourceKey == "Document" && e.ResourceId == newResource);
         set.Entries.Should().ContainSingle(e =>
             e.ResourceKey == "note"
             && e.ResourceId == note
@@ -165,7 +165,7 @@ public sealed class DefaultResourceEngineTests
     public void ApplyKey_WhenClearingMissingKey_DoesNotCallRemove()
     {
         var removeCalls = 0;
-        var set = EntitySet(Guid.NewGuid(), ("task", Guid.NewGuid()));
+        var set = EntitySet(Guid.NewGuid(), ("document", Guid.NewGuid()));
 
         DefaultResourceEngine.ApplyKey(
             set,

@@ -4,56 +4,35 @@ using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.TestFixtures.ExternalModule;
 
-public sealed class InProcessStorageFixtureModule : ISharpClawCoreModule
+public sealed class InProcessStorageFixtureModule : ISharpClawModule
 {
     public const string ModuleId = "synthetic_inprocess_storage";
     public const string ToolPrefixValue = "sis";
     public const string StorageName = "records";
 
-    public string Id => ModuleId;
-    public string DisplayName => "Synthetic In-Process Storage";
-    public string ToolPrefix => ToolPrefixValue;
+    public ModuleIdentity Identity { get; } = new(ModuleId, "Synthetic in-process storage", ToolPrefixValue);
 
-    public void ConfigureServices(IServiceCollection services)
+    public void Configure(ISharpClawModuleBuilder module)
     {
-        services.AddSingleton<IModuleStorageGateway, FakeModuleStorageGateway>();
-    }
-
-    public IReadOnlyList<ModuleToolDefinition> GetToolDefinitions() => [];
-
-    public IReadOnlyList<ModuleStorageContractDescriptor> GetStorageContracts() =>
-    [
-        new(
+        module.Services.AddSingleton<InProcessStorageToolHandler>();
+        module.Storage.Add(new ModuleStorageContractDescriptor(
             ModuleId,
             StorageName,
             [
                 new(ModuleStorageOperations.List),
                 new(ModuleStorageOperations.Upsert),
             ],
-            Indexes:
-            [
-                new("name", ModuleStorageIndexValueKind.String),
-            ])
-    ];
+            Indexes: [new("name", ModuleStorageIndexValueKind.String)]));
+        module.Tools.Add<InProcessStorageToolHandler>(
+            new ToolDescriptor("synthetic_inprocess_storage", "Synthetic storage tool.", ToolSchemas.EmptyObject));
+    }
+}
 
-    public Task<string> ExecuteToolAsync(
-        string toolName,
-        JsonElement parameters,
-        AgentJobContext job,
-        IServiceProvider scopedServices,
-        CancellationToken ct) =>
-        Task.FromResult("synthetic in-process storage");
-
-    private sealed class FakeModuleStorageGateway : IModuleStorageGateway
+internal sealed class InProcessStorageToolHandler : IToolHandler
+{
+    public ValueTask<ToolResult> InvokeAsync(ToolInvocation invocation, CancellationToken ct)
     {
-        public IReadOnlyList<ModuleStorageContractDescriptor> ListContracts() => [];
-
-        public Task<JsonElement> InvokeAsync(
-            string moduleId,
-            string storageName,
-            string operation,
-            JsonElement parameters,
-            CancellationToken ct = default) =>
-            throw new InvalidOperationException("Module-owned fake storage gateway should be replaced.");
+        ct.ThrowIfCancellationRequested();
+        return ValueTask.FromResult(ToolResult.Text("synthetic in-process storage"));
     }
 }

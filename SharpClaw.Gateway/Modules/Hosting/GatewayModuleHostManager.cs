@@ -209,9 +209,17 @@ public sealed class GatewayModuleHostManager : IAsyncDisposable
 
         try
         {
-            if (entry.DllPath is { } dllPath && opts.HotReloadEnabled)
+            if (entry.TryTakeLoaded(out var preparedContext, out var preparedExtension))
             {
-                var (ctx, ext) = GatewayModuleLoader.LoadFromDisk(dllPath, _logger);
+                loadContext = preparedContext;
+                extension = preparedExtension!;
+                dllHash = entry.DllPath is null
+                    ? null
+                    : GatewayModuleLoader.ComputeDllHash(entry.DllPath);
+            }
+            else if (entry.DllPath is { } dllPath)
+            {
+                var (ctx, ext) = GatewayModuleLoader.LoadFromDisk(dllPath);
                 loadContext = ctx;
                 extension = ext;
                 if (extension.ModuleId != moduleId)
@@ -312,13 +320,11 @@ public sealed class GatewayModuleHostManager : IAsyncDisposable
 
     private void ReconcileGroupsLocked(string moduleId, GatewayModuleOptions opts, CancellationToken ct)
     {
-        var entry = _loader.GetEntry(moduleId);
-        if (entry?.Extension is null)
+        if (!_hosts.TryGetValue(moduleId, out var host))
             return;
 
-        var host = _hosts[moduleId];
         var current = host.RegisteredGroups.ToHashSet(StringComparer.Ordinal);
-        var desired = entry.Extension.GetEndpointGroups()
+        var desired = host.Extension.GetEndpointGroups()
             .Where(g => opts.IsGroupEnabled(moduleId, g.GroupId))
             .Select(g => g.GroupId)
             .ToHashSet(StringComparer.Ordinal);

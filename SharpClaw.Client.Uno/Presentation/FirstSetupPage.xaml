@@ -64,7 +64,7 @@
             <TextBlock Style="{StaticResource TerminalText}"
                        FontSize="12" Foreground="#AA8844"
                        TextWrapping="Wrap"
-                       Text="Setup was already completed for an older version. You can redo it to reconfigure providers, models, and agents, or skip to keep your current config." />
+                       Text="Setup was already completed for an older version. You can redo it to reconfigure providers and models, or skip to keep your current config." />
             <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,4,0,0">
               <Button Style="{StaticResource TerminalButton}"
                       Click="OnUpgradeRedoClick">
@@ -265,140 +265,6 @@
             </Button>
           </StackPanel>
 
-          <!-- Agent selector panel (hidden until needed) -->
-          <StackPanel x:Name="AgentSelectorPanel"
-                      Visibility="Collapsed"
-                      Spacing="6"
-                      Margin="16,8,0,8">
-            <TextBlock Text="Select a default agent:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#CCCCCC" />
-            <ComboBox x:Name="DefaultAgentSelector"
-                      FontFamily="Consolas, Courier New, monospace"
-                      FontSize="12"
-                      Background="#1A1A1A"
-                      Foreground="#CCCCCC"
-                      BorderBrush="#333333"
-                      BorderThickness="1"
-                      MinWidth="300" />
-            <Button x:Name="AgentSubmitBtn"
-                    Style="{StaticResource TerminalButton}"
-                    Click="OnAgentSubmitClick"
-                    Margin="0,4,0,0">
-              <TextBlock Text="[ Continue ]"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="12" Foreground="#00FF00"
-                         HorizontalAlignment="Center" />
-            </Button>
-          </StackPanel>
-
-          <!-- Role permissions panel — module-by-module wizard -->
-          <StackPanel x:Name="RolePermissionsPanel"
-                      Visibility="Collapsed"
-                      Spacing="6"
-                      Margin="16,8,0,8">
-            <TextBlock Text="Configure permissions for this agent's role:"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="12" Foreground="#CCCCCC"
-                       TextWrapping="Wrap" />
-            <TextBlock Text="Modules are shown one at a time. Enable each module the agent should use, then configure its permissions."
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#808080"
-                       TextWrapping="Wrap" />
-
-            <!-- Progress -->
-            <TextBlock x:Name="ModuleProgressBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#808080"
-                       Margin="0,4,0,0" />
-
-            <!-- Auto-skipped modules notice -->
-            <TextBlock x:Name="ModuleAutoSkippedBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#AA8844"
-                       Visibility="Collapsed"
-                       TextWrapping="Wrap" />
-
-            <!-- Current module title -->
-            <TextBlock x:Name="ModuleWizardTitle"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="14" FontWeight="SemiBold"
-                       Foreground="#00CCFF" Margin="0,8,0,0" />
-
-            <!-- Module manifest info (description, version, author, license, platforms) -->
-            <StackPanel x:Name="ModuleManifestPanel"
-                        Spacing="2"
-                        Margin="0,4,0,4" />
-
-            <!-- Enable / disable toggle -->
-            <ToggleSwitch x:Name="ModuleEnableToggle"
-                          OnContent="Enabled" OffContent="Disabled"
-                          Margin="0,4,0,0"
-                          Toggled="OnModuleEnableToggled" />
-
-            <!-- Module status text (red when disabled, green when enabled) -->
-            <TextBlock x:Name="ModuleStatusBlock"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11"
-                       TextWrapping="Wrap"
-                       Margin="0,2,0,0" />
-
-            <!-- Separator between module toggle and permissions -->
-            <Border Height="1" Background="#333333" Margin="0,8,0,8" />
-
-            <!-- Default-agent notice (above permissions) -->
-            <TextBlock x:Name="ModuleDefaultAgentNotice"
-                       Style="{StaticResource TerminalText}"
-                       FontSize="11" Foreground="#AA8844"
-                       TextWrapping="Wrap"
-                       Text="⚠ These permissions are being granted to the DEFAULT agent only. Other agents will need their permissions manually configured."
-                       Margin="0,0,0,6" />
-
-            <!-- Grant all permissions toggle -->
-            <StackPanel x:Name="GrantAllPanel" Orientation="Horizontal" Spacing="8" Margin="0,0,0,4">
-              <ToggleSwitch x:Name="GrantAllToggle"
-                            OnContent="Grant all" OffContent="Grant all"
-                            Margin="0"
-                            Toggled="OnGrantAllToggled" />
-              <TextBlock Style="{StaticResource TerminalText}"
-                         FontSize="10" Foreground="#808080"
-                         VerticalAlignment="Center"
-                         Text="Grant all permissions in this module to the default role" />
-            </StackPanel>
-
-            <!-- Module permissions (visible when enabled) -->
-            <StackPanel x:Name="ModulePermissionsContainer" Spacing="6" Margin="0,4,0,0" />
-
-            <!-- Navigation -->
-            <StackPanel Orientation="Horizontal" Spacing="12" Margin="0,8,0,0">
-              <Button x:Name="ModuleBackBtn"
-                      Style="{StaticResource TerminalLink}"
-                      Click="OnModuleBackClick"
-                      Visibility="Collapsed">
-                <TextBlock Text="&lt; Back"
-                           Style="{StaticResource TerminalText}"
-                           FontSize="12" Foreground="#808080" />
-              </Button>
-              <Button x:Name="ModuleNextBtn"
-                      Style="{StaticResource TerminalButton}"
-                      Click="OnModuleNextClick">
-                <TextBlock x:Name="ModuleNextBtnText"
-                           Text="[ Next Module ]"
-                           Style="{StaticResource TerminalText}"
-                           FontSize="12" Foreground="#00FF00"
-                           HorizontalAlignment="Center" />
-              </Button>
-            </StackPanel>
-
-            <Button x:Name="RoleSkipBtn"
-                    Style="{StaticResource TerminalLink}"
-                    Click="OnRoleSkipClick">
-              <TextBlock Text="> Skip (configure later)"
-                         Style="{StaticResource TerminalText}"
-                         FontSize="12" Foreground="#808080" />
-            </Button>
-          </StackPanel>
-
           <!-- Skip setup -->
           <StackPanel x:Name="SkipSetupPanel"
                       Orientation="Horizontal"
@@ -414,7 +280,7 @@
             <TextBlock Style="{StaticResource TerminalText}"
                        FontSize="13" Foreground="#AA8844"
                        VerticalAlignment="Center"
-                       Text="(you will need to configure providers, models, and channels manually)" />
+                       Text="(you will need to configure providers and models manually)" />
           </StackPanel>
 
         </StackPanel>

@@ -40,8 +40,6 @@
     <File Path="docs/Gateway-documentation.md" />
     <File Path="docs/Gateway-skill.md" />
     <File Path="docs/Provider-Parameters.md" />
-    <File Path="docs/Tasks-documentation.md" />
-    <File Path="docs/Tasks-skill.md" />
   </Folder>
   <Folder Name="/Solution Items/Docs/Modules/">
     <File Path="docs/modules/Module-AgentOrchestration-skill.md" />
@@ -80,10 +78,6 @@
     <File Path="docs/providers/xAI.md" />
     <File Path="docs/providers/ZAI.md" />
   </Folder>
-  <Folder Name="/Solution Items/Docs/Tasks/">
-    <File Path="docs/tasks/DesktopReporterSetupTask.cs" />
-    <File Path="docs/tasks/DesktopReportTask.cs" />
-  </Folder>
   <Folder Name="/Solution Items/Git/">
     <File Path=".gitignore" />
   </Folder>
@@ -92,7 +86,6 @@
     <File Path="LICENSE.md" />
     <File Path=".github/README.md" />
     <File Path=".github/SECURITY.md" />
-    <File Path="docs/legal/DISCLAIMER.md" />
   </Folder>
   <Folder Name="/Solution Items/Scripts/">
     <File Path="publish-msix.ps1" />

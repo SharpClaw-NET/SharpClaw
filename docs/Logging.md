@@ -1,53 +1,62 @@
-# Logging
+# SharpClaw logging
 
-SharpClaw writes process logs under the active instance directory in local
-application data. A typical Windows development run creates a SharpClaw
-folder under `%LOCALAPPDATA%`, with separate instance folders for the
-interface, the core backend, and the gateway. Each instance has its own
-`logs` directory, and each running process writes into the subdirectory
-named after the process, such as `uno`, `core`, or `gateway`.
+SharpClaw operational logging is one process-owned pipeline in each executable process. Runtime Host, Gateway, and Uno each create exactly one `SharpClawLogRuntime`, which owns one Serilog logger, one Microsoft `ILoggerFactory` provider registration, one normalization and dispatch sink, one bounded dispatcher channel, and one boot identifier. Application and library code uses injected `ILogger<T>` with structured templates and scopes. Serilog is the implementation behind that API; application code does not write directly to a durable writer.
 
-The session log files are intentionally split by audience. `log.txt`
-contains the normal `ILogger` stream for informational, warning, error, and
-critical entries, the mirrored Serilog event stream, and anything written to
-standard output through `Console.WriteLine`. `debug.txt` contains debug and
-trace entries, including `System.Diagnostics.Debug.WriteLine` and
-`Trace.WriteLine` output that also appears in Visual Studio's debug output
-pane. This is where chat timing, streaming timing, task step timing, and
-other diagnostic breadcrumbs appear when the configured minimum level allows
-them. `exceptions.txt` contains exception details, standard error output,
-and exceptions attached to Serilog events, and is flushed immediately when an
-exception is captured. `serilog.txt` contains the raw Serilog file sink. It
-is separate from `log.txt` so Serilog and the session writer do not compete
-for the same file handle.
+## Process and module streams
 
-The logging settings live in each process environment file under
-`Logging:Serilog`. The same shape is used by Core, Gateway, and Interface.
-For example, setting `MinimumLevel` to `Debug` enables the structured timing
-logs added around chat requests, streaming chat, native tool-loop rounds,
-module tool execution, and task steps. `FileEnabled` controls whether
-Serilog writes `serilog.txt`; the session logger still writes `log.txt`,
-`debug.txt`, and `exceptions.txt` whenever it is registered by the process.
-`RequestLoggingEnabled` controls ASP.NET Core request logging in Core and
-Gateway and is not used by the Uno interface. No extra environment variables
-are required for console, diagnostics, or exception capture; those bridges
-are installed by the process when the session logger is created.
+Every process boot receives one GUID. Process-owned events are written once to `process/{application}/{bootId}`. A module-owned event is written once to `module/{moduleId}/{bootId}`. The dispatcher selects the stream from host-owned asynchronous ownership context, not from a logger category or a module-supplied property. Console output is rendered from the normalized record after the durable append decision. It is presentation only, so enabling `Logging:ConsoleEnabled` cannot add a durable record or capture the rendered line back into the stream.
 
-For day-to-day troubleshooting, start with `exceptions.txt` if something
-failed visibly, then read `log.txt` for the surrounding service events. If a
-chat or task feels slow, temporarily set `Logging:Serilog:MinimumLevel` to
-`Debug` in the relevant process env file and restart that process. The
-debug file will then show request IDs, elapsed milliseconds for history
-loading, provider calls, streamed provider rounds, assistant message
-persistence, cost aggregation, task compilation, and task step execution.
-When the investigation is done, return the minimum level to `Information`
-unless the additional diagnostic volume is still useful.
+An in-process Runtime module receives a host-owned `SharpClawModuleLoggerFactory` wrapper. The wrapper preserves the natural `ILogger<T>` category while applying the trusted module ID, module assembly version, host kind, and shared process boot ID at the point of emission. Gateway endpoint filters apply the equivalent trusted scope around the complete module request. An authenticated Runtime sidecar capability request and every bounded stdout or stderr line use the same module-scoped host logger. A module cannot redirect an event by supplying reserved ownership properties.
 
-If a session log file is empty, first confirm that the process is the one
-you are exercising. The desktop interface can launch a bundled backend and
-gateway, each with its own instance log directory, while a manually run API
-or gateway process may use a different instance root. Also check the
-minimum level. `debug.txt` is expected to stay quiet at `Information` unless
-code writes directly to the debug or trace stream, while `log.txt` should
-receive normal `ILogger`, Serilog, and stdout output from Core, Gateway, and
-Interface after startup.
+## Configuration
+
+The primary logging configuration section is `Logging`. Existing
+`Logging:Serilog` settings are translated in memory when the equivalent new key
+is absent, so an existing private environment file does not prevent startup.
+New `Logging` keys always take precedence. Malformed legacy values and obsolete
+keys such as `FileEnabled` are ignored. Legacy `Enabled=false` maps to a `Fatal`
+minimum level because the durable target remains the single operational
+persistence path. There is no provider selector. To retain only terminal
+events, set `Logging:MinimumLevel` to `Fatal`.
+
+The environment form is shown below. The queue is bounded, the flush interval is finite, and console rendering is disabled by default in service deployments.
+
+```text
+Logging__MinimumLevel=Information
+Logging__Overrides__Microsoft=Warning
+Logging__Overrides__Microsoft.AspNetCore=Warning
+Logging__Overrides__Microsoft.EntityFrameworkCore=Warning
+Logging__Overrides__Uno=Warning
+Logging__ConsoleEnabled=false
+Logging__RequestLoggingEnabled=true
+Logging__QueueCapacity=4096
+Logging__FlushIntervalMilliseconds=1000
+```
+
+Configuration is parsed once before the host is composed. Invalid levels, booleans, queue capacities, and flush intervals stop startup with a precise configuration error. The Runtime Host, Gateway, and Uno templates use this same key shape.
+
+## Normalization, redaction, and bounds
+
+Normalization and redaction happen once before the durable stream and before console rendering. Rendered messages are limited to 64 KiB of UTF-8, message templates to 8 KiB, exception text to 96 KiB, each property name to 128 bytes, each property value to 4 KiB, the scalar property count to 32, and the normalized record fields to 192 KiB. Truncation records the original byte size in a bounded metadata property when space permits. Oversize operational content is not converted into an artifact.
+
+Authorization values, API keys, access and refresh tokens, passwords, cookies, client secrets, connection strings, encryption keys, prompts, model responses, request bodies, response bodies, and secret-bearing properties are not retained. HTTP diagnostics record only method, path without query values, status, content length, elapsed time, and safe correlation metadata. They do not read request or response bodies. Exceptions are part of the same normalized event and therefore create one record rather than a normal event plus a second exception record.
+
+Sidecar stdout and stderr are streamed through fixed 64 KiB tails. A non-zero sidecar exit can report those tails, but it cannot retain an unbounded `StringBuilder`. Logging failures set runtime health state without recursively logging the failure or blocking business operations indefinitely.
+
+## Queue, durability, and shutdown
+
+There is one bounded channel per process runtime. Trace, Debug, and Information events may be dropped when the channel is full. Warning, Error, and Critical/Fatal events wait only for a bounded capacity interval. Accepted Error and Fatal events use durable storage mode. Drops are counted outside the logger and later summarized as one `RecordsDropped` event in the affected process or module stream without recursion.
+
+Shutdown stops intake, cancels periodic flush intake, drains the channel, flushes all known operational streams, and seals them. The process boot stream is known from construction even when it contains no records, and module streams are sealed after their first accepted event. Operational flushing is not part of the execution database transaction.
+
+## Execution diagnostics
+
+Canonical Jobs own their result, error, progress, attempt, and artifact state. Operational logging does not create a second job store or mirror job payloads into process or module streams.
+
+## Retrieval and retention
+
+Operational reads use the authenticated cursor facade and `SharpClawLogReader`. Cursor, page byte, record count, and scan byte limits remain enforced by the durable segment store. Process and module boot enumeration retains expiry watermarks and does not infer ownership from namespace text. The additive record fields use the existing decoder, so bodies written before unified logging remain readable without a schema migration.
+
+The durable store remains provider-neutral and encrypted through the existing instance key derivation. Logging adds no `DbContext`, EF provider, relational table, migration, package, or provider-selection branch. The existing process and module retention policies continue to apply to their respective boot streams.
+
+Runtime Host uses the shared store maintenance service as the sole retention owner. Gateway and Uno create private logging stores and each starts one lifecycle-owned bounded retention worker for that store; the worker applies the default 14-day process and module policy, stops intake, and is awaited during shutdown. Runtime never starts a second worker for its externally owned shared store.

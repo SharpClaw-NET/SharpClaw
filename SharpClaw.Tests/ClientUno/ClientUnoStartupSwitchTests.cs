@@ -1,10 +1,9 @@
 using System.Diagnostics;
 using FluentAssertions;
+using Microsoft.Extensions.Logging.Abstractions;
 using NUnit.Framework;
 using SharpClaw.Presentation;
 using SharpClaw.Services;
-using SharpClaw.Shared.Instances;
-using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.ClientUno;
 
@@ -22,7 +21,7 @@ public sealed class ClientUnoStartupSwitchTests
 
         using var manager = new BackendProcessManager(
             "http://127.0.0.1:48923",
-            scope.Logs,
+            NullLogger<BackendProcessManager>.Instance,
             frontendInstance: null,
             executablePath: executable,
             processOnPortProbe: () => false,
@@ -53,7 +52,7 @@ public sealed class ClientUnoStartupSwitchTests
 
         using var manager = new BackendProcessManager(
             "http://127.0.0.1:48923",
-            scope.Logs,
+            NullLogger<BackendProcessManager>.Instance,
             frontendInstance: null,
             executablePath: executable,
             processOnPortProbe: () => false,
@@ -84,7 +83,7 @@ public sealed class ClientUnoStartupSwitchTests
         using var manager = new GatewayProcessManager(
             "http://0.0.0.0:48924",
             "http://127.0.0.1:48923",
-            scope.Logs,
+            NullLogger<GatewayProcessManager>.Instance,
             frontendInstance: null,
             executablePath: executable,
             processOnPortProbe: () => false,
@@ -118,7 +117,7 @@ public sealed class ClientUnoStartupSwitchTests
 
         using var backend = new BackendProcessManager(
             "http://127.0.0.1:48923",
-            scope.Logs,
+            NullLogger<BackendProcessManager>.Instance,
             frontendInstance: null,
             executablePath: scope.CreateExecutable("SharpClaw.Runtime.Host.exe"),
             processOnPortProbe: () => false,
@@ -128,7 +127,7 @@ public sealed class ClientUnoStartupSwitchTests
         using var gateway = new GatewayProcessManager(
             "http://0.0.0.0:48924",
             "http://127.0.0.1:48923",
-            scope.Logs,
+            NullLogger<GatewayProcessManager>.Instance,
             frontendInstance: null,
             executablePath: scope.CreateExecutable("SharpClaw.Gateway.exe"),
             processOnPortProbe: () => false,
@@ -138,8 +137,12 @@ public sealed class ClientUnoStartupSwitchTests
             SkipLaunch = true,
         };
 
-        using var api = new SharpClawApiClient("http://127.0.0.1:48923", scope.Logs);
-        var boot = new BootModel(backend, gateway, api);
+        using var api = new SharpClawApiClient(
+            "http://127.0.0.1:48923",
+            NullLogger<SharpClawApiClient>.Instance,
+            frontendInstance: null,
+            clientActions: new ClientActionDispatcher());
+var boot = new BootModel(backend, gateway, api, null, new ClientActionDispatcher());
 
         var result = await boot.RunGatewayStepAsync(CancellationToken.None);
 
@@ -155,18 +158,7 @@ public sealed class ClientUnoStartupSwitchTests
         private TestScope(string root)
         {
             _root = root;
-            var paths = new SharpClawInstancePaths(
-                SharpClawInstanceKind.Frontend,
-                explicitInstanceRoot: root,
-                sharedRootOverride: root,
-                installAnchorOverride: root);
-            Logs = new DurableProcessLogWriter(
-                "client-uno-startup-tests",
-                paths,
-                flushInterval: TimeSpan.FromHours(1));
         }
-
-        public DurableProcessLogWriter Logs { get; }
 
         public static TestScope Create()
         {
@@ -184,8 +176,6 @@ public sealed class ClientUnoStartupSwitchTests
 
         public void Dispose()
         {
-            Logs.Dispose();
-
             try
             {
                 Directory.Delete(_root, recursive: true);

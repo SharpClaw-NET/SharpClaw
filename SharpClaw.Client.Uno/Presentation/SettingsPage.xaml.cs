@@ -17,22 +17,14 @@ public sealed partial class SettingsPage : Page
     private static FontFamily Mono => TerminalUI.Mono;
     private static SolidColorBrush Trans => TerminalUI.Transparent;
     private SharpClawApiClient Api => App.Services!.GetRequiredService<SharpClawApiClient>();
+    private ClientActionDispatcher Actions => App.Services!.GetRequiredService<ClientActionDispatcher>();
 
     private string _activeTab = "Providers";
-
-    // Role editor state
-    private PermissionEditorBuilder? _permEditor;
 
     // Cached lists for cross-tab use
     private List<ProviderEntry>? _cachedProviders;
     private List<ProviderTypeEntry>? _cachedProviderTypes;
-    private List<RoleEntry>? _cachedRoles;
     private List<ModelEntry>? _cachedModels;
-
-    // Current user info for permission filtering & admin tab
-    private JsonElement? _callerPermissions;
-    private bool _isUserAdmin;
-    private Guid? _callerRoleId;
 
     // Gateway log console state
     private DispatcherTimer? _gatewayLogTimer;
@@ -59,7 +51,6 @@ public sealed partial class SettingsPage : Page
     private async void OnLoaded(object sender, RoutedEventArgs e)
     {
         Cursor.SetCommand("sharpclaw settings ");
-        await FetchCurrentUserInfoAsync();
         await RefreshModuleFrontendStateAsync();
         BuildTabs();
         SelectTab("Providers");
@@ -72,15 +63,10 @@ public sealed partial class SettingsPage : Page
 
     private void BuildTabs()
     {
-        _moduleContributionTabs.Clear();
         TabPanel.Children.Clear();
         AddTabSection("Models");
         AddTabButton("Providers", "sharpclaw provider list");
         AddTabButton("Models", "sharpclaw model list");
-        AddTabSection("Agents");
-        AddTabButton("Agents", "sharpclaw agent list");
-        AddTabButton("Roles", "sharpclaw role list");
-        AddContributionTabs();
         AddTabSection("Gateway");
         AddTabButton("Gateway", "sharpclaw gateway status");
         AddTabSection("Modules");
@@ -89,12 +75,8 @@ public sealed partial class SettingsPage : Page
             foreach (var m in _cachedModuleStates)
                 if (m.Enabled)
                     AddTabButton(m.DisplayName, $"sharpclaw module get {m.ModuleId}");
-        if (_isUserAdmin)
-        {
-            AddTabSection("Admin");
-            AddTabButton("Users", "sharpclaw user list");
-            AddTabButton("Danger Zone", "sharpclaw reset");
-        }
+        AddTabSection("Application");
+        AddTabButton("Danger Zone", "sharpclaw reset");
     }
 
 
@@ -134,20 +116,11 @@ public sealed partial class SettingsPage : Page
         HighlightTabs();
         ContentPanel.Children.Clear();
 
-        if (_moduleContributionTabs.TryGetValue(tab, out var contribution))
-        {
-            _ = LoadContributionSettingsAsync(contribution);
-            return;
-        }
-
         _ = tab switch
         {
             "Providers" => LoadProvidersAsync(),
             "Models" => LoadModelsAsync(),
-            "Agents" => LoadAgentsAsync(),
-            "Roles" => LoadRolesListAsync(),
             "Gateway" => LoadGatewayAsync(),
-            "Users" => LoadUsersAsync(),
             "Danger Zone" => LoadDangerZoneAsync(),
             "Manage Modules" => LoadManageModulesAsync(),
             _ => DispatchModuleTabAsync(tab),
@@ -433,191 +406,6 @@ public sealed partial class SettingsPage : Page
     }
 
     // ═══════════════════════════════════════════════════════════════
-    // AGENTS
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task LoadAgentsAsync()
-    {
-        ContentPanel.Children.Clear();
-        var (form, listPanel) = TabHeader("Agents", "Search agents…");
-        var agents = await FetchListAsync<AgentEntry>("/agents");
-        _cachedModels ??= await FetchListAsync<ModelEntry>("/models");
-        _cachedRoles ??= await FetchListAsync<RoleEntry>("/roles");
-
-        var nameBox = MakeInput("Agent name…");
-        var modelBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
-            BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 280 };
-        if (_cachedModels is { Count: > 0 })
-        {
-            foreach (var m in _cachedModels)
-                modelBox.Items.Add(new ComboBoxItem { Content = $"{m.Name} ({m.ProviderName})", Tag = m.Id });
-            modelBox.SelectedIndex = 0;
-        }
-        var promptBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
-            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
-            PlaceholderText = "System prompt (optional)…", AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 60 };
-        var createBtn = GreenButton("Create");
-        createBtn.Click += async (_, _) =>
-        {
-            var name = nameBox.Text.Trim();
-            if (string.IsNullOrEmpty(name) || modelBox.SelectedItem is not ComboBoxItem { Tag: Guid modelId }) return;
-            var prompt = string.IsNullOrWhiteSpace(promptBox.Text) ? null : promptBox.Text.Trim();
-            var body = JsonSerializer.Serialize(new { name, modelId, systemPrompt = prompt }, Json);
-            await Api.PostAsync("/agents", new StringContent(body, Encoding.UTF8, "application/json"));
-            await LoadAgentsAsync();
-        };
-        form.Children.Add(nameBox);
-        form.Children.Add(new TextBlock { Text = "model:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC) });
-        form.Children.Add(modelBox);
-        form.Children.Add(new TextBlock { Text = "system prompt:", FontFamily = Mono, FontSize = 11, Foreground = B(0xCCCCCC) });
-        form.Children.Add(promptBox);
-        form.Children.Add(createBtn);
-
-        var syncBtn = GreenButton("↻ Sync agents from models");
-        syncBtn.Click += async (_, _) =>
-        {
-            syncBtn.IsEnabled = false;
-            try
-            {
-                var resp = await Api.PostAsync("/agents/sync-with-models", null);
-                Status(resp.IsSuccessStatusCode ? "✓ Agents synced." : "✗ Sync failed.",
-                    resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-                if (resp.IsSuccessStatusCode) await LoadAgentsAsync();
-            }
-            catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); }
-            finally { syncBtn.IsEnabled = true; }
-        };
-        form.Children.Add(syncBtn);
-
-        if (agents is { Count: > 0 })
-            foreach (var a in agents)
-                listPanel.Children.Add(MakeListRow(a.Name,
-                    $"{a.ModelName} ({a.ProviderName}){(a.RoleName is not null ? $"  role: {a.RoleName}" : "")}",
-                    () => ShowAgentDetail(a),
-                    async () => { await Api.DeleteAsync($"/agents/{a.Id}"); await LoadAgentsAsync(); }));
-    }
-
-    private void ShowAgentDetail(AgentEntry a)
-    {
-        ContentPanel.Children.Clear();
-        BackLink(() => _ = LoadAgentsAsync());
-        H($"Agent: {a.Name}");
-        Lbl($"model: {a.ModelName} ({a.ProviderName})", 0x999999);
-        Lbl($"id: {a.Id}", 0x555555);
-
-        // Edit system prompt
-        Sub("System Prompt");
-        var promptBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
-            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
-            Text = a.SystemPrompt ?? "", AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 80 };
-        var savePromptBtn = GreenButton("Save Prompt");
-        savePromptBtn.Click += async (_, _) =>
-        {
-            var prompt = string.IsNullOrWhiteSpace(promptBox.Text) ? null : promptBox.Text.Trim();
-            var body = JsonSerializer.Serialize(new { systemPrompt = prompt }, Json);
-            var resp = await Api.PutAsync($"/agents/{a.Id}",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-            Status(resp.IsSuccessStatusCode ? "✓ Prompt saved." : "✗ Save failed.",
-                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-        };
-        ContentPanel.Children.Add(promptBox);
-        ContentPanel.Children.Add(savePromptBtn);
-
-        // Provider parameters
-        Sub("Provider Parameters");
-        Lbl("Optional JSON key-value pairs merged into every API request for this agent's provider "
-            + "(e.g. {\"response_mime_type\":\"application/json\"} for Gemini).", 0x808080);
-        var currentParams = a.ProviderParameters is { Count: > 0 }
-            ? JsonSerializer.Serialize(a.ProviderParameters, new JsonSerializerOptions { WriteIndented = true })
-            : "{}";
-        var paramsBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
-            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
-            Text = currentParams, AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 60 };
-        var saveParamsBtn = GreenButton("Save Parameters");
-        saveParamsBtn.Click += async (_, _) =>
-        {
-            Dictionary<string, JsonElement>? parsed = null;
-            var raw = paramsBox.Text?.Trim();
-            if (!string.IsNullOrEmpty(raw) && raw != "{}")
-            {
-                try
-                {
-                    parsed = JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(raw);
-                }
-                catch (JsonException)
-                {
-                    Status("\u2717 Invalid JSON.", 0xFF4444);
-                    return;
-                }
-            }
-            var body = JsonSerializer.Serialize(new { providerParameters = parsed }, Json);
-            var resp = await Api.PutAsync($"/agents/{a.Id}",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-            Status(resp.IsSuccessStatusCode ? "\u2713 Parameters saved." : "\u2717 Save failed.",
-                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-        };
-        ContentPanel.Children.Add(paramsBox);
-        ContentPanel.Children.Add(saveParamsBtn);
-
-        // Custom chat header
-        Sub("Custom Chat Header");
-        Lbl("Template override for the metadata header prepended to each message. "
-            + "Use {{tag}} placeholders (e.g. {{time}}, {{user}}, {{agent-role}}, {{Agents:{Name} ({Id})}}).", 0x808080);
-        var headerBox = new TextBox { FontFamily = Mono, FontSize = 11, Foreground = B(0x00FF00),
-            Background = B(0x1A1A1A), BorderBrush = B(0x333333), BorderThickness = new Thickness(1),
-            Text = a.CustomChatHeader ?? "", AcceptsReturn = true,
-            TextWrapping = TextWrapping.Wrap, MinHeight = 80,
-            PlaceholderText = "(uses default header)" };
-        var saveHeaderBtn = GreenButton("Save Header");
-        saveHeaderBtn.Click += async (_, _) =>
-        {
-            var header = string.IsNullOrWhiteSpace(headerBox.Text) ? null : headerBox.Text.Trim();
-            var body = JsonSerializer.Serialize(new { customChatHeader = header }, Json);
-            var resp = await Api.PutAsync($"/agents/{a.Id}",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-            Status(resp.IsSuccessStatusCode ? "\u2713 Header saved." : "\u2717 Save failed.",
-                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-        };
-        ContentPanel.Children.Add(headerBox);
-        ContentPanel.Children.Add(saveHeaderBtn);
-
-        // Assign role
-        Sub("Role");
-        _cachedRoles ??= [];
-        var roleBox = new ComboBox { FontFamily = Mono, FontSize = 11, Background = B(0x1A1A1A), Foreground = B(0xCCCCCC),
-            BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 240 };
-        roleBox.Items.Add(new ComboBoxItem { Content = "(none — remove role)", Tag = Guid.Empty });
-        var selIdx = 0;
-        if (_cachedRoles.Count > 0)
-        {
-            for (var i = 0; i < _cachedRoles.Count; i++)
-            {
-                roleBox.Items.Add(new ComboBoxItem { Content = _cachedRoles[i].Name, Tag = _cachedRoles[i].Id });
-                if (_cachedRoles[i].Id == a.RoleId) selIdx = i + 1;
-            }
-        }
-        roleBox.SelectedIndex = selIdx;
-        var assignBtn = GreenButton("Assign Role");
-        assignBtn.Click += async (_, _) =>
-        {
-            if (roleBox.SelectedItem is not ComboBoxItem { Tag: Guid roleId }) return;
-            var body = JsonSerializer.Serialize(new { roleId }, Json);
-            var resp = await Api.PutAsync($"/agents/{a.Id}/role",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-            Status(resp.IsSuccessStatusCode ? "✓ Role assigned." : "✗ Failed.",
-                resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-        };
-        ContentPanel.Children.Add(roleBox);
-        ContentPanel.Children.Add(assignBtn);
-    }
-
-
-    private static void SaveLocalSetting(string key, string? value)
-        => App.Services?.GetService<ClientSettings>()?.Set(key, value);
-
     private static string? LoadLocalSetting(string key)
         => App.Services?.GetService<ClientSettings>()?.Get(key);
 
@@ -627,12 +415,13 @@ public sealed partial class SettingsPage : Page
 
     private GatewayProcessManager? Gateway => App.Services?.GetService<GatewayProcessManager>();
 
-    /// <summary>Creates a raw <see cref="HttpClient"/> pointed at the gateway.</summary>
-    private HttpClient CreateGatewayClient()
-    {
-        var gw = Gateway ?? throw new InvalidOperationException("GatewayProcessManager not registered.");
-        return new HttpClient { BaseAddress = new Uri(gw.ClientUrl), Timeout = TimeSpan.FromSeconds(10) };
-    }
+    private ValueTask<bool> IsGatewayReachableAsync(
+        GatewayProcessManager gateway,
+        CancellationToken cancellationToken = default) =>
+        Actions.RunCommandAsync(
+            "client.gateway.health",
+            token => new ValueTask<bool>(gateway.IsGatewayReachableAsync(token)),
+            cancellationToken);
 
     private async Task LoadGatewayAsync()
     {
@@ -756,7 +545,7 @@ public sealed partial class SettingsPage : Page
         }
 
         // ── Probe current state ──────────────────────────────────
-        var reachable = await gw.IsGatewayReachableAsync();
+        var reachable = await IsGatewayReachableAsync(gw);
         ApplyState(reachable, gw.IsRunning, gw.IsExternal);
 
         // ── Log console ──────────────────────────────────────────
@@ -840,9 +629,15 @@ public sealed partial class SettingsPage : Page
         RefreshLogConsole();
         StartGatewayLogTimer(RefreshLogConsole);
 
-        clearBtn.Click += (_, _) =>
+        clearBtn.Click += async (_, _) =>
         {
-            gw.ClearOutput();
+            await Actions.RunCommandAsync(
+                "client.gateway.logs.clear",
+                _ =>
+                {
+                    gw.ClearOutput();
+                    return ValueTask.CompletedTask;
+                });
             _gatewayLogSnapshot = 0;
             logBlock.Text = "(no output)";
             logCountBadge.Text = "0 lines";
@@ -872,8 +667,13 @@ public sealed partial class SettingsPage : Page
             statusIndicator.Foreground = B(0xFFCC00);
             try
             {
-                gw.ApiKey = Api.CachedApiKey;
-                await gw.EnsureStartedAsync();
+                await Actions.RunCommandAsync(
+                    "client.gateway.start",
+                    async token =>
+                    {
+                        gw.ApiKey = Api.CachedApiKey;
+                        await gw.EnsureStartedAsync(token);
+                    });
                 var ready = false;
                 for (var i = 0; i < 12; i++)
                 {
@@ -888,7 +688,7 @@ public sealed partial class SettingsPage : Page
                         startBtn.IsEnabled = gw.IsAvailable && !gw.SkipLaunch;
                         return;
                     }
-                    if (await gw.IsGatewayReachableAsync())
+                    if (await IsGatewayReachableAsync(gw))
                     {
                         ready = true;
                         break;
@@ -914,9 +714,15 @@ public sealed partial class SettingsPage : Page
             }
         };
 
-        stopBtn.Click += (_, _) =>
+        stopBtn.Click += async (_, _) =>
         {
-            gw.Stop();
+            await Actions.RunCommandAsync(
+                "client.gateway.stop",
+                _ =>
+                {
+                    gw.Stop();
+                    return ValueTask.CompletedTask;
+                });
             ApplyState(false, false, false);
             gwStatusBlock.Text = "Gateway stopped.";
             gwStatusBlock.Foreground = B(0xFF8800);
@@ -933,10 +739,15 @@ public sealed partial class SettingsPage : Page
             statusIndicator.Foreground = B(0xFFCC00);
             try
             {
-                gw.Stop();
-                await Task.Delay(500);
-                gw.ApiKey = Api.CachedApiKey;
-                gw.Start();
+                await Actions.RunCommandAsync(
+                    "client.gateway.restart",
+                    async token =>
+                    {
+                        gw.Stop();
+                        await Task.Delay(500, token);
+                        gw.ApiKey = Api.CachedApiKey;
+                        gw.Start();
+                    });
 
                 var ready = false;
                 for (var i = 0; i < 12; i++)
@@ -951,7 +762,7 @@ public sealed partial class SettingsPage : Page
                         gwStatusBlock.Foreground = B(0xFF4444);
                         return;
                     }
-                    if (await gw.IsGatewayReachableAsync())
+                    if (await IsGatewayReachableAsync(gw))
                     {
                         ready = true;
                         break;
@@ -978,7 +789,7 @@ public sealed partial class SettingsPage : Page
         refreshBtn.Click += async (_, _) =>
         {
             refreshBtn.IsEnabled = false;
-            var online = await gw.IsGatewayReachableAsync();
+            var online = await IsGatewayReachableAsync(gw);
             ApplyState(online, gw.IsRunning, gw.IsExternal);
             RefreshLogConsole();
             refreshBtn.IsEnabled = true;
@@ -1033,11 +844,17 @@ public sealed partial class SettingsPage : Page
             ? "Backend and gateway will remain running as background processes when you close the app."
             : "Backend and gateway will be stopped when you close the app.";
 
-        persistentToggle.Toggled += (_, _) =>
+        persistentToggle.Toggled += async (_, _) =>
         {
             var on = persistentToggle.IsOn;
-            if (backend is not null) backend.Persistent = on;
-            if (gw is not null) gw.Persistent = on;
+            await Actions.RunCommandAsync(
+                "client.process.persistence",
+                _ =>
+                {
+                    if (backend is not null) backend.Persistent = on;
+                    if (gw is not null) gw.Persistent = on;
+                    return ValueTask.CompletedTask;
+                });
 
             persistentStatus.Text = on
                 ? "Backend and gateway will remain running as background processes when you close the app."
@@ -1072,15 +889,26 @@ public sealed partial class SettingsPage : Page
                 ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
                 : "Processes only run when the app is open (unless persistent mode is on and they're already running).";
 
-            autoStartToggle.Toggled += (_, _) =>
+            autoStartToggle.Toggled += async (_, _) =>
             {
                 var on = autoStartToggle.IsOn;
+                await Actions.RunCommandAsync(
+                    "client.autostart.update",
+                    _ =>
+                    {
+                        if (backend is not null)
+                            WindowsStartupManager.SetBackendAutoStart(
+                                on && !backend.SkipLaunch,
+                                backend.ExecutablePath,
+                                backend.ApiUrl);
 
-                if (backend is not null)
-                    WindowsStartupManager.SetBackendAutoStart(on && !backend.SkipLaunch, backend.ExecutablePath, backend.ApiUrl);
-
-                if (gw is not null)
-                    WindowsStartupManager.SetGatewayAutoStart(on && !gw.SkipLaunch, gw.ExecutablePath, gw.GatewayUrl);
+                        if (gw is not null)
+                            WindowsStartupManager.SetGatewayAutoStart(
+                                on && !gw.SkipLaunch,
+                                gw.ExecutablePath,
+                                gw.GatewayUrl);
+                        return ValueTask.CompletedTask;
+                    });
 
                 autoStartStatus.Text = on
                     ? "Startup scripts registered in shell:startup. Works with both MSIX and unpackaged deployments."
@@ -1099,9 +927,6 @@ public sealed partial class SettingsPage : Page
 
 
     // ═══════════════════════════════════════════════════════════════
-    // ROLES
-    // ═══════════════════════════════════════════════════════════════
-
 
     private void StartGatewayLogTimer(Action refresh)
     {
@@ -1118,140 +943,6 @@ public sealed partial class SettingsPage : Page
         _gatewayLogBlock = null;
         _gatewayLogScroll = null;
     }
-    private async Task LoadRolesListAsync()
-    {
-        ContentPanel.Children.Clear();
-        var (form, listPanel) = TabHeader("Roles", "Search roles…");
-        _cachedRoles = await FetchListAsync<RoleEntry>("/roles");
-
-        var nameBox = MakeInput("New role name…");
-        var createBtn = GreenButton("Create");
-        createBtn.Click += async (_, _) =>
-        {
-            var name = nameBox.Text.Trim();
-            if (string.IsNullOrEmpty(name)) return;
-            var body = JsonSerializer.Serialize(new { name }, Json);
-            await Api.PostAsync("/roles", new StringContent(body, Encoding.UTF8, "application/json"));
-            await LoadRolesListAsync();
-        };
-        form.Children.Add(nameBox);
-        form.Children.Add(createBtn);
-
-        if (_cachedRoles is { Count: > 0 })
-            foreach (var role in _cachedRoles)
-            {
-                var r = role;
-                var row = MakeListRow(r.Name, r.Id.ToString()[..8] + "…",
-                    () => _ = LoadRoleDetailAsync(r.Id, r.Name),
-                    async () => { await Api.DeleteAsync($"/roles/{r.Id}"); await LoadRolesListAsync(); });
-                var clone = new Button
-                {
-                    Content = new TextBlock { Text = "⎘", FontFamily = Mono, FontSize = 12, Foreground = B(0x00CCFF) },
-                    Background = Trans, BorderThickness = new Thickness(0),
-                    Padding = new Thickness(6, 4), MinWidth = 0, MinHeight = 0,
-                    VerticalAlignment = VerticalAlignment.Center,
-                };
-                ToolTipService.SetToolTip(clone, "Duplicate role");
-                clone.Click += async (_, _) =>
-                {
-                    try
-                    {
-                        var body = JsonSerializer.Serialize(new { name = $"Duplicate of {r.Name}" }, Json);
-                        using var createResp = await Api.PostAsync("/roles", new StringContent(body, Encoding.UTF8, "application/json"));
-                        if (!createResp.IsSuccessStatusCode) { Status("✗ Clone failed.", 0xFF4444); return; }
-                        using var cs = await createResp.Content.ReadAsStreamAsync();
-                        using var cd = await JsonDocument.ParseAsync(cs);
-                        var newId = cd.RootElement.GetProperty("id").GetGuid();
-                        using var permsResp = await Api.GetAsync($"/roles/{r.Id}/permissions");
-                        if (permsResp.IsSuccessStatusCode)
-                        {
-                            var permsBody = await permsResp.Content.ReadAsStringAsync();
-                            await Api.PutAsync($"/roles/{newId}/permissions",
-                                new StringContent(permsBody, Encoding.UTF8, "application/json"));
-                        }
-                        await LoadRolesListAsync();
-                    }
-                    catch { Status("✗ Clone failed.", 0xFF4444); }
-                };
-                row.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-                Grid.SetColumn(clone, row.ColumnDefinitions.Count - 1);
-                row.Children.Add(clone);
-                listPanel.Children.Add(row);
-            }
-    }
-
-    private async Task LoadRoleDetailAsync(Guid roleId, string roleName)
-    {
-        ContentPanel.Children.Clear();
-        BackLink(() => _ = LoadRolesListAsync());
-        H($"Role: {roleName}");
-        Lbl($"id: {roleId}", 0x555555);
-
-        JsonElement? root = null;
-        try
-        {
-            using var resp = await Api.GetAsync($"/roles/{roleId}/permissions");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(s);
-                root = doc.RootElement.Clone();
-            }
-        }
-        catch { /* swallow */ }
-
-        if (root is null) { Status("✗ Failed to load permissions.", 0xFF4444); return; }
-        await BuildRoleEditorAsync(roleId, root.Value);
-    }
-
-    private async Task BuildRoleEditorAsync(Guid roleId, JsonElement root)
-    {
-        _permEditor = new PermissionEditorBuilder(Api)
-            .WithCallerFilter(_callerPermissions)
-            .WithExisting(root)
-            .WithFlagClearance(true)
-            .WithGrantClearance(true);
-
-        var metadata = await TerminalUI.LoadPermissionMetadataAsync(Api);
-
-        Sub("Permissions (grouped by module)");
-        Lbl("Capabilities and resource grants the agent can use, organised by owning module.", 0x808080);
-        await _permEditor.BuildGroupedByModuleAsync(ContentPanel, metadata);
-
-        var saveBtn = new Button
-        {
-            Content = new TextBlock { Text = "Save Permissions", FontFamily = Mono, FontSize = 12, Foreground = B(0x00FF00) },
-            Background = B(0x1A2A1A), BorderBrush = B(0x00FF00), BorderThickness = new Thickness(1),
-            Padding = new Thickness(16, 8), Margin = new Thickness(0, 12, 0, 0),
-        };
-        saveBtn.Click += async (_, _) => await SaveRolePermsAsync(roleId);
-        ContentPanel.Children.Add(saveBtn);
-    }
-
-    private async Task SaveRolePermsAsync(Guid roleId)
-    {
-        if (_permEditor is null) return;
-        try
-        {
-            var body = JsonSerializer.Serialize(_permEditor.CollectAll(), Json);
-            var resp = await Api.PutAsync($"/roles/{roleId}/permissions",
-                new StringContent(body, Encoding.UTF8, "application/json"));
-            if (resp.IsSuccessStatusCode) { Status("✓ Permissions saved.", 0x00FF00); return; }
-            string errorMsg;
-            try
-            {
-                var raw = await resp.Content.ReadAsStringAsync();
-                using var doc = JsonDocument.Parse(raw);
-                errorMsg = doc.RootElement.TryGetProperty("detail", out var d) && d.ValueKind == JsonValueKind.String
-                    ? d.GetString() ?? "Save failed."
-                    : "Save failed.";
-            }
-            catch { errorMsg = "Save failed."; }
-            Status($"✗ {errorMsg}", 0xFF4444);
-        }
-        catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); }
-    }
-
     // ═══════════════════════════════════════════════════════════════
     // Shared UI helpers
     // ═══════════════════════════════════════════════════════════════
@@ -1308,9 +999,6 @@ public sealed partial class SettingsPage : Page
         ContentPanel.Children.Add(list);
         return (form, list);
     }
-
-    private static ComboBox ClearanceCombo(string selected, bool includeUnset)
-        => TerminalUI.MakeClearanceCombo(selected, includeUnset);
 
     private void H(string text) => ContentPanel.Children.Add(new TextBlock
     {
@@ -1405,178 +1093,21 @@ public sealed partial class SettingsPage : Page
 
     private Task<List<T>?> FetchListAsync<T>(string path) => Api.FetchListAsync<T>(path, Json);
 
-    private static string FormatFlagName(string camelCase) => TerminalUI.FormatFlagName(camelCase);
-
     private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
 
     private void OnBackClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
-        var navigator = services.GetRequiredService<INavigator>();
-        _ = navigator.NavigateRouteAsync(this, "Main");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main");
     }
 
     private void OnEnvClick(object sender, RoutedEventArgs e)
     {
         if (App.Services is not { } services) return;
         EnvMenuPage.PendingOrigin = "Settings";
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // Current user info & permission helpers
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task FetchCurrentUserInfoAsync()
-    {
-        try
-        {
-            using var resp = await Api.GetAsync("/auth/me");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                using var doc = await JsonDocument.ParseAsync(s);
-                var root = doc.RootElement;
-                _isUserAdmin = root.TryGetProperty("isUserAdmin", out var adminProp) && adminProp.GetBoolean();
-                _callerRoleId = root.TryGetProperty("roleId", out var roleProp) && roleProp.ValueKind != JsonValueKind.Null
-                    ? roleProp.GetGuid() : null;
-            }
-        }
-        catch { /* swallow */ }
-
-        if (_callerRoleId is { } roleId)
-        {
-            try
-            {
-                using var resp = await Api.GetAsync($"/roles/{roleId}/permissions");
-                if (resp.IsSuccessStatusCode)
-                {
-                    using var s = await resp.Content.ReadAsStreamAsync();
-                    using var doc = await JsonDocument.ParseAsync(s);
-                    _callerPermissions = doc.RootElement.Clone();
-                }
-            }
-            catch { /* swallow */ }
-        }
-    }
-
-    /// <summary>
-    /// Returns the set of resource IDs the caller holds for a given access type,
-    /// or <c>null</c> if the caller has no grants of that type.
-    /// </summary>
-    private HashSet<Guid>? GetCallerResourceIds(string accessType)
-    {
-        if (_callerPermissions is not { } perms) return null;
-        if (!perms.TryGetProperty(accessType, out var arr) || arr.ValueKind != JsonValueKind.Array)
-            return null;
-
-        var ids = new HashSet<Guid>();
-        foreach (var g in arr.EnumerateArray())
-            if (g.TryGetProperty("resourceId", out var rid) && rid.ValueKind == JsonValueKind.String)
-                ids.Add(rid.GetGuid());
-        return ids.Count > 0 ? ids : null;
-    }
-
-    // ═══════════════════════════════════════════════════════════════
-    // USERS (admin only)
-    // ═══════════════════════════════════════════════════════════════
-
-    private async Task LoadUsersAsync()
-    {
-        ContentPanel.Children.Clear();
-        H("Users");
-        Lbl("Manage registered users and assign roles. Requires admin.", 0x808080);
-
-        List<UserListEntry>? users = null;
-        try
-        {
-            using var resp = await Api.GetAsync("/users");
-            if (resp.IsSuccessStatusCode)
-            {
-                using var s = await resp.Content.ReadAsStreamAsync();
-                users = await JsonSerializer.DeserializeAsync<List<UserListEntry>>(s, Json);
-            }
-            else if (resp.StatusCode == System.Net.HttpStatusCode.Forbidden)
-            {
-                Lbl("✗ You do not have admin privileges.", 0xFF4444);
-                return;
-            }
-        }
-        catch (Exception ex) { Status($"✗ {ex.Message}", 0xFF4444); return; }
-
-        if (users is not { Count: > 0 })
-        {
-            Lbl("No users found.", 0x808080);
-            return;
-        }
-
-        _cachedRoles ??= await FetchListAsync<RoleEntry>("/roles");
-
-        Sub("Registered Users");
-        var list = new StackPanel { Spacing = 8 };
-        foreach (var u in users)
-        {
-            var userRow = new StackPanel { Spacing = 4, Margin = new Thickness(0, 0, 0, 4) };
-
-            var headerRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8 };
-            headerRow.Children.Add(new TextBlock { Text = "›", FontFamily = Mono, FontSize = 12, Foreground = B(0x00FF00) });
-            headerRow.Children.Add(new TextBlock { Text = u.Username, FontFamily = Mono, FontSize = 12,
-                Foreground = B(0xE0E0E0), FontWeight = Microsoft.UI.Text.FontWeights.SemiBold });
-            if (u.IsUserAdmin)
-                headerRow.Children.Add(new TextBlock { Text = "admin", FontFamily = Mono, FontSize = 10,
-                    Foreground = B(0xFFCC00), VerticalAlignment = VerticalAlignment.Center });
-            if (u.RoleName is not null)
-                headerRow.Children.Add(new TextBlock { Text = $"role: {u.RoleName}", FontFamily = Mono, FontSize = 10,
-                    Foreground = B(0x808080), VerticalAlignment = VerticalAlignment.Center });
-            userRow.Children.Add(headerRow);
-
-            var roleRow = new StackPanel { Orientation = Orientation.Horizontal, Spacing = 8, Margin = new Thickness(16, 0, 0, 0) };
-            roleRow.Children.Add(new TextBlock { Text = "Role:", FontFamily = Mono, FontSize = 10,
-                Foreground = B(0x808080), VerticalAlignment = VerticalAlignment.Center });
-            var roleBox = new ComboBox { FontFamily = Mono, FontSize = 10, Background = B(0x1A1A1A),
-                Foreground = B(0xCCCCCC), BorderBrush = B(0x333333), BorderThickness = new Thickness(1), MinWidth = 200 };
-            roleBox.Items.Add(new ComboBoxItem { Content = "(none)", Tag = Guid.Empty });
-            var selIdx = 0;
-            if (_cachedRoles is { Count: > 0 })
-            {
-                for (var i = 0; i < _cachedRoles.Count; i++)
-                {
-                    roleBox.Items.Add(new ComboBoxItem { Content = _cachedRoles[i].Name, Tag = _cachedRoles[i].Id });
-                    if (_cachedRoles[i].Id == u.RoleId) selIdx = i + 1;
-                }
-            }
-            roleBox.SelectedIndex = selIdx;
-
-            var capturedUser = u;
-            var assignBtn = new Button
-            {
-                Content = new TextBlock { Text = "Assign", FontFamily = Mono, FontSize = 10, Foreground = B(0x00FF00) },
-                Background = B(0x1A2A1A), BorderBrush = B(0x00FF00), BorderThickness = new Thickness(1),
-                Padding = new Thickness(8, 3), MinWidth = 0, MinHeight = 0,
-            };
-            assignBtn.Click += async (_, _) =>
-            {
-                if (roleBox.SelectedItem is not ComboBoxItem { Tag: Guid roleId }) return;
-                var body = JsonSerializer.Serialize(new { roleId }, Json);
-                var resp = await Api.PutAsync($"/users/{capturedUser.Id}/role",
-                    new StringContent(body, Encoding.UTF8, "application/json"));
-                Status(resp.IsSuccessStatusCode
-                    ? $"✓ Role updated for {capturedUser.Username}."
-                    : "✗ Failed to assign role.",
-                    resp.IsSuccessStatusCode ? 0x00FF00 : 0xFF4444);
-            };
-
-            roleRow.Children.Add(roleBox);
-            roleRow.Children.Add(assignBtn);
-            userRow.Children.Add(roleRow);
-
-            // Show user ID in muted text
-            userRow.Children.Add(new TextBlock { Text = $"id: {u.Id}", FontFamily = Mono, FontSize = 9,
-                Foreground = B(0x444444), Margin = new Thickness(16, 0, 0, 0) });
-
-            list.Children.Add(userRow);
-        }
-        ContentPanel.Children.Add(list);
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 
     // ── DTOs ────────────────────────────────────────────────────
@@ -1594,13 +1125,7 @@ public sealed partial class SettingsPage : Page
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModelEntry(Guid Id, string Name, Guid ProviderId, string ProviderName, string Capabilities);
     [ImplicitKeys(IsEnabled = false)]
-    private sealed record AgentEntry(Guid Id, string Name, string? SystemPrompt, Guid ModelId, string ModelName, string ProviderName, Guid? RoleId = null, string? RoleName = null, Dictionary<string, JsonElement>? ProviderParameters = null, string? CustomChatHeader = null);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed record RoleEntry(Guid Id, string Name, Guid? PermissionSetId = null);
-    [ImplicitKeys(IsEnabled = false)]
     private sealed record ResolvedFile(string DownloadUrl, string Filename, string? Quantization);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed record UserListEntry(Guid Id, string Username, string? Bio, Guid? RoleId, string? RoleName, bool IsUserAdmin);
     [ImplicitKeys(IsEnabled = false)]
     private sealed record ModuleStateEntry(
         string ModuleId, string DisplayName, string ToolPrefix,
@@ -1718,24 +1243,52 @@ public sealed partial class SettingsPage : Page
         try
         {
             var gateway = App.Services?.GetService<GatewayProcessManager>();
-            gateway?.Dispose();
+            if (gateway is not null)
+            {
+                await Actions.RunCommandAsync(
+                    "client.gateway.stop",
+                    _ =>
+                    {
+                        gateway.Dispose();
+                        return ValueTask.CompletedTask;
+                    });
+            }
         }
         catch { /* best-effort */ }
 
         try
         {
             var backend = App.Services?.GetService<BackendProcessManager>();
-            backend?.Stop();
+            if (backend is not null)
+            {
+                await Actions.RunCommandAsync(
+                    "client.backend.stop",
+                    _ =>
+                    {
+                        backend.Stop();
+                        return ValueTask.CompletedTask;
+                    });
+            }
         }
         catch (Exception ex) { errors.Add($"Stop backend: {ex.Message}"); }
 
         // 3. Clear frontend-only preferences (client-settings.json) in memory
         //    so they are not re-flushed to disk before the directory is deleted.
-        try { App.Services?.GetService<ClientSettings>()?.Reset(); }
+        try
+        {
+            var settings = App.Services?.GetService<ClientSettings>();
+            if (settings is not null)
+                await settings.ResetAsync();
+        }
         catch (Exception ex) { errors.Add($"Client settings: {ex.Message}"); }
 
         // 3b. Clear saved account store.
-        try { App.Services?.GetService<AccountStore>()?.Reset(); }
+        try
+        {
+            var accounts = App.Services?.GetService<AccountStore>();
+            if (accounts is not null)
+                await accounts.ResetAsync();
+        }
         catch (Exception ex) { errors.Add($"Account store: {ex.Message}"); }
 
         // 4. Clean only the frontend-owned instance root. This also removes
@@ -1746,7 +1299,16 @@ public sealed partial class SettingsPage : Page
         {
             var frontend = App.Services?.GetService<FrontendInstanceService>();
             if (frontend is not null)
-                await DeleteWithRetryAsync(frontend.Paths.InstanceRoot, "Frontend instance", errors);
+            {
+                await Actions.RunCommandAsync(
+                    "client.factory-reset.files",
+                    token => new ValueTask(
+                        DeleteWithRetryAsync(
+                            frontend.Paths.InstanceRoot,
+                            "Frontend instance",
+                            errors,
+                            token)));
+            }
         }
         catch (Exception ex)
         {
@@ -1755,7 +1317,12 @@ public sealed partial class SettingsPage : Page
 
         // 5. Invalidate the client's cached API key so the next request
         //    re-reads from disk (handles both external and bundled restarts).
-        try { App.Services?.GetService<SharpClawApiClient>()?.InvalidateApiKey(); }
+        try
+        {
+            var api = App.Services?.GetService<SharpClawApiClient>();
+            if (api is not null)
+                await api.InvalidateApiKeyAsync();
+        }
         catch { /* best-effort */ }
 
         // Show result
@@ -1778,18 +1345,23 @@ public sealed partial class SettingsPage : Page
         // Navigate back to boot page so the app restarts the connection flow.
         if (App.Services is { } services)
         {
-            var navigator = services.GetRequiredService<INavigator>();
-            await navigator.NavigateRouteAsync(this, "Boot", qualifier: Qualifiers.ClearBackStack);
+            await services.GetRequiredService<ClientNavigationService>()
+                .NavigateRouteAsync(this, "Boot", Qualifiers.ClearBackStack);
         }
     }
 
-    private static async Task DeleteWithRetryAsync(string path, string label, List<string> errors)
+    private static async Task DeleteWithRetryAsync(
+        string path,
+        string label,
+        List<string> errors,
+        CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(path)) return;
 
         const int maxAttempts = 3;
         for (int i = 1; i <= maxAttempts; i++)
         {
+            cancellationToken.ThrowIfCancellationRequested();
             try
             {
                 Directory.Delete(path, recursive: true);
@@ -1797,7 +1369,7 @@ public sealed partial class SettingsPage : Page
             }
             catch when (i < maxAttempts)
             {
-                await Task.Delay(1000);
+                await Task.Delay(1000, cancellationToken);
             }
             catch (Exception ex)
             {
@@ -1812,7 +1384,10 @@ public sealed partial class SettingsPage : Page
     /// the backend process and must survive a factory reset so the client can
     /// re-authenticate against a still-running (external/dev) backend.
     /// </summary>
-    private static async Task CleanDirectoryPreservingAuthFilesAsync(string path, List<string> errors)
+    private static async Task CleanDirectoryPreservingAuthFilesAsync(
+        string path,
+        List<string> errors,
+        CancellationToken cancellationToken = default)
     {
         if (!Directory.Exists(path))
             return;
@@ -1830,7 +1405,11 @@ public sealed partial class SettingsPage : Page
 
         foreach (var dir in Directory.EnumerateDirectories(path))
         {
-            await DeleteWithRetryAsync(dir, $"LocalAppData/{Path.GetFileName(dir)}", errors);
+            await DeleteWithRetryAsync(
+                dir,
+                $"LocalAppData/{Path.GetFileName(dir)}",
+                errors,
+                cancellationToken);
         }
     }
 }

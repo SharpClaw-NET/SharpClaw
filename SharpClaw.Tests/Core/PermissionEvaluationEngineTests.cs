@@ -107,18 +107,18 @@ public sealed class PermissionEvaluationEngineTests
         var role = PermissionSet(
             resourceAccesses:
             [
-                new("AoTask", WellKnownIds.AllResources, PermissionClearance.ApprovedBySameLevelUser)
+                new("Document", WellKnownIds.AllResources, PermissionClearance.ApprovedBySameLevelUser)
             ]);
         var caller = PermissionSet(
             resourceAccesses:
             [
-                new("AoTask", resourceId, PermissionClearance.Independent)
+                new("Document", resourceId, PermissionClearance.Independent)
             ]);
 
         var result = _engine.EvaluateResourceAccess(
-            "AoTask",
+            "Document",
             resourceId,
-            "AoTask access",
+            "Document access",
             role,
             channelPermissions: null,
             contextPermissions: null,

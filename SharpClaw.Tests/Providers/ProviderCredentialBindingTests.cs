@@ -1,5 +1,4 @@
 using System.Text.Json;
-using SharpClaw.Runtime.BLL.Services;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Providers.Common;
 
@@ -78,35 +77,6 @@ public sealed class ProviderCredentialBindingTests
         feed.Should().BeSameAs(plugin.BoundCostFeed);
         plugin.BoundCredential.Should().Be("sk-cost");
         plugin.EndpointOnlyCostFeedCalls.Should().Be(0);
-    }
-
-    [Test]
-    public void ApplicationBinder_WhenCredentialIsRequiredAndPluginCannotBind_ThrowsLocalConfigurationError()
-    {
-        var plugin = new EndpointOnlyPlugin(requiresApiKey: true);
-
-        var act = () => ProviderCredentialBinder.CreateClient(
-            plugin,
-            ProviderClientOptions.Empty,
-            "sk-test");
-
-        act.Should().Throw<InvalidOperationException>()
-            .WithMessage("Provider 'test' requires credentials, but its plugin does not support host-side credential binding.");
-    }
-
-    [Test]
-    public void ApplicationBinder_WhenCredentialIsRequiredAndPluginCanBind_PassesCredentialByProviderOwnedOverload()
-    {
-        var plugin = new BoundPlugin(requiresApiKey: true);
-
-        var client = ProviderCredentialBinder.CreateClient(
-            plugin,
-            ProviderClientOptions.Empty,
-            "sk-app");
-
-        client.Should().BeSameAs(plugin.BoundClient);
-        plugin.BoundCredential.Should().Be("sk-app");
-        plugin.EndpointOnlyCalls.Should().Be(0);
     }
 
     private sealed class EndpointOnlyPlugin(bool requiresApiKey) : IProviderPlugin

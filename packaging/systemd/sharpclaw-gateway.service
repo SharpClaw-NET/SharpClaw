@@ -1,6 +1,6 @@
 [Unit]
 Description=SharpClaw Public Gateway
-Documentation=https://github.com/mkn8rn/SharpClaw
+Documentation=https://github.com/SharpClaw-NET/SharpClaw
 After=network-online.target sharpclaw-api.service
 Wants=network-online.target
 Requires=sharpclaw-api.service

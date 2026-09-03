@@ -1,486 +1,177 @@
-using System.Text.Json;
 using Microsoft.EntityFrameworkCore;
-using Microsoft.EntityFrameworkCore.ChangeTracking;
-using SharpClaw.Contracts.Entities.Core;
-using SharpClaw.Contracts.Entities.Core.Access;
-using SharpClaw.Contracts.Entities.Core.Clearance;
-using SharpClaw.Contracts.Entities.Core.Context;
-using SharpClaw.Contracts.Entities.Core.Jobs;
-using SharpClaw.Contracts.Entities.Core.Messages;
-using SharpClaw.Contracts.Entities.Core.Tasks;
-using SharpClaw.Contracts;
-using SharpClaw.Contracts.Entities;
 using Microsoft.EntityFrameworkCore.Storage.ValueConversion;
-using SharpClaw.Contracts.Enums;
+using SharpClaw.Contracts.Entities.Core;
 using SharpClaw.Contracts.Persistence;
 
 namespace SharpClaw.Runtime.INF.Persistence;
 
 public class SharpClawDbContext(
-    DbContextOptions<SharpClawDbContext> options) : DbContext(options), ISharpClawDataContext
+    DbContextOptions<SharpClawDbContext> options,
+    IRuntimePersistenceActionRunnerAccessor? persistenceActionRunnerAccessor = null)
+    : DbContext(options), ISharpClawDataContext
 {
-    IQueryable<AgentDB> ISharpClawDataContext.Agents => Agents;
-    IQueryable<ChannelDB> ISharpClawDataContext.Channels => Channels;
-    IQueryable<ChannelContextDB> ISharpClawDataContext.AgentContexts => AgentContexts;
-    IQueryable<ChatThreadDB> ISharpClawDataContext.ChatThreads => ChatThreads;
-    IQueryable<ChatMessageDB> ISharpClawDataContext.ChatMessages => ChatMessages;
-    IQueryable<PermissionSetDB> ISharpClawDataContext.PermissionSets => PermissionSets;
-    IQueryable<GlobalFlagDB> ISharpClawDataContext.GlobalFlags => GlobalFlags;
-    IQueryable<RoleDB> ISharpClawDataContext.Roles => Roles;
+    private readonly IRuntimePersistenceActionRunnerAccessor? _persistenceActionRunnerAccessor =
+        persistenceActionRunnerAccessor;
 
-    public DbSet<UserDB> Users => Set<UserDB>();
-    public DbSet<RoleDB> Roles => Set<RoleDB>();
-    public DbSet<PermissionSetDB> PermissionSets => Set<PermissionSetDB>();
-    public DbSet<RefreshTokenDB> RefreshTokens => Set<RefreshTokenDB>();
+    IQueryable<ProviderDB> ISharpClawDataContext.Providers => Providers;
+    IQueryable<ModelDB> ISharpClawDataContext.Models => Models;
+    IQueryable<ModuleStateDB> ISharpClawDataContext.ModuleStates => ModuleStates;
+    IQueryable<ModuleConfigEntryDB> ISharpClawDataContext.ModuleConfigEntries => ModuleConfigEntries;
+    IQueryable<ModuleStorageRecordDB> ISharpClawDataContext.ModuleStorageRecords => ModuleStorageRecords;
+    IQueryable<ModuleStorageIndexEntryDB> ISharpClawDataContext.ModuleStorageIndexEntries => ModuleStorageIndexEntries;
+
     public DbSet<ProviderDB> Providers => Set<ProviderDB>();
     public DbSet<ModelDB> Models => Set<ModelDB>();
-    public DbSet<AgentDB> Agents => Set<AgentDB>();
-    public DbSet<ChannelContextDB> AgentContexts => Set<ChannelContextDB>();
-    public DbSet<ChannelDB> Channels => Set<ChannelDB>();
-    public DbSet<ChatThreadDB> ChatThreads => Set<ChatThreadDB>();
-    public DbSet<ChatMessageDB> ChatMessages => Set<ChatMessageDB>();
-
-    public DbSet<ClearanceUserWhitelistEntryDB> ClearanceUserWhitelistEntries => Set<ClearanceUserWhitelistEntryDB>();
-    public DbSet<ClearanceAgentWhitelistEntryDB> ClearanceAgentWhitelistEntries => Set<ClearanceAgentWhitelistEntryDB>();
-    public DbSet<AgentJobDB> AgentJobs => Set<AgentJobDB>();
-    public DbSet<ExecutionAuditEventDB> ExecutionAuditEvents => Set<ExecutionAuditEventDB>();
-    public DbSet<DefaultResourceSetDB> DefaultResourceSets => Set<DefaultResourceSetDB>();
-    public DbSet<DefaultResourceEntryDB> DefaultResourceEntries => Set<DefaultResourceEntryDB>();
-    public DbSet<ToolAwarenessSetDB> ToolAwarenessSets => Set<ToolAwarenessSetDB>();
-
-    // ── Generic resource access (§3.10)
-    public DbSet<ResourceAccessDB> ResourceAccesses => Set<ResourceAccessDB>();
-
-    // ── Generic global flags (§12.4.2) ────────────────────────────
-    public DbSet<GlobalFlagDB> GlobalFlags => Set<GlobalFlagDB>();
-
-    // ── Module state & config ─────────────────────────────────────
     public DbSet<ModuleStateDB> ModuleStates => Set<ModuleStateDB>();
     public DbSet<ModuleConfigEntryDB> ModuleConfigEntries => Set<ModuleConfigEntryDB>();
     public DbSet<ModuleStorageRecordDB> ModuleStorageRecords => Set<ModuleStorageRecordDB>();
     public DbSet<ModuleStorageIndexEntryDB> ModuleStorageIndexEntries => Set<ModuleStorageIndexEntryDB>();
 
-    // ── Task scripts ──────────────────────────────────────────────
-    public DbSet<TaskDefinitionDB> TaskDefinitions => Set<TaskDefinitionDB>();
-    public DbSet<TaskInstanceDB> TaskInstances => Set<TaskInstanceDB>();
-    public DbSet<TaskTriggerBindingDB> TaskTriggerBindings => Set<TaskTriggerBindingDB>();
+    internal Task<int> SaveChangesThroughKernelAsync(
+        CancellationToken cancellationToken = default) =>
+        _persistenceActionRunnerAccessor is { } accessor
+            ? accessor.GetRequiredRunner().SaveChangesAsync(this, cancellationToken).AsTask()
+            : throw new InvalidOperationException(
+                "The Runtime persistence action runner is not configured.");
+
+    internal Task<int> SaveChangesTerminalAsync(CancellationToken cancellationToken) =>
+        SaveChangesCoreAsync(cancellationToken);
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
         base.OnModelCreating(modelBuilder);
 
-        // ── Roles & Users ─────────────────────────────────────────
-        modelBuilder.Entity<RoleDB>(e =>
+        modelBuilder.Entity<ProviderDB>(entity =>
         {
-            e.HasIndex(r => r.Name).IsUnique();
-            e.HasMany(r => r.Users)
-                .WithOne(u => u.Role)
-                .HasForeignKey(u => u.RoleId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(r => r.PermissionSet)
-                .WithMany()
-                .HasForeignKey(r => r.PermissionSetId)
+            entity.HasIndex(provider => provider.Name).IsUnique();
+            entity.HasMany(provider => provider.Models)
+                .WithOne(model => model.Provider)
+                .HasForeignKey(model => model.ProviderId)
                 .OnDelete(DeleteBehavior.Cascade);
         });
 
-        modelBuilder.Entity<UserDB>(e =>
+        modelBuilder.Entity<ModelDB>(entity =>
         {
-            e.HasIndex(u => u.Username).IsUnique();
-            e.HasMany(u => u.RefreshTokens)
-                .WithOne(r => r.User)
-                .HasForeignKey(r => r.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(model => new { model.Name, model.ProviderId }).IsUnique();
         });
 
-        modelBuilder.Entity<RefreshTokenDB>(e =>
+        modelBuilder.Entity<ModuleStateDB>(entity =>
         {
-            e.HasIndex(r => r.Token).IsUnique();
+            entity.HasIndex(state => state.ModuleId).IsUnique();
         });
 
-        // ── Providers & Models ────────────────────────────────────
-        modelBuilder.Entity<ProviderDB>(e =>
+        modelBuilder.Entity<ModuleConfigEntryDB>(entity =>
         {
-            e.HasIndex(p => p.Name).IsUnique();
-            e.HasMany(p => p.Models)
-                .WithOne(m => m.Provider)
-                .HasForeignKey(m => m.ProviderId)
-                .OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable("ModuleConfig");
+            entity.HasIndex(entry => new { entry.ModuleId, entry.Key }).IsUnique();
+            entity.Property(entry => entry.ModuleId).HasMaxLength(128);
+            entity.Property(entry => entry.Key).HasMaxLength(128);
+            entity.Property(entry => entry.Value).HasMaxLength(4096);
         });
 
-        modelBuilder.Entity<ModelDB>(e =>
+        modelBuilder.Entity<ModuleStorageRecordDB>(entity =>
         {
-            e.HasIndex(m => new { m.Name, m.ProviderId }).IsUnique();
-            e.HasMany(m => m.Agents)
-                .WithOne(a => a.Model)
-                .HasForeignKey(a => a.ModelId)
-                .OnDelete(DeleteBehavior.Restrict);
+            entity.ToTable("ModuleStorageRecords");
+            entity.HasIndex(record => new
+            {
+                record.ModuleId,
+                record.StorageName,
+                record.RecordKey,
+            }).IsUnique();
+            entity.Property(record => record.ModuleId).HasMaxLength(128);
+            entity.Property(record => record.StorageName).HasMaxLength(128);
+            entity.Property(record => record.RecordKey).HasMaxLength(256);
         });
 
-        // ── Tool Awareness Sets ────────────────────────
-        modelBuilder.Entity<ToolAwarenessSetDB>(e =>
+        modelBuilder.Entity<ModuleStorageIndexEntryDB>(entity =>
         {
-            e.HasIndex(t => t.Name).IsUnique();
-            e.Property(t => t.Tools).HasConversion(
-                v => JsonSerializer.Serialize(v, (JsonSerializerOptions?)null),
-                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(v, (JsonSerializerOptions?)null)! : new())
-                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, bool>>(
-                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
-                    v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode() : 0,
-                    v => v != null ? JsonSerializer.Deserialize<Dictionary<string, bool>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null)! : new()));
-        });
-
-        // ── Agents & Chat ─────────────────────────────────────────
-        modelBuilder.Entity<AgentDB>(e =>
-        {
-            e.HasIndex(a => a.Name).IsUnique();
-            e.Property(a => a.ResponseFormat).HasConversion(
-                    value => SerializeJsonElement(value),
-                    value => DeserializeJsonElement(value))
-                .Metadata.SetValueComparer(new ValueComparer<JsonElement?>(
-                    (left, right) => SerializeJsonElement(left)
-                        == SerializeJsonElement(right),
-                    value => SerializeJsonElement(value) == null
-                        ? 0
-                        : SerializeJsonElement(value)!.GetHashCode(),
-                    value => CloneJsonElement(value)));
-            e.Property(a => a.ProviderParameters).HasConversion(
-                v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null) : null,
-                v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(v, (JsonSerializerOptions?)null) : null)
-                .Metadata.SetValueComparer(new ValueComparer<Dictionary<string, JsonElement>?>(
-                    (a, b) => JsonSerializer.Serialize(a, (JsonSerializerOptions?)null) == JsonSerializer.Serialize(b, (JsonSerializerOptions?)null),
-                    v => v != null ? JsonSerializer.Serialize(v, (JsonSerializerOptions?)null).GetHashCode() : 0,
-                    v => v != null ? JsonSerializer.Deserialize<Dictionary<string, JsonElement>>(JsonSerializer.Serialize(v, (JsonSerializerOptions?)null), (JsonSerializerOptions?)null) : null));
-            e.HasMany(a => a.Contexts)
-                .WithOne(c => c.Agent)
-                .HasForeignKey(c => c.AgentId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasMany(a => a.Channels)
-                .WithOne(c => c.Agent!)
-                .HasForeignKey(c => c.AgentId)
-                .IsRequired(false)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(a => a.Role)
-                .WithMany()
-                .HasForeignKey(a => a.RoleId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(a => a.ToolAwarenessSet)
-                .WithMany()
-                .HasForeignKey(a => a.ToolAwarenessSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-        });
-
-        // ── Agent Contexts ────────────────────────────────────────
-        modelBuilder.Entity<ChannelContextDB>(e =>
-        {
-            e.HasIndex(c => new { c.AgentId, c.Name }).IsUnique();
-            e.HasMany(c => c.Channels)
-                .WithOne(conv => conv.AgentContext!)
-                .HasForeignKey(conv => conv.AgentContextId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(c => c.PermissionSet)
-                .WithMany()
-                .HasForeignKey(c => c.PermissionSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(c => c.DefaultResourceSet)
-                .WithMany()
-                .HasForeignKey(c => c.DefaultResourceSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasMany(c => c.AllowedAgents)
-                .WithMany(a => a.AllowedContexts)
-                .UsingEntity("ContextAllowedAgents");
-        });
-
-        // ── Channels ──────────────────────────────────────────────
-        modelBuilder.Entity<ChannelDB>(e =>
-        {
-            e.HasMany(c => c.ChatMessages)
-                .WithOne(m => m.Channel)
-                .HasForeignKey(m => m.ChannelId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(c => c.PermissionSet)
-                .WithMany()
-                .HasForeignKey(c => c.PermissionSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(c => c.DefaultResourceSet)
-                .WithMany()
-                .HasForeignKey(c => c.DefaultResourceSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne(c => c.ToolAwarenessSet)
-                .WithMany()
-                .HasForeignKey(c => c.ToolAwarenessSetId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasMany(c => c.AllowedAgents)
-                .WithMany(a => a.AllowedChannels)
-                .UsingEntity("ChannelAllowedAgents");
-            e.HasMany(c => c.Threads)
-                .WithOne(t => t.Channel)
-                .HasForeignKey(t => t.ChannelId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── Chat Threads ──────────────────────────────────────────
-        modelBuilder.Entity<ChatThreadDB>(e =>
-        {
-            e.HasMany(t => t.ChatMessages)
-                .WithOne(m => m.Thread!)
-                .HasForeignKey(m => m.ThreadId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── PermissionSets ────────────────────────────────────────
-        modelBuilder.Entity<PermissionSetDB>(e =>
-        {
-            e.HasMany(p => p.ClearanceUserWhitelist)
-                .WithOne(w => w.PermissionSet)
-                .HasForeignKey(w => w.PermissionSetId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.HasMany(p => p.ClearanceAgentWhitelist)
-                .WithOne(w => w.PermissionSet)
-                .HasForeignKey(w => w.PermissionSetId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── GlobalFlags (§12.4.2) ────────────────────────────────
-        modelBuilder.Entity<GlobalFlagDB>(e =>
-        {
-            e.ToTable("GlobalFlags");
-
-            e.HasIndex(f => new { f.PermissionSetId, f.FlagKey }).IsUnique();
-
-            e.HasOne(f => f.PermissionSet)
-                .WithMany(p => p.GlobalFlags)
-                .HasForeignKey(f => f.PermissionSetId)
-                .OnDelete(DeleteBehavior.Cascade);
-
-            e.Property(f => f.Clearance).HasConversion<string>();
-        });
-        // ── Generic resource access (§3.10) ──────────────────────
-        modelBuilder.Entity<ResourceAccessDB>(entity =>
-        {
-            entity.ToTable("ResourceAccesses");
-
-            // Composite unique: a permission set cannot have duplicate grants
-            // for the same resource within the same resource type and sub-type.
-            entity.HasIndex(e => new { e.PermissionSetId, e.ResourceType, e.ResourceId, e.SubType })
-                  .IsUnique();
-
-            entity.HasOne(e => e.PermissionSet)
-                  .WithMany(p => p.ResourceAccesses)
-                  .HasForeignKey(e => e.PermissionSetId)
-                  .OnDelete(DeleteBehavior.Cascade);
-
-            entity.Property(e => e.Clearance)
-                  .HasConversion<string>();
-
-            entity.Property(e => e.SubType)
-                  .HasDefaultValue("");
-        });
-
-        // ── Clearance whitelists ──────────────────────────────────
-        modelBuilder.Entity<ClearanceUserWhitelistEntryDB>(e =>
-        {
-            e.HasIndex(w => new { w.PermissionSetId, w.UserId }).IsUnique();
-            e.HasOne(w => w.User)
-                .WithMany()
-                .HasForeignKey(w => w.UserId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<ClearanceAgentWhitelistEntryDB>(e =>
-        {
-            e.HasIndex(w => new { w.PermissionSetId, w.AgentId }).IsUnique();
-            e.HasOne(w => w.Agent)
-                .WithMany()
-                .HasForeignKey(w => w.AgentId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        // ── Agent jobs ────────────────────────────────────────────
-        modelBuilder.Entity<AgentJobDB>(e =>
-        {
-            e.Property(j => j.Status).HasConversion<string>();
-            e.Property(j => j.EffectiveClearance).HasConversion<string>();
-            e.Property(j => j.ActionKey).HasMaxLength(256);
-            e.Property(j => j.ScriptJson).HasMaxLength(65_536);
-            e.Property<Guid?>(ExecutionMetadataColumns.ResultArtifactId);
-            e.Property<string?>(ExecutionMetadataColumns.ResultMediaType)
-                .HasMaxLength(128);
-            e.Property<long?>(ExecutionMetadataColumns.ResultLength);
-            e.Property<string?>(ExecutionMetadataColumns.ResultSha256)
-                .HasMaxLength(64);
-            e.Property<string?>(ExecutionMetadataColumns.ResultPreview)
-                .HasMaxLength(2_048);
-            e.Property<string?>(ExecutionMetadataColumns.ErrorCode)
-                .HasMaxLength(128);
-            e.Property<string?>(ExecutionMetadataColumns.ErrorMessage)
-                .HasMaxLength(2_048);
-            e.Property<DiagnosticCompleteness>(
-                    ExecutionMetadataColumns.DiagnosticCompleteness)
-                .HasConversion<string>();
-            e.Property<long?>(ExecutionMetadataColumns.FinalLogSequence);
-            e.Property<long>(ExecutionMetadataColumns.LogRecordCount);
-            e.HasOne(j => j.Agent)
-                .WithMany()
-                .HasForeignKey(j => j.AgentId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasOne(j => j.Channel)
-                .WithMany()
-                .HasForeignKey(j => j.ChannelId)
-                .OnDelete(DeleteBehavior.Cascade);
+            entity.ToTable("ModuleStorageIndexes");
+            entity.HasIndex(index => new
+            {
+                index.ModuleId,
+                index.StorageName,
+                index.IndexName,
+                index.StringValue,
+                index.RecordKey,
             });
-
-            // ── Task definitions & instances
-        modelBuilder.Entity<TaskDefinitionDB>(e =>
-        {
-            e.HasIndex(d => d.Name).IsUnique();
-            e.HasMany(d => d.Instances)
-                .WithOne(i => i.TaskDefinition)
-                .HasForeignKey(i => i.TaskDefinitionId)
-                .OnDelete(DeleteBehavior.Cascade);
-            e.HasMany(d => d.TriggerBindings)
-                .WithOne(t => t.TaskDefinition)
-                .HasForeignKey(t => t.TaskDefinitionId)
-                .OnDelete(DeleteBehavior.Cascade);
-        });
-
-        modelBuilder.Entity<TaskInstanceDB>(e =>
-        {
-            e.Property(i => i.Status).HasConversion<string>();
-            e.Property(i => i.ErrorMessage).HasMaxLength(2_048);
-            e.Property<string?>(ExecutionMetadataColumns.ErrorCode)
-                .HasMaxLength(128);
-            e.Property<DiagnosticCompleteness>(
-                    ExecutionMetadataColumns.DiagnosticCompleteness)
-                .HasConversion<string>();
-            e.Property<long?>(ExecutionMetadataColumns.FinalLogSequence);
-            e.Property<long>(ExecutionMetadataColumns.LogRecordCount);
-            e.Property<long?>(ExecutionMetadataColumns.FinalOutputSequence);
-            e.Property<long>(ExecutionMetadataColumns.OutputRecordCount);
-            e.HasOne(i => i.Channel)
-                .WithMany()
-                .HasForeignKey(i => i.ChannelId)
-                .OnDelete(DeleteBehavior.SetNull);
-            e.HasOne<ChannelContextDB>()
-                .WithMany()
-                .HasForeignKey(i => i.ContextId)
-                .OnDelete(DeleteBehavior.SetNull);
-        });
-
-        modelBuilder.Entity<ExecutionAuditEventDB>(e =>
-        {
-            e.Property(a => a.OwnerKind).HasConversion<string>();
-            e.Property(a => a.EventKind).HasMaxLength(128);
-            e.Property(a => a.PreviousState).HasMaxLength(64);
-            e.Property(a => a.NewState).HasMaxLength(64);
-            e.Property(a => a.ActorKind).HasMaxLength(64);
-            e.Property(a => a.ReasonCode).HasMaxLength(128);
-            e.HasIndex(a => new { a.OwnerKind, a.OwnerId, a.CreatedAt, a.Id });
-        });
-
-        // ── Module state & config ─────────────────────────────────
-        modelBuilder.Entity<ModuleStateDB>(e =>
-        {
-            e.HasIndex(s => s.ModuleId).IsUnique();
-        });
-
-        modelBuilder.Entity<ModuleConfigEntryDB>(e =>
-        {
-            e.ToTable("ModuleConfig");
-            e.HasIndex(c => new { c.ModuleId, c.Key }).IsUnique();
-            e.Property(c => c.ModuleId).HasMaxLength(128);
-            e.Property(c => c.Key).HasMaxLength(128);
-            e.Property(c => c.Value).HasMaxLength(4096);
-        });
-
-        modelBuilder.Entity<ModuleStorageRecordDB>(e =>
-        {
-            e.ToTable("ModuleStorageRecords");
-            e.HasIndex(r => new { r.ModuleId, r.StorageName, r.RecordKey }).IsUnique();
-            e.Property(r => r.ModuleId).HasMaxLength(128);
-            e.Property(r => r.StorageName).HasMaxLength(128);
-            e.Property(r => r.RecordKey).HasMaxLength(256);
-        });
-
-        modelBuilder.Entity<ModuleStorageIndexEntryDB>(e =>
-        {
-            e.ToTable("ModuleStorageIndexes");
-            e.HasIndex(i => new { i.ModuleId, i.StorageName, i.IndexName, i.StringValue, i.RecordKey });
-            e.HasIndex(i => new { i.ModuleId, i.StorageName, i.IndexName, i.NumberValue, i.RecordKey });
-            e.HasIndex(i => new { i.ModuleId, i.StorageName, i.IndexName, i.DateTimeValue, i.RecordKey });
-            e.HasIndex(i => new { i.ModuleId, i.StorageName, i.IndexName, i.BoolValue, i.RecordKey });
-            e.HasIndex(i => new { i.ModuleId, i.StorageName, i.RecordKey });
-            e.Property(i => i.ModuleId).HasMaxLength(128);
-            e.Property(i => i.StorageName).HasMaxLength(128);
-            e.Property(i => i.IndexName).HasMaxLength(128);
-            e.Property(i => i.RecordKey).HasMaxLength(256);
-            e.Property(i => i.StringValue).HasMaxLength(1024);
-        });
-
-        // ── Default resource entries ──────────────────────────────
-        modelBuilder.Entity<DefaultResourceEntryDB>(e =>
-        {
-            e.ToTable("DefaultResourceEntries");
-            e.HasIndex(entry => new { entry.DefaultResourceSetId, entry.ResourceKey }).IsUnique();
-            e.Property(entry => entry.ResourceKey).HasMaxLength(128);
-            e.HasOne(entry => entry.DefaultResourceSet)
-                .WithMany(drs => drs.Entries)
-                .HasForeignKey(entry => entry.DefaultResourceSetId)
-                .OnDelete(DeleteBehavior.Cascade);
+            entity.HasIndex(index => new
+            {
+                index.ModuleId,
+                index.StorageName,
+                index.IndexName,
+                index.NumberValue,
+                index.RecordKey,
+            });
+            entity.HasIndex(index => new
+            {
+                index.ModuleId,
+                index.StorageName,
+                index.IndexName,
+                index.DateTimeValue,
+                index.RecordKey,
+            });
+            entity.HasIndex(index => new
+            {
+                index.ModuleId,
+                index.StorageName,
+                index.IndexName,
+                index.BoolValue,
+                index.RecordKey,
+            });
+            entity.HasIndex(index => new
+            {
+                index.ModuleId,
+                index.StorageName,
+                index.RecordKey,
+            });
+            entity.Property(index => index.ModuleId).HasMaxLength(128);
+            entity.Property(index => index.StorageName).HasMaxLength(128);
+            entity.Property(index => index.IndexName).HasMaxLength(128);
+            entity.Property(index => index.RecordKey).HasMaxLength(256);
+            entity.Property(index => index.StringValue).HasMaxLength(1024);
         });
 
         ConfigureForProvider(modelBuilder);
-        }
+    }
 
-    /// <summary>
-    /// Applies provider-specific model configuration. Called at the end of
-    /// <see cref="OnModelCreating"/> to adjust the model for provider quirks.
-    /// </summary>
     private void ConfigureForProvider(ModelBuilder modelBuilder)
     {
-        if (Database.ProviderName == "Microsoft.EntityFrameworkCore.Sqlite")
+        if (Database.ProviderName != "Microsoft.EntityFrameworkCore.Sqlite")
+            return;
+
+        foreach (var entityType in modelBuilder.Model.GetEntityTypes())
         {
-            // SQLite has no native DateTimeOffset support.
-            // Apply a value converter on EVERY entity property of type
-            // DateTimeOffset / DateTimeOffset? — this includes CreatedAt
-            // and UpdatedAt which are auto-set by SaveChangesAsync on
-            // every entity via the base IEntity interface.
-            foreach (var entityType in modelBuilder.Model.GetEntityTypes())
+            foreach (var property in entityType.GetProperties())
             {
-                foreach (var property in entityType.GetProperties())
+                if (property.ClrType == typeof(DateTimeOffset))
                 {
-                    if (property.ClrType == typeof(DateTimeOffset))
-                        property.SetValueConverter(
-                            new ValueConverter<DateTimeOffset, long>(
-                                v => v.ToUnixTimeMilliseconds(),
-                                v => DateTimeOffset.FromUnixTimeMilliseconds(v)));
-                    else if (property.ClrType == typeof(DateTimeOffset?))
-                        property.SetValueConverter(
-                            new ValueConverter<DateTimeOffset?, long?>(
-                                v => v.HasValue ? v.Value.ToUnixTimeMilliseconds() : null,
-                                v => v.HasValue ? DateTimeOffset.FromUnixTimeMilliseconds(v.Value) : null));
+                    property.SetValueConverter(new ValueConverter<DateTimeOffset, long>(
+                        value => value.ToUnixTimeMilliseconds(),
+                        value => DateTimeOffset.FromUnixTimeMilliseconds(value)));
+                }
+                else if (property.ClrType == typeof(DateTimeOffset?))
+                {
+                    property.SetValueConverter(new ValueConverter<DateTimeOffset?, long?>(
+                        value => value.HasValue ? value.Value.ToUnixTimeMilliseconds() : null,
+                        value => value.HasValue
+                            ? DateTimeOffset.FromUnixTimeMilliseconds(value.Value)
+                            : null));
                 }
             }
         }
     }
 
-    public override async Task<int> SaveChangesAsync(CancellationToken cancellationToken = default)
+    public override async Task<int> SaveChangesAsync(
+        CancellationToken cancellationToken = default)
     {
-        // Wildcard resource grants are immutable — reject any attempt to delete them
-        // or modify their data-carrying properties at runtime.
-        foreach (var entry in ChangeTracker.Entries())
-        {
-            if (!IsProtectedWildcardGrant(entry)) continue;
+        if (_persistenceActionRunnerAccessor is not null)
+            return await SaveChangesThroughKernelAsync(cancellationToken);
 
-            if (entry.State == EntityState.Deleted)
-                throw new InvalidOperationException(
-                    "Wildcard resource grants (AllResources) are immutable and cannot be deleted.");
+        return await SaveChangesCoreAsync(cancellationToken);
+    }
 
-            if (entry.State == EntityState.Modified && WildcardGrantDataChanged(entry))
-                throw new InvalidOperationException(
-                    "Wildcard resource grants (AllResources) are immutable and cannot be modified.");
-        }
-
+    private async Task<int> SaveChangesCoreAsync(CancellationToken cancellationToken)
+    {
         foreach (var entry in ChangeTracker.Entries<BaseEntity>())
         {
             var now = DateTimeOffset.UtcNow;
@@ -491,7 +182,6 @@ public class SharpClawDbContext(
                     entry.Entity.CreatedAt = now;
                 if (entry.Entity.UpdatedAt == default)
                     entry.Entity.UpdatedAt = now;
-
                 if (entry.Entity.Id == Guid.Empty)
                     entry.Entity.Id = Guid.NewGuid();
             }
@@ -503,69 +193,4 @@ public class SharpClawDbContext(
 
         return await base.SaveChangesAsync(cancellationToken);
     }
-
-    /// <summary>
-    /// Returns <c>true</c> when the tracked entity is a resource-access
-    /// or permission grant whose resource FK equals
-    /// <see cref="WellKnownIds.AllResources"/> (the wildcard).
-    /// </summary>
-    private static bool IsProtectedWildcardGrant(EntityEntry entry) => entry.Entity switch
-    {
-        ResourceAccessDB e => e.ResourceId == WellKnownIds.AllResources,
-        _ => false,
-    };
-
-    /// <summary>
-    /// Returns <c>true</c> when a <see cref="ResourceAccessDB"/> wildcard row
-    /// has had one of its identity-carrying properties actually changed.
-    /// <para>
-    /// The wildcard guard blocks changes to what the grant <i>is</i>
-    /// (its resource type / id / sub-type) — repointing a wildcard grant at a
-    /// different resource category would silently widen or narrow its reach
-    /// in ways an operator almost certainly didn't intend.
-    /// </para>
-    /// <para>
-    /// It intentionally does NOT block changes to clearance-and-disposition
-    /// properties (<see cref="ResourceAccessDB.Clearance"/>,
-    /// <see cref="ResourceAccessDB.AccessLevel"/>,
-    /// <see cref="ResourceAccessDB.IsDefault"/>). Those are the knobs an
-    /// operator legitimately tunes over time — e.g. promoting a granted
-    /// wildcard from <see cref="PermissionClearance.Unset"/> to
-    /// <see cref="PermissionClearance.Independent"/>, or demoting an
-    /// overly-permissive clearance to a lower level — and there is no
-    /// operational reason a wildcard grant should be forever frozen at its
-    /// original clearance.
-    /// </para>
-    /// <para>
-    /// Audit timestamps and shadow properties are excluded so that unrelated
-    /// EF bookkeeping does not trip the guard.
-    /// </para>
-    /// </summary>
-    private static bool WildcardGrantDataChanged(EntityEntry entry)
-    {
-        ReadOnlySpan<string> identityProperties =
-        [
-            nameof(ResourceAccessDB.ResourceType),
-            nameof(ResourceAccessDB.SubType),
-        ];
-        foreach (var prop in identityProperties)
-        {
-            if (!Equals(entry.OriginalValues[prop], entry.CurrentValues[prop]))
-                return true;
-        }
-        return false;
-    }
-
-    private static string? SerializeJsonElement(JsonElement? value) =>
-        value?.GetRawText();
-
-    private static JsonElement? DeserializeJsonElement(string? value) =>
-        value is null
-            ? null
-            : JsonDocument.Parse(value).RootElement.Clone();
-
-    private static JsonElement? CloneJsonElement(JsonElement? value) =>
-        value is null
-            ? null
-            : JsonDocument.Parse(value.Value.GetRawText()).RootElement.Clone();
 }

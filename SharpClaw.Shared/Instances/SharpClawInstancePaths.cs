@@ -130,6 +130,16 @@ public sealed class SharpClawInstancePaths
     /// Writes the current discovery entry with explicit process metadata.
     /// </summary>
     public void PublishDiscoveryEntry(string baseUrl, DateTimeOffset startedAtUtc, int processId)
+        => PublishDiscoveryEntry(baseUrl, startedAtUtc, processId, GatewayTokenFilePath);
+
+    /// <summary>
+    /// Writes the current discovery entry with an optional Gateway token path.
+    /// </summary>
+    public void PublishDiscoveryEntry(
+        string baseUrl,
+        DateTimeOffset startedAtUtc,
+        int processId,
+        string? gatewayTokenFilePath)
     {
         if (string.IsNullOrWhiteSpace(baseUrl))
             throw new ArgumentException("Base URL is required.", nameof(baseUrl));
@@ -146,7 +156,7 @@ public sealed class SharpClawInstancePaths
             BaseUrl = baseUrl,
             RuntimeDirectory = RuntimeDirectory,
             ApiKeyFilePath = ApiKeyFilePath,
-            GatewayTokenFilePath = GatewayTokenFilePath,
+            GatewayTokenFilePath = gatewayTokenFilePath,
             ProcessId = processId,
             StartedAtUtc = startedAtUtc,
             LastSeenUtc = DateTimeOffset.UtcNow,

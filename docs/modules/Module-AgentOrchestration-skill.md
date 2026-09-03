@@ -16,8 +16,8 @@ Default: disabled
 Prerequisites: none
 Platform: All
 
-To enable, add to your core .env (Infrastructure/Environment/.env) Modules section:
-  "sharpclaw_agent_orchestration": "true"
+To enable, add this assignment to the deployed Runtime Host's Environment/.env:
+  Modules__sharpclaw_agent_orchestration="true"
 
 To disable, set to "false" or remove the key (missing = disabled).
 
@@ -30,7 +30,7 @@ See docs/Module-Enablement-Guide.md for full details.
 ────────────────────────────────────────
 OVERVIEW
 ────────────────────────────────────────
-Agent lifecycle management: sub-agent creation, agent management, task
+Agent lifecycle management: sub-agent creation and agent management
 editing, skill access, and custom chat header editing. All tools flow
 through the standard job pipeline.
 
@@ -54,14 +54,6 @@ ao_manage_agent (alias: manage_agent)
           modelId (GUID, optional)
   Permission: per-resource (Agent)
 
-ao_edit_task (alias: edit_task)
-  Edit Agent Orchestration task name, interval, or retries.
-  Params: resource_id (AoTask GUID, required),
-          name (string, optional),
-          repeatIntervalMinutes (int, optional — 0=remove),
-          maxRetries (int, optional)
-  Permission: per-resource (AoTask)
-
 ao_access_skill (alias: access_skill)
   Retrieve an Agent Orchestration skill's instruction text.
   Params: resource_id (AoSkill GUID, required)
@@ -80,57 +72,8 @@ ao_edit_channel_header (alias: edit_channel_header)
   Permission: per-resource (ChannelHeader)
 
 ────────────────────────────────────────
-TASK-SCRIPT OPERATIONS
-────────────────────────────────────────
-Core owns ordinary C# task-language statements: declaration, assignment,
-control flow, return, logging, delay, structured response parsing, and
-cancellation waits. This module contributes real host operations registered
-with TaskStepRegistry:
-  Chat, ChatStream, ChatToThread        — agent chat
-  Emit, ParseResponse                   — output / parsing
-  FindModel, FindProvider, FindAgent    — entity lookup
-  CreateAgent, CreateThread             — entity creation
-  CreateRole, FindRole,
-    SetRolePermissions, AssignRole      — roles / permissions
-  CreateChannel, FindChannel,
-    AddAllowedAgent                     — channels
-
-If this module is disabled, scripts using these module operations or its
-triggers are rejected by `task preflight`. Pure C# control flow stays valid
-because it is Core-owned.
-
-────────────────────────────────────────
-TRIGGERS
-────────────────────────────────────────
-Schedule           — cron scheduler (cron expression + timezone)
-OnStartup          — LifecycleTriggerSource (host startup)
-OnShutdown         — LifecycleTriggerSource (host shutdown)
-OnTaskCompleted    — TaskChainTriggerSource (source task completes)
-OnTaskFailed       — TaskChainTriggerSource (source task fails)
-OnTrigger(name)    — custom dispatch to arbitrary trigger key
-OnEvent(type, ...) — EventBusTriggerSource (internal event bus)
-OnFileChanged(...) — FileChangedTriggerSource (filesystem watch)
-OnTimer (handler)  — LifecycleTriggerSource in-script timer
-                     (key: sharpclaw.task_scripting.timer)
-
-If this module is disabled, these triggers are flagged by `task preflight`
-and removed from `task trigger-sources`.
-
-────────────────────────────────────────
 MODULE-OWNED CLI RESOURCES
 ────────────────────────────────────────
-AoTask resources live in the Agent Orchestration module's persistent
-scheduled-job store. The store is owned by the module and follows it into the
-sidecar process, separately from Core task schedule rows.
-
-  resource aotask add <name> [--next-run <timestamp>] [--repeat-minutes <n>] [--max-retries <n>]
-  resource aotask get <id>
-  resource aotask list
-  resource aotask update <id> [--name <name>] [--repeat-minutes <n>] [--max-retries <n>]
-  resource aotask delete <id>
-
-Alias: resource aot ...
-
 AoSkill resources live in the Agent Orchestration module's persistent skill
 store. The skill text is still retrieved through the module-owned
 access_skill tool, but it no longer depends on an in-process EF context.
@@ -147,7 +90,6 @@ Alias: resource aos ...
 RESOURCE DEPENDENCIES
 ────────────────────────────────────────
 - Agents — for manage_agent, edit_agent_header
-- AoTask — for edit_task
 - AoSkill — for access_skill
 - Channels — for edit_channel_header
 
@@ -155,5 +97,4 @@ RESOURCE DEPENDENCIES
 ROLE PERMISSIONS (relevant)
 ────────────────────────────────────────
 Global flags: canCreateSubAgents, canEditAgentHeader, canEditChannelHeader
-Per-resource: agentAccesses, taskAccesses, skillAccesses,
   agentHeaderAccesses, channelHeaderAccesses

@@ -8,7 +8,8 @@ WHAT A MODULE IS
 A manifest-backed module running in a sidecar process.
 C# modules still implement ISharpClawModule, but the parent host discovers
 module.json and talks to the module through the sidecar protocol.
-Enabled/disabled by the Modules section in Infrastructure/Environment/.env.
+Enabled/disabled by `Modules__<module_id>` in the deployed Runtime Host's
+`Environment/.env`.
 Can be toggled at runtime without restarting the Core API process:
 module enable/disable <id>
 
@@ -73,9 +74,9 @@ Job cost tracking:
   argument passed to ExecuteToolAsync and call RecordTokensAsync(job.JobId,
   promptTokens, completionTokens, ct). Calls are additive, so OCR, media, or
   private model pipelines can report usage after every chunk and the
-  host will expose the accumulated total through AgentJobResponse.jobCost.
+  host will expose the accumulated total through the current Job result.
   External modules receive this contract through the host bridge, so they do
-  not need to reference Core or update AgentJobDB directly.
+  not update host database tables directly.
 
 ────────────────────────────────────────
 CONTRACTS
@@ -91,55 +92,6 @@ Require — declare in RequiredContracts:
 Initialization order is sorted by contract dependency graph automatically.
 
 ────────────────────────────────────────
-TASK PIPELINE CONTRIBUTIONS
-────────────────────────────────────────
-Tasks have no fixed step or trigger surface in core. Modules contribute via
-four interfaces in SharpClaw.Contracts.Tasks:
-
-ITaskStepDescriptorProvider
-  Registration records for module methods callable from C# task scripts.
-  Members: ModuleId, Descriptors (IReadOnlyList<TaskStepDescriptor>)
-  Each descriptor's OwnerId must equal ModuleId.
-  Method names and runtime dispatch keys are unique across all modules.
-  Register: services.AddSingleton<ITaskStepDescriptorProvider, MyProvider>()
-
-ITaskParserModuleExtension
-  Parser hints, method mappings, and event-handler trigger keys.
-  Members:
-    StepKeyMappings: name -> (runtime dispatch key, ModuleId) for context-API methods.
-    EventTriggerMappings: name → (TriggerKey, ModuleId) for OnXxx handlers.
-    SingleArgExpressionMethods: methods whose first arg is captured as Expression.
-    Core owns ordinary C# statement parsing. Do not add module language keys
-    for declarations, assignment, control flow, return, logging, delay,
-    structured response parsing, or cancellation waits.
-    TriggerAttributeHandlers: name → ITaskTriggerAttributeHandler.
-  Register: services.AddSingleton<ITaskParserModuleExtension, MyExtension>()
-
-ITaskTriggerAttributeHandler
-  Recogniser for one trigger attribute name (short form, e.g. "Schedule";
-  long form "ScheduleAttribute" is also accepted by the parser).
-  Member: Handle(TaskTriggerAttributeContext) → TaskTriggerDefinition?
-  Returning null declines the attribute.
-  Two modules cannot claim the same attribute name; conflicts fail at startup.
-  Exposed to the parser via ITaskParserModuleExtension.TriggerAttributeHandlers.
-
-ITaskTriggerSource
-  Runtime watcher for one or more trigger keys.
-  Members:
-    TriggerKey (string?) or TriggerKeys (IReadOnlyList<string>)
-    StartAsync(IReadOnlyList<ITaskTriggerSourceContext>, ct) — must be idempotent
-    StopAsync()
-    GetBindingValue(def), GetBindingFilter(def) — persisted onto bindings
-    OwnsBindingPersistence (bool, default false)
-    SyncBindingsAsync(definition, ownedTriggers, ct) — when source owns persistence
-    RemoveBindingsAsync(definitionId, ct) — when source owns persistence
-  Register: services.AddSingleton<ITaskTriggerSource, MyTriggerSource>()
-
-Tasks bound to keys whose owning module is disabled are flagged by
-`task preflight`. Active sources are listed under `task trigger-sources`
-and `GET /tasks/trigger-sources`.
-
-────────────────────────────────────────
 CLI COMMANDS
 ────────────────────────────────────────
 Implement ICliCommandProvider. Register in ConfigureServices.
@@ -148,8 +100,8 @@ Members: Verbs (IReadOnlyList<string>), HandleAsync(string[], ct) → CliResult
 ────────────────────────────────────────
 ENABLING A NEW MODULE
 ────────────────────────────────────────
-Add to Infrastructure/Environment/.env Modules section:
-  "my_module": "true"
+Add to the deployed Runtime Host's Environment/.env:
+  Modules__my_module="true"
 
 Runtime (no restart): module enable my_module
 Verify: module get my_module  →  status should be "enabled"
@@ -164,6 +116,5 @@ Tool not reaching handler  → permission check denied; verify ModuleToolPermiss
 Inline tool produces nothing → ExecuteInlineToolAsync returned NotHandled or threw
 Contract not satisfied     → provider module disabled or failed; check module list
 SeedDataAsync not running  → .seeded marker exists; delete it to force re-seed
-Trigger never fires        → check StartAsync was called on ITaskTriggerSource;
                              check binding Kind matches a declared TriggerKey;
                              check OS permissions for the underlying hook

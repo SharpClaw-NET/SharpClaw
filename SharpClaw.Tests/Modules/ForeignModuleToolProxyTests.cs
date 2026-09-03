@@ -27,7 +27,7 @@ public sealed class ForeignModuleToolProxyTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             ResourceId: null,
-            ActionKey: "snm_sample_job");
+            ActionKey: "sdm_sample_job");
 
         var toolDefinitions = registry.GetAllToolDefinitions();
         var result = await foreignHost.Module.ExecuteToolAsync(
@@ -38,7 +38,7 @@ public sealed class ForeignModuleToolProxyTests
             CancellationToken.None);
 
         registry.TryResolve("sample_job", out var moduleId, out var toolName).Should().BeTrue();
-        moduleId.Should().Be("sample_node_module");
+        moduleId.Should().Be("sample_dotnet_module");
         toolName.Should().Be("sample_job");
         toolDefinitions.Should().Contain(tool => tool.Name == "sample_job");
         foreignHost.Module.GetToolDefinitions().Should().Contain(tool => tool.Name == "sample_job");
@@ -86,7 +86,7 @@ public sealed class ForeignModuleToolProxyTests
             Guid.NewGuid(),
             Guid.NewGuid(),
             ResourceId: null,
-            ActionKey: "snm_sample_stream");
+            ActionKey: "sdm_sample_stream");
 
         var stream = foreignHost.Module.ExecuteToolStreamingAsync(
             "sample_stream",
@@ -107,15 +107,21 @@ public sealed class ForeignModuleToolProxyTests
 
     private static ModuleManifest Manifest() =>
         new(
-            "sample_node_module",
-            "Sample Node Module",
+            "sample_dotnet_module",
+            "Sample .NET Module",
             "1.0.0",
-            "snm",
-            "dist/server.js",
+            "sdm",
+            "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
     private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        new(ModuleManifestRuntimeInfo.Node, "dist/server.js");
+        ModuleManifestRuntimeInfo.FromJson("""
+        {
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "SharpClaw.TestFixtures.ForeignSidecar.dll"
+        }
+        """);
 
     private static ForeignModuleHostLaunchOptions CreateLaunchOptions(TestWorkspace workspace)
     {
@@ -134,7 +140,7 @@ public sealed class ForeignModuleToolProxyTests
             HostVersion = "0.1.0-beta",
             Environment = new Dictionary<string, string>
             {
-                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "snm",
+                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "sdm",
             },
         };
     }

@@ -5,7 +5,7 @@
 
 This guide walks through creating, testing, and shipping a SharpClaw module from
 scratch â€” from the minimal skeleton to registering tools, exporting contracts, owning
-task triggers, and troubleshooting at runtime.
+troubleshooting at runtime.
 
 ---
 
@@ -23,11 +23,6 @@ task triggers, and troubleshooting at runtime.
 - [Adding CLI commands](#adding-cli-commands)
 - [Exporting and consuming contracts](#exporting-and-consuming-contracts)
 - [Seed data](#seed-data)
-- [Contributing to the task pipeline](#contributing-to-the-task-pipeline)
-  - [Module methods (`ITaskStepDescriptorProvider`)](#module-methods-itaskstepdescriptorprovider)
-  - [Parser mappings and event handlers (`ITaskParserModuleExtension`)](#parser-mappings-and-event-handlers-itaskparsermoduleextension)
-  - [Trigger attributes (`ITaskTriggerAttributeHandler`)](#trigger-attributes-itasktriggerattributehandler)
-  - [Trigger sources (`ITaskTriggerSource`)](#trigger-sources-itasktriggersource)
 - [Enabling your module](#enabling-your-module)
 - [Ideas for what to build](#ideas-for-what-to-build)
 - [Debugging and troubleshooting](#debugging-and-troubleshooting)
@@ -53,18 +48,17 @@ Modules can contribute any combination of:
 - **REST endpoints** â€” standard minimal-API routes, mounted at startup
 - **CLI commands** â€” additional verbs in the SharpClaw CLI
 - **Service contracts** â€” typed DI interfaces exported to other modules
-- **Task pipeline contributions** â€” module methods callable from C# task scripts, parser mappings, trigger attributes, and runtime trigger sources
 - **Seed data** â€” one-time database rows or config inserted on first install
 
-Modules can also own configuration under their own Core `.env` section. The
-env loader is generic: it reads the JSON-with-comments `.env` and `.dev.env`
-files into `IConfiguration`, so the loader does not need a code change when a
-new module introduces a section such as `"MyModule"`. Your module owns the
-section name, the key names, the defaults, and the code that reads them.
-Adding the section to the shipped Core `.env.template` is only needed when the
+Modules can also own configuration in the application host's canonical dotenv
+files. The generic loader reads the deployed Runtime Host's
+`Environment/.env` and `.dev.env` into `IConfiguration`, so the loader does not
+need a code change when a new module introduces keys such as
+`MyModule__EndpointUrl`. Your module owns the key names, defaults, and code that
+reads them. Adding keys to the shipped `.env.template` is only needed when the
 SharpClaw repo itself wants to advertise a bundled module's default settings.
-Third-party modules should document the snippet that users add to their own
-Core `.env`.
+Third-party modules should document the dotenv assignments users add to their
+own Runtime Host `Environment/.env`.
 
 ---
 
@@ -197,24 +191,21 @@ public async Task SeedDataAsync(IServiceProvider services, CancellationToken ct)
 
 ---
 
-## Module configuration from env
+## Module configuration from dotenv
 
-Core `.env` files are JSON-with-comments files loaded into the standard
-`IConfiguration` tree before modules are configured. There is no central
-registry of module env sections and no env-loader switch statement that must be
-updated for each module. If your module needs settings, choose a stable section
-name that belongs to the module, document the keys, and read them from DI in the
-service that uses them.
+The deployed Runtime Host `Environment/.env` and `.dev.env` files are canonical
+dotenv documents loaded into the standard `IConfiguration` tree before modules
+are configured. There is no central registry of module keys and no env-loader
+switch statement that must be updated for each module. If your module needs
+settings, choose stable keys that belong to the module, document them, and read
+them from DI in the service that uses them.
 
-For example, a module with id `my_module` can ask users to add this section next
-to the existing top-level sections in `SharpClaw.Runtime.INF`
-`/Environment/.env`:
+For example, a module with id `my_module` can ask users to add these assignments
+to the deployed Runtime Host's `Environment/.env`:
 
-```jsonc
-"MyModule": {
-  "EndpointUrl": "https://example.internal/api",
-  "RetrySeconds": "15"
-}
+```dotenv
+MyModule__EndpointUrl="https://example.internal/api"
+MyModule__RetrySeconds="15"
 ```
 
 The module code can then consume those values through normal constructor
@@ -235,16 +226,16 @@ public sealed class MyService(IConfiguration configuration)
 ```
 
 Keep defaults in module-owned code so the module still has predictable behavior
-when the section is absent. Use a unique, readable section name rather than a
-generic name such as `"Settings"` or `"Options"`. If a setting is sensitive,
-prefer the Core `.env` because it is the server-side env file and supports the
-same encrypted-at-rest path as the rest of Core configuration.
+when the keys are absent. Use a unique, readable key prefix rather than a
+generic name such as `Settings` or `Options`. If a setting is sensitive, prefer
+the Runtime Host `.env` because it is the server-side env file and uses the
+same protected-at-rest path as the rest of Runtime configuration.
 
 Bundled modules may add their documented defaults to the checked-in
 `.env.template` files for discoverability. Third-party modules should not need a
 SharpClaw source change for configuration; they should ship documentation that
-shows the JSON section to paste into Core `.env`, plus the module enablement
-entry under `Modules`.
+shows the dotenv assignments to paste into the Runtime Host `.env`, plus the
+module enablement assignment under `Modules`.
 
 ---
 
@@ -252,7 +243,7 @@ entry under `Modules`.
 
 ### Job-pipeline tools
 
-Job-pipeline tools go through the full `AgentJobService` lifecycle â€” they create a
+Job-pipeline tools go through the canonical Jobs coordinator lifecycle â€” they create a
 job record, support approval flows, and appear in job history. Use these for
 anything with side effects, latency, or that the user might want to audit.
 
@@ -312,14 +303,14 @@ Core automatically records the normal chat provider usage that it performs
 itself, but modules often run their own model calls. An OCR module might call a
 vision model for every page, a media module might call a model for every chunk,
 and a workflow module might call a private model behind its own client. Those
-calls still belong to the `AgentJobDB` row that started the module work, so the
+calls still belong to the canonical Job record that started the module work, so the
 module should report them through `IAgentJobCostTracker` instead of trying to
 update core tables directly.
 
 Resolve `IAgentJobCostTracker` from the `scopedServices` argument passed to
 `ExecuteToolAsync` and call `RecordTokensAsync` with the current
 `AgentJobContext.JobId`. The method is additive, so a long media-processing
-loop can report usage after each chunk and the final `AgentJobResponse.jobCost`
+loop can report usage after each chunk and the final canonical Job result
 will show the accumulated prompt, completion, and total tokens. External modules get the
 same contract forwarded into their isolated module container, and bundled modules
 can resolve it from the same restricted service scope as other host bridges.
@@ -560,190 +551,12 @@ Guard with an existence check so re-seeding manually doesn't produce duplicates.
 
 ---
 
-## Contributing to the task pipeline
-
-Tasks have a fixed Core-owned C# language surface and a module-owned operation
-surface. Modules do not contribute parser-owned step tables for declarations,
-assignment, control flow, return, logging, delay, structured response parsing,
-or cancellation waits. They contribute real callable operations, event-handler
-names, trigger attributes, and runtime trigger sources. There are four small
-interfaces in
-`SharpClaw.Contracts.Tasks` that work together:
-
-| Interface | What it contributes |
-|-----------|---------------------|
-| `ITaskStepDescriptorProvider` | Registration records for module methods callable from task scripts, such as `Chat(...)` or `HttpGet(...)`. |
-| `ITaskParserModuleExtension` | Method mappings, event-handler names (`OnTimer`), and per-method parser hints. |
-| `ITaskTriggerAttributeHandler` | One trigger attribute (e.g. `[Schedule]`, `[OnWebhook]`). |
-| `ITaskTriggerSource` | Runtime watcher that fires bound trigger keys. |
-
-Most modules need only one or two of these. A pure tool module needs none.
-
-### Module methods (`ITaskStepDescriptorProvider`)
-
-Use this when your module wants the parser to recognise a method call inside a
-task body and dispatch it through the central `TaskStepRegistry`. The current
-contract calls the registration record a `TaskStepDescriptor`; that is runtime
-plumbing, not a separate programming model for task authors. Authors write a
-normal C#-style method call such as `DoThing(value)`.
-
-```csharp
-public sealed class MyStepProvider : ITaskStepDescriptorProvider
-{
-    public string ModuleId => "my_module";
-
-    public IReadOnlyList<TaskStepDescriptor> Descriptors { get; } =
-    [
-        new TaskStepDescriptor
-        {
-            MethodName           = "DoThing",
-            StepKey              = "my_module.do_thing",
-            OwnerId              = "my_module",
-            FirstArgIsExpression = true,
-        },
-    ];
-}
-```
-
-Register it in `ConfigureServices`:
-
-```csharp
-services.AddSingleton<ITaskStepDescriptorProvider, MyStepProvider>();
-```
-
-The `OwnerId` on every descriptor must match `ModuleId`. Method names and
-runtime dispatch keys are unique across all modules; duplicates fail at startup.
-
-### Parser mappings and event handlers (`ITaskParserModuleExtension`)
-
-Use this when your module wants to:
-
-Map a method name to a runtime dispatch key with extra parser hints, or map an
-event-handler name such as `OnTimer` or `OnMetricThreshold` to a module-owned
-trigger key. Do not contribute ordinary C# statement semantics here; Core owns
-those language constructs.
-
-```csharp
-public sealed class MyParserExtension : ITaskParserModuleExtension
-{
-    public IReadOnlyDictionary<string, (string StepKey, string ModuleId)> StepKeyMappings { get; } =
-        new Dictionary<string, (string, string)>
-        {
-            ["DoThing"] = ("my_module.do_thing", "my_module"),
-        };
-
-    public IReadOnlyDictionary<string, (string TriggerKey, string ModuleId)> EventTriggerMappings { get; } =
-        new Dictionary<string, (string, string)>
-        {
-            ["OnMyEvent"] = ("my_module.on_my_event", "my_module"),
-        };
-
-    public IReadOnlySet<string> SingleArgExpressionMethods { get; } =
-        new HashSet<string> { "DoThing" };
-}
-```
-
-Register it in `ConfigureServices`:
-
-```csharp
-services.AddSingleton<ITaskParserModuleExtension, MyParserExtension>();
-```
-
-### Trigger attributes (`ITaskTriggerAttributeHandler`)
-
-Task scripts are parsed but not compiled, so trigger attributes (`[Schedule]`,
-`[OnWebhook]`, `[OnHotkey]`, etc.) are recognised by name. Each attribute name
-is owned by exactly one module via a registered handler. The parser routes
-matching occurrences to the handler and uses the returned
-`TaskTriggerDefinition` directly.
-
-```csharp
-public sealed class OnMyEventHandler : ITaskTriggerAttributeHandler
-{
-    public TaskTriggerDefinition? Handle(TaskTriggerAttributeContext context)
-    {
-        var p = new Dictionary<string, string?>(StringComparer.Ordinal);
-        var name = context.GetStringArg(0);
-        if (!string.IsNullOrEmpty(name))
-            p["my_module.event_name"] = name;
-        return new TaskTriggerDefinition
-        {
-            TriggerKey = "my_module.on_my_event",
-            Parameters = p,
-        };
-    }
-}
-```
-
-Expose handlers from your `ITaskParserModuleExtension`:
-
-```csharp
-public IReadOnlyDictionary<string, ITaskTriggerAttributeHandler> TriggerAttributeHandlers { get; } =
-    new Dictionary<string, ITaskTriggerAttributeHandler>(StringComparer.Ordinal)
-    {
-        ["OnMyEvent"] = new OnMyEventHandler(),
-    };
-```
-
-The parser also accepts the `OnMyEventAttribute` long form for the same
-handler. Returning `null` declines the attribute.
-
-> Two modules cannot claim the same attribute name. Conflicts are surfaced at
-> startup with both claimants and their assemblies.
-
-### Trigger sources (`ITaskTriggerSource`)
-
-Use this for the runtime side of a trigger: the OS hook, the timer loop, the
-webhook listener, the metric watcher. The host routes `TaskTriggerBindingDB`
-rows whose `Kind` matches one of your `TriggerKeys` to your source.
-
-```csharp
-public sealed class MyTriggerSource : ITaskTriggerSource
-{
-    public IReadOnlyList<string> TriggerKeys =>
-        ["my_module.on_my_event"];
-
-    public Task StartAsync(IReadOnlyList<ITaskTriggerSourceContext> contexts, CancellationToken ct)
-    {
-        // Wire up listeners for each context. Must be idempotent.
-        return Task.CompletedTask;
-    }
-
-    public Task StopAsync()
-    {
-        // Release listeners.
-        return Task.CompletedTask;
-    }
-}
-```
-
-Register it in `ConfigureServices`:
-
-```csharp
-services.AddSingleton<ITaskTriggerSource, MyTriggerSource>();
-```
-
-Sources that need to persist their own bookkeeping (cron rows, on-disk
-shortcuts, etc.) can override `OwnsBindingPersistence`, `SyncBindingsAsync`,
-and `RemoveBindingsAsync` instead of relying on the default
-`TaskTriggerBindingDB` upsert. See `ITaskTriggerSource` xmldoc for details.
-
-Users will see your module listed in `GET /tasks/trigger-sources` and
-`task trigger-sources`. Document the trigger keys you own in your module's own
-doc â€” when the module is disabled, tasks bound to those keys are flagged by
-`task preflight`.
-
----
-
 ## Enabling your module
 
-1. Add your module ID to the `Modules` section of
-   `Infrastructure/Environment/.env`:
+1. Add your module ID to the Runtime Host's `Environment/.env`:
 
-   ```jsonc
-   "Modules": {
-     "my_module": "true"
-   }
+   ```dotenv
+   Modules__my_module="true"
    ```
 
 2. Restart the application, or use the CLI to enable it at runtime:
@@ -765,14 +578,10 @@ doc â€” when the module is disabled, tasks bound to those keys are flagged 
 
 ## Ideas for what to build
 
-- **Notification module** â€” watch for task completions or agent job failures and push
   a system notification, email, or webhook.
-- **File watcher module** â€” own an `OnFileChanged` trigger source; let tasks react to
   file system events without polling.
 - **Hardware sensor module** â€” export an `ISensorReader` contract; other modules or
-  tasks can consume live temperature, battery, or GPU data.
 - **Calendar integration** â€” own an `OnCalendarEvent` trigger attribute and
-  source; fire tasks at meeting start/end without a cron job.
 - **Data pipeline module** â€” expose a `transform_data` tool that agents can call to
   reshape JSON payloads between steps.
 - **Local LLM router** â€” export an `ILocalModelProvider` contract; point the model
@@ -799,9 +608,10 @@ The permission check is returning denied. Add a log line at the top of
 in your code. Check the `ModuleToolPermission` configuration for that tool.
 
 **Inline tool fires but produces no model output**
-`ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Add a
-`Debug.WriteLine` at the top of the method (category `SharpClaw.CLI`) and check
-the VS debug output.
+`ExecuteInlineToolAsync` returned `NotHandled()` or threw silently. Inject an
+`ILogger<T>` into the module service, log a structured diagnostic at the top of
+the method, and inspect the bounded module operational stream for that natural
+logger category.
 
 **Contract requirement not satisfied at startup**
 The module that exports the contract you require either isn't enabled or failed to
@@ -813,7 +623,6 @@ The `.seeded` marker already exists. Delete it from the module's data directory 
 restart to force a re-seed.
 
 **Trigger never fires**
-Confirm `StartAsync` was called on your `ITaskTriggerSource` â€” add a log line.
 If it was called but events still don't fire, the OS-level hook (e.g. hotkey
 registration, process watcher) may have failed silently. Check platform
 prerequisites and permission levels. Confirm the binding row's `Kind` matches

@@ -2,10 +2,10 @@ using System.Net;
 using System.Text;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Shared.Instances;
-using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Tests.Gateway;
 
@@ -35,7 +35,6 @@ public class InternalApiClientResolutionTests
     {
         var gatewayRoot = CreateTempDirectory();
         var sharedRoot = CreateTempDirectory();
-        var logsRoot = CreateTempDirectory();
         var apiKeyPath = Path.Combine(sharedRoot, "runtime", ".api-key");
         Directory.CreateDirectory(Path.GetDirectoryName(apiKeyPath)!);
         File.WriteAllText(apiKeyPath, "explicit-api-key");
@@ -44,7 +43,6 @@ public class InternalApiClientResolutionTests
 
         try
         {
-            using var processLogs = CreateProcessLogs(logsRoot);
             var handler = new CaptureHandler();
             var httpClient = new HttpClient(handler)
             {
@@ -59,7 +57,7 @@ public class InternalApiClientResolutionTests
                     ApiKeyFilePath = apiKeyPath,
                 }),
                 new HttpContextAccessor(),
-                processLogs);
+                NullLogger<InternalApiClient>.Instance);
 
             _ = await client.GetAsync<object>("/ping");
 
@@ -70,7 +68,6 @@ public class InternalApiClientResolutionTests
         {
             DeleteDirectoryIfExists(gatewayRoot);
             DeleteDirectoryIfExists(sharedRoot);
-            DeleteDirectoryIfExists(logsRoot);
         }
     }
 
@@ -79,7 +76,6 @@ public class InternalApiClientResolutionTests
     {
         var gatewayRoot = CreateTempDirectory();
         var sharedRoot = CreateTempDirectory();
-        var logsRoot = CreateTempDirectory();
         var installAnchor = Path.Combine(sharedRoot, "gateway-install");
         Directory.CreateDirectory(installAnchor);
 
@@ -100,7 +96,6 @@ public class InternalApiClientResolutionTests
             Environment.SetEnvironmentVariable("SHARPCLAW_INSTANCE_ROOT", gatewayRoot);
             Environment.SetEnvironmentVariable("SHARPCLAW_SHARED_ROOT", sharedRoot);
 
-            using var processLogs = CreateProcessLogs(logsRoot);
             var handler = new CaptureHandler();
             var httpClient = new HttpClient(handler)
             {
@@ -114,7 +109,7 @@ public class InternalApiClientResolutionTests
                     BaseUrl = "http://127.0.0.1:48923",
                 }),
                 new HttpContextAccessor(),
-                processLogs);
+                NullLogger<InternalApiClient>.Instance);
 
             _ = await client.GetAsync<object>("/ping");
 
@@ -126,7 +121,6 @@ public class InternalApiClientResolutionTests
         {
             DeleteDirectoryIfExists(gatewayRoot);
             DeleteDirectoryIfExists(sharedRoot);
-            DeleteDirectoryIfExists(logsRoot);
         }
     }
 
@@ -180,16 +174,6 @@ public class InternalApiClientResolutionTests
         Directory.CreateDirectory(path);
         return path;
     }
-
-    private static DurableProcessLogWriter CreateProcessLogs(string root) =>
-        new(
-            "gateway-tests",
-            new SharpClawInstancePaths(
-                SharpClawInstanceKind.Gateway,
-                root,
-                root,
-                root),
-            TimeSpan.FromHours(1));
 
     private static void DeleteDirectoryIfExists(string path)
     {
