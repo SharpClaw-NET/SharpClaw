@@ -14,8 +14,8 @@
       AI agents, chat channels, local model inference, and automated jobs.
     </p>
   </description>
-  <url type="homepage">https://github.com/mkn8rn/SharpClaw</url>
-  <url type="bugtracker">https://github.com/mkn8rn/SharpClaw/issues</url>
+  <url type="homepage">https://github.com/SharpClaw-NET/SharpClaw</url>
+  <url type="bugtracker">https://github.com/SharpClaw-NET/SharpClaw/issues</url>
   <releases>
     <release version="__VERSION__" date="__DATE__" />
   </releases>

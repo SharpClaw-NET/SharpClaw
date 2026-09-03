@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using System.Text.Json;
-using SharpClaw.Shared.Logging;
+using Microsoft.Extensions.Logging;
+using SharpClaw.Contracts.Modules;
 
 namespace SharpClaw.Services;
 
@@ -12,22 +13,47 @@ public sealed class SharpClawApiClient : IDisposable
 {
     private readonly HttpClient _http;
     private readonly FrontendInstanceService? _frontendInstance;
-    private readonly DurableProcessLogWriter? _processLogs;
+    private readonly ILogger<SharpClawApiClient> _logger;
+    private readonly ClientActionDispatcher _clientActions;
+    private readonly ClientActionContextSource _contextSource;
+    private readonly bool _ownsHttp;
+    private readonly string? _fixedApiKey;
     private string? _cachedApiKey;
+    private int _disposed;
 
     public SharpClawApiClient(
         string baseUrl,
-        DurableProcessLogWriter? processLogs = null,
-        FrontendInstanceService? frontendInstance = null)
+        ILogger<SharpClawApiClient> logger,
+        FrontendInstanceService? frontendInstance,
+        ClientActionDispatcher clientActions,
+        ClientActionContextSource? contextSource = null)
     {
         _frontendInstance = frontendInstance;
-        _processLogs = processLogs;
-        _http = new HttpClient(new DebugLoggingHandler(new HttpClientHandler(), processLogs))
+        _logger = logger;
+        _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _contextSource = contextSource ?? new ClientActionContextSource();
+        _ownsHttp = true;
+        _http = new HttpClient(new HttpLoggingHandler(new HttpClientHandler(), logger))
         {
             BaseAddress = new Uri(baseUrl),
             Timeout = TimeSpan.FromMinutes(10)
         };
 
+    }
+
+    internal SharpClawApiClient(
+        HttpClient http,
+        ILogger<SharpClawApiClient> logger,
+        ClientActionDispatcher clientActions,
+        ClientActionContextSource contextSource,
+        string? fixedApiKey = null)
+    {
+        _http = http ?? throw new ArgumentNullException(nameof(http));
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _clientActions = clientActions ?? throw new ArgumentNullException(nameof(clientActions));
+        _contextSource = contextSource ?? throw new ArgumentNullException(nameof(contextSource));
+        _ownsHttp = false;
+        _fixedApiKey = fixedApiKey;
     }
 
     /// <summary>Base URL of the localhost API (e.g. http://127.0.0.1:48923).</summary>
@@ -36,63 +62,79 @@ public sealed class SharpClawApiClient : IDisposable
     /// <summary>
     /// Changes the target API base URL and clears the cached API key.
     /// </summary>
-    public void UpdateBaseUrl(string baseUrl)
+    public async ValueTask UpdateBaseUrlAsync(
+        string baseUrl,
+        CancellationToken cancellationToken = default)
     {
-        _http.BaseAddress = new Uri(baseUrl);
-        _cachedApiKey = null;
-        _frontendInstance?.RememberBackendBinding(
-            backendInstanceId: null,
-            baseUrl,
-            bindingKind: "configured");
+        var expectedVersion = _clientActions.GetStateVersion("client.api.target");
+        await _clientActions.CommitStateAsync(
+            "client.api.target",
+            expectedVersion,
+            _ =>
+            {
+                _http.BaseAddress = new Uri(baseUrl);
+                _cachedApiKey = null;
+                _frontendInstance?.RememberBackendBinding(
+                    backendInstanceId: null,
+                    baseUrl,
+                    bindingKind: "configured");
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
     }
 
     public async Task<HttpResponseMessage> GetAsync(
         string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("GET", path, null, responseHeadersRead: false, ct);
 
     public async Task<HttpResponseMessage> PostAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("POST", path, content, responseHeadersRead: false, ct);
 
-    public async Task<HttpResponseMessage> PostStreamAsync(
-        string path, HttpContent? content, CancellationToken ct = default)
+    public Task ConsumeStreamAsync(
+        string method,
+        string path,
+        HttpContent? content,
+        Func<HttpResponseMessage, CancellationToken, Task> consume,
+        CancellationToken cancellationToken = default)
     {
-        var request = new HttpRequestMessage(HttpMethod.Post, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
-    }
+        ArgumentException.ThrowIfNullOrWhiteSpace(method);
+        ArgumentException.ThrowIfNullOrWhiteSpace(path);
+        ArgumentNullException.ThrowIfNull(consume);
 
-    public async Task<HttpResponseMessage> GetStreamAsync(
-        string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Get, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, ct);
+        return _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.stream",
+                method,
+                SafePath(new Uri(path, UriKind.RelativeOrAbsolute)),
+                Guid.NewGuid(),
+                path),
+            async (invocation, actionToken) =>
+            {
+                using var request = new HttpRequestMessage(
+                    new HttpMethod(invocation.Method),
+                    invocation.EffectiveRequestTarget)
+                {
+                    Content = content,
+                };
+                AttachApiKey(request);
+                using var response = await _http.SendAsync(
+                    request,
+                    HttpCompletionOption.ResponseHeadersRead,
+                    actionToken);
+                await consume(response, actionToken);
+                return true;
+            },
+            cancellationToken).AsTask();
     }
 
     public async Task<HttpResponseMessage> PutAsync(
         string path, HttpContent? content, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Put, path) { Content = content };
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("PUT", path, content, responseHeadersRead: false, ct);
 
     public async Task<HttpResponseMessage> DeleteAsync(
         string path, CancellationToken ct = default)
-    {
-        var request = new HttpRequestMessage(HttpMethod.Delete, path);
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
-    }
+        => await SendClientCommandAsync("DELETE", path, null, responseHeadersRead: false, ct);
 
     /// <summary>
     /// GET + deserialize a JSON list, swallowing errors and returning <c>null</c> on failure.
@@ -115,8 +157,57 @@ public sealed class SharpClawApiClient : IDisposable
     public async Task<HttpResponseMessage> SendAsync(
         HttpRequestMessage request, CancellationToken ct = default)
     {
-        AttachApiKey(request);
-        return await _http.SendAsync(request, ct);
+        ArgumentNullException.ThrowIfNull(request);
+        return await _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.send",
+                request.Method.Method,
+                SafePath(request.RequestUri),
+                Guid.NewGuid(),
+                request.RequestUri?.ToString()),
+            async (invocation, actionToken) =>
+            {
+                request.Method = new HttpMethod(invocation.Method);
+                request.RequestUri = new Uri(
+                    invocation.EffectiveRequestTarget,
+                    UriKind.RelativeOrAbsolute);
+                AttachApiKey(request);
+                return await _http.SendAsync(request, actionToken);
+            },
+            ct);
+    }
+
+    private Task<HttpResponseMessage> SendClientCommandAsync(
+        string method,
+        string path,
+        HttpContent? content,
+        bool responseHeadersRead,
+        CancellationToken cancellationToken)
+    {
+        return _clientActions.RunCommandAsync(
+            new ClientCommandInvocation(
+                "http.send",
+                method,
+                SafePath(new Uri(path, UriKind.RelativeOrAbsolute)),
+                Guid.NewGuid(),
+                path),
+            async (invocation, actionToken) =>
+            {
+                using var request = new HttpRequestMessage(
+                    new HttpMethod(invocation.Method),
+                    invocation.EffectiveRequestTarget)
+                {
+                    Content = content,
+                };
+                AttachApiKey(request);
+                return await _http.SendAsync(
+                    request,
+                    responseHeadersRead
+                        ? HttpCompletionOption.ResponseHeadersRead
+                        : HttpCompletionOption.ResponseContentRead,
+                    actionToken);
+            },
+            cancellationToken).AsTask();
     }
 
     /// <summary>
@@ -141,10 +232,10 @@ public sealed class SharpClawApiClient : IDisposable
                 // and written a new key to disk.  Clear the cache so the
                 // next attempt re-reads the file.
                 if (response.StatusCode == System.Net.HttpStatusCode.Unauthorized)
-                    InvalidateApiKey();
+                    await InvalidateApiKeyAsync(cts.Token);
             }
             catch (HttpRequestException) { }
-            catch (InvalidOperationException) { InvalidateApiKey(); }
+            catch (InvalidOperationException) { await InvalidateApiKeyAsync(cts.Token); }
             catch (TaskCanceledException) when (!ct.IsCancellationRequested) { }
 
             await Task.Delay(250, cts.Token);
@@ -170,13 +261,45 @@ public sealed class SharpClawApiClient : IDisposable
     /// Stores the JWT access token returned by <c>/auth/login</c>.
     /// Subsequent requests include it as a Bearer token.
     /// </summary>
-    public void SetAccessToken(string token) => _accessToken = token;
+    internal async ValueTask SetAccessTokenAsync(
+        string? token,
+        CancellationToken cancellationToken = default,
+        ClientActionRequestContext? authenticatedContext = null)
+    {
+        var expectedVersion = _clientActions.GetStateVersion("client.auth");
+        await _clientActions.CommitStateAsync(
+            "client.auth",
+            expectedVersion,
+            _ =>
+            {
+                _accessToken = token;
+                if (token is null)
+                    _contextSource.ClearSession();
+                else if (authenticatedContext is not null)
+                    _contextSource.SetSession(authenticatedContext);
+                else
+                    _contextSource.ClearSession();
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+    }
+
+    // The normal path uses client.auth. This local reset is only for a failed
+    // cleanup action, so an authority failure cannot leave a usable token.
+    internal void ForceClearSessionAfterActionFailure()
+    {
+        _accessToken = null;
+        _contextSource.ClearSession();
+    }
 
     /// <summary>Current access token, if any.</summary>
     public string? AccessToken => _accessToken;
 
     private string ResolveApiKey()
     {
+        if (_fixedApiKey is not null)
+            return _fixedApiKey;
+
         if (_cachedApiKey is not null)
             return _cachedApiKey;
 
@@ -202,50 +325,58 @@ public sealed class SharpClawApiClient : IDisposable
     /// Clears the cached API key so the next request re-reads from disk.
     /// Call this after restarting the API process.
     /// </summary>
-    public void InvalidateApiKey() => _cachedApiKey = null;
+    public async ValueTask InvalidateApiKeyAsync(
+        CancellationToken cancellationToken = default)
+    {
+        var expectedVersion = _clientActions.GetStateVersion("client.api.key");
+        await _clientActions.CommitStateAsync(
+            "client.api.key",
+            expectedVersion,
+            _ =>
+            {
+                _cachedApiKey = null;
+                return ValueTask.CompletedTask;
+            },
+            cancellationToken);
+    }
 
-    public void Dispose() => _http.Dispose();
+    public void Dispose() =>
+        DisposeAsync().AsTask().GetAwaiter().GetResult();
+
+    public async ValueTask DisposeAsync()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+            return;
+
+        await _clientActions.RunCommandAsync(
+            "client.api.dispose",
+            _ =>
+            {
+                if (_ownsHttp)
+                    _http.Dispose();
+                return ValueTask.CompletedTask;
+            });
+    }
 
     /// <summary>
-    /// Logs full HTTP request/response details to <see cref="Debug.WriteLine(string, string)"/>
-    /// under the <c>SharpClaw.Client.Uno</c> category so they appear in the
-    /// Visual Studio <b>Output › Debug</b> pane when attached.
+    /// Emits bounded request metadata through the process logger. Bodies and
+    /// credential-bearing headers are intentionally never collected.
     /// </summary>
-    private sealed class DebugLoggingHandler(
+    private sealed class HttpLoggingHandler(
         HttpMessageHandler inner,
-        DurableProcessLogWriter? processLogs) : DelegatingHandler(inner)
+        ILogger logger) : DelegatingHandler(inner)
     {
-        private const string Category = "SharpClaw.Client.Uno";
-
-        [Conditional("DEBUG")]
-        private static void Log(string message) => Debug.WriteLine(message, Category);
-
-        private void LogPersistent(string message)
-        {
-            Log(message);
-            processLogs?.AppendDebug(message);
-        }
-
         protected override async Task<HttpResponseMessage> SendAsync(
             HttpRequestMessage request, CancellationToken cancellationToken)
         {
             var id = Guid.NewGuid().ToString("N")[..8];
-
-            LogPersistent($"[{id}] >>> {request.Method} {request.RequestUri}");
-
-            if (request.Content is not null)
-            {
-                var contentType = request.Content.Headers.ContentType?.MediaType ?? "";
-                if (IsTextContent(contentType))
-                {
-                    var body = await request.Content.ReadAsStringAsync(cancellationToken);
-                    LogPersistent($"[{id}] >>> Body:\n{body}");
-                }
-                else
-                {
-                    LogPersistent($"[{id}] >>> Body: <binary {contentType}, {request.Content.Headers.ContentLength} bytes>");
-                }
-            }
+            var path = SafePath(request.RequestUri);
+            logger.LogDebug(
+                "HTTP request {RequestId} started: {Method} {Path}; content length={ContentLength}",
+                id,
+                request.Method,
+                path,
+                request.Content?.Headers.ContentLength);
 
             var sw = Stopwatch.StartNew();
             HttpResponseMessage response;
@@ -256,46 +387,34 @@ public sealed class SharpClawApiClient : IDisposable
             catch (Exception ex)
             {
                 sw.Stop();
-                LogPersistent($"[{id}] !!! FAILED after {sw.ElapsedMilliseconds}ms: {ex.GetType().Name}: {ex.Message}");
-                processLogs?.AppendException(ex, $"HTTP request failed: {request.Method} {request.RequestUri}");
+                logger.LogError(
+                    ex,
+                    "HTTP request {RequestId} failed after {ElapsedMilliseconds}ms: {Method} {Path}",
+                    id,
+                    sw.ElapsedMilliseconds,
+                    request.Method,
+                    path);
                 throw;
             }
             sw.Stop();
 
-            LogPersistent($"[{id}] <<< {(int)response.StatusCode} {response.ReasonPhrase} ({sw.ElapsedMilliseconds}ms)");
-
-            if (response.Content is not null)
-            {
-                var responseContentType = response.Content.Headers.ContentType?.MediaType ?? "";
-                if (IsTextContent(responseContentType)
-                    && responseContentType is not "text/event-stream")
-                {
-                    // Skip full body read for large responses to avoid buffering
-                    // multi-MB payloads (e.g. job details with base64 screenshots)
-                    var contentLength = response.Content.Headers.ContentLength;
-                    if (contentLength is not null and > 4096)
-                    {
-                        LogPersistent($"[{id}] <<< Body: <{responseContentType}, {contentLength:N0} bytes>");
-                    }
-                    else
-                    {
-                        var responseBody = await response.Content.ReadAsStringAsync(cancellationToken);
-                        LogPersistent($"[{id}] <<< Body:\n{responseBody}");
-                    }
-                }
-                else
-                {
-                    LogPersistent($"[{id}] <<< Body: <{responseContentType}, {response.Content.Headers.ContentLength} bytes>");
-                }
-            }
+            logger.LogInformation(
+                "HTTP request {RequestId} completed: {StatusCode} after {ElapsedMilliseconds}ms: {Method} {Path}; response length={ContentLength}",
+                id,
+                (int)response.StatusCode,
+                sw.ElapsedMilliseconds,
+                request.Method,
+                path,
+                response.Content?.Headers.ContentLength);
 
             return response;
         }
+    }
 
-        private static bool IsTextContent(string mediaType) =>
-            mediaType.StartsWith("text/", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("json", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("xml", StringComparison.OrdinalIgnoreCase)
-            || mediaType.Contains("form-urlencoded", StringComparison.OrdinalIgnoreCase);
+    private static string SafePath(Uri? uri)
+    {
+        if (uri is null)
+            return string.Empty;
+        return uri.IsAbsoluteUri ? uri.AbsolutePath : uri.OriginalString.Split('?', 2)[0];
     }
 }

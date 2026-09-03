@@ -8,12 +8,14 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
+    <InternalsVisibleTo Include="SharpClaw.Runtime.Host" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="Microsoft.Extensions.Http" />
     <PackageReference Include="Microsoft.IdentityModel.JsonWebTokens" />
     <PackageReference Include="Microsoft.Extensions.Hosting" />
+    <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
@@ -27,6 +29,20 @@
 
   <ItemGroup>
     <Folder Include="Services\Triggers\Sources\" />
+  </ItemGroup>
+
+  <!--
+    The old application orchestration tree depended on the removed Core domain
+    model. Runtime BLL now exposes only the direct-chat kernel adapter and the
+    package-backed environment service while feature modules move to their
+    canonical contribution contracts.
+  -->
+  <ItemGroup>
+    <Compile Remove="**\*.cs" />
+    <Compile Include="GlobalUsings.cs" />
+    <Compile Include="CorePackageDependency.cs" />
+    <Compile Include="Kernel\**\*.cs" />
+    <Compile Include="Modules\SecureJsonOptions.cs" />
   </ItemGroup>
 
 </Project>

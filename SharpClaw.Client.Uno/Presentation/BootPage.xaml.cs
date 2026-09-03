@@ -4,8 +4,9 @@ using System.Text.Json;
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
-using Windows.ApplicationModel.DataTransfer;
+using SharpClaw.Contracts.Modules;
 using SharpClaw.Services;
+using Windows.ApplicationModel.DataTransfer;
 
 namespace SharpClaw.Presentation;
 
@@ -41,11 +42,6 @@ public sealed partial class BootPage : Page
     private CancellationTokenSource? _retryCts;
     private ImmutableArray<DiagnosticLine> _lastDiag;
 
-    private static readonly JsonSerializerOptions _autoLoginJson = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-    };
-
     protected override async void OnNavigatedTo(NavigationEventArgs e)
     {
         base.OnNavigatedTo(e);
@@ -55,7 +51,8 @@ public sealed partial class BootPage : Page
             services.GetRequiredService<BackendProcessManager>(),
             services.GetRequiredService<GatewayProcessManager>(),
             services.GetRequiredService<SharpClawApiClient>(),
-            services.GetRequiredService<FrontendInstanceService>());
+            services.GetRequiredService<FrontendInstanceService>(),
+            services.GetRequiredService<ClientActionDispatcher>());
 
         // Cancel any in-flight connection attempt from a previous visit.
         _retryCts?.Cancel();
@@ -73,7 +70,7 @@ public sealed partial class BootPage : Page
     // ---------------------------------------------------------------
     private async Task RunConnectionFlowAsync(string? customUrl, CancellationToken ct)
     {
-        _model!.ApplyCustomUrl(customUrl);
+        await _model!.ApplyCustomUrlAsync(customUrl, ct);
         _model.IsAwaitingInput = false;
         var diag = ImmutableArray.CreateBuilder<DiagnosticLine>();
 
@@ -154,8 +151,8 @@ public sealed partial class BootPage : Page
 
                 // No auto-login — navigate to login page
                 await Task.Delay(1000, CancellationToken.None);
-                var navigator = App.Services!.GetRequiredService<INavigator>();
-                await navigator.NavigateRouteAsync(this, "Login", qualifier: Qualifiers.ClearBackStack);
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Login", Qualifiers.ClearBackStack);
                 return;
             }
 
@@ -430,51 +427,53 @@ public sealed partial class BootPage : Page
             || account.RefreshTokenExpiresAt <= DateTimeOffset.UtcNow)
             return false;
 
+        var session = App.Services!.GetRequiredService<ClientSessionService>();
         try
         {
-            var api = App.Services!.GetRequiredService<SharpClawApiClient>();
-            var body = JsonSerializer.Serialize(
-                new { refreshToken = account.RefreshToken }, _autoLoginJson);
-            using var resp = await api.PostAsync("/auth/refresh",
-                new StringContent(body, Encoding.UTF8, "application/json"), ct);
-
-            if (!resp.IsSuccessStatusCode)
+            var result = await session.RefreshAsync(account.RefreshToken, ct);
+            if (result is null)
                 return false;
 
-            using var stream = await resp.Content.ReadAsStreamAsync(ct);
-            using var doc = await JsonDocument.ParseAsync(stream, cancellationToken: ct);
-            var root = doc.RootElement;
+            await session.RunAuthenticatedContinuationAsync(async () =>
+            {
+                var api = App.Services!.GetRequiredService<SharpClawApiClient>();
+                var identity = result.Identity;
+                var refreshedAccount = new AccountStore.SavedAccount
+                {
+                    UserId = identity.UserId,
+                    Username = identity.Username,
+                    AccessToken = result.AccessToken,
+                    AccessTokenExpiresAt = result.AccessTokenExpiresAt,
+                    RefreshToken = result.RefreshToken ?? account.RefreshToken,
+                    RefreshTokenExpiresAt = result.RefreshTokenExpiresAt ?? account.RefreshTokenExpiresAt,
+                    RememberMe = true,
+                };
 
-            var accessToken = root.TryGetProperty("accessToken", out var atProp)
-                ? atProp.GetString() : null;
-            if (accessToken is null) return false;
+                // Update stored tokens with fresh values.
+                await store!.SaveAccountAsync(refreshedAccount, ct);
+                if (account.UserId != identity.UserId)
+                    await store.RemoveAccountAsync(account.UserId, ct);
 
-            api.SetAccessToken(accessToken);
+                // Switch per-user settings.
+                await App.Services!.GetRequiredService<ClientSettings>()
+                    .SwitchUserAsync(identity.UserId, ct);
 
-            // Update stored tokens with fresh values
-            account.AccessToken = accessToken;
-            if (root.TryGetProperty("accessTokenExpiresAt", out var atExp))
-                account.AccessTokenExpiresAt = atExp.GetDateTimeOffset();
-            if (root.TryGetProperty("refreshToken", out var rt) && rt.ValueKind == JsonValueKind.String)
-                account.RefreshToken = rt.GetString();
-            if (root.TryGetProperty("refreshTokenExpiresAt", out var rtExp) && rtExp.ValueKind != JsonValueKind.Null)
-                account.RefreshTokenExpiresAt = rtExp.GetDateTimeOffset();
-            store!.SaveAccount(account);
+                // Pre-populate module caches for the session.
+                await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
 
-            // Switch per-user settings
-            App.Services!.GetRequiredService<ClientSettings>().SwitchUser(account.UserId);
-
-            // Pre-populate module caches for the session
-            await App.Services!.GetRequiredService<ModuleFrontendStateService>().RefreshAsync(api);
-
-            await Task.Delay(1000, CancellationToken.None);
-            var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
-            var needsSetup = !setupMarker.IsCompleted;
-            var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
-            var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
-            var navigator = App.Services!.GetRequiredService<INavigator>();
-            await navigator.NavigateRouteAsync(this, target, qualifier: Qualifiers.ClearBackStack);
+                await Task.Delay(1000, CancellationToken.None);
+                var setupMarker = App.Services!.GetRequiredService<FirstSetupMarker>();
+                var needsSetup = !setupMarker.IsCompleted;
+                var needsUpgrade = !needsSetup && setupMarker.NeedsUpgradeRerun;
+                var target = needsSetup || needsUpgrade ? "FirstSetup" : "Main";
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, target, Qualifiers.ClearBackStack);
+            });
             return true;
+        }
+        catch (ClientSessionCleanupException)
+        {
+            throw;
         }
         catch
         {
@@ -486,6 +485,7 @@ public sealed partial class BootPage : Page
     {
         if (App.Services is not { } services) return;
         EnvMenuPage.PendingOrigin = "Boot";
-        _ = services.GetRequiredService<INavigator>().NavigateRouteAsync(this, "EnvMenu");
+        _ = services.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "EnvMenu");
     }
 }

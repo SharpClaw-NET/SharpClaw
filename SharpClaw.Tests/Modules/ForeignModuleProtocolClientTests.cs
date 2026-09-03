@@ -17,10 +17,10 @@ public sealed class ForeignModuleProtocolClientTests
     {
         using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignModuleHandshakeResponse(
             ForeignModuleProtocol.Version,
-            "sample_node_module",
-            "snm",
-            ModuleManifestRuntimeInfo.Node,
-            "v24.0.0",
+            "sample_dotnet_module",
+            "sdm",
+            ModuleManifestRuntimeInfo.DotNet,
+            "net10.0",
             [
                 ForeignModuleCapability.Endpoints,
                 ForeignModuleCapability.LifecycleHooks,
@@ -30,10 +30,10 @@ public sealed class ForeignModuleProtocolClientTests
 
         var response = await client.HandshakeAsync(
             Manifest(),
-            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.Node, "dist/server.js"),
+            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"),
             "0.1.0-beta");
 
-        response.Runtime.Should().Be(ModuleManifestRuntimeInfo.Node);
+        response.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
         response.Capabilities.Should().Contain(ForeignModuleCapability.Endpoints);
         handler.Requests.Should().ContainSingle();
         handler.Requests[0].Method.Should().Be(HttpMethod.Post);
@@ -44,8 +44,8 @@ public sealed class ForeignModuleProtocolClientTests
             handler.Requests[0].Body!,
             JsonOptions)!;
         request.ProtocolVersion.Should().Be(ForeignModuleProtocol.Version);
-        request.ModuleId.Should().Be("sample_node_module");
-        request.ToolPrefix.Should().Be("snm");
+        request.ModuleId.Should().Be("sample_dotnet_module");
+        request.ToolPrefix.Should().Be("sdm");
         request.HostVersion.Should().Be("0.1.0-beta");
     }
 
@@ -55,19 +55,19 @@ public sealed class ForeignModuleProtocolClientTests
         using var handler = new FakeSidecarHandler((_, _) => Json(new ForeignModuleHandshakeResponse(
             ForeignModuleProtocol.Version,
             "wrong_module",
-            "snm",
-            ModuleManifestRuntimeInfo.Node,
-            "v24.0.0")));
+            "sdm",
+            ModuleManifestRuntimeInfo.DotNet,
+            "net10.0")));
         using var httpClient = CreateHttpClient(handler);
         var client = new ForeignModuleProtocolClient(httpClient, "run-token");
 
         var act = async () => await client.HandshakeAsync(
             Manifest(),
-            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.Node, "dist/server.js"));
+            new ModuleManifestRuntimeInfo(ModuleManifestRuntimeInfo.DotNet, "SharpClaw.TestFixtures.ForeignSidecar.dll"));
 
         await act.Should()
             .ThrowAsync<ForeignModuleProtocolException>()
-            .WithMessage("*handshake id 'wrong_module'*manifest id 'sample_node_module'*");
+            .WithMessage("*handshake id 'wrong_module'*manifest id 'sample_dotnet_module'*");
     }
 
     [Test]
@@ -155,11 +155,11 @@ public sealed class ForeignModuleProtocolClientTests
 
     private static ModuleManifest Manifest() =>
         new(
-            "sample_node_module",
-            "Sample Node Module",
+            "sample_dotnet_module",
+            "Sample .NET Module",
             "1.0.0",
-            "snm",
-            "dist/server.js",
+            "sdm",
+            "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
     private static HttpClient CreateHttpClient(HttpMessageHandler handler) =>

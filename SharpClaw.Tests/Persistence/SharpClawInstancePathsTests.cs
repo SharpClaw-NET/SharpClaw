@@ -44,7 +44,9 @@ public class SharpClawInstancePathsTests
             var keyFilePath = paths.GetSecretFilePath("encryption-key");
 
             File.Exists(keyFilePath).Should().BeTrue();
-            File.ReadAllText(keyFilePath).Trim().Should().Be(key);
+            File.ReadAllBytes(keyFilePath)
+                .Should()
+                .Equal(Convert.FromBase64String(key));
         }
         finally
         {

@@ -20,14 +20,14 @@ public sealed class ForeignModuleHostTests
             CreateLaunchOptions(workspace, "normal"));
 
         host.ProcessId.Should().BeGreaterThan(0);
-        host.Handshake.ModuleId.Should().Be("sample_node_module");
-        host.Handshake.Runtime.Should().Be(ModuleManifestRuntimeInfo.Node);
+        host.Handshake.ModuleId.Should().Be("sample_dotnet_module");
+        host.Handshake.Runtime.Should().Be(ModuleManifestRuntimeInfo.DotNet);
         host.Endpoints.Should().Contain(e => e.RoutePattern == "/modules/sample/ping");
         host.CapturedOutput.StandardOutput.Should().Contain($"moduleDir={workspace.ModuleDir}");
         host.CapturedOutput.StandardOutput.Should().Contain($"dataDir={workspace.DataDir}");
         host.CapturedOutput.StandardOutput.Should().Contain("token=run-token");
-        host.CapturedOutput.StandardOutput.Should().Contain("moduleId=sample_node_module");
-        host.CapturedOutput.StandardOutput.Should().Contain("runtime=node");
+        host.CapturedOutput.StandardOutput.Should().Contain("moduleId=sample_dotnet_module");
+        host.CapturedOutput.StandardOutput.Should().Contain("runtime=dotnet");
 
         await host.Module.InitializeAsync(host.Services, CancellationToken.None);
         var health = await host.Module.HealthCheckAsync(CancellationToken.None);
@@ -114,15 +114,21 @@ public sealed class ForeignModuleHostTests
 
     private static ModuleManifest Manifest() =>
         new(
-            "sample_node_module",
-            "Sample Node Module",
+            "sample_dotnet_module",
+            "Sample .NET Module",
             "1.0.0",
-            "snm",
-            "dist/server.js",
+            "sdm",
+            "SharpClaw.TestFixtures.ForeignSidecar.dll",
             "0.0.0");
 
     private static ModuleManifestRuntimeInfo RuntimeInfo() =>
-        new(ModuleManifestRuntimeInfo.Node, "dist/server.js");
+        ModuleManifestRuntimeInfo.FromJson("""
+        {
+          "runtime": "dotnet",
+          "hostMode": "sidecar",
+          "entryAssembly": "SharpClaw.TestFixtures.ForeignSidecar.dll"
+        }
+        """);
 
     private static ForeignModuleHostLaunchOptions CreateLaunchOptions(
         TestWorkspace workspace,
@@ -143,7 +149,7 @@ public sealed class ForeignModuleHostTests
             HostVersion = "0.1.0-beta",
             Environment = new Dictionary<string, string>
             {
-                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "snm",
+                ["SHARPCLAW_TEST_TOOL_PREFIX"] = "sdm",
             },
         };
     }

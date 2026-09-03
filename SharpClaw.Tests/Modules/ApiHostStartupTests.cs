@@ -17,7 +17,6 @@ namespace SharpClaw.Tests.Modules;
 /// confirms module DLLs are present on disk and contain an
 /// <c>ISharpClawCoreModule</c> implementation, but it cannot detect runtime
 /// startup regressions such as duplicate trigger-attribute ownership in
-/// <c>TaskScriptParser.RegisterModule</c>, parser-extension primitives
 /// collisions, missing infrastructure dependencies, or any other crash that
 /// happens between <c>builder.Build()</c> and <c>app.StartAsync()</c>.
 /// </para>

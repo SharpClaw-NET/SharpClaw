@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using Microsoft.Extensions.Logging;
 using System.Net;
 using System.Net.NetworkInformation;
 using SharpClaw.Shared.Logging;
@@ -21,7 +22,7 @@ namespace SharpClaw.Services;
 public sealed class BackendProcessManager : IDisposable
 {
     private readonly FrontendInstanceService? _frontendInstance;
-    private readonly DurableProcessLogWriter _processLogs;
+    private readonly ILogger<BackendProcessManager> _logger;
     private readonly Func<bool>? _processOnPortProbe;
     private readonly Func<CancellationToken, Task<bool>>? _apiReachabilityProbe;
     private readonly Action<ProcessStartInfo>? _processStartObserver;
@@ -29,7 +30,8 @@ public sealed class BackendProcessManager : IDisposable
     private bool _startedByObserver;
     private readonly string _executablePath;
     private string _apiUrl;
-    private readonly List<string> _processOutput = [];
+    private readonly SharpClawBoundedTextTail _processOutput =
+        new(SharpClawLogBounds.SidecarTailBytes);
     private readonly object _outputLock = new();
 
     /// <summary>
@@ -65,7 +67,7 @@ public sealed class BackendProcessManager : IDisposable
     /// </summary>
     public IReadOnlyList<string> ProcessOutput
     {
-        get { lock (_outputLock) return [.. _processOutput]; }
+        get { lock (_outputLock) return _processOutput.Snapshot(); }
     }
 
     /// <summary>Exit code of the bundled process, or <c>null</c> if still running or never started.</summary>
@@ -73,11 +75,11 @@ public sealed class BackendProcessManager : IDisposable
 
     public BackendProcessManager(
         string apiUrl,
-        DurableProcessLogWriter processLogs,
+        ILogger<BackendProcessManager> logger,
         FrontendInstanceService? frontendInstance = null)
         : this(
             apiUrl,
-            processLogs,
+            logger,
             frontendInstance,
             executablePath: null,
             processOnPortProbe: null,
@@ -88,7 +90,7 @@ public sealed class BackendProcessManager : IDisposable
 
     internal BackendProcessManager(
         string apiUrl,
-        DurableProcessLogWriter processLogs,
+        ILogger<BackendProcessManager> logger,
         FrontendInstanceService? frontendInstance,
         string? executablePath,
         Func<bool>? processOnPortProbe,
@@ -96,7 +98,7 @@ public sealed class BackendProcessManager : IDisposable
         Action<ProcessStartInfo>? processStartObserver)
     {
         _frontendInstance = frontendInstance;
-        _processLogs = processLogs;
+        _logger = logger;
         _processOnPortProbe = processOnPortProbe;
         _apiReachabilityProbe = apiReachabilityProbe;
         _processStartObserver = processStartObserver;
@@ -328,16 +330,16 @@ public sealed class BackendProcessManager : IDisposable
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add(e.Data);
-                _processLogs.AppendDebug($"[backend] {e.Data}");
+                lock (_outputLock) _processOutput.AppendLine(e.Data);
+                _logger.LogInformation("Backend process stdout: {Line}", e.Data);
             }
         };
         _process.ErrorDataReceived += (_, e) =>
         {
             if (e.Data is not null)
             {
-                lock (_outputLock) _processOutput.Add($"[stderr] {e.Data}");
-                _processLogs.AppendException($"[backend stderr] {e.Data}");
+                lock (_outputLock) _processOutput.AppendLine($"[stderr] {e.Data}");
+                _logger.LogWarning("Backend process stderr: {Line}", e.Data);
             }
         };
         _process.BeginOutputReadLine();

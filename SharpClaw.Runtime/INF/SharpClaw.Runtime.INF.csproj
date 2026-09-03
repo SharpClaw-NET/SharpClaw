@@ -8,6 +8,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="SharpClaw.Tests" />
+    <InternalsVisibleTo Include="SharpClaw.Runtime.BLL" />
+    <InternalsVisibleTo Include="SharpClaw.Runtime.Host" />
   </ItemGroup>
 
   <ItemGroup>
@@ -21,23 +23,22 @@
       <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
     </PackageReference>
     <PackageReference Include="Microsoft.Extensions.Configuration.Abstractions" />
-    <PackageReference Include="Microsoft.Extensions.Configuration.Json" />
     <PackageReference Include="Npgsql.EntityFrameworkCore.PostgreSQL" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.SqlServer" />
     <PackageReference Include="Microsoft.EntityFrameworkCore.Sqlite" />
     <PackageReference Include="Supprocom.JSONColdStore" />
+    <PackageReference Include="Supprocom.Secrets" />
     <PackageReference Include="System.Security.Cryptography.Xml" />
   </ItemGroup>
 
   <ItemGroup>
     <PackageReference Include="SharpClaw.Contracts" />
-    <PackageReference Include="SharpClaw.Providers.Common" />
     <ProjectReference Include="..\..\SharpClaw.Shared\SharpClaw.Shared.csproj" />
   </ItemGroup>
 
   <ItemGroup>
     <Content Include="Data\**" CopyToOutputDirectory="PreserveNewest" />
-    <!-- .env files registered dynamically by Directory.Build.targets (_RegisterEnvironmentContent) -->
+    <!-- Supprocom.Secrets buildTransitive assets copy configured templates. -->
   </ItemGroup>
 
 </Project>

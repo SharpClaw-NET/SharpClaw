@@ -15,7 +15,7 @@ If you believe you have found a security vulnerability in SharpClaw, **do not op
 This repository has GitHub Private Vulnerability Reporting enabled.  
 Please report vulnerabilities using the “Report a vulnerability” option in the repository’s Security tab:
 
-https://github.com/mkn8rn/SharpClaw/security/advisories/new
+https://github.com/SharpClaw-NET/SharpClaw/security/advisories/new
 
 All reports submitted through GitHub’s private reporting feature will be handled confidentially.
 

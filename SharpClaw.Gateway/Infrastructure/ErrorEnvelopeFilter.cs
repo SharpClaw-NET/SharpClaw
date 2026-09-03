@@ -1,6 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Mvc.Filters;
-using SharpClaw.Shared.Logging;
 
 namespace SharpClaw.Gateway.Infrastructure;
 
@@ -9,17 +8,13 @@ namespace SharpClaw.Gateway.Infrastructure;
 /// in the standard gateway error envelope.
 /// </summary>
 public sealed class ErrorEnvelopeFilter(
-    ILogger<ErrorEnvelopeFilter> logger,
-    DurableProcessLogWriter processLogs) : IExceptionFilter
+    ILogger<ErrorEnvelopeFilter> logger) : IExceptionFilter
 {
     public void OnException(ExceptionContext context)
     {
         logger.LogError(context.Exception, "Unhandled exception in {Controller}/{Action}.",
             context.RouteData.Values["controller"],
             context.RouteData.Values["action"]);
-        processLogs.AppendException(
-            context.Exception,
-            $"Unhandled exception in {context.RouteData.Values["controller"]}/{context.RouteData.Values["action"]}.");
 
         var requestId = context.HttpContext.Items.TryGetValue("RequestId", out var id) && id is string s
             ? s : Guid.NewGuid().ToString("N");

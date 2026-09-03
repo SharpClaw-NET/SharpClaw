@@ -5,6 +5,7 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.EntityFrameworkCore.Storage;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Contracts.Modules;
+using SharpClaw.Tests.Kernel;
 using SharpClaw.Runtime.INF.Persistence;
 
 namespace SharpClaw.Tests.Modules;
@@ -290,7 +291,10 @@ public sealed class BundledModuleStorageGatewayTests
             await using var db = CreateJsonColdStoreDbContext(dataDirectory);
             await db.Database.EnsureDeletedAsync();
             await db.Database.EnsureCreatedAsync();
-            var gateway = CreateGateway(db);
+            var actionBoundary = new RecordingRuntimeTransactionActionBoundary();
+            var gateway = CreateGateway(
+                db,
+                transactionRunner: new RuntimeTransactionActionRunner(db, actionBoundary));
 
             await UpsertJobAsync(
                 gateway,
@@ -352,6 +356,52 @@ public sealed class BundledModuleStorageGatewayTests
                 && index.RecordKey == "due"
                 && index.IndexName == "status");
             dueStatus.StringValue.Should().Be("Running");
+            actionBoundary.ActionKeys.Should().ContainInOrder(
+                "storage.transaction.begin",
+                "storage.transaction.commit");
+        }
+        finally
+        {
+            if (Directory.Exists(dataDirectory))
+                Directory.Delete(dataDirectory, recursive: true);
+        }
+    }
+
+    [Test]
+    public async Task Claim_failure_rolls_back_through_the_transaction_action()
+    {
+        var dataDirectory = Path.Combine(
+            TestContext.CurrentContext.WorkDirectory,
+            "jsoncoldstore-module-claim-rollback-" + Guid.NewGuid().ToString("N"));
+
+        try
+        {
+            await using var db = CreateJsonColdStoreDbContext(dataDirectory);
+            await db.Database.EnsureDeletedAsync();
+            await db.Database.EnsureCreatedAsync();
+            var actionBoundary = new RecordingRuntimeTransactionActionBoundary();
+            var gateway = CreateGateway(
+                db,
+                transactionRunner: new RuntimeTransactionActionRunner(db, actionBoundary));
+            await UpsertJobAsync(
+                gateway,
+                "due",
+                DateTimeOffset.Parse("2026-06-10T10:00:00Z"));
+
+            var act = async () => await InvokeAsync(gateway, "claim", new
+            {
+                filters = new[]
+                {
+                    new { indexName = "status", @operator = "equals", value = "Pending" },
+                },
+                patch = new { status = "Running" },
+            });
+
+            await act.Should().ThrowAsync<ArgumentException>();
+            actionBoundary.ActionKeys.Should().ContainInOrder(
+                "storage.transaction.begin",
+                "storage.transaction.rollback");
+            actionBoundary.ActionKeys.Should().NotContain("storage.transaction.commit");
         }
         finally
         {
@@ -508,8 +558,16 @@ public sealed class BundledModuleStorageGatewayTests
 
     private static BundledModuleStorageGateway CreateGateway(
         SharpClawDbContext db,
-        IModuleStorageTelemetry? telemetry = null) =>
-        new(db, TestStorageContractProvider.Instance, telemetry);
+        IModuleStorageTelemetry? telemetry = null,
+        IRuntimeTransactionActionRunner? transactionRunner = null) =>
+        new(
+            db,
+            TestStorageContractProvider.Instance,
+            new TestRuntimeTransactionActionRunnerAccessor(
+                transactionRunner ?? new RuntimeTransactionActionRunner(
+                    db,
+                    new TestRuntimeTransactionActionBoundary())),
+            telemetry);
 
     private static Task<JsonElement> InvokeAsync(
         BundledModuleStorageGateway gateway,
@@ -585,6 +643,21 @@ public sealed class BundledModuleStorageGatewayTests
             string storageName) =>
             Contracts.FirstOrDefault(contract =>
                 contract.ModuleId == moduleId && contract.StorageName == storageName);
+    }
+
+    private sealed class RecordingRuntimeTransactionActionBoundary
+        : IRuntimeTransactionActionBoundary
+    {
+        public List<string> ActionKeys { get; } = [];
+
+        public ValueTask<RuntimeTransactionActionResult> RunTransactionActionAsync(
+            RuntimeTransactionActionInvocation invocation,
+            Func<CancellationToken, ValueTask<RuntimeTransactionActionResult>> terminal,
+            CancellationToken cancellationToken = default)
+        {
+            ActionKeys.Add(invocation.ActionKey.Value);
+            return terminal(cancellationToken);
+        }
     }
 
     private sealed class RecordingStorageTelemetry : IModuleStorageTelemetry

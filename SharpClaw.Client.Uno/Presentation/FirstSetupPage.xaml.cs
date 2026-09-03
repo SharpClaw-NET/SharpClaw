@@ -2,7 +2,6 @@ using System.Net.Http;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
-using Microsoft.UI.Xaml.Media;
 using SharpClaw.Helpers;
 using SharpClaw.Services;
 
@@ -18,29 +17,14 @@ public sealed partial class FirstSetupPage : Page
     // State used across async steps
     private TaskCompletionSource<bool>? _providerTcs;
     private TaskCompletionSource<bool>? _apiKeyTcs;
-    private TaskCompletionSource<Guid?>? _agentTcs;
     private TaskCompletionSource<bool>? _localModelTcs;
-    private TaskCompletionSource<bool>? _roleTcs;
     private TaskCompletionSource<bool>? _upgradePromptTcs;
     private bool _localOnly;
     private bool _switchToCloud;
     private List<ProviderDto>? _providers;
     private List<ProviderTypeDto> _providerTypes = [];
 
-    private PermissionEditorBuilder? _permEditor;
-
     // ── Module wizard state ──
-    private TaskCompletionSource<int>? _moduleWizardTcs; // -1=back, 0=skip, 1=next
-    private List<ModulePermissionMetadata>? _sortedModules;
-    private int _moduleIndex;
-    private Dictionary<string, bool> _moduleEnabled = [];
-    private readonly Dictionary<string, StackPanel> _moduleContainers = [];
-    private readonly Stack<int> _wizardHistory = new();
-    private readonly List<string> _lastAutoSkipped = [];
-    private bool _suppressToggle;
-    private bool _suppressGrantAllToggle;
-    private readonly Dictionary<string, bool> _moduleGrantAll = [];
-
     public FirstSetupPage()
     {
         this.InitializeComponent();
@@ -71,9 +55,9 @@ public sealed partial class FirstSetupPage : Page
             if (!redo)
             {
                 // User chose to skip — stamp current version and go to Main
-                setupMarker.MarkCompleted();
-                var navigator = App.Services!.GetRequiredService<INavigator>();
-                await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+                await setupMarker.MarkCompletedAsync();
+                await App.Services!.GetRequiredService<ClientNavigationService>()
+                    .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
                 return;
             }
 
@@ -312,200 +296,16 @@ public sealed partial class FirstSetupPage : Page
             }
         }
 
-        // ── Step 4: Agents ──
-        AppendStep("Checking agents...");
-        var agents = await FetchListAsync<AgentDto>("/agents");
-        if (agents is { Count: > 0 })
-        {
-            ReplaceLastStep($"Found {agents.Count} agent(s).", done: true);
-        }
-        else
-        {
-            ReplaceLastStep("No agents found. Creating default agents...");
-            try
-            {
-                var resp = await Api.PostAsync("/agents/sync-with-models", null);
-                if (resp.IsSuccessStatusCode)
-                {
-                    agents = await FetchListAsync<AgentDto>("/agents");
-                    ReplaceLastStep($"Created {agents?.Count ?? 0} default agent(s).", done: true);
-                }
-                else
-                {
-                    ReplaceLastStep("Failed to create agents.", error: true);
-                    return;
-                }
-            }
-            catch (Exception ex)
-            {
-                ReplaceLastStep($"Failed: {ex.Message}", error: true);
-                return;
-            }
-        }
-
-        // ── Step 5: Default context + channel + thread ──
-        AppendStep("Checking contexts and channels...");
-        var contexts = await FetchListAsync<ContextDto>("/channel-contexts");
-        var hasFullSetup = false;
-        Guid? selectedAgentId = null;
-        if (contexts is { Count: > 0 })
-        {
-            // Check if any context has a channel with a thread
-            foreach (var ctx in contexts)
-            {
-                var channels = await FetchListAsync<ChannelDto>($"/channels?contextId={ctx.Id}");
-                if (channels is not { Count: > 0 }) continue;
-                foreach (var ch in channels)
-                {
-                    var threads = await FetchListAsync<ThreadDto>($"/channels/{ch.Id}/threads");
-                    if (threads is { Count: > 0 })
-                    {
-                        hasFullSetup = true;
-                        break;
-                    }
-                }
-                if (hasFullSetup) break;
-            }
-        }
-
-        if (hasFullSetup)
-        {
-            // Resolve the agent from the existing context so Step 6
-            // can still check/assign its role.
-            selectedAgentId = contexts!
-                .Select(c => c.Agent?.Id)
-                .FirstOrDefault(id => id.HasValue);
-
-            // If contexts don't carry AgentId (older API), try the agent list.
-            if (selectedAgentId is null)
-            {
-                agents ??= await FetchListAsync<AgentDto>("/agents") ?? [];
-                selectedAgentId = agents.FirstOrDefault()?.Id;
-            }
-
-            ReplaceLastStep("Default context, channel, and thread exist.", done: true);
-        }
-        else
-        {
-            ReplaceLastStep("Creating default workspace...");
-
-            agents ??= await FetchListAsync<AgentDto>("/agents") ?? [];
-            ReplaceLastStep("Please select a default agent for the initial workspace.");
-            PopulateAgentSelector(agents);
-            AgentSelectorPanel.Visibility = Visibility.Visible;
-            _agentTcs = new TaskCompletionSource<Guid?>();
-            selectedAgentId = await _agentTcs.Task;
-            AgentSelectorPanel.Visibility = Visibility.Collapsed;
-
-            if (selectedAgentId is null)
-            {
-                ReplaceLastStep("No agent selected. Setup cannot continue.", error: true);
-                return;
-            }
-
-            try
-            {
-                // Create context
-                var ctxBody = JsonSerializer.Serialize(new { agentId = selectedAgentId, name = "Default" }, Json);
-                var ctxResp = await Api.PostAsync("/channel-contexts", new StringContent(ctxBody, Encoding.UTF8, "application/json"));
-                if (!ctxResp.IsSuccessStatusCode)
-                {
-                    ReplaceLastStep("Failed to create context.", error: true);
-                    return;
-                }
-                using var ctxDoc = JsonDocument.Parse(await ctxResp.Content.ReadAsStringAsync());
-                var ctxId = ctxDoc.RootElement.GetProperty("id").GetGuid();
-
-                // Create channel
-                var chBody = JsonSerializer.Serialize(new { title = "General", agentId = selectedAgentId, contextId = ctxId }, Json);
-                var chResp = await Api.PostAsync("/channels", new StringContent(chBody, Encoding.UTF8, "application/json"));
-                if (!chResp.IsSuccessStatusCode)
-                {
-                    ReplaceLastStep("Failed to create channel.", error: true);
-                    return;
-                }
-                using var chDoc = JsonDocument.Parse(await chResp.Content.ReadAsStringAsync());
-                var chId = chDoc.RootElement.GetProperty("id").GetGuid();
-
-                // Create thread
-                var thBody = JsonSerializer.Serialize(new { name = "Default" }, Json);
-                var thResp = await Api.PostAsync($"/channels/{chId}/threads", new StringContent(thBody, Encoding.UTF8, "application/json"));
-                if (!thResp.IsSuccessStatusCode)
-                {
-                    ReplaceLastStep("Failed to create thread.", error: true);
-                    return;
-                }
-
-                ReplaceLastStep("Default workspace created.", done: true);
-            }
-            catch (Exception ex)
-            {
-                ReplaceLastStep($"Failed: {ex.Message}", error: true);
-                return;
-            }
-        }
-
-        // ── Step 6: Role & permissions for the selected agent ──
-        if (selectedAgentId is not null)
-        {
-            AppendStep("Checking agent role...");
-            var needsRole = true;
-
-            try
-            {
-                var agentResp = await Api.GetAsync($"/agents/{selectedAgentId}");
-                if (agentResp.IsSuccessStatusCode)
-                {
-                    using var agDoc = JsonDocument.Parse(await agentResp.Content.ReadAsStringAsync());
-                    if (agDoc.RootElement.TryGetProperty("roleId", out var rp)
-                        && rp.ValueKind == JsonValueKind.String)
-                    {
-                        needsRole = false;
-                        ReplaceLastStep("Agent already has a role.", done: true);
-                    }
-                }
-            }
-            catch { /* continue to create role */ }
-
-            if (needsRole)
-            {
-                while (true)
-                {
-                    ReplaceLastStep("Agent has no role. Set up permissions so it can use tools.");
-                    _roleTcs = new TaskCompletionSource<bool>();
-                    await RunModuleWizardAsync();
-                    var roleCreated = await _roleTcs.Task;
-                    RolePermissionsPanel.Visibility = Visibility.Collapsed;
-
-                    if (!roleCreated)
-                    {
-                        ReplaceLastStep("Role setup skipped. Agent has no permissions.", done: true);
-                        break;
-                    }
-
-                    try
-                    {
-                        await CreateRoleAndAssignAsync(selectedAgentId.Value);
-                        ReplaceLastStep("Role created and permissions applied.", done: true);
-                        break;
-                    }
-                    catch (Exception ex)
-                    {
-                        ReplaceLastStep(ex.Message, error: true, copyText: ex.Message);
-                        AppendStep("Retrying permissions setup...");
-                    }
-                }
-            }
-        }
+        AppendStep("Module-owned setup is handled by installed modules.", done: true);
 
         // ── Done ──
         AppendStep("Completed first-time setup!");
         await Task.Delay(1000);
 
-        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
+        await App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompletedAsync();
 
-        var navigator = App.Services!.GetRequiredService<INavigator>();
-        await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
+        await App.Services!.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
     }
 
     // ── Input callbacks ─────────────────────────────────────────
@@ -565,11 +365,20 @@ public sealed partial class FirstSetupPage : Page
             AppendStep("Checking Ollama connection…");
             try
             {
-                using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
-                var check = await http.GetAsync(endpoint!.TrimEnd('/') + "/api/tags");
-                if (!check.IsSuccessStatusCode)
+                var actions = App.Services!.GetRequiredService<ClientActionDispatcher>();
+                var statusCode = await actions.RunCommandAsync(
+                    "client.provider.ollama.probe",
+                    async token =>
+                    {
+                        using var http = new HttpClient { Timeout = TimeSpan.FromSeconds(5) };
+                        using var check = await http.GetAsync(
+                            endpoint!.TrimEnd('/') + "/api/tags",
+                            token);
+                        return (int)check.StatusCode;
+                    });
+                if (statusCode is < 200 or >= 300)
                 {
-                    ReplaceLastStep($"Ollama unreachable ({(int)check.StatusCode}). Check the endpoint and try again.", error: true);
+                    ReplaceLastStep($"Ollama unreachable ({statusCode}). Check the endpoint and try again.", error: true);
                     return;
                 }
                 ReplaceLastStep("Ollama connection OK.", done: true);
@@ -789,499 +598,24 @@ public sealed partial class FirstSetupPage : Page
         }
     }
 
-    private void OnAgentSubmitClick(object sender, RoutedEventArgs e)
-    {
-        if (DefaultAgentSelector.SelectedItem is ComboBoxItem { Tag: Guid agentId })
-            _agentTcs?.TrySetResult(agentId);
-        else
-            AppendStep("Please select an agent.", error: true);
-    }
-
     private async void OnSkipSetupClick(object sender, RoutedEventArgs e)
     {
-        App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompleted();
+        await App.Services!.GetRequiredService<FirstSetupMarker>().MarkCompletedAsync();
 
         // Cancel any pending input steps
         _providerTcs?.TrySetResult(false);
         _apiKeyTcs?.TrySetResult(false);
-        _agentTcs?.TrySetResult(null);
         _localModelTcs?.TrySetResult(false);
-        _moduleWizardTcs?.TrySetResult(0);
-        _roleTcs?.TrySetResult(false);
         _upgradePromptTcs?.TrySetResult(false);
 
         AppendStep("Setup skipped. You can configure everything manually.", done: true);
         await Task.Delay(800);
 
-        var navigator = App.Services!.GetRequiredService<INavigator>();
-        await navigator.NavigateRouteAsync(this, "Main", qualifier: Qualifiers.ClearBackStack);
-    }
-
-    private void OnRoleSkipClick(object sender, RoutedEventArgs e)
-    {
-        _moduleWizardTcs?.TrySetResult(0);
-        _roleTcs?.TrySetResult(false);
+        await App.Services!.GetRequiredService<ClientNavigationService>()
+            .NavigateRouteAsync(this, "Main", Qualifiers.ClearBackStack);
     }
 
     // ── Module wizard ───────────────────────────────────────────
-
-    private async Task RunModuleWizardAsync()
-    {
-        _permEditor = new PermissionEditorBuilder(Api)
-            .WithGrantClearance(true)
-            .WithFlagClearance(true)
-            .WithManualEditCallback(OnPermissionManuallyEdited);
-
-        var metadata = await TerminalUI.LoadPermissionMetadataAsync(Api);
-        _sortedModules = TerminalUI.TopologicalSort(metadata);
-
-        _moduleEnabled = new Dictionary<string, bool>();
-        foreach (var m in _sortedModules)
-            _moduleEnabled[m.ModuleId] = m.Enabled;
-
-        _moduleContainers.Clear();
-        _wizardHistory.Clear();
-        _lastAutoSkipped.Clear();
-
-        await _permEditor.EnsureResourcesLoadedAsync(_sortedModules);
-
-        // Skip to first navigable module
-        _moduleIndex = 0;
-        _lastAutoSkipped.Clear();
-        while (_moduleIndex < _sortedModules.Count && ShouldAutoDisable(_sortedModules[_moduleIndex]))
-        {
-            _moduleEnabled[_sortedModules[_moduleIndex].ModuleId] = false;
-            _lastAutoSkipped.Add(_sortedModules[_moduleIndex].DisplayName);
-            _moduleIndex++;
-        }
-
-        if (_moduleIndex >= _sortedModules.Count)
-        {
-            // No navigable modules — create role with no permissions
-            _roleTcs?.TrySetResult(true);
-            return;
-        }
-
-        RolePermissionsPanel.Visibility = Visibility.Visible;
-
-        while (_moduleIndex >= 0 && _moduleIndex < _sortedModules.Count)
-        {
-            var module = _sortedModules[_moduleIndex];
-            ShowModuleStep(module);
-
-            _moduleWizardTcs = new TaskCompletionSource<int>();
-            var action = await _moduleWizardTcs.Task;
-
-            if (action == 0) // Skip all
-            {
-                RolePermissionsPanel.Visibility = Visibility.Collapsed;
-                // _roleTcs already resolved by OnRoleSkipClick
-                return;
-            }
-
-            if (action == 1) // Next
-            {
-                _wizardHistory.Push(_moduleIndex);
-                _moduleIndex++;
-
-                // Skip auto-disabled modules
-                _lastAutoSkipped.Clear();
-                while (_moduleIndex < _sortedModules.Count && ShouldAutoDisable(_sortedModules[_moduleIndex]))
-                {
-                    _moduleEnabled[_sortedModules[_moduleIndex].ModuleId] = false;
-                    _lastAutoSkipped.Add(_sortedModules[_moduleIndex].DisplayName);
-                    _moduleIndex++;
-                }
-
-                if (_moduleIndex >= _sortedModules.Count)
-                {
-                    // Finished all modules
-                    RolePermissionsPanel.Visibility = Visibility.Collapsed;
-                    _roleTcs?.TrySetResult(true);
-                    return;
-                }
-            }
-            else // Back (-1)
-            {
-                _lastAutoSkipped.Clear();
-                if (_wizardHistory.Count > 0)
-                    _moduleIndex = _wizardHistory.Pop();
-            }
-        }
-    }
-
-    private void ShowModuleStep(ModulePermissionMetadata module)
-    {
-        ModuleProgressBlock.Text = $"Module {_moduleIndex + 1} of {_sortedModules!.Count}";
-        ModuleWizardTitle.Text = $"── {module.DisplayName} ──";
-
-        // Populate manifest info
-        PopulateManifestPanel(module);
-
-        // Show auto-skipped notice
-        if (_lastAutoSkipped.Count > 0)
-        {
-            ModuleAutoSkippedBlock.Text = $"Auto-disabled (dependency disabled): {string.Join(", ", _lastAutoSkipped)}";
-            ModuleAutoSkippedBlock.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ModuleAutoSkippedBlock.Visibility = Visibility.Collapsed;
-        }
-
-        // Set toggle (suppress handler)
-        _suppressToggle = true;
-        ModuleEnableToggle.IsOn = _moduleEnabled[module.ModuleId];
-        _suppressToggle = false;
-
-        // Module status text
-        UpdateModuleStatusText(_moduleEnabled[module.ModuleId]);
-
-        // Show permissions for enabled modules
-        ModulePermissionsContainer.Children.Clear();
-        if (_moduleEnabled[module.ModuleId])
-        {
-            var hasPermissions = module.GlobalFlags.Count > 0 || module.ResourceTypes.Count > 0;
-
-            ModuleDefaultAgentNotice.Visibility = hasPermissions ? Visibility.Visible : Visibility.Collapsed;
-            GrantAllPanel.Visibility = hasPermissions ? Visibility.Visible : Visibility.Collapsed;
-
-            if (hasPermissions)
-            {
-                // Set grant-all toggle (suppress handler)
-                _suppressGrantAllToggle = true;
-                GrantAllToggle.IsOn = _moduleGrantAll.TryGetValue(module.ModuleId, out var ga) && ga;
-                _suppressGrantAllToggle = false;
-
-                if (!_moduleContainers.TryGetValue(module.ModuleId, out var cached))
-                {
-                    cached = new StackPanel { Spacing = 6 };
-                    _permEditor!.BuildSingleModule(cached, module);
-                    _moduleContainers[module.ModuleId] = cached;
-                }
-
-                // If grant-all is on, apply it to the cached container
-                if (GrantAllToggle.IsOn)
-                    ApplyGrantAll(module);
-
-                ModulePermissionsContainer.Children.Add(cached);
-            }
-            else
-            {
-                var notice = new TextBlock
-                {
-                    Text = "This module has no configurable permissions.",
-                    FontFamily = Mono,
-                    FontSize = 14,
-                    Foreground = TerminalUI.Brush(0x888888),
-                    Margin = new Thickness(0, 4, 0, 0),
-                };
-                ModulePermissionsContainer.Children.Add(notice);
-            }
-
-            ModulePermissionsContainer.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ModuleDefaultAgentNotice.Visibility = Visibility.Collapsed;
-            GrantAllPanel.Visibility = Visibility.Collapsed;
-            ModulePermissionsContainer.Visibility = Visibility.Collapsed;
-        }
-
-        // Back button visibility
-        ModuleBackBtn.Visibility = _wizardHistory.Count > 0 ? Visibility.Visible : Visibility.Collapsed;
-
-        // Next button label
-        UpdateNextButtonText();
-    }
-
-    private bool ShouldAutoDisable(ModulePermissionMetadata module)
-    {
-        foreach (var dep in module.DependsOn)
-            if (_moduleEnabled.TryGetValue(dep, out var enabled) && !enabled)
-                return true;
-        return false;
-    }
-
-    private void UpdateNextButtonText()
-    {
-        var isLast = true;
-        for (var i = _moduleIndex + 1; i < _sortedModules!.Count; i++)
-        {
-            if (!ShouldAutoDisable(_sortedModules[i]))
-            {
-                isLast = false;
-                break;
-            }
-        }
-        ModuleNextBtnText.Text = isLast ? "[ Save Permissions ]" : "[ Next Module ]";
-    }
-
-    private void OnModuleEnableToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressToggle || _sortedModules is null || _moduleIndex >= _sortedModules.Count)
-            return;
-
-        var module = _sortedModules[_moduleIndex];
-        var enabled = ModuleEnableToggle.IsOn;
-        _moduleEnabled[module.ModuleId] = enabled;
-
-        // Update status text
-        UpdateModuleStatusText(enabled);
-
-        ModulePermissionsContainer.Children.Clear();
-
-        if (enabled)
-        {
-            var hasPermissions = module.GlobalFlags.Count > 0 || module.ResourceTypes.Count > 0;
-
-            ModuleDefaultAgentNotice.Visibility = hasPermissions ? Visibility.Visible : Visibility.Collapsed;
-            GrantAllPanel.Visibility = hasPermissions ? Visibility.Visible : Visibility.Collapsed;
-
-            if (hasPermissions)
-            {
-                _suppressGrantAllToggle = true;
-                GrantAllToggle.IsOn = _moduleGrantAll.TryGetValue(module.ModuleId, out var ga) && ga;
-                _suppressGrantAllToggle = false;
-
-                if (!_moduleContainers.TryGetValue(module.ModuleId, out var cached))
-                {
-                    cached = new StackPanel { Spacing = 6 };
-                    _permEditor!.BuildSingleModule(cached, module);
-                    _moduleContainers[module.ModuleId] = cached;
-                }
-
-                if (GrantAllToggle.IsOn)
-                    ApplyGrantAll(module);
-
-                ModulePermissionsContainer.Children.Add(cached);
-            }
-            else
-            {
-                var notice = new TextBlock
-                {
-                    Text = "This module has no configurable permissions.",
-                    FontFamily = Mono,
-                    FontSize = 14,
-                    Foreground = TerminalUI.Brush(0x888888),
-                    Margin = new Thickness(0, 4, 0, 0),
-                };
-                ModulePermissionsContainer.Children.Add(notice);
-            }
-
-            ModulePermissionsContainer.Visibility = Visibility.Visible;
-        }
-        else
-        {
-            ModuleDefaultAgentNotice.Visibility = Visibility.Collapsed;
-            GrantAllPanel.Visibility = Visibility.Collapsed;
-
-            _permEditor!.ClearModuleEntries(module);
-            _moduleContainers.Remove(module.ModuleId);
-            ModulePermissionsContainer.Visibility = Visibility.Collapsed;
-        }
-
-        // Disabling may auto-disable dependents, changing the "last module" status
-        UpdateNextButtonText();
-    }
-
-    private void OnModuleNextClick(object sender, RoutedEventArgs e)
-        => _moduleWizardTcs?.TrySetResult(1);
-
-    private void OnModuleBackClick(object sender, RoutedEventArgs e)
-        => _moduleWizardTcs?.TrySetResult(-1);
-
-    private void UpdateModuleStatusText(bool enabled)
-    {
-        if (enabled)
-        {
-            ModuleStatusBlock.Text = "This module is enabled. Permissions below will be granted to the default agent.";
-            ModuleStatusBlock.Foreground = TerminalUI.Brush(0x00CC66);
-        }
-        else
-        {
-            ModuleStatusBlock.Text = "This module is disabled for all agents.";
-            ModuleStatusBlock.Foreground = TerminalUI.Brush(0xFF6666);
-        }
-    }
-
-    private void PopulateManifestPanel(ModulePermissionMetadata module)
-    {
-        ModuleManifestPanel.Children.Clear();
-
-        // Description
-        if (!string.IsNullOrWhiteSpace(module.Description))
-        {
-            ModuleManifestPanel.Children.Add(new TextBlock
-            {
-                Text = module.Description,
-                FontFamily = Mono,
-                FontSize = 12,
-                Foreground = TerminalUI.Brush(0xCCCCCC),
-                TextWrapping = TextWrapping.Wrap,
-                Margin = new Thickness(0, 0, 0, 4),
-            });
-        }
-
-        // Metadata line: version · author · license · platforms
-        var parts = new List<string>();
-
-        if (!string.IsNullOrWhiteSpace(module.Version))
-            parts.Add($"v{module.Version}");
-        if (!string.IsNullOrWhiteSpace(module.Author))
-            parts.Add(module.Author);
-        if (!string.IsNullOrWhiteSpace(module.License))
-            parts.Add(module.License);
-        if (module.Platforms is { Length: > 0 })
-            parts.Add(string.Join(", ", module.Platforms));
-
-        if (parts.Count > 0)
-        {
-            ModuleManifestPanel.Children.Add(new TextBlock
-            {
-                Text = string.Join("  ·  ", parts),
-                FontFamily = Mono,
-                FontSize = 11,
-                Foreground = TerminalUI.Brush(0x808080),
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-
-        // Dependencies
-        if (module.DependsOn.Count > 0)
-        {
-            var depNames = module.DependsOn
-                .Select(depId => _sortedModules?.FirstOrDefault(m => m.ModuleId == depId)?.DisplayName ?? depId)
-                .ToList();
-
-            ModuleManifestPanel.Children.Add(new TextBlock
-            {
-                Text = $"Depends on: {string.Join(", ", depNames)}",
-                FontFamily = Mono,
-                FontSize = 11,
-                Foreground = TerminalUI.Brush(0xAA8844),
-                TextWrapping = TextWrapping.Wrap,
-            });
-        }
-    }
-
-    private void OnGrantAllToggled(object sender, RoutedEventArgs e)
-    {
-        if (_suppressGrantAllToggle || _sortedModules is null || _moduleIndex >= _sortedModules.Count)
-            return;
-
-        var module = _sortedModules[_moduleIndex];
-        var grantAll = GrantAllToggle.IsOn;
-        _moduleGrantAll[module.ModuleId] = grantAll;
-
-        if (grantAll)
-        {
-            ApplyGrantAll(module);
-        }
-        else
-        {
-            // Rebuild the module UI from scratch (unchecked state)
-            _permEditor!.ClearModuleEntries(module);
-            _moduleContainers.Remove(module.ModuleId);
-
-            var cached = new StackPanel { Spacing = 6 };
-            _permEditor.BuildSingleModule(cached, module);
-            _moduleContainers[module.ModuleId] = cached;
-
-            ModulePermissionsContainer.Children.Clear();
-            ModulePermissionsContainer.Children.Add(cached);
-        }
-    }
-
-    /// <summary>
-    /// Checks all global-flag checkboxes and ensures a wildcard grant row exists
-    /// for every resource type in the given module.
-    /// </summary>
-    private void ApplyGrantAll(ModulePermissionMetadata module)
-    {
-        if (_permEditor is null) return;
-
-        _permEditor.CheckAllFlags(module);
-        _permEditor.EnsureWildcardGrants(module);
-    }
-
-    /// <summary>
-    /// Called by <see cref="PermissionEditorBuilder"/> when the user manually
-    /// unchecks a flag or removes a grant row. Resets the grant-all toggle
-    /// for the current module.
-    /// </summary>
-    private void OnPermissionManuallyEdited()
-    {
-        if (_sortedModules is null || _moduleIndex >= _sortedModules.Count) return;
-
-        var module = _sortedModules[_moduleIndex];
-        if (_moduleGrantAll.TryGetValue(module.ModuleId, out var ga) && ga)
-        {
-            _moduleGrantAll[module.ModuleId] = false;
-            _suppressGrantAllToggle = true;
-            GrantAllToggle.IsOn = false;
-            _suppressGrantAllToggle = false;
-        }
-    }
-
-    private async Task CreateRoleAndAssignAsync(Guid agentId)
-    {
-        // 1. Create a new role via POST /roles
-        var roleBody = JsonSerializer.Serialize(new { name = "Default Agent Role" }, Json);
-        var roleResp = await Api.PostAsync("/roles",
-            new StringContent(roleBody, Encoding.UTF8, "application/json"));
-
-        if (!roleResp.IsSuccessStatusCode)
-            throw new InvalidOperationException(
-                $"Failed to create role ({(int)roleResp.StatusCode}). {await ExtractErrorAsync(roleResp)}");
-
-        Guid roleId;
-        using (var roleDoc = JsonDocument.Parse(await roleResp.Content.ReadAsStringAsync()))
-            roleId = roleDoc.RootElement.GetProperty("id").GetGuid();
-
-        // 2. Assign the role to the agent
-        var assignBody = JsonSerializer.Serialize(new { roleId }, Json);
-        var assignResp = await Api.PutAsync($"/agents/{agentId}/role",
-            new StringContent(assignBody, Encoding.UTF8, "application/json"));
-
-        if (!assignResp.IsSuccessStatusCode)
-            throw new InvalidOperationException(
-                $"Failed to assign role ({(int)assignResp.StatusCode}). {await ExtractErrorAsync(assignResp)}");
-
-        // 3. Collect the permission set from the dynamic builder
-        if (_permEditor is null) return;
-        var permBody = JsonSerializer.Serialize(_permEditor.CollectAll(), Json);
-
-        var permResp = await Api.PutAsync($"/roles/{roleId}/permissions",
-            new StringContent(permBody, Encoding.UTF8, "application/json"));
-
-        if (!permResp.IsSuccessStatusCode)
-            throw new InvalidOperationException(
-                $"Failed to set permissions ({(int)permResp.StatusCode}). {await ExtractErrorAsync(permResp)}");
-    }
-
-    private static async Task<string> ExtractErrorAsync(HttpResponseMessage resp)
-    {
-        var raw = await resp.Content.ReadAsStringAsync();
-        if (string.IsNullOrWhiteSpace(raw))
-            return resp.ReasonPhrase ?? "Unknown error";
-
-        try
-        {
-            using var doc = JsonDocument.Parse(raw);
-            // RFC 7807 problem detail
-            if (doc.RootElement.TryGetProperty("detail", out var detail))
-                return detail.GetString() ?? raw;
-            if (doc.RootElement.TryGetProperty("title", out var title))
-                return title.GetString() ?? raw;
-            if (doc.RootElement.TryGetProperty("message", out var msg))
-                return msg.GetString() ?? raw;
-        }
-        catch { /* not JSON — use raw text */ }
-
-        // Truncate overly long responses
-        return raw.Length > 200 ? raw[..200] + "..." : raw;
-    }
 
     // ── Populate helpers ────────────────────────────────────────
 
@@ -1328,21 +662,6 @@ public sealed partial class FirstSetupPage : Page
             : "Select a provider:";
     }
 
-    private void PopulateAgentSelector(List<AgentDto> agents)
-    {
-        DefaultAgentSelector.Items.Clear();
-        foreach (var a in agents)
-        {
-            DefaultAgentSelector.Items.Add(new ComboBoxItem
-            {
-                Content = $"{a.Name}  ({a.ProviderName}/{a.ModelName})",
-                Tag = a.Id,
-            });
-        }
-        if (agents.Count > 0)
-            DefaultAgentSelector.SelectedIndex = 0;
-    }
-
     // ── Utilities ────────────────────────────────────────────────
 
     private void ReplaceLastStep(string text, bool done = false, bool error = false, string? copyText = null)
@@ -1355,8 +674,6 @@ public sealed partial class FirstSetupPage : Page
     }
 
     private Task<List<T>?> FetchListAsync<T>(string path) => Api.FetchListAsync<T>(path, Json);
-
-    private static SolidColorBrush B(int rgb) => TerminalUI.Brush(rgb);
 
     // ── Upgrade-prompt callbacks ────────────────────────────────
 
@@ -1382,16 +699,6 @@ public sealed partial class FirstSetupPage : Page
         bool SupportsDeviceCodeAuth);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record ModelDto(Guid Id, string Name, JsonElement Capabilities, Guid ProviderId, string ProviderName);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record AgentDto(Guid Id, string Name, Guid ModelId, string ModelName, string ProviderName);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record ContextDto(Guid Id, string Name, ContextAgentDto? Agent = null);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record ContextAgentDto(Guid Id, string? Name = null);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record ChannelDto(Guid Id, string Title, Guid? ContextId);
-    [ImplicitKeys(IsEnabled = false)]
-    private sealed partial record ThreadDto(Guid Id, string Name, Guid ChannelId);
     [ImplicitKeys(IsEnabled = false)]
     private sealed partial record GgufFileDto(string DownloadUrl, string Filename, string? Quantization);
 }

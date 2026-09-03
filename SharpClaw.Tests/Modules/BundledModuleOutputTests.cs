@@ -1,7 +1,6 @@
 using System.Diagnostics;
 using System.Reflection;
 using System.Text.Json;
-using System.Xml.Linq;
 
 namespace SharpClaw.Tests.Modules;
 
@@ -246,6 +245,50 @@ public class BundledModuleOutputTests
     }
 
     [Test]
+    [NonParallelizable]
+    public void PackageResolutionUsesAssetsGraphWhenAmbientNuGetPackagesIsUnset()
+    {
+        var tempRoot = Path.Combine(
+            Path.GetTempPath(),
+            "sharpclaw-assets-package-root-" + Guid.NewGuid().ToString("N"));
+        var packageRoot = Path.Combine(tempRoot, "example.package", "1.0.0");
+        var assetsPath = Path.Combine(tempRoot, "project.assets.json");
+        var previousPackagesRoot = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
+
+        try
+        {
+            Directory.CreateDirectory(packageRoot);
+            var assets = new Dictionary<string, object?>
+            {
+                ["libraries"] = new Dictionary<string, object?>
+                {
+                    ["Example.Package/1.0.0"] = new Dictionary<string, object?>
+                    {
+                        ["type"] = "package",
+                        ["path"] = "example.package/1.0.0"
+                    }
+                },
+                ["packageFolders"] = new Dictionary<string, object?>
+                {
+                    [tempRoot] = new Dictionary<string, object?>()
+                }
+            };
+            File.WriteAllText(assetsPath, JsonSerializer.Serialize(assets));
+
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", null);
+
+            ResolveNuGetPackageRoot("Example.Package", assetsPath)
+                .Should()
+                .Be(Path.GetFullPath(packageRoot));
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("NUGET_PACKAGES", previousPackagesRoot);
+            TryDeleteDirectory(tempRoot);
+        }
+    }
+
+    [Test]
     public void InProcessTestHarnessPayloadIsBuiltAsSeparateModule()
     {
         var solutionRoot = ResolveSolutionRoot();
@@ -358,35 +401,55 @@ public class BundledModuleOutputTests
 
     private static string ResolveNuGetPackageRoot(string packageId)
     {
-        var version = ResolveCentralPackageVersion(packageId);
-        var packagesRoot = Environment.GetEnvironmentVariable("NUGET_PACKAGES");
-        if (string.IsNullOrWhiteSpace(packagesRoot))
-        {
-            packagesRoot = Path.Combine(
-                Environment.GetFolderPath(Environment.SpecialFolder.UserProfile),
-                ".nuget",
-                "packages");
-        }
-
-        return Path.Combine(packagesRoot, packageId.ToLowerInvariant(), version.ToLowerInvariant());
+        return ResolveNuGetPackageRoot(
+            packageId,
+            Path.Combine(ResolveSolutionRoot(), "SharpClaw.Tests", "obj", "project.assets.json"));
     }
 
-    private static string ResolveCentralPackageVersion(string packageId)
+    private static string ResolveNuGetPackageRoot(string packageId, string assetsPath)
     {
-        var propsPath = Path.Combine(ResolveSolutionRoot(), "Directory.Packages.props");
-        var document = XDocument.Load(propsPath);
-        var version = document
-            .Descendants("PackageVersion")
-            .Where(element => string.Equals(
-                (string?)element.Attribute("Include"),
-                packageId,
-                StringComparison.Ordinal))
-            .Select(element => (string?)element.Attribute("Version"))
-            .SingleOrDefault();
+        File.Exists(assetsPath).Should().BeTrue(
+            $"the restored assets graph must exist at '{assetsPath}'");
 
-        version.Should().NotBeNullOrWhiteSpace(
-            $"{propsPath} must centrally pin {packageId}");
-        return version!;
+        using var assets = JsonDocument.Parse(File.ReadAllText(assetsPath));
+        var libraryMatches = assets.RootElement
+            .GetProperty("libraries")
+            .EnumerateObject()
+            .Where(property =>
+            {
+                var separator = property.Name.IndexOf('/');
+                return separator > 0
+                       && string.Equals(
+                           property.Name[..separator],
+                           packageId,
+                           StringComparison.OrdinalIgnoreCase)
+                       && string.Equals(
+                           property.Value.GetProperty("type").GetString(),
+                           "package",
+                           StringComparison.OrdinalIgnoreCase);
+            })
+            .ToArray();
+
+        libraryMatches.Should().ContainSingle(
+            $"the restored assets graph must contain one package library for '{packageId}'");
+
+        var packageRelativePath = libraryMatches[0].Value
+            .GetProperty("path")
+            .GetString();
+        packageRelativePath.Should().NotBeNullOrWhiteSpace(
+            $"the restored assets graph must contain a package path for '{packageId}'");
+
+        var candidates = assets.RootElement
+            .GetProperty("packageFolders")
+            .EnumerateObject()
+            .Select(folder => Path.GetFullPath(Path.Combine(folder.Name, packageRelativePath!)))
+            .Where(Directory.Exists)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        candidates.Should().ContainSingle(
+            $"one restored package folder must contain '{packageId}' at '{packageRelativePath}'");
+        return candidates[0];
     }
 
     private static BundledModuleExpectation ReadBundledModuleExpectation(string manifestPath)
