@@ -105,7 +105,7 @@ jobs:
           </configuration>
           "@ | Set-Content -LiteralPath $config -Encoding utf8
           $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawRegistrationPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SharpClawContributionPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore dependency graph
         shell: pwsh
@@ -196,7 +196,7 @@ jobs:
           "@ | Set-Content -LiteralPath $config -Encoding utf8
           "SHARPCLAW_NUGET_CONFIG=$config" | Out-File -FilePath $env:GITHUB_ENV -Append
           $bundle = Join-Path $env:RUNNER_TEMP "sharpclaw-frozen-bom\bundle"
-          "SharpClawRegistrationPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
+          "SharpClawContributionPayloadRoot=$bundle" | Out-File -FilePath $env:GITHUB_ENV -Append
 
       - name: Restore
         shell: pwsh
