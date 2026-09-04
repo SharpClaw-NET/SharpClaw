@@ -15,6 +15,7 @@ $artifactsPath = Join-Path $rootPath "artifacts"
 $logsPath = Join-Path $rootPath "logs"
 $tempPath = Join-Path $rootPath "temp"
 $nuGetConfigPath = Join-Path $rootPath "NuGet.config"
+$packageVersion = "0.5.0-dev.20260904.5"
 
 New-Item -ItemType Directory -Force -Path @(
     $rootPath,
@@ -119,57 +120,57 @@ $repositories = @(
     [pscustomobject]@{
         Name = "contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "c399e348c4572114baace6563081565e0d3369f6"
+        Commit = "4cf302ddff93271dfa91688f61f8b23c201a965c"
     },
     [pscustomobject]@{
         Name = "gateway-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "c399e348c4572114baace6563081565e0d3369f6"
+        Commit = "4cf302ddff93271dfa91688f61f8b23c201a965c"
     },
     [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
-        Commit = "60539227e9d276c251b1b38c7a6932beec1e012e"
+        Commit = "618fe598fe0cdb6fb3914abd5bf7ed3b25ed6643"
     },
     [pscustomobject]@{
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "e49db22335a7861401595c58bf96d205e05ba1e4"
+        Commit = "62b2851ae4e33c9e9c98aeb4969b83718738b3c2"
     },
     [pscustomobject]@{
         Name = "module-hosts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "e999c0917baaeff56f4346cb37b944e8bcea2a9a"
+        Commit = "62b2851ae4e33c9e9c98aeb4969b83718738b3c2"
     },
     [pscustomobject]@{
         Name = "agent-contracts"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "40aa22d193885d17847391fd4a29cf4b759b2e07"
+        Commit = "e474cc56ef3290947006d93188c37f15d8da7c88"
     },
     [pscustomobject]@{
         Name = "agent-modules"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "40aa22d193885d17847391fd4a29cf4b759b2e07"
+        Commit = "e474cc56ef3290947006d93188c37f15d8da7c88"
     },
     [pscustomobject]@{
         Name = "editor-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.EditorIntegrations.git"
-        Commit = "5b591e03de0786888063b92c826f540893e11998"
+        Commit = "0165a6f420d9ffe857aead0567e3bfd8ce458a1e"
     },
     [pscustomobject]@{
         Name = "metrics"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Metrics.git"
-        Commit = "e9047c0ba47b140ef35f34b11859a02a31f40ae4"
+        Commit = "3e4f2a28d05be731aad3ed2f0af56fbfd31601e7"
     },
     [pscustomobject]@{
         Name = "provider-integrations"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ProviderIntegrations.git"
-        Commit = "5d2544df7a9f10c39bc73c223d0e4b7a9ba2265f"
+        Commit = "83ed56f12ba65a9adb4865dc0a3a7e7ea445ed3f"
     },
     [pscustomobject]@{
         Name = "module-dev"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleDevKit.git"
-        Commit = "7ea4a271ca1b944bf571718d493b6c9a4b4c2325"
+        Commit = "1f4ccfb8134b9a1c79adfb933d8004d56a8f76eb"
     }
 )
 
@@ -274,6 +275,9 @@ function Pack-Target
         "-p:ArtifactsPath=$targetArtifacts",
         "-p:UseArtifactsOutput=true",
         "-p:PackageOutputPath=$feedPath",
+        "-p:PackageVersion=$packageVersion",
+        "-p:Version=$packageVersion",
+        "-p:InformationalVersion=$packageVersion",
         "-p:ContinuousIntegrationBuild=true"
     ) + $ExtraArguments
     Invoke-BoundedProcess `
@@ -309,7 +313,7 @@ $agentSolution = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestrat
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
 $providerSolution = Join-Path $sourcesPath "provider-integrations\SharpClaw.ProviderIntegrations.slnx"
-$moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.RegistrationDev\SharpClaw.Modules.RegistrationDev.csproj"
+$moduleDevProject = Join-Path $sourcesPath "module-dev\SharpClaw.Modules.ModuleDev\SharpClaw.Modules.ModuleDev.csproj"
 $permissionRestrictionFixture = [System.IO.Path]::GetFullPath((Join-Path $PSScriptRoot "..\SharpClaw.Tests\Fixtures\PermissionRestriction\SharpClaw.TestFixtures.PermissionRestriction.csproj"))
 
 Restore-And-Pack -Label "contracts" -Target $contractsProject -ArtifactGroup "contracts"
@@ -354,7 +358,7 @@ foreach ($payloadName in @(
     Copy-Item -LiteralPath (Join-Path $outOfProcessOutput $payloadName) -Destination $outOfProcessPayload
 }
 
-$sdkArchive = Join-Path $feedPath "SharpClaw.ModuleSDK.0.5.0-beta.24.nupkg"
+$sdkArchive = Join-Path $feedPath "SharpClaw.ModuleSDK.0.5.0-dev.20260904.5.nupkg"
 $sdkZip = [System.IO.Compression.ZipFile]::OpenRead($sdkArchive)
 try
 {
@@ -393,10 +397,18 @@ foreach ($agentProject in @(
     Pack-Target -Label $label -Target $target -ArtifactGroup "agent-modules"
 }
 
-Restore-And-Pack `
+Restore-Target `
     -Label "permission-restriction-fixture" `
     -Target $permissionRestrictionFixture `
     -ArtifactGroup "permission-restriction-fixture"
+Pack-Target `
+    -Label "permission-restriction-fixture" `
+    -Target $permissionRestrictionFixture `
+    -ArtifactGroup "permission-restriction-fixture" `
+    -ExtraArguments @(
+        "-p:PackageVersion=0.5.0-beta.1",
+        "-p:Version=0.5.0-beta.1",
+        "-p:InformationalVersion=0.5.0-beta.1")
 
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
@@ -404,30 +416,30 @@ Restore-And-Pack -Label "provider-integrations" -Target $providerSolution -Artif
 Restore-And-Pack -Label "module-dev" -Target $moduleDevProject -ArtifactGroup "module-dev"
 
 $expectedPackages = @(
-    "SharpClaw.AgentOrchestration.Contracts.0.5.0-beta.22.nupkg",
-    "SharpClaw.Contracts.0.5.0-beta.40.nupkg",
-    "SharpClaw.Core.0.5.0-beta.36.nupkg",
-    "SharpClaw.Gateway.Contracts.0.5.0-beta.4.nupkg",
-    "SharpClaw.SidecarHost.InProcess.0.5.0-beta.24.nupkg",
-    "SharpClaw.SidecarHost.OutOfProcess.0.5.0-beta.34.nupkg",
-    "SharpClaw.ModuleSDK.0.5.0-beta.24.nupkg",
-    "SharpClaw.ModuleSDK.HostOperations.0.5.0-beta.11.nupkg",
-    "SharpClaw.ModuleSDK.Testing.0.5.0-beta.18.nupkg",
-    "SharpClaw.Modules.Agents.0.5.0-beta.24.nupkg",
-    "SharpClaw.Modules.Context.0.5.0-beta.23.nupkg",
-    "SharpClaw.Modules.EditorCommon.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Metrics.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.RegistrationDev.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Providers.Anthropic.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Providers.Google.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Providers.LlamaSharp.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Providers.Ollama.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.Providers.OpenAICompatible.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.TwoTierPermission.0.5.0-beta.24.nupkg",
-    "SharpClaw.Modules.VS2026Editor.0.5.0-beta.4.nupkg",
-    "SharpClaw.Modules.VSCodeEditor.0.5.0-beta.4.nupkg",
-    "SharpClaw.Providers.Common.0.5.0-beta.4.nupkg",
-    "SharpClaw.Providers.LocalCommon.0.5.0-beta.4.nupkg",
+    "SharpClaw.AgentOrchestration.Contracts.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Contracts.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Core.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Gateway.Contracts.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.SidecarHost.InProcess.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.SidecarHost.OutOfProcess.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.ModuleSDK.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.ModuleSDK.HostOperations.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.ModuleSDK.Testing.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Agents.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Context.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.EditorCommon.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Metrics.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.ModuleDev.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Providers.Anthropic.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Providers.Google.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Providers.LlamaSharp.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Providers.Ollama.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.Providers.OpenAICompatible.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.TwoTierPermission.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.VS2026Editor.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Modules.VSCodeEditor.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Providers.Common.0.5.0-dev.20260904.5.nupkg",
+    "SharpClaw.Providers.LocalCommon.0.5.0-dev.20260904.5.nupkg",
     "SharpClaw.TestFixtures.PermissionRestriction.0.5.0-beta.1.nupkg"
 )
 
