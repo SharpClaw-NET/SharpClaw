@@ -9,10 +9,13 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Contracts.Providers;
 using SharpClaw.Contracts.Persistence;
 using SharpClaw.Core.Kernel;
+using SharpClaw.Gateway;
+using SharpClaw.Gateway.Infrastructure;
 using SharpClaw.Runtime.BLL.Kernel;
 using SharpClaw.Runtime.Host;
 using SharpClaw.Runtime.Host.Handlers;
@@ -69,6 +72,11 @@ public sealed class RuntimeHostCompositionTests
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddConfiguration(configuration);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Host.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = true;
+            options.ValidateOnBuild = true;
+        });
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -107,6 +115,7 @@ public sealed class RuntimeHostCompositionTests
                 .Should().NotBeNull();
         }
         await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
+        await registrationSet.ConnectCapabilitiesAsync(app.Services);
         await adapter.StartAsync("test-host");
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
@@ -114,6 +123,37 @@ public sealed class RuntimeHostCompositionTests
         try
         {
             await app.StartAsync();
+            var cliContext = adapter.CreateCliExecutionContext(RequestPrincipal.Anonymous);
+            var firstCli = await registrationSet.Application.TryInvokeCliAsync(
+                "test-harness-scope",
+                [],
+                adapter,
+                cliContext,
+                CancellationToken.None);
+            var secondCli = await registrationSet.Application.TryInvokeCliAsync(
+                "test-harness-scope",
+                [],
+                adapter,
+                cliContext,
+                CancellationToken.None);
+            var thirdCli = await registrationSet.Application.TryInvokeCliAsync(
+                "test-harness-scope",
+                [],
+                adapter,
+                cliContext,
+                CancellationToken.None);
+            firstCli.Should().NotBeNull();
+            secondCli.Should().NotBeNull();
+            thirdCli.Should().NotBeNull();
+            using var firstCliState = JsonDocument.Parse(firstCli!.Output.Single().Text);
+            using var secondCliState = JsonDocument.Parse(secondCli!.Output.Single().Text);
+            using var thirdCliState = JsonDocument.Parse(thirdCli!.Output.Single().Text);
+            firstCliState.RootElement.GetProperty("instanceId").GetGuid()
+                .Should().NotBe(secondCliState.RootElement.GetProperty("instanceId").GetGuid());
+            secondCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(1);
+            thirdCliState.RootElement.GetProperty("disposed").GetInt32().Should().Be(2);
+            thirdCliState.RootElement.GetProperty("active").GetInt32().Should().Be(1);
+
             using var client = new HttpClient
             {
                 BaseAddress = new Uri(app.Urls.Single()),
@@ -170,8 +210,8 @@ public sealed class RuntimeHostCompositionTests
                 Path.Combine(AppContext.BaseDirectory, "test-contributions"),
             ],
             configuration);
-        var jobHandler = new JobProbeHandler();
-        var jobRegistration = new JobProbeRegistration(jobHandler);
+        var jobCapture = new JobProbeCapture();
+        var jobRegistration = new JobProbeRegistration(jobCapture);
         var jobServices = SharpClawModuleCompiler.Compile(jobRegistration).Services;
         var modules = registrationSet.Services
             .Concat(jobServices)
@@ -190,6 +230,11 @@ public sealed class RuntimeHostCompositionTests
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddConfiguration(configuration);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Host.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = true;
+            options.ValidateOnBuild = true;
+        });
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -277,7 +322,7 @@ public sealed class RuntimeHostCompositionTests
             using var resultPayload = JsonDocument.Parse(resultValue!);
             resultPayload.RootElement.GetProperty("value").GetString()
                 .Should().Be("queued-value-executed");
-            jobHandler.ExecutionCount.Should().Be(1);
+            jobCapture.ExecutionCount.Should().Be(1);
 
             using var progressResponse = await client.GetAsync(
                 $"/jobs/{jobId:D}/progress");
@@ -326,7 +371,39 @@ public sealed class RuntimeHostCompositionTests
                 replay.RootElement.GetProperty("outcome").GetInt32()
                     .Should().Be((int)ActionOutcomeKind.Completed);
             }
-            jobHandler.ExecutionCount.Should().Be(1);
+            jobCapture.ExecutionCount.Should().Be(1);
+
+            using var secondSubmitResponse = await client.PostAsJsonAsync(
+                "/jobs",
+                new
+                {
+                    actionKey = JobProbeHandler.Action.Value,
+                    input = new
+                    {
+                        contractName = JobProbeHandler.ContractName,
+                        schemaVersion = 1,
+                        value = JsonSerializer.Serialize(new
+                        {
+                            value = "second-value",
+                        }),
+                    },
+                });
+            secondSubmitResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            using var secondSubmitted = JsonDocument.Parse(
+                await secondSubmitResponse.Content.ReadAsStringAsync());
+            var secondJobId = secondSubmitted.RootElement.GetProperty("id").GetGuid();
+
+            using var secondDispatchResponse = await client.PostAsync(
+                $"/jobs/{secondJobId:D}/dispatch",
+                content: null);
+            secondDispatchResponse.StatusCode.Should().Be(HttpStatusCode.OK);
+            jobCapture.ExecutionCount.Should().Be(2);
+            jobCapture.ExecutionInstanceIds.Should().OnlyHaveUniqueItems();
+            jobCapture.ExecutionInstanceIds.Should().HaveCount(2);
+
+            using var secondDeleteResponse = await client.DeleteAsync(
+                $"/jobs/{secondJobId:D}");
+            secondDeleteResponse.StatusCode.Should().Be(HttpStatusCode.NoContent);
 
             using var deleteResponse = await client.DeleteAsync(
                 $"/jobs/{jobId:D}");
@@ -335,6 +412,8 @@ public sealed class RuntimeHostCompositionTests
             using var deletedResponse = await client.GetAsync(
                 $"/jobs/{jobId:D}");
             deletedResponse.StatusCode.Should().Be(HttpStatusCode.NotFound);
+            jobCapture.ActiveCount.Should().Be(0);
+            jobCapture.DisposedCount.Should().Be(jobCapture.CreatedCount);
         }
         finally
         {
@@ -702,9 +781,14 @@ public sealed class RuntimeHostCompositionTests
             async (app, services) =>
             {
                 var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
-                var store = ResolveLlamaLocalModelStore(adapter, services);
-                await InvokeLlamaPlaceholderAsync(store, modelId);
-                (await InvokeLlamaGetByModelIdAsync(store, modelId)).Should().NotBeNull();
+                await UseLlamaLocalModelStoreAsync(
+                    adapter,
+                    services,
+                    async store =>
+                    {
+                        await InvokeLlamaPlaceholderAsync(store, modelId);
+                        (await InvokeLlamaGetByModelIdAsync(store, modelId)).Should().NotBeNull();
+                    });
             });
 
         await RunNormalProductionHostAsync(
@@ -713,12 +797,102 @@ public sealed class RuntimeHostCompositionTests
             databaseOptions,
             async (app, services) =>
             {
-                var store = ResolveLlamaLocalModelStore(
+                await UseLlamaLocalModelStoreAsync(
                     app.Services.GetRequiredService<RuntimeKernelAdapter>(),
-                    services);
-                var record = await InvokeLlamaGetByModelIdAsync(store, modelId);
-                record.Should().NotBeNull();
-                record!.GetType().GetProperty("ModelId")!.GetValue(record).Should().Be(modelId);
+                    services,
+                    async store =>
+                    {
+                        var record = await InvokeLlamaGetByModelIdAsync(store, modelId);
+                        record.Should().NotBeNull();
+                        record!.GetType().GetProperty("ModelId")!.GetValue(record)
+                            .Should().Be(modelId);
+                    });
+            });
+    }
+
+    [Test]
+    [NonParallelizable]
+    public async Task NormalHostPayload_MapsLlamaSharpEndpointThroughRuntimeAndGateway()
+    {
+        using var workspace = new TemporaryWorkspace();
+        var configuration = new ConfigurationBuilder()
+            .AddInMemoryCollection(new Dictionary<string, string?>
+            {
+                ["Provider:Key"] = "llamasharp",
+                ["Provider:Model"] = "local-model",
+            })
+            .Build();
+        var databaseOptions = new DatabaseProviderOptions
+        {
+            Provider = StorageMode.JsonFile,
+        };
+        databaseOptions.JsonFile.DataDirectory = workspace.DatabaseDirectory;
+        databaseOptions.JsonFile.EncryptAtRest = false;
+
+        await RunNormalProductionHostAsync(
+            workspace,
+            configuration,
+            databaseOptions,
+            async (runtime, _) =>
+            {
+                var adapter = runtime.Services.GetRequiredService<RuntimeKernelAdapter>();
+                runtime.Services.GetRequiredService<IActionDispatcher>()
+                    .Should().BeSameAs(adapter.ActionDispatcher);
+                await using (var storageScope = runtime.Services.CreateAsyncScope())
+                {
+                    storageScope.ServiceProvider.GetServices<IScopedStorageGateway>()
+                        .Should().ContainSingle();
+                }
+
+                using (var runtimeClient = new HttpClient
+                       {
+                           BaseAddress = new Uri(runtime.Urls.Single()),
+                       })
+                using (var runtimeResponse = await runtimeClient.GetAsync("/models/local/"))
+                {
+                    var body = await runtimeResponse.Content.ReadAsStringAsync();
+                    runtimeResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
+                    JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+                }
+
+                var gatewayConfiguration = new ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        [$"{InternalApiOptions.SectionName}:BaseUrl"] = runtime.Urls.Single(),
+                        [$"{InternalApiOptions.SectionName}:ApiKey"] = "scope-test-key",
+                    })
+                    .Build();
+                var gatewayBuilder = WebApplication.CreateBuilder();
+                gatewayBuilder.Configuration.Sources.Clear();
+                gatewayBuilder.Configuration.AddConfiguration(gatewayConfiguration);
+                gatewayBuilder.WebHost.UseUrls("http://127.0.0.1:0");
+                gatewayBuilder.Services.Configure<InternalApiOptions>(
+                    gatewayBuilder.Configuration.GetSection(InternalApiOptions.SectionName));
+                gatewayBuilder.Services.AddHttpContextAccessor();
+                gatewayBuilder.Services.AddHttpClient<InternalApiClient>(client =>
+                {
+                    client.BaseAddress = new Uri(runtime.Urls.Single());
+                    client.Timeout = TimeSpan.FromSeconds(30);
+                });
+
+                await using var gateway = gatewayBuilder.Build();
+                gateway.MapGatewayProxyEndpoints();
+                await gateway.StartAsync();
+                try
+                {
+                    using var gatewayClient = new HttpClient
+                    {
+                        BaseAddress = new Uri(gateway.Urls.Single()),
+                    };
+                    using var gatewayResponse = await gatewayClient.GetAsync("/api/models/local/");
+                    var body = await gatewayResponse.Content.ReadAsStringAsync();
+                    gatewayResponse.StatusCode.Should().Be(HttpStatusCode.OK, body);
+                    JsonDocument.Parse(body).RootElement.ValueKind.Should().Be(JsonValueKind.Array);
+                }
+                finally
+                {
+                    await gateway.StopAsync();
+                }
             });
     }
 
@@ -938,6 +1112,11 @@ public sealed class RuntimeHostCompositionTests
         builder.Configuration.Sources.Clear();
         builder.Configuration.AddConfiguration(configuration);
         builder.WebHost.UseUrls("http://127.0.0.1:0");
+        builder.Host.UseDefaultServiceProvider(options =>
+        {
+            options.ValidateScopes = true;
+            options.ValidateOnBuild = true;
+        });
         RuntimeHostComposition.RegisterServices(
             builder.Services,
             configuration,
@@ -1005,9 +1184,11 @@ public sealed class RuntimeHostCompositionTests
         var readiness = app.Services.GetRequiredService<RuntimeReadinessState>();
         var adapter = app.Services.GetRequiredService<RuntimeKernelAdapter>();
         await app.Services.GetRequiredService<RuntimeDatabaseReadiness>().ValidateAsync();
+        await registrationSet.ConnectCapabilitiesAsync(app.Services);
         await adapter.StartAsync("normal-provider-restart-test");
         readiness.MarkReady();
         KernelHostEndpoints.Map(app);
+        registrationSet.Application.MapEndpoints(app, adapter);
 
         try
         {
@@ -1022,9 +1203,10 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private static object ResolveLlamaLocalModelStore(
+    private static async ValueTask UseLlamaLocalModelStoreAsync(
         RuntimeKernelAdapter adapter,
-        IReadOnlyList<ServiceDescriptor> services)
+        IReadOnlyList<ServiceDescriptor> services,
+        Func<object, ValueTask> operation)
     {
         var storeType = services
             .Select(descriptor => descriptor.ServiceType)
@@ -1033,8 +1215,11 @@ public sealed class RuntimeHostCompositionTests
 
         if (storeType is null)
             throw new InvalidOperationException("The LlamaSharp LocalModelStore was not registered.");
-        return adapter.Graph.GetService(storeType)
-            ?? throw new InvalidOperationException("The LlamaSharp LocalModelStore was not composed into the graph.");
+        await adapter.Graph.RunInServiceScopeAsync(async serviceProvider =>
+        {
+            await operation(serviceProvider.GetRequiredService(storeType));
+            return true;
+        });
     }
 
     private static async Task InvokeLlamaPlaceholderAsync(object store, Guid modelId)
@@ -1144,7 +1329,7 @@ public sealed class RuntimeHostCompositionTests
         }
     }
 
-    private sealed class JobProbeRegistration(JobProbeHandler handler) : ISharpClawModule
+    private sealed class JobProbeRegistration(JobProbeCapture capture) : ISharpClawModule
     {
         public ModuleIdentity Identity { get; } = new(
             "jobs-http-probe",
@@ -1175,13 +1360,22 @@ public sealed class RuntimeHostCompositionTests
                     ActionSafePoint.BeforeTerminal,
                 ],
             });
-            module.AddSingleton<IJobHandler>(handler);
+            module.AddSingleton(capture);
+            module.AddScoped<IJobHandler, JobProbeHandler>();
         }
     }
 
-    private sealed class JobProbeHandler : IJobHandler<ProbePayload, ProbePayload>
+    private sealed class JobProbeHandler : IJobHandler<ProbePayload, ProbePayload>, IDisposable
     {
-        private int _executionCount;
+        private readonly JobProbeCapture _capture;
+        private readonly Guid _instanceId = Guid.NewGuid();
+        private int _disposed;
+
+        public JobProbeHandler(JobProbeCapture capture)
+        {
+            _capture = capture;
+            _capture.Created(_instanceId);
+        }
 
         public const string ContractName = "jobs-http-probe";
 
@@ -1198,15 +1392,54 @@ public sealed class RuntimeHostCompositionTests
         public IJobPayloadCodec<ProbePayload> ResultCodec { get; } =
             new JsonJobPayloadCodec<ProbePayload>(ContractName);
 
-        public int ExecutionCount => Volatile.Read(ref _executionCount);
-
         public ValueTask<ProbePayload> ExecuteAsync(
             JobExecutionContext context,
             ProbePayload input,
             CancellationToken cancellationToken)
         {
-            Interlocked.Increment(ref _executionCount);
+            _capture.Executed(_instanceId);
             return ValueTask.FromResult(new ProbePayload(input.Value + "-executed"));
+        }
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+                _capture.Disposed(_instanceId);
+        }
+    }
+
+    private sealed class JobProbeCapture
+    {
+        private readonly ConcurrentQueue<Guid> _executionInstanceIds = new();
+        private int _activeCount;
+        private int _createdCount;
+        private int _disposedCount;
+        private int _executionCount;
+
+        public int ActiveCount => Volatile.Read(ref _activeCount);
+        public int CreatedCount => Volatile.Read(ref _createdCount);
+        public int DisposedCount => Volatile.Read(ref _disposedCount);
+        public int ExecutionCount => Volatile.Read(ref _executionCount);
+        public IReadOnlyList<Guid> ExecutionInstanceIds => _executionInstanceIds.ToArray();
+
+        public void Created(Guid instanceId)
+        {
+            _ = instanceId;
+            Interlocked.Increment(ref _activeCount);
+            Interlocked.Increment(ref _createdCount);
+        }
+
+        public void Executed(Guid instanceId)
+        {
+            _executionInstanceIds.Enqueue(instanceId);
+            Interlocked.Increment(ref _executionCount);
+        }
+
+        public void Disposed(Guid instanceId)
+        {
+            _ = instanceId;
+            Interlocked.Decrement(ref _activeCount);
+            Interlocked.Increment(ref _disposedCount);
         }
     }
 

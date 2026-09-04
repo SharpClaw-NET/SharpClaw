@@ -11,6 +11,9 @@ public static class TestHarnessConstants
     public const string InProcessRegistrationId = "sharpclaw_test_harness_in_process";
     public const string SourceId = OutOfProcessRegistrationId;
     public const string ToolPrefix = "th";
+#if TEST_HARNESS_IN_PROCESS
+    public const string ScopedCliCommand = "test-harness-scope";
+#endif
 
     public const string PlainProviderKey = "sharpclaw-test";
     public const string StreamingProviderKey = "sharpclaw-test-stream";

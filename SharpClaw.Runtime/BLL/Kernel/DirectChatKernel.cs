@@ -9,30 +9,47 @@ namespace SharpClaw.Runtime.BLL.Kernel;
 /// <summary>Runs direct chat through one compiled Core kernel graph.</summary>
 public sealed class DirectChatKernel
 {
+    private readonly KernelGraph _graph;
     private readonly DirectTurnRunner _runner;
     private readonly RunScopedConversationResolver _conversationResolver;
 
     internal DirectChatKernel(
+        KernelGraph graph,
         DirectTurnRunner runner,
         RunScopedConversationResolver conversationResolver)
     {
+        _graph = graph ?? throw new ArgumentNullException(nameof(graph));
         _runner = runner ?? throw new ArgumentNullException(nameof(runner));
         _conversationResolver = conversationResolver
             ?? throw new ArgumentNullException(nameof(conversationResolver));
     }
 
-    public async ValueTask<ChatTurnResult> RunAsync(
+    public ValueTask<ChatTurnResult> RunAsync(
         ChatTurnInput input,
-        CancellationToken cancellationToken = default)
-    {
-        await using var run = _conversationResolver.BeginRun();
-        return await _runner.RunAsync(input, cancellationToken);
-    }
+        CancellationToken cancellationToken = default) =>
+        _graph.RunInServiceScopeAsync(
+            async _ =>
+            {
+                await using var run = _conversationResolver.BeginRun();
+                return await _runner.RunAsync(input, cancellationToken);
+            });
 
     public async IAsyncEnumerable<ChatStreamChunk> StreamAsync(
         ChatTurnInput input,
         [System.Runtime.CompilerServices.EnumeratorCancellation]
         CancellationToken cancellationToken = default)
+    {
+        await foreach (var chunk in _graph.StreamInServiceScopeAsync(
+                           _ => StreamCore(input, cancellationToken),
+                           cancellationToken)
+                           .WithCancellation(cancellationToken))
+            yield return chunk;
+    }
+
+    private async IAsyncEnumerable<ChatStreamChunk> StreamCore(
+        ChatTurnInput input,
+        [System.Runtime.CompilerServices.EnumeratorCancellation]
+        CancellationToken cancellationToken)
     {
         await using var run = _conversationResolver.BeginRun();
         await foreach (var chunk in _runner.StreamAsync(input, cancellationToken)
@@ -70,6 +87,7 @@ internal static class DirectChatKernelFactory
             new RuntimeKernelToolContextIssuer());
         var toolPipeline = new UnifiedToolPipeline(graph, dispatcher);
         return new DirectChatKernel(
+            graph,
             new DirectTurnRunner(
                 graph,
                 dispatcher,

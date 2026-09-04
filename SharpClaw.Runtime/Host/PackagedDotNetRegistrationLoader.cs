@@ -32,6 +32,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
     {
         _services = services.ToList();
         _inProcessHosts = inProcessHosts.ToList();
+        _application = new PackagedApplicationRegistry(_inProcessHosts, []);
     }
 
     public IReadOnlyList<ServiceDescriptor> Services => _services;
@@ -156,6 +157,7 @@ internal sealed class PackagedDotNetRegistrationSet : IDisposable, IAsyncDisposa
             }
 
             registrationSet._application = new PackagedApplicationRegistry(
+                registrationSet._inProcessHosts,
                 registrationSet._sidecarRegistrations);
 
             return registrationSet;

@@ -49,6 +49,8 @@ internal static class RuntimeHostComposition
         services.AddSingleton<RuntimeReadinessState>();
         services.AddSingleton<RuntimeDatabaseReadiness>();
         services.AddSingleton<KernelExternalAuthoritySessionRegistry>();
+        services.AddSingleton<RuntimeHostActionContextAccessor>();
+        services.AddSingleton<IHostActionEntry, RuntimeHostActionEntry>();
         services.AddSingleton<IRuntimeProviderClientFactory, RuntimeProviderClientFactory>();
         services.AddSingleton<IActionDispatcher>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>().ActionDispatcher);
@@ -65,14 +67,11 @@ internal static class RuntimeHostComposition
         services.AddScoped<KernelJobsCoordinator>(serviceProvider =>
         {
             var adapter = serviceProvider.GetRequiredService<RuntimeKernelAdapter>();
-            var handlers = adapter.Graph.GetService(typeof(IEnumerable<IJobHandler>))
-                as IEnumerable<IJobHandler>
-                ?? [];
             return new KernelJobsCoordinator(
                 adapter.Graph,
                 adapter.CoreActionDispatcher,
                 serviceProvider.GetRequiredService<KernelJobsStore>(),
-                handlers);
+                serviceProvider.GetServices<IJobHandler>());
         });
         services.AddSingleton<IRuntimePersistenceActionBoundary>(serviceProvider =>
             serviceProvider.GetRequiredService<RuntimeKernelAdapter>());

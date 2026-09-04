@@ -25,6 +25,7 @@ public sealed class RuntimeKernelAdapter :
     private readonly KernelEventDispatcher _eventDispatcher;
     private readonly IKernelEventDeliverySink _eventDeliverySink;
     private readonly KernelJobsActionRunner _jobsActionRunner;
+    private readonly IServiceProvider _hostServices;
     private bool _started;
     private static readonly JsonSerializerOptions EventActionJsonOptions =
         new(JsonSerializerDefaults.General)
@@ -51,6 +52,7 @@ public sealed class RuntimeKernelAdapter :
         ArgumentNullException.ThrowIfNull(instancePaths);
         ArgumentNullException.ThrowIfNull(providerClientFactory);
 
+        _hostServices = hostServices;
         _lifecycleServices = lifecycleServices.ToArray();
         var graphBuilder = new KernelGraphBuilder();
         jobsBindings.AddTo(graphBuilder);
@@ -108,6 +110,25 @@ public sealed class RuntimeKernelAdapter :
     internal KernelActionDispatcher CoreActionDispatcher => _actionDispatcher;
 
     internal KernelJobsActionRunner JobsActionRunner => _jobsActionRunner;
+
+    internal IServiceProvider HostServices => _hostServices;
+
+    internal ValueTask<IActionOutcome<TResult>> RunHostActionEntryAsync<TAction, TResult>(
+        KernelActionExecutionContext executionContext,
+        ActionDescriptor<TAction, TResult> descriptor,
+        TAction action,
+        IHostActionEntry hostActionEntry,
+        IHostActionEntryTerminal<TAction, TResult> terminal,
+        CancellationToken cancellationToken) =>
+        _actionDispatcher.RunWithContextAsync(
+            executionContext,
+            descriptor,
+            action,
+            (context, ct) => terminal.InvokeAsync(
+                context with { HostActionEntry = hostActionEntry },
+                ct),
+            Graph.ActionSnapshot,
+            cancellationToken);
 
     public async ValueTask<RuntimeEventPublishResult> PublishAsync(
         RuntimeEventPayload payload,

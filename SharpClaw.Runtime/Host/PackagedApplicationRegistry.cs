@@ -1,9 +1,12 @@
 using System.Net.WebSockets;
+using System.Security.Cryptography;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Primitives;
 using SharpClaw.Contracts.Kernel;
 using SharpClaw.Core.Kernel;
+using SharpClaw.SidecarHost.InProcess;
 using SharpClaw.SidecarHost.OutOfProcess;
 using SharpClaw.Runtime.BLL.Kernel;
 
@@ -60,14 +63,16 @@ internal sealed class PackagedApplicationRegistry
     private readonly IReadOnlyDictionary<string, CliRoute> _cliRoutes;
     private readonly IReadOnlyList<EndpointRoute> _endpointRoutes;
 
-    public static PackagedApplicationRegistry Empty { get; } = new([]);
+    public static PackagedApplicationRegistry Empty { get; } = new([], []);
 
     public PackagedApplicationRegistry(
+        IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
+        ArgumentNullException.ThrowIfNull(inProcessRegistrations);
         ArgumentNullException.ThrowIfNull(registrations);
-        _cliRoutes = BuildCliRoutes(registrations);
-        _endpointRoutes = BuildEndpointRoutes(registrations);
+        _cliRoutes = BuildCliRoutes(inProcessRegistrations, registrations);
+        _endpointRoutes = BuildEndpointRoutes(inProcessRegistrations, registrations);
     }
 
     public async ValueTask<CliResult?> TryInvokeCliAsync(
@@ -101,23 +106,44 @@ internal sealed class PackagedApplicationRegistry
         var descriptor = GetTransportDescriptor(
             runtimeKernel,
             RuntimeCliActionCatalog.Execute);
-        var context = route.Client.IssueHostActionContext(
+        var envelope = new KernelActionEnvelope(descriptor.Key, invocation);
+        if (route.Client is { } client)
+        {
+            var context = client.IssueHostActionContext(
+                HostActionEntryIngress.Cli,
+                route.Descriptor.Name,
+                client.Discovery.SourceId,
+                descriptor,
+                envelope,
+                executionContext.Caller,
+                executionContext.Features,
+                executionContext.TraceId,
+                executionContext.IdempotencyKey,
+                DateTimeOffset.UtcNow.Add(CarrierLifetime));
+            var response = await client.InvokeCliAsync(
+                route.Descriptor.Name,
+                arguments,
+                context,
+                cancellationToken);
+            return response.Result;
+        }
+
+        var localContext = CreateLocalHostContext(
             HostActionEntryIngress.Cli,
             route.Descriptor.Name,
-            route.Client.Discovery.SourceId,
             descriptor,
-            new KernelActionEnvelope(descriptor.Key, invocation),
-            executionContext.Caller,
-            executionContext.Features,
-            executionContext.TraceId,
-            executionContext.IdempotencyKey,
-            DateTimeOffset.UtcNow.Add(CarrierLifetime));
-        var response = await route.Client.InvokeCliAsync(
-            route.Descriptor.Name,
-            arguments,
-            context,
+            envelope,
+            executionContext);
+        var contexts = runtimeKernel.HostServices
+            .GetRequiredService<RuntimeHostActionContextAccessor>();
+        using var contextScope = contexts.Push(localContext);
+        return await route.InProcess!.Invoker.InvokeCliAsync(
+            new CliInvocation(
+                localContext.InvocationId,
+                route.Descriptor.Name,
+                arguments,
+                localContext),
             cancellationToken);
-        return response.Result;
     }
 
     public void MapEndpoints(WebApplication app, RuntimeKernelAdapter runtimeKernel)
@@ -149,7 +175,8 @@ internal sealed class PackagedApplicationRegistry
             return;
         }
 
-        var maximumBodyBytes = target.Client.HostLimits.ActionInputBytes;
+        var maximumBodyBytes = target.Client?.HostLimits.ActionInputBytes
+            ?? target.InProcess!.Graph.PayloadLimits.ActionInputBytes;
         if (context.Request.ContentLength > maximumBodyBytes)
         {
             context.Response.StatusCode = StatusCodes.Status413PayloadTooLarge;
@@ -195,16 +222,33 @@ internal sealed class PackagedApplicationRegistry
                     using var socket = await context.WebSockets.AcceptWebSocketAsync();
                     var channel = new AspNetWebSocketChannel(
                         socket,
-                        target.Client.HostLimits.StreamChunkBytes);
+                        target.Client?.HostLimits.StreamChunkBytes
+                            ?? target.InProcess!.Graph.PayloadLimits.StreamChunkBytes);
                     var request = CreateEndpointRequest(
                         target,
                         effective,
                         executionContext,
                         runtimeKernel);
-                    await target.Client.InvokeWebSocketEndpointAsync(
-                        request,
-                        channel,
-                        cancellationToken);
+                    if (target.Client is { } client)
+                    {
+                        await client.InvokeWebSocketEndpointAsync(
+                            request,
+                            channel,
+                            cancellationToken);
+                    }
+                    else
+                    {
+                        var contexts = runtimeKernel.HostServices
+                            .GetRequiredService<RuntimeHostActionContextAccessor>();
+                        var hostActionEntry = runtimeKernel.HostServices
+                            .GetRequiredService<IHostActionEntry>();
+                        using var contextScope = contexts.Push(request.Invocation.HostActionContext);
+                        await target.InProcess!.Invoker.InvokeWebSocketEndpointAsync(
+                            request,
+                            channel,
+                            hostActionEntry,
+                            cancellationToken);
+                    }
                     return true;
                 },
                 context.RequestAborted);
@@ -214,7 +258,7 @@ internal sealed class PackagedApplicationRegistry
         var response = await runtimeKernel.RunRequestAsync(
             executionContext,
             original,
-            (effective, cancellationToken) =>
+            async (effective, cancellationToken) =>
             {
                 ValidateImmutableRoute(original, effective);
                 var request = CreateEndpointRequest(
@@ -222,7 +266,18 @@ internal sealed class PackagedApplicationRegistry
                     effective,
                     executionContext,
                     runtimeKernel);
-                return target.Client.InvokeEndpointAsync(request, cancellationToken);
+                if (target.Client is { } client)
+                    return await client.InvokeEndpointAsync(request, cancellationToken);
+
+                var contexts = runtimeKernel.HostServices
+                    .GetRequiredService<RuntimeHostActionContextAccessor>();
+                var hostActionEntry = runtimeKernel.HostServices
+                    .GetRequiredService<IHostActionEntry>();
+                using var contextScope = contexts.Push(request.Invocation.HostActionContext);
+                return await target.InProcess!.Invoker.InvokeHttpEndpointAsync(
+                    request,
+                    hostActionEntry,
+                    cancellationToken);
             },
             context.RequestAborted);
         context.Response.StatusCode = response.StatusCode;
@@ -244,19 +299,32 @@ internal sealed class PackagedApplicationRegistry
         var descriptor = GetTransportDescriptor(
             runtimeKernel,
             new SharpClawActionKey("runtime.request.receive"));
-        var hostContext = target.Client.IssueHostActionContext(
-            HostActionEntryIngress.Endpoint,
-            target.Descriptor.Id,
-            target.Client.Discovery.SourceId,
-            descriptor,
-            new KernelActionEnvelope(descriptor.Key, ingress),
-            executionContext.Caller,
-            executionContext.Features,
-            executionContext.TraceId,
-            executionContext.IdempotencyKey,
-            DateTimeOffset.UtcNow.Add(CarrierLifetime));
+        var envelope = new KernelActionEnvelope(descriptor.Key, ingress);
+        var hostContext = target.Client is { } client
+            ? client.IssueHostActionContext(
+                HostActionEntryIngress.Endpoint,
+                target.Descriptor.Id,
+                client.Discovery.SourceId,
+                descriptor,
+                envelope,
+                executionContext.Caller,
+                executionContext.Features,
+                executionContext.TraceId,
+                executionContext.IdempotencyKey,
+                DateTimeOffset.UtcNow.Add(CarrierLifetime))
+            : CreateLocalHostContext(
+                HostActionEntryIngress.Endpoint,
+                target.Descriptor.Id,
+                descriptor,
+                envelope,
+                executionContext);
         return new HostEndpointRouteRequest(
-            target.Client.CreateEndpointInvocation(target.Descriptor, hostContext),
+            target.Client is { } endpointClient
+                ? endpointClient.CreateEndpointInvocation(target.Descriptor, hostContext)
+                : new HostEndpointInvocation(
+                    hostContext.InvocationId,
+                    target.Descriptor.Id,
+                    hostContext),
             target.Descriptor.ToRouteIdentity(),
             FilterHeaders(ingress.Headers),
             ingress.Query,
@@ -279,17 +347,105 @@ internal sealed class PackagedApplicationRegistry
         };
     }
 
+    private static HostActionEntryRequestContext CreateLocalHostContext<TAction, TResult>(
+        HostActionEntryIngress ingress,
+        string primaryIdentity,
+        ActionDescriptor<TAction, TResult> descriptor,
+        TAction action,
+        KernelActionExecutionContext executionContext)
+    {
+        var inputSchema = descriptor.InputSchema
+            ?? throw new InvalidOperationException("The host action descriptor has no input schema.");
+        var inputSchemaHash = inputSchema.ContentHash;
+        if (string.IsNullOrWhiteSpace(inputSchemaHash))
+            throw new InvalidOperationException("The host action descriptor has no input schema hash.");
+        var payload = SidecarCapabilityTransportCodec.Serialize(action);
+        var now = DateTimeOffset.UtcNow;
+        var deadline = executionContext.HostActionEntry?.Deadline ?? now.Add(CarrierLifetime);
+        if (deadline <= now)
+            throw new OperationCanceledException("The host action entry deadline has expired.");
+
+        return new HostActionEntryRequestContext(
+            Guid.NewGuid(),
+            Convert.ToHexString(RandomNumberGenerator.GetBytes(32)),
+            ingress,
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            Guid.NewGuid(),
+            executionContext.Caller,
+            executionContext.Features,
+            executionContext.TraceId,
+            executionContext.IdempotencyKey,
+            deadline,
+            deadline)
+        {
+            Contribution = new HostActionEntryContribution(
+                new HostActionEntryIngressBinding(ingress, primaryIdentity),
+                new HostActionEntryLineage(
+                    descriptor.Key,
+                    descriptor.Version,
+                    HostActionEntryAuthorityValidator.ComputeDescriptorHash(descriptor),
+                    typeof(TAction).AssemblyQualifiedName ?? typeof(TAction).FullName!,
+                    inputSchema.Version,
+                    inputSchemaHash,
+                    Convert.ToHexString(SHA256.HashData(payload)),
+                    payload.Length)),
+            ParentInvocationId = executionContext.HostActionEntry?.InvocationId,
+            Depth = executionContext.HostActionEntry is null
+                ? 0
+                : executionContext.HostActionEntry.Depth + 1,
+            Attempt = executionContext.HostActionEntry?.Attempt is > 0
+                ? executionContext.HostActionEntry.Attempt
+                : 1,
+        };
+    }
+
     private static IReadOnlyDictionary<string, CliRoute> BuildCliRoutes(
+        IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
         var routes = new Dictionary<string, CliRoute>(StringComparer.OrdinalIgnoreCase);
+        foreach (var registration in inProcessRegistrations)
+        {
+            foreach (var contribution in registration.Graph.Application.CliCommands)
+            {
+                AddCliRoute(
+                    routes,
+                    contribution.Descriptor.Name,
+                    null,
+                    registration,
+                    contribution.Descriptor);
+                foreach (var alias in contribution.Descriptor.Aliases)
+                {
+                    AddCliRoute(
+                        routes,
+                        alias,
+                        null,
+                        registration,
+                        contribution.Descriptor);
+                }
+            }
+        }
+
         foreach (var registration in registrations)
         {
             foreach (var contribution in registration.Client.Application.CliCommands)
             {
-                AddCliRoute(routes, contribution.Descriptor.Name, registration.Client, contribution.Descriptor);
+                AddCliRoute(
+                    routes,
+                    contribution.Descriptor.Name,
+                    registration.Client,
+                    null,
+                    contribution.Descriptor);
                 foreach (var alias in contribution.Descriptor.Aliases)
-                    AddCliRoute(routes, alias, registration.Client, contribution.Descriptor);
+                {
+                    AddCliRoute(
+                        routes,
+                        alias,
+                        registration.Client,
+                        null,
+                        contribution.Descriptor);
+                }
             }
         }
         return routes;
@@ -298,10 +454,14 @@ internal sealed class PackagedApplicationRegistry
     private static void AddCliRoute(
         IDictionary<string, CliRoute> routes,
         string name,
-        OutOfProcessRegistrationClient client,
+        OutOfProcessRegistrationClient? client,
+        InProcessRegistrationHost? inProcess,
         CliCommandDescriptor descriptor)
     {
-        if (ReservedCliNames.Contains(name) || !routes.TryAdd(name, new CliRoute(client, descriptor)))
+        if ((client is null) == (inProcess is null))
+            throw new ArgumentException("A CLI route must have exactly one invocation owner.");
+        if (ReservedCliNames.Contains(name)
+            || !routes.TryAdd(name, new CliRoute(client, inProcess, descriptor)))
         {
             throw new InvalidOperationException(
                 $"The registration CLI name or alias '{name}' conflicts with another command.");
@@ -309,11 +469,18 @@ internal sealed class PackagedApplicationRegistry
     }
 
     private static IReadOnlyList<EndpointRoute> BuildEndpointRoutes(
+        IReadOnlyList<InProcessRegistrationHost> inProcessRegistrations,
         IReadOnlyList<OutOfProcessRegistrationProxy> registrations)
     {
-        var targets = registrations
-            .SelectMany(registration => registration.Client.Application.Endpoints.Select(
-                endpoint => new EndpointTarget(registration.Client, endpoint.Descriptor)))
+        var targets = inProcessRegistrations
+            .SelectMany(registration => registration.Graph.Application.Endpoints.Select(
+                endpoint => new EndpointTarget(null, registration, endpoint.Descriptor)))
+            .Concat(registrations.SelectMany(registration =>
+                registration.Client.Application.Endpoints.Select(
+                    endpoint => new EndpointTarget(
+                        registration.Client,
+                        null,
+                        endpoint.Descriptor))))
             .ToArray();
         var duplicate = targets
             .GroupBy(target => (
@@ -398,11 +565,13 @@ internal sealed class PackagedApplicationRegistry
             StringComparison.OrdinalIgnoreCase)) == true;
 
     private sealed record CliRoute(
-        OutOfProcessRegistrationClient Client,
+        OutOfProcessRegistrationClient? Client,
+        InProcessRegistrationHost? InProcess,
         CliCommandDescriptor Descriptor);
 
     private sealed record EndpointTarget(
-        OutOfProcessRegistrationClient Client,
+        OutOfProcessRegistrationClient? Client,
+        InProcessRegistrationHost? InProcess,
         EndpointRouteDescriptor Descriptor);
 
     private sealed record EndpointRoute(
