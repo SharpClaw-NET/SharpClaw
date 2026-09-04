@@ -123,11 +123,6 @@ $repositories = @(
         Commit = "4cf302ddff93271dfa91688f61f8b23c201a965c"
     },
     [pscustomobject]@{
-        Name = "gateway-contracts"
-        Repository = "https://github.com/SharpClaw-NET/SharpClaw.Contracts.git"
-        Commit = "4cf302ddff93271dfa91688f61f8b23c201a965c"
-    },
-    [pscustomobject]@{
         Name = "core"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.Core.git"
         Commit = "618fe598fe0cdb6fb3914abd5bf7ed3b25ed6643"
@@ -136,16 +131,6 @@ $repositories = @(
         Name = "module-sdk"
         Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
         Commit = "62b2851ae4e33c9e9c98aeb4969b83718738b3c2"
-    },
-    [pscustomobject]@{
-        Name = "module-hosts"
-        Repository = "https://github.com/SharpClaw-NET/SharpClaw.ModuleSDK.git"
-        Commit = "62b2851ae4e33c9e9c98aeb4969b83718738b3c2"
-    },
-    [pscustomobject]@{
-        Name = "agent-contracts"
-        Repository = "https://github.com/SharpClaw-NET/SharpClaw.AgentOrchestration.git"
-        Commit = "e474cc56ef3290947006d93188c37f15d8da7c88"
     },
     [pscustomobject]@{
         Name = "agent-modules"
@@ -251,7 +236,8 @@ function Restore-Target
             "--packages",
             $packagesPath,
             "-p:ArtifactsPath=$targetArtifacts",
-            "-p:UseArtifactsOutput=true"
+            "-p:UseArtifactsOutput=true",
+            "-p:SharpClawArtifactsRoot=$targetArtifacts"
         ) `
         -WorkingDirectory (Split-Path -Parent $Target) | Out-Null
 }
@@ -274,10 +260,9 @@ function Pack-Target
         "Release",
         "-p:ArtifactsPath=$targetArtifacts",
         "-p:UseArtifactsOutput=true",
+        "-p:SharpClawArtifactsRoot=$targetArtifacts",
         "-p:PackageOutputPath=$feedPath",
         "-p:PackageVersion=$packageVersion",
-        "-p:Version=$packageVersion",
-        "-p:InformationalVersion=$packageVersion",
         "-p:ContinuousIntegrationBuild=true"
     ) + $ExtraArguments
     Invoke-BoundedProcess `
@@ -300,15 +285,15 @@ function Restore-And-Pack
 }
 
 $contractsProject = Join-Path $sourcesPath "contracts\SharpClaw.Contracts\SharpClaw.Contracts.csproj"
-$gatewayProject = Join-Path $sourcesPath "gateway-contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
+$gatewayProject = Join-Path $sourcesPath "contracts\SharpClaw.Gateway.Contracts\SharpClaw.Gateway.Contracts.csproj"
 $coreProject = Join-Path $sourcesPath "core\SharpClaw.Core\SharpClaw.Core.csproj"
 $moduleSdkProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK\SharpClaw.ModuleSDK.csproj"
-$moduleHostsSolution = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.slnx"
-$moduleInProcessProject = Join-Path $sourcesPath "module-hosts\SharpClaw.SidecarHost.InProcess\SharpClaw.SidecarHost.InProcess.csproj"
-$moduleOutOfProcessProject = Join-Path $sourcesPath "module-hosts\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
-$moduleTestingProject = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
-$moduleHostOperationsProject = Join-Path $sourcesPath "module-hosts\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
-$agentContractsProject = Join-Path $sourcesPath "agent-contracts\SharpClaw.AgentOrchestration.Contracts\SharpClaw.AgentOrchestration.Contracts.csproj"
+$moduleHostsSolution = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.slnx"
+$moduleInProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.InProcess\SharpClaw.SidecarHost.InProcess.csproj"
+$moduleOutOfProcessProject = Join-Path $sourcesPath "module-sdk\SharpClaw.SidecarHost.OutOfProcess\SharpClaw.SidecarHost.OutOfProcess.csproj"
+$moduleTestingProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.Testing\SharpClaw.ModuleSDK.Testing.csproj"
+$moduleHostOperationsProject = Join-Path $sourcesPath "module-sdk\SharpClaw.ModuleSDK.HostOperations\SharpClaw.ModuleSDK.HostOperations.csproj"
+$agentContractsProject = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestration.Contracts\SharpClaw.AgentOrchestration.Contracts.csproj"
 $agentSolution = Join-Path $sourcesPath "agent-modules\SharpClaw.AgentOrchestration.slnx"
 $editorSolution = Join-Path $sourcesPath "editor-integrations\SharpClaw.EditorIntegrations.slnx"
 $metricsProject = Join-Path $sourcesPath "metrics\SharpClaw.Modules.Metrics\SharpClaw.Modules.Metrics.csproj"
@@ -338,6 +323,7 @@ Invoke-BoundedProcess `
         "Release",
         "-p:ArtifactsPath=$moduleHostsArtifacts",
         "-p:UseArtifactsOutput=true",
+        "-p:SharpClawArtifactsRoot=$moduleHostsArtifacts",
         "-p:ContinuousIntegrationBuild=true"
     ) `
     -WorkingDirectory (Split-Path -Parent $moduleOutOfProcessProject) | Out-Null
@@ -383,7 +369,7 @@ Pack-Target `
     -Target $moduleOutOfProcessProject `
     -ArtifactGroup "module-hosts" `
     -ExtraArguments @("-p:OutOfProcessHostPayloadSource=$outOfProcessPayload")
-Restore-And-Pack -Label "agent-contracts" -Target $agentContractsProject -ArtifactGroup "agent-contracts"
+Restore-And-Pack -Label "agent-contracts" -Target $agentContractsProject -ArtifactGroup "agent-modules"
 
 Restore-Target -Label "agent-modules" -Target $agentSolution -ArtifactGroup "agent-modules"
 foreach ($agentProject in @(
@@ -405,10 +391,7 @@ Pack-Target `
     -Label "permission-restriction-fixture" `
     -Target $permissionRestrictionFixture `
     -ArtifactGroup "permission-restriction-fixture" `
-    -ExtraArguments @(
-        "-p:PackageVersion=0.5.0-beta.1",
-        "-p:Version=0.5.0-beta.1",
-        "-p:InformationalVersion=0.5.0-beta.1")
+    -ExtraArguments @("-p:PackageVersion=0.5.0-beta.1")
 
 Restore-And-Pack -Label "editor-integrations" -Target $editorSolution -ArtifactGroup "editor-integrations"
 Restore-And-Pack -Label "metrics" -Target $metricsProject -ArtifactGroup "metrics"
@@ -520,10 +503,70 @@ Invoke-BoundedProcess `
     -WorkingDirectory $PSScriptRoot `
     -TimeoutSeconds 300 | Out-Null
 
+$canonicalAssemblies = @{}
+foreach ($package in $actualPackages)
+{
+    $zip = [System.IO.Compression.ZipFile]::OpenRead($package.FullName)
+    try
+    {
+        foreach ($entry in $zip.Entries | Where-Object { $_.FullName -like "lib/net10.0/SharpClaw.*.dll" })
+        {
+            $stream = $entry.Open()
+            try
+            {
+                $hash = [System.Convert]::ToHexString(
+                    [System.Security.Cryptography.SHA256]::HashData($stream))
+            }
+            finally
+            {
+                $stream.Dispose()
+            }
+
+            if ($canonicalAssemblies.ContainsKey($entry.Name) -and
+                $canonicalAssemblies[$entry.Name] -ne $hash)
+            {
+                throw "The frozen feed has multiple payloads for assembly '$($entry.Name)'."
+            }
+
+            $canonicalAssemblies[$entry.Name] = $hash
+        }
+    }
+    finally
+    {
+        $zip.Dispose()
+    }
+}
+
+$bundleAssemblyGroups = Get-ChildItem -LiteralPath (Join-Path $bundlePath "contributions") `
+    -Filter "SharpClaw.*.dll" -File -Recurse |
+    Group-Object Name
+foreach ($group in $bundleAssemblyGroups)
+{
+    $hashes = @($group.Group | ForEach-Object {
+        (Get-FileHash -Algorithm SHA256 -LiteralPath $_.FullName).Hash
+    } | Sort-Object -Unique)
+    if ($hashes.Count -ne 1)
+    {
+        throw "The contribution bundle has multiple payloads for assembly '$($group.Name)'."
+    }
+
+    if (-not $canonicalAssemblies.ContainsKey($group.Name) -or
+        $canonicalAssemblies[$group.Name] -ne $hashes[0])
+    {
+        throw "The contribution bundle assembly '$($group.Name)' does not match its package."
+    }
+}
+
 $manifest = [pscustomobject]@{
     Repositories = $repositories
-    ModuleBundleManifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
+    ContributionBundleManifestSha256 = (Get-FileHash -Algorithm SHA256 -LiteralPath (
         Join-Path $bundlePath "contribution-bundle-manifest.json")).Hash
+    ContributionAssemblies = @($canonicalAssemblies.GetEnumerator() | Sort-Object Key | ForEach-Object {
+        [pscustomobject]@{
+            Name = $_.Key
+            Sha256 = $_.Value
+        }
+    })
     Packages = @($actualPackages | ForEach-Object {
         [pscustomobject]@{
             Name = $_.Name
